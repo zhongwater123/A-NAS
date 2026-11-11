@@ -115,8 +115,8 @@ export async function react(recordId: string, reaction: FamilyReactionName, on: 
   const path = "/api/v1/family/records/{recordId}/reactions/{reaction}" as const;
   return (await call(on ? client.PUT(path, where) : client.DELETE(path, where))).items;
 }
-export const listWall = async (babyId: string) =>
-  (await call(client.GET("/api/v1/family/babies/{babyId}/wall", baby(babyId)))).items;
+export const listWall = (babyId: string, cursor = "") =>
+  call(client.GET("/api/v1/family/babies/{babyId}/wall", { params: { path: { babyId }, query: { cursor } } }));
 export const addWallMessage = (babyId: string, text: string, requestKey: string) =>
   call(client.POST("/api/v1/family/babies/{babyId}/wall", { ...baby(babyId), body: { text, requestKey } }));
 
@@ -126,6 +126,10 @@ export const getAlbum = (babyId: string, cursor = "") =>
       params: { path: { babyId }, query: cursor ? { cursor } : {} },
     }),
   );
+// albumContains says which of up to 500 photos a baby's album has already.
+export const albumContains = async (babyId: string, assetIds: string[]) =>
+  (await call(client.POST("/api/v1/family/babies/{babyId}/album/contains", { ...baby(babyId), body: { assetIds } })))
+    .assetIds;
 export const getGrowth = (babyId: string) => call(client.GET("/api/v1/family/babies/{babyId}/growth", baby(babyId)));
 export const getVaccines = (babyId: string) =>
   call(client.GET("/api/v1/family/babies/{babyId}/vaccines", baby(babyId)));
@@ -152,8 +156,7 @@ export function addRecording(
 }
 export const audioURL = (recordId: string) => `/api/v1/family/records/${id(recordId)}/audio`;
 
-// requestKey names one attempt, so a retried request does not add twice.
-export const requestKey = () => crypto.randomUUID();
+export { requestKey } from "../api/requestKey";
 
 // CustomVaccineCode records a dose of a vaccine the catalog does not list.
 export const CustomVaccineCode = "custom";
@@ -164,12 +167,14 @@ const familyMessages: Record<string, string> = {
   not_family_member: "加入家庭后才能看到这里",
   forbidden: "只有家长或添加它的人可以这样做",
   last_guardian: "家庭里至少要有一位家长，请先把另一位家人设为家长",
+  already_in_channel: "这些照片都已在频道中",
   changed: "已经有人先保存了修改，请关闭后重新打开再改",
   conflict: "这和现有的内容冲突，例如这个大事记已经配过说明，或有记录早于新的出生日",
   validation_failed: "填写的内容不符合要求，请检查日期和数值",
   photos_unavailable: "相册暂时不可用，请稍后再试照片相关的内容",
   family_unavailable: "家庭中心暂时不可用，请稍后再试",
   too_large: "文件太大了",
+  insufficient_storage: "空间不足，请清理一些内容后再试",
   unsupported_image: "请选择 JPEG、PNG、GIF 或 WebP 图片",
   media_unavailable: "这段录音暂时不能播放",
   not_found: "内容已不存在",

@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-10-27
+更新时间：2026-11-09
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -109,7 +109,7 @@ managed scope（`/etc/hermes`，root 所有，沙箱中只读）优先于成员�
 |---|---|---|
 | 模型 | 模型地址指向网关；`agent.image_input_mode: text` | 工具结果里的图片不直接进对话，只经 `vision_analyze` |
 | 工具 | `platform_toolsets.cli`、`platform_toolsets.cron`（去掉 `clarify` 与 `cronjob`）、`agent.disabled_toolsets`、`agent.coding_context: "off"`、`tools.tool_search.enabled: "off"`、`browser.extension_control.enabled` | `tool_search` 关闭后 MCP 工具直接出现在列表中，也关闭 MCP 的 prompts/resources 包装 |
-| MCP | `mcp_servers.anas`（`trust: untrusted`，只读工具标 `readOnlyHint`）；`mcp_discovery_timeout` 20 秒 | |
+| MCP | `mcp_servers.anas`（`trust: untrusted`，只读工具标 `readOnlyHint`）；`mcp_servers.companion`（`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`）；`mcp_discovery_timeout` 20 秒 | 每个键都写出，原因见[信任的 MCP 服务器](#信任的-mcp-服务器) |
 | 审批与提问 | `approvals.mode: manual`；`approvals.timeout` 与 `agent.clarify_timeout` 都为 86400；`approvals.cron_mode: deny` | Hermes 默认 300 秒与 3600 秒 |
 | 终端 | `terminal.cwd: /nas/助手` | |
 | 联网 | `updates.check`、`model_catalog.enabled`、`security.allow_lazy_installs`、`lsp.enabled` 关闭 | 默认会检查更新、拉模型目录、运行时装包、装语言服务器 |
@@ -148,7 +148,7 @@ Hermes 只从成员自己的 `config.yaml` 读的几项，由 root 为每个成�
 
 ### 管理员的助手
 
-owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`：systemd 设了 `User=` 就按 `/etc/group` 加上全部附加组（`initgroups`），`SupplementaryGroups=` 只能加、不能去。目前这个组不授予任何东西：数据卷上没有 ACL 用到它；Samba 按 `@a-nas-users` 授权；文件代理给管理员工作进程的附加组是它显式设定的（`internal/filebroker/server.go`）。用户决定照旧：ADR 0024 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查。
+owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`：systemd 设了 `User=` 就按 `/etc/group` 加上全部附加组（`initgroups`），`SupplementaryGroups=` 只能加、不能去。目前这个组不授予任何东西：数据卷上没有 ACL 用到它；Samba 按 `@a-nas-users` 授权；文件代理给管理员工作进程的附加组是它显式设定的（`internal/filebroker/rootbroker/server.go`）。用户决定照旧：ADR 0024 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查。
 
 ### Agent空间
 
@@ -318,6 +318,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `approval.pending`、`approval.received` | 取回待审批、卡片已显示；产品服务自己回答，按 `request_id` 找回自己生成的卡片 | `session_id`；`request_id` | `D/store/prompts.ts:283`、`:256` |
 | `approval.respond` | 浏览器不直接调用：产品服务核对成员的点击后代为调用 | `session_id`、`request_id`（必填）、`choice`：“提交更改”卡片只有 `once`、`deny`，命令卡片另有 `session`（2026-10-16 起）；不带 `all` | Desktop 只对经 `approval.pending` 取回的审批用它（`D/store/prompts.ts:363-407`） |
 | `browser.controller.register`、`browser.controller.result`（2026-10-20 起） | 窗口注册为这段对话的浏览器，回答浏览器命令 | 只接受 `vnas-window` 控制器、`webos` 浏览器名与窗口实现的能力；一条结果至多 5 MiB（2026-10-21 起，原为 64 KiB） | 见“[让 VNAS 操作 WebOS](#让-vnas-操作-webos)” |
+| `companion.result`（2026-11-09 起） | 窗口回答产品服务转来的伙伴命令；产品服务自己回答，不转给 Hermes | `session_id`、`command_id`（32 位十六进制）、`ok`，以及 `result` 或 `error`（各为至多 4 KiB 的对象）；只接受命令发往的那条连接、仍未结算的命令，每条只收一次 | A-NAS 自有，见下文“产品服务的转发” |
 
 **服务端请求与应答帧**
 
@@ -328,7 +329,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `clarify`（2026-10-16 起） | 问题卡片；回答只能在请求到达的那条连接上发回 |
 | `sudo`、`secret`、`vault.*`、`preview.*`、`terminal.read`、`window.read`、`theme.*`、`tour`、`setup_beat`、`display.install.sudo` | 以 `-32601` 应答：Hermes 把错误应答当作无人回答，工具立刻失败而不是等到超时（`server_requests.py:175-211`）；Desktop 对没有处理器的请求也这样（`S/json-rpc-channel.ts:407`） |
 
-**事件**：第一版列出下表中的 21 种（不含注明日期的两种）；集成时两种审批事件由卡片代替，实际转发 19 种。其余 56 种（子代理、MoA、语音与唤醒、宠物、桌面与浏览器控制、预览、连接器、计费、定时任务与项目变化、皮肤、通知、后台任务、表情反应、目标控制等）丢弃。
+**事件**：第一版列出下表中的 21 种（不含注明日期的三种）；集成时两种审批事件由卡片代替，实际转发 19 种。其余 56 种（子代理、MoA、语音与唤醒、宠物、桌面与浏览器控制、预览、连接器、计费、定时任务与项目变化、皮肤、通知、后台任务、表情反应、目标控制等）丢弃。
 
 | 事件 | 窗口用途 |
 |---|---|
@@ -342,6 +343,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `approval.cancelled`、`request.cancel` | 由产品服务处理（只认登记过的 id），窗口收到的是卡片的更新 |
 | `review.summary`（2026-10-16 起） | 后台复盘改了记忆或技能时的说明 |
 | `browser.controller.command`（2026-10-20 起） | 浏览器命令，只交给注册它的窗口，不转发给同一对话的其他窗口 |
+| `anas.companion`（2026-11-09 起，产品服务自己发） | 伙伴命令 `{command_id, action, args}`，只交给这段对话的浏览器、也是发出本回合提示的那个窗口，窗口以 `companion.result` 回答 |
 
 **REST**：聊天层（`D/lib/chat-messages`）解析的是 REST 的消息行（`display_content`、`display_metadata`、工具标签），所以列表、历史、改名与删除走 REST。产品服务带上实例凭据，不转发浏览器的任何头；每次请求一条经闸门的连接。
 
@@ -420,7 +422,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 产品服务的转发
 
-[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。
+[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。伙伴工具（#412）是单独的 MCP 服务器 `companion`（[`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)），托管配置设为 `trust: full`，调用不经审批；它经伙伴套接字（`anas-companion-assistant.socket`，定时任务的沙箱里没有）调产品服务，产品服务按对端 UID 认出成员，凭 `tool.start` 把调用配对到对话，以 `anas.companion` 事件转给该对话的浏览器窗口（[`companion.go`](../../internal/assistantapi/companion.go)）；配对不上、没有窗口时如实回答“没有在用的桌面”。
 
 ### 窗口
 
@@ -527,6 +529,19 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 - 拒绝、超时与停止对模型是同一句话，助手分不清成员是拒绝还是不在，卡片上要分开显示；这句话提到 “untrusted server”，`anas-files` 可以要求只说“没有得到你的同意”。
 - 切换对话或刷新后恢复卡片：`serve` 用 `approval.pending`（API Server 为 `GET /v1/runs/{run_id}` 的 `waiting_for_approval`），按 `request_id` 找回卡片。
 
+### 信任的 MCP 服务器
+
+2026-11-09 为虚拟伙伴的 `companion` 服务器（不经审批，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）对照固定提交 `0e427d788d25` 读源码所得：
+
+- 取值：Hermes 只认 `full` 与 `untrusted`（`tools/mcp_tool.py` 530）。不写或写 `null` 当作 `full`；其余的值去掉首尾空白、转成小写后比较，认不出的一律当作 `untrusted` 并记警告。YAML 的 `true`、`yes` 先变成字符串 `"true"`，所以也是 `untrusted`（`tools/mcp_tool_registration.py` 37–46）。信任按服务器设，没有按工具的覆盖。
+- 记下的时机：发现工具时记下服务器的信任与各工具的 `readOnlyHint`，调用时不再读配置（`mcp_tool_registration.py` 61–71，连接时 406）。`lazy` 注册从缓存的清单记下（596，清单也存 `readOnlyHint`，389），缓存在 `$HERMES_HOME/cache/` 下（`tools/mcp_schema_cache.py` 22–24），而 Hermes 的状态目录 Agent 能写（[助手目录的划分](#助手目录的划分)）。`lazy` 默认是 `false`（`tools/mcp_tool_discovery.py` 215），写明只为不让成员的配置改它。
+- 审批门：`_trust_gate_check` 在每个 MCP 工具处理函数的最前面，先于熔断检查、连接与 RPC（`tools/mcp_tool_handlers.py` 60–85、574–577）。没有记下信任时按 `full` 处理（65）；信任不是 `untrusted`，或工具的 `readOnlyHint` 恰为 `true` 时不问（66、52–57）。
+- managed scope 的优先级：`load_config` 先把成员的 `config.yaml` 深合并到默认值上，最后合并 managed scope，同一个叶子上 managed 胜出（`hermes_cli/config.py` 2261–2276、2333–2369）。合并逐层进入字典（1487–1502），managed 没写出的同级键仍由成员的配置决定，所以省略 `trust` 得到的 `full` 挡不住成员写的值。managed 文件格式有误时只记警告并被忽略（`hermes_cli/managed_scope.py` 86–93）。
+- 熔断：调用超时、失败或结果带 `isError=true` 都记一次（`mcp_tool_handlers.py` 150–157、537–538、598–600），正常结果清零；连续 3 次后，这个服务器 60 秒内的调用一律立即回答不可达、让模型不要重试（`mcp_tool.py` 517、542–543；`mcp_tool_handlers.py` 88–106）。
+- 串行与时限：同一服务器的调用在它的 `_rpc_lock` 下逐个进行，同一个 `serve` 进程的所有会话共用一个子进程与这把锁（`mcp_tool_handlers.py` 587；`mcp_tool.py` 428–430；`tools/mcp_tool_scope.py` 26–31）。单次调用默认 300 秒，可按服务器设 `timeout`，不经全局钳制（`tools/mcp_tool_common.py` 41–58）；计时在等锁之前开始，排队的时间也算在内（`tools/mcp_tool_loop.py` 166–176）。
+- 调用不带对话：stdio 上的调用只有工具名与参数（`mcp_tool_handlers.py` 396）；子进程的环境在启动时按白名单过滤，单元的 `ANAS_ASSISTANT_CHANNEL` 到不了它（`tools/mcp_tool_config.py` 147、184–192）。能对应到对话的只有 `tool.start`（`tui_gateway/tool_progress.py` 276–302）；委派子代理的镜像行 `tool_id` 以 `submirror:` 开头、参数为空（`tui_gateway/agent_callbacks.py` 81–88）。
+- 立即运行：`POST /api/cron/jobs/{id}/trigger` 在 `serve` 进程内经 `fire_due` 执行（`hermes_cli/web_routers/cron.py` 629–637、729–731；`hermes_cli/web_server_cron.py` 292–316），与对话共用 `serve` 的 MCP 子进程；`cron/scheduler.py` 不设工具进度回调，所以它的调用没有 `tool.start`。到点运行的 `hermes cron tick` 是另一个单元里的另一个进程，有自己的子进程。
+
 ## 开放 Hermes 自带的工具
 
 2026-10-16：实验 NAS 上试用时，助手复制不了共享空间里的一张图片：文件工具只读写文字，“提交更改”只写暂存区里写好的内容，上游复制二进制文件靠终端，而终端关着。用户决定：只拦能做出破坏性操作的，其余尽量让助手用（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8 已改写）。此前只开 `file`、`memory`、`session_search`、`skills`、`todo`，关闭其余 32 个工具集（`toolsets.py` 中的 29 个与运行时注册的 3 个）。
@@ -604,9 +619,9 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 
 | 工具 | 相册接口 | 用途 |
 |---|---|---|
-| `search_photos(query, page)` | `GET /search` | 按画面内容（设备上的向量检索）、名称与本人的标签搜索；`closest` 标出最接近的一组 |
+| `search_photos(query, page)` | `GET /search`；2026-11-10 起对按名称或文字命中的照片并入 `GET /assets/{id}/text` | 按画面内容（设备上的向量检索）、名称、本人的标签与照片上的文字搜索；`closest` 标出最接近的一组 |
 | `browse_photos(month, album_id, tag, page)` | `…/timeline/months`、`…/timeline?month=`、`…/albums`、`/albums/{id}/assets`、`/tags`、`/tags/{name}/assets` | 不填参数时列出每月的照片数、相册与标签；按月、相册或标签列出 |
-| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置 |
+| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata`，2026-11-10 起并入 `GET /assets/{id}/text` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置；照片上读出的文字与字段 |
 | `similar_photos(photo_id, page)` | `GET /assets/{id}/similar` | 画面相似的照片 |
 | `look_at_photo(photo_id)`（2026-10-19） | `GET /assets/{id}/view` | 取出画面交给看图模型 |
 
@@ -615,7 +630,7 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 - 按月浏览翻完所有页（每个图库最多 2,000 张，超过时注明不完整）。相册连不上或回答的不是 JSON 时给模型一句“相册暂时连不上，请稍后再试”。AI Worker 不可用时只按名称与标签匹配，结果中注明。
 - 最初 4 个工具的定义合计约 1,860 字符，每次模型请求都带上（2026-10-15）。
 
-spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，18 张种子照片（alice 私有 13 张，含“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。
+spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，20 张种子照片（alice 私有 15 张，含“2025 夏天 青岛”相册与“青岛”标签，2026-11-10 起含一张身份证的两面，替身 Worker 读出它们的文字，姓名与号码是编的；bob 私有 2 张；共享 3 张）。
 
 - [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)（2026-10-15 为 23 项，2026-10-20 为 27 项）：两个成员的助手各自只看到本人与共享的图库；拿着 bob 照片的编号也打不开；带会话令牌没有作用；缩略图与改名得到 `not_found`；沙箱里连不到相册服务的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员进不了 alice 的 `/proc/<pid>/root`；对端是 root 时 503；相册服务重启后正在运行的助手照常读相册，服务停止时一次连接就把它拉起；只有 socket 单元停止时工具说“相册暂时连不上”，实例重启后恢复；本人照片的视图是 JPEG、元数据读得到，bob 的拿不到。
 - [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：照片工具都不请求审批，同一会话中的“提交更改”照常请求。
@@ -640,6 +655,23 @@ spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/a
 
 - 做不到的（认人、看画面）与越权的都如实回答，没有编造人物或地点。
 - 模型会逐张调用 `photo_details` 找地点或人物（“室内”那一轮查了 13 张）。说明改为“只多出尺寸、标签与相册，没有地点、人物或画面内容，不要为找这些逐张查看”后：找海边照片从 12 次降到 6 次，“室内”从 16 次降到 9 次（逐张查看从 13 次降到 2 次），token 基本不变（5.5 万、5.7 万）。2026-10-20 起它带元数据，说明告诉模型拍摄位置在这里查。
+
+### 问证件上的号码（2026-11-10）
+
+起因是用户在实验 NAS 上的一次对话：相册里有一张身份证的两面，问 VNAS“我身份证号码是多少”，它翻了 11 次文件；提示“相册里面没有吗”后又用 5 次调用搜索、逐张取画面，国徽面的画面被交给云端看图模型，人像面被挡住，最后答不出号码。原因与改法见 [OCR 实施方案](../architecture/photo-ocr.md#助手的工具)。
+
+评测在 spike 里重放这段对话：种子图库加了身份证的两面（文件名不带含义，替身 Worker 读出文字），三句话在同一段对话里，deepseek-flash，改动前后各跑一次（[`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 末尾三行是同一组的常设用例）。“改动前”是主干 `c203b668` 加上这两张种子照片。
+
+| 请求 | 改动前 | 改动后 |
+|---|---|---|
+| 我身份证号码是多少 | 只翻文件，答不出；4 次调用，8.3 万 token，25 秒 | `search_photos("身份证")` 一次，回答里是号码的句柄，并带出国徽面的签发机关与有效期；1 次调用，4.2 万 token，12 秒 |
+| （接着）相册里面没有吗？ | 搜索、浏览、取 3 张画面（国徽面放行，人像面被挡）、2 次识图，答不出；8 次调用，9.5 万 token，18 秒 | 直接按已有结果回答两张照片各是什么；0 次调用，2.3 万 token，5 秒 |
+| （接着）身份证有效期到什么时候？ | 答不出：“相册把证件上的文字整张内容都拦住了” | 到 2040 年 1 月 1 日，出处是国徽面那张；0 次调用，2 秒 |
+
+- 改动后没有一次取画面：证件的画面没有发给云端。
+- 第一版说明下，模型在搜索后又查了一次 `photo_details`，还向成员解释“⟦身份证号·…⟧ 是占位，窗口会显示成数字”。在说明里加上“结果里带着 fields 的照片不必再查”和“不要解释句柄”后，这两样都没有再出现。表中是加上之后的结果。
+- 每种情况只跑了一次，模型的回答有随机性；数字说明量级，不是稳定的均值。
+- 替身 Worker 的照片是纯色图，改动前的识图什么也看不出；实验 NAS 上那次，云端模型从国徽面读出了签发机关与有效期。
 
 ### 接入相册服务
 

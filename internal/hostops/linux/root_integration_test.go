@@ -209,7 +209,10 @@ func startSamba(t *testing.T) {
 	if err := os.MkdirAll("/etc/samba", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile("/etc/samba/smb.conf", []byte("[global]\n    server role = standalone server\n    smb ports = 445\n    disable netbios = yes\n"), 0o644); err != nil {
+	// It listens where the executor's configuration has it listen, so that
+	// the executor has smbd reload rather than restart through systemd, which
+	// this container does not run.
+	if err := os.WriteFile("/etc/samba/smb.conf", []byte("[global]\n    server role = standalone server\n    interfaces = lo\n    bind interfaces only = yes\n    smb ports = 445\n    disable netbios = yes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := exec.Command("pgrep", "-x", "smbd").CombinedOutput(); err == nil && len(output) != 0 {

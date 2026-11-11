@@ -40,9 +40,11 @@ sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 86400$/  t
   "$here/managed-config.yaml" > /etc/hermes/config.yaml
 chmod 0644 /etc/hermes/config.yaml
 
-# Mount point for the photo service's assistant socket (#113): an empty file on the host,
-# the socket itself inside each sandbox (anas-assistant@.service).
+# Mount points for the photo service's assistant socket (#113) and the Product Service's
+# companion socket (#412): empty files on the host, the sockets themselves inside each
+# sandbox (anas-assistant@.service).
 install -d -m 0755 /run/anas-assistant-photos && : > /run/anas-assistant-photos/photos.sock
+install -d -m 0755 /run/anas-assistant-companion && : > /run/anas-assistant-companion/companion.sock
 # serve takes no token any more: it uses Hermes's own login (assistant-start.sh). An
 # install from before that leaves its token unit behind.
 rm -f /etc/systemd/system/anas-assistant-token@.service
@@ -54,9 +56,11 @@ if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -m 0644 "$here/api-server-channel/anas-assistant-api.conf" /etc/systemd/system/anas-assistant-api@.service.d/channel.conf
 fi
 # Hermes's curator, weekly, in the same sandbox, while the member's assistant is not
-# running (anas-assistant-curator@.timer). It needs neither the session token nor the model.
+# running (anas-assistant-curator@.timer). It needs neither the session token nor the model,
+# nor a window: the companion socket is left out.
 # Hermes's own pruning of its image cache follows it (media-cache.py).
 sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i (spike)#' \
+  -e '\#a-nas-companion-assistant#d' \
   -e 's#^ExecStart=.*#ExecStart=/usr/bin/tini -- /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes curator run#' \
   -e '/^ExecStart=/a ExecStartPost=/opt/a-nas/assistant-runtimes/spike/venv/bin/python -P /spike/media-cache.py' \
   -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
@@ -66,8 +70,12 @@ install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
 # The member's scheduled tasks (Hermes's cronjob): one round of Hermes's own `hermes cron tick`
 # in the same sandbox, behind the same bridge to the model (assistant-start.sh, channel cron),
 # started by anas-assistant-cron-waker.service when a job is due, whether the assistant runs
-# or not. A job may take a while; Hermes's own watchdog ends one that stalls.
+# or not. A job may take a while; Hermes's own watchdog ends one that stalls. No job has a
+# window, so its sandbox has no companion socket and the companion tools answer that no
+# desktop is in use (#412): the Product Service could not tell its calls from those of a
+# conversation, which come from the same UID.
 sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i (spike)#' \
+  -e '\#a-nas-companion-assistant#d' \
   -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron' \
   -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
   -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
@@ -104,12 +112,16 @@ fi
 # unit binds its assistant socket (/run/a-nas/assistant-changes.sock) over the empty file
 # here. Otherwise the spike's change broker stands in, with a product socket for the product
 # service and the agent socket for the assistants' MCP tool.
-install -d -m 0755 /run/anas-spike-broker /run/anas-change-agent
+install -d -m 0755 /run/anas-change-agent
 if [[ "$gate" == host-agent ]]; then
   systemctl stop change-broker 2>/dev/null || true
   rm -f /run/anas-change-agent/agent.sock /run/anas-spike-broker/broker.sock
+  # Without the change broker there is no product socket, nor its directory: the probe
+  # (probe.sh) then knows it has nothing there to be refused.
+  rmdir /run/anas-spike-broker 2>/dev/null || true
   : > /run/anas-change-agent/agent.sock
 else
+  install -d -m 0755 /run/anas-spike-broker
   transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
     python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 fi

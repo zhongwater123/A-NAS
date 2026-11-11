@@ -17,6 +17,15 @@ const activityEvents = ["pointerdown", "pointermove", "keydown", "wheel", "touch
 // awake shows the page; saver plays a video over it; asleep is plain black.
 type Phase = "awake" | "saver" | "asleep";
 
+let covered = false;
+
+// localConsoleCovered tells whether either cover is up over the page: nobody
+// sees what the companion would do then, so VNAS hears that it is paused
+// (companion/commands.ts).
+export function localConsoleCovered(): boolean {
+  return covered;
+}
+
 export function isLocalConsole(search = window.location.search): boolean {
   return new URLSearchParams(search).get("local-console") === "1";
 }
@@ -87,6 +96,7 @@ export function LocalConsoleScreenSaver({
 
   const setPhase = useCallback((next: Phase) => {
     phaseRef.current = next;
+    covered = next !== "awake";
     setPhaseState(next);
   }, []);
 

@@ -33,6 +33,13 @@ func (s *Service) View(ctx context.Context, p Principal, assetID string) (Conten
 	if !strings.HasPrefix(record.MediaType, "image/") {
 		return Content{}, ErrNoView
 	}
+	if p.Assistant {
+		// An assistant knows a sensitive value only as a handle; a view would
+		// show its model the value itself (docs/architecture/photo-ocr.md).
+		if err := s.assistantMayLook(ctx, record.objectID); err != nil {
+			return Content{}, err
+		}
+	}
 	original, err := s.openObject(record.objectID)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Content{}, fmt.Errorf("original of %s is missing from the content store", record.ID)

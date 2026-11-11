@@ -19,8 +19,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -33,13 +36,15 @@ const (
 )
 
 type dependencies struct {
-	root                  fs.FS
-	hostname              func() (string, error)
-	architecture          string
-	now                   func() time.Time
-	readBlockDevices      func(context.Context) ([]byte, error)
-	readSMART             func(context.Context, string) ([]byte, error)
-	readFilesystemUsage   func(string) (filesystemUsage, error)
+	root                fs.FS
+	hostname            func() (string, error)
+	architecture        string
+	now                 func() time.Time
+	readBlockDevices    func(context.Context) ([]byte, error)
+	readSMART           func(context.Context, string) ([]byte, error)
+	readFilesystemUsage func(string) (filesystemUsage, error)
+	// readBtrfsDevices runs `btrfs filesystem show --raw` on the mount point.
+	readBtrfsDevices      func(context.Context, string) ([]byte, error)
 	sleep                 func(context.Context, time.Duration) error
 	readTaskServices      func(context.Context) ([]byte, error)
 	readTaskBlockDevices  func(context.Context) ([]byte, error)
@@ -56,7 +61,27 @@ type Reader struct {
 	workloadTasks workloadTaskSampler
 	smart         smartCache
 	fanMemory     fanMemory
+	btrfsDevices  btrfsDeviceCache
 }
+
+// btrfsDeviceCache keeps how Btrfs allocates the data volume's devices for
+// btrfsDevicesFor: every host-state request reads the host, and running
+// btrfs for each would add a process to every poll.
+type btrfsDeviceCache struct {
+	mu      sync.Mutex
+	uuid    string
+	readAt  time.Time
+	devices []hoststate.VolumeDevice
+}
+
+const (
+	// btrfsDevicesFor is how long a reading of the devices' allocation
+	// stands; the allocation changes by whole block groups.
+	btrfsDevicesFor = 30 * time.Second
+	// btrfsDevicesTimeout bounds `btrfs filesystem show`, so that a disk
+	// that stalls it does not hold every host-state request.
+	btrfsDevicesTimeout = 10 * time.Second
+)
 
 type ResolvedDevice struct {
 	Disk          hoststate.Disk
@@ -89,6 +114,9 @@ func New() *Reader {
 			).Output()
 		},
 		readSMART: readSMARTCommand,
+		readBtrfsDevices: func(ctx context.Context, path string) ([]byte, error) {
+			return exec.CommandContext(ctx, "btrfs", "filesystem", "show", "--raw", path).Output()
+		},
 		readFilesystemUsage: func(path string) (filesystemUsage, error) {
 			var stats syscall.Statfs_t
 			if err := syscall.Statfs(path, &stats); err != nil {
@@ -98,7 +126,7 @@ func New() *Reader {
 			return filesystemUsage{
 				total:     uint64(stats.Blocks) * blockSize,
 				available: uint64(stats.Bavail) * blockSize,
-				readOnly:  stats.Flags&stRDOnly != 0,
+				readOnly:  stats.Flags&unix.ST_RDONLY != 0,
 			}, nil
 		},
 	})
@@ -159,6 +187,9 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if json.Unmarshal(blockDevices, &document) == nil {
 		dataVolume = readDataVolume(r.dependencies.root, dataVolumeUUID(document.BlockDevices, btrfs), disks)
 	}
+	if dataVolume != nil {
+		dataVolume.Devices = r.volumeDevices(ctx, dataVolume.FilesystemUUID)
+	}
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
 	if err != nil {
@@ -182,6 +213,29 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	}, nil
 }
 
+// volumeDevices is how Btrfs allocates the data volume's devices, read at
+// most once in btrfsDevicesFor. Without it the volume is still observed;
+// only the allocation is unknown.
+func (r *Reader) volumeDevices(ctx context.Context, uuid string) []hoststate.VolumeDevice {
+	if r.dependencies.readBtrfsDevices == nil {
+		return nil
+	}
+	cache := &r.btrfsDevices
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	now := r.dependencies.now()
+	if cache.uuid != uuid || cache.readAt.IsZero() || now.Sub(cache.readAt) >= btrfsDevicesFor || now.Before(cache.readAt) {
+		ctx, cancel := context.WithTimeout(ctx, btrfsDevicesTimeout)
+		output, err := r.dependencies.readBtrfsDevices(ctx, dataMountPoint)
+		cancel()
+		cache.uuid, cache.readAt, cache.devices = uuid, now, nil
+		if err == nil {
+			cache.devices = VolumeDevices(r.dependencies.root, uuid, output)
+		}
+	}
+	return slices.Clone(cache.devices)
+}
+
 func (r *Reader) systemStorage() *hoststate.StorageUsage {
 	if r.dependencies.readFilesystemUsage == nil {
 		return nil
@@ -194,9 +248,6 @@ func (r *Reader) systemStorage() *hoststate.StorageUsage {
 	}
 	return &hoststate.StorageUsage{TotalBytes: usage.total, AvailableBytes: usage.available}
 }
-
-// stRDOnly is ST_RDONLY in statfs flags: the filesystem is mounted read-only.
-const stRDOnly = 0x1
 
 type filesystemUsage struct {
 	total, available uint64

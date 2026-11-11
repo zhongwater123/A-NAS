@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // User tags and AI corrections are user metadata of one photo asset
@@ -89,7 +91,7 @@ func (s *Service) TagCounts(ctx context.Context, p Principal, viewing string) ([
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT t.name, t.asset_id FROM user_tags t JOIN assets a ON a.id = t.asset_id
-WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+sqlitedb.Placeholders(len(scope))+`)
 ORDER BY t.created_at DESC, t.asset_id DESC`, scope...)
 	if err != nil {
 		return nil, err
@@ -123,7 +125,7 @@ func (s *Service) TagPhotos(ctx context.Context, p Principal, name, viewing, cur
 	if err != nil {
 		return Page{}, err
 	}
-	where := "a.library_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") +
+	where := "a.library_id IN (" + sqlitedb.Placeholders(len(scope)) +
 		") AND a.id IN (SELECT asset_id FROM user_tags WHERE name = ?)"
 	return s.newestFirst(ctx, p, where, append(slices.Clone(scope), name), cursor, limit)
 }

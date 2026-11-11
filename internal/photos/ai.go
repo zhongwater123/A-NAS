@@ -8,8 +8,9 @@ import (
 	"errors"
 	"math"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Local AI turns each original's upright thumbnail into a vector through the
@@ -190,6 +191,16 @@ type AIStatus struct {
 	// text route does not apply to the Worker's model or its queries wait for
 	// the Worker.
 	TextPhotos *int `json:"textPhotos,omitempty"`
+	// Texts splits TextPhotos into the photos read, waiting to be read and
+	// whose reading failed; absent when TextPhotos is.
+	Texts *TextProgress `json:"texts,omitempty"`
+}
+
+// TextProgress is how far reading the text in photos has come.
+type TextProgress struct {
+	Read   int `json:"read"`
+	Queued int `json:"queued"`
+	Failed int `json:"failed"`
 }
 
 const (
@@ -265,7 +276,6 @@ func (s *Service) completeEmbedding(ctx context.Context, job claimedJob, model s
 	if err != nil {
 		return err
 	}
-	stored := false
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ?)",
@@ -285,12 +295,8 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, vector 
 			}
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-		stored = err == nil
 		return err
 	})
-	if err == nil && stored {
-		s.index.put(job.objectID, model, vector)
-	}
 	return err
 }
 
@@ -322,8 +328,12 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
 		return AIStatus{}, err
 	}
-	if status.TextPhotos, err = s.textPhotos(ctx, model, libraries); err != nil {
+	if status.Texts, err = s.textProgress(ctx, model, libraries); err != nil {
 		return AIStatus{}, err
+	}
+	if status.Texts != nil {
+		total := status.Texts.Read + status.Texts.Queued + status.Texts.Failed
+		status.TextPhotos = &total
 	}
 	if len(libraries) == 0 {
 		return status, nil
@@ -344,7 +354,7 @@ FROM (
          IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed')
            OR (? AND p.state = 'failed'), 0) AS failed
   FROM (SELECT v.object_id, `+inPeopleLibrary("v.object_id")+` AS people FROM (SELECT DISTINCT object_id FROM assets
-        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)
+        WHERE trashed_at IS NULL AND library_id IN (`+sqlitedb.Placeholders(len(libraries))+`)
           AND `+inLocalAI("assets.object_id")+`) v) a
   LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
   LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?

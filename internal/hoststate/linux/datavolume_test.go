@@ -2,7 +2,12 @@ package linux
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -27,6 +32,14 @@ func TestReaderFindsEveryDiskOfTheDataVolumeAndItsConversion(t *testing.T) {
 			sysfs + "/allocation/metadata/dup/used_bytes":   &fstest.MapFile{Data: []byte("0\n")},
 			sysfs + "/allocation/system/raid1/used_bytes":   &fstest.MapFile{Data: []byte("1\n")},
 			sysfs + "/exclusive_operation":                  &fstest.MapFile{Data: []byte("balance\n")},
+			sysfs + "/devinfo/1/missing":                    &fstest.MapFile{Data: []byte("0\n")},
+			sysfs + "/devinfo/2/missing":                    &fstest.MapFile{Data: []byte("0\n")},
+		},
+		readBtrfsDevices: func(_ context.Context, path string) ([]byte, error) {
+			if path != "/srv/a-nas/data" {
+				t.Errorf("btrfs filesystem show %q, want the data mount point", path)
+			}
+			return []byte(btrfsShow(uuid, "\tdevid    1 size 500106788864 used 52613349376 path /dev/sdb1\n", "\tdevid    2 size 500106788864 used 50465865728 path /dev/sda1\n")), nil
 		},
 		hostname:     func() (string, error) { return "a-nas-dev", nil },
 		architecture: "amd64",
@@ -77,6 +90,100 @@ func TestReaderFindsEveryDiskOfTheDataVolumeAndItsConversion(t *testing.T) {
 	wantMetadata := []hoststate.ProfileUsage{{Profile: hoststate.ProfileDup, UsedBytes: 0}, {Profile: hoststate.ProfileRAID1, UsedBytes: 2}}
 	if !reflect.DeepEqual(volume.Data, wantData) || !reflect.DeepEqual(volume.Metadata, wantMetadata) {
 		t.Fatalf("profiles = %+v / %+v, want %+v / %+v", volume.Data, volume.Metadata, wantData, wantMetadata)
+	}
+	wantDevices := []hoststate.VolumeDevice{
+		{DevID: 1, SizeBytes: 500106788864, AllocatedBytes: 52613349376},
+		{DevID: 2, SizeBytes: 500106788864, AllocatedBytes: 50465865728},
+	}
+	if !reflect.DeepEqual(volume.Devices, wantDevices) {
+		t.Fatalf("devices = %+v, want %+v", volume.Devices, wantDevices)
+	}
+}
+
+// btrfsShow is what `btrfs filesystem show --raw` prints for a mounted
+// filesystem with the device lines.
+func btrfsShow(uuid string, devices ...string) string {
+	out := "Label: 'ANAS_DATA'  uuid: " + uuid + "\n\tTotal devices " + strconv.Itoa(len(devices)) + " FS bytes used 46245638144\n"
+	for _, device := range devices {
+		out += device
+	}
+	return out + "\n"
+}
+
+// Every host-state request reads the host; the devices' allocation is read
+// with btrfs at most once in 30 seconds, and again for another volume.
+func TestVolumeDevicesAreReadOnceInAWhile(t *testing.T) {
+	const uuid = "09e275fe-794a-458d-8200-b6e67c55cc22"
+	now := time.Unix(1000, 0)
+	reads := 0
+	reader := newReader(dependencies{
+		now: func() time.Time { return now },
+		readBtrfsDevices: func(ctx context.Context, _ string) ([]byte, error) {
+			reads++
+			if _, ok := ctx.Deadline(); !ok {
+				t.Error("btrfs filesystem show runs without a deadline")
+			}
+			return []byte(btrfsShow(uuid, "\tdevid    1 size 1000 used 600 path /dev/sdb1\n", "\tdevid    2 size 1000 used 400 path /dev/sda1\n")), nil
+		},
+	})
+	for range 3 {
+		if devices := reader.volumeDevices(context.Background(), uuid); len(devices) != 2 {
+			t.Fatalf("volumeDevices() = %+v, want both devices", devices)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("btrfs ran %d times for three reads in a moment, want once", reads)
+	}
+	now = now.Add(btrfsDevicesFor)
+	reader.volumeDevices(context.Background(), uuid)
+	reader.volumeDevices(context.Background(), "aaaaaaaa-0000-4000-8000-000000000000")
+	if reads != 3 {
+		t.Fatalf("btrfs ran %d times, want again after 30 s and for another volume", reads)
+	}
+}
+
+// Only a complete list of the filesystem's devices says how Btrfs allocates
+// them; a missing device, or one sysfs knows and the tool does not list,
+// leaves it unknown.
+func TestVolumeDevicesNeedEveryDeviceOfTheFilesystem(t *testing.T) {
+	const uuid = "09e275fe-794a-458d-8200-b6e67c55cc22"
+	const other = "aaaaaaaa-0000-4000-8000-000000000000"
+	first := "\tdevid    1 size 1000 used 600 path /dev/sdb1\n"
+	second := "\tdevid    2 size 1000 used 400 path /dev/sda1\n"
+	two := fstest.MapFS{
+		"sys/fs/btrfs/" + uuid + "/devinfo/1/missing": &fstest.MapFile{Data: []byte("0\n")},
+		"sys/fs/btrfs/" + uuid + "/devinfo/2/missing": &fstest.MapFile{Data: []byte("0\n")},
+	}
+	want := []hoststate.VolumeDevice{{DevID: 1, SizeBytes: 1000, AllocatedBytes: 600}, {DevID: 2, SizeBytes: 1000, AllocatedBytes: 400}}
+	for _, test := range []struct {
+		name   string
+		root   fstest.MapFS
+		output string
+		want   []hoststate.VolumeDevice
+	}{
+		{name: "every device", root: two, output: btrfsShow(uuid, first, second), want: want},
+		{name: "another filesystem first", root: two, output: btrfsShow(other, first) + btrfsShow(uuid, first, second), want: want},
+		{name: "only another filesystem", root: two, output: btrfsShow(other, first, second)},
+		{name: "a device missing", root: two, output: btrfsShow(uuid, first, "\tdevid    2 size 0 used 0 path <missing disk> MISSING\n")},
+		{name: "some devices missing", root: two, output: strings.Replace(btrfsShow(uuid, first, second), "\n\n", "\n\t*** Some devices missing\n\n", 1)},
+		{name: "fewer devices than the total", root: two, output: strings.Replace(btrfsShow(uuid, first, second), second, "", 1)},
+		{name: "a device sysfs knows is not listed", root: fstest.MapFS{
+			"sys/fs/btrfs/" + uuid + "/devinfo/1/missing": &fstest.MapFile{Data: []byte("0\n")},
+			"sys/fs/btrfs/" + uuid + "/devinfo/2/missing": &fstest.MapFile{Data: []byte("0\n")},
+			"sys/fs/btrfs/" + uuid + "/devinfo/3/missing": &fstest.MapFile{Data: []byte("1\n")},
+		}, output: btrfsShow(uuid, first, second)},
+		{name: "sysfs counts the device missing", root: fstest.MapFS{
+			"sys/fs/btrfs/" + uuid + "/devinfo/1/missing": &fstest.MapFile{Data: []byte("0\n")},
+			"sys/fs/btrfs/" + uuid + "/devinfo/2/missing": &fstest.MapFile{Data: []byte("1\n")},
+		}, output: btrfsShow(uuid, first, second)},
+		{name: "more allocated than the size", root: two, output: btrfsShow(uuid, first, "\tdevid    2 size 1000 used 1001 path /dev/sda1\n")},
+		{name: "the same devid twice", root: two, output: btrfsShow(uuid, first, first)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := VolumeDevices(test.root, uuid, []byte(test.output)); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("VolumeDevices() = %+v, want %+v", got, test.want)
+			}
+		})
 	}
 }
 
@@ -139,5 +246,69 @@ func TestNoDataVolumeWithoutABtrfsMountedThere(t *testing.T) {
 	}
 	if volume := readDataVolume(fstest.MapFS{}, "09e275fe-794a-458d-8200-b6e67c55cc22", nil); volume != nil {
 		t.Fatalf("data volume without data disks = %+v, want nil", volume)
+	}
+}
+
+// The states below are what Linux 6.12 showed in a VM (see the investigation
+// 2026-11-06-mirror-missing-a-disk): a device absent at a degraded mount is
+// marked missing, one that vanishes while mounted is not, and one that comes
+// back while mounted stays unwritable.
+func TestReadMissingDevicesCountsEveryWayADiskGoes(t *testing.T) {
+	const uuid = "22786f00-8ff1-4e26-96b4-4851f4b25fd3"
+	type device struct {
+		devid                       string
+		missing, writeable, replace string
+	}
+	cases := []struct {
+		name    string
+		devices []device
+		links   []string // block devices under devices/
+		gone    []string // links whose block device vanished
+		want    int
+	}{
+		{name: "whole", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sda1", "sdb1"}},
+		{name: "mounted degraded", devices: []device{{"1", "0", "1", "0"}, {"2", "1", "0", "0"}}, links: []string{"sda1"}, want: 1},
+		{name: "vanished while mounted", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sdb1"}, gone: []string{"sda1"}, want: 1},
+		{name: "back while mounted", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "0", "0"}}, links: []string{"sda1"}, want: 1},
+		{name: "being replaced", devices: []device{{"0", "0", "1", "1"}, {"1", "0", "1", "0"}, {"2", "1", "0", "0"}}, links: []string{"sda1", "sdb1"}, want: 1},
+		{name: "replaced", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sda1", "sdb1"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			base := filepath.Join(root, "sys", "fs", "btrfs", uuid)
+			write := func(path, value string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, device := range test.devices {
+				dir := filepath.Join(base, "devinfo", device.devid)
+				write(filepath.Join(dir, "missing"), device.missing)
+				write(filepath.Join(dir, "writeable"), device.writeable)
+				write(filepath.Join(dir, "replace_target"), device.replace)
+			}
+			if err := os.MkdirAll(filepath.Join(base, "devices"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range append(append([]string(nil), test.links...), test.gone...) {
+				target := filepath.Join(root, "sys", "block", name)
+				if !slices.Contains(test.gone, name) {
+					if err := os.MkdirAll(target, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Symlink(target, filepath.Join(base, "devices", name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := ReadMissingDevices(os.DirFS(root), uuid); got != test.want {
+				t.Fatalf("ReadMissingDevices() = %d, want %d", got, test.want)
+			}
+		})
 	}
 }

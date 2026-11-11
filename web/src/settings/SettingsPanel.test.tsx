@@ -5,7 +5,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import type { ActivityPage, Disk, FileEntry, Session, Space } from "../api.generated";
+import type { ActivityPage, Disk, FileEntry, Session, Space, Volume } from "../api.generated";
 import { useHostState } from "../desktop/useHostState";
 import { healthyState, session as signIn } from "../test/fixtures";
 import { type SettingsOptions, settingsHandlers, terminalHandlers } from "../test/handlers/settings";
@@ -83,6 +83,14 @@ function Settings({ signedIn, open = true }: { signedIn: Session; open?: boolean
 
 // renderSettings opens Settings on 概览, as the desktop first does; close and
 // reopen close the window and open it again.
+// spreadMirror is a mirror of three data disks whose files are spread as given.
+const spreadMirrorDisks = ["disk:data", "disk:data-2", "disk:data-3"].map((id) =>
+  disk(id, { role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] }),
+);
+function spreadMirror(spread: Volume["spread"]): Volume {
+  return volume({ diskIds: ["disk:data", "disk:data-2", "disk:data-3"], layout: "mirror", spread });
+}
+
 function renderSettings(signedIn: Session = owner) {
   setSession(signedIn);
   const view = render(<Settings signedIn={signedIn} />);
@@ -121,6 +129,37 @@ async function openSection(user: ReturnType<typeof userEvent.setup>, name: strin
 }
 
 const unavailable = () => apiError("state_unavailable", "host state is unavailable");
+
+// degradedMirror is a mirror that runs without one of its disks, beside a
+// disk large enough to replace it and one that is too small.
+function degradedMirror(): SettingsOptions {
+  const disks = [
+    disk("disk:data", {
+      model: "ST500DM002-1BD142",
+      capacityBytes: 500_107_862_016,
+      role: "data",
+      inUse: true,
+      filesystems: ["btrfs"],
+      eligibleForDataVolume: false,
+      ineligibleReasons: ["data_volume", "in_use"],
+    }),
+    disk("disk:large", { model: "WDC WD10EZEX", capacityBytes: 1_000_204_886_016 }),
+    disk("disk:small", { model: "Small SSD", capacityBytes: 256_060_514_304, rotational: false }),
+  ];
+  return {
+    hostState: { ...healthyState, disks },
+    volumes: [
+      volume({
+        diskIds: ["disk:data"],
+        layout: "mirror",
+        state: "degraded",
+        capacityBytes: 480 * 1024 ** 3,
+        availableBytes: 280 * 1024 ** 3,
+        missingDisks: [{ id: "disk:gone", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016 }],
+      }),
+    ],
+  };
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -319,6 +358,18 @@ describe("Settings terminal", () => {
     expect(screen.queryByTestId("xterm-session")).toBeNull();
     await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitFor(() => expect(terminal.sent.checks).toBe(2));
+  });
+
+  it("says the terminal opens only on the LAN or the device's screen when reached from the internet", async () => {
+    serve();
+    server.use(...terminalHandlers(true, true).handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "终端");
+
+    expect(await screen.findByRole("heading", { name: "外网访问时不能使用终端" })).toBeTruthy();
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+    expect(xterm.mounts).toBe(0);
   });
 });
 
@@ -796,6 +847,125 @@ describe("Settings", () => {
     await waitFor(() => expect(storage.requests).toContain("POST /api/v1/volumes/volume%3Adata/conversion"));
   });
 
+  it("adds a disk to a mirror without changing its layout", async () => {
+    const members = ["disk:data", "disk:data-2"].map((id) =>
+      disk(id, {
+        model: "ST500DM002-1BD142",
+        capacityBytes: 500_107_862_016,
+        role: "data",
+        inUse: true,
+        eligibleForDataVolume: false,
+        ineligibleReasons: ["data_volume"],
+      }),
+    );
+    const spareDisk = disk("disk:spare", { model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016 });
+    const plan = storagePlan("plan:grow", {
+      kind: "add_disks",
+      layout: "mirror",
+      capacityBeforeBytes: 500_107_862_016,
+      capacityAfterBytes: 750_161_793_024,
+      disks: [
+        {
+          id: "disk:spare",
+          model: "ST500DM002-1BD142",
+          capacityBytes: 500_107_862_016,
+          fingerprint: "spare",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE k:spare",
+      actions: [
+        { kind: "add_devices", description: "把目标硬盘加入正在使用的数据卷，已有文件保持原样" },
+        {
+          kind: "spread",
+          description: "在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用",
+        },
+      ],
+    });
+    const storage = serve({
+      hostState: { ...healthyState, disks: [...members, spareDisk] },
+      volumes: [
+        volume({
+          diskIds: ["disk:data", "disk:data-2"],
+          layout: "mirror",
+          capacityBytes: 465 * 1024 ** 3,
+          availableBytes: 20 * 1024 ** 3,
+        }),
+      ],
+      plan,
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("可以加入数据卷，增加容量；数据卷仍为镜像（RAID 1）。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "设置用途…" }));
+    const wizard = screen.getByRole("region", { name: "设置硬盘用途" });
+    expect(within(wizard).getByText("选择要加入的硬盘。加入后数据卷仍为镜像（RAID 1）：")).toBeTruthy();
+    expect(within(wizard).getByText("可用容量 466 GiB → 699 GiB")).toBeTruthy();
+    expect(within(wizard).queryByText("冗余方式")).toBeNull();
+    expect(within(wizard).queryByRole("button", { name: "下一步" })).toBeNull();
+    await user.click(within(wizard).getByRole("button", { name: "生成计划" }));
+
+    expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect(storage.plans).toEqual([{ diskIds: ["disk:spare"] }]);
+    expect(within(wizard).getByText(/把已有文件分散到全部硬盘/)).toBeTruthy();
+  });
+
+  it("shows the space a mirror cannot use yet and spreads its files again", async () => {
+    const disks = ["disk:data", "disk:data-2", "disk:data-3"].map((id) =>
+      disk(id, { role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] }),
+    );
+    const storage = serve({
+      hostState: { ...healthyState, disks },
+      volumes: [
+        volume({
+          diskIds: ["disk:data", "disk:data-2", "disk:data-3"],
+          layout: "mirror",
+          capacityBytes: 698 * 1024 ** 3,
+          availableBytes: 40 * 1024 ** 3,
+          spread: { state: "waiting", unusableBytes: 230 * 1024 ** 3 },
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("分散文件已暂停")).toBeTruthy();
+    expect(screen.getByText(/系统会在 15 分钟内接着分散/)).toBeTruthy();
+    expect(screen.getByText("还有 230 GiB 空间要等文件分散完才能使用")).toBeTruthy();
+    expect(screen.getByText("Btrfs · 镜像（RAID 1） · 3 块硬盘")).toBeTruthy();
+    expect(screen.queryByText("转换中")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "继续分散" }));
+    await waitFor(() => expect(storage.requests).toContain("POST /api/v1/volumes/volume%3Adata/conversion"));
+  });
+
+  it("says when spreading left space unusable", async () => {
+    serve({
+      hostState: { ...healthyState, disks: spreadMirrorDisks },
+      volumes: [spreadMirror({ state: "stopped", unusableBytes: 120 * 1024 ** 3 })],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("分散后仍有空间用不上")).toBeTruthy();
+    expect(screen.getByText("还有 120 GiB 空间用不上")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "继续分散" })).toBeTruthy();
+  });
+
+  it("keeps new disks out while a balance still runs after the space became usable", async () => {
+    serve({
+      hostState: { ...healthyState, disks: [...spreadMirrorDisks, disk("disk:spare")] },
+      volumes: [spreadMirror({ state: "running", unusableBytes: 0 })],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("正在把文件分散到全部硬盘")).toBeTruthy();
+    expect(screen.queryByText(/空间要等文件分散完才能使用/)).toBeNull();
+    expect(screen.getByText("文件分散完后才能加入新硬盘。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "设置用途…" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("creates a mirror when two disks are chosen for a new data volume", async () => {
     const second = disk("disk:fake-data-02");
     const diskIds = ["disk:fake-data-01", "disk:fake-data-02"];
@@ -829,6 +999,148 @@ describe("Settings", () => {
     await user.click(within(wizard).getByRole("button", { name: "生成格式化计划" }));
     expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
     expect(storage.plans).toEqual([{ diskIds, layout: "span" }]);
+  });
+
+  it("replaces the missing disk of a mirror with a disk at least as large", async () => {
+    const replacement = storagePlan("plan:replace", {
+      kind: "replace_disk",
+      layout: "mirror",
+      capacityBeforeBytes: 500_107_862_016,
+      capacityAfterBytes: 500_107_862_016,
+      disks: [
+        {
+          id: "disk:large",
+          model: "WDC WD10EZEX",
+          capacityBytes: 1_000_204_886_016,
+          fingerprint: "large-fingerprint",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE k:large",
+      actions: [
+        { kind: "replace_disk", description: "用剩下那块硬盘上的副本，把缺少的硬盘的数据重建到这块硬盘上" },
+        { kind: "restore_redundancy", description: "把缺少硬盘期间只存了一份的数据转回镜像" },
+      ],
+    });
+    const storage = serve({ ...degradedMirror(), plan: replacement });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("缺少硬盘")).toBeTruthy();
+    expect(screen.getByText("Btrfs · 镜像（RAID 1） · 2 块硬盘")).toBeTruthy();
+    const missing = screen.getByRole("region", { name: "缺少的硬盘" });
+    expect(within(missing).getByText("缺少 1 块硬盘")).toBeTruthy();
+    expect(within(missing).getByText("在更换硬盘之前，新写入的数据只有一份。")).toBeTruthy();
+    const members = screen.getByRole("list", { name: "组成数据卷的硬盘" });
+    const [present, gone] = within(members).getAllByRole("listitem");
+    expect(within(present).queryByText("缺少")).toBeNull();
+    expect(within(gone).getByText("ST500DM002-1BD142")).toBeTruthy();
+    expect(within(gone).getByText("缺少")).toBeTruthy();
+    expect(within(gone).getByText("disk:gone")).toBeTruthy();
+    // Only a replacement fits a mirror without a disk.
+    expect(screen.queryByRole("button", { name: "设置用途…" })).toBeNull();
+
+    await user.click(within(missing).getByRole("button", { name: "更换硬盘…" }));
+    const wizard = screen.getByRole("region", { name: "更换硬盘" });
+    expect(
+      within(wizard).getByText(/替换缺少的 ST500DM002-1BD142（disk:gone）。选择一块不小于 466 GiB 的硬盘/),
+    ).toBeTruthy();
+    const large = within(wizard).getByRole("radio", { name: /WDC WD10EZEX/ }) as HTMLInputElement;
+    const small = within(wizard).getByRole("radio", { name: /Small SSD/ }) as HTMLInputElement;
+    expect(large.checked).toBe(true);
+    expect(small.disabled).toBe(true);
+    expect(within(wizard).getByText("容量小于缺少的硬盘")).toBeTruthy();
+    expect(within(wizard).queryByRole("radiogroup", { name: "冗余方式" })).toBeNull();
+    expect(within(wizard).queryByRole("button", { name: "下一步" })).toBeNull();
+    await user.click(within(wizard).getByRole("button", { name: "生成计划" }));
+
+    expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect(storage.plans).toEqual([{ diskIds: ["disk:large"] }]);
+    expect(within(wizard).getByText("ST500DM002-1BD142（disk:gone）")).toBeTruthy();
+    expect(within(wizard).getByText(/把缺少的硬盘的数据重建到这块硬盘上/)).toBeTruthy();
+    await user.type(within(wizard).getByLabelText(/输入确认短语/), "ERASE k:large");
+    await user.click(within(wizard).getByRole("button", { name: "确认计划" }));
+    expect(await within(wizard).findByText(/然后替换缺少的硬盘并重建镜像/)).toBeTruthy();
+    await user.click(within(wizard).getByRole("button", { name: "清除硬盘并重建镜像" }));
+    expect(await within(wizard).findByText("硬盘已更换")).toBeTruthy();
+    await user.click(within(wizard).getByRole("button", { name: "完成" }));
+    expect(screen.queryByRole("region", { name: "更换硬盘" })).toBeNull();
+  });
+
+  it("follows the rebuild of a replaced disk when the page comes back", async () => {
+    const plan = storagePlan("plan:rebuild", {
+      kind: "replace_disk",
+      layout: "mirror",
+      state: "running",
+      step: "replace",
+      progress: 52,
+    });
+    serve({ ...degradedMirror(), unfinished: [plan], operation: { ...plan, state: "succeeded", step: undefined } });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    const wizard = await screen.findByRole("region", { name: "更换硬盘" });
+    expect(within(wizard).getByText("正在重建 52%")).toBeTruthy();
+    expect(within(wizard).getByRole("progressbar", { name: "重建" }).getAttribute("aria-valuenow")).toBe("52");
+    expect(await within(wizard).findByText("硬盘已更换")).toBeTruthy();
+  });
+
+  it("says when the smaller disk cannot replace the missing one", async () => {
+    serve(degradedMirror());
+    server.use(http.post("/api/v1/storage/plans", ({ response }) => response(422).json(apiError("disk_too_small"))));
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    await user.click(await screen.findByRole("button", { name: "更换硬盘…" }));
+    await user.click(screen.getByRole("button", { name: "生成计划" }));
+    expect(await screen.findByText("这块硬盘比缺少的硬盘小，请换一块容量不小于它的硬盘。")).toBeTruthy();
+  });
+
+  it.each([
+    [undefined, null],
+    [{ state: "running" as const, convertedBytes: 82 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 }, "41"],
+  ])("shows a mirror restoring its redundancy, conversion=%o", async (conversion, percent) => {
+    const disks = ["disk:data", "disk:new"].map((id) =>
+      disk(id, { role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] }),
+    );
+    serve({
+      hostState: { ...healthyState, disks },
+      volumes: [volume({ diskIds: ["disk:data", "disk:new"], layout: "mirror", restoring: true, conversion })],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("恢复中")).toBeTruthy();
+    expect(screen.getByText("正在恢复冗余")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "恢复冗余" }).getAttribute("aria-valuenow")).toBe(percent);
+    expect(screen.queryByRole("region", { name: "缺少的硬盘" })).toBeNull();
+    expect(screen.queryByText(/转换为镜像/)).toBeNull();
+  });
+
+  it("lists the missing disk of an offline span without offering a replacement", async () => {
+    serve({
+      hostState: { ...healthyState, disks: [disk("disk:data", { filesystems: ["btrfs"] })] },
+      volumes: [
+        volume({
+          diskIds: ["disk:data", "disk:gone"],
+          layout: "span",
+          state: "unavailable",
+          missingDisks: [{ id: "disk:gone", model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016 }],
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("离线")).toBeTruthy();
+    expect(screen.getByText("Btrfs · 扩容（不冗余） · 2 块硬盘")).toBeTruthy();
+    const missing = screen.getByRole("region", { name: "缺少的硬盘" });
+    expect(within(missing).getByText("接回缺少的硬盘并重启设备后，数据卷恢复在线。")).toBeTruthy();
+    expect(screen.getByText("disk:gone")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "更换硬盘…" })).toBeNull();
+    // The disk left over is the volume's, not a spare.
+    expect(screen.getByText("数据盘")).toBeTruthy();
+    expect(screen.queryByText(/块未使用的硬盘/)).toBeNull();
   });
 
   it("resets a member password from a form inside the window", async () => {

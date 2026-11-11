@@ -6,6 +6,7 @@
 package photoservice
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -64,9 +65,17 @@ type Config struct {
 	// so that load on the machine running them cannot hold AI work back.
 	AIPressure func(resource string) (float64, error)
 	// Vectors is the service's own vector index (ADR 0028), kept in line
-	// with the Catalog and compared with searches; nil leaves it off.
+	// with the Catalog and read by search; nil leaves search to read the
+	// Catalog's vectors.
 	Vectors photos.VectorIndex
+	// VectorCheckEvery is how often a search is checked against the Catalog
+	// (photos.RunVectorCheck); it defaults to VectorCheckInterval.
+	VectorCheckEvery time.Duration
 }
+
+// VectorCheckInterval is how often, at most, a search is checked against the
+// Catalog: each check reads every candidate's vector.
+const VectorCheckInterval = 10 * time.Minute
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
 
@@ -86,7 +95,7 @@ func RequireOwnedStore(root string) error {
 		return fmt.Errorf("%w: %s must be a private directory of this service", ErrStoreUnavailable, root)
 	}
 	var fs syscall.Statfs_t
-	if err := syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != 0x9123683e {
+	if err := syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != unix.BTRFS_SUPER_MAGIC {
 		return fmt.Errorf("%w: %s is not on the Btrfs data volume", ErrStoreUnavailable, root)
 	}
 	if fs.Flags&unix.ST_RDONLY != 0 {
@@ -232,9 +241,9 @@ func supervise(ctx, background context.Context, config Config, gate *Gate, serve
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors)
+			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors, cmp.Or(config.VectorCheckEvery, VectorCheckInterval))
 		}()
-		serve(photosapi.New(service, config.Logger))
+		serve(preparingVectors(service, photosapi.New(service, config.Logger)))
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
 
 		lost := watchStore(ctx, config, service)
@@ -286,6 +295,15 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 		if err == nil {
 			options := config.Photos
 			options.AI = config.AI
+			options.Vectors = config.Vectors
+			logger := config.Logger
+			options.OnVectorFallback = func(reason string, err error) {
+				if err != nil {
+					logger.Warn("photo search reads the Catalog's vectors", "reason", reason, "error", err)
+					return
+				}
+				logger.Info("photo search reads the Catalog's vectors", "reason", reason)
+			}
 			service, openErr := photos.Open(config.Root, options)
 			if openErr == nil {
 				return service, nil
@@ -306,12 +324,13 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 
 // RunBackground readies the job queue (photos.Service.RecoverJobs), then
 // renders media, runs local AI through ai while gate allows it, keeps the
-// vector index in line and compares searches with it, and maintains the
-// store until ctx ends. It returns only once all of them have stopped, so
-// the caller may then close service. None needs a user session; a nil ai
-// leaves local AI off, and nil vectors the vector index.
+// vector index in line and checks a search against the Catalog at most every
+// checkEvery, and maintains the store until ctx ends. It returns only once
+// all of them have stopped, so the caller may then close service. None needs
+// a user session; a nil ai leaves local AI off, and nil vectors the vector
+// index.
 func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate,
-	vectors photos.VectorIndex) {
+	vectors photos.VectorIndex, checkEvery time.Duration) {
 	if recovery, err := service.RecoverJobs(ctx); err != nil {
 		logger.ErrorContext(ctx, "photo job recovery failed", "error", err)
 	} else if recovery != (photos.JobRecovery{}) {
@@ -332,7 +351,7 @@ func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Lo
 		})
 	}
 	if vectors != nil {
-		runVectorIndex(ctx, &workers, service, logger, gate, vectors)
+		runVectorIndex(ctx, &workers, service, logger, gate, vectors, checkEvery)
 	} else if err := service.ForgetVectorIndex(ctx); err != nil {
 		logger.ErrorContext(ctx, "photo vector index state could not be dropped", "error", err)
 	}
@@ -341,11 +360,11 @@ func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Lo
 }
 
 // runVectorIndex starts keeping the vector index in line with the Catalog,
-// as background work, and comparing searches with it
-// (docs/architecture/vector-index.md). The comparisons are what decides
-// whether search moves to the index; they log no query or name.
+// as background work, and checking a sample of searches against the Catalog
+// (docs/architecture/vector-index.md#读路径). The checks log no query or
+// name.
 func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photos.Service, logger *slog.Logger, gate *Gate,
-	vectors photos.VectorIndex) {
+	vectors photos.VectorIndex, checkEvery time.Duration) {
 	workers.Go(func() {
 		service.RunVectorSync(ctx, vectors, gate, min(time.Minute, gate.quiet), func(event photos.VectorSyncEvent) {
 			level := slog.LevelInfo
@@ -360,18 +379,33 @@ func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photo
 			logger.WarnContext(ctx, "photo vector index sync failed; it retries", "error", err)
 		})
 	})
-	var warm func() bool
-	if client, ok := vectors.(interface{ Warm() bool }); ok {
-		warm = client.Warm
-	}
 	workers.Go(func() {
-		service.RunVectorShadow(ctx, vectors, warm, min(time.Minute, gate.quiet), func(c photos.ShadowComparison) {
-			logger.InfoContext(ctx, "photo vector index shadow search", "collection", c.Collection, "candidates", c.Candidates,
+		service.RunVectorCheck(ctx, checkEvery, func(c photos.VectorCheck) {
+			level := slog.LevelInfo
+			if c.Overlap[10] < 1 || c.Overlap[100] < 1 || c.Overlap[500] < 1 {
+				// Both sides score exactly: the index is out of line with the
+				// Catalog.
+				level = slog.LevelWarn
+			}
+			logger.Log(ctx, level, "photo vector index check", "collection", c.Collection, "candidates", c.Candidates,
 				"overlap10", c.Overlap[10], "overlap100", c.Overlap[100], "overlap500", c.Overlap[500],
 				"index_ms", c.Index.Milliseconds(), "exact_ms", c.Exact.Milliseconds(), "warm", c.Warm)
 		}, func(err error) {
-			logger.WarnContext(ctx, "photo vector index shadow search failed", "error", err)
+			logger.WarnContext(ctx, "photo vector index check failed", "error", err)
 		})
+	})
+}
+
+// preparingVectors starts the vector index ahead of a search while someone
+// uses the library: every request reaching the photo API prepares it, at
+// most every few seconds and without waiting (photos.Service.PrepareVectors).
+// Reading the AI status does not, for a window may poll it while left open.
+func preparingVectors(service *photos.Service, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != photosapi.AIStatusPath {
+			service.PrepareVectors()
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

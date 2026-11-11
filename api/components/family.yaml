@@ -189,8 +189,8 @@ schemas:
       kind: { type: string, enum: [photos, journal, measurement, vaccine, milestone], description: "Required when adding; an edit keeps the kind." }
       occurredOn: { $ref: "#/schemas/FamilyDate" }
       text: { type: string, maxLength: 5000 }
-      photos: { type: array, maxItems: 200, description: "Photo asset IDs of the shared library, in order; on an edit, replaces the photos.", items: { type: string } }
-      certificates: { type: array, maxItems: 200, description: "A vaccination's proof photos.", items: { type: string } }
+      photos: { type: array, maxItems: 200, description: "Photo asset IDs of the shared library, in order; on an edit, replaces only currently visible references. Omission preserves all stored references.", items: { type: string } }
+      certificates: { type: array, maxItems: 200, description: "A vaccination's proof photos; on an edit, replaces only currently visible references. Omission preserves all stored references.", items: { type: string } }
       alsoBabies: { type: array, description: "A photo record goes into these babies' channels too.", items: { type: string } }
       measurement: { $ref: "#/schemas/FamilyMeasurement" }
       vaccine: { $ref: "#/schemas/FamilyVaccineDose" }
@@ -220,6 +220,12 @@ schemas:
     properties:
       photos: { type: array, description: "Newest taken first.", items: { $ref: "#/schemas/FamilyAlbumPhoto" } }
       next: { type: string }
+  FamilyAssetIDs:
+    type: object
+    additionalProperties: false
+    required: [assetIds]
+    properties:
+      assetIds: { type: array, maxItems: 500, items: { type: string } }
   FamilyGrowthPoint:
     type: object
     additionalProperties: false

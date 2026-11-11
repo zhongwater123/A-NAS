@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
 
 func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
@@ -35,7 +36,10 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	storageService := storage.NewService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
+	storageService, err := storage.OpenService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	terminalCalls := 0
 	terminalHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		terminalCalls++
@@ -524,6 +528,154 @@ func TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn(t *testing.T) {
 	}
 }
 
+// The internet entry has a listener of its own (ADR 0032). Its sessions work
+// from any address on that entry and nowhere else, its cookie is Secure, and
+// it neither sets the device up nor grants the local console's session.
+func TestProductAPIBindsInternetSessionsToTheInternetEntry(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	product := checkedProduct(t, httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
+		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	type entry struct {
+		handler http.Handler
+		host    string
+	}
+	lan := entry{product, "127.0.0.1:8080"}
+	internet := entry{webentry.InternetHandler("nas.example.com", product), "nas.example.com"}
+	// from is the client's address as Caddy forwards it, or "" for a direct
+	// loopback connection.
+	var csrf string
+	send := func(through entry, method, path, body, from string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		request.RemoteAddr, request.Host = "127.0.0.1:41234", through.host
+		if body != "" {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if csrf != "" {
+			request.Header.Set("X-CSRF-Token", csrf)
+		}
+		if from != "" {
+			request.Header.Set("X-Forwarded-For", from)
+		}
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		through.handler.ServeHTTP(response, request)
+		return response
+	}
+	credentials := `{"username":"owner","password":"correct horse battery staple","localConsole":true}`
+	signIn := func(through entry, path, from string) (*http.Cookie, string, string) {
+		t.Helper()
+		response := send(through, http.MethodPost, path, credentials, from)
+		var body struct {
+			CSRFToken string `json:"csrfToken"`
+			ExpiresAt string `json:"expiresAt"`
+		}
+		cookies := response.Result().Cookies()
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || len(cookies) != 1 {
+			t.Fatalf("sign in = %d %s", response.Code, response.Body.String())
+		}
+		return cookies[0], body.CSRFToken, body.ExpiresAt
+	}
+
+	// Even a process on the device itself, which sends no forwarding header,
+	// cannot set the device up through the internet listener.
+	for _, from := range []string{"198.51.100.7", ""} {
+		if got := send(internet, http.MethodPost, "/api/v1/setup/admin", credentials, from).Code; got != http.StatusForbidden {
+			t.Fatalf("setup through the internet entry from %q = %d, want 403", from, got)
+		}
+	}
+	console, _, _ := signIn(lan, "/api/v1/setup/admin", "")
+	laptop, _, _ := signIn(lan, "/api/v1/session", "192.0.2.10")
+	phone, phoneCSRF, phoneExpiry := signIn(internet, "/api/v1/session", "198.51.100.7")
+	if !phone.Secure || !phone.HttpOnly || phone.SameSite != http.SameSiteStrictMode || laptop.Secure {
+		t.Fatalf("internet cookie %#v, LAN cookie Secure %v: want only the internet one Secure", phone, laptop.Secure)
+	}
+	if phoneExpiry == "9999-12-31T23:59:59Z" {
+		t.Fatal("the internet entry granted a local console session")
+	}
+	if _, _, expiry := signIn(internet, "/api/v1/session", ""); expiry == "9999-12-31T23:59:59Z" {
+		t.Fatal("a direct connection to the internet listener got a local console session")
+	}
+
+	for _, c := range []struct {
+		name    string
+		through entry
+		from    string
+		cookie  *http.Cookie
+		want    int
+	}{
+		{"internet session from its address", internet, "198.51.100.7", phone, http.StatusOK},
+		{"internet session after the phone changed networks", internet, "203.0.113.40", phone, http.StatusOK},
+		{"internet session through the LAN entry", lan, "198.51.100.7", phone, http.StatusUnauthorized},
+		{"internet session over direct loopback", lan, "", phone, http.StatusUnauthorized},
+		{"LAN session through the internet entry", internet, "192.0.2.10", laptop, http.StatusUnauthorized},
+		{"local console session through the internet entry", internet, "", console, http.StatusUnauthorized},
+	} {
+		if got := send(c.through, http.MethodGet, "/api/v1/session", "", c.from, c.cookie).Code; got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	csrf = phoneCSRF
+	signOut := send(internet, http.MethodDelete, "/api/v1/session", "", "203.0.113.40", phone)
+	cleared := signOut.Result().Cookies()
+	if signOut.Code != http.StatusNoContent || len(cleared) != 1 || !cleared[0].Secure || cleared[0].MaxAge >= 0 {
+		t.Fatalf("sign out = %d with cookies %#v, want 204 clearing a Secure cookie", signOut.Code, cleared)
+	}
+}
+
+func TestProductAPIMakesAClientThatKeepsFailingToSignInWait(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, apiCredentials{}, accounts.Options{
+		PasswordCost: accounts.PasswordCost{MemoryKiB: 64, Iterations: 1, Parallelism: 1},
+	})
+	if _, err := service.SetupAdministrator(context.Background(), "owner", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	handler := checkedProduct(t, httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	signIn := func(password, from string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/session",
+			bytes.NewBufferString(`{"username":"owner","password":"`+password+`"}`))
+		request.RemoteAddr, request.Host = "127.0.0.1:41234", "127.0.0.1:8080"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Forwarded-For", from)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	for range 5 {
+		if got := signIn("not the password", "192.0.2.10").Code; got != http.StatusUnauthorized {
+			t.Fatalf("wrong password = %d, want 401", got)
+		}
+	}
+	waiting := signIn("correct horse battery staple", "192.0.2.10")
+	if waiting.Code != http.StatusTooManyRequests || waiting.Header().Get("Retry-After") != "30" ||
+		!strings.Contains(waiting.Body.String(), `"too_many_attempts"`) {
+		t.Fatalf("sign-in while waiting = %d %q %s", waiting.Code, waiting.Header().Get("Retry-After"), waiting.Body.String())
+	}
+	if got := signIn("correct horse battery staple", "192.0.2.11").Code; got != http.StatusOK {
+		t.Fatalf("sign-in from another client = %d, want 200", got)
+	}
+}
+
 // signedInDirectly signs in as a direct loopback connection, which a plain
 // httptest request is; a session works only from where it signed in.
 func signedInDirectly(ctx context.Context) context.Context {
@@ -561,6 +713,12 @@ func (apiVolumeExecutor) StartCreateVolume(_ context.Context, request storage.Cr
 func (apiVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
 	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
 		FilesystemUUID: request.FilesystemUUID, Layout: request.Layout, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (apiVolumeExecutor) StartReplaceDisk(_ context.Context, request storage.ReplaceDiskRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, Layout: storage.LayoutMirror, State: storage.VolumeStateAvailable,
 	}}, nil
 }
 

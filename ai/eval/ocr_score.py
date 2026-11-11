@@ -119,14 +119,33 @@ def shape(value):
     return re.sub(r"\d", "9", re.sub(r"[^\d\s]", "x", value))
 
 
-def field_confidence(record, raw_value):
-    """Lowest token probability over the tokens that spell raw_value in the output, or None."""
+def field_confidence(record, raw_value, key=None):
+    """Lowest token probability over the tokens that spell raw_value in the output, or None.
+
+    With key, as the product reads a field (internal/photos/textread), the value is looked
+    for after its key, as written or escaped in its JSON string: another field's value may
+    hold the same digits, as 113.00 holds 13.00.
+    """
     tokens = record.get("tokens") or []
     text = "".join(token for token, _ in tokens)
-    start = text.find(raw_value)
-    if start < 0 or not raw_value:
+    if not raw_value:
         return None
-    end, position, lowest = start + len(raw_value), 0, 0.0
+    after, spellings = 0, [raw_value]
+    if key is not None:
+        name = json.dumps(key, ensure_ascii=False)
+        after = text.find(name)
+        if after < 0:
+            return None
+        after += len(name)
+        spellings.append(json.dumps(raw_value, ensure_ascii=False)[1:-1])
+    start, written = -1, raw_value
+    for written in spellings:
+        start = text.find(written, after)
+        if start >= 0:
+            break
+    if start < 0:
+        return None
+    end, position, lowest = start + len(written), 0, 0.0
     for token, logprob in tokens:
         token_end = position + len(token)
         if token_end > start and position < end:

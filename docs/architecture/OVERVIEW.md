@@ -5,25 +5,29 @@
 ## 系统边界
 
 ```text
-NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局域网浏览器
-  │ 回环地址上的同源 HTTP / REST                          │ 明文 HTTP，TCP 80
-  │                                                       ▼
-  │                                       Caddy 局域网 Web 入口（可选；附加 X-Forwarded-For）
-  │                                                       │ 回环
-  ▼                                                       ▼
-产品服务（非特权，只监听 127.0.0.1:8080）
+NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局域网浏览器                 互联网浏览器
+  │ 回环地址上的同源 HTTP / REST                          │ 明文 HTTP，TCP 80             │ HTTPS，TCP 443
+  │                                                       │                               ▼
+  │                                                       │            边缘服务器 HAProxy（按 SNI 原样转发，附加 PROXY 头）
+  │                                                       │                               │ NAS 主动建立的 WireGuard 隧道
+  │                                                       ▼                               ▼
+  │                                       Caddy 局域网 Web 入口（可选）     Caddy 互联网站点（可选；在隧道地址上终止 TLS）
+  │                                                       │ 回环，附加 X-Forwarded-For    │ 回环，附加 X-Forwarded-For
+  ▼                                                       ▼                               ▼
+产品服务（非特权，只监听 127.0.0.1:8080；启用互联网入口时另有专用的 127.0.0.1:8081）
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── Transfers（/api/v1/uploads 的 tus 分片写入文件代理以用户身份创建的临时文件；下载按发送字节跟踪；ADR 0019）
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► FFmpeg Worker（按连接启动，无网络、无数据卷）
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
   ├── /api/v1/web-search ── 只经 Unix 套接字 ──► 网页搜索服务（SearXNG，a-nas-search；只能访问公网地址；ADR 0030）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
+  │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
   │                              ├── AI Orchestrator ──► AI Worker（systemd 套接字按需启动；只读 fd，无网络；ADR 0016）
-  │                              └── 向量同步与影子比对 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
+  │                              └── 向量同步与排序查询 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -63,7 +67,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）；家庭中心的记录与录音由家庭服务按家人、家长与作者授权，频道里的照片仍由相册 Policy 授权（[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
-9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。
+9. 本地控制台、隧道、局域网与互联网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。互联网只经 HTTPS 进入，到达产品服务专用的回环端口，请求按到达的端口而不是请求头认定来自互联网（[`internal/webentry`](../../internal/webentry/webentry.go)）。外网会话只在互联网入口有效、不按地址绑定，不签发本机会话，不打开终端（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）。
 10. 受管图库以稳定照片资产 ID 表达用户可见身份；内容对象路径和内容哈希不成为公共文件身份。
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
@@ -119,16 +123,18 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、安装编排（`appstore.Center`：卷检查、应用身份、计划摘要、准备目录）、Compose 执行任务与安装后核对、`/api/v1/apps`（仅管理员，公开文档与容器代理的线格式分开）与 `/api/v1/app-shortcuts`（所有已登录账号的桌面快捷方式）；`appstore/fake` 的内存 Docker 按渲染出的 Compose 建容器，与真实 Docker 共用 `engine/enginetest` 的契约表 | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers`（公开文档与容器代理的线格式分开）与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
 | `internal/assistantchanges` | AI 助手“提交更改”的执行方：检查提交、为卡片复制暂存内容、登记本人的一次性授权、以本人身份经文件代理的受限工作进程执行（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4） | 单元测试与系统测试；随助手默认关闭 |
-| `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
+| `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)）；在 systemd 持有的伙伴套接字上按对端 UID 认出成员，把伙伴工具的调用与 Hermes 的 `tool.start` 配对，以 `anas.companion` 只转给发出本回合提示的 VNAS 窗口（ADR 0024 决定 8，[虚拟伙伴规格](../specs/virtual-companion.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
 | `internal/assistantlogin` | 用 Hermes 自带的密码登录（dashboard basic auth）登录成员实例上的 `hermes serve`；实例的 root 专属密钥就是密码，登录过的连接带有成员身份，Hermes 的浏览器控制需要它（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10） | 由文件代理的会话闸门与 `internal/assistantapi` 使用；随助手默认关闭 |
-| `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
-| `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
+| `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端，互联网入口不提供；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
+| `deploy/caddy` | 局域网 Web 入口的 Caddy 配置，以及加上互联网站点的模板；系统服务安装器在已安装 Caddy 时校验并写入，有 `/etc/a-nas/internet.env` 时写入后者 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md)、[互联网访问规格](../specs/internet-access.md) |
+| `internal/webentry` | 认定请求经哪个入口到达：互联网入口有专用的回环监听端口，其请求带上入口的域名，其他域名返回 421 | 会话绑定、Secure Cookie、写请求的 Host 校验与终端据此区分互联网入口 |
+| `deploy/internet`、`deploy/edge` | 互联网入口在 NAS 上的隧道防火墙表，以及边缘服务器的一次性配置脚本（WireGuard、HAProxy、防火墙） | 安装器按 `internet.env` 收敛 NAS 一侧；边缘服务器经堡垒机由手册执行，见[启用互联网访问](../runbooks/enable-internet-access.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
 | `internal/hoststate/agent` / `internal/hoststate/agent/wire` / `internal/hoststate/agent/rootagent` | Unix Socket 上的 Host Agent IPC：产品服务的客户端、双方共用的文档与路径、Host Agent 的处理器；产品服务不链接处理器，Host Agent 不链接客户端（[#221](https://github.com/zhongwater123/A-NAS/issues/221)） | 状态、指标、卷、凭据与快照 IPC 已实现 |
 | `internal/hoststate` / `internal/taskmanager` | 只读宿主机状态、CPU/内存/网络指标与设备、服务、进程采样；Fake 与 Debian Linux Adapter | 状态和状态栏指标见[状态栏规格](../specs/host-metrics-status-bar.md)；[任务管理器](../specs/task-manager.md)经同一 Host Agent IPC 向所有已登录账号提供只读观测，不返回命令参数或环境变量；任务图标由 Host Agent 指名、产品服务中的 `internal/taskmanager/taskicon` 解码 |
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
 | `internal/accountid` / `internal/sessiondir` / `internal/filesystem` / `internal/datavolume` / `internal/ptyshell` / `internal/websearchswitch` | 产品服务与 root Host Agent 共用的契约：Linux 身份、角色与会话令牌，root 只读的会话目录，文件系统端口与 `RootFileSystem`，数据卷的布局、操作与执行端口，PTY Shell，网页搜索开关的状态；`accounts`、`files`、`storage`、`terminal` 保留同名别名，Host Agent 不链接这些服务。`.golangci.yml` 的 depguard 列出两个代理依赖闭包中的包与它们允许的导入，并禁止产品代码导入 root 侧的包（[#221](https://github.com/zhongwater123/A-NAS/issues/221)） | 已实现 |
-| `internal/unixmsg` / `internal/sqlitedb` / `internal/mediatype` | 共用的基础代码：Unix 套接字上的帧（4 字节长度、JSON 与至多一个随控制消息传递的描述符，文件代理、FFmpeg Worker、分享桥与 AI Worker 共用）；SQLite 的打开方式与存储时间格式；哪些文件是视频（[#222](https://github.com/zhongwater123/A-NAS/issues/222)） | 已实现，`unixmsg` 有 fuzz 测试 |
+| `internal/unixmsg` / `internal/sqlitedb` / `internal/mediatype` / `internal/atomicfile` | 共用的基础代码：Unix 套接字上的帧（4 字节长度、JSON 与至多一个随控制消息传递的描述符，文件代理、FFmpeg Worker、分享桥与 AI Worker 共用）；SQLite 的打开方式与存储时间格式；哪些文件是视频（[#222](https://github.com/zhongwater123/A-NAS/issues/222)）；替换记录文件：renameio 在同目录写临时文件、同步后改名，再同步目录，断电后只会留下旧文件或完整的新文件（[#272](https://github.com/zhongwater123/A-NAS/issues/272)） | 已实现，`unixmsg` 有 fuzz 测试 |
 | `internal/capacity` | 数据卷的保留容量：写入后仍须留出卷的 5% 且不少于 10 GiB，文件与相册在同一点用尽空间（不变量 12） | `files.Service` 与相册使用 |
 | `internal/filebroker` / `internal/filebroker/wire` / `internal/filebroker/rootbroker` | 产品服务的客户端、双方共用的协议，以及 Host Agent 内的文件代理（`rootbroker`）：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/testing.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/systemdscope` | 把文件代理派生的工作进程与终端 Shell 放进各自的 systemd 临时 scope，绑定 Host Agent 的单元（[#166](https://github.com/zhongwater123/A-NAS/issues/166)） | 已实现，系统测试覆盖 |
@@ -138,7 +144,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口；由会话得到相册 `Principal` 只有 `photoservice.Authenticate` 一处，开发模式经 `photoservice.Local` 在产品进程内使用同一实现 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，`internal/musicapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md) |
 | `internal/websearch` / `internal/websearchapi` | 网页搜索：经 Unix 套接字调用 SearXNG 的 JSON 接口，按分类只问该分类的引擎，映射结果，用 SearXNG 的密钥为缩略图地址签名，按账号限流；管理员的开关由 Host Agent 持有（标记文件加 `systemctl`，`internal/hostops/linux/websearch.go`），种子分类的开关在产品服务的 `web-search.db`（[规格](../specs/web-search.md)） | 单元测试、OpenAPI 契约测试与系统测试（替身）覆盖；开发模式用不访问任何引擎的 Fake |
-| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与影子比对 |
+| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与排序（[读路径](vector-index.md#读路径)） |
 | `internal/aiworker` | 相册服务调用 AI Worker 的客户端：每次请求连接 systemd 按需激活的 Unix 套接字，一帧是 4 字节长度加 JSON；图片作为只读描述符随控制消息传递，从不传路径，Worker 因此不需要访问数据卷（[本地 AI 实施方案](photo-ai.md)） | 已实现，单元测试与针对 `ai/` 中 Python Worker（替身 Provider）的协议测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证；`/internal/photos/activity` 只供产品服务合并活动记录 | 已实现；部分路由在 `httpapi` 的 OpenAPI 契约测试中；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
@@ -201,5 +207,6 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [音乐原地索引决策](../adr/0018-index-music-in-place-through-the-file-broker.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
 - [局域网 Web 入口决策](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)
+- [互联网入口决策](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)
 - [局域网 Web 访问规格](../specs/lan-web-access.md)
 - [状态栏与实时指标规格](../specs/host-metrics-status-bar.md)

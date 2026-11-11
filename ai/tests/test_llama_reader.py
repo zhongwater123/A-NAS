@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from anas_ai import providers
 
@@ -26,11 +27,12 @@ class LlamaReaderTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.directory, True)
         self.record = os.path.join(self.directory, "request.json")
         self.environ = {"FAKE_LLAMA_RECORD": self.record}
-        for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE_DELAY",
+        for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE",
+                     "FAKE_LLAMA_PIECE_DELAY", "FAKE_LLAMA_ERROR", "FAKE_LLAMA_NO_FINISH", "FAKE_LLAMA_START_DELAY",
                      "FAKE_LLAMA_EXIT"):
             self.environ[name] = None
 
-    def reader(self, sha=None):
+    def reader(self, sha=None, cache_dir=None):
         for name, value in self.environ.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -50,7 +52,7 @@ class LlamaReaderTest(unittest.TestCase):
         runtime = os.path.join(self.directory, "llama.json")
         with open(runtime, "w", encoding="utf-8") as file:
             json.dump({"version": "b11655"}, file)
-        reader = providers.LlamaReader([sys.executable, STAND_IN], *files, runtime, threads=2)
+        reader = providers.LlamaReader([sys.executable, STAND_IN], *files, runtime, threads=2, cache_dir=cache_dir)
         self.addCleanup(reader.release)
         return reader
 
@@ -139,6 +141,75 @@ class LlamaReaderTest(unittest.TestCase):
         with self.assertRaises(providers.InvalidInput):
             reader.read(b"not an image", "text", None, reader.run_options())
 
+    def test_a_server_that_fails_is_tried_again_not_refused(self):
+        # A passing fault, such as a 503, must not fail the photo for good,
+        # nor may a stream cut short pass for a whole reading.
+        for name, value in (("FAKE_LLAMA_STATUS", "503"), ("FAKE_LLAMA_ERROR", "failed to decode"),
+                            ("FAKE_LLAMA_NO_FINISH", "1")):
+            with self.subTest(name):
+                self.environ.update({"FAKE_LLAMA_STATUS": None, "FAKE_LLAMA_ERROR": None,
+                                     "FAKE_LLAMA_NO_FINISH": None, name: value})
+                reader = self.reader()
+                with self.assertRaises(providers.Failed):
+                    reader.read(b"jpeg", "text", None, reader.run_options())
+                # The server may be broken: the next reading starts a new one.
+                self.assertIsNone(reader._process)
+
+    def test_hanging_up_while_the_server_starts_stops_it(self):
+        # The Worker answers one request at a time: a search must not wait
+        # for the model to load.
+        self.environ["FAKE_LLAMA_START_DELAY"] = "30"
+        reader = self.reader()
+        run = reader.run_options()
+        threading.Timer(0.5, setattr, (run, "terminate", True)).start()
+        started = time.monotonic()
+        with self.assertRaises(providers.Cancelled):
+            reader.read(b"jpeg", "text", None, run)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertIsNone(reader._process)
+
+    def test_hashing_stops_when_told(self):
+        self.reader()  # writes the stand-in model file and its manifest
+        path = os.path.join(self.directory, "model.gguf")
+        with open(path + ".json", encoding="utf-8") as file:
+            manifest = json.load(file)
+        with self.assertRaises(providers.Cancelled):
+            providers.verify_file(path, manifest, stopped=lambda: True)
+
+    def test_a_file_that_matched_is_not_hashed_again(self):
+        cache = os.path.join(self.directory, "cache")
+        os.mkdir(cache)
+        self.reader(cache_dir=cache).read(b"jpeg", "text", None, providers.ReadingRun())
+
+        def again():
+            # The Worker started again with the same files.
+            files = [os.path.join(self.directory, name) for name in
+                     ("model.gguf", "model.gguf.json", "mmproj.gguf", "mmproj.gguf.json", "llama.json")]
+            reader = providers.LlamaReader([sys.executable, STAND_IN], *files, threads=2, cache_dir=cache)
+            self.addCleanup(reader.release)
+            return reader
+
+        with mock.patch.object(providers, "verify_file", side_effect=AssertionError("hashed again")):
+            self.assertEqual(again().read(b"jpeg", "text", None, providers.ReadingRun())["finish"], "stop")
+        # A file replaced since is hashed again, and fails.
+        path = os.path.join(self.directory, "model.gguf")
+        os.replace(path, path + ".old")
+        with open(path, "wb") as file:
+            file.write(b"LANGUAGE")
+        with self.assertRaises(providers.Unavailable):
+            again().read(b"jpeg", "text", None, providers.ReadingRun())
+
+    def test_a_mark_that_is_not_text_is_hashed_again(self):
+        cache = os.path.join(self.directory, "cache")
+        os.mkdir(cache)
+        reader = self.reader(cache_dir=cache)
+        for name in ("model.gguf.json", "mmproj.gguf.json"):
+            with open(os.path.join(self.directory, name), encoding="utf-8") as file:
+                sha = json.load(file)["sha256"]
+            with open(os.path.join(cache, f"verified-{sha}"), "wb") as file:
+                file.write(bytes([0xFF, 0xFE]) + b" not text")
+        self.assertEqual(reader.read(b"jpeg", "text", None, reader.run_options())["finish"], "stop")
+
     def test_files_are_checked_before_the_first_start(self):
         reader = self.reader(sha="0" * 64)
         with self.assertRaises(providers.Unavailable):
@@ -189,6 +260,22 @@ class LlamaReaderTest(unittest.TestCase):
         with self.assertRaisesRegex(providers.Unavailable, "exited .*failed to load the model"):
             reader.read(b"jpeg", "text", None, reader.run_options())
         self.assertIsNone(reader._process)
+
+
+class LoopingTest(unittest.TestCase):
+    def test_documents_repeat_a_character_for_a_line_and_are_no_loop(self):
+        for text in ("合计 35.50\n" + "-" * 48, "目录\n第一章 起步" + "." * 60, "姓名：" + "_" * 64,
+                     "收据\n" + "=" * 100, "单价\n" + "0.00\n" * 8, "-" * 200,
+                     # A form's blank rows, as on the evaluation page the first rule cut.
+                     "| 项目 | 金额 |\n" + "|  |  |  |  |\n" * 20):
+            with self.subTest(text=text[:12]):
+                self.assertFalse(providers.looping(text))
+
+    def test_a_unit_repeated_on_and_on_is_a_loop(self):
+        for text in ("开头" + "回单" * 100, "开头" + "-" * 600, "开头" + "这是一段重复的话。" * 20,
+                     "开头" + "|  |  |  |  |\n" * 40):
+            with self.subTest(text=text[:12]):
+                self.assertTrue(providers.looping(text))
 
 
 if __name__ == "__main__":

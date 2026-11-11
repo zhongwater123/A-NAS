@@ -45,6 +45,29 @@ describe("Settings → 网页搜索", () => {
     ]);
   });
 
+  it("lists the engines paused since their site blocked them", async () => {
+    const until = new Date();
+    until.setHours(23, 30, 0, 0);
+    serve({
+      status: {
+        ...webSearchStatus(),
+        paused: [{ engine: "百度", reason: "captcha", until: until.toISOString() }],
+      },
+    });
+    render(<WebSearchSection />);
+    expect(await screen.findByText("百度")).toBeInTheDocument();
+    expect(screen.getByText("要求验证码，今天 23:30 恢复")).toBeInTheDocument();
+    expect(
+      screen.getByText("网站拦截后暂停 1 小时，恢复后再次被拦则加倍，最长 1 天；同一网站的各类搜索一起暂停。"),
+    ).toBeInTheDocument();
+  });
+
+  it("says when no website is paused", async () => {
+    serve();
+    render(<WebSearchSection />);
+    expect(await screen.findByText("没有暂停的网站")).toBeInTheDocument();
+  });
+
   it("offers SearXNG's license and the source this release was built from", async () => {
     serve();
     render(<WebSearchSection />);

@@ -1,4 +1,4 @@
-import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react";
+import { Baby, CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
@@ -18,12 +18,15 @@ import {
   videoLines,
 } from "./model";
 import { PhotoFaces } from "./People";
+import { PhotoTextPanel } from "./PhotoText";
 import styles from "./photos.module.css";
 
 export interface DetailsActions {
   rename: (asset: PhotoAsset) => Promise<PhotoAsset | undefined>;
   copy: (asset: PhotoAsset, library: PhotoLibrary) => void;
   addToAlbum: (assets: PhotoAsset[]) => void;
+  // Present while the caller has babies in 家庭中心.
+  addToChannel?: (assets: PhotoAsset[]) => void;
   openAlbum: (album: Pick<PhotoAlbum, "id" | "name" | "libraryId">) => void;
   openTag: (tag: string) => void;
   // Opens a person's photos.
@@ -58,7 +61,7 @@ interface Props {
 }
 
 // PhotoDetails is the viewer's side panel: when and what the photo or video
-// is, who is in a photo, its tags and its albums.
+// is, who is in a photo, the text in it, its tags and its albums.
 export function PhotoDetails({ asset, details, caller, actions, onChanged }: Props) {
   const [tag, setTag] = useState("");
   const [attaching, setAttaching] = useState(false);
@@ -195,6 +198,15 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
           onError={actions.error}
         />
       )}
+      {!video && (
+        <PhotoTextPanel
+          key={current.id}
+          asset={current}
+          caller={caller}
+          editable={writable && !current.trash}
+          onError={actions.error}
+        />
+      )}
 
       <section aria-label="标签">
         <h4>标签</h4>
@@ -266,6 +278,12 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
             <button type="button" onClick={() => actions.copy(current, mine)}>
               <Copy />
               复制到我的图库
+            </button>
+          )}
+          {actions.addToChannel && (library?.kind === "shared" || library?.id === mine?.id) && (
+            <button type="button" onClick={() => actions.addToChannel?.([current])}>
+              <Baby />
+              加入宝宝频道
             </button>
           )}
         </section>

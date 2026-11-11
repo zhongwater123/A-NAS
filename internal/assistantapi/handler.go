@@ -58,7 +58,10 @@ type Options struct {
 	// Notices keeps the notices of scheduled tasks' runs; without it the
 	// member is not told of them.
 	Notices TaskNotices
-	Logger  *slog.Logger
+	// Accounts names the member whose assistant called on the companion
+	// socket, from the caller's UID; without it no call is taken.
+	Accounts AccountResolver
+	Logger   *slog.Logger
 	// Context ends what the API runs in the background: the instances kept
 	// for signed-in members, the watch over their scheduled tasks, and the
 	// gateway connections. Wait returns once the first two stopped. Without
@@ -76,6 +79,10 @@ type Handler struct {
 	background sync.WaitGroup
 	membersMu  sync.Mutex
 	members    map[string]*member
+	// companionCalls counts the calls on the companion socket under way, by
+	// the caller's UID (companion.go).
+	companionCallsMu sync.Mutex
+	companionCalls   map[int]int
 	// keeps holds the instances kept running for signed-in members, by account.
 	keepsMu sync.Mutex
 	keeps   map[string]*keep

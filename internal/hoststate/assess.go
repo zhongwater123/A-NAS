@@ -29,6 +29,9 @@ const (
 	// FindingVolumeOffline: a data volume was created but no data disk is
 	// mounted.
 	FindingVolumeOffline FindingCode = "volume_offline"
+	// FindingVolumeDegraded: the data volume runs without one of its disks,
+	// so a mirror has no second copy of what it writes now (ADR 0025).
+	FindingVolumeDegraded FindingCode = "volume_degraded"
 	// FindingVolumeReadOnly: the data volume is mounted read-only.
 	FindingVolumeReadOnly FindingCode = "volume_read_only"
 	// FindingVolumeFull: the data volume is inside the reserve writers keep
@@ -133,6 +136,9 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 	}
 	if thermal := state.System.Thermal; thermal != nil && thermal.CPU != nil && thermal.CPU.Celsius >= thermal.CPU.HotCelsius {
 		add(FindingCPUHot, HealthWarning, ResourceID{}, new(int64(thermal.CPU.Celsius)))
+	}
+	if state.DataVolume != nil && state.DataVolume.MissingDevices > 0 {
+		add(FindingVolumeDegraded, HealthCritical, ResourceID{}, new(int64(state.DataVolume.MissingDevices)))
 	}
 	if expected.DataVolume && !dataDisk {
 		add(FindingVolumeOffline, HealthCritical, ResourceID{}, nil)

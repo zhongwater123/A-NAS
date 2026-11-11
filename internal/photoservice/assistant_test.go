@@ -213,6 +213,11 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/metadata", nil); response.StatusCode != http.StatusOK {
 		t.Fatalf("metadata = %d, want 200", response.StatusCode)
 	}
+	// And the text read from it, its sensitive values as handles; it neither
+	// corrects the text nor reads the changes made to it.
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/text", nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("text = %d, want 200", response.StatusCode)
+	}
 	for _, request := range [][2]string{
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/thumbnail"},
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/original"},
@@ -224,6 +229,11 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 		{http.MethodPatch, "/api/v1/photos/assets/" + asset.ID},
 		{http.MethodDelete, "/api/v1/photos/assets/" + asset.ID},
 		{http.MethodPost, "/api/v1/photos/assets/" + asset.ID + "/tags"},
+		{http.MethodPut, "/api/v1/photos/assets/" + asset.ID + "/text/fields/合计"},
+		{http.MethodDelete, "/api/v1/photos/assets/" + asset.ID + "/text/fields/合计"},
+		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/text/changes"},
+		// What a handle stands for is the member's to ask, never the assistant's.
+		{http.MethodGet, "/api/v1/photos/text-handles/0123ab"},
 	} {
 		response := assistantRequest(t, socket, request[0], request[1], nil)
 		if response.StatusCode != http.StatusNotFound || errorCode(t, response) != "not_found" {

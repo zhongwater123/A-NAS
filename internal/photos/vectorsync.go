@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 )
 
@@ -20,9 +21,8 @@ import (
 // libraries hold an untrashed photo of an object, queues the object in
 // vector_outbox in the same transaction (migration 14's triggers), and the
 // sync loop below brings the index in line. Losing the index loses nothing;
-// the loop builds a new one from the Catalog. In this first stage search
-// still ranks with the exact scan (search.go); the index answers only shadow
-// queries that measure how far it agrees.
+// the loop builds a new one from the Catalog. Ranking by similarity reads
+// the index (vectorsearch.go).
 
 // VectorIndex is the photo service's own vector index; *vectorindex.Client
 // implements it.
@@ -33,6 +33,7 @@ type VectorIndex interface {
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
 	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
+	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
 }
 
@@ -143,6 +144,14 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.vectorRecheck:
+			// Ranking found the index without its collection, as after the
+			// instance lost its storage: make it again now, queueing every
+			// vector, rather than at the next reconciliation. Filling it waits
+			// for the gate like any other sync.
+			if _, _, err := s.imagesCollection(ctx, index, report, true); err != nil {
+				failed(err)
+			}
 		case <-time.After(wait):
 		}
 	}
@@ -264,7 +273,7 @@ func (s *Service) vectorPoints(ctx context.Context, objects []string, model stri
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT e.object_id, e.vector, a.library_id FROM embeddings e
 JOIN assets a ON a.object_id = e.object_id AND a.trashed_at IS NULL
-WHERE e.derivation = ? AND e.model = ? AND `+inLocalAI("e.object_id")+` AND e.object_id IN (`+placeholders(len(objects))+`)
+WHERE e.derivation = ? AND e.model = ? AND `+inLocalAI("e.object_id")+` AND e.object_id IN (`+sqlitedb.Placeholders(len(objects))+`)
 ORDER BY e.object_id, a.library_id`, args...)
 	if err != nil {
 		return nil, err

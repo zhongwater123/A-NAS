@@ -4,6 +4,19 @@
 
 ## 索引
 
+- [2026-11-09：hwmon 属性截断与异常 SMART 温度](2026-11-09-hwmon-truncation-and-smart-temperature.md)
+- [2026-11-09：音乐扫描刚结束时，状态报告“空闲”却带着扫描前的歌曲数与版本号](2026-11-09-music-status-idle-with-stale-count.md)
+- [2026-11-09：分散任务把未知分配量当成完成，后台测量没有超时](2026-11-09-spread-allocation-observation.md)
+- [2026-11-06：镜像少了一块硬盘时 systemd、udev 与 Btrfs 的行为](2026-11-06-mirror-missing-a-disk.md)
+- [2026-11-05：家庭中心数据一致性与清理](2026-11-05-family-data-integrity.md)
+- [2026-11-05：网页搜索的隐藏暂停、跨分类绕过与并发积压](2026-11-05-web-search-website-pacing.md)
+- [2026-11-04：建卷测试结束后旧执行器仍写操作日志，竞态检测作业偶发失败](2026-11-04-volume-test-writes-after-cleanup.md)
+- [2026-11-04：重启后 smbd 早于 DHCP 地址启动，只监听回环](2026-11-04-smbd-starts-before-dhcp-address.md)
+- [2026-11-04：一次失败让网页分类的引擎全部暂停 5 分钟](2026-11-04-web-engines-suspended-after-one-bad-moment.md)
+- [2026-11-04：产品服务重启后两秒内新建的分享显示“已撤回”](2026-11-04-share-bridge-generation-window.md)
+- [2026-11-04：并发登录绕过退避与密码计算内存边界](2026-11-04-sign-in-admission-and-memory.md)
+- [2026-11-03：停用助手被保活的成员时返回 503](2026-11-03-assistant-disable-start-race.md)
+- [2026-11-03：经局域网 HTTP 打开时，家庭中心添加宝宝后窗口无法显示](2026-11-03-family-window-fails-over-lan-http.md)
 - [2026-10-28：镜像仓库一次限流就让应用安装失败](2026-10-28-registry-rate-limit-failed-install.md)
 - [2026-10-27：Agent空间 保留目录未受保护，链接扩大 Landlock 可写范围](2026-10-27-agent-space-policy-directories.md)
 - [2026-10-28：分享历史导致重复 IPC，最小化窗口仍下载完整对话](2026-10-28-share-history-polling.md)
@@ -55,6 +68,7 @@
 - [2026-10-28：保存快照保留设置后，后台仍按旧策略删除快照](2026-10-28-snapshot-retention-policy-race.md)
 - [2026-10-28：本机屏幕播放屏保时占用约 1.4 个核](2026-10-28-screensaver-video-cpu.md)
 
+
 ## 状态
 
 每篇调查的状态只写在文件标题下的“状态：”一行，索引不重复。状态以下列词开头，其后可以补充说明：
@@ -65,6 +79,7 @@
 - `superseded`：被后来的决定或调查取代，并链接替代项。
 
 `make docs-check` 检查索引收录了每篇调查且不带状态、状态行以上述词开头，以及每篇 `fixed` 的调查都被验收手册链接。列出所有待验收的调查：`grep -l '^状态：fixed' docs/investigations/*.md`。
+
 
 ## 使用方式
 

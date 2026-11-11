@@ -39,6 +39,10 @@ class Cancelled(Exception):
     """The caller hung up, so the work was stopped before it finished."""
 
 
+class Failed(Exception):
+    """The provider failed on an input it accepted, for a reason that may pass; the work is tried again later."""
+
+
 # AI works in idle time with what the device has, but leaves these cores to
 # the photo service and the user, so that a request arriving mid-inference is
 # served at once (docs/architecture/photo-objects.md#资源策略).
@@ -76,8 +80,12 @@ def verify_model(model_path, manifest_path):
     return manifest
 
 
-def verify_file(model_path, manifest):
-    """Raises Unavailable unless model_path has the manifest's size and SHA-256."""
+def verify_file(model_path, manifest, stopped=None):
+    """Raises Unavailable unless model_path has the manifest's size and SHA-256.
+
+    stopped, when given, is asked between chunks and raises Cancelled once it
+    says so: hashing gigabytes takes seconds.
+    """
     try:
         size = os.stat(model_path).st_size
     except OSError as error:
@@ -87,6 +95,8 @@ def verify_file(model_path, manifest):
     digest = hashlib.sha256()
     with open(model_path, "rb") as file:
         for chunk in iter(lambda: file.read(1 << 20), b""):
+            if stopped is not None and stopped():
+                raise Cancelled()
             digest.update(chunk)
     if digest.hexdigest() != manifest["sha256"]:
         raise Unavailable(f"model file {model_path} does not match the manifest's SHA-256")
@@ -741,12 +751,34 @@ def ocr_prompt(kind, schema):
     return OCR_FIELDS_PROMPT + json.dumps(schema, ensure_ascii=False)
 
 
-def looping(text, repeats=8, longest=300):
-    """Whether the tail of text is one unit repeated `repeats` times, greedy decoding's failure mode."""
-    tail = text[-repeats * longest :]
-    for size in range(1, min(longest, len(tail) // repeats) + 1):
-        unit = tail[-size:]
-        if unit.strip() and tail.endswith(unit * repeats):
+# A loop repeats its unit over at least this many characters. Documents
+# repeat one character for a line or two: a receipt's separator line, a
+# contents page's leader dots, a form's fill-in line; a table repeats a row a
+# few times. None of these is a loop (#365).
+LOOP_CHARACTERS = 128
+# A unit with no letter or digit, such as a blank table row `|  |  |`, must
+# repeat over this many: a form can have a few dozen blank rows, and what it
+# prints below them, totals, dates, signatures, would be lost.
+LOOP_BLANK_CHARACTERS = 512
+
+
+def looping(text, repeats=8, longest=300, shortest=LOOP_CHARACTERS, blank=LOOP_BLANK_CHARACTERS):
+    """Whether text ends in one unit repeated, greedy decoding's failure mode.
+
+    The unit repeats at least `repeats` times and over at least `shortest`
+    characters, or `blank` for a unit without a letter or digit, so that a
+    separator line, a few equal rows or a form's blank rows are not taken for
+    a loop.
+    """
+    for size in range(1, longest + 1):
+        if size > len(text):
+            break
+        unit = text[-size:]
+        if not unit.strip():
+            continue
+        span = shortest if any(character.isalnum() for character in unit) else blank
+        count = max(repeats, -(-span // size))
+        if size * count <= len(text) and text.endswith(unit * count):
             return True
     return False
 
@@ -808,12 +840,14 @@ class LlamaReader:
 
     server is the command that runs llama-server. The manifests are read at
     once, for the model's name and memory; the files are checked against them
-    before the first start, not on every start of the Worker, since hashing
-    3 GB would cost seconds each time.
+    before the first start, not on every start of the server, since hashing
+    3.4 GB takes seconds. With cache_dir, a file that matched is marked there
+    by its identity on disk, so that the Worker, which exits when idle, does
+    not hash it again when it starts again.
     """
 
     def __init__(self, server, model_path, model_manifest, mmproj_path, mmproj_manifest, runtime_manifest,
-                 threads=None):
+                 threads=None, cache_dir=None):
         model, mmproj = read_manifest(model_manifest), read_manifest(mmproj_manifest)
         try:
             with open(runtime_manifest, encoding="utf-8") as file:
@@ -822,6 +856,7 @@ class LlamaReader:
             raise Unavailable(f"the llama.cpp manifest {runtime_manifest}: {error}") from error
         self._server = list(server)
         self._files = ((model_path, model), (mmproj_path, mmproj))
+        self._cache_dir = cache_dir
         self._verified = False
         self._process = None
         self._directory = None
@@ -839,10 +874,16 @@ class LlamaReader:
         return ReadingRun()
 
     def read(self, data, kind, schema, run):
-        """Reads an image: its text, each token's log probability, and why the answer ended."""
+        """Reads an image: its text, each token's log probability, and why the answer ended.
+
+        A request the server refuses (4xx) is InvalidInput, which fails the
+        photo for good. A server that fails otherwise (5xx, an error in the
+        stream, or a stream that ends without saying why) raises Failed, and
+        the photo is read again later.
+        """
         if not data:
             raise InvalidInput("empty image")
-        path = self._start()
+        path = self._start(run)
         body = {
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(data).decode()}},
@@ -851,7 +892,7 @@ class LlamaReader:
             "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
             "stream": True, "chat_template_kwargs": {"enable_thinking": False},
         }
-        text, tokens, finish, refused = [], [], None, None
+        text, tokens, finish, refused, failed = [], [], None, None, None
         connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
         try:
             connection.connect()
@@ -859,12 +900,21 @@ class LlamaReader:
             connection.request("POST", "/v1/chat/completions", json.dumps(body), {"Content-Type": "application/json"})
             response = connection.getresponse()
             if response.status != 200:
-                refused = f"llama-server answered {response.status}: {response.read(500).decode(errors='replace')}"
+                answer = f"llama-server answered {response.status}: {response.read(500).decode(errors='replace')}"
+                if 400 <= response.status < 500:
+                    refused = answer
+                else:
+                    failed = answer
             else:
                 for line in response:
                     if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
                         continue
-                    for choice in json.loads(line[6:]).get("choices") or []:
+                    event = json.loads(line[6:])
+                    if "error" in event:
+                        # How llama-server reports a failure mid-answer, before it ends the stream.
+                        failed = f"llama-server failed mid-answer: {json.dumps(event['error'], ensure_ascii=False)[:500]}"
+                        break
+                    for choice in event.get("choices") or []:
                         piece = (choice.get("delta") or {}).get("content")
                         if piece:
                             text.append(piece)
@@ -891,8 +941,15 @@ class LlamaReader:
                 self.release(kill=True)
             raise Cancelled()
         if refused is not None:
-            # The server checks the image; one it cannot decode fails again.
+            # The server checks the request; one it refuses fails again.
             raise InvalidInput(refused)
+        if failed is None and finish is None:
+            failed = "llama-server ended the answer without saying why"
+        if failed is not None:
+            # The server may be left broken, out of memory or in a bad state:
+            # the next reading starts a new one rather than fail at once.
+            self.release()
+            raise Failed(failed)
         return {"text": "".join(text), "logprobs": tokens, "finish": finish}
 
     def release(self, kill=False):
@@ -915,14 +972,21 @@ class LlamaReader:
             shutil.rmtree(self._directory, ignore_errors=True)
             self._directory = None
 
-    def _start(self):
-        """The server's socket, starting the server unless it runs."""
+    def _start(self, run=None):
+        """The server's socket, starting the server unless it runs.
+
+        Hashing the files and waiting for the server take from seconds to
+        minutes, and the Worker answers one request at a time: run, when
+        given, stops both once the caller hangs up, killing the server, so
+        that a search does not wait behind them (#365).
+        """
         if self._process is not None and self._process.poll() is None:
             return self._socket()
         self.release()
+        stopped = (lambda: run.terminate) if run is not None else None
         if not self._verified:
             for path, manifest in self._files:
-                verify_file(path, manifest)
+                self._verify(path, manifest, stopped)
             self._verified = True
         self._directory = tempfile.mkdtemp(prefix="anas-ocr-")
         self._log = open(os.path.join(self._directory, "server.log"), "wb")  # noqa: SIM115  closed by release()
@@ -941,6 +1005,9 @@ class LlamaReader:
         )
         deadline = time.monotonic() + OCR_START_SECONDS
         while not self._ready():
+            if stopped is not None and stopped():
+                self.release(kill=True)
+                raise Cancelled()
             code = self._process.poll()
             if code is not None or time.monotonic() > deadline:
                 tail = self._log_tail()
@@ -949,6 +1016,32 @@ class LlamaReader:
                 raise Unavailable(f"llama-server {why}: {tail}")
             time.sleep(0.2)
         return self._socket()
+
+    def _verify(self, path, manifest, stopped):
+        """verify_file, skipped for a file the cache directory marks as matched.
+
+        The mark holds the file's identity on disk, so a file replaced or
+        changed since is hashed again. Without a cache directory, or when the
+        mark cannot be kept, every start of the Worker hashes once.
+        """
+        mark = identity = None
+        if self._cache_dir is not None:
+            # A mark that cannot be read, or is not text, is one more reason to hash.
+            with contextlib.suppress(OSError, ValueError):
+                info = os.stat(path)
+                identity = (f"{manifest['sha256']} {info.st_dev} {info.st_ino} {info.st_size} "
+                            f"{info.st_mtime_ns} {info.st_ctime_ns}")
+                mark = os.path.join(self._cache_dir, f"verified-{manifest['sha256']}")
+                with open(mark, encoding="utf-8") as file:
+                    if file.read() == identity:
+                        return
+        verify_file(path, manifest, stopped)
+        if mark is not None:
+            with contextlib.suppress(OSError):
+                temporary = f"{mark}.{os.getpid()}"
+                with open(temporary, "w", encoding="utf-8") as file:
+                    file.write(identity)
+                os.replace(temporary, mark)
 
     def _socket(self):
         # A host ending in .sock makes llama-server listen on a UNIX socket.

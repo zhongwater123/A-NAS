@@ -1,7 +1,7 @@
 # 相册本地 AI（M2）实施方案
 
 状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)），AI 标签只在 AI 聚合中展示、不参与搜索。2026-10-13 起同一个 Worker 还运行物体检测器，用于文搜图融合、“检测到”分段与以图搜图（[物体检测方案](photo-objects.md)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字见其中的[首次实机部署证据](../runbooks/enable-photo-ai.md#首次实机部署证据)
-更新时间：2026-10-29
+更新时间：2026-11-04
 
 本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供中文自然语言搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -19,7 +19,7 @@ M2 交付后，成员可以：
 ## 已确认的决定
 
 - **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
-- **OCR**：2026-10-09 决定不做；2026-10-19 用户决定做，识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型 2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M，见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
+- **OCR**：做（[决定](../decisions/2026-10-19-photo-ocr.md)，推翻了 2026-10-09 的“不做”），识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型为 Qwen3.5-4B 的 Q4_K_M（[决定](../decisions/2026-10-30-ocr-model.md)），见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
 - **内置**：AI 随系统安装和升级、默认开启，模型与运行环境由开发机经 SSH 传到设备，设备不联网获取（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
 ## 已核实的 Runtime 事实（2026-10-08）
@@ -52,7 +52,7 @@ M2 交付后，成员可以：
 
 - **模型文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
 - **运行环境**：[`ai/requirements.txt`](../../ai/requirements.txt) 以版本与哈希固定 MediaPipe、检测器所用的 ONNX Runtime 及其运行所需的依赖：导入 MediaPipe 会加载其绘图工具，所以 OpenCV（headless 版）与 Matplotlib 保留；只服务音频任务的 `sounddevice` 与开发期的评估依赖不装。锁文件由 [`ai/requirements.in`](../../ai/requirements.in) 经 `uv pip compile` 解析生成，GUI 版 OpenCV 与 `sounddevice` 由 [`ai/requirements.excludes`](../../ai/requirements.excludes) 排除。[`scripts/build-ai-runtime.sh`](../../scripts/build-ai-runtime.sh) 在开发机的 Debian 13 容器中按锁文件安装成虚拟环境并打包，运行环境 ID 取锁文件与 Python 版本的 SHA-256 前 16 位十六进制。2026-10-10 的运行环境解开约 460 MB（原开发环境 664 MB），压缩包 163 MB；2026-10-13 加入 ONNX Runtime 后解开约 542 MB，压缩包 189 MB。NAS 不运行 pip、不访问 PyPI，也不需要 `python3-venv`（Experimental NAS 没有安装）：虚拟环境只引用系统的 `/usr/bin/python3`，安装器核对系统 Python 与构建时的版本一致。
-- **开发机**：模型位于 `D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。
+- **开发机**：模型位于 `D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。各清单固定的模型存放在私有仓库的 Release 中，开发机用 `scripts/fetch-models.sh` 拉取并核对（[拉取模型](../development/ai-development.md#拉取模型)）。
 - **暂存**：[`deploy-dev.ps1`](../../scripts/deploy-dev.ps1) 以 `anas-dev` 经 SSH 暂存 release 时，先核对 NAS 暂存区的 `apps/a-nas/models/<SHA-256>/<文件名>` 与 `apps/a-nas/ai-runtimes/<ID>.tar.gz`，缺少或哈希不符时才上传；release 只携带 Worker 代码、各模型与运行环境的清单与单元，暂存脚本把模型与运行环境按角色链接进 release 的 `ai/` 目录。检测器的开发机位置由 `-DetectorDirectory` 指定，默认是官方权重导出的目录 `D:\A-NAS-models\dfine-obj365\official`。Experimental NAS 上 2026-10-09 按名称暂存的模型已于 2026-10-10 核对哈希后移到按哈希的位置。
 - **安装**：root 执行的安装器先把暂存的模型与运行环境复制到自己的临时目录再核对大小与 SHA-256，暂存账号因此无法改动已校验的内容；通过后放入 `/opt/a-nas/models/<SHA-256>/<文件名>`（`root:root 0644`）与 `/opt/a-nas/ai-runtimes/<ID>/`，已经安装的直接复用。release 的 `ai/` 目录包含 Worker 代码、清单，以及按角色指向这两处的链接（`model.litertlm`、`detector.onnx`、`runtime`）；单元经 `/opt/a-nas/current/ai/` 引用它们。安装器还要求 `python3`、`libEGL.so.1` 与 `libGLESv2.so.2`（Debian 包 `libegl1`、`libgles2`），缺少时以退出码 3 停止。
 - **校验**：Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
@@ -73,7 +73,7 @@ M2 交付后，成员可以：
 ### AI Worker（`anas-ai`）
 
 - 一个小型 Python 进程，内部有两个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm` 产生向量；ONNX Runtime 加载 D-FINE 检测器，只在有检测任务时才创建会话（[物体检测方案](photo-objects.md#worker)）。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量与框。
-- 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷。内存不设固定预算（2026-10-28 用户确定）：后台任务加载模型前确认加载后仍余 1 GiB，安装器写入的 `MemoryMax`（总内存减 2.5 GiB）只防失控，模型不换出（`MemorySwapMax=0`），内存耗尽时内核先结束 Worker（`OOMScoreAdjust=500`，[资源策略](photo-objects.md#资源策略)）。Worker 在 `anas-ai.slice` 中运行，上一层 `anas.slice` 的 `CPUWeight=10` 让设备上的其他工作在争用时先拿到核。CPU 不再固定为 2 核（2026-10-13 用户原则：闲时有多少用多少，始终留出余量）：检测推理用可用逻辑核数减 2 个线程，安装器按本机核数写入 `anas-ai.service.d/cpu-reserve.conf`，以 `CPUQuota=(N−2)×100%` 兜底（[资源策略](photo-objects.md#资源策略)）。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
+- 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷。内存不设固定预算（[决定](../decisions/2026-10-28-ai-memory-headroom.md)）：后台任务加载模型前确认加载后仍余 1 GiB，安装器写入的 `MemoryMax`（总内存减 2.5 GiB）只防失控，模型不换出（`MemorySwapMax=0`），内存耗尽时内核先结束 Worker（`OOMScoreAdjust=500`，[资源策略](photo-objects.md#资源策略)）。Worker 在 `anas-ai.slice` 中运行，上一层 `anas.slice` 的 `CPUWeight=10` 让设备上的其他工作在争用时先拿到核。CPU 不再固定为 2 核（[决定](../decisions/2026-10-13-ai-uses-idle-capacity.md)：闲时有多少用多少，始终留出余量）：检测推理用可用逻辑核数减 2 个线程，安装器按本机核数写入 `anas-ai.service.d/cpu-reserve.conf`，以 `CPUQuota=(N−2)×100%` 兜底（[资源策略](photo-objects.md#资源策略)）。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 - 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。任何一次连接都会拉起 Worker 并重新计时，所以相册服务在得知模型 ID 之后，只在有到期的向量任务时才联系它；模型 ID 在服务启动后的第一轮得知，更换模型随 release 而来（安装器重启相册服务），搜索遇到新模型时也会让后台重新核对。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
 - 模型与运行环境的来源、位置与校验见“模型与运行环境的交付”。安装器随系统启用套接字，没有“未安装”状态；Worker 启动中、崩溃或模型校验失败时相册照常可用，搜索退回按名称与用户标签匹配。设备低于最低硬件（待实机测量）时不启动 Worker。这些情况下界面都不说 AI 不可用（[相册界面规格](../specs/photo-gallery-ui.md)）。
 
@@ -120,7 +120,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 #66 因此关闭了全部标签。之后用户希望把按内容分组的呈现找回来，并定下两条规则（2026-10-10）：
 - **红线**：由向量模型产生的标签不参与搜索。
-- **宁缺毋滥**：宁可少标，不能错标。2026-10-12 用户确认每组 80% 以上正确可以接受。
+- **宁缺毋滥**：宁可少标，不能错标（[决定](../decisions/2026-10-10-ai-labels-as-groups.md)）；每组 80% 以上正确可以接受（[决定](../decisions/2026-10-12-ai-group-precision.md)）。
 
 **行为**：
 - 标签只以 AI 聚合呈现：照片向量与某个标签文本向量的相似度达到阈值、且这张照片没有被移出，就归入该标签的一组。
@@ -136,23 +136,23 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 每组在校准半上收入的照片要“可信地”至少 80% 正确（单侧 95% Wilson 置信下限），且至少收入 10 张才启用。只看测出来的比例不够：样本只有十几张时，“桥”在校准半 13 张对 11 张，到测试半只有 44%。
 - 场景标签的真值来自 COCO-Stuff。场景太常见，统一的误报率上限只能留下不到一成的真实照片，所以场景标签改为取仍然可信地达到 80% 的最宽阈值。
 - 校准半除 COCO val 的一半外，还有 COCO 2017 train 中按哈希固定选出的 20,000 张（2026-10-12 加入）：只用 val 时稀有标签和多数场景只有十几张照片，看不出一组对不对。测试半仍只来自 val，不参与任何选择。
-- 校准给出 59 组。其中 7 组在测试半上不足 10 张、无法独立核对，沙发在测试半上只有 71% 正确，这 8 组按用户决定（2026-10-12）手动留下，名单记在阈值文件的 `heldBack` 中。
+- 校准给出 59 组。其中 7 组在测试半上不足 10 张、无法独立核对，沙发在测试半上只有 71% 正确，这 8 组按[决定](../decisions/2026-10-12-ai-group-precision.md)手动留下，名单记在阈值文件的 `heldBack` 中。
 - v1 阈值启用 51 组：动物 11、自然 5（雪、大海、草地、天空、树）、食物 7、交通工具 7、运动 3、物品 18。在测试半上，各组收入的照片 93.0% 正确（2,436 张）；最低的是草地 82%、天空 82%、树 83%。留下 8 组是看过测试半才定的，不受影响的数字是留下之前 59 组的 92.8%。
 - 场景标签的正确率与这类场景在照片中有多常见有关：COCO 里天空约占四分之一的照片，家庭照片里室内照片更多，天空这一组的实际正确率可能低于测得的数字。
 - 山、沙子、河、花、建筑、道路在这一标准下仍然不启用。
 
 **之后**：
-- 固定类别的目标检测已在开发机评估（用户 2026-10-10 选定 D-FINE Objects365，[检测与混合检索研究](../research/photo-ai-object-detection.md)）：小物体召回翻倍，融合后句子类查询不受影响，COCO 之外的类别需按类启用。[实施方案](photo-objects.md)于 2026-10-13 确认，实现进行中：检测器的类别不由向量模型产生，不受上面的红线约束，参与文搜图的融合与“检测到”分段；本期不组成 AI 聚合。
+- 固定类别的目标检测已在开发机评估（[决定](../decisions/2026-10-10-object-detector-d-fine.md)选定 D-FINE Objects365，[检测与混合检索研究](../research/photo-ai-object-detection.md)）：小物体召回翻倍，融合后句子类查询不受影响，COCO 之外的类别需按类启用。[实施方案](photo-objects.md)于 2026-10-13 确认，实现进行中：检测器的类别不由向量模型产生，不受上面的红线约束，参与文搜图的融合与“检测到”分段；本期不组成 AI 聚合。
 - 小物体也在开发机评估过“分块向量”：每张照片除整图外再按网格切块，各算一个向量，搜索取整图与各块的较高分（[`eval.tile_search`](../../ai/eval/tile_search.py)）。在同一测试上 2×2 分块只把不到画面 1% 的物体的召回从 36.0% 提到 38.0%，向量计算却是 5 倍，不进入产品。
 
 ### 语义搜索
 
 已实现于 [`photos/search.go`](../../internal/photos/search.go)，桌面相册窗口提供搜索框。
 
-- `GET /api/v1/photos/search?q=&viewing=&cursor=&limit=`：查询 1–200 字符。相册服务请 Worker 编码查询，再对范围内未进回收站的照片做精确余弦扫描。图片向量按内容对象常驻内存（20,000 张约 60 MB）：第一次搜索时按当前模型载入，之后随新向量写入与对象清除同步更新，换模型时整体重载。
+- `GET /api/v1/photos/search?q=&viewing=&cursor=&limit=`：查询 1–200 字符。相册服务请 Worker 编码查询，再按余弦相似度给范围内未进回收站的照片排序。2026-11-06 起由[向量索引](vector-index.md#读路径)选出可能排进前面的照片，再按 Catalog 的向量精确打分，结果与精确扫描相同；向量不再常驻相册服务的内存（此前 20,000 张约 60 MB）。
 - 排序（2026-10-10 决定，[#66](https://github.com/zhongwater123/A-NAS/issues/66)，取代按标签阈值过滤与“至多 20 张最接近”）：名称或用户标签包含查询（不区分大小写）的照片排在最前；其余有向量的照片全部按与查询的相似度排列，至多 500 张，不按任何标签过滤。
 - 两段（方案 C）：名称与用户标签的匹配，加上相似度在最佳匹配 0.04 以内的照片，组成“最接近”的一组；其后的照片相关度较低。响应的 `closest` 给出这一组在所有页中的数量，每页相同，界面在其后画分隔线。依据见[校准报告](../research/photo-ai-label-calibration.md#搜索结果的取舍)：只排序时前 500 张中只有 15% 相关；0.04 以内约 90% 相关、召回约 33%。相似度没有能区分相关与否的分数线，图库里根本没有要找的东西时也会划出一组，所以界面只称“最接近”。2026-10-13 起提到物品的查询把检测分数融合进排序，以物体词为主的查询由“检测到”的照片组成第一段，响应另带 `objects`（[物体检测方案](photo-objects.md#搜索)）；以图搜图见同一方案。
-- 分页游标记录上一页最后一项的分数与 ID；每页重新扫描一次。#66 的评论中有 2 万与 10 万条的扫描实测。2026-10-26 起向量另外同步到相册服务独占的[向量索引](vector-index.md)，文搜图在后台对它做影子比对（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）；用户看到的结果仍来自这里的精确扫描，是否切换按实机数据决定。
+- 分页游标记录上一页最后一项的分数与 ID；每页重新排序一次。#66 的评论中有 2 万与 10 万条的扫描实测。向量 2026-10-26 起同步到相册服务独占的[向量索引](vector-index.md)，影子比对全部一致后，2026-11-06 起排序从索引读（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）；索引答不了时读 Catalog，结果不变。
 - 范围按[规格](../specs/photo-library.md)：普通搜索覆盖自己的私有图库与共享图库，不混入任何查看中的成员图库；管理员在查看模式下用 `viewing` 指定所查看的成员私有图库，经有效授权校验后加入，授权过期或无权时与不存在的图库一样返回 404。候选只从范围内的图库查询，结果来自 Catalog 当前记录。
 - AI 不可用（Worker 未运行、模型不符或编码失败）时只按名称与用户标签匹配，响应的 `semantic` 为 `false`，`closest` 等于结果数，窗口不另作提示（2026-10-10 决定）。
 - 时间、地点与人物不是向量能回答的条件（“去年夏天”“妈妈”）：对应能力实现后，从查询中解析出这些条件再过滤，其余部分仍按向量排序。

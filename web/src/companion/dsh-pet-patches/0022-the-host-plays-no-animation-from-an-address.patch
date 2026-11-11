@@ -1,0 +1,26 @@
+dsh-pet's /anim also plays a third party's own animation from any http or https address. A-NAS
+plays only the animations of its pool, by name: an address would put whatever it points at on
+the member's screen, and the shared screen of the host too. VNAS's anim tool has no url and the
+product service drops one, so the page's decision refuses an address as bad-request instead of
+checking its scheme; everything else decideAnim checks, and in what order, is unchanged.
+
+diff --git a/host/anim.ts b/host/anim.ts
+--- a/host/anim.ts
++++ b/host/anim.ts
+@@ -155,13 +155,9 @@ export function decideAnim(args: {
+ 
+   // url 形态：地址合法即放行，不查动画池、也不要求素材真的取得到——播放端对取不到的地址没有
+   // 兜底（浏览器 fetch 失败 / 桌面 video error），会经回执如实报 failed，而不是在这里猜。
+-  if (rawUrl) {
+-    const url = normalizeHttpUrl(rawUrl);
+-    if (url === null) {
+-      return { ok: false, reason: 'bad-request', message: 'url 必须是 http/https 的完整地址' };
+-    }
+-    return { ok: true, petId, url, facing };
+-  }
++  // A-NAS: the page plays only the animations of its own pool, by name. An address would play whatever
++  // it points at on the member's screen, so it is refused rather than checked for a scheme.
++  if (rawUrl) return { ok: false, reason: 'bad-request', message: 'url 不受支持：只能按动画名点播' };
+ 
+   // name 形态：名字必须是该宠物菜单里点得到的动画。播放端"名字即文件名"，播不存在的动画只会静默失败，
+   // 所以必须在这里拦住，而不是写进 S 让前端白跑一趟。

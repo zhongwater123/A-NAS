@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -32,6 +35,10 @@ type volumeMarker struct {
 	// before they are added and becomes Layout once the volume has them, so
 	// that disks a killed run added still get it (issue #165).
 	Pending *pendingLayout `json:"pending,omitempty"`
+	// SpreadStopped names the disks (devices and sizes, devicesKey) a spread
+	// of the mirror finished on with space still unusable. The check does
+	// not spread again until the disks change or the administrator asks.
+	SpreadStopped string `json:"spreadStopped,omitempty"`
 }
 
 type pendingLayout struct {
@@ -124,22 +131,7 @@ func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation)
 	if err := os.MkdirAll(e.mountPoint, 0o750); err != nil {
 		return datavolume.Volume{}, fmt.Errorf("create mount point: %w", err)
 	}
-	unit := fmt.Sprintf(`[Unit]
-Description=A-NAS data volume
-After=local-fs-pre.target
-Before=local-fs.target
-
-[Mount]
-What=UUID=%s
-Where=%s
-Type=btrfs
-Options=noatime,compress=zstd:3,nodev,nosuid,noexec
-TimeoutSec=30
-
-[Install]
-WantedBy=local-fs.target
-`, uuid, e.mountPoint)
-	if err := writeAtomic(e.mountUnitPath(), []byte(unit), 0o644); err != nil {
+	if err := writeAtomic(e.mountUnitPath(), []byte(mountUnit(uuid, e.mountPoint)), 0o644); err != nil {
 		return datavolume.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
 	}
 	// A filesystem on several disks mounts once the kernel knows them all.
@@ -237,6 +229,77 @@ func (e *Executor) madeBy(operation *volumeOperation, mounted *hoststate.DataVol
 	return true
 }
 
+// mountOptions are the data volume's mount options. A device the volume was
+// mounted from may vanish while the volume keeps running, as a mirror does
+// when one disk fails, so the mount is not bound to it: without
+// x-systemd.device-bound=no, systemd unmounts the volume when the device it
+// names in the mount table goes away (ADR 0025).
+const mountOptions = "noatime,compress=zstd:3,nodev,nosuid,noexec,x-systemd.device-bound=no"
+
+// mountUnit is the data volume's mount unit. systemd waits for the
+// filesystem's UUID device, which udev marks ready once the kernel knows
+// every disk of the volume, for its device timeout (90 seconds by default);
+// the unit then fails, and the Host Agent decides whether to mount a mirror
+// without the missing disk.
+func mountUnit(uuid, mountPoint string) string {
+	return fmt.Sprintf(`[Unit]
+Description=A-NAS data volume
+After=local-fs-pre.target
+Before=local-fs.target
+
+[Mount]
+What=UUID=%s
+Where=%s
+Type=btrfs
+Options=%s
+TimeoutSec=30
+
+[Install]
+WantedBy=local-fs.target
+`, uuid, mountPoint, mountOptions)
+}
+
+// mountUnitUUID is the filesystem UUID the mount unit mounts, or "".
+func mountUnitUUID(contents []byte) string {
+	for line := range strings.SplitSeq(string(contents), "\n") {
+		if value, found := strings.CutPrefix(strings.TrimSpace(line), "What=UUID="); found {
+			if uuid := strings.TrimSpace(value); datavolume.ValidFilesystemUUID(uuid) {
+				return uuid
+			}
+		}
+	}
+	return ""
+}
+
+// EnsureMountUnit brings a mount unit written by an earlier release up to
+// date and reports whether it changed it. It changes nothing the next mount
+// would not: systemd keeps the dependencies of a volume mounted now until
+// it is mounted again.
+func (e *Executor) EnsureMountUnit(ctx context.Context) (bool, error) {
+	contents, err := os.ReadFile(e.mountUnitPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the data-volume mount unit: %w", err)
+	}
+	uuid := mountUnitUUID(contents)
+	if uuid == "" {
+		return false, errors.New("the data-volume mount unit names no filesystem UUID")
+	}
+	want := mountUnit(uuid, e.mountPoint)
+	if string(contents) == want {
+		return false, nil
+	}
+	if err := writeAtomic(e.mountUnitPath(), []byte(want), 0o644); err != nil {
+		return false, fmt.Errorf("update the data-volume mount unit: %w", err)
+	}
+	if output, err := e.runner.Run(ctx, "systemctl", []string{"daemon-reload"}, ""); err != nil {
+		return true, commandError("systemctl daemon-reload failed", err, output)
+	}
+	return true, nil
+}
+
 // checkMountUnit refuses to replace a mount unit for a filesystem the plan
 // did not make: a data volume that is offline now would otherwise never
 // mount again, and its disks would look unused (issue #165). The unit may
@@ -250,13 +313,8 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 	if err != nil {
 		return fmt.Errorf("read the data-volume mount unit: %w", err)
 	}
-	uuid := ""
-	for line := range strings.SplitSeq(string(contents), "\n") {
-		if value, found := strings.CutPrefix(strings.TrimSpace(line), "What=UUID="); found {
-			uuid = strings.TrimSpace(value)
-		}
-	}
-	if !datavolume.ValidFilesystemUUID(uuid) {
+	uuid := mountUnitUUID(contents)
+	if uuid == "" {
 		return datavolume.ErrVolumeExists
 	}
 	if e.formattedByUnfinishedCreation(uuid) {
@@ -295,6 +353,12 @@ func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (da
 			adding = append(adding, disk)
 		}
 	}
+	if len(adding) > 0 {
+		if err := e.beginAdding(operation.FilesystemUUID); err != nil {
+			return datavolume.Volume{}, err
+		}
+		defer e.endAdding()
+	}
 	if err := e.recordPendingLayout(operation, len(mounted.DiskIDs)+len(adding)); err != nil {
 		return datavolume.Volume{}, err
 	}
@@ -330,6 +394,7 @@ func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (da
 		} else if output, err := e.runner.Run(ctx, "udevadm", []string{"settle", "--timeout=10"}, ""); err != nil {
 			e.logger.WarnContext(ctx, "udev did not settle after adding disks", "error", commandError("udevadm settle", err, output))
 		}
+		e.endAdding()
 	}
 	// The disks belong to the volume now; the layout becomes the volume's
 	// before anything else can fail, so the Host Agent's check converts to it.
@@ -344,6 +409,27 @@ func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (da
 		volume.DiskIDs = append(volume.DiskIDs, disk.DiskID)
 	}
 	return volume, nil
+}
+
+// beginAdding refuses to add disks while Btrfs runs a balance or the Host
+// Agent converts or spreads the volume, which may be between two balances
+// the kernel does not show: btrfs device add would fail after the disks
+// were erased. Until endAdding, the Host Agent's checks start no balance.
+func (e *Executor) beginAdding(uuid string) error {
+	e.conversionMu.Lock()
+	defer e.conversionMu.Unlock()
+	_, _, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), strings.ToLower(uuid))
+	if e.converting || e.adding || operation != hoststate.VolumeOperationNone {
+		return datavolume.ErrVolumeBusy
+	}
+	e.adding = true
+	return nil
+}
+
+func (e *Executor) endAdding() {
+	e.conversionMu.Lock()
+	e.adding = false
+	e.conversionMu.Unlock()
 }
 
 // recordPendingLayout records in the marker, before any disk is added, the
@@ -407,8 +493,13 @@ func (e *Executor) promotePendingLayout() (volumeMarker, error) {
 	return marker, e.writeMarker(marker)
 }
 
-// ContinueConversion starts converting the data volume to its layout now.
+// ContinueConversion starts converting the data volume to its layout, or
+// spreading a mirror over all of its disks, now; spreading is tried again
+// even where it last left space unusable.
 func (e *Executor) ContinueConversion(ctx context.Context) error {
+	if err := e.recordSpreadStopped(""); err != nil {
+		return err
+	}
 	started, err := e.ReconcileConversion(ctx)
 	if err == nil && !started {
 		return datavolume.ErrNoConversion
@@ -421,7 +512,9 @@ func (e *Executor) ContinueConversion(ctx context.Context) error {
 // nothing else: a balance with the soft filter rewrites only those, so it
 // picks up where a stopped one left off. Stopping the Host Agent or the
 // machine cancels it, which is why the Host Agent calls this at startup and
-// then periodically. It reports whether a balance started.
+// then periodically. Once nothing is left to convert, it spreads a mirror
+// that cannot use all of its disks over them (reconcileSpread). It reports
+// whether a balance started.
 func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	if !e.dataVolumeReady() {
 		return false, nil
@@ -434,14 +527,24 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	if !marker.Layout.Fits(2) {
 		return false, nil
 	}
-	data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), strings.ToLower(marker.FilesystemUUID))
+	uuid := strings.ToLower(marker.FilesystemUUID)
+	// Without one of its disks a mirror cannot hold two copies: converting
+	// would fail every time. It converts once the disk is back or replaced.
+	if linuxhoststate.ReadMissingDevices(os.DirFS(e.systemRoot), uuid) > 0 {
+		return false, nil
+	}
+	data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), uuid)
 	args := conversionCommand(marker.Layout, data, metadata, operation)
 	if args == nil {
-		return false, nil
+		convertData, convertMetadata := datavolume.OutsideLayout(data, metadata, marker.Layout)
+		if operation != hoststate.VolumeOperationNone || convertData || convertMetadata {
+			return false, nil
+		}
+		return e.reconcileSpread(ctx, marker)
 	}
 	e.conversionMu.Lock()
 	defer e.conversionMu.Unlock()
-	if e.converting {
+	if e.converting || e.adding {
 		return false, nil
 	}
 	e.converting = true
@@ -460,6 +563,180 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 		e.logger.Info("data-volume conversion finished", "layout", marker.Layout)
 	}()
 	return true, nil
+}
+
+// Spreading a mirror packs the data block groups at most half full, which
+// frees whole ones on every disk without needing a new one, and then writes
+// data block groups anew: Btrfs places each on the disks with the most space
+// left, as the btrfs documentation advises after adding disks. The full
+// balance starts with the newest block groups and does not come back to the
+// ones it wrote, so it is cancelled as soon as no space is unusable: it
+// rewrites only as much as the disks need, not the whole volume.
+var (
+	spreadPack = []string{"balance", "start", "-dusage=50"}
+	spreadAll  = []string{"balance", "start", "--full-balance", "-d"}
+)
+
+// reconcileSpread spreads a mirror that cannot use space its disks have
+// (datavolume.Unusable) over all of them: a disk that joined two full ones
+// stays mostly unused until then, since each block group needs room on two
+// disks. A spread cut short by a shutdown starts again at the next check. A
+// spread that finished with space still unusable, for lack of room on the
+// old disks, is recorded in the marker with the disks it ran on, and the
+// check leaves them alone until they change or the administrator asks. It
+// reports whether spreading started.
+func (e *Executor) reconcileSpread(ctx context.Context, marker volumeMarker) (bool, error) {
+	if marker.Layout != datavolume.LayoutMirror {
+		return false, nil
+	}
+	unusable, devices, err := e.measureSpread(ctx, marker.FilesystemUUID)
+	if err != nil {
+		return false, err
+	}
+	if unusable == 0 {
+		e.conversionMu.Lock()
+		e.spreadStopped = false
+		e.conversionMu.Unlock()
+		if marker.SpreadStopped != "" {
+			return false, e.recordSpreadStopped("")
+		}
+		return false, nil
+	}
+	e.conversionMu.Lock()
+	defer e.conversionMu.Unlock()
+	e.spreadStopped = marker.SpreadStopped == devicesKey(devices)
+	if e.spreadStopped || e.converting || e.adding {
+		return false, nil
+	}
+	e.converting = true
+	e.logger.InfoContext(ctx, "spreading the data volume over all of its disks", "unusableBytes", unusable)
+	//nolint:gosec // G118: like a conversion, spreading outlives the request that starts it; converting tracks it.
+	go e.spread(marker.FilesystemUUID)
+	return true, nil
+}
+
+func (e *Executor) spread(uuid string) {
+	ctx := context.Background()
+	defer func() {
+		e.conversionMu.Lock()
+		e.converting = false
+		e.conversionMu.Unlock()
+	}()
+	e.balance(ctx, spreadPack)
+	if unusable, _, err := e.measureSpread(ctx, uuid); err == nil && unusable > 0 {
+		e.balanceUntilSpread(ctx, uuid)
+	}
+	unusable, devices, err := e.measureSpread(ctx, uuid)
+	switch {
+	case err != nil:
+		e.logger.Error("the data volume could not be measured after spreading it", "error", err)
+	case unusable == 0:
+		e.logger.Info("the data volume can use all of its disks")
+	default:
+		e.logger.Warn("the data volume still cannot use all of its disks; it is spread again once its disks change or on request", "unusableBytes", unusable)
+		if err := e.recordSpreadStopped(devicesKey(devices)); err != nil {
+			e.logger.Error("record that spreading the data volume stopped", "error", err)
+		}
+	}
+}
+
+// balanceUntilSpread runs the full data balance and cancels it once no
+// space is unusable, measuring every spreadPoll. It waits for its watch to
+// end, so that no cancel reaches a later balance.
+func (e *Executor) balanceUntilSpread(ctx context.Context, uuid string) {
+	done := make(chan struct{})
+	var watch sync.WaitGroup
+	var cancelled atomic.Bool
+	watch.Go(func() {
+		ticker := time.NewTicker(e.spreadPoll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			if unusable, _, err := e.measureSpread(ctx, uuid); err != nil || unusable > 0 {
+				continue
+			}
+			cancelled.Store(true)
+			if output, err := e.runner.Run(ctx, "btrfs", []string{"balance", "cancel", e.mountPoint}, ""); err != nil {
+				e.logger.Warn("the spread balance could not be cancelled", "error", commandError("btrfs balance cancel", err, output))
+			}
+			return
+		}
+	})
+	if output, err := e.runner.Run(ctx, "btrfs", append(slices.Clone(spreadAll), e.mountPoint), ""); err != nil && !cancelled.Load() {
+		e.logger.Warn("a balance of the data volume stopped", "command", "btrfs "+strings.Join(spreadAll, " "), "error", commandError("btrfs balance", err, output))
+	}
+	close(done)
+	watch.Wait()
+}
+
+func (e *Executor) balance(ctx context.Context, command []string) {
+	if output, err := e.runner.Run(ctx, "btrfs", append(slices.Clone(command), e.mountPoint), ""); err != nil {
+		e.logger.Warn("a balance of the data volume stopped", "command", "btrfs "+strings.Join(command, " "), "error", commandError("btrfs balance", err, output))
+	}
+}
+
+// measureSpread reads how Btrfs allocates the mirror's devices, checked
+// against sysfs as the host state reads them, and how much space the mirror
+// cannot use yet. Unknown allocations are errors, not evidence that the
+// spread finished. Bound even background reads so a stalled command cannot
+// keep the spread watcher, and therefore the volume's operation lock, alive.
+func (e *Executor) measureSpread(ctx context.Context, uuid string) (uint64, []hoststate.VolumeDevice, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := e.runner.Output(ctx, "btrfs", []string{"filesystem", "show", "--raw", e.mountPoint}, "")
+	if err != nil {
+		return 0, nil, commandError("btrfs filesystem show", err, output)
+	}
+	devices := linuxhoststate.VolumeDevices(os.DirFS(e.systemRoot), strings.ToLower(uuid), output)
+	if len(devices) < 2 {
+		return 0, nil, errors.New("the data volume device allocation is unknown")
+	}
+	return datavolume.Unusable(datavolume.LayoutMirror, devices), devices, nil
+}
+
+// devicesKey names the disks of the volume by device and size, so that a
+// recorded stop no longer applies once a disk is added, replaced or grown.
+func devicesKey(devices []hoststate.VolumeDevice) string {
+	keys := make([]string, 0, len(devices))
+	for _, device := range devices {
+		keys = append(keys, fmt.Sprintf("%d:%d", device.DevID, device.SizeBytes))
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ",")
+}
+
+// recordSpreadStopped records in the marker the disks a spread left space
+// unusable on, or clears the record ("").
+func (e *Executor) recordSpreadStopped(devices string) error {
+	e.conversionMu.Lock()
+	e.spreadStopped = devices != ""
+	e.conversionMu.Unlock()
+	e.markerMu.Lock()
+	defer e.markerMu.Unlock()
+	marker, err := e.readMarker()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if marker.SpreadStopped == devices {
+		return nil
+	}
+	marker.SpreadStopped = devices
+	return e.writeMarker(marker)
+}
+
+// SpreadStopped reports whether spreading the mirror over the disks it has
+// now left space unusable, as the last check found.
+func (e *Executor) SpreadStopped() bool {
+	e.conversionMu.Lock()
+	defer e.conversionMu.Unlock()
+	return e.spreadStopped
 }
 
 // conversionCommand is the btrfs command that converts data and metadata

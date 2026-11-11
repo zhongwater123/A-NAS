@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,17 +14,22 @@ import (
 	"time"
 )
 
-// testEngines are the engines the first release loaded, as SearXNG lists them.
+// testEngines are the engines the first release loaded, as SearXNG lists them;
+// all but 夸克 have more than one page.
 var testEngines = []EngineInfo{
-	{Name: "baidu", Categories: []string{"general"}}, {Name: "sogou", Categories: []string{"general"}},
-	{Name: "360search", Categories: []string{"general"}}, {Name: "quark", Categories: []string{"general"}},
-	{Name: "yandex", Categories: []string{"general"}},
-	{Name: "baidu images", Categories: []string{"images"}}, {Name: "quark images", Categories: []string{"images"}},
-	{Name: "bilibili", Categories: []string{"videos"}}, {Name: "iqiyi", Categories: []string{"videos"}},
-	{Name: "acfun", Categories: []string{"videos"}}, {Name: "sogou videos", Categories: []string{"videos"}},
-	{Name: "360search videos", Categories: []string{"videos"}}, {Name: "youtube", Categories: []string{"videos", "music"}},
-	{Name: "dailymotion", Categories: []string{"videos"}},
-	{Name: "sogou wechat", Categories: []string{"news"}}, {Name: "piratebay", Categories: []string{"files"}},
+	{Name: "baidu", Categories: []string{"general"}, Paging: true}, {Name: "sogou", Categories: []string{"general"}, Paging: true},
+	{Name: "360search", Categories: []string{"general"}, Paging: true}, {Name: "quark", Categories: []string{"general"}},
+	{Name: "yandex", Categories: []string{"general"}, Paging: true},
+	{Name: "baidu images", Categories: []string{"images"}, Paging: true},
+	{Name: "quark images", Categories: []string{"images"}, Paging: true},
+	{Name: "bilibili", Categories: []string{"videos"}, Paging: true}, {Name: "iqiyi", Categories: []string{"videos"}, Paging: true},
+	{Name: "acfun", Categories: []string{"videos"}, Paging: true},
+	{Name: "sogou videos", Categories: []string{"videos"}, Paging: true},
+	{Name: "360search videos", Categories: []string{"videos"}, Paging: true},
+	{Name: "youtube", Categories: []string{"videos", "music"}, Paging: true},
+	{Name: "dailymotion", Categories: []string{"videos"}, Paging: true},
+	{Name: "sogou wechat", Categories: []string{"news"}, Paging: true},
+	{Name: "piratebay", Categories: []string{"files"}, Paging: true},
 }
 
 // recordingBackend answers each engine as told and remembers what it was
@@ -94,7 +100,9 @@ func newTestService(t *testing.T, backend Backend, power Switch) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return New(Options{Backend: backend, Switch: power, Settings: store, Secret: []byte("test secret"), ThumbnailPath: "/thumb"})
+	// Tests search faster than a person; those of the pace set their own.
+	return New(Options{Backend: backend, Switch: power, Settings: store, Secret: []byte("test secret"), ThumbnailPath: "/thumb",
+		Unpaced: true})
 }
 
 // shown is what the window shows once a search's updates have all come.
@@ -103,6 +111,8 @@ type shown struct {
 	Results      []Result
 	Unresponsive []string
 	Suggestions  []string
+	Paused       []string
+	Busy         []string
 }
 
 func search(service *Service, account string, query Query) (shown, error) {
@@ -119,6 +129,10 @@ func search(service *Service, account string, query Query) (shown, error) {
 		}
 		page.Unresponsive = append(page.Unresponsive, update.Unresponsive...)
 		page.Suggestions = append(page.Suggestions, update.Suggestions...)
+		for _, paused := range update.Paused {
+			page.Paused = append(page.Paused, paused.Engine)
+		}
+		page.Busy = append(page.Busy, update.Busy...)
 		return nil
 	})
 	return page, err
@@ -180,8 +194,89 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	if sogou.Platform != "v.sogou.com" || *sogou.DurationSeconds != 20 || sogou.Thumbnail != "" {
 		t.Fatalf("sogou = %+v", sogou)
 	}
-	if strings.Join(page.Unresponsive, ",") != "爱奇艺,unknown" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
+	if strings.Join(page.Unresponsive, ",") != "unknown" || strings.Join(page.Paused, ",") != "爱奇艺" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
 		t.Fatalf("unresponsive %v, suggestions %v", page.Unresponsive, page.Suggestions)
+	}
+}
+
+func TestPapersPackagesPlacesAndTracksKeepTheirDetails(t *testing.T) {
+	backend := &recordingBackend{
+		engines: []EngineInfo{
+			{Name: "crossref", Categories: []string{"science"}}, {Name: "github", Categories: []string{"it"}},
+			{Name: "photon", Categories: []string{"map"}}, {Name: "piped.music", Categories: []string{"music"}},
+		},
+		// As SearXNG answered on 2026-11-03.
+		responses: map[string]Response{
+			"crossref": {Results: []RawResult{{
+				URL: "https://www.nature.com/articles/s41598-026-39296-8", Title: "Use large language model", Engine: "crossref",
+				Template: "paper.html", Content: "<jats:p>Large language models &amp; reasoning</jats:p>",
+				Authors: []any{"Yiqiao Yin", " "}, Publisher: "Springer", Journal: "Scientific Reports", DOI: "10.1038/s41598-026-39296-8",
+				PDFURL: "javascript:alert(1)",
+			}}},
+			"github": {Results: []RawResult{{
+				URL: "https://github.com/nocodb/nocodb", Title: "nocodb/nocodb", Engine: "github", Template: "packages.html",
+				Maintainer: "nocodb", Popularity: 65414.0, Version: "0.263.1", LicenseName: "Other",
+				Homepage: "https://nocodb.com", SourceCodeURL: "https://github.com/nocodb/nocodb.git",
+			}}},
+			"photon": {Results: []RawResult{{
+				URL: "https://openstreetmap.org/way/546474656", Title: "杭州西湖", Engine: "photon", Template: "map.html",
+				Latitude: "30.2431", Longitude: 120.1459,
+				Address: map[string]any{"road": "北山街", "house_number": 1.0, "locality": "杭州市", "country": "中国"},
+			}}},
+			"piped.music": {Results: []RawResult{{
+				URL: "https://srv.piped.video/watch?v=SJKoWAd5ySo", Title: "晴天", Content: "周杰倫", Engine: "piped.music",
+				Template: "default.html", Length: "270.0",
+			}}},
+		},
+	}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	only := func(category Category, q string) Result {
+		t.Helper()
+		page, err := search(service, "u1", Query{Text: q, Category: category})
+		if err != nil || len(page.Results) != 1 {
+			t.Fatalf("%s: results %+v, error %v", category, page.Results, err)
+		}
+		return page.Results[0]
+	}
+	paper := only(Science, "large language model")
+	if paper.Kind != KindPaper || strings.Join(paper.Authors, ",") != "Yiqiao Yin" || paper.Journal != "Scientific Reports" ||
+		paper.DOI != "10.1038/s41598-026-39296-8" || paper.PDF != "" || paper.Content != "Large language models & reasoning" {
+		t.Fatalf("paper = %+v", paper)
+	}
+	repository := only(IT, "nocodb")
+	if repository.Kind != KindPackage || repository.Author != "nocodb" || repository.Popularity != "65414" ||
+		repository.Version != "0.263.1" || repository.License != "Other" || repository.SourceCode == "" || repository.Homepage == "" {
+		t.Fatalf("package = %+v", repository)
+	}
+	place := only(Map, "西湖")
+	if place.Kind != KindPlace || place.Address != "北山街, 1, 杭州市, 中国" || *place.Latitude != 30.2431 || *place.Longitude != 120.1459 {
+		t.Fatalf("place = %+v", place)
+	}
+	track := only(Music, "晴天")
+	if track.Kind != "" || *track.DurationSeconds != 270 || track.Platform != "piped.music" || track.Content != "周杰倫" {
+		t.Fatalf("track = %+v", track)
+	}
+}
+
+func TestAnInfoboxShowsTheWordsOfItsContent(t *testing.T) {
+	// Jisho's infobox, as SearXNG answers it.
+	content := `<p><i>Other forms:</i> 猫</p>
+        <small><a href="https://www.edrdg.org/wiki/">JMdict</a>
+        and <a href="https://www.edrdg.org/enamdict/">JMnedict</a> by EDRDG, CC BY-SA 3.0.</small>
+        <ul><li><i>Noun</i>: cat</li><li><i>Noun</i>: shamisen &amp; geisha</li></ul><script>alert(1)</script>`
+	backend := &recordingBackend{responses: map[string]Response{"baidu": {Infoboxes: []RawInfobox{{Infobox: "ねこ", Content: content}}}}}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	page, err := search(service, "u1", Query{Text: "ねこ", Category: Web})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var box *Infobox
+	for _, update := range page.updates {
+		box = cmp.Or(box, update.Infobox)
+	}
+	want := "Other forms: 猫\nJMdict and JMnedict by EDRDG, CC BY-SA 3.0.\nNoun: cat\nNoun: shamisen & geisha"
+	if box == nil || box.Title != "ねこ" || box.Content != want {
+		t.Fatalf("infobox = %+v, want its content %q", box, want)
 	}
 }
 
@@ -256,7 +351,7 @@ func TestResultsComeAsTheEnginesAnswer(t *testing.T) {
 		return nil
 	})
 	want := []string{
-		"results=baidu/1 sogou/1 baidu/2 found= unresponsive=360 搜索 suggestions=天气预报 pending=2",
+		"results=baidu/1 sogou/1 baidu/2 found= unresponsive= suggestions=天气预报 pending=2",
 		"results=quark/2 found=baidu/1:百度、夸克 unresponsive= suggestions=天气 pending=1",
 		"results= found= unresponsive=Yandex suggestions= pending=0",
 	}
@@ -498,7 +593,7 @@ func TestTabsFollowSearXNGsCategories(t *testing.T) {
 		Web: "baidu,bing,wikipedia,alpha,chefkoch", Images: "startpage images", Videos: "youtube", Music: "youtube",
 		News: "wikinews", Science: "arxiv", IT: "crates.io", Torrents: "kickass", Map: "", Social: "",
 	} {
-		if got := strings.Join(tabs[category], ","); got != want {
+		if got := strings.Join(tabs.tabs[category], ","); got != want {
 			t.Errorf("%s = %q, want %q", category, got, want)
 		}
 	}

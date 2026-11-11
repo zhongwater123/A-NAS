@@ -55,3 +55,36 @@ func TestTheReleaseLoadsEveryEngineThatCanAnswer(t *testing.T) {
 		t.Fatalf("plugins = %v", settings.Plugins)
 	}
 }
+
+// SearXNG leaves out an engine that timed out or failed to connect for
+// min(ban_time_on_fail, max_ban_time_on_fail) seconds. A moment when
+// SearXNG is starved or the NAS's network is down fails every engine at
+// once, so that time stays a moment: at five minutes, one such moment left
+// the web tab without engines for five minutes
+// (docs/investigations/2026-11-04-web-engines-suspended-after-one-bad-moment.md).
+func TestAFailedEngineSitsOutOnlyAMoment(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "search", "settings.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Search struct {
+			BanTimeOnFail    *int `yaml:"ban_time_on_fail"`
+			MaxBanTimeOnFail *int `yaml:"max_ban_time_on_fail"`
+		} `yaml:"search"`
+	}
+	if err := yaml.Unmarshal(contents, &settings); err != nil {
+		t.Fatal(err)
+	}
+	// SearXNG's own defaults, where the settings leave them out.
+	banTime, maxBanTime := 5, 120
+	if settings.Search.BanTimeOnFail != nil {
+		banTime = *settings.Search.BanTimeOnFail
+	}
+	if settings.Search.MaxBanTimeOnFail != nil {
+		maxBanTime = *settings.Search.MaxBanTimeOnFail
+	}
+	if suspended := min(banTime, maxBanTime); suspended > 5 {
+		t.Fatalf("a failed engine sits out %d s", suspended)
+	}
+}

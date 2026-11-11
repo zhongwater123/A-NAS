@@ -36,6 +36,11 @@ use_default_settings:
 general:
   instance_name: "A-NAS"
 
+ui:
+  # The Product Service reads why an engine gave no results, such as
+  # "CAPTCHA" or "access denied", in English (internal/websearch/pace.go).
+  default_locale: "en"
+
 search:
   # Moderate, where an engine supports it.
   safe_search: 1
@@ -43,11 +48,26 @@ search:
   # The Product Service reads JSON; SearXNG's own pages are not offered.
   formats:
     - json
-  # SearXNG waits for the slowest engine of a search. An engine that times
-  # out or fails to connect, as many do from the NAS's network, sits out the
-  # next five minutes instead of the next five seconds.
-  ban_time_on_fail: 300
-  max_ban_time_on_fail: 300
+  # An engine that times out or fails to connect sits out the next five
+  # seconds, SearXNG's default. SearXNG judges each engine on its own, and a
+  # moment when SearXNG itself is starved or the NAS's network is down fails
+  # every engine at once: at five minutes, such a moment left the whole web
+  # tab out for five minutes (docs/investigations/
+  # 2026-11-04-web-engines-suspended-after-one-bad-moment.md). The Product
+  # Service shows each engine's results as they come and asks each engine at
+  # a person's pace, so an engine that never answers costs only the wait for
+  # its timeout.
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 5
+  # A-NAS owns visible, persistent website pauses (one hour to one day).
+  # Disable every challenge-specific default, including Cloudflare's 15 days.
+  suspended_times:
+    SearxEngineAccessDenied: 0
+    SearxEngineCaptcha: 0
+    SearxEngineTooManyRequests: 0
+    cf_SearxEngineCaptcha: 0
+    cf_SearxEngineAccessDenied: 0
+    recaptcha_SearxEngineCaptcha: 0
 
 server:
   # The secret comes from SEARXNG_SECRET, which the installer generates once

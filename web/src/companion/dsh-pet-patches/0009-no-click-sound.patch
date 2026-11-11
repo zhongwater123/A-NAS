@@ -1,0 +1,18 @@
+The companion clicks silently: a click sound is not in its spec, the host screen is shared by
+the family, and A-NAS does not serve dsh-pet's sound file. The switch dsh-pet's configuration
+turns on stays off, so playClickSound never plays.
+
+diff --git a/client/pet/click-sound.ts b/client/pet/click-sound.ts
+--- a/client/pet/click-sound.ts
++++ b/client/pet/click-sound.ts
+@@ -27,7 +27,9 @@ let clickSoundEnabled = false;
+  * @param enabled - 成品配置里的 `clickSoundEnabled`。
+  */
+ export function setClickSoundEnabled(enabled: boolean): void {
+-  clickSoundEnabled = enabled;
++  // A-NAS: the companion makes no sound (not in its spec, and the host screen is shared), and A-NAS
++  // does not serve the sound file; the switch stays off whatever the configuration asks for.
++  void enabled;
+ }
+ 
+ /** 播放点击音效；开关关闭、节流中或音频不可用时静默返回。 */

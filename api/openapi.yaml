@@ -120,6 +120,7 @@ paths:
   /api/v1/family/babies/{babyId}/recordings: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1recordings" }
   /api/v1/family/babies/{babyId}/trash: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1trash" }
   /api/v1/family/babies/{babyId}/album: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1album" }
+  /api/v1/family/babies/{babyId}/album/contains: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1album~1contains" }
   /api/v1/family/babies/{babyId}/growth: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1growth" }
   /api/v1/family/babies/{babyId}/vaccines: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccines" }
   /api/v1/family/babies/{babyId}/vaccine-plan: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccine-plan" }
@@ -171,6 +172,10 @@ paths:
   /api/v1/photos/assets/{assetId}/video/stream: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1video~1stream" }
   /api/v1/photos/assets/{assetId}/view: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1view" }
   /api/v1/photos/assets/{assetId}/metadata: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1metadata" }
+  /api/v1/photos/assets/{assetId}/text: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text" }
+  /api/v1/photos/assets/{assetId}/text/fields/{field}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1fields~1{field}" }
+  /api/v1/photos/assets/{assetId}/text/changes: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1changes" }
+  /api/v1/photos/text-handles/{handle}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1text-handles~1{handle}" }
   /api/v1/photos/assets/{assetId}/motion: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion" }
   /api/v1/photos/assets/{assetId}/motion/play: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion~1play" }
   /api/v1/photos/assets/{assetId}/download: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1download" }
@@ -275,6 +280,8 @@ components:
     PhotoAlbumID: { $ref: "components/photos.yaml#/parameters/PhotoAlbumID" }
     PhotoPersonID: { $ref: "components/photos.yaml#/parameters/PhotoPersonID" }
     PhotoOccurrenceID: { $ref: "components/photos.yaml#/parameters/PhotoOccurrenceID" }
+    PhotoTextField: { $ref: "components/photos.yaml#/parameters/PhotoTextField" }
+    PhotoTextHandle: { $ref: "components/photos.yaml#/parameters/PhotoTextHandle" }
     MediaLibraryID: { $ref: "components/media.yaml#/parameters/MediaLibraryID" }
     MediaVideoID: { $ref: "components/media.yaml#/parameters/MediaVideoID" }
     MediaTitleID: { $ref: "components/media.yaml#/parameters/MediaTitleID" }
@@ -363,6 +370,7 @@ components:
     VolumeLayout: { $ref: "components/storage.yaml#/schemas/VolumeLayout" }
     Volume: { $ref: "components/storage.yaml#/schemas/Volume" }
     VolumeConversion: { $ref: "components/storage.yaml#/schemas/VolumeConversion" }
+    VolumeSpread: { $ref: "components/storage.yaml#/schemas/VolumeSpread" }
     StorageAction: { $ref: "components/storage.yaml#/schemas/StorageAction" }
     PlannedDisk: { $ref: "components/storage.yaml#/schemas/PlannedDisk" }
     StoragePlan: { $ref: "components/storage.yaml#/schemas/StoragePlan" }
@@ -392,6 +400,7 @@ components:
     SystemLogPage: { $ref: "components/logs.yaml#/schemas/SystemLogPage" }
     WebSearchCategory: { $ref: "components/web-search.yaml#/schemas/WebSearchCategory" }
     WebSearchStatus: { $ref: "components/web-search.yaml#/schemas/WebSearchStatus" }
+    WebSearchPausedEngine: { $ref: "components/web-search.yaml#/schemas/WebSearchPausedEngine" }
     WebSearchSettings: { $ref: "components/web-search.yaml#/schemas/WebSearchSettings" }
     WebSearchQuery: { $ref: "components/web-search.yaml#/schemas/WebSearchQuery" }
     WebSearchResult: { $ref: "components/web-search.yaml#/schemas/WebSearchResult" }
@@ -455,6 +464,10 @@ components:
     PhotoAlbum: { $ref: "components/photos.yaml#/schemas/PhotoAlbum" }
     PhotoNameRequest: { $ref: "components/photos.yaml#/schemas/PhotoNameRequest" }
     PhotoSearchResults: { $ref: "components/photos.yaml#/schemas/PhotoSearchResults" }
+    PhotoText: { $ref: "components/photos.yaml#/schemas/PhotoText" }
+    PhotoTextCorrectionRequest: { $ref: "components/photos.yaml#/schemas/PhotoTextCorrectionRequest" }
+    PhotoTextChange: { $ref: "components/photos.yaml#/schemas/PhotoTextChange" }
+    PhotoTextHandleValue: { $ref: "components/photos.yaml#/schemas/PhotoTextHandleValue" }
     PhotoSimilarResults: { $ref: "components/photos.yaml#/schemas/PhotoSimilarResults" }
     PhotoImageSearch: { $ref: "components/photos.yaml#/schemas/PhotoImageSearch" }
     PhotoAIStatus: { $ref: "components/photos.yaml#/schemas/PhotoAIStatus" }

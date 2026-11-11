@@ -1,7 +1,7 @@
 # 硬盘用途与数据卷冗余
 
-状态：M1 implemented；M2、M3 draft
-更新时间：2026-10-23
+状态：M1 implemented；M2 implemented，待实机验收；M3 draft
+更新时间：2026-11-06
 
 ## 目标
 
@@ -77,6 +77,22 @@
   - 卡片写明“完成前坏一块盘仍可能丢数据”。
   - 重启或断电后，转换自动继续。
 
+### M1：给多块硬盘组成的数据卷加盘
+
+- Given：数据卷由两块及以上硬盘组成，在线、可写，没有正在进行的转换或分散；有一块或几块合格的未使用硬盘。
+- When：管理员点击“设置用途…”。
+- Then：
+  - “发现 N 块未使用的硬盘”写明加入后数据卷仍为原来的冗余方式，例如“数据卷仍为镜像（RAID 1）”。
+  - 向导只有“硬盘与用途”“核对计划”“执行”三步，没有冗余方式这一步。勾选硬盘后显示加入前后的可用容量，例如两块 465.8 GB 的镜像加一块为“466 GiB → 699 GiB”，加两块为“→ 932 GiB”。
+  - 冗余方式保持不变：镜像加盘后仍只能坏一块盘。改成扩容或条带属于 M3 的“更改冗余方式”，因为那会放弃冗余；接口收到别的冗余方式时返回 `422 layout_change_unsupported`。
+  - 镜像的每个块组都要在两块硬盘上各占一份空间。原有硬盘快满时，新盘找不到配对的空间，加入后大部分仍用不上。此时计划多一步“在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用”；原有硬盘空间充足、或一次加入两块时没有这一步，已有文件不动，新写入的数据自然用上新盘。
+- 分散期间：
+  - 数据卷卡片显示“正在把文件分散到全部硬盘”和“还有 X 空间要等文件分散完才能使用”。Btrfs 不报告分散的进度，只显示剩下的；空间全部可用后 Host Agent 在半分钟内停下 balance。
+  - 数据卷照常读写，冗余不受影响；Btrfs 运行任何 balance 时都不能加入硬盘（`409 volume_busy`），“设置用途…”写明“文件分散完后才能加入新硬盘。”。
+  - 被关机或重启打断时，卡片显示“分散文件已暂停”和“继续分散”，Host Agent 在下一次检查时接着分散。
+  - 原有硬盘几乎全满、块组也都装满时，分散腾不出配对的空间。卡片显示“分散后仍有空间用不上”和还有多少用不上，说明删除或移走一些文件后点“继续分散”；Host Agent 不再自动重试，直到硬盘变化（加盘、更换或扩大）或管理员点“继续分散”，重启后也一样。
+- 扩容与条带加盘同样保持原来的方式，不分散：它们的块组只需要一块盘上有空间，新盘的容量直接可用。条带的已有数据仍留在原来的硬盘上，读写速度不随新盘提高，上游为此建议加盘后做一次完整的数据 balance，本规格不做。
+
 ### M1：没有数据卷时用多块盘初始化
 
 - Given：尚未创建数据卷，有两块及以上合格硬盘。
@@ -100,27 +116,39 @@
 - Given：数据卷是镜像，一块盘损坏或被拔出。
 - When：运行中掉盘，或开机时缺少这块盘。
 - Then：
-  - 数据卷继续可读写。开机时缺盘，由 Host Agent 以降级方式挂载。
-  - 系统健康为严重：“数据卷缺少一块硬盘，已经没有冗余”，处理办法是“尽快更换硬盘”（新增 `volume_degraded`，见[系统健康](system-health.md)）。
+  - 数据卷继续可读写。
+    - 运行中掉盘：数据卷保持挂载，Btrfs 只往剩下的盘写。
+    - 开机时缺盘：systemd 先等这块盘 90 秒（盘起转慢时照常挂载），然后 Host Agent 以降级方式挂载。开机因此多花约 90 秒。
+  - 系统健康为严重：“数据卷缺少 1 块硬盘”，处理办法是“尽快在‘设置 → 存储’中更换硬盘”（`volume_degraded`，见[系统健康](system-health.md)）。
   - 数据卷卡片标“缺少硬盘”，列出缺失硬盘的型号与 ID 短码。
   - 降级期间新写入的数据只有一份。
+
+### M2：上次留下的盘不在
+
+- Given：镜像曾在缺一块盘时运行并写入过数据，下一次开机时偏偏只有那块缺过的旧盘在。
+- Then：
+  - Host Agent 不挂载数据卷：旧盘上没有降级期间写入的数据，两块盘各自写下去就无法再合并。
+  - 系统健康为 `volume_offline`，Host Agent 的系统日志写明原因。
+  - 接回降级期间留下的那块盘后重启即可恢复。
+  - Host Agent 在系统盘的 `/var/lib/a-nas-host/degraded-volume.json` 中记下降级期间留下的盘，冗余恢复后删除。系统盘重装后这条记录不在，这道保护随之失效。
 
 ### M2：更换硬盘
 
 - Given：镜像缺少一块硬盘，并插入了一块合格的新盘，容量不小于缺失的那块。
 - When：管理员在数据卷卡片点“更换硬盘…”，选择新盘、核对计划并输入确认短语。
 - Then：
-  - 新盘替换缺失的硬盘并重建镜像，卡片显示“正在重建 52%”。
-  - 重建完成后，降级期间只有一份的数据也转回镜像。
+  - 新盘替换缺失的硬盘并重建镜像，卡片显示“正在重建 52%”。重建在内核中进行，期间可以关闭页面；Host Agent 重启时重建继续，设备重启后重建从头开始，计划进入“需要处理”，重试会等它完成。
+  - 重建完成后，降级期间只有一份的数据也转回镜像，再做一次 Scrub；期间卡片显示“正在恢复冗余”。
   - 卡片恢复“在线”，`volume_degraded` 消失。
   - 新盘比缺失的盘大时，多出的空间在重建后自动用上。
+  - 新盘比缺失的盘小时不能选（`422 disk_too_small`）。剩下那块盘几乎没有未分配空间时，Btrfs 无法开始重建，计划失败并写明停在重建一步。
 
 ### M2：缺失的硬盘回来了
 
 - Given：镜像降级期间写入过数据，之后原来那块盘被重新接上，例如数据线松了。
 - When：重新接上后重启。
 - Then：
-  - 这块盘重新回到数据卷。
+  - 这块盘重新回到数据卷。运行中接回时，内核认出它但不再写它，卡片仍显示“缺少硬盘”，要重启后才恢复。
   - Host Agent 在后台把降级期间只有一份的数据转回镜像，再做一次校验，修复这块盘上过期的内容。
   - 卡片显示“正在恢复冗余”，完成后恢复“在线”。
 
@@ -153,7 +181,9 @@
 
   取消的计划没有碰过任何硬盘。执行中可以关闭设置窗口或页面，见下文“执行在设备上进行”。
 - 哪块盘属于数据卷、哪块盘正在使用，以内核为准。宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出数据卷的每块成员盘，任何已挂载 Btrfs 的设备都算使用中。`lsblk` 的文件系统类型与 UUID 来自 udev 数据库，`btrfs device add` 之后它在重启前一直把新分区显示为空白；只按它判断，刚加入的盘会重新显示为“未使用”，并且可以被再次清除（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。加盘后 Host Agent 还会让 udev 重新探测新分区。
-- 同一时间只有一个有效计划：生成新计划会取消尚未执行的旧计划（页面刷新后界面不再记得它），只有执行中的计划会挡住新计划（`409 plan_state_conflict`）。数据卷正在转换、重建或缺少硬盘时，只能执行更换硬盘，其他计划返回 `409 volume_busy`。
+- 同一时间只有一个有效计划：生成新计划会取消尚未执行的旧计划（页面刷新后界面不再记得它），只有执行中的计划会挡住新计划（`409 plan_state_conflict`）。数据卷正在转换、Btrfs 正在运行 balance（例如分散）、重建或缺少硬盘时，只能执行更换硬盘，其他计划返回 `409 volume_busy`；暂停或停下的分散不挡住加盘。生成计划之后 Host Agent 才开始转换或分散的，执行时产品服务再核对一次，计划进入 `needs_attention`；Host Agent 自己也在清除硬盘之前核对，自己的转换或分散在两次 balance 之间时同样拒绝（`the data volume is converting to another layout or spreading over its disks`），加盘期间不开始新的 balance。
+- 哪些空间“用不上”由服务端按每块盘的大小与已分配量计算（[`Unusable`](../../internal/datavolume/layout.go)）：镜像能存的量（上表的可用容量）减去已存的量，再减去按两块盘配对还能分配出的量。不到容量的十分之一、且不到 2 GiB 时算作没有，因为 Btrfs 的数据块组是容量的十分之一、最大 1 GiB，balance 做不到更细。每块盘的已分配量来自 `btrfs filesystem show --raw`，sysfs 不提供；读不到、或有盘缺失时不计算，也不分散。
+- 分散先把用了不到一半的块组打包（`btrfs balance start -dusage=50`），在原有硬盘上腾出整块的空间，再开始完整的数据 balance（`--full-balance -d`），Btrfs 把每个块组重新写到剩余空间最多的两块盘上。完整 balance 从最新的块组往前写，不回头处理写过的，Host Agent 每 30 秒量一次用不上的空间，一到零就取消它（`btrfs balance cancel`），所以只重写腾出空间需要的部分，不是整个数据卷。做完仍有用不上的空间时，Host Agent 把这时的硬盘（devid 与大小）记进卷标记的 `spreadStopped`，宿主机状态报告“停下”，直到硬盘变化或管理员点“继续分散”（清除记录）才再分散。
 - 执行前，Host Agent 重新枚举并核对：
   - 新盘的身份，变化时返回 `disk_changed`；
   - 数据卷的文件系统 UUID、成员与冗余方式，变化时返回 `volume_changed`。
@@ -170,6 +200,8 @@
 - 计划、确认、执行写入活动日志；转换的开始、完成或停下写入 Host Agent 的系统日志。
 - 冗余方式与容量估算在服务端决定；界面按同一公式显示，供选择时参考（[`layouts.ts`](../../web/src/settings/layouts.ts)）。
 - 单盘数据卷从不记录目标冗余方式，也不显示转换：它的元数据是 `dup` 还是 `single` 取决于格式化它的 btrfs-progs 版本。
+
+- 分散任务的设备分配量未知时，保留停止记录，不判定分散完成、不取消 balance；每次后台测量最多等待十秒，失败时留待下一次有效观测（[调查](../investigations/2026-11-09-spread-allocation-observation.md)）。
 
 ## 验收证据
 
@@ -191,17 +223,39 @@ M1：
 - 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）与 Host Agent IPC（[`agent_test.go`](../../internal/hoststate/agent/rootagent/agent_test.go)）：执行返回 `202` 与步骤、`GET /api/v1/storage/plans`、`GET /v1/storage/operations/{planId}` 与错误码。
 - React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试；重试再次停下时显示新的原因。
 
-M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test.sh`](../../scripts/system-test.sh)）、更换与移除的 root 集成测试，以及拔盘开机、接回恢复的实机验证。
-- 实机：按运行手册在实验 NAS 上：
-  - 把 `sda` 加入数据卷并转为镜像，Scrub 没有错误；
+给多块硬盘组成的数据卷加盘：
+
+- 计算“用不上”的空间（[`layout_test.go`](../../internal/datavolume/layout_test.go)）：两块满盘加一块空盘、原有硬盘有空间、一次加两块、一大两小、已经分散、扩容与条带、太少不必分散、小数据卷。
+- 读出每块盘的分配（[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go) 的 `TestVolumeDevicesNeedEveryDeviceOfTheFilesystem` 与 [`FuzzBtrfsDevices`](../../internal/hoststate/linux/fuzz_test.go)）：另一个文件系统、缺盘、数量不符、sysfs 多出一块、分配量超过大小、重复的 devid；IPC 的往返与拒绝（[`volume_test.go`](../../internal/hoststate/agent/rootagent/volume_test.go)）。
+- 存储服务（[`layout_test.go`](../../internal/storage/layout_test.go) 的 `TestDisksJoinAMirrorAsAMirror`、`TestAMirrorShowsTheSpaceItCannotUseYet` 与 `TestNoDiskJoinsWhileBtrfsBalances`）：拒绝改为扩容或条带、缺省保持镜像、原有硬盘有空间时只加盘、快满时计划多出分散、分散中、暂停与停下的显示、继续分散、分散完不再显示、只读的数据卷不显示分散；balance 进行中（空间已全部可用时也一样）既不生成也不执行加盘计划。
+- Host Agent（[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)）：先打包再完整 balance、空间全部可用时取消 balance、只有镜像分散、做完仍用不上时记下硬盘并在重启后也不重试、硬盘变化后再分散、“继续分散”清除记录；转换、分散或 balance 进行中不清除硬盘也不加盘，加盘期间不开始分散。宿主机状态（[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go) 的 `TestVolumeDevicesAreReadOnceInAWhile`、[`volume_test.go`](../../internal/hoststate/agent/rootagent/volume_test.go) 的 `TestClientReadsWhetherSpreadingStopped`）：每块盘的分配 30 秒内只读一次、带超时；“停下”经 Host Agent 套接字传给产品服务。
+- root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go) 的 `TestRootAMirrorSpreadsOntoAJoinedDisk`）：真实 Btrfs 上两块 1 GiB 盘的镜像加入一块 2 GiB 的盘，检查分散后全部空间可用，块组仍全是 RAID1。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：镜像加盘没有冗余方式这一步、显示加入前后的容量、计划请求不带冗余方式；分散暂停与停下的显示和继续分散；balance 进行中“设置用途…”不可用。
+
+M2：
+
+- systemd、udev 与 Btrfs 的实际行为（开机等盘、运行中掉盘、降级挂载、接回、更换、中断的更换）在 Debian 13 虚拟机上逐项验证，见[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)。容器版系统测试没有 udev，测不到这些。
+- Host Agent：
+  - [`volume_test.go`](../../internal/hostops/linux/volume_test.go) 的 `TestEnsureMountUnitStopsBindingTheVolumeToOneDisk`：旧 mount unit 被改写为不随单块设备停止；
+  - [`degraded_internal_test.go`](../../internal/hostops/linux/degraded_internal_test.go)：先只读挂上查看、卸载、记下、一次挂成读写；只有镜像、只缺一块、只在上次留下的盘上才挂载；记录读不出时不挂载；`btrfs replace status` 的解析。
+- 宿主机状态：[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go) 的 `TestReadMissingDevicesCountsEveryWayADiskGoes`（缺盘的三种去向、重建中的目标盘）；[`assess_test.go`](../../internal/hoststate/assess_test.go) 的 `volume_degraded`。
+- 存储服务：[`layout_test.go`](../../internal/storage/layout_test.go) 的 `TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan`（缺盘时的状态与缺失硬盘、只接受更换、新盘不能更小、离线时同样列出缺失硬盘、恢复冗余中、执行更换）。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：缺盘的卡片与缺失硬盘、更换的完整流程（过小的盘不可选、核对、确认、执行）、重建进度到完成、`disk_too_small`、恢复冗余（有无转换）、离线的扩容列出缺失硬盘且没有更换入口。
+- Fake 模式（[`devstorage_test.go`](../../cmd/anas-api/devstorage_test.go)）：`ANAS_FAKE_STORAGE=degraded` 下镜像缺盘、更换、恢复冗余到在线，扩容离线。
+- 实机：按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)在实验 NAS 上：
+  - 部署后重启一次，确认 mount unit 不再随单块设备停止；
   - 拔掉一块盘开机，确认降级挂载与健康告警；
-  - 接回后确认冗余恢复。
+  - 接回后确认冗余恢复；
+  - 有空闲硬盘时验证更换。
+
+M3 另需：移除硬盘的 root 集成测试。
 
 ## 关联
 
+- 调查：[分散任务的未知观测与测量超时](../investigations/2026-11-09-spread-allocation-observation.md)、[镜像少了一块硬盘时 systemd、udev 与 Btrfs 的行为](../investigations/2026-11-06-mirror-missing-a-disk.md)
 - ADR：[0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 [0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md) 的单盘限制）
 - 规格：[基础存储与共享](basic-storage-and-sharing.md#数据卷初始化)、[设置](settings.md)中的“存储”分区、[系统健康](system-health.md)
 - 架构：[存储与文件架构](../architecture/storage-and-files.md)
-- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/datavolume/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
-- 运行手册：[把硬盘加入数据卷](../runbooks/add-a-disk-to-the-data-volume.md)
+- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/datavolume/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`degraded.go`](../../internal/hostops/linux/degraded.go)（缺盘挂载、更换与恢复冗余）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
+- 运行手册：[把硬盘加入数据卷](../runbooks/add-a-disk-to-the-data-volume.md)、[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)
 - 项目背景：[PROJECT_CONTEXT.md](../../PROJECT_CONTEXT.md) 的“增加第二块数据盘，用于验证镜像、掉盘、替换和重建”

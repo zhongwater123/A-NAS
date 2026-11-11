@@ -3,6 +3,7 @@ package linux
 import (
 	"io/fs"
 	"math"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -26,7 +27,7 @@ const (
 	// defaultHotCelsius applies when a sensor reports no critical
 	// temperature, as AMD's k10temp does.
 	defaultHotCelsius = 85
-	// hwmonLimit bounds the hwmon devices and readings looked at.
+	// hwmonLimit bounds device discovery, not attributes within a chip.
 	hwmonLimit = 256
 )
 
@@ -131,13 +132,15 @@ func deviceHwmons(root fs.FS, device string) []string {
 // readHwmonTemperatures reads the plausible temp<N>_input readings of one
 // hwmon directory with their labels and critical limits, by number.
 func readHwmonTemperatures(root fs.FS, directory string) []hwmonReading {
-	entries, _, err := taskDirectories(root, directory, hwmonLimit)
+	// Match inputs across the whole directory: Super I/O chips expose hundreds
+	// of unrelated attributes, and sysfs enumeration is not in sensor order.
+	inputs, err := fs.Glob(root, directory+"/temp*_input")
 	if err != nil {
 		return nil
 	}
 	var readings []hwmonReading
-	for _, entry := range entries {
-		number, ok := strings.CutPrefix(entry.Name(), "temp")
+	for _, input := range inputs {
+		number, ok := strings.CutPrefix(path.Base(input), "temp")
 		if !ok {
 			continue
 		}
@@ -303,12 +306,12 @@ func readFanSensors(root fs.FS) ([]fanReading, bool) {
 		if err != nil || gpuHwmons[strings.TrimSpace(string(name))] {
 			continue
 		}
-		files, _, err := taskDirectories(root, directory, hwmonLimit)
+		inputs, err := fs.Glob(root, directory+"/fan*_input")
 		if err != nil {
 			continue
 		}
-		for _, file := range files {
-			number, ok := strings.CutPrefix(file.Name(), "fan")
+		for _, input := range inputs {
+			number, ok := strings.CutPrefix(path.Base(input), "fan")
 			if !ok {
 				continue
 			}
@@ -318,7 +321,7 @@ func readFanSensors(root fs.FS) ([]fanReading, bool) {
 				continue
 			}
 			found = true
-			rpm, err := taskUint(root, directory+"/"+file.Name())
+			rpm, err := taskUint(root, input)
 			if err != nil || *rpm > hoststate.MaxFanRPM {
 				continue
 			}

@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 // MaxRecordingBytes bounds one recording: two hours of phone-quality audio
@@ -48,6 +51,19 @@ type RecordingInput struct {
 
 // ErrTooLarge means an upload passed its size limit.
 var ErrTooLarge = errors.New("too large")
+
+var ErrNoSpace = errors.New("not enough space")
+
+func (s *Store) admitRecording(incoming int64) error {
+	ok, err := s.admits(s.recordings, incoming)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNoSpace
+	}
+	return nil
+}
 
 func cleanContentType(value string) (string, bool) {
 	mediaType, _, err := mime.ParseMediaType(value)
@@ -92,12 +108,27 @@ func (s *Store) AddRecording(ctx context.Context, actor Actor, babyID string, in
 	if date, ok := parseDate(occurredOn); !ok || date.After(s.today()) {
 		return Record{}, ErrInvalid
 	}
+	if err := s.admitRecording(MaxRecordingBytes); err != nil {
+		return Record{}, err
+	}
 	id := newID("rec")
+	s.uploadsMu.Lock()
 	temporary, err := os.CreateTemp(s.recordings, ".upload-*")
+	if err == nil {
+		s.activeUploads[filepath.Base(temporary.Name())] = true
+		s.activeUploads[id] = true
+	}
+	s.uploadsMu.Unlock()
 	if err != nil {
 		return Record{}, err
 	}
-	defer func() { _ = os.Remove(temporary.Name()) }()
+	defer func() {
+		_ = os.Remove(temporary.Name())
+		s.uploadsMu.Lock()
+		delete(s.activeUploads, filepath.Base(temporary.Name()))
+		delete(s.activeUploads, id)
+		s.uploadsMu.Unlock()
+	}()
 	size, err := io.Copy(temporary, io.LimitReader(body, MaxRecordingBytes+1))
 	if err == nil && size > MaxRecordingBytes {
 		err = ErrTooLarge
@@ -114,8 +145,18 @@ func (s *Store) AddRecording(ctx context.Context, actor Actor, babyID string, in
 	if err != nil {
 		return Record{}, err
 	}
+	// Bytes are already on the volume; check the remaining reserve, not size again.
+	if err := s.admitRecording(0); err != nil {
+		return Record{}, err
+	}
 	final := s.recordingPath(id)
 	if err := os.Rename(temporary.Name(), final); err != nil {
+		return Record{}, err
+	}
+	// The record added below names the file, so the rename must be on disk
+	// first: a power cut must not leave a record without its recording.
+	if err := atomicfile.SyncDir(s.recordings); err != nil {
+		_ = os.Remove(final)
 		return Record{}, err
 	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
@@ -129,7 +170,7 @@ func (s *Store) AddRecording(ctx context.Context, actor Actor, babyID string, in
 request_key, recording_type, recording_bytes, recording_name) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, babyID, KindRecording, occurredOn, title, actor.AccountID, actor.Username, formatTime(s.now()),
 			nullString(input.RequestKey), contentType, size, fileName); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if isUniqueConstraint(err) {
 				return ErrConflict
 			}
 			return err
@@ -178,6 +219,9 @@ func (s *Store) Purge(ctx context.Context) error {
 	cutoff := s.trashCutoff()
 	var recordings []string
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM audit_events WHERE occurred_at < ?", formatTime(s.now().AddDate(0, 0, -AuditDays))); err != nil {
+			return err
+		}
 		var err error
 		if recordings, err = expiredRecordings(ctx, tx, cutoff); err != nil {
 			return err
@@ -191,12 +235,14 @@ func (s *Store) Purge(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, id := range recordings {
 		if err := os.Remove(s.recordingPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return s.removeStrayUploads()
+	failures = append(failures, s.removeStrayUploads(ctx))
+	return errors.Join(failures...)
 }
 
 // expiredRecordings lists the recordings whose record, or whose baby, has
@@ -220,18 +266,45 @@ WHERE r.kind = 'recording' AND ((r.deleted_at IS NOT NULL AND r.deleted_at <= ?)
 	return ids, rows.Err()
 }
 
-// removeStrayUploads deletes uploads a crash left half-written.
-func (s *Store) removeStrayUploads() error {
+// removeStrayUploads recovers abandoned uploads and files left after a failed
+// purge or a crash between rename and commit. Live uploads are always excluded.
+func (s *Store) removeStrayUploads(ctx context.Context) error {
+	s.uploadsMu.Lock()
+	defer s.uploadsMu.Unlock()
 	entries, err := os.ReadDir(s.recordings)
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, entry := range entries {
+		if s.activeUploads[entry.Name()] || entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
 		if strings.HasPrefix(entry.Name(), ".upload-") {
-			if err := os.Remove(filepath.Join(s.recordings, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
+			if !info.ModTime().Before(s.now().Add(-24 * time.Hour)) {
+				continue
 			}
+		} else if strings.HasPrefix(entry.Name(), "rec_") {
+			var exists bool
+			err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM records WHERE id = ? AND kind = 'recording')", entry.Name()).Scan(&exists)
+			if err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			if exists {
+				continue
+			}
+		} else {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.recordings, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

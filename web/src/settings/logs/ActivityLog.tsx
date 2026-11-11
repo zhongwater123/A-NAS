@@ -63,10 +63,11 @@ const categoryIcons: Record<ActivityCategory | "other", LucideIcon> = {
   file: FolderOpen,
   storage: HardDrive,
   photo: Images,
+  family: Activity,
   other: Activity,
 };
 
-const categoryOrder: ActivityCategory[] = ["session", "account", "file", "storage", "photo"];
+const categoryOrder: ActivityCategory[] = ["session", "account", "file", "storage", "photo", "family"];
 
 const pageSize = 50;
 
@@ -76,6 +77,7 @@ const unavailableLabels: Record<ActivityCategory, string> = {
   file: "文件",
   storage: "存储",
   photo: "相册",
+  family: "家庭中心",
 };
 
 interface LogState {

@@ -4,6 +4,10 @@ go 1.27.0
 
 toolchain go1.27.3
 
+// npm packages can carry Go code (flatted does), which ./... would otherwise
+// build, vet, lint and test as part of this module.
+ignore node_modules
+
 require (
 	github.com/abema/go-mp4 v1.7.4
 	github.com/caarlos0/env/v11 v11.4.1
@@ -19,8 +23,10 @@ require (
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/go-audio/wav v1.1.0
 	github.com/godbus/dbus/v5 v5.2.4
+	github.com/google/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/mattn/go-sqlite3 v1.14.52
@@ -37,6 +43,7 @@ require (
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.42.0
+	golang.org/x/net v0.61.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
@@ -78,7 +85,6 @@ require (
 	go.opentelemetry.io/otel v1.45.0 // indirect
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/vuln v1.9.0 // indirect

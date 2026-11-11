@@ -8,7 +8,12 @@ token's log probability. Environment variables shape it:
 - FAKE_LLAMA_DELAY: seconds to wait before answering, as the image's encoding does;
 - FAKE_LLAMA_STATUS: answer with this HTTP status instead;
 - FAKE_LLAMA_REPEAT: answer the same piece this many times;
+- FAKE_LLAMA_PIECE: that piece, 回单 unless given;
 - FAKE_LLAMA_PIECE_DELAY: seconds between the answer's pieces;
+- FAKE_LLAMA_ERROR: after the answer, report this error in the stream and end it without a finish reason,
+  as llama-server does when it fails mid-answer;
+- FAKE_LLAMA_NO_FINISH: end the stream without a finish reason;
+- FAKE_LLAMA_START_DELAY: seconds to wait before listening, as on a slow model load;
 - FAKE_LLAMA_EXIT: exit at once with this code, as on a model that does not load.
 """
 
@@ -55,7 +60,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         repeat = int(os.environ.get("FAKE_LLAMA_REPEAT", "0"))
         pause = float(os.environ.get("FAKE_LLAMA_PIECE_DELAY", "0"))
-        pieces = ["回单"] * repeat if repeat else ANSWER
+        pieces = [os.environ.get("FAKE_LLAMA_PIECE", "回单")] * repeat if repeat else ANSWER
         try:
             for piece in pieces:
                 event = {"choices": [{"delta": {"content": piece}, "finish_reason": None,
@@ -63,7 +68,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n")
                 self.wfile.flush()
                 time.sleep(pause)
-            self.wfile.write(b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n')
+            error = os.environ.get("FAKE_LLAMA_ERROR")
+            if error:
+                event = {"error": {"code": 500, "message": error, "type": "server_error"}}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            elif not os.environ.get("FAKE_LLAMA_NO_FINISH"):
+                self.wfile.write(b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n')
         except BrokenPipeError:
             pass  # the client hung up, which llama-server notices between tokens
 
@@ -77,6 +87,7 @@ def main():
     if code:
         print("failed to load the model", flush=True)
         sys.exit(int(code))
+    time.sleep(float(os.environ.get("FAKE_LLAMA_START_DELAY", "0")))
     with Server(sys.argv[sys.argv.index("--host") + 1], Handler) as server:
         server.serve_forever()
 

@@ -56,7 +56,7 @@ func RequireOwnedStore(root string) error {
 		return ErrStoreUnavailable
 	}
 	var fs syscall.Statfs_t
-	if err = syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != 0x9123683e || fs.Flags&unix.ST_RDONLY != 0 {
+	if err = syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != unix.BTRFS_SUPER_MAGIC || fs.Flags&unix.ST_RDONLY != 0 {
 		return ErrStoreUnavailable
 	}
 	if _, err = os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
@@ -258,19 +258,50 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				continue
 			}
 		}
-		serve(sharesapi.NewWithPreview(store.Store, config.Logger, config.Sessions.ActiveProfiles, config.Media))
+		// A supervisor tick is not a readiness guarantee: the Product Service
+		// can restart immediately afterwards. Check the bridge before admitting
+		// each request, and wake recovery without waiting for the next tick.
+		failed := make(chan error, 1)
+		var retired atomic.Bool
+		next := sharesapi.NewWithPreview(store.Store, config.Logger, config.Sessions.ActiveProfiles, config.Media)
+		serve(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if retired.Load() {
+				unavailable.ServeHTTP(w, r)
+				return
+			}
+			probe, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			err := store.checkBridge(probe)
+			cancel()
+			if err != nil {
+				if r.Context().Err() == nil {
+					select {
+					case failed <- err:
+					default:
+					}
+				}
+				w.Header().Set("Retry-After", "1")
+				unavailable.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}))
+		interrupt := func(reason string) {
+			retired.Store(true)
+			serve(unavailable)
+			_ = store.Interrupt(reason)
+		}
 		config.Logger.Info("member-share service ready")
 		for {
 			select {
 			case <-ctx.Done():
-				serve(unavailable)
-				_ = store.Interrupt("Share service stopped before task completion")
+				interrupt("Share service stopped before task completion")
 				return
+			case err = <-failed:
 			case <-ticker.C:
+				err = storeCheck(ctx, store, config)
 			}
-			if err = storeCheck(ctx, store, config); err != nil {
-				serve(unavailable)
-				_ = store.Interrupt("File service or data volume became unavailable; start a new save request")
+			if err != nil {
+				interrupt("File service or data volume became unavailable; start a new save request")
 				config.Logger.WarnContext(ctx, "member-share store unavailable", "error", err)
 				break
 			}

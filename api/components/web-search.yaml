@@ -6,7 +6,7 @@ schemas:
   WebSearchStatus:
     type: object
     additionalProperties: false
-    required: [enabled, running, torrents, categories, engines]
+    required: [enabled, running, torrents, categories, engines, paused]
     properties:
       enabled: { type: boolean, description: "The administrator's switch; off stops the service." }
       running: { type: string, enum: [running, starting, stopped, failed], description: What systemd reports of the service. }
@@ -33,6 +33,26 @@ schemas:
           it: { type: array, items: { type: string } }
           social: { type: array, items: { type: string } }
           torrents: { type: array, items: { type: string } }
+      paused:
+        type: array
+        description: The websites searches leave out after a block, the first to return first; sibling engines share a pause.
+        items: { $ref: "#/schemas/WebSearchPausedEngine" }
+  WebSearchPausedEngine:
+    type: object
+    additionalProperties: false
+    description: >-
+      A website left out of searches after a block: for an hour, doubled on the next block after expiry up
+      to a day. Concurrent answers do not extend or clear an active pause.
+    required: [engine, reason, until]
+    properties:
+      engine: { type: string, description: The website name the window shows; the legacy field name is retained. }
+      reason:
+        type: string
+        enum: [captcha, denied, too_many, unreadable]
+        description: >-
+          How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not
+          read, often a challenge it does not recognize.
+      until: { type: string, format: date-time }
   WebSearchSettings:
     type: object
     additionalProperties: false
@@ -71,6 +91,22 @@ schemas:
       sizeBytes: { type: integer, minimum: 1 }
       seeders: { type: integer, minimum: 0 }
       leechers: { type: integer, minimum: 0 }
+      kind:
+        type: string
+        enum: [paper, package, place]
+        description: A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+      authors: { type: array, items: { type: string }, description: A paper's authors. }
+      journal: { type: string, description: "A paper's journal, or else its publisher." }
+      doi: { type: string }
+      pdf: { type: string, format: uri, description: A paper's PDF. }
+      version: { type: string, description: A package's version. }
+      license: { type: string }
+      popularity: { type: string, description: "A package's popularity as its site counts it: stars, downloads or pulls." }
+      homepage: { type: string, format: uri }
+      sourceCode: { type: string, format: uri }
+      address: { type: string, description: A place's address. }
+      latitude: { type: number, minimum: -90, maximum: 90 }
+      longitude: { type: number, minimum: -180, maximum: 180 }
   WebSearchAnswer:
     type: object
     additionalProperties: false
@@ -92,7 +128,7 @@ schemas:
     additionalProperties: false
     description: >-
       Part of a page, sent as the tab's engines answer; each field holds only what is new since the update before.
-    required: [results, found, answers, suggestions, unresponsive, pending]
+    required: [results, found, answers, suggestions, unresponsive, paused, busy, pending]
     properties:
       results:
         type: array
@@ -109,9 +145,22 @@ schemas:
       suggestions: { type: array, items: { type: string } }
       unresponsive:
         type: array
-        description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+        description: The tab's engines that did not answer; website blocks are reported under paused.
         items: { type: string }
-      pending: { type: integer, minimum: 0, description: "The tab's engines still searching; 0 in the last update." }
+      paused:
+        type: array
+        description: Websites paused before or during this search, each reported once as the block becomes known.
+        items: { $ref: "#/schemas/WebSearchPausedEngine" }
+      busy:
+        type: array
+        description: >-
+          The engines this search left out because their website had been asked too often just before: each website is
+          asked a few times in a row, then every ten seconds, whoever searches.
+        items: { type: string }
+      pending:
+        type: integer
+        minimum: 0
+        description: "The engines still searching or waiting for their turn; 0 in the last update."
   WebSearchFound:
     type: object
     additionalProperties: false

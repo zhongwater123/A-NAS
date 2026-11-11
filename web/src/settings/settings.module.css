@@ -3614,6 +3614,11 @@ button.health-go svg {
     transform: translateX(270%);
   }
 }
+/* A step that reports how far it has come, such as a mirror's rebuild. */
+.wiz-progress.measured span {
+  animation: none;
+  transition: width 0.6s ease;
+}
 .wiz-foot {
   display: flex;
   align-items: center;
@@ -3726,6 +3731,15 @@ button.health-go svg {
 .vol-convert-note {
   color: var(--set-text) !important;
 }
+/* Restoring redundancy reports no progress of its own. */
+.vol-convert .wiz-progress {
+  height: 8px;
+  margin-top: 2px;
+  background: rgba(47, 111, 228, 0.14);
+}
+.vol-convert .wiz-progress span {
+  background: linear-gradient(90deg, #5ea6ff, #2f6fe4);
+}
 .vol-convert-actions {
   display: flex;
   justify-content: flex-end;
@@ -3768,6 +3782,49 @@ button.health-go svg {
   margin-left: auto;
   font-weight: 600;
   color: var(--set-text);
+}
+/* A disk of the volume the device does not see (M2). */
+.vol-members li.missing {
+  padding: 7px 9px;
+  border: 1px dashed rgba(210, 59, 72, 0.35);
+  background: #fff;
+}
+.vol-members li.missing svg {
+  color: var(--set-danger);
+}
+.vol-members li.missing span:first-of-type,
+.vol-members li.missing small:last-child {
+  color: var(--set-muted);
+}
+.vol-missing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 12px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--set-danger-soft);
+}
+.vol-missing > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  align-self: flex-start;
+  margin-top: 1px;
+  color: var(--set-danger);
+}
+.vol-missing strong {
+  color: #a32c38;
+  font-weight: 650;
+}
+.vol-missing p {
+  margin-top: 2px;
+  color: #7d3a41;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.vol-missing .set-btn {
+  flex: none;
+  margin-left: auto;
 }
 .wiz-purposes {
   display: grid;

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // People (docs/architecture/photo-people.md): each library keeps its own
@@ -562,7 +564,7 @@ JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.librar
 JOIN occurrences o ON o.id = po.occurrence_id
 JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND `+listedAssets(p, "a")+`
 JOIN libraries l ON l.id = pe.library_id AND l.people = 1
-WHERE pe.library_id IN (`+placeholders(len(scope))+`)
+WHERE pe.library_id IN (`+sqlitedb.Placeholders(len(scope))+`)
 GROUP BY pe.id`, scope...)
 	if err != nil {
 		return nil, err
@@ -625,8 +627,6 @@ func (s *Service) coverStillTheirs(ctx context.Context, personID, occurrenceID s
 		personID, occurrenceID).Scan(&ok)
 	return err == nil && ok
 }
-
-func placeholders(count int) string { return strings.TrimSuffix(strings.Repeat("?,", count), ",") }
 
 // visiblePerson returns a person p may see, with its library.
 func (s *Service) visiblePerson(ctx context.Context, q queryer, p Principal, personID string) (Person, library, error) {

@@ -129,14 +129,8 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if err != nil {
 		return Page{}, err
 	}
-	var hits []searchHit
-	var vectorErr error
-	err = s.detected.read(ctx, s, s.objectCalibration.Model, func(found map[string][]classScore) {
-		vectorErr = s.index.read(ctx, s, search.model, func(vectors map[string][]float32) {
-			hits = likeHits(candidates, vectors, found, search.vector, search.objects, "")
-		})
-	})
-	if err = errors.Join(err, vectorErr); err != nil {
+	hits, err := s.likeHits(ctx, scopeIDs(scope), candidates, search.model, search.vector, search.objects, "")
+	if err != nil {
 		return Page{}, err
 	}
 	assets, next, err := s.hitPage(ctx, p, scope, hits, after, request.Limit)
@@ -210,6 +204,10 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 		return nil
 	}
 	defer func() { _ = file.Close() }()
+	// The text reader goes first, as before any detection: the two are not
+	// loaded together. The Worker answers one request at a time, so the
+	// release waits for a reading the closed gate is stopping.
+	s.ai.switchPhase(ctx, detector, false)
 	model, boxes, err := detector.DetectObjects(ctx, file)
 	// A Worker that took the request keeps the detector loaded; the AI
 	// runner releases it on its next round, since this request kept the gate

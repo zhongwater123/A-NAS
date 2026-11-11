@@ -199,6 +199,12 @@ func (s *Service) claimJob(ctx context.Context, derivation string) (claimedJob, 
 // claimObjectJob leases the ready job of one derivation for objectID, or the
 // next one of any object when objectID is empty.
 func (s *Service) claimObjectJob(ctx context.Context, derivation, objectID string) (claimedJob, error) {
+	return s.claimJobIn(ctx, derivation, objectID, "j.not_before, j.object_id")
+}
+
+// claimJobIn leases a ready job as claimObjectJob does, the first in order,
+// an SQL ORDER BY over the job j.
+func (s *Service) claimJobIn(ctx context.Context, derivation, objectID, order string) (claimedJob, error) {
 	// Every claim counts as an attempt, so a job that never finishes stops
 	// being reclaimed once its attempts are used up.
 	if _, err := s.db.ExecContext(ctx, `
@@ -215,7 +221,7 @@ SELECT j.object_id, j.derivation, j.attempts, o.orientation, v.object_id IS NOT 
 FROM jobs j JOIN objects o ON o.id = j.object_id LEFT JOIN videos v ON v.object_id = j.object_id
 WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
   AND (? = '' OR j.object_id = ?)
-ORDER BY j.not_before, j.object_id
+ORDER BY `+order+`
 LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation, &job.video, &job.duration); err != nil {
 			return err
 		}
@@ -243,7 +249,10 @@ type JobRecovery struct {
 // fails as interrupted. Jobs that failed on storage or on a FFmpeg Worker that
 // ran out of time (io) start over, as the disk that was full or the device
 // that was too busy may be fine now; so do those a worker that was not there
-// failed before such failures stopped counting (issue #168).
+// failed before such failures stopped counting (issue #168). Text readings
+// that failed do not: they fail where the reader fails on that photo, which a
+// restart does not change, and each try takes minutes; a new reader tries
+// them again (requeueStaleTexts).
 func (s *Service) RecoverJobs(ctx context.Context) (JobRecovery, error) {
 	var recovery JobRecovery
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -259,7 +268,7 @@ WHERE state = 'running' AND attempts >= ?`, jobErrorInterrupted, jobMaxAttempts)
 		}
 		requeued, err := tx.ExecContext(ctx, `
 UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
+WHERE state = 'failed' AND error_class = ? AND derivation <> ?`, now, jobErrorIO, textDerivation)
 		if err != nil {
 			return err
 		}

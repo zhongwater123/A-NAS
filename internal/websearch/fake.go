@@ -18,7 +18,8 @@ import (
 
 // Fake answers like SearXNG without reaching any engine, for development and
 // the Fake host state: a few results per engine, built from the query, with
-// Bing's engines reported as unresponsive.
+// Bing's engines reported as unresponsive. 搜狗 answers a search that contains
+// 验证码 with a CAPTCHA, which pauses it.
 type Fake struct {
 	// Delay is how long an engine takes to answer, so that the window can be
 	// seen filling in; none when nil.
@@ -45,7 +46,14 @@ var fakeEngines = []EngineInfo{
 	{Name: "piratebay", Categories: []string{"files"}}, {Name: "nyaa", Categories: []string{"files"}},
 }
 
-func (Fake) Engines(context.Context) ([]EngineInfo, error) { return fakeEngines, nil }
+// Engines are fakeEngines, each with more than one page.
+func (Fake) Engines(context.Context) ([]EngineInfo, error) {
+	engines := slices.Clone(fakeEngines)
+	for i := range engines {
+		engines[i].Paging = true
+	}
+	return engines, nil
+}
 
 // Search answers for the one engine the Service asks at a time.
 func (f Fake) Search(ctx context.Context, form url.Values) (Response, error) {
@@ -62,6 +70,10 @@ func (f Fake) Search(ctx context.Context, form url.Values) (Response, error) {
 	response := Response{Suggestions: []string{query + " 是什么", query + " 教程"}}
 	if strings.HasPrefix(name, "bing") {
 		response.Unresponsive = [][]string{{name, "timeout"}}
+		return response, nil
+	}
+	if name == "sogou" && strings.Contains(query, "验证码") {
+		response.Unresponsive = [][]string{{name, "CAPTCHA"}}
 		return response, nil
 	}
 	var categories []string
@@ -88,11 +100,26 @@ func (f Fake) Search(ctx context.Context, form url.Values) (Response, error) {
 			result.MagnetLink = fmt.Sprintf("magnet:?xt=urn:btih:%040d&dn=example-%d", n, n)
 			result.Filesize, result.Seed, result.Leech = fmt.Sprintf("%d.5 MB", 100*n), strconv.Itoa(20-n), strconv.Itoa(n)
 			result.Thumbnail = ""
+		case slices.Contains(categories, "music"):
+			result.Length, result.Author = strconv.Itoa(150+n*23), "示例歌手"
+		case slices.Contains(categories, "science"):
+			result.Template, result.Thumbnail = "paper.html", ""
+			result.Authors, result.Journal = []any{"张三", "李四", "王五", "赵六"}, "示例学报"
+			result.DOI, result.PDFURL = fmt.Sprintf("10.0000/example.%d", n), fmt.Sprintf("https://example.org/paper-%d.pdf", n)
+		case slices.Contains(categories, "repos"):
+			result.Template, result.Thumbnail = "packages.html", ""
+			result.Version, result.Maintainer, result.LicenseName = fmt.Sprintf("1.%d.0", n), "example", "MIT License"
+			result.Popularity, result.SourceCodeURL = float64(1000*n), "https://example.org/source"
+		case slices.Contains(categories, "map"):
+			result.Template, result.Thumbnail = "map.html", ""
+			result.Latitude, result.Longitude = 30.24+float64(n)/100, 120.15
+			result.Address = map[string]any{"road": "示例路", "house_number": float64(n), "locality": "杭州市", "country": "中国"}
 		}
 		response.Results = append(response.Results, result)
 	}
 	if page == 1 && name == "baidu" {
-		response.Infoboxes = []RawInfobox{{Infobox: query, Content: "开发模式下的示例摘要。", ID: "https://example.org/wiki"}}
+		response.Infoboxes = []RawInfobox{{Infobox: query, Content: "<p>开发模式下的示例摘要，没有访问任何百科。</p><p>第二段示例文字。</p>",
+			ID: "https://example.org/wiki", ImgSrc: "https://images.example.org/infobox.png"}}
 	}
 	return response, nil
 }

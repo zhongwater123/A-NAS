@@ -1,6 +1,6 @@
 # 架构决策记录
 
-ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权衡的决定。普通依赖升级、易撤销配置和实现细节不创建 ADR。
+ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权衡的决定。普通依赖升级、易撤销配置和实现细节不创建 ADR；用户作出的可以改回来的产品决定（默认值、阈值、范围、优先级）写[决定记录](../decisions/README.md)。同一个决定只写在一处，分界见[决定记录](../decisions/README.md#与-adr-的分界)。`proposed` 的 ADR 等用户接受，列在[当前状态](../status/CURRENT.md#待用户决定)的“待用户决定”中。
 
 ## 索引
 
@@ -35,10 +35,14 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - 0026：VNAS 经 NAS 上的 PAIR 节点使用家里电脑的算力（draft，[PR #196](https://github.com/zhongwater123/A-NAS/pull/196)）
 - 0027：语音处理在云端转写与整理，声纹只在本机计算和保存（draft，[PR #203](https://github.com/zhongwater123/A-NAS/pull/203)）
 
-- [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed；修订 0011 的数据位置：派生的向量索引放在系统盘）
+- [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（accepted；修订 0011 的数据位置：派生的向量索引放在系统盘）
 - [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed）
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
+- [0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（proposed）
+- [0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（proposed；修订 0012 的“只适用于可信内网”）
+- [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
+- [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
 
 ## 格式
 

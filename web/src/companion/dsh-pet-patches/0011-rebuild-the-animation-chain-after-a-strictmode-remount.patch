@@ -1,0 +1,53 @@
+The pet shows under React's StrictMode, which A-NAS renders in. In development StrictMode
+unmounts every component once more and mounts it again, keeping its refs; the card's
+animation chain is built once into a ref and disposed on unmount, so the remount ran on a
+disposed chain that drops every animation it loads. The unmount now empties the ref, and a
+mount that finds its chain gone asks for one more render, which builds a new chain and plays
+the current animation on it. A real mount and unmount behave as before.
+
+card/drag.ts follows the same pattern but needs no change: its driver's dispose only removes
+the window mouseup fallback, which the next press adds again.
+
+diff --git a/client/pet/card/animation.ts b/client/pet/card/animation.ts
+--- a/client/pet/card/animation.ts
++++ b/client/pet/card/animation.ts
+@@ -92,11 +92,23 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
+ 
+     // 状态驱动播放。
+     useEffect(() => {
++      // A-NAS: a chain disposed by StrictMode's rehearsal unmount (below) cannot play; the next render
++      // builds another one and plays on that.
++      if (ownAnimRef.current !== ownAnim) return;
+       ownAnim.switchTo(anim, once, cuePlayback);
+       // eslint-disable-next-line react-hooks/exhaustive-deps -- 依赖由 anim/once/seq/cuePlayback 的换源身份决定；ownAnim 是稳定引用，补它没有意义
+     }, [anim, once, seq, cuePlayback]);
+ 
+     useEffect(() => {
++      // A-NAS: in development React's StrictMode unmounts every component once more and mounts it
++      // again, keeping its refs, so this effect would run again on the chain its cleanup disposed, which
++      // never plays again and left the pet blank. The cleanup empties the ref instead, and here a
++      // render is asked for: it builds a new chain, plays the current animation on it (seq changes) and
++      // runs this effect for that chain. A real mount and unmount run it once each, as before.
++      if (ownAnimRef.current !== ownAnim) {
++        card.actions.bumpSeq();
++        return;
++      }
+       // 槽对象身份稳定（useRef 一次），字段每渲染就地更新；捕获一份给清理用，避免读 .current。
+       const services = live.current;
+       // 视口变化要按新尺寸重算根节点位置，否则改窗口大小后宠物停在旧比例上；
+@@ -149,13 +161,14 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
+         unregisterPose(); // 卸载即摘除：静默失效比读到陈旧值安全。
+         unregisterProgress();
+         ownAnim.dispose(); // 中断在途素材请求并释放 blob，之后本实例不可复用。
++        ownAnimRef.current = null;
+         services.stopMove();
+         services.drag.stopFollow();
+         services.flight.stop();
+         services.squash.stop();
+       };
+       // eslint-disable-next-line react-hooks/exhaustive-deps -- 挂载/卸载各跑一次：闭包读的是 refs 与稳定 props
+-    }, []);
++    }, [ownAnim]);
+ 
+     return ownAnim;
+   };

@@ -13,6 +13,7 @@ export type {
   WebSearchCategory,
   WebSearchInfobox,
   WebSearchLicense,
+  WebSearchPausedEngine,
   WebSearchQuery,
   WebSearchResult,
   WebSearchStatus,

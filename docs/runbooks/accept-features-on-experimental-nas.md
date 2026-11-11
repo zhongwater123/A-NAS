@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-10-27
+更新时间：2026-11-05
 
 ## 目的
 
@@ -40,12 +40,14 @@
 - 账号规则（#101）：按管理员、成员与被禁用账号核对登录、禁用、重置与改密。
 - 身份同步（#261）：按[调查的后续工作](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md#后续工作)核对产品服务启动后的身份同步日志、已禁用账号的登记，以及被禁用成员没有 SMB 会话。
 - SMART 改为后台读取（#126）：日志中 smartctl 被杀与超时的条数、大文件夹的加载耗时、数据盘能否待机（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
+- 温度与风扇（#360）：部署后只读核对 `name` 为 `nct6798` 的 hwmon 目录中的 `fan2_input`，在“设置 → 概览”与“任务管理器 → 设备运行状态”确认 2 号风扇可见且转速相符；不拔风扇或改写传感器。异常 SMART 温度由本地故障夹具验证，实机只确认其他设备指标持续可用（[调查](../investigations/2026-11-09-hwmon-truncation-and-smart-temperature.md)）。
 
 ### 备份中心与存储
 
 - 快照清扫（#204）：部署前后记下 `.a-nas-snapshots` 的条目数并查看清扫日志，确认大空间出现凌晨 3 点的定时快照（[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)）；各空间默认的每日快照都出现。
 - 实测“找回文件 → 最近删除或移走”在真实空间上的耗时。
 - 硬盘用途（#149、#198）：加盘后不重启即显示为已使用（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)），生成计划后可以取消；按[加盘手册](add-a-disk-to-the-data-volume.md)补做 Scrub。
+- 镜像缺盘（M2）：2026-11-10 部署后重启，mount unit 已不再随单块设备停止（`StopPropagatedFrom=` 为空）；还要按[镜像缺盘与更换硬盘](replace-a-mirror-disk.md)拔盘开机、接回，有空闲盘时验证更换（[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 存储计划不随页面中断（#165）：需要一块空闲盘。按[调查的后续工作](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md#后续工作)在加盘执行中关闭页面，回来后向导接着显示并完成。
 - 无法识别的设备（#263）：插入空读卡器或没有序列号的 U 盘，“设置 → 存储”照常列出其他硬盘，该设备说明原因且不可选（[调查](../investigations/2026-10-26-unidentified-device-blocks-host-state.md)）。
 - 系统健康（#143）：概览的“健康检查”与 SMART、温度、挂载、只读、剩余空间和 Btrfs 错误计数一致。
@@ -68,6 +70,11 @@
 - 超大图片（#265）：上传超出解码预算的图片（如 16384 × 16384 的 16 位 PNG）被拒绝并说明原因，相册服务没有因内存上限重启（[调查](../investigations/2026-10-26-photo-decode-memory-budget.md)）。
 - 视频（#146）：用 iPhone（HEVC、竖拍、实况 MOV）、安卓与摄像机的真实文件验收导入、封面、播放与转码负载。Catalog 已到第 13 次迁移，回滚到更早的 release 前须先彻底删除视频资产。
 
+### 家庭中心
+
+- [#363 数据一致性](../investigations/2026-11-05-family-data-integrity.md)：同次更新产品、相册与家庭服务后，用专用测试宝宝和可丢弃照片创建一篇含两张照片的日志；在相册回收其中一张、修改日志文字、恢复照片，确认两张仍在原记录中。去“设置 → 日志”的“家庭中心”类别查看本人操作，再换账号确认看不到前一账号的家庭操作。上传一段测试录音并播放，留言墙出现“读取更早的留言”时核对能读取旧信。
+- 容量阈值、205 封留言、并发重试与清理期间上传的故障注入由[本地回归测试](../../internal/family/data_regression_test.go)覆盖；不要通过填满实验 NAS 或修改系统时间复现。结束后在界面删除本节新建的测试宝宝与测试照片；未得到预期结果时保留它们并记录 release 和操作顺序。
+
 ### 影视中心与音乐
 
 - 影视中心：直接播放与转码、字幕、成员间进度隔离、从影视中心上传、重命名片源与电视剧后片名和剧集的更新（[调查](../investigations/2026-10-15-media-rename-scan-race.md)），以及转封装和转码播放时前进、后退与拖动的等待时间和 CPU 占用。
@@ -81,6 +88,7 @@
 
 - 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
+- 安装前置检查（#185）：按[容器代理手册](install-container-agent.md#安装预留协议的升级顺序)先更新容器代理、再更新产品服务，然后正常安装一个可丢弃应用。再选两个端口相同的可丢弃应用（例如目录中的 FileDrop 与 pyLoad 都用 8000），装上一个并停止它，然后安装另一个：安装在接受前被拒绝，NAS 上没有新的 `app-<id>` 账号（`id app-<id>` 报错），也没有新建它的共享目录（[调查](../investigations/2026-10-27-app-install-preparation-order.md)）。
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
 - 镜像下载重试：更新容器代理后重新安装 Immich。镜像仓库限流时，输出逐行出现“<服务>：镜像仓库限流，N 秒后重试（第 k 次）”，安装随后成功；5 次仍失败时，任务说明原因并保留已下载完成的镜像，再次安装不重新下载它们（`docker image ls` 核对），见[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。
@@ -90,6 +98,14 @@
 ### 成员分享
 
 在局域网 HTTP 浏览器上（不是 localhost）验收发送、接收、私聊与保存（[调查](../investigations/2026-10-16-member-sharing-http-send.md)），以及 #157 的并排窗口、接收者状态、按讨论合并的提醒和自己的消息不计未读；分别重启产品服务与 Host Agent 后分享重新可用（[调查](../investigations/2026-10-15-member-sharing-service-startup.md)）。
+
+用可丢弃文件，在产品服务重启、Web 入口刚恢复时立即发起分享及保存：可以暂时提示服务不可用，稍后重试应成功，不得把未撤回的分享显示为“已撤回”。确认接收者能读取独立副本、保存内容一致，随后真正撤回仍阻止继续读取；收集分享服务和产品服务日志（[#362 调查](../investigations/2026-11-04-share-bridge-generation-window.md)）。
+
+最小化与历史（#182）：打开与另一账号的私聊后最小化分享窗口，浏览器开发者工具的网络面板中不再有对话内容的请求，桌面的未读徽标仍约每 30 秒同步；另一账号此时发来的消息在恢复窗口后接着出现，没有重复或缺失（[调查](../investigations/2026-10-28-share-history-polling.md)）。
+
+### 网页搜索
+
+- 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
 
 ### AI 助手（试用）
 

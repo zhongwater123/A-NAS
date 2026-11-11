@@ -28,6 +28,9 @@ func TestSessionWorksOnlyFromTheClientThatSignedIn(t *testing.T) {
 		return accounts.ClientOrigin{Via: accounts.ViaLAN, Address: address}
 	}
 	loopback := accounts.ClientOrigin{Via: accounts.ViaLoopback}
+	internet := func(address string) accounts.ClientOrigin {
+		return accounts.ClientOrigin{Via: accounts.ViaInternet, Address: address}
+	}
 	signIn := func(origin accounts.ClientOrigin, localConsole bool) string {
 		t.Helper()
 		signInCtx := accounts.WithClientOrigin(ctx, origin)
@@ -62,6 +65,13 @@ func TestSessionWorksOnlyFromTheClientThatSignedIn(t *testing.T) {
 		{"local console session on the device", signIn(loopback, true), loopback, nil},
 		{"local console session through Caddy", signIn(loopback, true), lan("127.0.0.1"), elsewhere},
 		{"session signed in without an address", signIn(lan("unknown"), false), lan("unknown"), unbound},
+		// A phone keeps its internet session as it changes networks (ADR 0032).
+		{"internet session from another address", signIn(internet("198.51.100.7"), false), internet("203.0.113.40"), nil},
+		{"internet session without an address", signIn(internet(""), false), internet("203.0.113.40"), nil},
+		{"internet session through the LAN entry", signIn(internet("198.51.100.7"), false), lan("198.51.100.7"), elsewhere},
+		{"internet session over direct loopback", signIn(internet("198.51.100.7"), false), loopback, elsewhere},
+		{"LAN session through the internet entry", signIn(lan("192.0.2.10"), false), internet("192.0.2.10"), elsewhere},
+		{"local console session through the internet entry", signIn(loopback, true), internet(""), elsewhere},
 		{"session signed in without an origin", signIn(accounts.ClientOrigin{}, false), accounts.ClientOrigin{}, unbound},
 	}
 	for _, c := range cases {

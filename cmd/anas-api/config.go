@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
+
+	"golang.org/x/net/idna"
 
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
@@ -56,6 +59,14 @@ type Config struct {
 	// through Caddy (invariant 9), and the loopback checks for setup, the
 	// local console and the terminal rely on it.
 	HTTPAddr string `env:"ANAS_HTTP_ADDR" envDefault:"127.0.0.1:8080"`
+	// InternetHTTPAddr is the internet entry's own loopback listener, which
+	// Caddy's HTTPS site for InternetHost proxies to (ADR 0032). Both are set
+	// or neither; without them the device has no internet entry.
+	InternetHTTPAddr string `env:"ANAS_INTERNET_HTTP_ADDR"`
+	InternetHost     string `env:"ANAS_INTERNET_HOST"`
+	// FakeStorage picks the simulated host in fake mode: empty for the usual
+	// disks, degraded for a volume that loses a disk (devstorage.go).
+	FakeStorage string `env:"ANAS_FAKE_STORAGE"`
 	// StateDir holds the SQLite stores and caches; it defaults to the user's
 	// configuration directory.
 	StateDir string `env:"ANAS_STATE_DIR"`
@@ -92,8 +103,10 @@ type Config struct {
 	// ScreensaverVideo is the variable releases before the pool named; its
 	// directory is the pool.
 	ScreensaverVideo string `env:"ANAS_SCREENSAVER_VIDEO"`
-	Assistant        AssistantConfig
-	WebSearch        WebSearchConfig
+	// CompanionDirectory holds the companion's animations (install-media-pool.sh).
+	CompanionDirectory string `env:"ANAS_COMPANION_DIRECTORY"`
+	Assistant          AssistantConfig
+	WebSearch          WebSearchConfig
 	// HostAgentChangesSocket is the Host Agent's socket for the assistants'
 	// changes. The Product Service once read the same name for the spike's
 	// change broker; it refuses it now, so that neither meaning is taken for
@@ -170,7 +183,27 @@ func loadConfig(environment map[string]string) (Config, error) {
 		return Config{}, errors.New("ANAS_HOSTSTATE_MODE must be agent or fake")
 	}
 	live := c.Live()
-	problem(loopbackAddress(c.HTTPAddr))
+	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
+	switch {
+	case c.FakeStorage == "":
+	case live:
+		problem(errors.New("ANAS_FAKE_STORAGE applies to fake mode only"))
+	case c.FakeStorage != fakeStorageDegraded:
+		problem(fmt.Errorf("ANAS_FAKE_STORAGE must be empty or %s", fakeStorageDegraded))
+	}
+	switch {
+	case c.InternetHTTPAddr == "" && c.InternetHost == "":
+	case c.InternetHTTPAddr == "" || c.InternetHost == "":
+		problem(errors.New("ANAS_INTERNET_HTTP_ADDR and ANAS_INTERNET_HOST turn the internet entry on together; set both or neither"))
+	default:
+		problem(loopbackAddress("ANAS_INTERNET_HTTP_ADDR", c.InternetHTTPAddr))
+		if c.InternetHTTPAddr == c.HTTPAddr {
+			problem(errors.New("ANAS_INTERNET_HTTP_ADDR must differ from ANAS_HTTP_ADDR: requests are told apart by the listener they arrive on"))
+		}
+		host, err := domainName(c.InternetHost)
+		problem(err)
+		c.InternetHost = host
+	}
 
 	if c.StateDir != "" {
 		path("ANAS_STATE_DIR", &c.StateDir)
@@ -194,6 +227,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
 		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
+		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
 		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir}, {"ANAS_WEB_SEARCH_SOCKET", &c.WebSearch.Socket},
 		{"ANAS_WEB_SEARCH_RELEASE", &c.WebSearch.Release}, {"ANAS_WEB_SEARCH_SECRET_FILE", &c.WebSearch.SecretFile},
 	} {
@@ -260,6 +294,10 @@ func loadConfig(environment map[string]string) (Config, error) {
 		}
 	}
 
+	if c.CompanionDirectory == "" {
+		c.CompanionDirectory = "/var/lib/a-nas/companion/current"
+	}
+
 	if c.HostAgentChangesSocket != "" {
 		problem(errors.New("ANAS_ASSISTANT_CHANGES_SOCKET is the Host Agent's; the Product Service's stand-in for development is ANAS_ASSISTANT_SPIKE_BROKER_SOCKET"))
 	}
@@ -281,7 +319,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 }
 
 // loopbackAddress accepts only a loopback IP and a port.
-func loopbackAddress(address string) error {
+func loopbackAddress(name, address string) error {
 	host, _, err := net.SplitHostPort(address)
 	if err == nil {
 		var ip netip.Addr
@@ -290,9 +328,25 @@ func loopbackAddress(address string) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("ANAS_HTTP_ADDR must be a loopback address and port such as 127.0.0.1:8080; the LAN reaches the API only through Caddy: %w", err)
+		return fmt.Errorf("%s must be a loopback address and port such as 127.0.0.1:8080; browsers reach the API only through Caddy: %w", name, err)
 	}
 	return nil
+}
+
+// domainName accepts the internet entry's domain as it can be registered: at
+// least two labels, the last not all digits so that an IP address is not
+// taken for one. It returns the name as browsers send it in Host: in lower
+// case, an internationalized name in its ASCII form.
+func domainName(name string) (string, error) {
+	host, err := idna.Registration.ToASCII(strings.ToLower(name))
+	labels := strings.Split(host, ".")
+	if err == nil && (len(labels) < 2 || strings.Trim(labels[len(labels)-1], "0123456789") == "") {
+		err = errors.New("not a domain name")
+	}
+	if err != nil {
+		return "", fmt.Errorf("ANAS_INTERNET_HOST must be the domain the internet entry serves, such as nas.example.com: %w", err)
+	}
+	return host, nil
 }
 
 // photoServiceConfig configures the photo service (ADR 0011), which runs

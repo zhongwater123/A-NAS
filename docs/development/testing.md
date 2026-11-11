@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-10-27
+更新时间：2026-11-06
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -20,6 +20,30 @@
 向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。在 Linux x86_64 开发环境中先运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
 清单目前固定 Linux x86_64 包。其他架构使用 `ANAS_QDRANT_BINARY` 前需自行验证同版本二进制的可运行性；项目尚无已验证的 ARM64 完整门禁流程。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
+
+## 测试素材
+
+测试用的大文件与模型（[拉取模型](ai-development.md#拉取模型)）放在同一个私有仓库 [zhongwater123/A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets) 中，每套素材一个 Release，附 `SHA256SUMS`。仓库开启了不可变 Release，补充素材就发新的 Release。读取需要仓库所有者把账号加为协作者。
+
+| Release | 内容 |
+|---|---|
+| [`videos-dji-v1`](https://github.com/zhongwater123/A-NAS-assets/releases/tag/videos-dji-v1) | DJI 相机存储卡中的全部 MP4：582 个，91.4 GiB，2026 年 5、8、10 月拍摄。不含 `.LRF` 低清预览与照片 |
+
+拉取全部，或用 `-p` 只拉一部分（连同 `SHA256SUMS`）：
+
+```bash
+gh release download videos-dji-v1 --repo zhongwater123/A-NAS-assets --dir DIR --skip-existing
+gh release download videos-dji-v1 --repo zhongwater123/A-NAS-assets --dir DIR --skip-existing -p 'DJI_202608*' -p SHA256SUMS
+```
+
+2 GiB 以上的文件超过 GitHub 单个附件的上限，按 1 GiB 切成 `<文件名>.part-NN`，目前只有 `DJI_20261004133059_0885_D.MP4`。在 DIR 中拼回后核对（macOS 用 `shasum -a 256 -c`）：
+
+```bash
+cat DJI_20261004133059_0885_D.MP4.part-* > DJI_20261004133059_0885_D.MP4 && rm DJI_20261004133059_0885_D.MP4.part-*
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+gh 下载时直接写入最终文件名，中断后 `--skip-existing` 会保留不完整的文件，核对失败的删掉后重跑。2026-11-04 实测下载约 1.7 MB/s，全部拉取约需 16 小时。
 
 ## Web 桌面
 
@@ -76,17 +100,25 @@ python3 -m venv ~/.local/opt/ai-tools
 
 开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
-`make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
+`make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。测试启动的后台操作也要在测试返回前等它结束：之后才写进 `t.TempDir()` 的 goroutine 会让清理报 `directory not empty`（[调查](../investigations/2026-11-04-volume-test-writes-after-cleanup.md)）。
 
 Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
-各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本的哈希与所在的周缓存，构建脚本改了或过了一周才重新组装。
+各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本与 `a-nas-host` 包定义的哈希及所在的周缓存，二者改了或过了一周才重新组装。
 
 另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
 
 ## Root 集成测试
 
-账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行：
+账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行。
+
+CI 的系统测试作业用 [`scripts/root-integration-test.sh`](../../scripts/root-integration-test.sh) 运行它们（[#190](https://github.com/zhongwater123/A-NAS/issues/190)）：在作业中编译测试程序，以 root 在系统测试的 Debian 13 镜像中运行，镜像不需要 Go；同一脚本还运行分享的 Btrfs 捕获与 ACL 矩阵（`internal/sharefiles/testdata/btrfs.sh`）。两组测试创建同样的账号，所以各用一个容器。本地有 Docker 与这个镜像时同样运行：
+
+```bash
+scripts/build-system-test-image.sh && scripts/root-integration-test.sh
+```
+
+也可以在装有 Go 与 gcc 的容器中直接运行：
 
 ```bash
 docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
@@ -123,6 +155,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
 - SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
 - 禁用账号会断开它连着的 SMB 会话，之后产品服务启动时的身份同步照常成功。Host Agent 的沙箱让 Samba 命令在标准错误打印告警，root 集成测试碰不到这一点（[调查](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)）；
+- smbd 等 SMB 接口有了 IPv4 地址才启动：在一个暂时没有地址的接口上，smbd 不启动、超时后再试，加上地址后启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）；
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
 - 安装器配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 活动记录为经入口的登录记下客户端地址、为本机屏幕登录记下来源；Host Agent 在正式单元的沙箱中以 `journalctl` 读到产品服务与 systemd 关于白名单单元的日志，成员读不到系统日志，白名单外的单元被拒绝（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)）；
@@ -137,16 +170,27 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
   - 换了 Qdrant 二进制时存储被清空；
   - 放在实例单元中的探针看不到网络、读不到数据卷与产品状态；
   - 篡改的压缩包被拒绝；
-  - 相册服务建好集合、同步照片，并记下搜索的影子比对。
+  - 相册服务建好集合、同步照片；重启后的一次搜索读索引，后台核对与 Catalog 一致，没有回退到 Catalog。
 
   运行前需要 `scripts/fetch-qdrant.sh` 取得的压缩包。
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
-- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。
+- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），另加系统测试打开的可选功能（Caddy、助手沙箱的工具）与只供测试用的工具。
+- 系统测试按部署的顺序安装：安装器先在没有 `a-nas-host`、以及装着另一个版本时拒绝安装且不改变系统，然后以 `dpkg -i` 装上 release 的 `a-nas-host`。dpkg 不下载依赖，包列出了镜像中没有的依赖时，这一步失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
+- 每条检查在它保护的东西坏掉时都要失败（[#423](https://github.com/zhongwater123/A-NAS/issues/423)）：
+  - 一条检查只查一个单元，因为 `systemctl is-active A B` 在任一单元运行时就成功；
+  - 拒绝要看到拒绝本身：
+    - 本地访问用 `denied` 或 `cannot_create`，先以 root 证明目标存在，再要求输出 `Permission denied`；
+    - SMB 用 `smb_refused` 写明 `NT_STATUS_…`；
+    - 终端要求握手返回 403；
+    - 互联网入口要求连接在 TLS 完成前被关闭；
+  - `fails` 只用于任何失败都算数的检查；
+  - 沙箱探针在沙箱外运行时，要报出具体的发现；
+  - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标用 `expect_hidden`，由系统测试在沙箱外确认存在。
 - 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
 
 ## CI
@@ -159,4 +203,6 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 
 - [Makefile](../../Makefile)
 - [CI 工作流](../../.github/workflows/ci.yml)
+- [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
+- [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)

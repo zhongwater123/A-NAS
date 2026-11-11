@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Category groups actions for the activity log's filters.
@@ -28,11 +30,12 @@ const (
 	CategoryFile    Category = "file"
 	CategoryStorage Category = "storage"
 	CategoryPhoto   Category = "photo"
+	CategoryFamily  Category = "family"
 	CategoryOther   Category = "other"
 )
 
 // Categories lists the categories a client may filter by.
-var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto}
+var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto, CategoryFamily}
 
 // categoryPrefixes maps each category to the action prefixes that belong to
 // it. "photos.viewing" (an account action) must not match "photo.".
@@ -42,6 +45,7 @@ var categoryPrefixes = map[Category][]string{
 	CategoryFile:    {"file.", "snapshot."},
 	CategoryStorage: {"storage."},
 	CategoryPhoto:   {"photo."},
+	CategoryFamily:  {"family."},
 }
 
 // CategoryOf returns the category of an action.
@@ -332,11 +336,11 @@ FROM audit_events)`
 	if q.Subject != nil {
 		var alternatives []string
 		if len(q.Subject.ActorIDs) > 0 {
-			alternatives = append(alternatives, "actor IN ("+placeholders(len(q.Subject.ActorIDs))+")")
+			alternatives = append(alternatives, "actor IN ("+sqlitedb.Placeholders(len(q.Subject.ActorIDs))+")")
 			arguments = append(arguments, values(q.Subject.ActorIDs)...)
 		}
 		if len(q.Subject.ResourceIDs) > 0 {
-			alternatives = append(alternatives, "resource_id IN ("+placeholders(len(q.Subject.ResourceIDs))+")")
+			alternatives = append(alternatives, "resource_id IN ("+sqlitedb.Placeholders(len(q.Subject.ResourceIDs))+")")
 			arguments = append(arguments, values(q.Subject.ResourceIDs)...)
 		}
 		if len(alternatives) == 0 {
@@ -352,7 +356,7 @@ FROM audit_events)`
 			allowed := []string{"actor = ?"}
 			allowedArguments := []any{q.Reveal.ViewerID}
 			if len(q.Reveal.SpaceIDs) > 0 {
-				allowed = append(allowed, "space IN ("+placeholders(len(q.Reveal.SpaceIDs))+")")
+				allowed = append(allowed, "space IN ("+sqlitedb.Placeholders(len(q.Reveal.SpaceIDs))+")")
 				allowedArguments = append(allowedArguments, values(q.Reveal.SpaceIDs)...)
 			}
 			names = "((" + strings.Join(allowed, " OR ") + ") AND (" + names + "))"
@@ -362,7 +366,7 @@ FROM audit_events)`
 		arguments = append(arguments, text)
 		arguments = append(arguments, nameArguments...)
 		if len(q.TextActors) > 0 {
-			alternatives = append(alternatives, "actor IN ("+placeholders(len(q.TextActors))+")")
+			alternatives = append(alternatives, "actor IN ("+sqlitedb.Placeholders(len(q.TextActors))+")")
 			arguments = append(arguments, values(q.TextActors)...)
 		}
 		conditions = append(conditions, "("+strings.Join(alternatives, " OR ")+")")
@@ -387,10 +391,6 @@ func Merge(limit int, pages ...[]Event) (events []Event, more bool) {
 		return events[:limit], true
 	}
 	return events, false
-}
-
-func placeholders(count int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }
 
 func values(items []string) []any {

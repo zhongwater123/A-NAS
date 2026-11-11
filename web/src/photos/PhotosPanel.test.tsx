@@ -4,8 +4,9 @@ import type { HttpHandler } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import type { PhotoAsset, PhotoLibrary, PhotoSearchResults } from "../api.generated";
+import type { PhotoAsset, PhotoLibrary, PhotoSearchResults, PhotoText, PhotoTextChange } from "../api.generated";
 import { session } from "../test/fixtures";
+import { familyBaby, familyOverview, familyRecord } from "../test/handlers/family";
 import {
   album,
   asset,
@@ -715,6 +716,71 @@ describe("PhotosPanel selection", () => {
   });
 });
 
+describe("PhotosPanel 加入宝宝频道", () => {
+  it("adds photos to babies' channels, copying the caller's own once and leaving out what a channel has", async () => {
+    const copied: string[] = [];
+    const records: Array<{ babyId: string; photos: string[]; text?: string }> = [];
+    const opened = vi.fn();
+    serve(
+      {
+        timelines: mine(() => [
+          asset("photo:1", { sharedCopy: "photo:s1" }),
+          asset("photo:2"),
+          asset("photo:3", { sharedCopy: "photo:s3" }),
+        ]),
+        family: () =>
+          familyOverview({ babies: [familyBaby(), familyBaby({ id: "baby_2", name: "二宝", nickname: "" })] }),
+      },
+      http.post("/api/v1/family/babies/{babyId}/album/contains", async ({ params, request, response }) => {
+        const { assetIds } = await request.json();
+        return response(200).json({
+          assetIds: params.babyId === "baby_1" ? assetIds.filter((id) => id === "photo:s3") : [],
+        });
+      }),
+      http.post("/api/v1/photos/assets/{assetId}/copies", ({ params, response }) => {
+        copied.push(params.assetId);
+        return response(201).json(asset("photo:c2", { libraryId: sharedLibrary.id }));
+      }),
+      http.post("/api/v1/family/babies/{babyId}/records", async ({ params, request, response }) => {
+        const body = await request.json();
+        records.push({ babyId: params.babyId, photos: body.photos ?? [], text: body.text });
+        return response(201).json(familyRecord({ babyId: params.babyId, kind: "photos" }));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} onOpenFamily={opened} />);
+    for (const name of ["photo:1.jpg", "photo:2.jpg", "photo:3.jpg"])
+      await user.click(await screen.findByRole("checkbox", { name: `选择 ${name}` }));
+    await user.click(await screen.findByRole("button", { name: "加入宝宝频道" }));
+    const dialog = await screen.findByRole("dialog", { name: "加入宝宝频道" });
+    expect(await within(dialog).findByText("1 张已在频道中，会跳过")).toBeTruthy();
+    expect(within(dialog).getByText(/其中 1 张在我的图库，会先复制到共享图库/)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "加入" })).toHaveProperty("disabled", true);
+    await user.click(within(dialog).getByRole("checkbox", { name: /米米/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /二宝/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: "说明（可选）" }), "公园");
+    await user.click(within(dialog).getByRole("button", { name: "加入" }));
+
+    expect(await screen.findByText("已加入米米、二宝的频道")).toBeTruthy();
+    expect(copied).toEqual(["photo:2"]);
+    expect(records.map((record) => ({ ...record, photos: [...record.photos].sort() }))).toEqual([
+      { babyId: "baby_1", photos: ["photo:c2", "photo:s1"], text: "公园" },
+      { babyId: "baby_2", photos: ["photo:c2", "photo:s1", "photo:s3"], text: "公园" },
+    ]);
+    await user.click(screen.getByRole("button", { name: "查看" }));
+    expect(opened).toHaveBeenCalledWith("baby_1");
+  });
+
+  it("offers no channel to an account outside 家庭中心", async () => {
+    serve({ timelines: mine(() => [asset("photo:1")]) });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:1.jpg" }));
+    expect(screen.getByRole("button", { name: "加入相册" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "加入宝宝频道" })).toBeNull();
+  });
+});
+
 describe("PhotosPanel sidebar albums", () => {
   it("keeps the sidebar's albums on screen while it lists them again", async () => {
     let albums = [trip];
@@ -869,7 +935,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       }),
       http.get("/api/v1/photos/search", ({ request, response }) => {
         searches.push(pathOf(request));
-        return response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
+        return response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1, names: 0, texts: 0 });
       }),
     );
     window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
@@ -1091,7 +1157,7 @@ describe("PhotosPanel people and pets", () => {
     const cards = within(row).getAllByRole("button", { name: /^打开 / });
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["打开 小明", "打开 咪咪", "打开 未命名"]);
     expect(within(row).getByText("添加名字")).toBeTruthy();
-    expect(screen.getByText(/照片和人脸都在这台 NAS 上由本地 AI 识别/)).toBeTruthy();
+    expect(screen.getByText(/照片、人脸和文字都在这台 NAS 上由本地 AI 识别/)).toBeTruthy();
     await user.click(within(row).getByRole("button", { name: "已隐藏 1 位" }));
     expect(within(row).getByRole("button", { name: "打开 未命名的狗" })).toBeTruthy();
 
@@ -1165,14 +1231,14 @@ describe("PhotosPanel people and pets", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
     expect(await screen.findByLabelText("人物与宠物")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "人物与宠物设置" }));
-    const settings = await screen.findByRole("dialog", { name: "人物与宠物设置" });
+    await user.click(screen.getByRole("button", { name: "本地 AI 设置" }));
+    const settings = await screen.findByRole("dialog", { name: "本地 AI 设置" });
     const switchOwn = within(settings).getByRole("switch", { name: "我的图库的人物与宠物" });
     expect(switchOwn.getAttribute("aria-checked")).toBe("true");
     expect((within(settings).getByRole("switch", { name: "共享图库的人物与宠物" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
-    expect(within(settings).getByText("已开启 · 由管理员设置")).toBeTruthy();
+    expect(within(within(settings).getByRole("region", { name: "共享图库" })).getByText("由管理员设置")).toBeTruthy();
 
     // Off clears what was recognised, so it asks first.
     await user.click(switchOwn);
@@ -1184,9 +1250,330 @@ describe("PhotosPanel people and pets", () => {
       expect(screen.getByRole("switch", { name: "我的图库的人物与宠物" }).getAttribute("aria-checked")).toBe("false"),
     );
     await user.click(
-      within(screen.getByRole("dialog", { name: "人物与宠物设置" })).getByRole("button", { name: "关闭" }),
+      within(screen.getByRole("dialog", { name: "本地 AI 设置" })).getByRole("button", { name: "关闭" }),
     );
     await waitFor(() => expect(screen.queryByLabelText("人物与宠物")).toBeNull());
+  });
+
+  it("turns reading the text in photos off after asking that corrections stay", async () => {
+    let own = { ...privateLibrary, people: true, texts: true, canSetPeople: true };
+    const changes: unknown[] = [];
+    serve(
+      { libraries: () => [{ ...sharedLibrary, texts: true, canSetPeople: false }, own] },
+      http.patch("/api/v1/photos/libraries/{libraryId}", async ({ request, response }) => {
+        const change = await request.json();
+        changes.push(change);
+        own = { ...own, texts: change.texts ?? own.texts };
+        return response(200).json(own);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("button", { name: "AI 聚合" }));
+    await user.click(await screen.findByRole("button", { name: "本地 AI 设置" }));
+    const settings = await screen.findByRole("dialog", { name: "本地 AI 设置" });
+    const texts = within(settings).getByRole("switch", { name: "我的图库的照片中的文字" });
+    expect(texts.getAttribute("aria-checked")).toBe("true");
+    expect(
+      (within(settings).getByRole("switch", { name: "共享图库的照片中的文字" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    // Escape leaves the question, and the settings stay open.
+    await user.click(texts);
+    expect(await screen.findByRole("dialog", { name: "关闭我的图库的照片中的文字？" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "关闭我的图库的照片中的文字？" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "本地 AI 设置" })).toBeTruthy();
+    expect(changes).toEqual([]);
+
+    await user.click(texts);
+    const ask = await screen.findByRole("dialog", { name: "关闭我的图库的照片中的文字？" });
+    expect(within(ask).getByText(/更正和修改记录会保留/)).toBeTruthy();
+    await user.click(within(ask).getByRole("button", { name: "关闭并删除" }));
+    expect(changes).toEqual([{ texts: false }]);
+    expect(await screen.findByText("已关闭我的图库的照片中的文字")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "我的图库的照片中的文字" }).getAttribute("aria-checked")).toBe("false"),
+    );
+    // On starts at once.
+    await user.click(screen.getByRole("switch", { name: "我的图库的照片中的文字" }));
+    expect(changes).toEqual([{ texts: false }, { texts: true }]);
+  });
+});
+
+describe("PhotosPanel text in photos", () => {
+  const readField = (name: string, value: string, more: Partial<PhotoText["fields"][number]> = {}) => ({
+    name,
+    value,
+    read: value,
+    passed: true,
+    sensitive: false,
+    ...more,
+  });
+  const receipt = (): PhotoText => ({
+    status: "read",
+    kind: "receipt",
+    text: "某某超市\n2024年05月06日\n合计 ¥35.50",
+    complete: true,
+    model: "reader-1",
+    fields: [
+      readField("商户", "某某超市"),
+      readField("日期", "2024年05月06日"),
+      readField("合计", "¥35.80", { passed: false, reasons: ["not_in_text"] }),
+    ],
+  });
+  const fieldPath = (name: string) => `/api/v1/photos/assets/photo%3Areceipt/text/fields/${encodeURIComponent(name)}`;
+
+  it("shows the text read from a photo, and lets a member check, correct and take back a field", async () => {
+    // Bob confirmed the date from the shared library; the total failed a check.
+    let text = receipt();
+    text.fields[1] = {
+      ...text.fields[1],
+      correction: { userId: "user:bob", username: "bob", at: "2026-11-05T06:20:00Z" },
+    };
+    // The change log, newest first, as the photo service keeps it.
+    const log: PhotoTextChange[] = [
+      {
+        field: "日期",
+        old: "2024年05月06日",
+        new: "2024年05月06日",
+        restored: false,
+        userId: "user:bob",
+        username: "bob",
+        library: { id: sharedLibrary.id, kind: "shared" },
+        at: "2026-11-05T06:20:00Z",
+      },
+    ];
+    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const setField = (name: string, value: string | undefined) => {
+      const field = text.fields.find((item) => item.name === name)!;
+      const old = field.correction ? field.value : field.read;
+      if (field.correction && value === old) return;
+      log.unshift({
+        field: name,
+        old,
+        new: value ?? field.read,
+        restored: value === undefined,
+        userId: "user:alice",
+        username: "alice",
+        library: { id: privateLibrary.id, kind: "private" },
+        at: "2026-11-06T06:20:00Z",
+      });
+      text = {
+        ...text,
+        fields: text.fields.map((item) =>
+          item !== field
+            ? item
+            : value === undefined
+              ? { ...receipt().fields.find((read) => read.name === name)! }
+              : {
+                  ...item,
+                  value,
+                  passed: true,
+                  reasons: undefined,
+                  correction: { userId: "user:alice", username: "alice", at: "2026-11-06T06:20:00Z" },
+                },
+        ),
+      };
+    };
+    serve(
+      { timelines: mine(() => [asset("photo:receipt")]), texts: { "photo:receipt": () => text } },
+      http.put("/api/v1/photos/assets/{assetId}/text/fields/{field}", async ({ params, request, response }) => {
+        const body = await request.json();
+        requests.push({ method: "PUT", path: pathOf(request), body });
+        setField(params.field, body.value);
+        return response(200).json(text);
+      }),
+      http.delete("/api/v1/photos/assets/{assetId}/text/fields/{field}", ({ params, request, response }) => {
+        requests.push({ method: "DELETE", path: pathOf(request) });
+        setField(params.field, undefined);
+        return response(200).json(text);
+      }),
+      http.get("/api/v1/photos/assets/{assetId}/text/changes", ({ response }) => response(200).json({ items: log })),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:receipt.jpg");
+    const panel = await screen.findByRole("region", { name: "照片中的文字" });
+    // VNAS, reading the desktop for the member, skips the panel: it shows in
+    // full what an assistant knows only as handles.
+    expect(panel.getAttribute("data-vnas-private")).toBe("照片上读出的文字");
+    expect(within(panel).getByText("小票")).toBeTruthy();
+    expect(within(panel).getByText("机器识别")).toBeTruthy();
+    expect(within(panel).getByText("某某超市")).toBeTruthy();
+    // A field that failed a check says why, and what was read is no secret.
+    expect(within(panel).getByText(/待核对：全文里找不到/)).toBeTruthy();
+
+    // Correcting in place; the pencil takes the focus back, so that the
+    // viewer's keys keep working.
+    const pencil = () => within(panel).getByRole("button", { name: "更正合计" });
+    await user.click(pencil());
+    const input = within(panel).getByRole("textbox", { name: "更正合计" });
+    expect((input as HTMLInputElement).value).toBe("¥35.80");
+    await user.clear(input);
+    await user.type(input, "¥35.50{Enter}");
+    expect(requests).toEqual([{ method: "PUT", path: fieldPath("合计"), body: { value: "¥35.50" } }]);
+    expect(await within(panel).findByText(/alice 更正于/)).toBeTruthy();
+    expect(within(panel).queryByText(/待核对/)).toBeNull();
+    expect(document.activeElement).toBe(pencil());
+    // Escape leaves the field and nothing else.
+    await user.click(pencil());
+    await user.keyboard("{Escape}");
+    expect(within(panel).queryByRole("textbox")).toBeNull();
+    expect(document.activeElement).toBe(pencil());
+    expect(screen.getByRole("dialog", { name: "查看 photo:receipt.jpg" })).toBeTruthy();
+
+    // Taking it back shows what was read.
+    await user.click(within(pencil().closest("li")!).getByRole("button", { name: /恢复识别结果/ }));
+    expect(requests.at(-1)).toEqual({ method: "DELETE", path: fieldPath("合计") });
+    expect(await within(panel).findByText("¥35.80")).toBeTruthy();
+
+    // The whole text opens with the space bar too, which starts no slideshow.
+    within(panel).getByText("全文").closest("summary")!.focus();
+    await user.keyboard(" ");
+    expect(screen.queryByRole("dialog", { name: "幻灯片" })).toBeNull();
+    await user.click(within(panel).getByText("全文"));
+    expect(within(panel).getByText(fullText("某某超市\n2024年05月06日\n合计 ¥35.50"))).toBeTruthy();
+
+    // Who changed what from which library, with a way back: a correction
+    // made over another goes back to it, one made over the reading, or a
+    // confirmation, back to the reading; one the field stands as already
+    // has none.
+    await user.click(within(panel).getByText("修改记录"));
+    const changes = within(panel).getByText("修改记录").closest("details")!;
+    expect(await within(changes).findByText(/bob · .* · 共享图库/)).toBeTruthy();
+    expect(within(changes).getByText(/确认 2024年05月06日/)).toBeTruthy();
+    expect(within(changes).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(changes).queryByRole("button", { name: "把合计改回识别结果" })).toBeNull();
+    await user.click(within(changes).getByRole("button", { name: "把日期改回识别结果" }));
+    expect(requests.at(-1)).toEqual({ method: "DELETE", path: fieldPath("日期") });
+    await waitFor(() => expect(within(changes).getAllByRole("listitem")).toHaveLength(4));
+    expect(within(changes).queryByRole("button", { name: "把日期改回识别结果" })).toBeNull();
+    await user.click(within(changes).getByRole("button", { name: "把合计改回 ¥35.50" }));
+    expect(requests.at(-1)).toEqual({ method: "PUT", path: fieldPath("合计"), body: { value: "¥35.50" } });
+    await waitFor(() => expect(within(changes).getAllByRole("listitem")).toHaveLength(5));
+
+    // A change made while the log is closed is there when it opens again.
+    await user.click(within(panel).getByText("修改记录"));
+    await user.click(within(pencil().closest("li")!).getByRole("button", { name: /恢复识别结果/ }));
+    expect(requests.at(-1)).toEqual({ method: "DELETE", path: fieldPath("合计") });
+    await user.click(within(panel).getByText("修改记录"));
+    await waitFor(() => expect(within(changes).getAllByRole("listitem")).toHaveLength(6));
+  });
+
+  it("confirms a field as read", async () => {
+    let text = receipt();
+    const bodies: unknown[] = [];
+    serve(
+      { timelines: mine(() => [asset("photo:receipt")]), texts: { "photo:receipt": () => text } },
+      http.put("/api/v1/photos/assets/{assetId}/text/fields/{field}", async ({ request, response }) => {
+        bodies.push(await request.json());
+        text = { ...text, fields: text.fields.map((field) => ({ ...field, passed: true, reasons: undefined })) };
+        return response(200).json(text);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await openPhoto(user, "photo:receipt.jpg");
+    const panel = await screen.findByRole("region", { name: "照片中的文字" });
+    await user.click(within(panel).getByRole("button", { name: "确认" }));
+    expect(bodies).toEqual([{ value: "¥35.80" }]);
+    await waitFor(() => expect(within(panel).queryByText(/待核对/)).toBeNull());
+  });
+
+  it("shows the text of a photo in a viewed member library read-only", async () => {
+    const viewed: PhotoLibrary = {
+      id: "library:bob",
+      kind: "private",
+      ownerUserId: "user:bob",
+      ownerName: "bob",
+      createdAt: "2026-10-08T00:00:00Z",
+      viewing: { grantId: "viewing:7", expiresAt: "2099-01-01T00:00:00Z" },
+    };
+    const own: PhotoLibrary = { ...privateLibrary, id: "library:admin", ownerUserId: "user:admin", ownerName: "admin" };
+    serve({
+      libraries: () => [own, sharedLibrary, viewed],
+      timelines: { [viewed.id]: () => [asset("photo:bobs", { libraryId: viewed.id })] },
+      texts: { "photo:bobs": receipt },
+    });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:admin" userName="admin" isAdmin />);
+    await user.click(await screen.findByRole("tab", { name: "bob" }));
+    await openPhoto(user, "photo:bobs.jpg");
+    const panel = await screen.findByRole("region", { name: "照片中的文字" });
+    expect(within(panel).getByText(/待核对/)).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: /更正|确认|恢复/ })).toBeNull();
+    expect(within(panel).getByRole("button", { name: "复制合计" })).toBeTruthy();
+  });
+
+  it("heads the photos whose text holds the query, after the name matches", async () => {
+    serve(
+      { timelines: mine(() => [asset("photo:home")]) },
+      http.get("/api/v1/photos/search", ({ response }) =>
+        response(200).json({
+          items: [asset("photo:超市"), asset("photo:receipt"), asset("photo:shop"), asset("photo:sea")],
+          semantic: true,
+          closest: 3,
+          names: 1,
+          texts: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "超市{Enter}");
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
+    expect(resultOrder()).toEqual([
+      "查看 photo:超市.jpg",
+      "divider",
+      "查看 photo:receipt.jpg",
+      "divider",
+      "查看 photo:shop.jpg",
+      "divider",
+      "查看 photo:sea.jpg",
+    ]);
+    expect(screen.getByRole("separator", { name: "画面相近的照片" })).toBeTruthy();
+    expect(screen.getByRole("separator", { name: "相关度较低" })).toBeTruthy();
+  });
+
+  it("quotes what the text was searched for, without the names of the people in the query", async () => {
+    serve(
+      { timelines: mine(() => [asset("photo:home")]) },
+      http.get("/api/v1/photos/search", ({ response }) =>
+        response(200).json({
+          items: [asset("photo:receipt"), asset("photo:sea")],
+          semantic: true,
+          closest: 1,
+          names: 0,
+          texts: 1,
+          people: ["小明"],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await screen.findByRole("button", { name: "查看 photo:home.jpg" });
+    await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "小明 超市{Enter}");
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
+  });
+
+  it("says how far local AI has read the text once the photos are organised", async () => {
+    serve({
+      ai: () => ({
+        state: "working",
+        ready: 6,
+        pending: 0,
+        failed: 2,
+        textPhotos: 6,
+        texts: { read: 2, queued: 3, failed: 1 },
+      }),
+    });
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    const status = await screen.findByRole("status", { name: "本地 AI 状态" });
+    expect(await within(status).findByText("正在读取文字 3 / 6")).toBeTruthy();
+    // The photos local AI could not organise are still told.
+    expect(within(status).getByText(/读完后可以搜索照片中的文字；2 张无法识别；1 张没能读出/)).toBeTruthy();
   });
 });
 
@@ -1207,13 +1594,15 @@ describe("PhotosPanel search and viewing", () => {
   it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const sea = asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" });
     const results: Record<string, PhotoSearchResults> = {
-      海边的猫: { items: [sea], semantic: true, closest: 1 },
+      海边的猫: { items: [sea], semantic: true, closest: 1, names: 0, texts: 0 },
       电动车: {
         items: [asset("photo:bike"), asset("photo:scooter"), asset("photo:garden")],
         semantic: true,
         closest: 2,
+        names: 0,
+        texts: 0,
       },
-      黄昏: { items: [], semantic: false, closest: 0 },
+      黄昏: { items: [], semantic: false, closest: 0, names: 0, texts: 0 },
     };
     const searches: string[] = [];
     serve(
@@ -1266,18 +1655,24 @@ describe("PhotosPanel search and viewing", () => {
         items: [asset("photo:phone"), asset("photo:desk-phone"), asset("photo:desk")],
         semantic: true,
         closest: 2,
+        names: 0,
+        texts: 0,
         objects: { words: ["手机"], detected: 2, undetected: 5 },
       },
       长颈鹿: {
         items: [asset("photo:zoo"), asset("photo:park")],
         semantic: true,
         closest: 1,
+        names: 0,
+        texts: 0,
         objects: { words: ["长颈鹿"], detected: 0, undetected: 0 },
       },
       猫和狗: {
         items: [],
         semantic: true,
         closest: 0,
+        names: 0,
+        texts: 0,
         objects: { words: ["猫", "狗"], detected: 0, undetected: 3 },
       },
     };
@@ -1337,7 +1732,7 @@ describe("PhotosPanel search and viewing", () => {
           : response(200).json({ items: [], ready: false });
       }),
       http.get("/api/v1/photos/search", ({ response }) =>
-        response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1 }),
+        response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1, names: 0, texts: 0 }),
       ),
     );
     const user = userEvent.setup();
@@ -1472,7 +1867,7 @@ describe("PhotosPanel search and viewing", () => {
         searches.push(pathOf(request));
         const library = query.get("library");
         const items = [sea, beach].filter((photo) => !library || photo.libraryId === library);
-        return response(200).json({ items, semantic: true, closest: items.length });
+        return response(200).json({ items, semantic: true, closest: items.length, names: 0, texts: 0 });
       }),
     );
     const user = userEvent.setup();
@@ -1529,7 +1924,7 @@ describe("PhotosPanel search and viewing", () => {
       }),
       http.get("/api/v1/photos/search", ({ request, response }) => {
         searches.push(pathOf(request));
-        return response(200).json({ items: [], semantic: true, closest: 0 });
+        return response(200).json({ items: [], semantic: true, closest: 0, names: 0, texts: 0 });
       }),
     );
     const user = userEvent.setup();

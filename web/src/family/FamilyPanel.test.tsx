@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import type { FamilyRecordInput } from "../api.generated";
 import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
-import { asset } from "../test/handlers/photos";
+import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
 import { http, server } from "../test/server";
 import { summarize } from "./FamilyNotices";
 import { FamilyPanel } from "./FamilyPanel";
@@ -46,13 +46,21 @@ beforeAll(() => {
   Element.prototype.scrollIntoView ??= () => undefined;
 });
 
+// The NAS LAN entry is HTTP: getRandomValues exists, randomUUID does not.
+// Every case runs as there; the window once failed on LAN HTTP alone.
+const getRandomValues = crypto.getRandomValues.bind(crypto);
 beforeEach(() => {
+  vi.stubGlobal("crypto", { getRandomValues });
   setSession(
     session(
       { id: "user:mom", username: "mom", role: "member" },
       { csrfToken: "csrf", expiresAt: "2026-11-01T00:00:00Z" },
     ),
   );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("FamilyPanel", () => {
@@ -264,6 +272,91 @@ describe("FamilyPanel", () => {
     expect(within(dialog).getByText("clip.mp4")).toBeTruthy();
   });
 
+  describe("从相册选择", () => {
+    // The photo grid lays out only in an element of some size; jsdom gives
+    // what scrolls the size of a window.
+    const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
+    const scrolls = (element: Element) => element.isConnected && getComputedStyle(element).overflowY === "auto";
+    beforeEach(() => {
+      for (const name of ["offsetHeight", "offsetWidth", "clientHeight", "clientWidth"])
+        Object.defineProperty(HTMLElement.prototype, name, {
+          configurable: true,
+          get() {
+            return scrolls(this) ? (name.endsWith("Height") ? 600 : 900) : 0;
+          },
+        });
+    });
+    afterEach(() => {
+      for (const name of ["offsetHeight", "offsetWidth"] as const)
+        Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
+      for (const name of ["clientHeight", "clientWidth"] as const) Reflect.deleteProperty(HTMLElement.prototype, name);
+    });
+
+    it("adds photos from both libraries, leaving out what the channel has and copying the member's own", async () => {
+      let added: FamilyRecordInput | undefined;
+      const copied: Array<{ assetId: string; libraryId: string }> = [];
+      const shared = (id: string) => asset(id, { libraryId: sharedLibrary.id });
+      server.use(
+        ...familyHandlers(),
+        ...photosHandlers({
+          libraries: () => [sharedLibrary, { ...privateLibrary, ownerUserId: "user:mom" }],
+          timelines: {
+            [sharedLibrary.id]: () => [shared("photo:s1"), shared("photo:s2")],
+            [privateLibrary.id]: () => [asset("photo:p1"), asset("photo:p2", { sharedCopy: "photo:s3" })],
+          },
+        }),
+        http.post("/api/v1/family/babies/{babyId}/album/contains", async ({ request, response }) =>
+          response(200).json({ assetIds: (await request.json()).assetIds.filter((id) => id === "photo:s1") }),
+        ),
+        http.post("/api/v1/photos/assets/{assetId}/copies", async ({ params, request, response }) => {
+          copied.push({ assetId: params.assetId, libraryId: (await request.json()).libraryId });
+          return response(201).json(shared("photo:c1"));
+        }),
+        http.post("/api/v1/family/babies/{babyId}/records", async ({ request, response }) => {
+          added = await request.json();
+          return response(201).json(familyRecord({ id: "rec_new", kind: "photos", text: "" }));
+        }),
+      );
+      const user = userEvent.setup();
+      render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+      const side = await screen.findByRole("complementary", { name: "小米粒的资料" });
+      await user.click(within(side).getByRole("button", { name: "照片视频" }));
+      const composer = await screen.findByRole("dialog", { name: "记录照片视频" });
+      await user.click(within(composer).getByRole("button", { name: "从相册选择" }));
+      const picker = await screen.findByRole("dialog", { name: "从相册选择" });
+
+      // A photo the channel has says so and stays unchosen.
+      expect(await within(picker).findByText("已在频道中")).toBeTruthy();
+      await user.click(within(picker).getByRole("checkbox", { name: "选择 photo:s1.jpg" }));
+      expect(within(picker).getByRole("button", { name: "添加" })).toHaveProperty("disabled", true);
+      await user.click(within(picker).getByRole("checkbox", { name: "选择 photo:s2.jpg" }));
+      await user.click(within(picker).getByRole("tab", { name: "我的图库" }));
+      await user.click(await within(picker).findByRole("checkbox", { name: "选择 photo:p1.jpg" }));
+      await user.click(within(picker).getByRole("checkbox", { name: "选择 photo:p2.jpg" }));
+      expect(within(picker).getByText("已选 3 张，其中 1 张会复制到共享图库，家人都能看到")).toBeTruthy();
+      await user.click(within(picker).getByRole("button", { name: "添加 3 张" }));
+
+      expect(screen.queryByRole("dialog", { name: "从相册选择" })).toBeNull();
+      expect(within(composer).getByRole("button", { name: "移除 photo:p2.jpg" })).toBeTruthy();
+      await user.click(within(composer).getByRole("button", { name: "保存" }));
+      await waitFor(() => expect(added?.kind).toBe("photos"));
+      // Only the photo without a shared copy is copied, into the shared library.
+      expect(copied).toEqual([{ assetId: "photo:p1", libraryId: sharedLibrary.id }]);
+      expect(added?.photos).toEqual(["photo:s2", "photo:c1", "photo:s3"]);
+    });
+  });
+
+  it("opens the channel another window asks for and hands the request back", async () => {
+    const second = familyBaby({ id: "baby_2", name: "二宝", nickname: "" });
+    server.use(...familyHandlers({ overview: familyOverview({ babies: [familyBaby(), second] }) }));
+    const handled = vi.fn();
+    const intent = { babyId: "baby_2" };
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} intent={intent} onIntentHandled={handled} />);
+    expect(await screen.findByRole("complementary", { name: "二宝的资料" })).toBeTruthy();
+    await waitFor(() => expect(handled).toHaveBeenCalledWith(intent));
+    expect(screen.getByRole("button", { name: "二宝" }).getAttribute("aria-current")).toBe("page");
+  });
+
   it("asks a guardian to add the first baby", async () => {
     server.use(...familyHandlers({ overview: familyOverview({ babies: [] }) }));
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
@@ -336,4 +429,62 @@ describe("summarize", () => {
       "uncle想以“舅舅”的身份加入家庭",
     ]);
   });
+});
+
+it("omits unchanged photo references when editing the text of a record", async () => {
+  const original = familyRecord({
+    authorId: "user:mom",
+    authorName: "mom",
+    photos: [{ assetId: "visible", video: false, role: "album" }],
+  });
+  let patched: FamilyRecordInput | undefined;
+  server.use(
+    ...familyHandlers({ records: [original] }),
+    http.patch("/api/v1/family/records/{recordId}", async ({ request, response }) => {
+      patched = await request.json();
+      return response(200).json({ ...original, text: patched.text ?? "", version: 2 });
+    }),
+  );
+  render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog", { name: "编辑日志" });
+  const field = within(dialog).getByRole("textbox", { name: "内容" });
+  await userEvent.clear(field);
+  await userEvent.type(field, "修改文字");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(patched?.text).toBe("修改文字"));
+  expect(patched).not.toHaveProperty("photos");
+  expect(patched).not.toHaveProperty("certificates");
+});
+
+it("loads older letters using the wall cursor", async () => {
+  const cursors: string[] = [];
+  const message = (id: string, text: string) => ({
+    id,
+    text,
+    authorId: "user:mom",
+    authorName: "mom",
+    createdAt: "2026-10-28T10:00:00Z",
+  });
+  server.use(
+    ...familyHandlers(),
+    http.get("/api/v1/family/babies/{babyId}/wall", ({ request, response }) => {
+      const cursor = new URL(request.url).searchParams.get("cursor") ?? "";
+      cursors.push(cursor);
+      return response(200).json(
+        cursor
+          ? { items: [message("old", "最早的一封信")] }
+          : { items: [message("new", "最近的一封信")], next: "older" },
+      );
+    }),
+  );
+  render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "家人" }));
+  expect(await screen.findByText("最近的一封信")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "读取更早的留言" }));
+  expect(await screen.findByText("最早的一封信")).toBeTruthy();
+  expect(screen.getByText("最近的一封信")).toBeTruthy();
+  expect(cursors).toEqual(["", "older"]);
+  expect(screen.queryByRole("button", { name: "读取更早的留言" })).toBeNull();
 });

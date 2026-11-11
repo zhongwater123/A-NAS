@@ -1,6 +1,6 @@
 # 0012：局域网经 Caddy 以明文 HTTP 开放 Web 桌面（HTTPS 前的过渡）
 
-状态：accepted；行为见[局域网 Web 访问规格](../specs/lan-web-access.md)，启用步骤见[启用局域网 Web 访问](../runbooks/enable-lan-web-access.md)。
+状态：accepted；行为见[局域网 Web 访问规格](../specs/lan-web-access.md)，启用步骤见[启用局域网 Web 访问](../runbooks/enable-lan-web-access.md)。互联网访问另走只用 HTTPS 的入口，见 [ADR 0032](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)；本决定的明文 HTTP 仍只适用于可信内网。
 
 此前 Web 只监听 `127.0.0.1`，只能经本地控制台或 SSH 隧道使用；成员账号没有 SSH 登录权限，其他部门的同事只能使用 SMB。设备在可预见的时间内只部署在公司内网，设备所有者希望内网用户用浏览器使用全部功能，而目前取得浏览器信任的证书成本较高。我们决定由 Caddy 在 80 端口以明文 HTTP 向局域网提供 Web 桌面，产品服务仍只监听回环；设备所有者明确接受明文传输的风险，作为启用 HTTPS 前的过渡。
 

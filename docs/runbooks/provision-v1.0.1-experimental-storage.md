@@ -16,7 +16,7 @@
 
 已初始化数据卷的设备升级时，不要重新执行磁盘初始化或首次配置向导，只核对暂存制品并运行系统服务安装器：
 
-1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API 与 Host Agent 的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
+1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API、Host Agent 与两个宿主机软件包（`a-nas-host`、`a-nas-console`，[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
 2. 以 root 查看本地控制台以哪个账号运行：
 
    ```bash
@@ -34,12 +34,16 @@
    cat "$source_release/RELEASE"
    printf '%s  %s\n' \
      <API SHA-256> "$source_release/anas-api" \
-     <Host Agent SHA-256> "$source_release/anas-host-agent" |
+     <Host Agent SHA-256> "$source_release/anas-host-agent" \
+     <a-nas-host SHA-256> "$source_release/a-nas-host.deb" \
+     <a-nas-console SHA-256> "$source_release/a-nas-console.deb" |
      sha256sum --check
 
    findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
    ip -brief link show dev "$smb_interface"
 
+   # 有本机屏幕的设备连同 a-nas-console 一起装；没有屏幕的只装 a-nas-host。
+   apt install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
    "$source_release/install-v1.0.1-system-services.sh" \
      "$source_release" "$release_id" "$smb_interface"
    ```
@@ -50,6 +54,8 @@
    test -x /opt/a-nas/current/kiosk-launcher
    systemctl show -p User --value anas-kiosk@tty1.service   # a-nas-kiosk
    ```
+
+两个包的版本只用来标明 release，不表示先后：未打标签的提交按哈希排序，打过标签之后的提交也都排在该标签之前，所以 apt 可能把升级列为 `DOWNGRADED`。安装器只核对版本是否等于本 release 的版本，因此安装时一律带 `--allow-downgrades`；不带它时，交互式的 `apt install` 要再确认一次，带 `-y` 的则直接失败。
 
 安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
 
@@ -75,13 +81,13 @@ EXPECTED_DISK_SERIAL=Z2AYDZPB \
 若必须逐步排障，可不用向导而执行以下等价安装步骤；把示例值替换为本次 RC：
 
 ```bash
-# 仅在仓库源可达时安装一次；若 apt 失败，停止，不进入格式化流程。
-apt-get update
-apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg heif-thumbnailer libheif-plugin-libde265
-
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 release_id=<GIT_SHA>
 smb_interface=enp2s0
+
+# 若 apt 失败，停止，不进入格式化流程。
+apt-get update
+apt-get install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
 
 readlink -f /opt/a-nas/current
 ip -brief link
@@ -90,9 +96,9 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-影视中心的 FFmpeg Worker 使用 Debian 的 FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)），安装器在缺少 `ffmpeg`、`ffprobe` 或 `heif-thumbnailer` 时以退出码 3 结束而不改变系统；已部署过的设备升级前以 root 执行一次 `apt-get install --no-install-recommends ffmpeg heif-thumbnailer libheif-plugin-libde265`。文件管理的 HEIC/HEIF 预览使用 libheif；编码工具不属于产品运行依赖。
+宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。smbd 只监听启动时已有的地址，所以安装器为它写入 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`：smbd 等 `$smb_interface` 有了 IPv4 地址才启动，每次最多等 20 秒，等不到就 5 秒后再试；重启后它不再只监听回环（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。安装时 smbd 若已在运行，这项配置在它下次启动时生效；没有运行且接口还没有地址时，安装器照常完成，最后提示 smbd 尚未启动。
 
-完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+完成标准：`dpkg-query -W a-nas-host` 显示本 release 的版本；`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ### 移入 Host Agent 的记录
 
@@ -216,6 +222,8 @@ systemctl enable --now "anas-$worker.socket"
 systemctl restart anas-host-agent anas-photos anas-shares anas-api anas-kiosk@tty1
 ```
 
+目标 release 带有宿主机软件包（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）时，在执行上面的脚本之前先装回它的版本：`apt install --no-install-recommends --allow-downgrades "/opt/a-nas/releases/$previous/a-nas-host.deb"`，有本机屏幕时连同同一目录的 `a-nas-console.deb`。新版本多装的软件包留在系统上，不影响旧版本运行。更早的 release 没有这两个包，由它们的安装器自己检查依赖，这一步跳过。
+
 回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在本机屏幕上重新登录。
 
 AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
@@ -232,6 +240,7 @@ FFmpeg Worker 改名后的升级与回滚会停止正在播放、解码或扫描
 ## 开发机暂存注意事项
 
 - 先按[测试与验证](../development/testing.md)验证候选提交，再用 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>` 暂存（开发机 B）；开发机 A 使用脚本默认的 WSL 发行版与用户。SSH 配置见[连接手册](bootstrap-experimental-nas-ssh.md)。
+- 开发机连不到 NAS 时，用 `deploy-dev.ps1 -BundleDirectory <目录>` 写出发布包，由部署机复制到 NAS 并运行包里的 `stage.sh` 暂存，见[用发布包暂存 release](stage-a-release-bundle.md)。暂存出的 release 与 `-NasHost` 相同，root 的步骤不变。
 - `deploy-dev.ps1` 仅在 `build/.validated-build` 与提交、产品版本和二进制哈希一致时复用门禁结果；该清单由 Makefile 的 `check` 目标生成。无 Git 的 ext4 副本运行 `check-steps` 只提供测试证据，不生成部署清单。
 - 屏保视频不随 release 暂存，更换时使用[本地控制台手册](operate-local-kiosk.md#更换屏保视频)中的独立上传流程。早于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 的旧安装器分支应先合入主干，再部署。
 - 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。

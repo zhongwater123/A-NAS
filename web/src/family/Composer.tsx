@@ -1,8 +1,8 @@
-import { ImagePlus, Mic, Square, TriangleAlert, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ImagePlus, Images, Mic, Square, TriangleAlert, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
-import { listPhotoLibraries, uploadPhoto } from "../photos/api";
+import { listPhotoLibraries, type PhotoAsset, uploadPhoto } from "../photos/api";
 import {
   addRecord,
   addRecording,
@@ -19,7 +19,11 @@ import {
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { decimal, kindLabels, today } from "./format";
+import { maxPhotos, toShared } from "./fromLibrary";
 import { Field, Modal, Thumb } from "./parts";
+
+// The photo library's grid loads only when a member opens the picker.
+const LibraryPicker = lazy(() => import("./LibraryPicker").then((module) => ({ default: module.LibraryPicker })));
 
 // Draft is what the composer opens with: a kind to add, a record to edit, a
 // scheduled dose to record, an automatic milestone to annotate, or what was
@@ -35,13 +39,13 @@ export interface Draft {
   text?: string;
 }
 
-// A file chosen to upload, and how far it got.
+// A file chosen to upload, and how far it got: once uploaded, its photo.
 interface Pending {
   key: string;
   file: File;
   preview?: string;
   progress: number;
-  assetId?: string;
+  photo?: PhotoAsset;
   failed?: string;
 }
 
@@ -50,7 +54,9 @@ const audioTypes = "audio/*,.m4a,.amr,.3gp,.aac,.mp3,.wav,.ogg,.flac";
 
 // Composer adds or edits one record. Photos and videos are uploaded to the
 // shared library first, as the person adding them, and the record names
-// them; files that fail stay listed to try again.
+// them; files that fail stay listed to try again. Photos chosen from the
+// photo library join by their shared-library asset, copied there first
+// from the member's own library when they have none.
 export function Composer({
   baby,
   draft,
@@ -71,6 +77,10 @@ export function Composer({
   const [text, setText] = useState(editing?.text ?? draft.text ?? "");
   const [kept, setKept] = useState(editing?.photos ?? []);
   const [files, setFiles] = useState<Pending[]>(() => pendingOf(draft.files ?? []));
+  const [picked, setPicked] = useState<PhotoAsset[]>([]);
+  const [choosing, setChoosing] = useState(false);
+  // The shared copies made of picked photos, kept for another try.
+  const copies = useRef(new Map<string, string>());
   const [also, setAlso] = useState<string[]>([]);
   const [height, setHeight] = useState(numberText(editing?.measurement?.heightCm, 1));
   const [weight, setWeight] = useState(numberText(editing?.measurement?.weightKg, 2));
@@ -130,23 +140,27 @@ export function Composer({
 
   const addFiles = (list: FileList | File[]) => setFiles((current) => [...current, ...pendingOf(list)]);
 
+  // sharedLibrary is where a record's photos live.
+  const sharedLibrary = async () => {
+    const shared = (await listPhotoLibraries()).find((library) => library.kind === "shared");
+    if (!shared) throw new Problem("找不到共享图库，暂时不能添加照片。");
+    return shared.id;
+  };
+
   // upload sends the chosen files that are not in the shared library yet.
-  const upload = async (): Promise<string[] | undefined> => {
-    const waiting = files.filter((item) => !item.assetId);
-    if (waiting.length === 0) return files.map((item) => item.assetId!);
-    const libraries = await listPhotoLibraries();
-    const shared = libraries.find((library) => library.kind === "shared");
-    if (!shared) throw new Problem("找不到共享图库，暂时不能上传照片。");
-    const done = new Map<string, string>();
+  const upload = async (sharedId: string): Promise<PhotoAsset[] | undefined> => {
+    const waiting = files.filter((item) => !item.photo);
+    if (waiting.length === 0) return files.map((item) => item.photo!);
+    const done = new Map<string, PhotoAsset>();
     const failed = new Map<string, string>();
     for (const item of waiting) {
       try {
-        const result = await uploadPhoto(shared.id, item.file, (fraction) =>
+        const result = await uploadPhoto(sharedId, item.file, (fraction) =>
           setFiles((current) =>
             current.map((entry) => (entry.key === item.key ? { ...entry, progress: fraction } : entry)),
           ),
         );
-        if ("id" in result) done.set(item.key, result.id);
+        if ("id" in result) done.set(item.key, result);
         else failed.set(item.key, "这是实况照片的视频部分，请和照片一起选择");
       } catch (caught) {
         failed.set(item.key, errorText(caught, "photos"));
@@ -154,7 +168,7 @@ export function Composer({
       setFiles((current) =>
         current.map((entry) =>
           done.has(entry.key)
-            ? { ...entry, assetId: done.get(entry.key), progress: 1, failed: undefined }
+            ? { ...entry, photo: done.get(entry.key), progress: 1, failed: undefined }
             : failed.has(entry.key)
               ? { ...entry, failed: failed.get(entry.key) }
               : entry,
@@ -162,7 +176,7 @@ export function Composer({
       );
     }
     if (failed.size > 0) return undefined;
-    return files.map((item) => item.assetId ?? done.get(item.key)!);
+    return files.map((item) => item.photo ?? done.get(item.key)!);
   };
 
   const measurement = () => {
@@ -206,13 +220,17 @@ export function Composer({
         );
         return;
       }
-      const uploaded = await upload();
+      const sharedId = files.some((item) => !item.photo) || picked.length ? await sharedLibrary() : "";
+      const uploaded = await upload(sharedId);
       if (!uploaded) {
         setProblem("有文件没有上传成功，可以再试一次，或移除它们后保存。");
         setBusy(false);
         return;
       }
-      const photos = [...kept.map((photo) => photo.assetId), ...uploaded];
+      const chosen = await toShared(picked, sharedId, copies.current);
+      const photos = [
+        ...new Set([...kept.map((photo) => photo.assetId), ...uploaded.map((photo) => photo.id), ...chosen]),
+      ];
       const input: FamilyRecordInput = { requestKey: key, text: text.trim() };
       if (kind !== "photos" && !autoKey) input.occurredOn = occurredOn;
       switch (kind) {
@@ -240,6 +258,10 @@ export function Composer({
       }
       if (editing) {
         delete input.requestKey;
+        if (photos.length === editing.photos.length && photos.every((id, i) => id === editing.photos[i].assetId)) {
+          delete input.photos;
+          delete input.certificates;
+        }
         onSaved(await updateRecord(editing.id, { ...input, version: editing.version }));
       } else {
         onSaved(
@@ -256,7 +278,7 @@ export function Composer({
     }
   };
 
-  const photoCount = kept.length + files.length;
+  const photoCount = kept.length + files.length + picked.length;
   const ready = (() => {
     switch (kind) {
       case "photos":
@@ -283,6 +305,9 @@ export function Composer({
       files={files}
       onAdd={addFiles}
       onRemove={(key) => setFiles((current) => current.filter((item) => item.key !== key))}
+      picked={picked}
+      onRemovePicked={(assetId) => setPicked((current) => current.filter((asset) => asset.id !== assetId))}
+      onChoose={() => setChoosing(true)}
       disabled={busy}
     />
   );
@@ -452,7 +477,27 @@ export function Composer({
         </div>
       )}
       {(kind === "photos" || kind === "journal" || kind === "milestone") && !editing && (
-        <p className={styles.fcFootnote}>照片视频会以你的身份存进共享图库，在相册里也能看到。</p>
+        <p className={styles.fcFootnote}>
+          新上传的照片视频以你的身份存进共享图库，在相册里也能看到。
+          {kind === "photos" && "拍摄日期不同的照片按天分成多条记录。"}
+        </p>
+      )}
+      {choosing && (
+        <Suspense fallback={null}>
+          <LibraryPicker
+            babyId={kind === "photos" ? baby.id : undefined}
+            imagesOnly={kind === "vaccine"}
+            room={maxPhotos - photoCount}
+            onPick={(assets) => {
+              setPicked((current) => [
+                ...current,
+                ...assets.filter((asset) => !current.some((item) => item.id === asset.id)),
+              ]);
+              setChoosing(false);
+            }}
+            onClose={() => setChoosing(false)}
+          />
+        </Suspense>
       )}
       {progress !== undefined && busy && (
         <div
@@ -587,6 +632,9 @@ function PhotoPicker({
   files,
   onAdd,
   onRemove,
+  picked,
+  onRemovePicked,
+  onChoose,
   disabled,
 }: {
   label: string;
@@ -596,6 +644,9 @@ function PhotoPicker({
   files: Pending[];
   onAdd: (files: FileList | File[]) => void;
   onRemove: (key: string) => void;
+  picked: PhotoAsset[];
+  onRemovePicked: (assetId: string) => void;
+  onChoose: () => void;
   disabled: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -646,7 +697,7 @@ function PhotoPicker({
               <span className={styles.fcPickProgress} style={{ width: `${item.progress * 100}%` }} />
             )}
             {item.failed && <span className={styles.fcPickFailed}>上传失败</span>}
-            {!disabled && !item.assetId && (
+            {!disabled && !item.photo && (
               <button
                 type="button"
                 className={styles.fcPickRemove}
@@ -658,9 +709,28 @@ function PhotoPicker({
             )}
           </div>
         ))}
+        {picked.map((asset) => (
+          <div key={asset.id} className={styles.fcPick} title={asset.name}>
+            <Thumb assetId={asset.id} />
+            {!disabled && (
+              <button
+                type="button"
+                className={styles.fcPickRemove}
+                aria-label={`移除 ${asset.name}`}
+                onClick={() => onRemovePicked(asset.id)}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        ))}
         <button type="button" className={styles.fcPickAdd} onClick={() => input.current?.click()} disabled={disabled}>
           <ImagePlus size={20} />
-          <span>{kept.length + files.length ? "继续添加" : "选择或拖入"}</span>
+          <span>{kept.length + files.length + picked.length ? "添加文件" : "选择或拖入文件"}</span>
+        </button>
+        <button type="button" className={styles.fcPickAdd} onClick={onChoose} disabled={disabled}>
+          <Images size={20} />
+          <span>从相册选择</span>
         </button>
         <input
           ref={input}

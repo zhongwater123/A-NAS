@@ -358,6 +358,80 @@ BEGIN
     ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
 END;
 `,
+	// 15: the text read from photos (docs/architecture/photo-ocr.md). A
+	// reading is derived, one per content object that copies share: its
+	// document type, its whole text and how that ended (finish: stop, or
+	// length or repetition for a text cut off), and its fields with their
+	// checks as JSON. What members correct is user data per library and
+	// object; it stays when the library turns reading off and when a new
+	// model reads again. Each library can turn reading off, as with people.
+	`
+ALTER TABLE libraries ADD COLUMN texts INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE texts (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    finish TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    checks TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE text_corrections (
+    library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    account TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, object_id, field)
+);
+`,
+	// 16: corrections belong to the content object, whichever library a
+	// member corrected it in, and the last one stands (ADR 0033). Each change
+	// is kept, with who made it from which library: the library is kept by
+	// its ID only, so that the change outlives it. No code wrote the
+	// per-library corrections of 15, so the table is made anew. The handles
+	// a member's assistant gets for sensitive values stand for one value of
+	// one photo for that member.
+	`
+DROP TABLE text_corrections;
+
+CREATE TABLE text_corrections (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    account TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, field)
+);
+
+CREATE TABLE text_changes (
+    id INTEGER PRIMARY KEY,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    old_value TEXT NOT NULL,
+    new_value TEXT NOT NULL,
+    restored INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    library_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX text_changes_by_object ON text_changes(object_id, id);
+
+CREATE TABLE text_handles (
+    handle TEXT PRIMARY KEY,
+    account TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (account, asset_id, key)
+);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

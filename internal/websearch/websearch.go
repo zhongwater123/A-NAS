@@ -7,20 +7,24 @@
 package websearch
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/time/rate"
 
 	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
@@ -81,7 +85,7 @@ func (q *Query) validate() error {
 // category, which would ask only those.
 func (q Query) form(names []string) url.Values {
 	form := url.Values{
-		"q": {q.Text}, "format": {"json"}, "engines": {strings.Join(names, ",")},
+		"q": {literal(q.Text)}, "format": {"json"}, "engines": {strings.Join(names, ",")},
 		"pageno": {strconv.Itoa(q.Page)}, "language": {"zh-CN"}, "safesearch": {"1"},
 	}
 	if q.TimeRange != AnyTime {
@@ -89,6 +93,34 @@ func (q Query) form(names []string) url.Values {
 	}
 	return form
 }
+
+// literal keeps SearXNG from reading a word of the search as a command of its
+// own (searx/query.py): "!name" would search the engine or category it names
+// instead of the form's engine, so that every engine's request of a search
+// asked that one; "!!", ":xx" and "<n" redirect, change the language or cut
+// the time the engines get. Such a word starts with the character's
+// full-width form instead, which the engines read as the same text. SearXNG
+// splits words at whitespace as Python reads it, which includes a few control
+// characters.
+func literal(text string) string {
+	var b strings.Builder
+	start := true
+	for _, r := range text {
+		switch {
+		case unicode.IsSpace(r) || unicode.IsControl(r):
+			start = true
+		case start:
+			start = false
+			if wide, ok := fullWidth[r]; ok {
+				r = wide
+			}
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+var fullWidth = map[rune]rune{'!': '！', ':': '：', '<': '＜'}
 
 // Backend is the SearXNG service: SearXNG over its socket in production, a
 // fake in development.
@@ -132,9 +164,8 @@ var (
 	ErrNotSigned        = errors.New("thumbnail address is not signed")
 )
 
-// The pace each account may search at: SearXNG asks every engine of the tab
-// once per search, and the family shares one public address, which engines
-// answer with a CAPTCHA when it searches like a robot.
+// The pace each account may search at, which guards the Product Service and
+// SearXNG; each engine has a pace of its own (pace.go).
 const (
 	searchInterval = 2 * time.Second
 	searchBurst    = 10
@@ -161,6 +192,11 @@ type Options struct {
 	Secret []byte
 	// ThumbnailPath is where the API serves thumbnails.
 	ThumbnailPath string
+	// Logger reports pauses the store cannot keep; slog's default when nil.
+	Logger *slog.Logger
+	// Unpaced asks the engines as fast as searches come, for tests whose
+	// fake engines reach no site.
+	Unpaced bool
 }
 
 // Service answers the web search window.
@@ -170,8 +206,21 @@ type Service struct {
 	settings      *Store
 	secret        []byte
 	thumbnailPath string
+	logger        *slog.Logger
 	limitersMu    sync.Mutex
 	limiters      map[string]*rate.Limiter
+	// Each website's pace, whoever searches, and the websites that blocked us
+	// (pace.go); pauses is nil until read from the store.
+	pace    pacing
+	pacesMu sync.Mutex
+	paces   map[string]*rate.Limiter
+	waiting map[turnKey]bool
+	// Search requests only; thumbnails and /config do not consume these slots.
+	requests chan struct{}
+	pausesMu sync.Mutex
+	pauses   map[string]Pause
+	// Each account's recent searches (pace.go).
+	searches *expirable.LRU[searchKey, *record]
 	// The switch as last read, which thumbnails reuse for switchMaxAge.
 	stateMu   sync.Mutex
 	lastState ServiceState
@@ -186,10 +235,21 @@ type Service struct {
 }
 
 func New(options Options) *Service {
+	logger := options.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	pace := humanPace
+	if options.Unpaced {
+		pace = pacing{interval: 0, burst: 1}
+	}
 	return &Service{
 		backend: options.Backend, power: options.Switch, settings: options.Settings,
-		secret: options.Secret, thumbnailPath: options.ThumbnailPath, limiters: map[string]*rate.Limiter{},
-		now: time.Now, firstUpdate: firstUpdate, updateGap: updateGap,
+		secret: options.Secret, thumbnailPath: options.ThumbnailPath, logger: logger, limiters: map[string]*rate.Limiter{},
+		pace: pace, paces: map[string]*rate.Limiter{}, waiting: map[turnKey]bool{},
+		requests: make(chan struct{}, maxSearchRequests),
+		searches: expirable.NewLRU[searchKey, *record](keptSearches, nil, searchMaxAge),
+		now:      time.Now, firstUpdate: firstUpdate, updateGap: updateGap,
 	}
 }
 
@@ -202,6 +262,9 @@ type Status struct {
 	// Engines are every tab's engines, as the window names them; empty until
 	// SearXNG has been read while it ran.
 	Engines map[Category][]string `json:"engines"`
+	// Paused are the websites searches leave out after they blocked us,
+	// the first to return first.
+	Paused []PausedEngine `json:"paused"`
 }
 
 func (s *Service) Status(ctx context.Context) (Status, error) {
@@ -213,7 +276,18 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	status := Status{ServiceState: state, Torrents: torrents, Categories: []Category{}, Engines: map[Category][]string{}}
+	pauses, err := s.pausedEngines(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	status := Status{ServiceState: state, Torrents: torrents, Categories: []Category{}, Engines: map[Category][]string{},
+		Paused: []PausedEngine{}}
+	for name, pause := range pauses {
+		status.Paused = append(status.Paused, pause.shown(name))
+	}
+	slices.SortFunc(status.Paused, func(a, b PausedEngine) int {
+		return cmp.Or(a.Until.Compare(b.Until), strings.Compare(a.Engine, b.Engine))
+	})
 	// A stopped service has no engines to list; the last read stands.
 	engines := s.cachedCatalog()
 	if state.Enabled {
@@ -299,19 +373,19 @@ func (s *Service) SetSettings(ctx context.Context, settings Settings) (Status, e
 func (s *Service) catalog(ctx context.Context) (catalog, error) {
 	s.catalogMu.Lock()
 	defer s.catalogMu.Unlock()
-	if s.engines != nil && s.now().Sub(s.enginesAt) < catalogMaxAge {
+	if s.engines.tabs != nil && s.now().Sub(s.enginesAt) < catalogMaxAge {
 		return s.engines, nil
 	}
 	if s.backend == nil {
-		return nil, ErrUnavailable
+		return catalog{}, ErrUnavailable
 	}
 	infos, err := s.backend.Engines(ctx)
 	if err != nil {
-		if s.engines != nil {
+		if s.engines.tabs != nil {
 			s.enginesAt = s.now().Add(catalogRetry - catalogMaxAge)
 			return s.engines, nil
 		}
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return catalog{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	s.engines, s.enginesAt = newCatalog(infos), s.now()
 	return s.engines, nil

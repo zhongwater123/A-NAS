@@ -2,11 +2,14 @@
 // desktop, whatever window is open, that opens the run in VNAS. It hides itself
 // after a while, unless pointed at; the result stays unread in VNAS's
 // 定时任务 until the member reads it. The notices wait on the server, so a run
-// while the member was away is told when they come back.
+// while the member was away is told when they come back. On the host's own
+// screen, which the family shares, a toast says only that a result came: what
+// the task is and what it found stay for the member to open in VNAS.
 import { CalendarClock, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { AssistantTaskNotice } from "../desktop/api";
+import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
 import { loadTaskNotices, readTaskNotice, useTaskNotices } from "./taskNotices";
 import { whenText } from "./taskTime";
 import styles from "./taskToasts.module.css";
@@ -16,7 +19,16 @@ const POLL_MS = 60_000;
 const SHOWN = 3;
 const HIDE_MS = 12_000;
 
-export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notice: AssistantTaskNotice): void }) {
+export function TaskToasts({
+  enabled,
+  onOpen,
+  shared = isLocalConsole(),
+}: {
+  enabled: boolean;
+  onOpen(notice: AssistantTaskNotice): void;
+  /** The screen is the family's (the local console): tell that a result came, not what it is. */
+  shared?: boolean;
+}) {
   const notices = useTaskNotices();
   // Toasts that hid themselves stay hidden on this page; the notices stay unread.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
@@ -66,7 +78,7 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
             key={item.id}
             className={`${styles.vtToast}${failed ? ` ${styles.failed}` : ""}`}
             role="status"
-            aria-label={`定时任务 ${run.name}`}
+            aria-label={shared ? "定时任务的新结果" : `定时任务 ${run.name}`}
           >
             <span className={styles.vtToastMark}>
               <CalendarClock />
@@ -74,10 +86,10 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
             <div className={styles.vtToastCopy}>
               <small>VNAS 定时任务 · {whenText(Date.parse(run.ranAt) / 1000)}</small>
               <strong>
-                {run.name}
+                {shared ? "有新结果" : run.name}
                 {failed && <em>没有完成</em>}
               </strong>
-              {run.summary && <p>{plainText(run.summary)}</p>}
+              {!shared && run.summary && <p>{plainText(run.summary)}</p>}
               <button
                 type="button"
                 className={styles.vtToastOpen}

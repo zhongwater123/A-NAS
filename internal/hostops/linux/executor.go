@@ -14,13 +14,17 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
@@ -103,6 +107,10 @@ type Executor struct {
 	spaceRoots    map[string]string
 	registryPath  string
 	registryError error
+	// fixedGroupsMu orders looking up and creating the fixed groups: the
+	// data-volume reconciliation at startup and the Product Service's identity
+	// synchronization both create them, and the second groupadd failed.
+	fixedGroupsMu sync.Mutex
 	identitiesMu  sync.Mutex
 	identities    map[string]identityRecord
 	identityPath  string
@@ -120,6 +128,15 @@ type Executor struct {
 	logger        *slog.Logger
 	conversionMu  sync.Mutex
 	converting    bool
+	// adding is set while disks are being added to the data volume: no
+	// balance may start then, or btrfs device add would fail.
+	adding bool
+	// spreadStopped says spreading the mirror over the disks it has now left
+	// space unusable (the marker's SpreadStopped), for the host state.
+	spreadStopped bool
+	// spreadPoll is how often a running spread measures the unusable space,
+	// to cancel the balance once none is left.
+	spreadPoll time.Duration
 	// markerMu orders changes to the data-volume marker.
 	markerMu sync.Mutex
 	// webSearchMu orders changes to the web search switch, so its file and
@@ -132,6 +149,20 @@ type Executor struct {
 	operationsError error
 	// operating is the plan whose operation runs now; one runs at a time.
 	operating string
+	// degradedMu orders mounting the volume without a disk, restoring its
+	// redundancy and the record of both.
+	degradedMu    sync.Mutex
+	degraded      *degradedRecord
+	degradedPath  string
+	degradedError error
+	scrubbing     bool
+	scrubRetryAt  time.Time
+	// unmountedProbe says the Host Agent unmounted its own probe last, so
+	// the mount unit's inactivity is not an administrator's.
+	unmountedProbe bool
+	// restoring mirrors whether the record exists, for the host state to
+	// read without waiting on degradedMu.
+	restoring atomic.Bool
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -155,6 +186,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 		mountPoint: filepath.Clean(mountPoint), mountUnitName: unitName, smbInterface: strings.TrimSpace(options.SMBInterface),
 		spaceRoots: make(map[string]string), identities: make(map[string]identityRecord),
 		viewing: make(map[string]viewingRecord), now: options.Now, apps: make(map[string]int),
+		spreadPoll: 30 * time.Second,
 	}
 	if executor.now == nil {
 		executor.now = time.Now
@@ -169,9 +201,10 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingPath = filepath.Join(stateDirectory, "viewing-grants.json")
 	executor.appsPath = filepath.Join(stateDirectory, "app-identities.json")
 	executor.operationsPath = filepath.Join(stateDirectory, "volume-operations.json")
+	executor.degradedPath = filepath.Join(stateDirectory, "degraded-volume.json")
 	executor.stateOwner = os.Geteuid()
 	executor.stateFailures = executor.prepareState(stateDirectory, filepath.Join(executor.systemRoot, "var", "lib", legacyStateDirectoryName), []string{
-		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath,
+		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath, executor.degradedPath,
 	})
 	executor.registryError = executor.loadSpaceRegistry()
 	// Viewing grants are checked against the identities, so those load first.
@@ -179,9 +212,11 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingError = executor.loadViewingRegistry()
 	executor.appsError = executor.loadAppsRegistry()
 	executor.operationsError = executor.loadOperations()
+	executor.degradedError = executor.loadDegraded()
 	for path, err := range map[string]error{
 		executor.registryPath: executor.registryError, executor.identityPath: executor.identityError,
 		executor.viewingPath: executor.viewingError, executor.appsPath: executor.appsError, executor.operationsPath: executor.operationsError,
+		executor.degradedPath: executor.degradedError,
 	} {
 		if err != nil {
 			executor.logger.Error("a Host Agent record cannot be used; the operations that need it fail", "file", path, "error", err)
@@ -244,7 +279,7 @@ func (e *Executor) DataVolumeReady() bool { return e.dataVolumeReady() }
 
 func (e *Executor) dataVolumeReady() bool {
 	var stats syscall.Statfs_t
-	if err := syscall.Statfs(e.mountPoint, &stats); err != nil || uint64(stats.Type) != 0x9123683e {
+	if err := syscall.Statfs(e.mountPoint, &stats); err != nil || uint64(stats.Type) != unix.BTRFS_SUPER_MAGIC {
 		return false
 	}
 	contents, err := os.ReadFile(filepath.Join(e.mountPoint, ".a-nas-volume.json"))
@@ -351,18 +386,67 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	if previousErr != nil && !errors.Is(previousErr, os.ErrNotExist) {
 		return previousErr
 	}
+	restart := previousErr != nil
+	if !restart {
+		listening, err := e.sambaListening(ctx, configurationPath)
+		if err != nil {
+			return err
+		}
+		next, err := e.sambaListening(ctx, candidatePath)
+		if err != nil {
+			return err
+		}
+		restart = listening != next
+	}
 	if err := os.Rename(candidatePath, configurationPath); err != nil {
 		return err
 	}
-	if output, err := e.runner.Run(ctx, "smbcontrol", []string{"all", "reload-config"}, ""); err != nil {
+	if err := atomicfile.SyncDir(filepath.Dir(configurationPath)); err != nil {
+		return err
+	}
+	// smbd opens its listening sockets only when it starts, and a reload
+	// keeps them. Under Debian's configuration, before the first one A-NAS
+	// writes, it listens on every address; only a restart makes it listen on
+	// the SMB interface alone. Restarting ends the open SMB sessions, so it
+	// happens only when the addresses or ports change. A stopped smbd stays
+	// stopped, and systemd starts it as its unit says, waiting for the
+	// interface's address (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
+	command, args, what := "smbcontrol", []string{"all", "reload-config"}, "reload"
+	if restart {
+		command, args, what = "systemctl", []string{"try-restart", "--no-block", "smbd.service"}, "restart smbd for"
+	}
+	if output, err := e.runner.Run(ctx, command, args, ""); err != nil {
 		if previousErr == nil {
 			_ = writeAtomic(configurationPath, previous, 0o644)
 		} else {
 			_ = os.Remove(configurationPath)
 		}
-		return fmt.Errorf("reload Samba configuration: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("%s Samba configuration: %w: %s", what, err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// sambaListeningSettings are the settings smbd reads only when it starts:
+// where it listens.
+var sambaListeningSettings = []string{"interfaces", "bind interfaces only", "smb ports"}
+
+// sambaListening returns the listening settings of the Samba configuration at
+// path, as testparm reads them with their defaults. A configuration testparm
+// cannot read, which only the previous one can be, listens unlike any other.
+func (e *Executor) sambaListening(ctx context.Context, path string) (string, error) {
+	values := make([]string, 0, len(sambaListeningSettings))
+	for _, name := range sambaListeningSettings {
+		output, err := e.runner.Output(ctx, "testparm",
+			[]string{"--suppress-prompt", "--section-name=global", "--parameter-name=" + name, path}, "")
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "unreadable", nil
+		}
+		values = append(values, name+" = "+strings.TrimSpace(string(output)))
+	}
+	return strings.Join(values, "\n"), nil
 }
 
 // sambaShareOptions keep the kernel's POSIX ACLs authoritative: Samba runs as
@@ -482,37 +566,9 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".a-nas-unit-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	committed := false
-	defer func() {
-		_ = temporary.Close()
-		if !committed {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if _, err := temporary.Write(contents); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Chmod(mode); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	committed = true
-	// The rename is on disk only once the directory is: records such as the
-	// operation journal must survive a power cut right after they are written.
-	return syncDirectory(filepath.Dir(path))
+	// Records such as the operation journal must survive a power cut right
+	// after they are written.
+	return atomicfile.Write(path, contents, mode)
 }
 
 type execCommandRunner struct{}

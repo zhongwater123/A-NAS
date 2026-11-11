@@ -236,11 +236,11 @@ wipefs --no-act "$resolved_disk" || true
 confirm "Do these values match the intended RC and disposable experimental disk?" || exit 1
 
 stage "Install host dependencies"
-warn "This installs Btrfs, partitioning, SMART, Samba, SQLite, local AI runtime and FFmpeg packages."
+warn "This installs the release's a-nas-host and a-nas-console packages (ADR 0031) and what they depend on: Btrfs, partitioning, SMART, Samba, FFmpeg, local AI libraries and the local console's Chromium."
 confirm "Install the required Debian packages now?" || exit 1
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends \
-  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg heif-thumbnailer libheif-plugin-libde265
+DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-downgrades \
+  "$SOURCE_RELEASE/a-nas-host.deb" "$SOURCE_RELEASE/a-nas-console.deb"
 
 stage "Install root-owned A-NAS system services"
 anas_uid=$(id -u anas-dev)
@@ -320,7 +320,10 @@ step "Create, browse, restore from, and delete a manual read-only snapshot."
 pause "Press Enter after completing these closure checks."
 
 testparm --suppress-prompt /etc/samba/smb.conf >/dev/null
-systemctl is-active --quiet smbd.service anas-host-agent.service anas-api.service
+# One unit at a time: systemctl is-active A B succeeds when any of them is (#423).
+for unit in smbd.service anas-host-agent.service anas-api.service; do
+  systemctl is-active --quiet "$unit" || { warn "$unit is not active"; exit 1; }
+done
 
 evidence_dir=/var/lib/a-nas/acceptance
 evidence_file="$evidence_dir/$RELEASE_ID.txt"

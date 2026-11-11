@@ -16,6 +16,8 @@ export type {
   PhotoPerson,
   PhotoSearchResults as PhotoSearchPage,
   PhotoSimilarResults as PhotoSimilarPage,
+  PhotoText,
+  PhotoTextChange,
   PhotoTimeline as PhotoPage,
 } from "../api.generated";
 export type PhotoTrash = NonNullable<PhotoAsset["trash"]>;
@@ -139,6 +141,24 @@ export const listPersonPhotos = (personId: string, cursor = "", limit = 120) =>
 // what local AI recognised there and keeps names and corrections.
 export const setLibraryPeople = (libraryId: string, people: boolean) =>
   call(client.PATCH("/api/v1/photos/libraries/{libraryId}", { ...library(libraryId), body: { people } }));
+// setLibraryTexts turns reading the text in a library's photos on or off;
+// off clears the text read there and keeps members' corrections and changes.
+export const setLibraryTexts = (libraryId: string, texts: boolean) =>
+  call(client.PATCH("/api/v1/photos/libraries/{libraryId}", { ...library(libraryId), body: { texts } }));
+// The text local AI read from a photo, its document's fields, and the changes
+// members made to them (docs/architecture/photo-ocr.md).
+export const getPhotoText = (assetId: string) =>
+  call(client.GET("/api/v1/photos/assets/{assetId}/text", asset(assetId)));
+const field = (assetId: string, name: string) => ({ params: { path: { assetId, field: name } } });
+// correctPhotoText sets a field for every library that holds the photo;
+// setting it to what was read confirms the reading.
+export const correctPhotoText = (assetId: string, name: string, value: string) =>
+  call(client.PUT("/api/v1/photos/assets/{assetId}/text/fields/{field}", { ...field(assetId, name), body: { value } }));
+// restorePhotoText takes a field's correction back, so that it shows what was read.
+export const restorePhotoText = (assetId: string, name: string) =>
+  call(client.DELETE("/api/v1/photos/assets/{assetId}/text/fields/{field}", field(assetId, name)));
+export const listPhotoTextChanges = async (assetId: string) =>
+  (await call(client.GET("/api/v1/photos/assets/{assetId}/text/changes", asset(assetId)))).items;
 export const updatePerson = (personId: string, change: { name?: string; hidden?: boolean; coverId?: string }) =>
   call(client.PATCH("/api/v1/photos/people/{personId}", { ...person(personId), body: change }));
 // Every face of personId moves into the other person, which keeps its name

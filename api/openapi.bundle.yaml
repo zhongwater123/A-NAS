@@ -201,6 +201,7 @@ paths:
     post:
       security: []
       operationId: createSession
+      description: 'Sign in. A client whose sign-ins keep failing waits before it may try again: after 5 failures in a row for one username, or 20 for all usernames together, each further attempt answers 429 too_many_attempts with Retry-After until a wait of 30 seconds, doubling with each failure up to 15 minutes, has passed. Clients are what sessions are bound to (the LAN address, an IPv6 client''s /64, or direct loopback). Signing in clears the client''s failures.'
       requestBody:
         required: true
         content:
@@ -215,6 +216,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401':
+          $ref: '#/components/responses/ProductError'
+        '429':
           $ref: '#/components/responses/ProductError'
     get:
       operationId: getSession
@@ -345,6 +348,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -385,6 +389,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -465,6 +470,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -527,6 +533,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - password
               properties:
@@ -732,6 +739,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -743,7 +751,7 @@ paths:
     post:
       operationId: continueVolumeConversion
       x-anas-posture: admin
-      description: Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion; the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+      description: 'Starts converting the data volume to its layout, or spreading the files of a mirror that cannot use all of its disks, now: after a shutdown or an error stopped it, or after a spread left space unusable. The Host Agent otherwise continues at startup and every 15 minutes, a stopped spread only once the disks change. 409 no_conversion when neither waits. Administrators only.'
       parameters:
         - name: volumeId
           in: path
@@ -783,7 +791,7 @@ paths:
     post:
       operationId: createStoragePlan
       x-anas-posture: admin
-      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
+      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the layout is ignored), 422 disk_too_small when it is smaller than the missing disk and replace_one_disk for any other number of disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts, Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -831,6 +839,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - confirmationPhrase
               properties:
@@ -916,6 +925,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -939,6 +949,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1231,6 +1242,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1299,6 +1311,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1317,6 +1330,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - name
               properties:
@@ -1474,6 +1488,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1727,7 +1742,7 @@ paths:
     post:
       operationId: searchWeb
       summary: Search one tab's engines through the built-in SearXNG, sending results as the engines answer
-      description: 'The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.'
+      description: 'The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status. Each engine is asked as a person would search: at its own pace whoever searches, not while its site has blocked it, and for a page after the first only if it found something on the page before. The same page again within ten minutes comes from what the engines answered, for this account only. A word that SearXNG would read as a command of its own ("!name", ":xx", "<n") is searched as text.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -3028,7 +3043,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: addFamilyRecord
-      summary: Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID
+      summary: Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID. A photo record leaves out photos already in the cloud album (409 already_in_channel when none are left) and becomes one record per day its photos were taken; the response is the latest of them
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -3105,6 +3120,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/family/babies/{babyId}/trash:
     get:
       operationId: listFamilyTrash
@@ -3153,6 +3170,32 @@ paths:
         '422':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/album/contains:
+    post:
+      operationId: familyAlbumContains
+      summary: Which of up to 500 photos are in a baby's cloud album already, in the order asked, so a picker can mark them
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyAssetIDs'
+      responses:
+        '200':
+          description: The named photos that are in the album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyAssetIDs'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
   /api/v1/family/babies/{babyId}/growth:
     get:
@@ -3261,6 +3304,11 @@ paths:
     get:
       operationId: listFamilyWall
       summary: The channel's message wall in 亲友团, newest first
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: Messages
@@ -3276,9 +3324,13 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FamilyComment'
+                  next:
+                    type: string
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
     post:
       operationId: addFamilyWallMessage
@@ -3504,6 +3556,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -4018,7 +4071,7 @@ paths:
   /api/v1/photos/libraries/{libraryId}:
     patch:
       operationId: changePhotoLibrary
-      summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+      summary: Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again
       parameters:
         - $ref: '#/components/parameters/PhotoLibraryID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4029,10 +4082,11 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required:
-                - people
+              minProperties: 1
               properties:
                 people:
+                  type: boolean
+                texts:
                   type: boolean
       responses:
         '200':
@@ -4465,6 +4519,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -4828,7 +4883,7 @@ paths:
     get:
       operationId: viewPhoto
       summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-      description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo''s text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -4841,6 +4896,8 @@ paths:
                 format: binary
         '304':
           description: ETag still matches after authorization
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '413':
@@ -4863,9 +4920,11 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 properties:
                   location:
                     type: object
+                    additionalProperties: false
                     required:
                       - latitude
                       - longitude
@@ -4884,6 +4943,116 @@ paths:
         '415':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text:
+    get:
+      operationId: getPhotoText
+      summary: The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+      description: 'A library that does not read text shows none (status off), even of a photo another library holds. A member''s AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md).'
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text/fields/{field}:
+    put:
+      operationId: correctPhotoTextField
+      summary: Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+      description: Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record.
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+        - $ref: '#/components/parameters/PhotoTextField'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhotoTextCorrectionRequest'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: restorePhotoTextField
+      summary: Take a field's correction back, so that it shows what was read again
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+        - $ref: '#/components/parameters/PhotoTextField'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text/changes:
+    get:
+      operationId: listPhotoTextChanges
+      summary: Every change to the photo's fields, newest first, with who made it from which library
+      description: For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+      responses:
+        '200':
+          description: The changes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhotoTextChange'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/text-handles/{handle}:
+    get:
+      operationId: getPhotoTextHandle
+      summary: The value a handle of the caller's AI assistant stands for
+      description: An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+      parameters:
+        - $ref: '#/components/parameters/PhotoTextHandle'
+      responses:
+        '200':
+          description: The value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoTextHandleValue'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
   /api/v1/photos/assets/{assetId}/motion:
     get:
@@ -5353,7 +5522,7 @@ paths:
     patch:
       operationId: renameMediaShow
       summary: Rename a show as the caller, its own folder and the episode files that carry its title
-      description: A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+      description: A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot, 400 show_without_folder when the show has no folder of its own and no episode file carries its title, and 409 show_title_taken when another show in the library has the title.
       parameters:
         - name: showId
           in: path
@@ -5412,7 +5581,7 @@ paths:
     patch:
       operationId: renameMediaVideoFile
       summary: Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
-      description: The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+      description: The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot and 400 video_extension_required without a video extension.
       parameters:
         - $ref: '#/components/parameters/MediaVideoID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -6672,14 +6841,14 @@ paths:
       operationId: openTerminalSession
       x-anas-posture: admin
       summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
-      description: Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
+      description: Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted; the internet entry is refused with `terminal_internet`. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
       responses:
         '101':
           description: Switched to the WebSocket terminal protocol.
         '401':
           $ref: '#/components/responses/ProductError'
         '403':
-          description: The terminal is disabled or the request did not come through this device's Web entry.
+          description: The terminal is disabled, the request came through the internet entry, or it did not come through this device's Web entry.
           content:
             application/json:
               schema:
@@ -7017,7 +7186,7 @@ paths:
     get:
       operationId: openAssistantGateway
       summary: The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
+      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
       responses:
         '101':
           description: Switched to WebSocket
@@ -7650,6 +7819,21 @@ components:
       required: true
       schema:
         type: string
+    PhotoTextField:
+      name: field
+      in: path
+      required: true
+      description: A field of the photo's document type, such as 合计
+      schema:
+        type: string
+    PhotoTextHandle:
+      name: handle
+      in: path
+      required: true
+      description: The letters after the dot of a handle, such as 6d48a8
+      schema:
+        type: string
+        pattern: ^[0-9a-f]{6}$
     MediaLibraryID:
       name: libraryId
       in: path
@@ -8387,6 +8571,7 @@ components:
             - disk_hot
             - cpu_hot
             - volume_offline
+            - volume_degraded
             - volume_read_only
             - volume_full
             - volume_nearly_full
@@ -8402,7 +8587,7 @@ components:
         value:
           type: integer
           format: int64
-          description: 'disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.'
+          description: 'disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing.'
     Disk:
       type: object
       additionalProperties: false
@@ -8458,7 +8643,8 @@ components:
             type: string
         temperatureCelsius:
           type: integer
-          minimum: -273
+          minimum: -40
+          maximum: 150
         temperatureHotCelsius:
           type: integer
           minimum: 1
@@ -8927,10 +9113,22 @@ components:
           enum:
             - creating
             - available
+            - degraded
             - unavailable
             - read_only
+          description: 'degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025).'
         conversion:
           $ref: '#/components/schemas/VolumeConversion'
+        missingDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissingDisk'
+          description: Disks of the volume the device does not see, while it is degraded or not mounted.
+        restoring:
+          type: boolean
+          description: The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy.
+        spread:
+          $ref: '#/components/schemas/VolumeSpread'
     VolumeConversion:
       type: object
       additionalProperties: false
@@ -8954,6 +9152,26 @@ components:
           type: integer
           format: int64
           minimum: 0
+    VolumeSpread:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - unusableBytes
+      description: Present while a mirror cannot use part of its disks' space, because each block group needs room on two disks, such as after a disk joined two full ones, until the Host Agent spreads the files over all disks; and while Btrfs balances a volume on several disks, during which no disk can join it.
+      properties:
+        state:
+          type: string
+          enum:
+            - running
+            - waiting
+            - stopped
+          description: 'running: Btrfs balances the volume now. waiting: spreading stopped, for example at shutdown, and continues at the Host Agent''s next check. stopped: spreading finished with space still unusable, for lack of room on the old disks; it is tried again when the disks change or on request.'
+        unusableBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Space for files the mirror cannot use until its files are spread; 0 once all of it is usable.
     StorageAction:
       type: object
       additionalProperties: false
@@ -8963,6 +9181,7 @@ components:
       properties:
         kind:
           type: string
+          description: erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or spread (the files are spread over all disks so that a mirror can use the new ones).
         description:
           type: string
     PlannedDisk:
@@ -9020,6 +9239,8 @@ components:
           enum:
             - create_volume
             - add_disks
+            - replace_disk
+          description: 'replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy.'
         layout:
           $ref: '#/components/schemas/VolumeLayout'
         disks:
@@ -9062,7 +9283,13 @@ components:
             - mount
             - prepare
             - add_devices
+            - replace
           description: The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How far a rebuild has come, in percent, while a replace_disk plan is at the replace step.
         createdAt:
           type: string
           format: date-time
@@ -9651,6 +9878,7 @@ components:
         - file
         - storage
         - photo
+        - family
     ActivityAccount:
       type: object
       additionalProperties: false
@@ -9688,6 +9916,7 @@ components:
             - file
             - storage
             - photo
+            - family
             - other
         action:
           type: string
@@ -9846,6 +10075,7 @@ components:
         - torrents
         - categories
         - engines
+        - paused
       properties:
         enabled:
           type: boolean
@@ -9922,6 +10152,34 @@ components:
               type: array
               items:
                 type: string
+        paused:
+          type: array
+          description: The websites searches leave out after a block, the first to return first; sibling engines share a pause.
+          items:
+            $ref: '#/components/schemas/WebSearchPausedEngine'
+    WebSearchPausedEngine:
+      type: object
+      additionalProperties: false
+      description: 'A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause.'
+      required:
+        - engine
+        - reason
+        - until
+      properties:
+        engine:
+          type: string
+          description: The website name the window shows; the legacy field name is retained.
+        reason:
+          type: string
+          enum:
+            - captcha
+            - denied
+            - too_many
+            - unreadable
+          description: 'How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not read, often a challenge it does not recognize.'
+        until:
+          type: string
+          format: date-time
     WebSearchSettings:
       type: object
       additionalProperties: false
@@ -10020,6 +10278,52 @@ components:
         leechers:
           type: integer
           minimum: 0
+        kind:
+          type: string
+          enum:
+            - paper
+            - package
+            - place
+          description: A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+        authors:
+          type: array
+          items:
+            type: string
+          description: A paper's authors.
+        journal:
+          type: string
+          description: A paper's journal, or else its publisher.
+        doi:
+          type: string
+        pdf:
+          type: string
+          format: uri
+          description: A paper's PDF.
+        version:
+          type: string
+          description: A package's version.
+        license:
+          type: string
+        popularity:
+          type: string
+          description: 'A package''s popularity as its site counts it: stars, downloads or pulls.'
+        homepage:
+          type: string
+          format: uri
+        sourceCode:
+          type: string
+          format: uri
+        address:
+          type: string
+          description: A place's address.
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
     WebSearchAnswer:
       type: object
       additionalProperties: false
@@ -10056,6 +10360,8 @@ components:
         - answers
         - suggestions
         - unresponsive
+        - paused
+        - busy
         - pending
       properties:
         results:
@@ -10080,13 +10386,23 @@ components:
             type: string
         unresponsive:
           type: array
-          description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+          description: The tab's engines that did not answer; website blocks are reported under paused.
+          items:
+            type: string
+        paused:
+          type: array
+          description: Websites paused before or during this search, each reported once as the block becomes known.
+          items:
+            $ref: '#/components/schemas/WebSearchPausedEngine'
+        busy:
+          type: array
+          description: 'The engines this search left out because their website had been asked too often just before: each website is asked a few times in a row, then every ten seconds, whoever searches.'
           items:
             type: string
         pending:
           type: integer
           minimum: 0
-          description: The tab's engines still searching; 0 in the last update.
+          description: The engines still searching or waiting for their turn; 0 in the last update.
     WebSearchFound:
       type: object
       additionalProperties: false
@@ -10979,13 +11295,13 @@ components:
         photos:
           type: array
           maxItems: 200
-          description: Photo asset IDs of the shared library, in order; on an edit, replaces the photos.
+          description: Photo asset IDs of the shared library, in order; on an edit, replaces only currently visible references. Omission preserves all stored references.
           items:
             type: string
         certificates:
           type: array
           maxItems: 200
-          description: A vaccination's proof photos.
+          description: A vaccination's proof photos; on an edit, replaces only currently visible references. Omission preserves all stored references.
           items:
             type: string
         alsoBabies:
@@ -11414,9 +11730,12 @@ components:
         people:
           type: boolean
           description: Whether the library recognises people and pets.
+        texts:
+          type: boolean
+          description: 'Whether the library reads the text in photos: documents, receipts, cards, screenshots.'
         canSetPeople:
           type: boolean
-          description: 'Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library.'
+          description: 'Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library.'
         viewing:
           description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
           type: object
@@ -11557,6 +11876,9 @@ components:
           type: array
           items:
             type: string
+        sharedCopy:
+          type: string
+          description: 'For an asset of the caller''s own private library: the earliest asset of the shared library with the same original. Adding the photo to a family channel uses it instead of copying again.'
         trash:
           type: object
           additionalProperties: false
@@ -11616,6 +11938,13 @@ components:
                 description: Absent while the face is nobody yet.
               name:
                 type: string
+        text:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+          description: Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -11807,6 +12136,8 @@ components:
         - items
         - semantic
         - closest
+        - names
+        - texts
       properties:
         items:
           type: array
@@ -11820,7 +12151,15 @@ components:
         closest:
           type: integer
           minimum: 0
-          description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+          description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+        names:
+          type: integer
+          minimum: 0
+          description: How many results, counted over all pages, match the query by name or user tag; they come first.
+        texts:
+          type: integer
+          minimum: 0
+          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
         objects:
           type: object
           additionalProperties: false
@@ -11848,6 +12187,176 @@ components:
           items:
             type: string
           description: 'Full names of people in the search''s scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first.'
+    PhotoText:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - complete
+        - fields
+      properties:
+        status:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+            - none
+            - 'off'
+          description: 'read: the text below; queued: waiting to be read; failed: reading failed; none: not a photo whose text is read; off: this library does not read text.'
+        kind:
+          type: string
+          enum:
+            - plain
+            - id_card
+            - id_card_back
+            - bank_card
+            - bank_slip
+            - invoice
+            - receipt
+          description: The document type read.
+        text:
+          type: string
+          description: The whole text as machine reading gave it, which may be wrong.
+        complete:
+          type: boolean
+          description: False when the reading was cut off at its length limit or stopped looping.
+        model:
+          type: string
+          description: The text reader that read it.
+        fields:
+          type: array
+          description: The document type's fields in the order the document shows them.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+              - value
+              - read
+              - passed
+              - sensitive
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+                description: 'What the field holds: the correction, else what was read.'
+              read:
+                type: string
+                description: What was read; empty when nothing was.
+              passed:
+                type: boolean
+                description: 'Whether the value needs no one to look at it: the reading passed every check, or a member corrected it.'
+              reasons:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - not_in_text
+                    - format
+                    - mismatch
+                    - low_confidence
+                    - unfinished
+              sensitive:
+                type: boolean
+                description: A member's AI assistant gets the value only as a handle.
+              correction:
+                type: object
+                additionalProperties: false
+                required:
+                  - userId
+                  - username
+                  - at
+                description: Who last corrected the field, and when.
+                properties:
+                  userId:
+                    type: string
+                  username:
+                    type: string
+                  at:
+                    type: string
+                    format: date-time
+    PhotoTextCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          maxLength: 200
+          description: What the field holds; spaces around it are dropped, and it may be empty.
+    PhotoTextChange:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - old
+        - new
+        - restored
+        - userId
+        - username
+        - library
+        - at
+      properties:
+        field:
+          type: string
+        old:
+          type: string
+        new:
+          type: string
+        restored:
+          type: boolean
+          description: True when a correction was taken back, so that the field shows what was read.
+        userId:
+          type: string
+        username:
+          type: string
+          description: The member's name when making the change.
+        library:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+          description: The library the change was made from; only its ID once it is gone.
+          properties:
+            id:
+              type: string
+            kind:
+              type: string
+              enum:
+                - private
+                - shared
+            ownerName:
+              type: string
+        at:
+          type: string
+          format: date-time
+    PhotoTextHandleValue:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - value
+        - unchecked
+        - assetId
+        - assetName
+      properties:
+        label:
+          type: string
+          description: 'The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码.'
+        value:
+          type: string
+          description: 'What the handle stands for now: what the field holds, what was read for it, or the number as its digits.'
+        unchecked:
+          type: boolean
+          description: 'True for a field''s value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong.'
+        assetId:
+          type: string
+          description: The photo the value was read from.
+        assetName:
+          type: string
     PhotoSimilarResults:
       type: object
       additionalProperties: false
@@ -11924,6 +12433,25 @@ components:
           type: integer
           minimum: 0
           description: Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker.
+        texts:
+          type: object
+          additionalProperties: false
+          required:
+            - read
+            - queued
+            - failed
+          description: textPhotos split by where reading their text stands; absent when textPhotos is.
+          properties:
+            read:
+              type: integer
+              minimum: 0
+            queued:
+              type: integer
+              minimum: 0
+              description: Waiting to be read, also when an older reader's reading is kept meanwhile.
+            failed:
+              type: integer
+              minimum: 0
     PhotoDirectoryListing:
       type: object
       additionalProperties: false
@@ -13407,6 +13935,9 @@ components:
       properties:
         enabled:
           type: boolean
+        internet:
+          type: boolean
+          description: Present and true when the request came through the internet entry (ADR 0032), which never opens terminal sessions.
     FeedbackItem:
       type: object
       additionalProperties: false
@@ -14035,6 +14566,21 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/TaskManagerFan'
+    MissingDisk:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+      description: A disk of the data volume that is not there, as the plan that added it recorded it.
+      properties:
+        id:
+          $ref: '#/components/schemas/StableResourceID'
+        model:
+          type: string
+        capacityBytes:
+          type: integer
+          format: int64
+          minimum: 0
     FamilyReactionName:
       type: string
       enum:
@@ -14057,5 +14603,16 @@ components:
           type: array
           minItems: 1
           description: The members who left it, earliest first.
+          items:
+            type: string
+    FamilyAssetIDs:
+      type: object
+      additionalProperties: false
+      required:
+        - assetIds
+      properties:
+        assetIds:
+          type: array
+          maxItems: 500
           items:
             type: string

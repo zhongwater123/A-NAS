@@ -47,6 +47,7 @@ export function nicknameProblem(value: string): string | undefined {
 // accountErrorText words the API's account errors.
 export const accountErrors: Record<string, string> = {
   invalid_credentials: "账号或密码不正确",
+  too_many_attempts: "登录失败次数过多，请稍后再试",
   invalid_username: usernameText,
   username_unavailable: "这个账号名已被使用、留给系统，或与设备上已有的 Linux 账号重名，请换一个",
   invalid_password: `密码需为 ${passwordRuleText}，不能包含换行等控制字符`,

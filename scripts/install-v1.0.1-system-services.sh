@@ -23,7 +23,7 @@ if [[ ! -d "$source_release" ]]; then
   echo "source release is not a directory: $source_release" >&2
   exit 2
 fi
-for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-units.sh; do
+for binary in anas-api anas-host-agent install-media-pool.sh install-screensavers.sh install-ffmpeg-units.sh; do
   if [[ ! -f "$source_release/$binary" || ! -x "$source_release/$binary" ]]; then
     echo "missing executable: $source_release/$binary" >&2
     exit 2
@@ -43,6 +43,12 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
+for file in Caddyfile.internet anas-internet.nft anas-internet-firewall-system.service; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing internet entry file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # The local console runs as an account of its own from the installed release
 # (issue #174); enabling it stays a runbook step (operate-local-kiosk.md).
 for file in kiosk-launcher anas-kiosk@.service a-nas-kiosk.pam a-nas-kiosk.sysusers; do
@@ -88,26 +94,24 @@ for file in anas-search-system.service anas-search-dns-system.service anas-searc
     exit 2
   fi
 done
-# Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
-  if ! command -v "$command" >/dev/null; then
-    echo "missing required host command: $command" >&2
-    exit 3
+# The Debian packages the release runs on come with its a-nas-host (ADR 0031),
+# which dpkg keeps whole: the release only checks that this one is installed,
+# and that a local console's a-nas-console, when installed, is this release's.
+for package in a-nas-host a-nas-console; do
+  if [[ ! -f "$source_release/$package.deb" ]]; then
+    echo "missing host package: $source_release/$package.deb" >&2
+    exit 2
   fi
 done
-# Each vector index is reached through systemd's socket proxy.
-if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
-  echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
-  exit 3
-fi
-# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2),
-# and llama-server these (libgomp1, libssl3t64). The cache is read once: with
-# pipefail, grep -q leaving early can end ldconfig with SIGPIPE, which then
-# reads as a missing library.
-host_libraries=$(ldconfig -p)
-for library in libEGL.so.1 libGLESv2.so.2 libgomp.so.1 libssl.so.3 libcrypto.so.3; do
-  if ! grep -Fq "$library (" <<<"$host_libraries"; then
-    echo "missing required host library: $library" >&2
+host_package_version=$(dpkg-deb --field "$source_release/a-nas-host.deb" Version)
+for package in a-nas-host a-nas-console; do
+  installed=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' "$package" 2>/dev/null || true)
+  # A device without a screen has no a-nas-console, or only its configuration.
+  if [[ "$package" == a-nas-console ]]; then
+    case "${installed%% *}" in '' | not-installed | config-files) continue ;; esac
+  fi
+  if [[ "$installed" != "installed $host_package_version" ]]; then
+    echo "this release needs $package $host_package_version; install it first: apt install --no-install-recommends --allow-downgrades $source_release/$package.deb" >&2
     exit 3
   fi
 done
@@ -210,6 +214,80 @@ if command -v caddy >/dev/null; then
   caddy validate --adapter caddyfile --config "$source_release/Caddyfile" >/dev/null 2>&1 ||
     { echo "LAN Web entry configuration does not validate: $source_release/Caddyfile" >&2; exit 2; }
   lan_entry=true
+fi
+# The internet entry is optional too (ADR 0032): /etc/a-nas/internet.env turns
+# it on. Read the file without running it, check each value and what the entry
+# needs from the host, and validate Caddy's configuration, all before
+# changing anything. Removing the file turns the entry off again.
+internet_env=/etc/a-nas/internet.env
+internet_entry=false
+if [[ -e "$internet_env" ]]; then
+  declare -A internet=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in '' | '#'*) continue ;; esac
+    case "${line%%=*}" in
+      ANAS_INTERNET_HOST | ANAS_INTERNET_RELAY_ENDPOINT | ANAS_INTERNET_RELAY_PUBLIC_KEY | ANAS_INTERNET_TUNNEL_PREFIX)
+        internet[${line%%=*}]=${line#*=} ;;
+      *) echo "$internet_env: unknown line: ${line%%=*}" >&2; exit 2 ;;
+    esac
+  done < "$internet_env"
+  internet_host=${internet[ANAS_INTERNET_HOST]:-}
+  relay_endpoint=${internet[ANAS_INTERNET_RELAY_ENDPOINT]:-}
+  relay_key=${internet[ANAS_INTERNET_RELAY_PUBLIC_KEY]:-}
+  # A domain in lower-case ASCII, as browsers send it; an internationalized
+  # name is written in its xn-- form.
+  if [[ ! "$internet_host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+    echo "$internet_env: ANAS_INTERNET_HOST must be the entry's domain in lower case, such as nas.example.com" >&2
+    exit 2
+  fi
+  if [[ ! "$relay_key" =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$ ]]; then
+    echo "$internet_env: ANAS_INTERNET_RELAY_PUBLIC_KEY must be the relay's WireGuard public key" >&2
+    exit 2
+  fi
+  # The tunnel's addresses come from a unique local /64: the relay is ::1,
+  # this NAS ::2.
+  if ! tunnel=$(python3 -I - "${internet[ANAS_INTERNET_TUNNEL_PREFIX]:-}" "$relay_endpoint" <<'PY'
+import ipaddress
+import sys
+
+try:
+    prefix = ipaddress.IPv6Network(sys.argv[1])
+    host, colon, port = sys.argv[2].rpartition(":")
+    ipaddress.ip_address(host.removeprefix("[").removesuffix("]"))
+except ValueError:
+    sys.exit(1)
+if prefix.prefixlen != 64 or not prefix.subnet_of(ipaddress.IPv6Network("fd00::/8")):
+    sys.exit(1)
+if not colon or not port.isdigit() or not 1 <= int(port) <= 65535:
+    sys.exit(1)
+print(prefix[1], prefix[2])
+PY
+  ); then
+    echo "$internet_env: ANAS_INTERNET_TUNNEL_PREFIX must be a unique local /64 (fdXX:XXXX:XXXX:XXXX::/64) and ANAS_INTERNET_RELAY_ENDPOINT the relay's address:port" >&2
+    exit 2
+  fi
+  read -r relay_address tunnel_address <<<"$tunnel"
+  # grep reads the whole list: stopping at the match would leave caddy
+  # writing to a closed pipe, which pipefail reports as a failure.
+  if [[ "$lan_entry" != true ]] || ! caddy list-modules 2>/dev/null | grep -x 'caddy.listeners.proxy_protocol' >/dev/null; then
+    echo "the internet entry needs Caddy 2.7 or newer from Caddy's own repository; install it first (docs/runbooks/enable-lan-web-access.md)" >&2
+    exit 3
+  fi
+  for command in wg wg-quick nft; do
+    if ! command -v "$command" >/dev/null; then
+      echo "the internet entry needs $command; install it first: apt install --no-install-recommends wireguard-tools nftables" >&2
+      exit 3
+    fi
+  done
+  internet_caddyfile() {
+    sed -e "s|@INTERNET_HOST@|$internet_host|g" -e "s|@TUNNEL_ADDRESS@|$tunnel_address|g" \
+      -e "s|@RELAY_ADDRESS@|$relay_address|g" "$source_release/Caddyfile.internet"
+  }
+  caddy validate --adapter caddyfile --config <(internet_caddyfile) >/dev/null 2>&1 ||
+    { echo "internet entry configuration does not validate: $source_release/Caddyfile.internet with $internet_env" >&2; exit 2; }
+  nft --check --file "$source_release/anas-internet.nft" ||
+    { echo "internet entry firewall table does not load: $source_release/anas-internet.nft" >&2; exit 2; }
+  internet_entry=true
 fi
 # The Host Agent moves each of its records out of /var/lib/a-nas when it
 # starts, but only a regular file with one link that root owns (issue #176):
@@ -402,8 +480,11 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/install-media-pool.sh" "$temporary/install-media-pool.sh"
 install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
 install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
+# A rollback to this release installs its host packages again.
+install -o root -g root -m 0644 "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb" "$temporary/"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
 install -o root -g root -m 0644 "$source_release/ai/runtime.json" "$temporary/ai/"
@@ -430,10 +511,10 @@ mv -- "$temporary" "$target"
 trap - EXIT
 
 # Screen saver videos are long-lived media, not part of a release (ADR 0014):
-# install-screensavers.sh keeps them under /var/lib/a-nas/screensavers, where
+# install-media-pool.sh keeps them under /var/lib/a-nas/screensavers, where
 # "current" names the pool the Product Service plays whatever the release.
 if [[ -d "$source_release/screensavers" ]]; then
-  echo "ignoring the release's screen saver videos: install them with install-screensavers.sh" >&2
+  echo "ignoring the release's screen saver videos: install them with install-media-pool.sh screensavers" >&2
 fi
 # Installers before issue #49 left each pool in a directory named after its
 # release and no "current". Adopt the pool installed last, which they played
@@ -442,7 +523,7 @@ if [[ ! -e /var/lib/a-nas/screensavers/current && ! -L /var/lib/a-nas/screensave
   legacy_pool=$(find /var/lib/a-nas/screensavers -mindepth 1 -maxdepth 1 -type d -name '[A-Za-z0-9_-]*' \
     ! -name objects ! -name pools -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d ' ' -f 2-)
   if [[ -n "$legacy_pool" ]]; then
-    "$target/install-screensavers.sh" --import "$legacy_pool" ||
+    "$target/install-media-pool.sh" screensavers --import "$legacy_pool" ||
       echo "could not adopt the screen saver pool in $legacy_pool; the local console keeps its wallpaper" >&2
   fi
 fi
@@ -486,6 +567,10 @@ fi
 if [[ -n "$terminal_enabled" ]]; then
   printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 fi
+# The internet entry's own listener, which Caddy's HTTPS site proxies to.
+if [[ "$internet_entry" == true ]]; then
+  printf 'ANAS_INTERNET_HTTP_ADDR=127.0.0.1:8081\nANAS_INTERNET_HOST=%s\n' "$internet_host" >> /etc/a-nas/anas-api.env
+fi
 chown root:a-nas /etc/a-nas/anas-api.env
 chmod 0640 /etc/a-nas/anas-api.env
 
@@ -504,6 +589,22 @@ printf '%s\n' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
 chmod 0600 /etc/a-nas/host-agent.env
+# smbd listens only on the addresses its interfaces have when it starts (bind
+# interfaces only), and at boot a DHCP address can arrive after smbd's turn.
+# So smbd waits up to 20 s for the SMB interface's IPv4 address; without one,
+# the start fails and systemd tries again 5 s later, until it has one. Units
+# ordered after smbd, the Host Agent among them, start after the first try.
+# Restart= also brings smbd back after a crash
+# (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
+install -d -o root -g root -m 0755 /etc/systemd/system/smbd.service.d
+cat > /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf <<EOF
+# Written by the A-NAS installer for the SMB interface $smb_interface.
+[Service]
+ExecStartPre=/bin/sh -c 'timeout 20 sh -c "until ip -4 -o address show dev $smb_interface scope global 2>/dev/null | grep -q inet; do sleep 1; done" || { echo "$smb_interface has no IPv4 address after 20 s; smbd waits for one because it listens only on the addresses present when it starts" >&2; exit 1; }'
+Restart=on-failure
+RestartSec=5s
+EOF
+chmod 0644 /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf
 
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
@@ -558,7 +659,55 @@ if [[ "$lan_entry" == true ]]; then
     cp -p /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-a-nas
   fi
   install -d -o root -g root -m 0755 /etc/caddy
-  install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
+  if [[ "$internet_entry" == true ]]; then
+    internet_caddyfile > /etc/caddy/Caddyfile.incoming
+    chmod 0644 /etc/caddy/Caddyfile.incoming
+    mv -f -- /etc/caddy/Caddyfile.incoming /etc/caddy/Caddyfile
+  else
+    install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
+  fi
+fi
+tunnel_changed=
+if [[ "$internet_entry" == true ]]; then
+  # Caddy binds the tunnel's address even while the tunnel is down, so it
+  # starts, LAN entry included, whatever the tunnel does.
+  printf '%s\n' '# Written by the A-NAS installer: the internet entry binds its tunnel address' \
+    '# before the tunnel is up (ADR 0032).' 'net.ipv6.ip_nonlocal_bind = 1' > /etc/sysctl.d/60-anas-internet.conf
+  chmod 0644 /etc/sysctl.d/60-anas-internet.conf
+  sysctl --quiet --load=/etc/sysctl.d/60-anas-internet.conf
+  install -o root -g root -m 0644 "$source_release/anas-internet.nft" /etc/a-nas/anas-internet.nft
+  install -o root -g root -m 0644 "$source_release/anas-internet-firewall-system.service" /etc/systemd/system/anas-internet-firewall.service
+  # The tunnel's key is made once and kept, also when the entry is turned off.
+  install -d -o root -g root -m 0700 /etc/wireguard
+  if [[ ! -s /etc/wireguard/wg-anas.key ]]; then
+    (umask 077 && wg genkey > /etc/wireguard/wg-anas.key.incoming)
+    mv -f -- /etc/wireguard/wg-anas.key.incoming /etc/wireguard/wg-anas.key
+  fi
+  printf '%s\n' \
+    "# Managed by A-NAS: the internet entry's tunnel to the edge relay (ADR 0032)," \
+    "# written from $internet_env. This NAS dials the relay." \
+    '[Interface]' \
+    "Address = $tunnel_address/64" \
+    'PostUp = wg set %i private-key /etc/wireguard/%i.key' \
+    '' \
+    '[Peer]' \
+    "PublicKey = $relay_key" \
+    "Endpoint = $relay_endpoint" \
+    "AllowedIPs = $relay_address/128" \
+    'PersistentKeepalive = 25' > /etc/wireguard/wg-anas.conf.incoming
+  chmod 0600 /etc/wireguard/wg-anas.conf.incoming
+  if cmp -s /etc/wireguard/wg-anas.conf.incoming /etc/wireguard/wg-anas.conf; then
+    rm -f -- /etc/wireguard/wg-anas.conf.incoming
+  else
+    mv -f -- /etc/wireguard/wg-anas.conf.incoming /etc/wireguard/wg-anas.conf
+    tunnel_changed=1
+  fi
+elif [[ -e /etc/systemd/system/anas-internet-firewall.service || -e /etc/wireguard/wg-anas.conf ]]; then
+  # Turned off: undo what an earlier installation set up, keeping the key.
+  systemctl disable --now wg-quick@wg-anas.service anas-internet-firewall.service 2>/dev/null || true
+  rm -f -- /etc/wireguard/wg-anas.conf /etc/systemd/system/anas-internet-firewall.service \
+    /etc/a-nas/anas-internet.nft /etc/sysctl.d/60-anas-internet.conf
+  echo "internet entry turned off; the tunnel key stays in /etc/wireguard/wg-anas.key"
 fi
 # Fan speeds come from the board's sensor chip, whose driver Linux does not
 # load by itself (docs/specs/device-temperatures.md). The in-kernel drivers of
@@ -583,7 +732,14 @@ else
 fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
-systemctl enable --now smbd.service
+# A running smbd keeps its listeners here; the Host Agent restarts it when the
+# Samba configuration it writes listens elsewhere, as on a new install whose
+# smbd runs under Debian's configuration. One that is not running waits for the
+# SMB interface's address and keeps trying without it, which must not stop
+# the installation halfway; the end of the output says so.
+systemctl enable smbd.service
+smb_started=true
+systemctl start smbd.service || smb_started=false
 # A running Worker belongs to the previous release; the next connection starts
 # this release's.
 systemctl stop anas-ai.service
@@ -603,9 +759,21 @@ systemctl restart anas-host-agent.service anas-photos.service anas-api.service a
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
+if [[ "$internet_entry" == true ]]; then
+  systemctl enable anas-internet-firewall.service wg-quick@wg-anas.service
+  systemctl restart anas-internet-firewall.service
+  # A tunnel that does not come up leaves only the internet entry unreachable.
+  if [[ -n "$tunnel_changed" ]] || ! systemctl is-active --quiet wg-quick@wg-anas.service; then
+    systemctl restart wg-quick@wg-anas.service ||
+      echo "the internet entry's tunnel did not start; see journalctl -u wg-quick@wg-anas (docs/runbooks/enable-internet-access.md)" >&2
+  fi
+fi
 if [[ "$lan_entry" == true ]]; then
   systemctl enable caddy.service
   systemctl reload-or-restart caddy.service
+fi
+if [[ "$internet_entry" == true ]]; then
+  echo "internet entry: https://$internet_host through $relay_endpoint; this NAS's tunnel public key: $(wg pubkey < /etc/wireguard/wg-anas.key)"
 fi
 # Web search follows this release's runtime; its unit's condition keeps it
 # stopped while the administrator has turned it off. It comes after the
@@ -622,6 +790,9 @@ systemctl --no-pager --full status anas-host-agent.service anas-photos.service a
 echo "web search: $(systemctl is-active anas-search.service || true)"
 if [[ -n "$web_search_failed" ]]; then
   echo "web search did not start; see journalctl -u anas-search-dns -u anas-search -b (docs/runbooks/enable-web-search.md)" >&2
+fi
+if [[ "$smb_started" == false ]]; then
+  echo "smbd has not started; systemd tries again every 5 s. If $smb_interface has no IPv4 address, SMB starts once it has one; otherwise see journalctl -u smbd -b" >&2
 fi
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must

@@ -145,6 +145,7 @@ func (h *handler) routes() {
 	h.metadataRoutes()
 	h.peopleRoutes()
 	h.videoRoutes()
+	h.textRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -168,6 +169,12 @@ type searchResponse struct {
 	// Closest counts the results, over all pages, in the closest group; the
 	// results after them are less related.
 	Closest int `json:"closest"`
+	// Names counts the results, over all pages, whose name or user tags
+	// hold the query; they come first.
+	Names int `json:"names"`
+	// Texts counts the results, over all pages, whose text read from the
+	// photo holds the query; they follow the name and user tag matches.
+	Texts int `json:"texts"`
 	// Objects is set when the query is about things the detector finds
 	// reliably: the closest group is then the photos it found them in.
 	Objects *objectsFound `json:"objects,omitempty"`
@@ -321,7 +328,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := searchResponse{Items: page.Assets, Next: page.Next, Semantic: page.Semantic, Closest: page.Closest,
-		People: page.People}
+		Names: page.Names, Texts: page.Texts, People: page.People}
 	if page.Objects != nil {
 		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
 	}
@@ -678,12 +685,22 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_busy", "正在同时转换播放的视频太多，请稍后再试")
 	case errors.Is(err, photos.ErrThumbnailUnavailable):
 		httpjson.WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
+	case errors.Is(err, photos.ErrSensitivePhoto):
+		httpjson.WriteError(w, http.StatusForbidden, "sensitive_photo",
+			"the photo is an ID card, a bank card, a bank slip, an invoice or a receipt, or shows a long number; "+
+				"an assistant reads its text instead, where each sensitive number is a handle")
+	case errors.Is(err, photos.ErrUnreadPhoto):
+		httpjson.WriteError(w, http.StatusForbidden, "unread_photo",
+			"the photo's text is not read yet; until it is, an assistant gets no view of it")
 	case errors.Is(err, photos.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
 	case errors.Is(err, photos.ErrConflict):
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the item conflicts with its current state or an existing name")
 	case errors.Is(err, photos.ErrInvalidName):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+	case errors.Is(err, photos.ErrInvalidText):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed",
+			"a field holds at most "+strconv.Itoa(photos.MaxCorrectionRunes)+" characters and no control characters")
 	case errors.Is(err, photos.ErrInvalidCursor):
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
 	case errors.Is(err, photos.ErrInvalidMonth):

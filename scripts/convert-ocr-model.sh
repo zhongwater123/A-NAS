@@ -3,8 +3,14 @@
 # files (docs/architecture/photo-ocr.md#模型): the language part quantized to
 # Q4_K_M and the vision encoder in F16, which
 # deploy/models/qwen3.5-4b-q4_k_m.json and qwen3.5-4b-mmproj-f16.json pin.
-# It converts twice and stops unless both results are byte-identical, then
-# prints each file's size and SHA-256 and checks them against the manifests.
+#
+# Before converting it checks the inputs against the manifests: the llama.cpp
+# checkout is at their conversionCommit, and every weight file has its
+# weightsSha256. It converts twice and stops unless both results are
+# byte-identical, prints each file's size and SHA-256, and moves the files to
+# the output directory under their names only when both match the manifests;
+# otherwise with .unverified appended. Without either manifest it does not
+# start.
 #
 # Runs in anas-ocr-eval:trixie (ai/ocr-eval.Dockerfile) with a llama.cpp
 # checkout built at the commit the manifests name at /src, the download at the
@@ -24,6 +30,43 @@ manifests=${MANIFESTS:-/manifests}
 out=${OUT:-/out}
 model='Qwen3.5-4B-Q4_K_M.gguf'
 mmproj='mmproj-Qwen3.5-4B-f16.gguf'
+pairs=("$model:qwen3.5-4b-q4_k_m.json" "$mmproj:qwen3.5-4b-mmproj-f16.json")
+
+manifest_paths=()
+for pair in "${pairs[@]}"; do
+  manifest=$manifests/${pair#*:}
+  if [[ ! -f "$manifest" ]]; then
+    echo "no manifest $manifest: nothing to check the conversion against" >&2
+    exit 4
+  fi
+  manifest_paths+=("$manifest")
+done
+
+# The checkout every manifest names.
+commit=$(git -c safe.directory="$src" -C "$src" rev-parse HEAD)
+for manifest in "${manifest_paths[@]}"; do
+  wanted=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("conversionCommit", ""))' "$manifest")
+  if [[ -z "$wanted" ]]; then
+    echo "$manifest names no conversionCommit, the llama.cpp commit to convert with" >&2
+    exit 4
+  fi
+  if [[ "$commit" != "$wanted" ]]; then
+    echo "$src is at $commit; $manifest converts with llama.cpp $wanted" >&2
+    exit 4
+  fi
+done
+
+# The weights the manifests pin.
+if ! python3 -c '
+import json, sys
+hf = sys.argv[1]
+for path in sys.argv[2:]:
+    for name, sha in json.load(open(path))["weightsSha256"].items():
+        print(f"{sha}  {hf}/{name}")
+' "$hf" "${manifest_paths[@]}" | sort -u | sha256sum --check --quiet --strict -; then
+  echo "the weights in $hf are not the ones the manifests pin" >&2
+  exit 4
+fi
 
 work=$(mktemp -d "$out/.convert-XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
@@ -44,16 +87,25 @@ for file in "$model" "$mmproj"; do
 done
 
 status=0
-for pair in "$model:qwen3.5-4b-q4_k_m.json" "$mmproj:qwen3.5-4b-mmproj-f16.json"; do
+for pair in "${pairs[@]}"; do
   file=${pair%%:*} manifest=$manifests/${pair#*:}
-  mv -f -- "$work/first/$file" "$out/$file"
-  size=$(stat -c %s "$out/$file")
-  sha=$(sha256sum "$out/$file" | cut -d ' ' -f 1)
+  size=$(stat -c %s "$work/first/$file")
+  sha=$(sha256sum "$work/first/$file" | cut -d ' ' -f 1)
   echo "$file $size $sha"
-  if [[ -f "$manifest" ]] && [[ "$(python3 -c 'import json, sys; m = json.load(open(sys.argv[1])); print(m["sizeBytes"], m["sha256"])' \
+  if [[ "$(python3 -c 'import json, sys; m = json.load(open(sys.argv[1])); print(m["sizeBytes"], m["sha256"])' \
     "$manifest")" != "$size $sha" ]]; then
     echo "$file does not match $manifest" >&2
     status=4
   fi
+done
+# Files that do not match are kept beside, marked unverified: a new model
+# version's manifests take their size and SHA-256 from them.
+suffix=
+if ((status != 0)); then
+  suffix=.unverified
+  echo "kept as $out/<file>.unverified" >&2
+fi
+for file in "$model" "$mmproj"; do
+  mv -f -- "$work/first/$file" "$out/$file$suffix"
 done
 exit "$status"

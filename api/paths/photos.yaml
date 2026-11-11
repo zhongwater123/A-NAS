@@ -3,7 +3,7 @@
     operationId: listPhotoLibraries
     summary: List the caller's private library, the shared library and any member library being viewed
     responses:
-      "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } } } } }
+      "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } } } } }
       "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
 /api/v1/photos/ai:
   get:
@@ -204,7 +204,7 @@
 /api/v1/photos/libraries/{libraryId}:
   patch:
     operationId: changePhotoLibrary
-    summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+    summary: Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again
     parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -213,9 +213,10 @@
           schema:
             type: object
             additionalProperties: false
-            required: [people]
+            minProperties: 1
             properties:
               people: { type: boolean }
+              texts: { type: boolean }
     responses:
       "200": { description: The library, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -385,7 +386,7 @@
     summary: List trashed photo assets the caller may restore or purge
     parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }]
     responses:
-      "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
+      "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
   delete:
     operationId: emptyPhotoTrash
     summary: Permanently delete every trashed photo asset the caller may purge
@@ -535,11 +536,12 @@
   get:
     operationId: viewPhoto
     summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-    description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+    description: "An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo's text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet."
     parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
     responses:
       "200": { description: The photo's view, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "304": { description: ETag still matches after authorization }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "415": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -557,9 +559,11 @@
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 location:
                   type: object
+                  additionalProperties: false
                   required: [latitude, longitude]
                   properties:
                     latitude: { type: number }
@@ -569,6 +573,66 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "415": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text:
+  get:
+    operationId: getPhotoText
+    summary: The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+    description: "A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md)."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text/fields/{field}:
+  put:
+    operationId: correctPhotoTextField
+    summary: Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+    description: "Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/photos.yaml#/parameters/PhotoTextField" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTextCorrectionRequest" } } } }
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: restorePhotoTextField
+    summary: Take a field's correction back, so that it shows what was read again
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/photos.yaml#/parameters/PhotoTextField" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text/changes:
+  get:
+    operationId: listPhotoTextChanges
+    summary: Every change to the photo's fields, newest first, with who made it from which library
+    description: For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200":
+        description: The changes
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items]
+              properties:
+                items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoTextChange" } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/text-handles/{handle}:
+  get:
+    operationId: getPhotoTextHandle
+    summary: The value a handle of the caller's AI assistant stands for
+    description: "An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoTextHandle" }]
+    responses:
+      "200": { description: The value, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTextHandleValue" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/photos/assets/{assetId}/motion:
   get:
     operationId: openPhotoMotion

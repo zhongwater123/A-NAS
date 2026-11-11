@@ -20,7 +20,10 @@ type Photos interface {
 type Photo struct {
 	ID      string
 	TakenAt *time.Time
-	Video   bool
+	// ImportedAt is when the photo was uploaded, which dates a photo that
+	// does not say when it was taken.
+	ImportedAt time.Time
+	Video      bool
 	// Shared reports whether the asset is in the shared library; channels
 	// hold only shared photos.
 	Shared bool

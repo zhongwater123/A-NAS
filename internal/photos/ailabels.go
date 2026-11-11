@@ -7,11 +7,11 @@ import (
 	"math"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // AI clusters (docs/architecture/photo-ai.md): a photo belongs to a label's
@@ -200,31 +200,32 @@ func (s *Service) LabelCounts(ctx context.Context, p Principal, viewing string) 
 		margin float64
 	}
 	tallies := make(map[string]*tally)
-	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			vector, ok := vectors[c.objectID]
-			if !ok {
-				continue
-			}
-			for _, label := range s.labels.Shown() {
-				margin := dot(vector, labelVectors[label.ID]) - s.labels.Thresholds[label.ID]
-				if margin < 0 || hidden[c.id+"\x1f"+label.ID] {
-					continue
-				}
-				t := tallies[label.ID]
-				if t == nil {
-					t = &tally{}
-					tallies[label.ID] = t
-				}
-				t.photos++
-				if t.cover == "" || margin > t.margin {
-					t.cover, t.margin = c.id, margin
-				}
-			}
-		}
-	})
+	shown := s.labels.Shown()
+	queries := make([]thresholdQuery, len(shown))
+	for i, label := range shown {
+		queries[i] = thresholdQuery{vector: labelVectors[label.ID], floor: s.labels.Thresholds[label.ID]}
+	}
+	found, err := s.above(ctx, s.labels.Model, scopeIDs(scope), aiObjects(candidates, ""), queries, false)
 	if err != nil {
 		return nil, false, err
+	}
+	for _, c := range candidates {
+		for i, label := range shown {
+			sim, ok := found[i][c.objectID]
+			if !ok || hidden[c.id+"\x1f"+label.ID] {
+				continue
+			}
+			margin := sim - s.labels.Thresholds[label.ID]
+			t := tallies[label.ID]
+			if t == nil {
+				t = &tally{}
+				tallies[label.ID] = t
+			}
+			t.photos++
+			if t.cover == "" || margin > t.margin {
+				t.cover, t.margin = c.id, margin
+			}
+		}
 	}
 	for _, label := range s.labels.Shown() {
 		if t := tallies[label.ID]; t != nil {
@@ -259,19 +260,16 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	if err != nil {
 		return Page{}, err
 	}
-	threshold := s.labels.Thresholds[label]
-	var hits []searchHit
-	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			if vector, ok := vectors[c.objectID]; ok && !hidden[c.id+"\x1f"+label] {
-				if score := dot(vector, labelVectors[label]); score >= threshold {
-					hits = append(hits, searchHit{c.id, score})
-				}
-			}
-		}
-	})
+	found, err := s.above(ctx, s.labels.Model, scopeIDs(scope), aiObjects(candidates, ""),
+		[]thresholdQuery{{vector: labelVectors[label], floor: s.labels.Thresholds[label]}}, true)
 	if err != nil {
 		return Page{}, err
+	}
+	var hits []searchHit
+	for _, c := range candidates {
+		if score, ok := found[0][c.objectID]; ok && !hidden[c.id+"\x1f"+label] {
+			hits = append(hits, searchHit{c.id, score})
+		}
 	}
 	sortHits(hits)
 	if after != nil {
@@ -297,7 +295,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	// A photo trashed since the candidates were read drops out here, and so
 	// would one outside the scope or hidden from p.
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+sqlitedb.Placeholders(len(scope))+") AND a.id IN ("+sqlitedb.Placeholders(len(ids))+")",
 		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return Page{}, err
@@ -317,7 +315,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 // unit separator; only those of label, when one is given. Videos take no
 // part in AI, so none is a candidate even with a vector.
 func (s *Service) clusterCandidates(ctx context.Context, p Principal, scope []any, label string) ([]candidate, map[string]bool, error) {
-	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") + ")"
+	in := "(" + sqlitedb.Placeholders(len(scope)) + ")"
 	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE "+listedAssets(p, "assets")+" AND "+inLocalAI("assets.object_id")+
 		" AND library_id IN "+in+" ORDER BY id", scope...)
 	if err != nil {

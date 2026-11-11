@@ -85,6 +85,9 @@ install -m 0644 a-nas-kiosk.sysusers.incoming a-nas-kiosk.sysusers
 install -m 0644 kiosk.env.incoming kiosk.env
 install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
 install -m 0644 Caddyfile.incoming Caddyfile
+install -m 0644 Caddyfile.internet.incoming Caddyfile.internet
+install -m 0644 anas-internet.nft.incoming anas-internet.nft
+install -m 0644 anas-internet-firewall-system.service.incoming anas-internet-firewall-system.service
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
@@ -93,6 +96,7 @@ install -m 0644 anas-family-system.service.incoming anas-family-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
+install -m 0750 install-media-pool.sh.incoming install-media-pool.sh
 install -m 0750 install-ffmpeg-units.sh.incoming install-ffmpeg-units.sh
 install -m 0644 anas-system.slice.incoming anas-system.slice
 install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
@@ -104,6 +108,9 @@ install -m 0644 anas-vectors-system.slice.incoming anas-vectors-system.slice
 install -m 0644 anas-vectors-system@.service.incoming anas-vectors-system@.service
 install -m 0644 anas-vectors-proxy-system@.socket.incoming anas-vectors-proxy-system@.socket
 install -m 0644 anas-vectors-proxy-system@.service.incoming anas-vectors-proxy-system@.service
+# The host packages root installs before the release (ADR 0031).
+install -m 0644 a-nas-host.deb.incoming a-nas-host.deb
+install -m 0644 a-nas-console.deb.incoming a-nas-console.deb
 # Local AI (ADR 0016): the Worker's code and the manifests of the models and
 # runtime it pins. deploy-dev.ps1 uploads the models and runtime once per
 # content; link the staged copies the root installer copies and checks. Each
@@ -207,13 +214,15 @@ rm -f \
   search-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
+  a-nas-host.deb.incoming \
+  a-nas-console.deb.incoming \
   kiosk-launcher.incoming \
   anas-kiosk@.service.incoming \
   a-nas-kiosk.pam.incoming \
   a-nas-kiosk.sysusers.incoming \
   kiosk.env.incoming \
   a-nas-chromium-policy.json.incoming \
-  Caddyfile.incoming \
+  Caddyfile.incoming   Caddyfile.internet.incoming   anas-internet.nft.incoming   anas-internet-firewall-system.service.incoming \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \
@@ -222,6 +231,7 @@ rm -f \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
   install-screensavers.sh.incoming \
+  install-media-pool.sh.incoming \
   install-ffmpeg-units.sh.incoming
 
 {

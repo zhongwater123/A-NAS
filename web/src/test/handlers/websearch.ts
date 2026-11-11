@@ -44,6 +44,7 @@ export function webSearchStatus(enabled = true, torrents = false): WebSearchStat
     torrents,
     categories: enabled ? categories : [],
     engines,
+    paused: [],
   };
 }
 
@@ -55,6 +56,8 @@ export function pageFor(query: WebSearchQuery): WebSearchUpdate {
     answers: [],
     suggestions: page === 1 ? [`${query.q} 是什么`] : [],
     unresponsive: ["百度"],
+    paused: [],
+    busy: [],
     pending: 0,
   };
   const results = [1, 2].map((n) => {
@@ -84,6 +87,39 @@ export function pageFor(query: WebSearchQuery): WebSearchUpdate {
         };
       case "torrents":
         return { ...common, magnet: `magnet:?xt=urn:btih:${number}`, sizeBytes: 928702791, seeders: 3, leechers: 0 };
+      case "music":
+        return { ...common, platform: "YouTube", author: "周杰倫", durationSeconds: 270 };
+      case "science":
+        return {
+          ...common,
+          kind: "paper" as const,
+          authors: ["Renxi Wang", "Haonan Li", "Xudong Han", "Yixuan Zhang"],
+          journal: "Scientific Reports",
+          doi: `10.1038/example.${number}`,
+          pdf: `https://example.org/paper-${number}.pdf`,
+          content: "示例摘要",
+          publishedAt: "2024-02-18T09:10:07Z",
+        };
+      case "it":
+        return {
+          ...common,
+          kind: "package" as const,
+          version: "4.1.1",
+          author: "Kriasoft",
+          license: "MIT License",
+          popularity: "65414",
+          homepage: "https://example.org/home",
+          sourceCode: "https://example.org/source",
+          content: "示例摘要",
+        };
+      case "map":
+        return {
+          ...common,
+          kind: "place" as const,
+          address: "北山街, 杭州市, 中国",
+          latitude: 30.2431,
+          longitude: 120.1459,
+        };
       default:
         return { ...common, content: "示例摘要", publishedAt: "2026-10-25T06:59:20Z" };
     }

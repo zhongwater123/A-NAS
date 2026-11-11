@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"maps"
 	"math"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Kind is what a record holds.
@@ -99,7 +102,7 @@ type Record struct {
 }
 
 // RecordInput is what a member writes. On update, Version is the version
-// they read; Photos, when not nil, replaces the record's photos.
+// they read; non-nil photo lists replace only photos visible to the caller.
 type RecordInput struct {
 	RequestKey   string           `json:"requestKey"`
 	Kind         Kind             `json:"kind"`
@@ -210,7 +213,7 @@ func loadPhotos(ctx context.Context, q queryer, rows []*row) error {
 		ids = append(ids, r.record.ID)
 	}
 	result, err := q.QueryContext(ctx, "SELECT record_id, asset_id, role, taken_at, video FROM record_photos WHERE record_id IN ("+
-		placeholders(len(ids))+") ORDER BY record_id, position", ids...)
+		sqlitedb.Placeholders(len(ids))+") ORDER BY record_id, position", ids...)
 	if err != nil {
 		return err
 	}
@@ -229,10 +232,6 @@ func loadPhotos(ctx context.Context, q queryer, rows []*row) error {
 		r.photoVideo[assetID] = video
 	}
 	return result.Err()
-}
-
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }
 
 // present turns stored rows into what actor may read: only the photos actor
@@ -425,6 +424,11 @@ type checked struct {
 // check validates input for baby and looks its photos up as actor. Photos
 // must be visible to actor and in the shared library.
 func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordInput) (checked, error) {
+	return s.checkWithRetained(ctx, actor, baby, input, nil)
+}
+
+// retained contains only references already stored on this record, never client data.
+func (s *Store) checkWithRetained(ctx context.Context, actor Actor, baby Baby, input RecordInput, retained map[string]Photo) (checked, error) {
 	c := checked{input: input}
 	var ok bool
 	limit := MaxTextRunes
@@ -512,10 +516,12 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 		}
 		seen[id] = true
 	}
-	found, err := s.lookup(ctx, actor, ids)
+	lookupIDs := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { _, ok := retained[id]; return ok })
+	found, err := s.lookup(ctx, actor, lookupIDs)
 	if err != nil {
 		return c, err
 	}
+	maps.Copy(found, retained)
 	for _, id := range ids {
 		photo, ok := found[id]
 		if !ok || !photo.Shared {
@@ -532,16 +538,9 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 	if input.Kind == KindPhotos {
 		date = ""
 		for _, photo := range c.photos {
-			if photo.TakenAt != nil {
-				local := photo.TakenAt.In(time.Local)
-				day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).Format(dateLayout)
-				if date == "" || day < date {
-					date = day
-				}
+			if day := photoDay(photo, today); date == "" || day < date {
+				date = day
 			}
-		}
-		if date == "" {
-			date = today.Format(dateLayout)
 		}
 	}
 	day, ok := parseDate(date)
@@ -555,6 +554,45 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 	return c, nil
 }
 
+// photoDay is the day a photo was taken, in the device's time zone, or the
+// day it was uploaded when it does not say. A camera whose clock runs ahead
+// files its photos under today.
+func photoDay(photo Photo, today time.Time) string {
+	at := photo.TakenAt
+	if at == nil && !photo.ImportedAt.IsZero() {
+		at = &photo.ImportedAt
+	}
+	day := today.Format(dateLayout)
+	if at != nil {
+		day = min(day, at.In(time.Local).Format(dateLayout))
+	}
+	return day
+}
+
+// byDay splits a checked photo record into one record per day its photos
+// were taken, the latest day first, leaving out the photos in skip. Each
+// record keeps the text.
+func (s *Store) byDay(c checked, skip map[string]bool) []checked {
+	today := s.today()
+	days := map[string]*checked{}
+	for i, photo := range c.photos {
+		if skip[photo.ID] {
+			continue
+		}
+		day := photoDay(photo, today)
+		if days[day] == nil {
+			days[day] = &checked{input: c.input, occurredOn: day}
+		}
+		days[day].photos = append(days[day].photos, photo)
+		days[day].roles = append(days[day].roles, c.roles[i])
+	}
+	records := make([]checked, 0, len(days))
+	for _, day := range slices.Backward(slices.Sorted(maps.Keys(days))) {
+		records = append(records, *days[day])
+	}
+	return records
+}
+
 func roundTo(value *float64, scale float64) sql.NullInt64 {
 	if value == nil {
 		return sql.NullInt64{}
@@ -562,9 +600,11 @@ func roundTo(value *float64, scale float64) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(math.Round(*value * scale)), Valid: true}
 }
 
-// AddRecord adds a record to a baby's channel. A photo record may also go
-// into the channels of other babies, as a record of its own in each. A
-// request repeated with the same RequestKey returns the first record.
+// AddRecord adds a record to a baby's channel. A photo record leaves out
+// photos already in the cloud album and becomes one record per day its
+// photos were taken; it may also go into the channels of other babies, the
+// same way. The result is the latest record in babyID's channel, which a
+// request repeated with the same RequestKey returns again.
 func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input RecordInput) (Record, error) {
 	if _, _, err := s.requireMember(ctx, s.db, actor); err != nil {
 		return Record{}, err
@@ -590,6 +630,15 @@ func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input
 		if _, _, err := s.requireMember(ctx, tx, actor); err != nil {
 			return err
 		}
+		if input.RequestKey != "" {
+			err := tx.QueryRowContext(ctx, "SELECT id FROM records WHERE author_id = ? AND request_key = ?", actor.AccountID, input.RequestKey).Scan(&id)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		targets := []string{babyID}
 		for _, other := range input.AlsoBabies {
 			if other == babyID || slices.Contains(targets, other) {
@@ -601,18 +650,37 @@ func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input
 			targets = append(targets, other)
 		}
 		for i, target := range targets {
-			key := sql.NullString{String: input.RequestKey, Valid: input.RequestKey != "" && i == 0}
-			recordID, err := s.insertRecord(ctx, tx, actor, target, c, key)
-			if err != nil {
-				return err
+			records := []checked{c}
+			if input.Kind == KindPhotos {
+				in, err := inAlbum(ctx, tx, target, input.Photos)
+				if err != nil {
+					return err
+				}
+				records = s.byDay(c, in)
 			}
-			if i == 0 {
-				id = recordID
+			if len(records) == 0 && i == 0 {
+				return ErrInChannel
+			}
+			for j, record := range records {
+				first := i == 0 && j == 0
+				key := sql.NullString{String: input.RequestKey, Valid: input.RequestKey != "" && first}
+				recordID, err := s.insertRecord(ctx, tx, actor, target, record, key)
+				if err != nil {
+					return err
+				}
+				if first {
+					id = recordID
+				}
 			}
 		}
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrConflict) && input.RequestKey != "" {
+			if existing, lookupErr := s.byRequest(ctx, actor, input.RequestKey); lookupErr == nil {
+				return existing, nil
+			}
+		}
 		return Record{}, err
 	}
 	return s.readRecord(ctx, s.db, actor, id, false)
@@ -646,7 +714,7 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, babyID, input.Kind, c.occurredOn, input.Text, actor.AccountID, actor.Username, formatTime(s.now()),
 		key, c.heightMM, c.weightG, c.headMM, code, vaccineName, dose, clinic, batch, title, autoKey)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueConstraint(err) {
 			return "", ErrConflict
 		}
 		return "", err
@@ -705,21 +773,46 @@ func (s *Store) UpdateRecord(ctx context.Context, actor Actor, id string, input 
 		}
 		c = checked{input: RecordInput{Kind: KindRecording, Text: text}, occurredOn: input.OccurredOn}
 	} else {
-		if input.Photos == nil && input.Certificates == nil {
-			if err := loadPhotos(ctx, s.db, []*row{current}); err != nil {
+		if err := loadPhotos(ctx, s.db, []*row{current}); err != nil {
+			return Record{}, err
+		}
+		// Omitted lists keep their references without requiring the photo service.
+		// Explicit lists may only remove references the caller can currently see.
+		visible := map[string]Photo{}
+		if input.Photos != nil || input.Certificates != nil {
+			visible, err = s.lookup(ctx, actor, current.photoIDs)
+			if err != nil {
 				return Record{}, err
 			}
-			for _, assetID := range current.photoIDs {
-				if current.photoRoles[assetID] == "certificate" {
-					input.Certificates = append(input.Certificates, assetID)
-				} else {
-					input.Photos = append(input.Photos, assetID)
+		}
+		omitPhotos, omitCertificates := input.Photos == nil, input.Certificates == nil
+		retained := map[string]Photo{}
+		// photoDay interprets timestamps in the device's timezone. Use local
+		// noon to retain the saved day even when a DST transition skips midnight.
+		recordDate, _ := parseDate(current.record.OccurredOn)
+		recordDate = time.Date(recordDate.Year(), recordDate.Month(), recordDate.Day(), 12, 0, 0, 0, time.Local)
+		for _, assetID := range current.photoIDs {
+			_, seen := visible[assetID]
+			certificate := current.photoRoles[assetID] == "certificate"
+			omitted := (!certificate && omitPhotos) || (certificate && omitCertificates)
+			if omitted || !seen {
+				retained[assetID] = Photo{ID: assetID, Shared: true, TakenAt: current.photoTaken[assetID], ImportedAt: recordDate, Video: current.photoVideo[assetID]}
+				list := &input.Photos
+				if certificate {
+					list = &input.Certificates
+				}
+				if !slices.Contains(*list, assetID) {
+					*list = append(*list, assetID)
 				}
 			}
 		}
-		if c, err = s.check(ctx, actor, baby, input); err != nil {
+		if c, err = s.checkWithRetained(ctx, actor, baby, input, retained); err != nil {
 			return Record{}, err
 		}
+		if input.Kind == KindPhotos && omitPhotos {
+			c.occurredOn = current.record.OccurredOn
+		}
+
 	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var version int64
@@ -750,7 +843,7 @@ func (s *Store) UpdateRecord(ctx context.Context, actor Actor, id string, input 
 height_mm = ?, weight_g = ?, head_mm = ?, vaccine_code = ?, vaccine_name = ?, dose = ?, clinic = ?, batch = ?, title = ?, auto_key = ?
 WHERE id = ?`, c.occurredOn, in.Text, formatTime(s.now()), c.heightMM, c.weightG, c.headMM,
 			code, vaccineName, dose, clinic, batch, title, autoKey, id); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if isUniqueConstraint(err) {
 				return ErrConflict
 			}
 			return err
@@ -825,7 +918,7 @@ func (s *Store) RestoreRecord(ctx context.Context, actor Actor, id string) (Reco
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE records SET deleted_at = NULL, deleted_by = '' WHERE id = ?", id); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if isUniqueConstraint(err) {
 				return ErrConflict
 			}
 			return err

@@ -9,18 +9,22 @@
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
 - [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（superseded；仅 SSH 隧道与 `-StageOnly` 暂存仍适用）
 - [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
+- [安装伙伴动画](install-companion-animations.md)（draft；2026-11-10 在实验 NAS 装上池 `36492963e4112f55`）
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
+- [用发布包暂存 release](stage-a-release-bundle.md)（draft；开发机连不到 NAS 时由部署机暂存）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 - [启用相册本地 AI](enable-photo-ai.md)（verified；2026-10-10 部署 `6833c7637f73`）
 - [启用相册物体检测](enable-photo-objects.md)（verified；2026-10-13 部署 `bb1ec71bff65`）
-- [启用向量索引](enable-vector-index.md)（draft；系统测试已验证，实验 NAS 待执行）
+- [启用向量索引](enable-vector-index.md)（draft；实验 NAS 已执行第 1–4 步与第 6 步，第 5 步的读路径核对待部署后执行）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
+- [启用互联网访问](enable-internet-access.md)（draft；边缘服务器已准备，NAS 一侧与开放待执行）
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
-- [启用网页搜索](enable-web-search.md)（draft；系统测试覆盖服务边界，实验 NAS 待执行）
+- [启用网页搜索](enable-web-search.md)（draft；实验 NAS 已执行第 1–3 步，空闲外发待查明）
 - [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
 - [在实验 NAS 上试用 AI 助手](try-ai-assistant-on-experimental-nas.md)（draft；云端模型，仅开发测试）
 - [把硬盘加入数据卷](add-a-disk-to-the-data-volume.md)（draft；实验 NAS 待执行）
+- [镜像缺盘与更换硬盘](replace-a-mirror-disk.md)（draft；实验 NAS 待执行）
 - [在实验 NAS 上验收已部署的功能](accept-features-on-experimental-nas.md)（draft；按模块分节，验收完成的节随即删去）
 
 ## 使用方式

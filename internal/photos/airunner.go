@@ -3,6 +3,7 @@ package photos
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -27,14 +28,17 @@ type aiRunner struct {
 	ahead detectionAhead
 
 	mu sync.Mutex
-	// model, detector, faces and animals are the Worker's models whose stale
-	// results have already been queued again; empty until a round asks.
-	model, detector, faces, animals string
+	// model, detector, faces, animals and reader are the Worker's models
+	// whose stale results have already been queued again; empty until a
+	// round asks.
+	model, detector, faces, animals, reader string
 	// generation counts the times they were forgotten, so that a requeue
 	// running meanwhile does not record them again.
 	generation int
-	// detectorLoaded is whether the Worker may still hold the detector.
-	detectorLoaded bool
+	// detectorLoaded is whether the Worker may still hold the detection
+	// models, and readerLoaded whether it may hold the text reader: the
+	// reading phase runs apart from detection (docs/architecture/photo-ocr.md#资源策略).
+	detectorLoaded, readerLoaded bool
 	// need is what the Worker said its models take
 	// (EmbedderInfo.MemoryBytes); 0 until a round asks.
 	need uint64
@@ -43,7 +47,50 @@ type aiRunner struct {
 }
 
 func newAIRunner(lib *Service) *aiRunner {
-	return &aiRunner{lib: lib, wake: make(chan struct{}, 1)}
+	return &aiRunner{lib: lib, wake: make(chan struct{}, 1), need: lib.storedMemoryNeed()}
+}
+
+// workerFile keeps what the AI Worker last said about itself, across starts
+// of the photo service:
+//   - what its models take (EmbedderInfo.MemoryBytes), with the release it
+//     came from. The first round after a start weighs it before the round's
+//     first call, which starts the Worker through its socket (#365). Another
+//     release's need is not taken: its models may take less, and a need
+//     too high would keep the gate shut without ever asking the Worker again;
+//   - its text reader. A new one tries again the photos the last one failed
+//     to read, which are not retried on every start (RecoverJobs).
+const workerFile = "ai-worker.json"
+
+type workerRecord struct {
+	Release     string `json:"release"`
+	MemoryBytes uint64 `json:"memoryBytes"`
+	Reader      string `json:"reader,omitempty"`
+}
+
+// workerRecord is what workerFile keeps, or nothing before the Worker first
+// answered.
+func (s *Service) workerRecord() workerRecord {
+	var record workerRecord
+	if content, err := fs.ReadFile(s.root.FS(), workerFile); err == nil {
+		_ = json.Unmarshal(content, &record)
+	}
+	return record
+}
+
+func (s *Service) storeWorkerRecord(record workerRecord) error {
+	content, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return s.writeDerived(workerFile, content)
+}
+
+// storedMemoryNeed is the need this release's Worker last said, or 0.
+func (s *Service) storedMemoryNeed() uint64 {
+	if record := s.workerRecord(); record.Release == s.release {
+		return record.MemoryBytes
+	}
+	return 0
 }
 
 // aiProgress is what the AI runner last observed.
@@ -149,6 +196,7 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	detector, _ := embedder.(Detector)
 	faceDetector, _ := embedder.(FaceDetector)
 	animals, _ := embedder.(AnimalEmbedder)
+	reader, _ := embedder.(TextReader)
 	// The input the last detection rendered ahead is used only if a
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
@@ -190,11 +238,23 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 		return false, err
 	}
 	// The first answer, or a new release, tells what the models take, which
-	// the gate weighs before any of them loads.
+	// the gate weighs before any of them loads, and which the next start of
+	// the photo service weighs before it calls the Worker.
 	if r.setMemoryNeed(info.MemoryBytes) {
+		record := r.lib.workerRecord()
+		record.Release, record.MemoryBytes = r.lib.release, info.MemoryBytes
+		if err := r.lib.storeWorkerRecord(record); err != nil {
+			return false, err
+		}
 		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
 			r.progress.set(AIPaused, reason, "")
-			r.releaseModels(ctx, detector, reason)
+			if reason == "memory_for_models" || reason == "memory_low" || reason == "memory_pressure" {
+				// This round's call may have started the Worker, which would
+				// hold its memory idle until it exits by itself.
+				r.endWorker(ctx, detector)
+			} else {
+				r.releaseModels(ctx, detector, reason)
+			}
 			return false, nil
 		}
 	}
@@ -206,6 +266,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	}
 	if animals == nil {
 		info.Animals = ""
+	}
+	if reader == nil {
+		info.OCR = ""
 	}
 	if err := r.requeueStale(ctx, info); err != nil {
 		return false, err
@@ -225,7 +288,16 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	job, err := r.lib.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
 		if info.Detector == "" && info.Faces == "" && info.Animals == "" {
+			// Nothing to detect with: the text of routed photos is read. The
+			// Worker's release, which frees the reader too, is the Detector's.
+			if reader != nil && info.OCR != "" {
+				m := models{detector: detector, reader: reader}
+				if claimed, read, err := r.readText(ctx, m, gate, info); claimed || err != nil {
+					return read, err
+				}
+			}
 			r.progress.set(AIIdle, "", info.Model)
+			r.releaseModels(ctx, detector, "")
 			return false, nil
 		}
 		// A long run of photos clusters as it goes, not only at its end.
@@ -234,7 +306,7 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 		}
 		input := next
 		next = nil
-		return r.detect(ctx, models{detector, faceDetector, animals}, gate, info, input)
+		return r.detect(ctx, models{detector, faceDetector, animals, reader}, gate, info, input)
 	}
 	if err != nil {
 		return false, err
@@ -277,6 +349,7 @@ type models struct {
 	detector     Detector
 	faceDetector FaceDetector
 	animals      AnimalEmbedder
+	reader       TextReader
 }
 
 // detect runs one object's ready detection job, face scan and pet
@@ -293,6 +366,12 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		var err error
 		input, err = r.lib.claimDetection(ctx, wanted)
 		if errors.Is(err, sql.ErrNoRows) {
+			// With nothing to detect, the text of routed photos is read.
+			if m.reader != nil && info.OCR != "" {
+				if claimed, read, err := r.readText(ctx, m, gate, info); claimed || err != nil {
+					return read, err
+				}
+			}
 			r.progress.set(AIIdle, "", info.Model)
 			r.releaseModels(ctx, detector, "")
 			clustered, err := r.lib.clusterPeople(ctx)
@@ -339,8 +418,9 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 			}
 		}
 	}
-	// The Worker loads its detector for the first detection and keeps it
-	// until released.
+	// The text reader goes before the detection models load; the Worker
+	// loads its detector for the first detection and keeps it until released.
+	r.switchPhase(ctx, detector, false)
 	r.markDetectorLoaded()
 	if objectsJob == nil && facesJob == nil && petsJob == nil {
 		_ = input.file.Close()
@@ -504,13 +584,54 @@ func (r *aiRunner) releaseModels(ctx context.Context, detector Detector, reason 
 		return
 	}
 	r.mu.Lock()
-	loaded := r.detectorLoaded
-	r.detectorLoaded = false
+	loaded := r.detectorLoaded || r.readerLoaded
+	r.detectorLoaded, r.readerLoaded = false, false
 	r.mu.Unlock()
 	if loaded {
 		// A Worker that has gone has released everything already.
 		_ = detector.Release(ctx, all)
 	}
+}
+
+// switchPhase releases the Worker's background models of the other phase
+// before reading text or detecting: the text reader and the detection models
+// are not loaded together (docs/architecture/photo-ocr.md#资源策略). The
+// Worker's release drops both.
+func (r *aiRunner) switchPhase(ctx context.Context, detector Detector, reading bool) {
+	if detector == nil {
+		return
+	}
+	r.mu.Lock()
+	other := r.readerLoaded
+	if reading {
+		other = r.detectorLoaded
+	}
+	if other {
+		r.detectorLoaded, r.readerLoaded = false, false
+	}
+	r.mu.Unlock()
+	if other {
+		_ = detector.Release(ctx, false)
+	}
+}
+
+// endWorker tells a Worker known to run to release everything and exit.
+func (r *aiRunner) endWorker(ctx context.Context, detector Detector) {
+	if detector == nil {
+		return
+	}
+	r.mu.Lock()
+	r.detectorLoaded, r.readerLoaded = false, false
+	r.mu.Unlock()
+	_ = detector.Release(ctx, true)
+}
+
+// markReaderLoaded records that the Worker loaded its text reader, which it
+// keeps until released.
+func (r *aiRunner) markReaderLoaded() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.readerLoaded = true
 }
 
 // memoryNeed is what the Worker last said its models take.
@@ -547,7 +668,7 @@ func (r *aiRunner) markDetectorLoaded() {
 // asks again. Queueing twice is harmless: a job already queued stays.
 func (r *aiRunner) requeueStale(ctx context.Context, info EmbedderInfo) error {
 	r.mu.Lock()
-	model, detector, faces, animals, generation := r.model, r.detector, r.faces, r.animals, r.generation
+	model, detector, faces, animals, reader, generation := r.model, r.detector, r.faces, r.animals, r.reader, r.generation
 	r.mu.Unlock()
 	lib := r.lib
 	now := formatTime(lib.now())
@@ -588,10 +709,24 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 			return err
 		}
 	}
+	if info.OCR != "" && reader != info.OCR {
+		// A reader the photo service has not seen before also tries the
+		// photos the last one failed to read.
+		record := lib.workerRecord()
+		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
+			return err
+		}
+		if record.Reader != info.OCR {
+			record.Reader = info.OCR
+			if err := lib.storeWorkerRecord(record); err != nil {
+				return err
+			}
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.generation == generation {
-		r.model, r.detector, r.faces, r.animals = info.Model, info.Detector, info.Faces, info.Animals
+		r.model, r.detector, r.faces, r.animals, r.reader = info.Model, info.Detector, info.Faces, info.Animals, info.OCR
 	}
 	return nil
 }
@@ -600,7 +735,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 func (r *aiRunner) forgetModels() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.model, r.detector, r.faces, r.animals = "", "", "", ""
+	r.model, r.detector, r.faces, r.animals, r.reader = "", "", "", "", ""
 	r.generation++
 }
 
@@ -652,12 +787,17 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	}
 	detector, faces, animals := r.workerModels()
 	detecting, facing, petting := detector != "", faces != "", animals != ""
+	r.mu.Lock()
+	reading := r.reader != ""
+	r.mu.Unlock()
 	now := formatTime(lib.now())
 	var due bool
 	err := lib.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?))
+SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
+    OR (? AND derivation = ?))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
-		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation, now, now).Scan(&due)
+		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation,
+		reading, textDerivation, now, now).Scan(&due)
 	return due, err
 }
 

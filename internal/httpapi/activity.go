@@ -11,8 +11,11 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
 
 // photoActivitySource reads the caller's photo events through the photo API,
@@ -63,15 +66,19 @@ func withClientOrigin(r *http.Request) context.Context {
 }
 
 // clientOrigin is where a request came from, which sessions are also bound
-// to. The LAN entry (Caddy, ADR 0012) is the only proxy and sets
-// X-Forwarded-For to the client's address; the Product Service listens on
-// loopback only, so anything else connected over loopback directly.
+// to. Caddy is the only proxy and sets X-Forwarded-For to the client's
+// address: on the main listener for the LAN entry (ADR 0012), on the internet
+// listener from the PROXY header the edge relay sends (ADR 0032). The
+// Product Service listens on loopback only, so anything else on the main
+// listener connected over loopback directly.
 func clientOrigin(r *http.Request) accounts.ClientOrigin {
 	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded == "" && r.Header.Get("Forwarded") == "" {
+	origin := accounts.ClientOrigin{Via: accounts.ViaLAN}
+	if _, internet := webentry.Internet(r); internet {
+		origin.Via = accounts.ViaInternet
+	} else if forwarded == "" && r.Header.Get("Forwarded") == "" {
 		return accounts.ClientOrigin{Via: accounts.ViaLoopback}
 	}
-	origin := accounts.ClientOrigin{Via: accounts.ViaLAN}
 	hops := strings.Split(forwarded, ",")
 	address := strings.TrimSpace(hops[len(hops)-1])
 	// Caddy writes a link-local client's address with its zone.
@@ -79,4 +86,21 @@ func clientOrigin(r *http.Request) accounts.ClientOrigin {
 		origin.Address = address
 	}
 	return origin
+}
+
+func (h *productHandler) familyActivitySource() func(*http.Request, activity.Query) ([]activity.Event, error) {
+	if h.Family == nil {
+		return nil
+	}
+	return func(r *http.Request, q activity.Query) ([]activity.Event, error) {
+		request := r.Clone(r.Context())
+		request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
+		request.URL = &url.URL{Path: familyapi.ActivityPath, RawQuery: q.Values().Encode()}
+		response := &bufferedResponse{header: http.Header{}}
+		h.guard(apiroute.Route{Posture: apiroute.Session, Handler: withUser(h.Family)})(response, request)
+		if response.status != http.StatusOK {
+			return nil, fmt.Errorf("family activity status %d", response.status)
+		}
+		return activityapi.DecodeServicePage(&response.body)
+	}
 }

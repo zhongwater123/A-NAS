@@ -25,7 +25,7 @@
   - 相册接给助手的方式（ADR 0024 决定 6）：相册服务多开一个只给助手的套接字（`anas-photos-assistant.socket`，由 systemd 持有，只绑定进每个助手的沙箱），按连接者的 UID 认出成员，只读，只看本人私有图库与共享图库，拿不到原图与缩略图；Host Agent 为它提供按 UID 查成员（`ANAS_PHOTO_ASSISTANT_LOOKUP=1`）。窗口里的照片由成员本人的会话加载。
   - 这些设置与会话闸门一起写成 systemd drop-in（`/etc/systemd/system/<服务>.service.d/assistant-trial.conf`，由 [`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 写入）：正式部署会重写 `/etc/a-nas/*.env`，写在那里的会话闸门每次部署后都要重新加；drop-in 不受部署影响。
   - `video_analyze` 把整段视频交给模型，DeepSeek 不收视频，这个工具会报错；看图（`vision_analyze`）可用。
-  - 模型可能提到 Hermes 的 `/help` 与上手引导（待定）。
+  - 模型可能提到 Hermes 的 `/help` 与上手引导（[待定](../decisions/2026-10-15-assistant-help-and-onboarding.md)）。
 - 停止条件：`check` 报告不是全新状态、数据卷或 release 不符、bundle 校验失败；`install` 输出 `STOP` 或 `FAIL`。出现时不要继续，按“回滚或恢复”处理。
 
 ## 步骤
@@ -82,6 +82,7 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 - 2026-10-19 之后的 bundle 接上相册（`check` 的最后两行 `PASS photo service ...`），并把会话闸门从 `/etc/a-nas/*.env` 移到 drop-in；`update` 删掉环境文件里旧的那一行。之后的正式部署不再需要重新加它（[研究](../research/hermes-agent-runtime.md#接入相册服务)）。
 - 2026-10-20 之后的 bundle 开启定时任务：装上唤醒服务 `anas-assistant-cron-waker.service` 与运行单元 `anas-assistant-cron@.service`（`check` 多一行 `PASS scheduled tasks are started when due`），以及系统技能 `anas-scheduled-tasks`。任务列表、立即运行与桌面提示在产品服务中，要正式部署带上它们才有（[研究](../research/hermes-agent-runtime.md#定时任务)）。
 - 带“VNAS 操作 WebOS”的 bundle 把实例换成 Hermes 自己的登录，旧的产品服务连不上它，带登录的产品服务也登不进旧实例，所以**同一次维护里先正式部署产品服务（含 Host Agent 的文件代理），再立即 `update`**；中间这一会儿 VNAS 不可用。它带上 `hermes-patches/0002` 与系统技能 `anas-desktop`，删掉旧的 `anas-assistant-token@.service`（[研究](../research/hermes-agent-runtime.md#让-vnas-操作-webos)）。
+- 带虚拟伙伴（#412）的 bundle 把伙伴套接字交给产品服务；之前构建的产品服务不读它，伙伴的每次调用都要等满 20 秒。所以**先正式部署带伙伴套接字的产品服务，再 `update`**。`check` 与 `install`、`update` 的最后一行只有在产品服务在这个套接字上应答时才是 `PASS photo service serves assistants`；否则状态里写 `companion for assistants unanswered`，那一行是 `FAIL`。
 
 ## 验证
 

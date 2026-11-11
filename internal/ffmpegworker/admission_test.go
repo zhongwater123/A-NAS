@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // slotDir creates a slot directory as the installer's tmpfiles entry does.
@@ -193,7 +195,7 @@ func TestFailuresSayWhetherTheWorkerHadTheRequest(t *testing.T) {
 			t.Errorf("request = %+v, %v; want one asking for an acknowledgement", request, err)
 			return
 		}
-		closeFile(file)
+		unixmsg.CloseFile(file)
 		_ = writeFrame(conn, Response{Accepted: true}, nil)
 	})
 	if _, err := stopped.Image(ctx, openFile(t, "x"), 320); !errors.Is(err, ErrInterrupted) {
@@ -206,7 +208,7 @@ func TestFailuresSayWhetherTheWorkerHadTheRequest(t *testing.T) {
 			if err != nil {
 				return
 			}
-			closeFile(file)
+			unixmsg.CloseFile(file)
 			_ = writeFrame(conn, response, nil)
 			_, _ = conn.Write([]byte(body))
 		}

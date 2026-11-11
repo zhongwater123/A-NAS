@@ -6,6 +6,7 @@
 package photos
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"errors"
@@ -89,9 +90,11 @@ type Library struct {
 	// Viewing is set when the caller sees another member's private library
 	// only through Administrative Viewing Mode; access is read-only.
 	Viewing *LibraryViewing `json:"viewing,omitempty"`
-	// People says whether the library recognises people and pets, and
-	// CanSetPeople whether the caller may turn that on or off.
+	// People says whether the library recognises people and pets, Texts
+	// whether it reads the text in photos, and CanSetPeople whether the
+	// caller may turn either on or off.
 	People       bool `json:"people"`
+	Texts        bool `json:"texts"`
 	CanSetPeople bool `json:"canSetPeople"`
 }
 
@@ -155,7 +158,10 @@ type Asset struct {
 	// AlsoKeptBy names other members whose private libraries hold the same
 	// original. Only the owner of a private library sees it, and it reveals
 	// nothing else about those libraries.
-	AlsoKeptBy []string    `json:"alsoKeptBy,omitempty"`
+	AlsoKeptBy []string `json:"alsoKeptBy,omitempty"`
+	// SharedCopy is, for an asset of the caller's own private library, the
+	// shared library's asset with the same original, when there is one.
+	SharedCopy string      `json:"sharedCopy,omitempty"`
 	Trash      *TrashState `json:"trash,omitempty"`
 	// Tags and Albums belong to a single photo's details; lists leave them
 	// out. AI clusters are never part of a photo's details.
@@ -164,6 +170,10 @@ type Asset struct {
 	// People lists the faces and pets in a single photo's details, with
 	// who each is in the photo's library.
 	People []AssetPerson `json:"people,omitempty"`
+	// Text says where reading the text in a photo stands, in a single
+	// photo's details: TextRead, TextQueued or TextFailed; empty when the
+	// photo's library does not read text or the photo is not one to read.
+	Text string `json:"text,omitempty"`
 }
 
 type TrashState struct {
@@ -211,6 +221,17 @@ type Options struct {
 	TextRoute *textroute.Route
 	// People defaults to the built-in calibration of the face models.
 	People []PeopleCalibration
+	// Release names the product release, which ships the AI Worker too:
+	// what another release's Worker said about its models is not taken for
+	// this one's.
+	Release string
+	// Vectors is the service's own vector index (ADR 0028), which ranking by
+	// similarity reads; nil, or an index that cannot answer, leaves ranking
+	// to read the Catalog's vectors.
+	Vectors VectorIndex
+	// OnVectorFallback, when set, is told why ranking read the Catalog
+	// instead of the index, once per reason every few minutes.
+	OnVectorFallback func(reason string, err error)
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -224,6 +245,7 @@ type Service struct {
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
+	release        string
 	now            func() time.Time
 	random         io.Reader
 	trashRetention time.Duration
@@ -240,10 +262,9 @@ type Service struct {
 	mediaWake chan struct{}
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
-	// embedder encodes search queries, index holds image vectors for search
-	// and AI clusters, and detected the detector's best score per class.
+	// embedder encodes search queries, and detected holds the detector's best
+	// score per class.
 	embedder   Embedder
-	index      vectorIndex
 	detected   objectIndex
 	labels     labels.Set
 	labelIndex labelIndex
@@ -257,12 +278,25 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
-	// shadow hands searches to RunVectorShadow while shadowing says it runs
-	// (vectorshadow.go); vectorChecked is the image collection the sync loop
-	// last found in the index (vectorsync.go).
-	shadow        chan shadowQuery
-	shadowing     atomic.Bool
-	vectorChecked atomic.Pointer[imagesCollection]
+	// vectors is the vector index ranking reads (vectorsearch.go), prepared
+	// at most every prepareVectorsEvery and left alone for a while after it
+	// fails (health); fallbacks rate the reports to onVectorFallback. check
+	// hands searches to RunVectorCheck while checking says it runs
+	// (vectorcheck.go). vectorChecked is the image collection the sync loop
+	// last found in the index, and vectorRecheck asks the sync loop to look
+	// again now (vectorsync.go).
+	vectors          VectorIndex
+	vectorsPrepared  atomic.Int64
+	health           indexHealth
+	onVectorFallback func(reason string, err error)
+	fallbacks        vectorFallbacks
+	check            chan vectorCheckQuery
+	checking         atomic.Bool
+	vectorChecked    atomic.Pointer[imagesCollection]
+	vectorRecheck    chan struct{}
+	// closed ends background work the service starts itself when it closes.
+	closed       context.Context
+	closeWorkers context.CancelFunc
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 
@@ -307,15 +341,17 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root, media: options.Media,
+		db: db, root: opened, rootPath: root, release: options.Release, media: options.Media,
 		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
 		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
-		shadow:   make(chan shadowQuery, 1),
+		check:    make(chan vectorCheckQuery, 1), vectorRecheck: make(chan struct{}, 1),
+		vectors: options.Vectors, onVectorFallback: options.OnVectorFallback,
 	}
+	service.closed, service.closeWorkers = context.WithCancel(context.Background())
 	service.ai = newAIRunner(service)
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
@@ -374,6 +410,7 @@ func Open(root string, options Options) (*Service, error) {
 }
 
 func (s *Service) Close() error {
+	s.closeWorkers()
 	return errors.Join(s.db.Close(), s.root.Close())
 }
 

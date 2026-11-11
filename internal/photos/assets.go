@@ -193,6 +193,9 @@ func (s *Service) importStaged(ctx context.Context, p Principal, lib library, na
 		if err := s.enqueuePeopleScans(ctx, tx, staged.id); err != nil {
 			return err
 		}
+		if err := s.enqueueTextReading(ctx, tx, staged.id); err != nil {
+			return err
+		}
 		record, err := s.assetByID(ctx, tx, assetID)
 		if err != nil {
 			return err
@@ -243,6 +246,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 		return Asset{}, err
 	}
 	if asset.People, err = s.peopleOf(ctx, record); err != nil {
+		return Asset{}, err
+	}
+	if asset.Text, err = s.textState(ctx, record); err != nil {
 		return Asset{}, err
 	}
 	return asset, nil
@@ -616,6 +622,9 @@ func (s *Service) insertCopy(ctx context.Context, tx *sql.Tx, p Principal, sourc
 	if err := s.enqueuePeopleScans(ctx, tx, record.objectID); err != nil {
 		return assetRecord{}, err
 	}
+	if err := s.enqueueTextReading(ctx, tx, record.objectID); err != nil {
+		return assetRecord{}, err
+	}
 	return record, s.audit(ctx, tx, p.UserID, "photo.copied", id, source.ID)
 }
 
@@ -750,7 +759,6 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 	if err != nil {
 		return 0, err
 	}
-	s.index.forget(orphaned)
 	s.detected.forget(orphaned)
 	// A file left behind by a failure here has no Catalog row; Reconcile
 	// removes it.

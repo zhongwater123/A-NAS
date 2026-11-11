@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { calendarMoment } from "../lib/time";
 import {
   allCategories,
   categoryLabels,
@@ -14,6 +15,7 @@ import {
   type WebSearchLicense,
   type WebSearchStatus,
 } from "../websearch/api";
+import { pauseReasons } from "../websearch/pauses";
 import { publishWebSearch, useWebSearch } from "../websearch/status";
 import { Banner, Group, IconTile, PageHeader, Pill, type Tone } from "./parts";
 import styles from "./settings.module.css";
@@ -27,7 +29,8 @@ const runningText: Record<WebSearchStatus["running"], { text: string; tone: Tone
 
 // WebSearchSection is Settings → 网页搜索, shown to administrators only
 // (docs/specs/web-search.md): the switches of web search and its torrent tab,
-// the engines it asks, and SearXNG's license and source (ADR 0030).
+// the engines it asks and those paused since their site blocked them, and
+// SearXNG's license and source (ADR 0030).
 export function WebSearchSection() {
   const status = useWebSearch();
   const [busy, setBusy] = useState(false);
@@ -104,6 +107,24 @@ export function WebSearchSection() {
               </details>
             );
           })}
+        </Group>
+      )}
+      {status?.enabled && (
+        <Group
+          title="暂停的网站"
+          footnote="网站拦截后暂停 1 小时，恢复后再次被拦则加倍，最长 1 天；同一网站的各类搜索一起暂停。"
+        >
+          {status.paused.length === 0 && <div className={styles.setRow}>没有暂停的网站</div>}
+          {status.paused.map((paused) => (
+            <div key={paused.engine} className={styles.setRow}>
+              <div className={styles.setRowText}>
+                <span>{paused.engine}</span>
+                <small>
+                  {pauseReasons[paused.reason]}，{calendarMoment(paused.until)} 恢复
+                </small>
+              </div>
+            </div>
+          ))}
         </Group>
       )}
       <LicenseGroup />

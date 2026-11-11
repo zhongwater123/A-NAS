@@ -1,7 +1,10 @@
 // Command photos-spike runs the A-NAS photo service for the assistant spike
 // (#113, docs/research/hermes-agent-runtime.md): the real photoservice.Run
 // with its assistant socket, a small library for alice and bob, and a
-// stand-in for the AI Worker that tells photos apart by their colour.
+// stand-in for the AI Worker that tells photos apart by their colour. Two of
+// alice's photos stand for the two sides of an ID card: the stand-in reads
+// their text, with a made-up name and number, as the Worker's reader would
+// (docs/architecture/photo-ocr.md).
 //
 //	photos-spike STATE_DIR PHOTO_SOCKET ASSISTANT_SOCKET
 //
@@ -43,6 +46,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/aiworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photos/textroute"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
@@ -63,7 +67,27 @@ var concepts = []concept{
 	{color.RGBA{60, 140, 60, 255}, []string{"山", "爬山", "登山", "mountain"}},
 	{color.RGBA{250, 200, 160, 255}, []string{"合照", "合影", "全家福", "人", "家人", "妈妈", "爸爸", "people"}},
 	{color.RGBA{150, 70, 30, 255}, []string{"美食", "吃", "饭", "火锅", "food"}},
+	{cardFront, []string{"证件", "身份证", "卡", "票据", "document"}},
 }
+
+// The two sides of the ID card are painted nearly alike: both are documents
+// to the stand-in's vectors, and its reader tells them apart.
+var (
+	cardFront = color.RGBA{90, 200, 190, 255}
+	cardBack  = color.RGBA{80, 190, 180, 255}
+)
+
+// What the stand-in reads from the ID card: nobody's name, and a number made
+// up so that its check digit holds.
+const (
+	frontText   = "姓名 张三\n性别 男 民族 汉\n出生 1990 年 1 月 1 日\n住址 广东省深圳市某区某路 1 号\n公民身份号码 440306199001011236"
+	frontFields = `{"姓名": "张三", "性别": "男", "民族": "汉", "出生": "1990年1月1日", "住址": "广东省深圳市某区某路1号", "公民身份号码": "440306199001011236"}`
+	backText    = "中华人民共和国\n居民身份证\n签发机关 深圳市公安局某分局\n有效期限 2020.01.01-2040.01.01"
+	backFields  = `{"签发机关": "深圳市公安局某分局", "有效期限": "2020.01.01-2040.01.01"}`
+)
+
+// textRoute sends the photos whose vector is the documents' to be read.
+const textRoute = `{"model": "spike-colours-1", "queries": ["证件"], "threshold": 0.9}`
 
 const (
 	beach = iota
@@ -73,6 +97,7 @@ const (
 	mountain
 	people
 	food
+	document
 )
 
 type fixture struct {
@@ -81,28 +106,33 @@ type fixture struct {
 	taken                string // EXIF DateTimeOriginal; empty for none
 	tags                 []string
 	album                string
+	// paint, when set, is the colour in place of the concept's own.
+	paint *color.RGBA
 }
 
 // "去年" is 2025 in the spike's October 2026.
 var fixtures = []fixture{
-	{"alice", "private", "IMG_3101.jpg", beach, "2025:07:12 16:20:00", []string{"青岛"}, "2025 夏天 青岛"},
-	{"alice", "private", "IMG_3102.jpg", beach, "2025:07:12 17:05:00", []string{"青岛"}, "2025 夏天 青岛"},
-	{"alice", "private", "IMG_3115.jpg", people, "2025:07:13 10:30:00", []string{"青岛"}, "2025 夏天 青岛"},
-	{"alice", "private", "IMG_2801.jpg", beach, "2024:08:03 15:00:00", nil, ""},
-	{"alice", "private", "IMG_2802.jpg", beach, "2024:08:03 15:40:00", nil, ""},
-	{"alice", "private", "IMG_3010.jpg", snow, "2025:01:18 09:00:00", nil, ""},
-	{"alice", "private", "IMG_3011.jpg", snow, "2025:01:18 09:20:00", nil, ""},
-	{"alice", "private", "IMG_3301.jpg", cat, "2025:05:02 20:10:00", nil, ""},
-	{"alice", "private", "IMG_3302.jpg", cat, "2025:11:09 21:00:00", []string{"咪咪"}, ""},
-	{"alice", "private", "IMG_3405.jpg", birthday, "2025:10:20 19:30:00", nil, ""},
-	{"alice", "private", "IMG_3520.jpg", mountain, "2026:02:14 11:00:00", nil, ""},
-	{"alice", "private", "IMG_3601.jpg", people, "2026:03:08 12:00:00", nil, ""},
-	{"alice", "private", "扫描件.jpg", food, "", nil, ""},
-	{"bob", "private", "IMG_9001.jpg", beach, "2025:07:20 14:00:00", nil, ""},
-	{"bob", "private", "IMG_9002.jpg", people, "2025:07:20 14:10:00", nil, ""},
-	{"bob", "shared", "全家福_2025春节.jpg", people, "2025:01:29 12:00:00", nil, ""},
-	{"bob", "shared", "IMG_7001.jpg", beach, "2025:08:15 18:00:00", nil, ""},
-	{"bob", "shared", "IMG_7002.jpg", food, "2025:12:31 20:00:00", nil, ""},
+	{"alice", "private", "IMG_3101.jpg", beach, "2025:07:12 16:20:00", []string{"青岛"}, "2025 夏天 青岛", nil},
+	{"alice", "private", "IMG_3102.jpg", beach, "2025:07:12 17:05:00", []string{"青岛"}, "2025 夏天 青岛", nil},
+	{"alice", "private", "IMG_3115.jpg", people, "2025:07:13 10:30:00", []string{"青岛"}, "2025 夏天 青岛", nil},
+	{"alice", "private", "IMG_2801.jpg", beach, "2024:08:03 15:00:00", nil, "", nil},
+	{"alice", "private", "IMG_2802.jpg", beach, "2024:08:03 15:40:00", nil, "", nil},
+	{"alice", "private", "IMG_3010.jpg", snow, "2025:01:18 09:00:00", nil, "", nil},
+	{"alice", "private", "IMG_3011.jpg", snow, "2025:01:18 09:20:00", nil, "", nil},
+	{"alice", "private", "IMG_3301.jpg", cat, "2025:05:02 20:10:00", nil, "", nil},
+	{"alice", "private", "IMG_3302.jpg", cat, "2025:11:09 21:00:00", []string{"咪咪"}, "", nil},
+	{"alice", "private", "IMG_3405.jpg", birthday, "2025:10:20 19:30:00", nil, "", nil},
+	{"alice", "private", "IMG_3520.jpg", mountain, "2026:02:14 11:00:00", nil, "", nil},
+	{"alice", "private", "IMG_3601.jpg", people, "2026:03:08 12:00:00", nil, "", nil},
+	{"alice", "private", "扫描件.jpg", food, "", nil, "", nil},
+	// File names as a phone gives them: nothing in them says what they show.
+	{"alice", "private", "ecbb3af3a2e2.jpg", document, "2026:03:02 09:15:00", nil, "", &cardFront},
+	{"alice", "private", "9b72d6201e0a.jpg", document, "2026:03:02 09:16:00", nil, "", &cardBack},
+	{"bob", "private", "IMG_9001.jpg", beach, "2025:07:20 14:00:00", nil, "", nil},
+	{"bob", "private", "IMG_9002.jpg", people, "2025:07:20 14:10:00", nil, "", nil},
+	{"bob", "shared", "全家福_2025春节.jpg", people, "2025:01:29 12:00:00", nil, "", nil},
+	{"bob", "shared", "IMG_7001.jpg", beach, "2025:08:15 18:00:00", nil, "", nil},
+	{"bob", "shared", "IMG_7002.jpg", food, "2025:12:31 20:00:00", nil, "", nil},
 }
 
 // colours is the stand-in AI Worker: an image's vector names the concept
@@ -111,15 +141,17 @@ var fixtures = []fixture{
 type colours struct{}
 
 func (colours) Info(context.Context) (photos.EmbedderInfo, error) {
-	return photos.EmbedderInfo{Model: "spike-colours-1", Dimensions: len(concepts) + 1}, nil
+	return photos.EmbedderInfo{Model: "spike-colours-1", Dimensions: len(concepts) + 1,
+		OCR: "spike-reader-1", OCRMemoryBytes: 1 << 20}, nil
 }
 
-func (colours) EmbedImage(_ context.Context, file *os.File) ([]float32, error) {
+// meanColour is an image's mean colour.
+func meanColour(file *os.File) (r, g, b float64, err error) {
 	img, _, err := image.Decode(file)
 	if err != nil {
-		return nil, photos.ErrAIRejected
+		return 0, 0, 0, photos.ErrAIRejected
 	}
-	var r, g, b, n float64
+	var n float64
 	bounds := img.Bounds()
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -127,11 +159,47 @@ func (colours) EmbedImage(_ context.Context, file *os.File) ([]float32, error) {
 			r, g, b, n = r+float64(cr>>8), g+float64(cg>>8), b+float64(cb>>8), n+1
 		}
 	}
-	best, distance := 0, math.MaxFloat64
+	return r / n, g / n, b / n, nil
+}
+
+func distance(r, g, b float64, c color.RGBA) float64 {
+	return math.Pow(r-float64(c.R), 2) + math.Pow(g-float64(c.G), 2) + math.Pow(b-float64(c.B), 2)
+}
+
+// ReadText is the stand-in for the Worker's text reader: the two sides of
+// the ID card, told apart by their colour, with every token certain.
+func (colours) ReadText(_ context.Context, file *os.File, schema json.RawMessage) (string, photos.Reading, error) {
+	r, g, b, err := meanColour(file)
+	if err != nil {
+		return "", photos.Reading{}, err
+	}
+	whole, fields := frontText, frontFields
+	if distance(r, g, b, cardBack) < distance(r, g, b, cardFront) {
+		whole, fields = backText, backFields
+	}
+	if schema == nil {
+		return "spike-reader-1", photos.Reading{Text: whole, Finish: "stop"}, nil
+	}
+	return "spike-reader-1", photos.Reading{Text: fields, Finish: "stop", Tokens: []photos.TokenProb{{Token: fields}}}, nil
+}
+
+// The reader's memory is released through the Worker's detector interface;
+// the stand-in detects nothing and holds nothing.
+func (colours) DetectObjects(context.Context, *os.File) (string, []photos.Box, error) {
+	return "", nil, errors.New("the stand-in has no detector")
+}
+
+func (colours) Release(context.Context, bool) error { return nil }
+
+func (colours) EmbedImage(_ context.Context, file *os.File) ([]float32, error) {
+	r, g, b, err := meanColour(file)
+	if err != nil {
+		return nil, err
+	}
+	best, nearest := 0, math.MaxFloat64
 	for i, c := range concepts {
-		d := math.Pow(r/n-float64(c.colour.R), 2) + math.Pow(g/n-float64(c.colour.G), 2) + math.Pow(b/n-float64(c.colour.B), 2)
-		if d < distance {
-			best, distance = i, d
+		if d := distance(r, g, b, c.colour); d < nearest {
+			best, nearest = i, d
 		}
 	}
 	vector := make([]float32, len(concepts)+1)
@@ -200,6 +268,11 @@ func main() {
 	if socket := os.Getenv("PHOTOS_SPIKE_AI_SOCKET"); socket != "" {
 		ai = aiworker.Client{SocketPath: socket}
 	}
+	route, err := textroute.Parse([]byte(textRoute))
+	if err != nil {
+		logger.Error("the stand-in's text route", "error", err)
+		os.Exit(1)
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- photoservice.Run(ctx, photoservice.Config{
@@ -207,7 +280,7 @@ func main() {
 			AssistantSocketPath: assistantSocket, Accounts: passwdAccounts{}, Logger: logger,
 			// The spike's store is a plain directory, not the Btrfs data volume.
 			CheckStore: func(string) error { return nil },
-			Photos:     photos.Options{DisableCapacityReserve: true},
+			Photos:     photos.Options{DisableCapacityReserve: true, TextRoute: &route},
 			AI:         ai, AIQuietPeriod: 500 * time.Millisecond,
 			AIPressure: func(string) (float64, error) { return 0, nil },
 		})
@@ -360,8 +433,12 @@ func seed(ctx context.Context, a api) error {
 	if len(existing.Items) == 0 {
 		albums := map[string]string{}
 		for _, f := range fixtures {
+			colour := concepts[f.shows].colour
+			if f.paint != nil {
+				colour = *f.paint
+			}
 			library := libraries[f.owner][f.library]
-			asset, err := a.upload(ctx, f.owner, library, f.name, bytes.NewReader(photo(concepts[f.shows].colour, f.taken)))
+			asset, err := a.upload(ctx, f.owner, library, f.name, bytes.NewReader(photo(colour, f.taken)))
 			if err != nil {
 				return err
 			}
@@ -392,11 +469,12 @@ func seed(ctx context.Context, a api) error {
 			if err := a.call(ctx, member, http.MethodGet, strings.TrimPrefix(photosapi.AIStatusPath, photosapi.PathPrefix), nil, "", &status); err != nil {
 				return err
 			}
-			if status.Pending == 0 && status.Ready > 0 {
+			// Every vector, and then the text of the photos routed to be read.
+			if status.Pending == 0 && status.Ready > 0 && status.Texts != nil && status.Texts.Queued == 0 {
 				break
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("vectors for %s still pending: %+v", member, status)
+				return fmt.Errorf("vectors or texts for %s still pending: %+v", member, status)
 			}
 			time.Sleep(time.Second)
 		}

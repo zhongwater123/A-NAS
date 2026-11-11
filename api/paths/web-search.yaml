@@ -33,6 +33,10 @@
       may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled
       while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is
       off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.
+      Each engine is asked as a person would search: at its own pace whoever searches, not while its site has
+      blocked it, and for a page after the first only if it found something on the page before. The same page
+      again within ten minutes comes from what the engines answered, for this account only. A word that SearXNG
+      would read as a command of its own ("!name", ":xx", "<n") is searched as text.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchQuery" } } } }
     responses:

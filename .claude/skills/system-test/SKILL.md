@@ -10,7 +10,7 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 ## 前提
 
 - WSL 中的 Docker；测试只启动并删除自己命名为 `anas-system-test-<PID>` 的容器。本机还运行着与 A-NAS 无关的容器，不要清理它们。
-- 镜像 `anas-systemd:trixie`。缺少时，或比构建脚本旧时，重新构建。比较两个时间：`docker image inspect -f '{{.Created}}' anas-systemd:trixie`，以及在检出中运行 `git log -1 --format=%cI -- scripts/build-system-test-image.sh`。旧镜像会让后来加进脚本的检查失败，例如助手沙箱报 `rg: not found`。构建命令：
+- 镜像 `anas-systemd:trixie`。缺少时，或比构建脚本旧时，重新构建。比较两个时间：`docker image inspect -f '{{.Created}}' anas-systemd:trixie`，以及在检出中运行 `git log -1 --format=%cI -- scripts/build-system-test-image.sh deploy/debian/a-nas-host/DEBIAN/control`（镜像装的是这个包的依赖）。旧镜像会让后来加进脚本的检查失败，例如助手沙箱报 `rg: not found`。构建命令：
 
   ```bash
   scripts/build-system-test-image.sh anas-systemd:trixie <本地任一 Debian 镜像>
@@ -40,4 +40,5 @@ echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$d
 ## 结果
 
 - 脚本逐项打印 `PASS <名称>` 或 `FAIL <名称>`，有任何失败即以非零退出。在报告或 PR 中写明 PASS 的项数与每一条 FAIL。
+- `FAIL` 下一行的 `ran:` 是展开参数后执行的命令，`test` 比较的实际值就在其中；`quiet`、`fails` 与 `denied` 等辅助函数隐藏的输出，失败时以 `|` 开头打印最后 20 行。有失败时，脚本最后打印失败的单元与日志中的警告，并把整个 journal、单元列表、安装器与各服务的日志放进检出中的 `build/system-test-logs/`。CI 失败时这个目录作为 `system-test-logs` 制品上传。
 - 测试被强行中断时，用 `docker ps -a --filter name=anas-system-test-` 找出残留的容器，只删除这些。

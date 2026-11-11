@@ -81,6 +81,11 @@ func TestRequestsAreTyped(t *testing.T) {
 		"key as field":  client.CreateCollection(ctx, vectorindex.Collection{Name: "c", Dimensions: 2, Keywords: []string{"key"}}),
 		"no dimensions": client.CreateCollection(ctx, vectorindex.Collection{Name: "c"}),
 		"no limit":      searchErrLimit(client, 0),
+		"batch, no limit": func() error {
+			_, err := client.SearchBatch(ctx, "c", []vectorindex.Query{{Vector: []float32{1},
+				Scope: vectorindex.Scope{Field: "libraries", Values: []string{"a"}}}})
+			return err
+		}(),
 	} {
 		if !errors.Is(err, vectorindex.ErrInvalid) {
 			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
@@ -139,6 +144,22 @@ func TestIndex(t *testing.T) {
 		t.Errorf("scores = %v, want dot products, best first", hits)
 	}
 
+	// A floor leaves out what is less similar; a batch answers each query as
+	// a search would, a scope without values finding nothing.
+	floor := float32(0.9)
+	batch, err := client.SearchBatch(ctx, "images", []vectorindex.Query{
+		{Vector: unit(1, 0.2, 0), Scope: vectorindex.Scope{Field: "libraries", Values: []string{"alice", "shared"}}, Limit: 10, Exact: true, Floor: &floor},
+		{Vector: unit(0, 1, 0), Scope: vectorindex.Scope{Field: "libraries"}, Limit: 10},
+		{Vector: unit(0, 1, 0), Scope: vectorindex.Scope{Field: "libraries", Values: []string{"bob", "shared"}}, Limit: 10, Exact: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 3 || !slices.Equal(hitKeys(batch[0]), []string{"east"}) || len(batch[1]) != 0 ||
+		!slices.Equal(hitKeys(batch[2]), []string{"north", "northeast", "east"}) {
+		t.Errorf("batch = %v; want east above the floor, nothing without scope, then all three by similarity", batch)
+	}
+
 	// Replacing a point replaces its keywords.
 	if err := client.Upsert(ctx, "images", []vectorindex.Point{{Key: "east", Vector: unit(1, 0, 0), Keywords: map[string][]string{"libraries": {"bob"}}}}); err != nil {
 		t.Fatal(err)
@@ -173,6 +194,11 @@ func TestIndex(t *testing.T) {
 	if collections, err := client.Collections(ctx); err != nil || len(collections) != 0 {
 		t.Errorf("after delete, Collections = %v, %v", collections, err)
 	}
+	// A search of a collection the instance no longer holds says so.
+	if _, err := client.Search(ctx, "images", vectorindex.Query{Vector: unit(1, 0, 0),
+		Scope: vectorindex.Scope{Field: "libraries", Values: []string{"bob"}}, Limit: 10}); !errors.Is(err, vectorindex.ErrNoCollection) {
+		t.Errorf("search of a deleted collection = %v, want ErrNoCollection", err)
+	}
 }
 
 // An idle client closes its connection, so that on the NAS the proxy exits
@@ -199,6 +225,34 @@ func TestIdleConnectionCloses(t *testing.T) {
 	}
 	if _, err := client.Collections(ctx); err != nil {
 		t.Fatalf("after idling: %v", err)
+	}
+}
+
+// Prepare starts the instance without asking it anything, and keeps an open
+// connection from idling, so that the next search finds the instance running.
+func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
+	defer vectorindex.SetIdleTimeout(400 * time.Millisecond)()
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, nil)
+	defer func() { _ = client.Close() }()
+
+	if err := client.Prepare(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !client.Warm() || instance.Connections() == 0 {
+		t.Fatal("not Warm after Prepare")
+	}
+	// Preparing again and again for longer than the idle timeout keeps the
+	// connection open.
+	for range 6 {
+		time.Sleep(150 * time.Millisecond)
+		if err := client.Prepare(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if instance.Connections() == 0 {
+		t.Fatal("the connection closed while it was being prepared")
 	}
 }
 

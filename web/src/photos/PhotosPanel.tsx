@@ -1,6 +1,7 @@
 import { CircleAlert, RefreshCw } from "lucide-react";
 import { type FormEvent, useCallback, useLayoutEffect, useRef, useState } from "react";
 
+import { useBabies } from "../family/useBabies";
 import { useDialogs, useToasts } from "../ui/feedback";
 import { useStoredState } from "../ui/useStoredState";
 import { ActionDialogs } from "./ActionDialogs";
@@ -37,6 +38,8 @@ interface Props {
   /** A photo to show on its own, asked for by another window; onIntentHandled hands it back once shown. */
   intent?: { assetId: string };
   onIntentHandled?(handled: { assetId: string }): void;
+  /** Opens a baby's channel in 家庭中心 that photos joined. */
+  onOpenFamily?(babyId: string): void;
 }
 
 const narrowWidth = 720;
@@ -44,7 +47,7 @@ const narrowWidth = 720;
 // PhotosPanel is the photos window: libraries and albums on the side, photos
 // filling the rest, a viewer over everything. The photo service decides
 // every permission; the panel only leaves out what it would refuse.
-export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled }: Props) {
+export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled, onOpenFamily }: Props) {
   const [rowHeight, setRowHeight] = useStoredState("a-nas.photos.rowHeight", defaultRowHeight);
   const [info, setInfo] = useStoredState("a-nas.photos.info", true);
   const [docked, setDocked] = useStoredState("a-nas.photos.sidebar", true);
@@ -91,6 +94,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
   const sidebarOpen = narrow ? drawer : docked;
 
   const ai = useAIStatus();
+  const babies = useBabies();
 
   // The window's width decides whether the sidebar docks; the toolbar's
   // height is where the photos start.
@@ -151,9 +155,20 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
     dialogs,
     toast,
     reportError,
+    babies,
+    onOpenFamily,
   });
-  const { busy, picker, photoPicker, setPhotoPicker, setPeopleSettings, newAlbum, dropOnAlbum, dropOnLibrary } =
-    actions;
+  const {
+    busy,
+    picker,
+    photoPicker,
+    setPhotoPicker,
+    channelPicker,
+    setAISettings,
+    newAlbum,
+    dropOnAlbum,
+    dropOnLibrary,
+  } = actions;
 
   const {
     viewer,
@@ -228,6 +243,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
     dialogs,
     picker,
     photoPicker,
+    channelPicker,
     selection,
     place,
     viewAssets,
@@ -388,7 +404,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           scope={scope}
           sourceBadge={sourceBadge}
           newAlbum={newAlbum}
-          setPeopleSettings={setPeopleSettings}
+          setAISettings={setAISettings}
           setPhotoPicker={setPhotoPicker}
           reportError={reportError}
           dragging={dragging}

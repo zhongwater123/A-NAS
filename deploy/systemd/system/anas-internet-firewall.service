@@ -1,0 +1,16 @@
+[Unit]
+Description=A-NAS internet entry: firewall table for the tunnel
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/internet-access.md
+# In place before the tunnel can carry a packet.
+DefaultDependencies=no
+Before=network-pre.target wg-quick@wg-anas.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/a-nas/anas-internet.nft
+ExecStop=/usr/sbin/nft delete table inet anas_internet
+
+[Install]
+WantedBy=multi-user.target

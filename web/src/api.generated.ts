@@ -174,6 +174,7 @@ export interface paths {
         };
         get: operations["getSession"];
         put?: never;
+        /** @description Sign in. A client whose sign-ins keep failing waits before it may try again: after 5 failures in a row for one username, or 20 for all usernames together, each further attempt answers 429 too_many_attempts with Retry-After until a wait of 30 seconds, doubling with each failure up to 15 minutes, has passed. Clients are what sessions are bound to (the LAN address, an IPv6 client's /64, or direct loopback). Signing in clears the client's failures. */
         post: operations["createSession"];
         delete: operations["deleteSession"];
         options?: never;
@@ -469,7 +470,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion; the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only. */
+        /** @description Starts converting the data volume to its layout, or spreading the files of a mirror that cannot use all of its disks, now: after a shutdown or an error stopped it, or after a spread left space unusable. The Host Agent otherwise continues at startup and every 15 minutes, a stopped spread only once the disks change. 409 no_conversion when neither waits. Administrators only. */
         post: operations["continueVolumeConversion"];
         delete?: never;
         options?: never;
@@ -487,7 +488,7 @@ export interface paths {
         /** @description Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload. */
         get: operations["listUnfinishedStoragePlans"];
         put?: never;
-        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
+        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the layout is ignored), 422 disk_too_small when it is smaller than the missing disk and replace_one_disk for any other number of disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts, Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
         post: operations["createStoragePlan"];
         delete?: never;
         options?: never;
@@ -1017,7 +1018,7 @@ export interface paths {
         put?: never;
         /**
          * Search one tab's engines through the built-in SearXNG, sending results as the engines answer
-         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.
+         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status. Each engine is asked as a person would search: at its own pace whoever searches, not while its site has blocked it, and for a page after the first only if it found something on the page before. The same page again within ten minutes comes from what the engines answered, for this account only. A word that SearXNG would read as a command of its own ("!name", ":xx", "<n") is searched as text.
          */
         post: operations["searchWeb"];
         delete?: never;
@@ -1766,7 +1767,7 @@ export interface paths {
         /** A channel's records as a timeline: by the day each happened, newest first, 30 a page; only photos the reader can see, and photo records with none left are skipped */
         get: operations["listFamilyRecords"];
         put?: never;
-        /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID */
+        /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID. A photo record leaves out photos already in the cloud album (409 already_in_channel when none are left) and becomes one record per day its photos were taken; the response is the latest of them */
         post: operations["addFamilyRecord"];
         delete?: never;
         options?: never;
@@ -1819,6 +1820,23 @@ export interface paths {
         get: operations["getFamilyAlbum"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/album/contains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Which of up to 500 photos are in a baby's cloud album already, in the order asked, so a picker can mark them */
+        post: operations["familyAlbumContains"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2305,7 +2323,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again */
+        /** Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again */
         patch: operations["changePhotoLibrary"];
         trace?: never;
     };
@@ -2692,7 +2710,7 @@ export interface paths {
         };
         /**
          * The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo's text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.
          */
         get: operations["viewPhoto"];
         put?: never;
@@ -2715,6 +2733,87 @@ export interface paths {
          * @description Everything its EXIF holds, under ifd0, exif and gps, and where the photo was taken when the camera recorded it. Videos have none yet.
          */
         get: operations["getPhotoMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/assets/{assetId}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+         * @description A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md).
+         */
+        get: operations["getPhotoText"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/assets/{assetId}/text/fields/{field}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+         * @description Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record.
+         */
+        put: operations["correctPhotoTextField"];
+        post?: never;
+        /** Take a field's correction back, so that it shows what was read again */
+        delete: operations["restorePhotoTextField"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/assets/{assetId}/text/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every change to the photo's fields, newest first, with who made it from which library
+         * @description For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+         */
+        get: operations["listPhotoTextChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/text-handles/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The value a handle of the caller's AI assistant stands for
+         * @description An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+         */
+        get: operations["getPhotoTextHandle"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2981,7 +3080,7 @@ export interface paths {
         head?: never;
         /**
          * Rename a show as the caller, its own folder and the episode files that carry its title
-         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot, 400 show_without_folder when the show has no folder of its own and no episode file carries its title, and 409 show_title_taken when another show in the library has the title.
          */
         patch: operations["renameMediaShow"];
         trace?: never;
@@ -3002,7 +3101,7 @@ export interface paths {
         head?: never;
         /**
          * Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
-         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot and 400 video_extension_required without a video extension.
          */
         patch: operations["renameMediaVideoFile"];
         trace?: never;
@@ -3757,7 +3856,7 @@ export interface paths {
         };
         /**
          * Upgrade to a WebSocket bridged to a login shell on a new PTY
-         * @description Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
+         * @description Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted; the internet entry is refused with `terminal_internet`. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
          */
         get: operations["openTerminalSession"];
         put?: never;
@@ -3891,7 +3990,7 @@ export interface paths {
         };
         /**
          * The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
+         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
          */
         get: operations["openAssistantGateway"];
         put?: never;
@@ -4423,13 +4522,13 @@ export interface components {
         HealthFindings: components["schemas"]["HealthFinding"][];
         HealthFinding: {
             /** @enum {string} */
-            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
+            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_degraded" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
             /** @enum {string} */
             severity: "warning" | "critical";
             diskId?: components["schemas"]["StableResourceID"];
             /**
              * Format: int64
-             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.
+             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing.
              */
             value?: number;
         };
@@ -4645,9 +4744,17 @@ export interface components {
             capacityBytes?: number;
             /** Format: int64 */
             availableBytes?: number;
-            /** @enum {string} */
-            state: "creating" | "available" | "unavailable" | "read_only";
+            /**
+             * @description degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025).
+             * @enum {string}
+             */
+            state: "creating" | "available" | "degraded" | "unavailable" | "read_only";
             conversion?: components["schemas"]["VolumeConversion"];
+            /** @description Disks of the volume the device does not see, while it is degraded or not mounted. */
+            missingDisks?: components["schemas"]["MissingDisk"][];
+            /** @description The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy. */
+            restoring?: boolean;
+            spread?: components["schemas"]["VolumeSpread"];
         };
         /** @description Present while data or metadata are outside the layout's Btrfs profiles, after disks were added. */
         VolumeConversion: {
@@ -4661,7 +4768,21 @@ export interface components {
             /** Format: int64 */
             totalBytes: number;
         };
+        /** @description Present while a mirror cannot use part of its disks' space, because each block group needs room on two disks, such as after a disk joined two full ones, until the Host Agent spreads the files over all disks; and while Btrfs balances a volume on several disks, during which no disk can join it. */
+        VolumeSpread: {
+            /**
+             * @description running: Btrfs balances the volume now. waiting: spreading stopped, for example at shutdown, and continues at the Host Agent's next check. stopped: spreading finished with space still unusable, for lack of room on the old disks; it is tried again when the disks change or on request.
+             * @enum {string}
+             */
+            state: "running" | "waiting" | "stopped";
+            /**
+             * Format: int64
+             * @description Space for files the mirror cannot use until its files are spread; 0 once all of it is usable.
+             */
+            unusableBytes: number;
+        };
         StorageAction: {
+            /** @description erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or spread (the files are spread over all disks so that a mirror can use the new ones). */
             kind: string;
             description: string;
         };
@@ -4679,8 +4800,11 @@ export interface components {
         };
         StoragePlan: {
             id: string;
-            /** @enum {string} */
-            kind: "create_volume" | "add_disks";
+            /**
+             * @description replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy.
+             * @enum {string}
+             */
+            kind: "create_volume" | "add_disks" | "replace_disk";
             layout: components["schemas"]["VolumeLayout"];
             disks: components["schemas"]["PlannedDisk"][];
             /**
@@ -4701,7 +4825,9 @@ export interface components {
              * @description The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
              * @enum {string}
              */
-            step?: "erase" | "format" | "mount" | "prepare" | "add_devices";
+            step?: "erase" | "format" | "mount" | "prepare" | "add_devices" | "replace";
+            /** @description How far a rebuild has come, in percent, while a replace_disk plan is at the replace step. */
+            progress?: number;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4976,7 +5102,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family";
         ActivityAccount: {
             id: string;
             username: string;
@@ -4988,7 +5114,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -5078,6 +5204,20 @@ export interface components {
                 social: string[];
                 torrents: string[];
             };
+            /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
+            paused: components["schemas"]["WebSearchPausedEngine"][];
+        };
+        /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
+        WebSearchPausedEngine: {
+            /** @description The website name the window shows; the legacy field name is retained. */
+            engine: string;
+            /**
+             * @description How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not read, often a challenge it does not recognize.
+             * @enum {string}
+             */
+            reason: "captcha" | "denied" | "too_many" | "unreadable";
+            /** Format: date-time */
+            until: string;
         };
         WebSearchSettings: {
             enabled: boolean;
@@ -5124,6 +5264,34 @@ export interface components {
             sizeBytes?: number;
             seeders?: number;
             leechers?: number;
+            /**
+             * @description A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+             * @enum {string}
+             */
+            kind?: "paper" | "package" | "place";
+            /** @description A paper's authors. */
+            authors?: string[];
+            /** @description A paper's journal, or else its publisher. */
+            journal?: string;
+            doi?: string;
+            /**
+             * Format: uri
+             * @description A paper's PDF.
+             */
+            pdf?: string;
+            /** @description A package's version. */
+            version?: string;
+            license?: string;
+            /** @description A package's popularity as its site counts it: stars, downloads or pulls. */
+            popularity?: string;
+            /** Format: uri */
+            homepage?: string;
+            /** Format: uri */
+            sourceCode?: string;
+            /** @description A place's address. */
+            address?: string;
+            latitude?: number;
+            longitude?: number;
         };
         WebSearchAnswer: {
             text: string;
@@ -5146,9 +5314,13 @@ export interface components {
             answers: components["schemas"]["WebSearchAnswer"][];
             infobox?: components["schemas"]["WebSearchInfobox"];
             suggestions: string[];
-            /** @description The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA). */
+            /** @description The tab's engines that did not answer; website blocks are reported under paused. */
             unresponsive: string[];
-            /** @description The tab's engines still searching; 0 in the last update. */
+            /** @description Websites paused before or during this search, each reported once as the block becomes known. */
+            paused: components["schemas"]["WebSearchPausedEngine"][];
+            /** @description The engines this search left out because their website had been asked too often just before: each website is asked a few times in a row, then every ten seconds, whoever searches. */
+            busy: string[];
+            /** @description The engines still searching or waiting for their turn; 0 in the last update. */
             pending: number;
         };
         WebSearchFound: {
@@ -5498,9 +5670,9 @@ export interface components {
             kind?: "photos" | "journal" | "measurement" | "vaccine" | "milestone";
             occurredOn?: components["schemas"]["FamilyDate"];
             text?: string;
-            /** @description Photo asset IDs of the shared library, in order; on an edit, replaces the photos. */
+            /** @description Photo asset IDs of the shared library, in order; on an edit, replaces only currently visible references. Omission preserves all stored references. */
             photos?: string[];
-            /** @description A vaccination's proof photos. */
+            /** @description A vaccination's proof photos; on an edit, replaces only currently visible references. Omission preserves all stored references. */
             certificates?: string[];
             /** @description A photo record goes into these babies' channels too. */
             alsoBabies?: string[];
@@ -5664,7 +5836,9 @@ export interface components {
             createdAt: string;
             /** @description Whether the library recognises people and pets. */
             people?: boolean;
-            /** @description Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library. */
+            /** @description Whether the library reads the text in photos: documents, receipts, cards, screenshots. */
+            texts?: boolean;
+            /** @description Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library. */
             canSetPeople?: boolean;
             /** @description Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only. */
             viewing?: {
@@ -5724,6 +5898,8 @@ export interface components {
             duplicate?: "first" | "duplicate";
             /** @description Names of other members whose private libraries hold the same original; only the owner of a private library sees it. */
             alsoKeptBy?: string[];
+            /** @description For an asset of the caller's own private library: the earliest asset of the shared library with the same original. Adding the photo to a family channel uses it instead of copying again. */
+            sharedCopy?: string;
             trash?: {
                 /** Format: date-time */
                 trashedAt: string;
@@ -5748,6 +5924,11 @@ export interface components {
                 personId?: string;
                 name?: string;
             }[];
+            /**
+             * @description Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
+             * @enum {string}
+             */
+            text?: "read" | "queued" | "failed";
         };
         PhotoTimeline: {
             items: components["schemas"]["PhotoAsset"][];
@@ -5823,8 +6004,12 @@ export interface components {
             next?: string;
             /** @description False when local AI could not encode the query and only names and user tags were matched. */
             semantic: boolean;
-            /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
+            /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
             closest: number;
+            /** @description How many results, counted over all pages, match the query by name or user tag; they come first. */
+            names: number;
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
+            texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
                 /** @description The query's class words. */
@@ -5836,6 +6021,78 @@ export interface components {
             };
             /** @description Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first. */
             people?: string[];
+        };
+        PhotoText: {
+            /**
+             * @description read: the text below; queued: waiting to be read; failed: reading failed; none: not a photo whose text is read; off: this library does not read text.
+             * @enum {string}
+             */
+            status: "read" | "queued" | "failed" | "none" | "off";
+            /**
+             * @description The document type read.
+             * @enum {string}
+             */
+            kind?: "plain" | "id_card" | "id_card_back" | "bank_card" | "bank_slip" | "invoice" | "receipt";
+            /** @description The whole text as machine reading gave it, which may be wrong. */
+            text?: string;
+            /** @description False when the reading was cut off at its length limit or stopped looping. */
+            complete: boolean;
+            /** @description The text reader that read it. */
+            model?: string;
+            /** @description The document type's fields in the order the document shows them. */
+            fields: {
+                name: string;
+                /** @description What the field holds: the correction, else what was read. */
+                value: string;
+                /** @description What was read; empty when nothing was. */
+                read: string;
+                /** @description Whether the value needs no one to look at it: the reading passed every check, or a member corrected it. */
+                passed: boolean;
+                reasons?: ("not_in_text" | "format" | "mismatch" | "low_confidence" | "unfinished")[];
+                /** @description A member's AI assistant gets the value only as a handle. */
+                sensitive: boolean;
+                /** @description Who last corrected the field, and when. */
+                correction?: {
+                    userId: string;
+                    username: string;
+                    /** Format: date-time */
+                    at: string;
+                };
+            }[];
+        };
+        PhotoTextCorrectionRequest: {
+            /** @description What the field holds; spaces around it are dropped, and it may be empty. */
+            value: string;
+        };
+        PhotoTextChange: {
+            field: string;
+            old: string;
+            new: string;
+            /** @description True when a correction was taken back, so that the field shows what was read. */
+            restored: boolean;
+            userId: string;
+            /** @description The member's name when making the change. */
+            username: string;
+            /** @description The library the change was made from; only its ID once it is gone. */
+            library: {
+                id: string;
+                /** @enum {string} */
+                kind?: "private" | "shared";
+                ownerName?: string;
+            };
+            /** Format: date-time */
+            at: string;
+        };
+        PhotoTextHandleValue: {
+            /** @description The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码. */
+            label: string;
+            /** @description What the handle stands for now: what the field holds, what was read for it, or the number as its digits. */
+            value: string;
+            /** @description True for a field's value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong. */
+            unchecked: boolean;
+            /** @description The photo the value was read from. */
+            assetId: string;
+            assetName: string;
         };
         PhotoSimilarResults: {
             items: components["schemas"]["PhotoAsset"][];
@@ -5873,6 +6130,13 @@ export interface components {
             clusters?: "ready" | "preparing";
             /** @description Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker. */
             textPhotos?: number;
+            /** @description textPhotos split by where reading their text stands; absent when textPhotos is. */
+            texts?: {
+                read: number;
+                /** @description Waiting to be read, also when an older reader's reading is kept meanwhile. */
+                queued: number;
+                failed: number;
+            };
         };
         PhotoDirectoryListing: {
             /** @description Every subdirectory on the first page; empty on later pages. */
@@ -6405,6 +6669,8 @@ export interface components {
         };
         TerminalStatusResponse: {
             enabled: boolean;
+            /** @description Present and true when the request came through the internet entry (ADR 0032), which never opens terminal sessions. */
+            internet?: boolean;
         };
         FeedbackItem: {
             id: string;
@@ -6673,6 +6939,13 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
+        MissingDisk: {
+            id: components["schemas"]["StableResourceID"];
+            model?: string;
+            /** Format: int64 */
+            capacityBytes?: number;
+        };
         /**
          * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
          * @enum {string}
@@ -6682,6 +6955,9 @@ export interface components {
             name: components["schemas"]["FamilyReactionName"];
             /** @description The members who left it, earliest first. */
             accountIds: string[];
+        };
+        FamilyAssetIDs: {
+            assetIds: string[];
         };
     };
     responses: {
@@ -6814,6 +7090,10 @@ export interface components {
         PhotoAlbumID: string;
         PhotoPersonID: string;
         PhotoOccurrenceID: string;
+        /** @description A field of the photo's document type, such as 合计 */
+        PhotoTextField: string;
+        /** @description The letters after the dot of a handle, such as 6d48a8 */
+        PhotoTextHandle: string;
         MediaLibraryID: string;
         MediaVideoID: string;
         /** @description A video or show ID. */
@@ -6904,6 +7184,7 @@ export type WallpaperStyleChange = components['schemas']['WallpaperStyleChange']
 export type VolumeLayout = components['schemas']['VolumeLayout'];
 export type Volume = components['schemas']['Volume'];
 export type VolumeConversion = components['schemas']['VolumeConversion'];
+export type VolumeSpread = components['schemas']['VolumeSpread'];
 export type StorageAction = components['schemas']['StorageAction'];
 export type PlannedDisk = components['schemas']['PlannedDisk'];
 export type StoragePlan = components['schemas']['StoragePlan'];
@@ -6933,6 +7214,7 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
 export type WebSearchResult = components['schemas']['WebSearchResult'];
@@ -6996,6 +7278,10 @@ export type PhotoTagCounts = components['schemas']['PhotoTagCounts'];
 export type PhotoAlbum = components['schemas']['PhotoAlbum'];
 export type PhotoNameRequest = components['schemas']['PhotoNameRequest'];
 export type PhotoSearchResults = components['schemas']['PhotoSearchResults'];
+export type PhotoText = components['schemas']['PhotoText'];
+export type PhotoTextCorrectionRequest = components['schemas']['PhotoTextCorrectionRequest'];
+export type PhotoTextChange = components['schemas']['PhotoTextChange'];
+export type PhotoTextHandleValue = components['schemas']['PhotoTextHandleValue'];
 export type PhotoSimilarResults = components['schemas']['PhotoSimilarResults'];
 export type PhotoImageSearch = components['schemas']['PhotoImageSearch'];
 export type PhotoAiStatus = components['schemas']['PhotoAIStatus'];
@@ -7057,8 +7343,10 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type MissingDisk = components['schemas']['MissingDisk'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
+export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];
@@ -7086,6 +7374,8 @@ export type ParameterPhotoAssetId = components['parameters']['PhotoAssetID'];
 export type ParameterPhotoAlbumId = components['parameters']['PhotoAlbumID'];
 export type ParameterPhotoPersonId = components['parameters']['PhotoPersonID'];
 export type ParameterPhotoOccurrenceId = components['parameters']['PhotoOccurrenceID'];
+export type ParameterPhotoTextField = components['parameters']['PhotoTextField'];
+export type ParameterPhotoTextHandle = components['parameters']['PhotoTextHandle'];
 export type ParameterMediaLibraryId = components['parameters']['MediaLibraryID'];
 export type ParameterMediaVideoId = components['parameters']['MediaVideoID'];
 export type ParameterMediaTitleId = components['parameters']['MediaTitleID'];
@@ -7405,6 +7695,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
         };
     };
     deleteSession: {
@@ -10622,6 +10913,7 @@ export interface operations {
             413: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listFamilyTrash: {
@@ -10678,6 +10970,37 @@ export interface operations {
             404: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    familyAlbumContains: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyAssetIDs"];
+            };
+        };
+        responses: {
+            /** @description The named photos that are in the album */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyAssetIDs"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
         };
     };
     getFamilyGrowth: {
@@ -10793,7 +11116,9 @@ export interface operations {
     };
     listFamilyWall: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: string;
+            };
             header?: never;
             path: {
                 babyId: components["parameters"]["FamilyBabyID"];
@@ -10810,11 +11135,13 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["FamilyComment"][];
+                        next?: string;
                     };
                 };
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
         };
     };
     addFamilyWallMessage: {
@@ -11672,7 +11999,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    people: boolean;
+                    people?: boolean;
+                    texts?: boolean;
                 };
             };
         };
@@ -12574,6 +12902,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
@@ -12612,6 +12941,143 @@ export interface operations {
             404: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoText: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    correctPhotoTextField: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+                /** @description A field of the photo's document type, such as 合计 */
+                field: components["parameters"]["PhotoTextField"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoTextCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    restorePhotoTextField: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+                /** @description A field of the photo's document type, such as 合计 */
+                field: components["parameters"]["PhotoTextField"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    listPhotoTextChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PhotoTextChange"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoTextHandle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The letters after the dot of a handle, such as 6d48a8 */
+                handle: components["parameters"]["PhotoTextHandle"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoTextHandleValue"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     openPhotoMotion: {
@@ -14702,7 +15168,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["ProductError"];
-            /** @description The terminal is disabled or the request did not come through this device's Web entry. */
+            /** @description The terminal is disabled, the request came through the internet entry, or it did not come through this device's Web entry. */
             403: {
                 headers: {
                     [name: string]: unknown;

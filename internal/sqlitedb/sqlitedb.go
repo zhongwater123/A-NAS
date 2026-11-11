@@ -70,5 +70,10 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 // time.RFC3339Nano reads both forms.
 const TimeLayout = "2006-01-02T15:04:05.000000000Z"
 
+// Placeholders is "?,?,…", count bind parameters for an IN list.
+func Placeholders(count int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
+}
+
 // FormatTime formats value for a store.
 func FormatTime(value time.Time) string { return value.UTC().Format(TimeLayout) }

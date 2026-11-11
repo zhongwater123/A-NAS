@@ -65,10 +65,19 @@ jobs:
       # make docs-check, alone or within make check, checks the documents'
       # links with this lychee release: the one the Makefile names, checked
       # against its published SHA-256.
+      # Release files come through the API with the job's token, three tries
+      # each: anonymous downloads from github.com are the first to time out
+      # when GitHub is under load (every one answered 504 on 2026-11-09).
       - name: Install lychee
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^LYCHEE_VERSION = //p' Makefile)"
-          curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v$version/lychee-x86_64-unknown-linux-gnu.tar.gz"
+          for attempt in 1 2 3; do
+            gh release download "lychee-v$version" --repo lycheeverse/lychee --pattern lychee-x86_64-unknown-linux-gnu.tar.gz --output "$RUNNER_TEMP/lychee.tar.gz" --clobber && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           echo "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP"
           sudo install "$RUNNER_TEMP/lychee-x86_64-unknown-linux-gnu/lychee" /usr/local/bin/lychee
@@ -92,9 +101,15 @@ jobs:
       # release the Makefile names, checked against its published SHA-256.
       - name: Install ShellCheck
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^SHELLCHECK_VERSION = //p' Makefile)"
-          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "https://github.com/koalaman/shellcheck/releases/download/v$version/shellcheck-v$version.linux.x86_64.tar.xz"
+          for attempt in 1 2 3; do
+            gh release download "v$version" --repo koalaman/shellcheck --pattern "shellcheck-v$version.linux.x86_64.tar.xz" --output "$RUNNER_TEMP/shellcheck.tar.xz" --clobber && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
           sudo install "$RUNNER_TEMP/shellcheck-v$version/shellcheck" /usr/local/bin/shellcheck
@@ -202,7 +217,7 @@ jobs:
       # week every run tests against the same packages.
       - name: Name the cached Debian 13 systemd image
         id: image
-        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh', 'deploy/debian/a-nas-host/DEBIAN/control') }}" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Debian 13 systemd image
         id: image-cache
@@ -232,6 +247,11 @@ jobs:
       - name: Load the Btrfs module for the test's data volume
         run: sudo modprobe btrfs
 
+      # Real accounts, ACLs, Samba and loop-mounted Btrfs as root: the
+      # permission matrix, mirror conversion and the share ACL matrix (#190).
+      - name: Run the root integration tests in disposable containers
+        run: scripts/root-integration-test.sh anas-systemd:trixie
+
       # The release stages the pinned Qdrant tarball as deploy-dev.ps1 does.
       - name: Restore the pinned Qdrant server
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -254,3 +274,11 @@ jobs:
 
       - name: Install the release under systemd and check every entry point
         run: make system-test
+
+      - name: Upload the failed system test's journal and logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-test-logs
+          path: build/system-test-logs
+          if-no-files-found: ignore

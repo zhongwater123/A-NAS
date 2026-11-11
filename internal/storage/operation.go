@@ -33,7 +33,7 @@ func (s *Service) track(planID string, operation VolumeOperation) (ExecutionPlan
 	// The step is only shown while the plan runs; saving it would write an
 	// activity record for every step.
 	if plan.State == PlanStateRunning {
-		plan.Step = operation.Step
+		plan.Step, plan.Progress = operation.Step, operation.Progress
 		s.plans[planID] = plan
 	}
 	s.mu.Unlock()
@@ -52,7 +52,7 @@ func (s *Service) succeeded(planID string, operation VolumeOperation) (Execution
 	if operation.Volume != nil {
 		volume = *operation.Volume
 	}
-	volume.Layout, volume.Conversion = plan.Layout, nil
+	volume.Layout, volume.Conversion, volume.Spread = plan.Layout, nil, nil
 	if plan.Kind == PlanKindCreateVolume {
 		volume.DiskIDs = diskIDsOf(plan.Disks)
 		if volume.ID == "" {
@@ -61,7 +61,12 @@ func (s *Service) succeeded(planID string, operation VolumeOperation) (Execution
 	} else {
 		current, _ := s.currentVolumeLocked()
 		volume.ID, volume.FilesystemUUID = current.ID, current.FilesystemUUID
-		volume.DiskIDs = append([]string(nil), current.DiskIDs...)
+		// A replacement leaves the missing disk out: the Host Agent reports
+		// the disks the volume has now. Without that report the recorded
+		// disks are kept, as for an addition.
+		if plan.Kind != PlanKindReplaceDisk || len(volume.DiskIDs) == 0 {
+			volume.DiskIDs = append([]string(nil), current.DiskIDs...)
+		}
 		for _, id := range diskIDsOf(plan.Disks) {
 			if !slices.Contains(volume.DiskIDs, id) {
 				volume.DiskIDs = append(volume.DiskIDs, id)

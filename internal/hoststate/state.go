@@ -255,6 +255,14 @@ func (o VolumeOperation) Valid() bool {
 	}
 }
 
+// VolumeDevice is one device of the data volume as Btrfs allocates it: its
+// size and the bytes its block groups take, used by files or not.
+type VolumeDevice struct {
+	DevID          uint64
+	SizeBytes      uint64
+	AllocatedBytes uint64
+}
+
 // DataVolume is the Btrfs filesystem mounted as the data volume. Its disks
 // are found by filesystem UUID, because the mount table names only one of
 // them; Data and Metadata hold more than one profile while a conversion runs.
@@ -264,6 +272,20 @@ type DataVolume struct {
 	Data           []ProfileUsage
 	Metadata       []ProfileUsage
 	Operation      VolumeOperation
+	// MissingDevices is how many of the volume's disks the kernel cannot
+	// write to: absent when it was mounted without them, or gone since. A
+	// mirror keeps working without one (ADR 0025).
+	MissingDevices int
+	// Restoring says the volume ran without a disk and has not been scrubbed
+	// since: what was written then has one copy until it is.
+	Restoring bool
+	// Devices is how Btrfs allocates each device; nil when it could not be
+	// read or a device is missing.
+	Devices []VolumeDevice
+	// SpreadStopped says the Host Agent spread the mirror over these disks
+	// and space stayed unusable: it tries again only when the disks change
+	// or the administrator asks.
+	SpreadStopped bool
 }
 
 type State struct {

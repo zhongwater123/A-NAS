@@ -33,8 +33,19 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 `Agent空间` 的管理位置由 Host Agent 维护，访问与修复规则见 [ADR 0024 决定 5](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md#决定)。Shared 的 Samba 配置额外 veto 名为 `Agent空间` 的条目；下面的通用 Samba 选项仍用于个人空间。
 
-- 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
-- 数据卷可以由多块硬盘组成，用 Btrfs 自带的多设备配置（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)）：mount unit 不变，Btrfs 在全部成员出现后挂载；挂载表只列出其中一块设备，所以宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出每块成员盘，任何已挂载 Btrfs 的设备都算使用中；`lsblk` 的文件系统列来自 udev 数据库，加盘后在重启前是旧的（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。卷标记 `.a-nas-volume.json` 的 `layout` 记录目标冗余方式（镜像、扩容或条带；单盘时没有），Host Agent 在启动时和每 15 分钟检查 sysfs 的 `allocation/<类型>/<profile>/used_bytes` 与 `exclusive_operation`，把不在目标 profile 中的数据以 `soft` 过滤的 balance 转换过去。停止 Host Agent 或关机会取消正在进行的 balance，下一次检查接着做。产品服务从同一份观测计算转换进度，目标冗余方式取自最近一次成功的存储计划。
+- 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec,x-systemd.device-bound=no`。最后一项让多盘数据卷不随挂载表登记的那块设备停止：没有它，镜像的这块盘一坏，systemd 就卸载整个数据卷。Host Agent 启动时把更早版本写的 unit 改写过来，下一次挂载生效（[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
+- 数据卷可以由多块硬盘组成，用 Btrfs 自带的多设备配置（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)）：mount unit 不变，Btrfs 在全部成员出现后挂载；挂载表只列出其中一块设备，所以宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出每块成员盘，任何已挂载 Btrfs 的设备都算使用中；`lsblk` 的文件系统列来自 udev 数据库，加盘后在重启前是旧的（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。卷标记 `.a-nas-volume.json` 的 `layout` 记录目标冗余方式（镜像、扩容或条带；单盘时没有），Host Agent 在启动时和每 15 分钟检查 sysfs 的 `allocation/<类型>/<profile>/used_bytes` 与 `exclusive_operation`，把不在目标 profile 中的数据以 `soft` 过滤的 balance 转换过去。停止 Host Agent 或关机会取消正在进行的 balance，下一次检查接着做。产品服务从同一份观测计算转换进度，目标冗余方式取自最近一次成功的存储计划。多盘数据卷加盘时冗余方式不变。镜像的每个块组要在两块盘上各占一份，原有硬盘快满时新盘找不到配对的空间；同一检查在没有要转换的数据后，从 `btrfs filesystem show --raw`（sysfs 不给出每块盘的已分配量）算出用不上的空间，超过容量的十分之一或 2 GiB 时先以 `-dusage=50` 打包半空的块组，再开始完整的数据 balance，与上游手册加盘后的做法一致；完整 balance 从最新的块组往前写，Host Agent 每 30 秒量一次，用不上的空间一到零就 `btrfs balance cancel`，只重写需要的部分。逐块盘挪动块组（`devid` 过滤加 `limit`）在回环设备上实测时有时无，所以不用。做完仍用不上时，把这时的硬盘记进卷标记的 `spreadStopped`，宿主机状态带上 `spreadStopped`，直到硬盘变化或管理员要求才再分散，重启后也不重试。Host Agent 在清除要加入的硬盘之前确认没有 balance、自己也不在转换或分散，加盘期间不开始 balance：`btrfs device add` 在 balance 期间会失败。产品服务用同一公式（[`Unusable`](../../internal/datavolume/layout.go)）显示用不上的空间并预告计划中的分散，读每块盘分配的 `btrfs` 命令 30 秒内只运行一次。
+- 缺盘（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md) 决定 6，[规格](../specs/disk-roles-and-redundancy.md#m2镜像少了一块硬盘)）：
+  - 开机时：udev 在内核认齐全部成员前把它们标为未就绪，systemd 等 by-uuid 设备 90 秒后让 mount unit 失败。Host Agent 随后经 `systemd-run` 在宿主机的挂载命名空间里依次：
+    1. 以 `degraded,ro,rescue=nologreplay` 挂上，读卷标记与 sysfs（只读挂载默认仍会重放日志树并写盘，所以关掉重放）；
+    2. 卸载；
+    3. 写下记录；
+    4. 以 `degraded,skip_balance` 一次挂成读写：关机时暂停的 balance 若在一块盘上继续，会把镜像的块组改写成单份。更换硬盘前，Host Agent 取消这个暂停的 balance，转换检查之后重做剩下的部分。
+
+    Host Agent 自己的命名空间收得到新挂载，收不到 remount，所以读写挂载一次完成。只在 mount unit 失败，或本次开机从未挂上时才这样做；管理员停掉的数据卷保持卸载。查看用的只读挂载卸不掉时，下一轮检查先卸载它。只有镜像、只缺一块、且降级记录（`/var/lib/a-nas-host/degraded-volume.json`）列出的上次留下的盘都在时才挂载，否则保持离线并在日志写明原因。
+  - 缺盘的计数看 sysfs `devinfo/<devid>/missing`、`writeable`，以及 `devices/` 下的链接是否还指向块设备：运行中消失的盘不会被标为 missing。缺盘期间不做冗余方式转换。
+  - 盘齐后，转换检查把降级期间写成单份的块组转回镜像，随后 Host Agent 做一次 Scrub，完成后删除记录。Scrub 发现两份都坏的数据（退出码 3）时同样删除记录，损坏由系统健康的 Btrfs 错误计数报告；Scrub 中途停下时 6 小时后重试。
+  - 更换硬盘按缺失设备的 devid 执行 `btrfs replace start`，进度取自 `btrfs replace status -1`；新盘较大时 `btrfs filesystem resize <devid>:max`。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
 - 个人空间位于 `spaces/private/<username>`，共享空间位于 `spaces/shared`；公开接口只使用不透明空间 ID。
 - 授权只由 POSIX ACL 表达（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。空间根目录、回收站目录及其容器均为 `root:root`、无 setgid，权限只在这些目录上设置，内容靠默认 ACL 继承，从不递归改写：
@@ -144,7 +155,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [备份中心规格](../specs/backup-center.md)与[快照计划](../../internal/files/schedule.go)
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`api/openapi.yaml`](../../api/openapi.yaml)
-- [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md) 与[数据卷操作](../../internal/hostops/linux/volume.go)
+- [ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)、[硬盘用途与数据卷冗余规格](../specs/disk-roles-and-redundancy.md)、[数据卷操作](../../internal/hostops/linux/volume.go) 与[缺盘挂载、更换和恢复冗余](../../internal/hostops/linux/degraded.go)
 - [ACL 对账](../../internal/hostops/linux/acl.go) 与 [权限矩阵 root 集成测试](../../internal/hostops/linux/root_matrix_integration_test.go)
 - [Host Agent 记录的目录与迁移](../../internal/hostops/linux/state.go)、[读入校验与迁移测试](../../internal/hostops/linux/state_internal_test.go) 与 [root 集成测试 `TestRootStateLeavesTheProductServiceDirectory`](../../internal/hostops/linux/root_integration_test.go)
 - [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)

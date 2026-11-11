@@ -71,6 +71,7 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 		"POST /babies/{babyID}/recordings":                h.addRecording,
 		"GET /babies/{babyID}/trash":                      h.trash,
 		"GET /babies/{babyID}/album":                      h.album,
+		"POST /babies/{babyID}/album/contains":            h.albumContains,
 		"GET /babies/{babyID}/growth":                     h.growth,
 		"GET /babies/{babyID}/vaccines":                   h.vaccines,
 		"PUT /babies/{babyID}/vaccine-plan":               h.vaccinePlan,
@@ -94,6 +95,7 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
+	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.withActor(h.activity))
 	return h
 }
 
@@ -126,6 +128,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &bodyLimit), errors.Is(err, family.ErrTooLarge), errors.Is(err, avatar.ErrTooLarge):
 		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "too_large", "the upload is too large")
+	case errors.Is(err, family.ErrNoSpace):
+		httpjson.WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", "not enough space")
 	case errors.Is(err, family.ErrNotMember):
 		httpjson.WriteError(w, http.StatusForbidden, "not_family_member", "join the family first")
 	case errors.Is(err, family.ErrForbidden):
@@ -142,6 +146,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request conflicts with the current state")
 	case errors.Is(err, family.ErrLastGuardian):
 		httpjson.WriteError(w, http.StatusConflict, "last_guardian", "the family needs at least one guardian")
+	case errors.Is(err, family.ErrInChannel):
+		httpjson.WriteError(w, http.StatusConflict, "already_in_channel", "the photos are in the channel already")
 	case errors.Is(err, family.ErrPhotosUnavailable):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")
 	default:
@@ -415,6 +421,19 @@ func (h *handler) album(w http.ResponseWriter, r *http.Request, actor family.Act
 	h.reply(w, r, http.StatusOK, page, err)
 }
 
+func (h *handler) albumContains(w http.ResponseWriter, r *http.Request, actor family.Actor) {
+	var request struct {
+		AssetIDs []string `json:"assetIds"`
+	}
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	found, err := h.store.AlbumContains(r.Context(), actor, r.PathValue("babyID"), request.AssetIDs)
+	h.reply(w, r, http.StatusOK, struct {
+		AssetIDs []string `json:"assetIds"`
+	}{found}, err)
+}
+
 func (h *handler) growth(w http.ResponseWriter, r *http.Request, actor family.Actor) {
 	growth, err := h.store.Growth(r.Context(), actor, r.PathValue("babyID"))
 	h.reply(w, r, http.StatusOK, growth, err)
@@ -442,8 +461,8 @@ func (h *handler) milestones(w http.ResponseWriter, r *http.Request, actor famil
 }
 
 func (h *handler) wall(w http.ResponseWriter, r *http.Request, actor family.Actor) {
-	comments, err := h.store.Wall(r.Context(), actor, r.PathValue("babyID"))
-	h.reply(w, r, http.StatusOK, items[family.Comment]{Items: comments}, err)
+	page, err := h.store.Wall(r.Context(), actor, r.PathValue("babyID"), r.URL.Query().Get("cursor"))
+	h.reply(w, r, http.StatusOK, page, err)
 }
 
 func (h *handler) addWallComment(w http.ResponseWriter, r *http.Request, actor family.Actor) {

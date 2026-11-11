@@ -1,7 +1,9 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 
+import type { FamilyBaby } from "../family/api";
 import { endViewing } from "../settings/api";
 import type { useDialogs, useToasts } from "../ui/feedback";
+import type { AISwitch } from "./AISettings";
 import {
   addPhotoTag,
   addToAlbum,
@@ -23,6 +25,7 @@ import {
   renameAlbum,
   restorePhoto,
   setLibraryPeople,
+  setLibraryTexts,
   trashPhoto,
   updatePerson,
 } from "./api";
@@ -50,6 +53,9 @@ interface Options {
   dialogs: ReturnType<typeof useDialogs>;
   toast: ReturnType<typeof useToasts>["toast"];
   reportError: (message: string) => void;
+  // The babies of 家庭中心 whose channels photos can join, and how to open one.
+  babies: FamilyBaby[];
+  onOpenFamily?: (babyId: string) => void;
 }
 
 // usePhotoActions is what the window does to photos and to the album, person,
@@ -75,8 +81,11 @@ export function usePhotoActions({
   dialogs,
   toast,
   reportError,
+  babies,
+  onOpenFamily,
 }: Options) {
   const [picker, setPicker] = useState<PhotoAsset[]>();
+  const [channelPicker, setChannelPicker] = useState<PhotoAsset[]>();
   const [photoPicker, setPhotoPicker] = useState<PhotoAlbum>();
   const [busy, setBusy] = useState<{ label: string; done: number; total: number }>();
   const byId = useMemo(() => new Map(viewAssets.map((asset) => [asset.id, asset])), [viewAssets]);
@@ -139,6 +148,19 @@ export function usePhotoActions({
       setPicker(undefined);
       reportError(messageOf(caught));
     }
+  };
+  // addedToChannel says which channels photos joined, and opens the first.
+  const addedToChannel = (added: FamilyBaby[]) => {
+    setChannelPicker(undefined);
+    selection.clear();
+    if (!added.length) {
+      toast({ text: "这些照片都已在频道中" });
+      return;
+    }
+    toast({
+      text: `已加入${added.map((baby) => baby.nickname || baby.name).join("、")}的频道`,
+      action: onOpenFamily ? { label: "查看", run: () => onOpenFamily(added[0].id) } : undefined,
+    });
   };
   const copyTo = async (library: PhotoLibrary, assets: PhotoAsset[]) => {
     const result = await batch(`正在复制到${libraryName(caller, library)}`, assets, (asset) =>
@@ -225,30 +247,48 @@ export function usePhotoActions({
       reportError(messageOf(caught));
     }
   };
-  const [peopleSettings, setPeopleSettings] = useState(false);
-  // Off clears what was recognised, so it asks first; on starts at once.
-  const setPeople = async (library: PhotoLibrary, on: boolean) => {
+  const [aiSettings, setAISettings] = useState(false);
+  // Off clears what local AI found, so it asks first; on starts at once.
+  const setAISwitch = async (library: PhotoLibrary, which: AISwitch, on: boolean) => {
     const name = libraryName(caller, library);
+    const people = which === "people";
     if (
       !on &&
-      !(await dialogs.confirm({
-        title: `关闭${name}的人物与宠物？`,
-        message:
-          "这个图库里识别出的人脸与宠物会被删除，本地 AI 也不再识别新照片。起的名字和做过的更正会保留，重新开启后随识别结果回来。",
-        confirm: "关闭并删除",
-        danger: true,
-      }))
+      !(await dialogs.confirm(
+        people
+          ? {
+              title: `关闭${name}的人物与宠物？`,
+              message:
+                "这个图库里识别出的人脸与宠物会被删除，本地 AI 也不再识别新照片。起的名字和做过的更正会保留，重新开启后随识别结果回来。",
+              confirm: "关闭并删除",
+              danger: true,
+            }
+          : {
+              title: `关闭${name}的照片中的文字？`,
+              message:
+                "这个图库里读出的文字会被删除，本地 AI 也不再读取新照片的文字。成员做过的更正和修改记录会保留，重新开启后随读取结果回来。",
+              confirm: "关闭并删除",
+              danger: true,
+            },
+      ))
     )
       return;
     try {
-      const changed = await setLibraryPeople(library.id, on);
+      const changed = people ? await setLibraryPeople(library.id, on) : await setLibraryTexts(library.id, on);
       setLibraries((items) =>
         items?.map((item) =>
-          item.id === changed.id ? { ...item, people: changed.people, canSetPeople: changed.canSetPeople } : item,
+          item.id === changed.id
+            ? { ...item, people: changed.people, texts: changed.texts, canSetPeople: changed.canSetPeople }
+            : item,
         ),
       );
       setRefreshKey((key) => key + 1);
-      toast({ text: on ? `已开启${name}的人物与宠物，本地 AI 会在空闲时重新识别` : `已关闭${name}的人物与宠物` });
+      const label = people ? "人物与宠物" : "照片中的文字";
+      toast({
+        text: on
+          ? `已开启${name}的${label}，本地 AI 会在空闲时${people ? "重新识别" : "读取"}`
+          : `已关闭${name}的${label}`,
+      });
     } catch (caught) {
       reportError(messageOf(caught));
     }
@@ -408,12 +448,16 @@ export function usePhotoActions({
     busy,
     picker,
     setPicker,
+    babies,
+    channelPicker,
+    setChannelPicker,
+    addedToChannel,
     photoPicker,
     setPhotoPicker,
     merging,
     setMerging,
-    peopleSettings,
-    setPeopleSettings,
+    aiSettings,
+    setAISettings,
     restore,
     trash,
     addTo,
@@ -425,7 +469,7 @@ export function usePhotoActions({
     changePerson,
     namePerson,
     mergeInto,
-    setPeople,
+    setAISwitch,
     untag,
     purge,
     download,

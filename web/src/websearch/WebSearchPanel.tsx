@@ -1,11 +1,9 @@
-import { ArrowDown, CircleAlert, Copy, LoaderCircle, Magnet, RotateCw, Search, X } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { ArrowDown, LoaderCircle, RotateCw, Search, X } from "lucide-react";
+import { Tabs } from "radix-ui";
+import { type CSSProperties, type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
-import { formatBytes } from "../lib/bytes";
-import { copyText } from "../lib/clipboard";
-import { calendarDate } from "../lib/time";
 import { useToasts } from "../ui/feedback";
 import {
   categoryLabels,
@@ -13,13 +11,18 @@ import {
   type WebSearchAnswer,
   type WebSearchCategory,
   type WebSearchInfobox,
+  type WebSearchPausedEngine,
   type WebSearchQuery,
   type WebSearchResult,
   type WebSearchUpdate,
 } from "./api";
+import { EngineStatus } from "./EngineStatus";
+import { ExternalLink, Infobox, ResultList } from "./ResultViews";
 import { useWebSearch } from "./status";
 import { WebSearchGlyph } from "./WebSearchGlyph";
 import styles from "./websearch.module.css";
+
+export { durationText } from "./ResultViews";
 
 type TimeRange = NonNullable<WebSearchQuery["timeRange"]>;
 
@@ -33,6 +36,9 @@ const timeRanges: Array<{ value: TimeRange | ""; label: string }> = [
 
 const maxPage = 20;
 
+// Tabs whose results are tiles across the window rather than a column.
+const tiled = new Set<WebSearchCategory>(["images", "videos"]);
+
 // A page of results as its updates have come: engines still searching add
 // theirs below.
 interface Page {
@@ -41,10 +47,22 @@ interface Page {
   infobox?: WebSearchInfobox;
   suggestions: string[];
   unresponsive: string[];
+  // Engines the search left out: their site blocked them, or they had just
+  // been asked too often.
+  paused: WebSearchPausedEngine[];
+  busy: string[];
   pending: number;
 }
 
-const emptyPage: Page = { results: [], answers: [], suggestions: [], unresponsive: [], pending: 0 };
+const emptyPage: Page = {
+  results: [],
+  answers: [],
+  suggestions: [],
+  unresponsive: [],
+  paused: [],
+  busy: [],
+  pending: 0,
+};
 
 // withUpdate adds an update to its page: new results after the others, and
 // the engines of results that more engines have found since.
@@ -60,6 +78,8 @@ export function withUpdate(page: Page, update: WebSearchUpdate): Page {
     infobox: page.infobox ?? update.infobox,
     suggestions: [...page.suggestions, ...update.suggestions],
     unresponsive: [...page.unresponsive, ...update.unresponsive],
+    paused: [...page.paused, ...update.paused],
+    busy: [...page.busy, ...update.busy],
     pending: update.pending,
   };
 }
@@ -94,6 +114,7 @@ export function WebSearchPanel() {
   const shown = searched && allowed(searched.category) ? searched : undefined;
   const pending = useRef<AbortController | undefined>(undefined);
   const input = useRef<HTMLInputElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const { toast, element: toasts } = useToasts();
 
   useEffect(() => () => pending.current?.abort(), []);
@@ -105,6 +126,8 @@ export function WebSearchPanel() {
     const same = shown && shown.query === query && shown.category === nextCategory && shown.timeRange === nextRange;
     // A page asked for again replaces what came of it before.
     const pages = page > 1 && same ? shown.pages.slice(0, page - 1) : [];
+    // Another search starts at the top.
+    if (page === 1 && body.current) body.current.scrollTop = 0;
     setShown({ query, category: nextCategory, timeRange: nextRange, pages, loading: page });
     let current: Page | undefined;
     searchWeb(
@@ -203,22 +226,18 @@ export function WebSearchPanel() {
     </form>
   );
 
+  // Arrow keys move between the tabs; Enter or a click searches one, so
+  // passing a tab asks no engine. Radix chooses a tab on mousedown; a click
+  // with none before it, as assistive technology sends, chooses it too.
   const tabs = (
     <div className={styles.wsTabs}>
-      <div role="tablist" aria-label="搜索分类">
+      <Tabs.List aria-label="搜索分类">
         {categories.map((item) => (
-          <button
-            key={item}
-            type="button"
-            role="tab"
-            aria-selected={item === category}
-            className={item === category ? styles.active : undefined}
-            onClick={() => chooseCategory(item)}
-          >
+          <Tabs.Trigger key={item} value={item} onClick={() => item !== category && chooseCategory(item)}>
             {categoryLabels[item]}
-          </button>
+          </Tabs.Trigger>
         ))}
-      </div>
+      </Tabs.List>
       {category === "news" && (
         <select
           className={styles.wsRange}
@@ -236,9 +255,41 @@ export function WebSearchPanel() {
     </div>
   );
 
-  if (!shown) {
-    return (
-      <div className={styles.ws}>
+  return (
+    <Tabs.Root
+      className={styles.ws}
+      value={category}
+      onValueChange={(value) => chooseCategory(value as WebSearchCategory)}
+      activationMode="manual"
+    >
+      {shown ? (
+        <>
+          <header className={styles.wsBar}>
+            {box}
+            {tabs}
+          </header>
+          <Tabs.Content
+            value={category}
+            ref={body}
+            className={styles.wsBody}
+            aria-busy={shown.loading !== undefined || undefined}
+          >
+            <Results
+              shown={shown}
+              engines={status?.engines[shown.category] ?? []}
+              onMore={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
+              // Again the page that failed, or the last when no engine answered.
+              onRetry={() =>
+                run(shown.query, shown.category, shown.timeRange, shown.failed ?? Math.max(shown.pages.length, 1))
+              }
+              onSearch={searchFor}
+              onCopied={(ok) =>
+                toast(ok ? { text: "已复制磁力链接", tone: "done" } : { text: "无法复制，请手动复制", tone: "error" })
+              }
+            />
+          </Tabs.Content>
+        </>
+      ) : (
         <div className={styles.wsHome}>
           <span className={styles.wsHomeMark} aria-hidden>
             <WebSearchGlyph size={34} />
@@ -246,34 +297,9 @@ export function WebSearchPanel() {
           {box}
           {tabs}
         </div>
-        {toasts}
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.ws}>
-      <header className={styles.wsBar}>
-        {box}
-        {tabs}
-      </header>
-      <div className={styles.wsBody} aria-busy={shown.loading !== undefined || undefined}>
-        <Results
-          shown={shown}
-          engines={status?.engines[shown.category] ?? []}
-          onMore={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
-          // Again the page that failed, or the last when no engine answered.
-          onRetry={() =>
-            run(shown.query, shown.category, shown.timeRange, shown.failed ?? Math.max(shown.pages.length, 1))
-          }
-          onSearch={searchFor}
-          onCopied={(ok) =>
-            toast(ok ? { text: "已复制磁力链接", tone: "done" } : { text: "无法复制，请手动复制", tone: "error" })
-          }
-        />
-      </div>
+      )}
       {toasts}
-    </div>
+    </Tabs.Root>
   );
 }
 
@@ -298,236 +324,145 @@ function Results({
   const first = pages[0];
   const last = pages.at(-1);
   const unresponsive = last?.unresponsive ?? [];
+  const paused = last?.paused ?? [];
+  const busy = last?.busy ?? [];
   const pending = last?.pending ?? 0;
-  const allSilent =
-    last !== undefined && last.results.length === 0 && engines.length > 0 && unresponsive.length >= engines.length;
+  const silent = unresponsive.length + paused.length + busy.length;
+  const left = paused.length + busy.length;
+  const allSilent = last !== undefined && last.results.length === 0 && engines.length > 0 && silent >= engines.length;
+  const engineStatus = <EngineStatus unresponsive={unresponsive} paused={paused} busy={busy} />;
 
-  if (loading === 1) return <Skeleton category={category} />;
   if (error && pages.length === 0) return <Failure error={error} onRetry={onRetry} />;
-  if (first && results.length === 0 && pending === 0) {
-    return allSilent ? (
-      <Failure message="搜索引擎都没有响应，请稍后再试" onRetry={onRetry} />
-    ) : (
-      <div className={styles.wsEmpty} role="status">
-        没有找到与“{shown.query}”相关的结果
+  // The first results take a moment: shapes stand where they will come.
+  if (loading === 1 || (results.length === 0 && pending > 0)) {
+    return (
+      <div className={tiled.has(category) ? styles.wsPage : `${styles.wsPage} ${styles.wsColumns}`}>
+        <StatusLine count={0} pending={pending} searching>
+          {engineStatus}
+        </StatusLine>
+        <Skeleton category={category} />
       </div>
     );
   }
+  if (first && results.length === 0) {
+    return allSilent ? (
+      <Failure
+        message={left > 0 ? "搜索引擎暂时不可用，请稍后再试" : "搜索引擎都没有响应，请稍后再试"}
+        onRetry={onRetry}
+      >
+        {engineStatus}
+      </Failure>
+    ) : (
+      <div className={styles.wsEmpty} role="status">
+        <p>没有找到与“{shown.query}”相关的结果</p>
+        {silent > 0 && (
+          <div className={styles.wsEmptyActions}>
+            {engineStatus}
+            <button type="button" className={styles.wsRetry} onClick={onRetry}>
+              <RotateCw />
+              重试
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  const infobox = first?.infobox;
+  const answers = first?.answers ?? [];
+  const suggestions = first?.suggestions ?? [];
   return (
-    <>
-      {unresponsive.length > 0 && unresponsive.length <= 3 && (
-        <p className={styles.wsSilent}>
-          <CircleAlert aria-hidden />
-          {unresponsive.join("、")}未响应
-        </p>
-      )}
-      {unresponsive.length > 3 && (
-        <details className={styles.wsSilentMany}>
-          <summary>
-            <CircleAlert aria-hidden />
-            {unresponsive.length} 个引擎未响应
-          </summary>
-          <p>{unresponsive.join("、")}</p>
-        </details>
-      )}
-      {first?.infobox && <Infobox infobox={first.infobox} />}
-      {first && first.answers.length > 0 && (
-        <div className={styles.wsAnswers}>
-          {first.answers.map((answer) => (
-            <p key={answer.text}>
-              {answer.url ? <ExternalLink href={answer.url}>{answer.text}</ExternalLink> : answer.text}
-            </p>
-          ))}
+    <div
+      className={
+        tiled.has(category) ? styles.wsPage : `${styles.wsPage} ${styles.wsColumns} ${infobox ? styles.withAside : ""}`
+      }
+    >
+      <StatusLine count={results.length} pending={loading === undefined ? pending : 0} searching={pending > 0}>
+        {engineStatus}
+      </StatusLine>
+      {infobox && !tiled.has(category) && (
+        <div className={styles.wsAside}>
+          <Infobox infobox={infobox} />
         </div>
       )}
-      <ResultList category={category} results={results} onCopied={onCopied} />
-      {loading !== undefined && <div className={styles.wsMoreLoading}>正在加载…</div>}
-      {loading === undefined && pending > 0 && (
-        <p className={styles.wsPending} role="status">
-          <LoaderCircle aria-hidden />
-          还有 {pending} 个引擎在搜索
-        </p>
-      )}
-      {error && pages.length > 0 && <Failure error={error} onRetry={onRetry} inline />}
-      {loading === undefined &&
-        pending === 0 &&
-        !error &&
-        last &&
-        last.results.length > 0 &&
-        pages.length < maxPage && (
-          <button type="button" className={styles.wsMore} onClick={onMore}>
-            <ArrowDown />
-            更多结果
-          </button>
+      <div className={styles.wsMain}>
+        {answers.length > 0 && (
+          <div className={styles.wsAnswers}>
+            {answers.map((answer) => (
+              <p key={answer.text}>
+                {answer.url ? <ExternalLink href={answer.url}>{answer.text}</ExternalLink> : answer.text}
+              </p>
+            ))}
+          </div>
         )}
-      {first && first.suggestions.length > 0 && (
-        <nav className={styles.wsSuggestions} aria-label="相关搜索">
-          <span>相关搜索</span>
-          {first.suggestions.map((suggestion) => (
-            <button key={suggestion} type="button" onClick={() => onSearch(suggestion)}>
-              {suggestion}
+        {pages.map((page, index) => (
+          <Fragment key={index}>
+            {index > 0 && page.results.length > 0 && (
+              <div className={styles.wsPageBreak} role="separator">
+                第 {index + 1} 页
+              </div>
+            )}
+            {page.results.length > 0 && <ResultList category={category} results={page.results} onCopied={onCopied} />}
+          </Fragment>
+        ))}
+        {loading !== undefined && (
+          <p className={styles.wsMoreLoading}>
+            <LoaderCircle aria-hidden />
+            正在加载第 {loading} 页
+          </p>
+        )}
+        {error && pages.length > 0 && <Failure error={error} onRetry={onRetry} inline />}
+        {loading === undefined &&
+          pending === 0 &&
+          !error &&
+          last &&
+          last.results.length > 0 &&
+          pages.length < maxPage && (
+            <button type="button" className={styles.wsMore} onClick={onMore}>
+              <ArrowDown />
+              更多结果
             </button>
-          ))}
-        </nav>
-      )}
-    </>
-  );
-}
-
-function ResultList({
-  category,
-  results,
-  onCopied,
-}: {
-  category: WebSearchCategory;
-  results: WebSearchResult[];
-  onCopied: (ok: boolean) => void;
-}) {
-  switch (category) {
-    case "images":
-      return (
-        <ul className={styles.wsImages} aria-label="图片结果">
-          {results.map((result, index) => (
-            <li key={`${result.url}#${index}`}>
-              <a href={result.url} target="_blank" rel="noopener noreferrer" title={result.title}>
-                <Thumbnail src={result.thumbnail} />
-                <span className={styles.wsImageCaption}>
-                  <strong>{result.title}</strong>
-                  <small>
-                    {[
-                      result.width && result.height ? `${result.width} × ${result.height}` : "",
-                      result.source || result.domain,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </small>
-                </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      );
-    case "videos":
-      return (
-        <ul className={styles.wsVideos} aria-label="视频结果">
-          {results.map((result, index) => (
-            <li key={`${result.url}#${index}`}>
-              <a href={result.url} target="_blank" rel="noopener noreferrer">
-                <span className={styles.wsVideoCover}>
-                  <Thumbnail src={result.thumbnail} />
-                  {result.durationSeconds !== undefined && (
-                    <span className={styles.wsDuration}>{durationText(result.durationSeconds)}</span>
-                  )}
-                </span>
-                <strong>{result.title}</strong>
-              </a>
-              <small>{[result.platform, result.author, published(result)].filter(Boolean).join(" · ")}</small>
-            </li>
-          ))}
-        </ul>
-      );
-    case "torrents":
-      return (
-        <ul className={styles.wsTorrents} aria-label="种子结果">
-          {results.map((result, index) => (
-            <li key={`${result.url}#${index}`}>
-              <span className={styles.wsTorrentIcon} aria-hidden>
-                <Magnet />
-              </span>
-              <div className={styles.wsTorrentMain}>
-                {result.magnet ? (
-                  <a href={result.magnet} className={styles.wsTitle}>
-                    {result.title}
-                  </a>
-                ) : (
-                  <span className={styles.wsTitle}>{result.title}</span>
-                )}
-                <small>
-                  {result.sizeBytes !== undefined && <span>{formatBytes(result.sizeBytes)}</span>}
-                  {result.seeders !== undefined && (
-                    <span className={result.seeders > 0 ? styles.wsSeeders : undefined}>做种 {result.seeders}</span>
-                  )}
-                  {result.leechers !== undefined && <span>下载 {result.leechers}</span>}
-                  {published(result) && <span>{published(result)}</span>}
-                  <ExternalLink href={result.url}>{result.engines.join("、") || result.domain}</ExternalLink>
-                </small>
-              </div>
-              {result.magnet && (
-                <button
-                  type="button"
-                  className={styles.wsCopy}
-                  onClick={() => onCopied(copyText(result.magnet ?? ""))}
-                  aria-label={`复制“${result.title}”的磁力链接`}
-                >
-                  <Copy />
-                  复制磁力链接
+          )}
+        {suggestions.length > 0 && (
+          <nav className={styles.wsSuggestions} aria-label="相关搜索">
+            <h2>相关搜索</h2>
+            <div>
+              {suggestions.map((suggestion) => (
+                <button key={suggestion} type="button" onClick={() => onSearch(suggestion)}>
+                  <Search aria-hidden />
+                  {suggestion}
                 </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      );
-    default:
-      return (
-        <ol className={category === "news" ? `${styles.wsList} ${styles.wsNews}` : styles.wsList} aria-label="搜索结果">
-          {results.map((result, index) => (
-            <li key={`${result.url}#${index}`}>
-              <div className={styles.wsListText}>
-                <small className={styles.wsSource}>
-                  <span>{result.domain}</span>
-                  <span className={styles.wsEngines}>{result.engines.join("、")}</span>
-                </small>
-                <ExternalLink href={result.url} className={styles.wsTitle}>
-                  {result.title}
-                </ExternalLink>
-                {(result.content || result.publishedAt) && (
-                  <p>
-                    {published(result) && <time dateTime={result.publishedAt}>{published(result)}</time>}
-                    {result.content}
-                  </p>
-                )}
-              </div>
-              {result.thumbnail && (
-                <span className={styles.wsListThumb}>
-                  <Thumbnail src={result.thumbnail} />
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-      );
-  }
-}
-
-function Infobox({ infobox }: { infobox: WebSearchInfobox }) {
-  return (
-    <aside className={styles.wsInfobox} aria-label={infobox.title}>
-      {infobox.thumbnail && (
-        <span className={styles.wsInfoboxThumb}>
-          <Thumbnail src={infobox.thumbnail} />
-        </span>
-      )}
-      <div>
-        <strong>{infobox.title}</strong>
-        {infobox.content && <p>{infobox.content}</p>}
-        {infobox.url && <ExternalLink href={infobox.url}>查看详情</ExternalLink>}
+              ))}
+            </div>
+          </nav>
+        )}
       </div>
-    </aside>
+    </div>
   );
 }
 
-// Thumbnail loads through A-NAS; one that fails leaves the tile's own color.
-function Thumbnail({ src }: { src?: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) return <span className={styles.wsThumbEmpty} aria-hidden />;
-  return <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />;
-}
-
-function ExternalLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
+// StatusLine counts the results so far and the engines still searching, with
+// the engines that gave no answer beside them.
+function StatusLine({
+  count,
+  pending,
+  searching,
+  children,
+}: {
+  count: number;
+  pending: number;
+  searching?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <a href={href} className={className} target="_blank" rel="noopener noreferrer">
+    <div className={styles.wsStatus}>
+      <span className={styles.wsCount}>
+        {searching && <LoaderCircle aria-hidden />}
+        {[count > 0 ? `${count} 条结果` : "正在搜索", pending > 0 ? `还有 ${pending} 个引擎在搜索` : ""]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
       {children}
-    </a>
+    </div>
   );
 }
 
@@ -536,47 +471,69 @@ function Failure({
   message,
   onRetry,
   inline,
+  children,
 }: {
   error?: Error;
   message?: string;
   onRetry: () => void;
   inline?: boolean;
+  children?: ReactNode;
 }) {
   const code = error instanceof APIError ? error.code : "";
   // Turned off is no failure the user can retry.
   const final = code === "web_search_disabled" || code === "torrent_search_disabled";
   return (
     <div className={inline ? `${styles.wsFailure} ${styles.inline}` : styles.wsFailure} role="alert">
-      <span>{message ?? errorText(error, "webSearch")}</span>
-      {!final && (
-        <button type="button" onClick={onRetry}>
-          <RotateCw />
-          重试
-        </button>
+      <p>{message ?? errorText(error, "webSearch")}</p>
+      {(!final || children) && (
+        <div className={styles.wsEmptyActions}>
+          {children}
+          {!final && (
+            <button type="button" className={styles.wsRetry} onClick={onRetry}>
+              <RotateCw />
+              重试
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
+// Skeleton holds the place of the first results in their tab's own shape.
 function Skeleton({ category }: { category: WebSearchCategory }) {
-  const tiles = category === "images" || category === "videos";
+  if (category === "images") {
+    return (
+      <div className={styles.wsSkeletonImages} aria-label="正在搜索">
+        {[1.5, 1, 1.33, 0.75, 1.6, 1.2, 1, 1.4, 0.8, 1.33, 1.5, 1].map((shape, index) => (
+          <span key={index} style={{ "--shape": shape } as CSSProperties} />
+        ))}
+      </div>
+    );
+  }
+  if (category === "videos") {
+    return (
+      <div className={styles.wsSkeletonVideos} aria-label="正在搜索">
+        {Array.from({ length: 8 }, (_, index) => (
+          <span key={index}>
+            <i />
+            <i />
+            <i />
+          </span>
+        ))}
+      </div>
+    );
+  }
   return (
-    <div className={tiles ? styles.wsSkeletonTiles : styles.wsSkeletonList} aria-label="正在搜索">
-      {Array.from({ length: tiles ? 8 : 5 }, (_, index) => (
-        <span key={index} />
+    <div className={styles.wsSkeletonList} aria-label="正在搜索">
+      {Array.from({ length: 5 }, (_, index) => (
+        <span key={index}>
+          <i />
+          <i />
+          <i />
+          <i />
+        </span>
       ))}
     </div>
   );
-}
-
-function published(result: WebSearchResult): string {
-  return result.publishedAt ? calendarDate(result.publishedAt) : "";
-}
-
-// durationText reads 233 as 3:53 and 8189 as 2:16:29.
-export function durationText(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const rest = String(seconds % 60).padStart(2, "0");
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
 }

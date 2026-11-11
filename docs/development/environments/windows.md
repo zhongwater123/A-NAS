@@ -65,7 +65,8 @@ wsl -d Ubuntu-24.04 -u root
 | 项目 | 状态 |
 |---|---|
 | Windows | Windows 11 专业版（build 26200）；源码 `D:\A-NAS`，Claude Code 的工作树位于 `D:\A-NAS\.claude\worktrees\` |
-| WSL | WSL2，发行版名 `Ubuntu`（Ubuntu 26.04 LTS），systemd 已启用 |
+| 硬件 | Intel Core Ultra 5 125U：低功耗笔记本处理器，12 核 14 线程，其中 2 个性能核；内存 15.5 GB |
+| WSL | WSL2，发行版名 `Ubuntu`（Ubuntu 26.04 LTS），systemd 已启用；没有 `.wslconfig`，按默认用全部 14 个线程、最多约 7.7 GB 内存（主机的一半），所以几个会话的门禁要排队，见 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md#一次只跑一个门禁) |
 | WSL 用户 | 日常用户，属于 `docker` 组，没有免密 `sudo`；没有 `anas-dev` |
 | WSL 工作区入口 | 直接使用 `/mnt/d/A-NAS` 或对应工作树 |
 | Git | Git for Windows；仓库内已设置 `core.autocrlf=false`、`core.eol=lf` |

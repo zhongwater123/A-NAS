@@ -13,11 +13,15 @@ type (
 	PlanKind            = datavolume.PlanKind
 	VolumeState         = datavolume.VolumeState
 	Volume              = datavolume.Volume
+	MissingDisk         = datavolume.MissingDisk
 	ConversionState     = datavolume.ConversionState
 	Conversion          = datavolume.Conversion
+	Spread              = datavolume.Spread
+	SpreadState         = datavolume.SpreadState
 	DiskTarget          = datavolume.DiskTarget
 	CreateVolumeRequest = datavolume.CreateVolumeRequest
 	AddDisksRequest     = datavolume.AddDisksRequest
+	ReplaceDiskRequest  = datavolume.ReplaceDiskRequest
 	VolumeExecutor      = datavolume.VolumeExecutor
 	OperationState      = datavolume.OperationState
 	OperationStep       = datavolume.OperationStep
@@ -31,12 +35,17 @@ const (
 	LayoutStripe           = datavolume.LayoutStripe
 	PlanKindCreateVolume   = datavolume.PlanKindCreateVolume
 	PlanKindAddDisks       = datavolume.PlanKindAddDisks
+	PlanKindReplaceDisk    = datavolume.PlanKindReplaceDisk
 	VolumeStateCreating    = datavolume.VolumeStateCreating
 	VolumeStateAvailable   = datavolume.VolumeStateAvailable
+	VolumeStateDegraded    = datavolume.VolumeStateDegraded
 	VolumeStateUnavailable = datavolume.VolumeStateUnavailable
 	VolumeStateReadOnly    = datavolume.VolumeStateReadOnly
 	ConversionRunning      = datavolume.ConversionRunning
 	ConversionWaiting      = datavolume.ConversionWaiting
+	SpreadRunning          = datavolume.SpreadRunning
+	SpreadWaiting          = datavolume.SpreadWaiting
+	SpreadStopped          = datavolume.SpreadStopped
 	OperationRunning       = datavolume.OperationRunning
 	OperationSucceeded     = datavolume.OperationSucceeded
 	OperationFailed        = datavolume.OperationFailed
@@ -46,6 +55,7 @@ const (
 	StepMount              = datavolume.StepMount
 	StepPrepare            = datavolume.StepPrepare
 	StepAddDevices         = datavolume.StepAddDevices
+	StepReplace            = datavolume.StepReplace
 )
 
 var (
@@ -55,17 +65,13 @@ var (
 	ErrVolumeChanged     = datavolume.ErrVolumeChanged
 	ErrVolumeUnavailable = datavolume.ErrVolumeUnavailable
 	ErrNoConversion      = datavolume.ErrNoConversion
+	ErrVolumeBusy        = datavolume.ErrVolumeBusy
 	ErrVolumeExists      = datavolume.ErrVolumeExists
 	ErrOperationNotFound = datavolume.ErrOperationNotFound
 )
 
 // UsableBytes is datavolume.UsableBytes.
 func UsableBytes(layout Layout, sizes []uint64) uint64 { return datavolume.UsableBytes(layout, sizes) }
-
-// OutsideLayout is datavolume.OutsideLayout.
-func OutsideLayout(data, metadata []hoststate.ProfileUsage, layout Layout) (convertData, convertMetadata bool) {
-	return datavolume.OutsideLayout(data, metadata, layout)
-}
 
 // FingerprintDisk is datavolume.FingerprintDisk.
 func FingerprintDisk(disk hoststate.Disk) string { return datavolume.FingerprintDisk(disk) }
