@@ -24,9 +24,20 @@ const (
 	fakeToken   = "serve-token-alice"
 	fakeRuntime = "0a1b2c3d"
 	fakeStored  = "20261015_120000_abcdef"
-	// fakeGone is a conversation Hermes no longer has.
-	fakeGone = "20261015_150000_cccccc"
+	// fakeGone is a conversation Hermes no longer has, and fakeMoved one whose
+	// counters move once between a snapshot and the write that names them.
+	fakeGone  = "20261015_150000_cccccc"
+	fakeMoved = "20261015_160000_dddddd"
 )
+
+// movedOnce reports true the first time it is asked.
+func (f *fakeServe) movedOnce() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	first := !f.moved
+	f.moved = true
+	return first
+}
 
 // fakeServe stands in for alice's `hermes serve` on <dir>/alice.sock: the
 // REST session routes and /api/ws, with a turn that calls 提交更改 and asks
@@ -61,6 +72,8 @@ type fakeServe struct {
 	// stopFirst makes session.interrupt end the turn before its answer, as
 	// Hermes's own turn thread may while the request still runs.
 	stopFirst bool
+	// moved is set once fakeMoved's counters have moved under a write.
+	moved bool
 }
 
 func newFakeServe(t *testing.T) *fakeServe {
@@ -149,6 +162,9 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 		(r.URL.Query().Get("request_id") == "" || r.URL.Query().Get("expected_revision") != "3" || r.URL.Query().Get("expected_generation") != "1"):
 		// Hermes commits no write without its fence.
 		http.Error(w, `{"detail":"client_upgrade_required: this app is out of sync"}`, http.StatusConflict)
+	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/"+fakeMoved && f.movedOnce():
+		// A turn ended since the snapshot: the counters it named are stale.
+		http.Error(w, `{"detail":"stale_revision"}`, http.StatusConflict)
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/20261015_130000_aaaaaa":
 		// A turn is writing to it.
 		http.Error(w, `{"detail":"session_busy"}`, http.StatusConflict)

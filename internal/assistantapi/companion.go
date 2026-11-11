@@ -63,6 +63,10 @@ type windowTools struct {
 	event, cancel string
 	// receipt is how long a command waits for the window's answer.
 	receipt *time.Duration
+	// call bounds one call of the family's tools on the socket, and result is
+	// what a window may answer one of its commands with.
+	call   int
+	result method
 	// rate is how many commands a member's windows get a minute, and rateEach
 	// caps some tools within it.
 	rate     int
@@ -80,7 +84,8 @@ type toolRule struct {
 }
 
 var companionFamily = &windowTools{prefix: companionPrefix, tools: companionTools, event: "anas.companion",
-	receipt: &companionReceipt, rate: companionRate, rateEach: companionRateEach, answer: companionAnswer, refuse: extraProblem}
+	receipt: &companionReceipt, call: maxCompanionCall, result: companionResultParams,
+	rate: companionRate, rateEach: companionRateEach, answer: companionAnswer, refuse: extraProblem}
 
 // windowFamilies are the families whose tools' calls are paired.
 var windowFamilies = []*windowTools{companionFamily, desktopFamily}
@@ -103,7 +108,7 @@ const (
 	// mirroredTool starts the ids of the tool.start Hermes makes up on a
 	// subagent's own session, with no arguments.
 	mirroredTool = "submirror:"
-	// maxCompanionCall bounds one call on the socket, and
+	// maxCompanionCall bounds one call of a companion tool on the socket, and
 	// maxCompanionAnswer the window's answer to one command.
 	maxCompanionCall   = 8 << 10
 	maxCompanionAnswer = 4 << 10
@@ -317,7 +322,7 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request, fami
 	}
 	body := http.NewResponseController(w)
 	_ = body.SetReadDeadline(time.Now().Add(companionBody))
-	if err := httpjson.Decode(w, r, maxCompanionCall, &call); err != nil {
+	if err := httpjson.Decode(w, r, int64(family.call), &call); err != nil {
 		httpjson.WriteDecodeError(w, err, "invalid_request", "the request body is not valid JSON")
 		return
 	}
@@ -872,11 +877,7 @@ func object(maxBytes int) check {
 // companionResult takes a window's answer to a command of family it was
 // sent: once, and only from the window it went to.
 func (u *upstream) companionResult(f frame, family *windowTools) frame {
-	rule := companionResultParams
-	if family == desktopFamily {
-		rule = desktopResultParams
-	}
-	params, err := rule.check(f.Params)
+	params, err := family.result.check(f.Params)
 	if err != nil {
 		return rpcError(f.ID, codeInvalidParams, err.Error())
 	}

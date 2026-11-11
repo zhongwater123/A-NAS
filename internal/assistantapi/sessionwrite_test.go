@@ -39,13 +39,20 @@ func TestConversationWritesCarryHermessFence(t *testing.T) {
 		t.Fatalf("delete named %v", query)
 	}
 
-	// A conflict is tried once more with fresh counters, and each try is a request of its own.
+	// Counters that moved under the write are read again, and the second try is a request of its own.
+	if status, body := h.request(http.MethodDelete, "/sessions/"+fakeMoved, ""); status != http.StatusNoContent {
+		t.Fatalf("delete after the counters moved = %d %s", status, body)
+	}
+	calls = asked()
+	if len(calls) != 4 || !strings.HasSuffix(calls[2], "/mutation-snapshot") || calls[1] == calls[3] {
+		t.Fatalf("moved counters asked Hermes %v", calls)
+	}
+	// A turn writing to the conversation is not a matter of counters: asked once.
 	if status, body := h.request(http.MethodDelete, "/sessions/20261015_130000_aaaaaa", ""); status != http.StatusServiceUnavailable ||
 		!strings.Contains(body, "assistant_busy") {
 		t.Fatalf("delete while a turn writes = %d %s", status, body)
 	}
-	calls = asked()
-	if len(calls) != 4 || !strings.HasSuffix(calls[2], "/mutation-snapshot") || calls[1] == calls[3] {
+	if calls := asked(); len(calls) != 2 {
 		t.Fatalf("a busy conversation asked Hermes %v", calls)
 	}
 

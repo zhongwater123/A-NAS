@@ -37,6 +37,9 @@ const (
 	maxDesktopName = 32
 	// maxDesktopFailure bounds what the window says of a step it did not take.
 	maxDesktopFailure = 500
+	// maxDesktopCall bounds one call on the socket: the text a step types,
+	// which JSON may write as six bytes for each of its own, and the rest.
+	maxDesktopCall = 6*maxDesktopText + 1<<10
 )
 
 // desktopReceipt is how long a command waits for the window's answer: the
@@ -48,7 +51,8 @@ var desktopReceipt = 30 * time.Second
 const desktopFailed = "failed"
 
 var desktopFamily = &windowTools{prefix: desktopPrefix, tools: desktopTools, event: "anas.desktop", cancel: "anas.desktop.cancel",
-	receipt: &desktopReceipt, rate: desktopRate, answer: desktopAnswer, refuse: desktopRefusal}
+	receipt: &desktopReceipt, call: maxDesktopCall, result: desktopResultParams,
+	rate: desktopRate, answer: desktopAnswer, refuse: desktopRefusal}
 
 // desktopTools are the tools of the desktop server with their arguments. The
 // window never leaves WebOS, so there is no tool that opens an address or goes

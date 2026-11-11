@@ -50,11 +50,13 @@ class DesktopToolTests(unittest.TestCase):
     def test_a_picture_comes_back_as_an_image_and_never_as_text(self):
         self.service.serve(200, {"status": "ok", "result": {
             "mime_type": "image/png", "data": PNG, "width": 1, "height": 1,
-            "annotations": [{"ref": "e1", "name": "上传"}, {"ref": "e2", "name": "相册"}]}})
+            "annotations": [{"ref": "e1", "name": "上传"}, {"ref": "e2", "name": "相册"}, {"ref": "e3"}, {"name": "无编号"}, "e9"]}})
         result = desktop.call("look", {"annotate": True})
         said = self.text(result, "ok")
         self.assertIn("vision_analyze", said)
-        self.assertIn("e1 上传；e2 相册", said)
+        # A control without a name is its ref alone, and what is no labelled control is left out.
+        self.assertIn("e1 上传；e2 相册；e3。", said)
+        self.assertNotIn("None", said)
         self.assertEqual(len(result.content), 2)
         self.assertEqual((result.content[1].type, result.content[1].data, result.content[1].mime_type), ("image", PNG, "image/png"))
         self.assertNotIn(PNG, said)

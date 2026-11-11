@@ -553,6 +553,19 @@ func TestTheCompanionSocketKnowsTheMemberByTheirUID(t *testing.T) {
 	if status, _ := post(client, "/other", `{}`); status != http.StatusNotFound {
 		t.Fatalf("another route: %d", status)
 	}
+	// A call is read as far as its family's longest call goes: the text a step
+	// types may be 4000 bytes that JSON writes as six each.
+	typed := `{"tool":"type","args":{"ref":"e1","text":"` + strings.Repeat(`\u0001`, maxDesktopText) + `"}}`
+	if status, data := post(client, "/desktop/call", typed); status != http.StatusOK || data["status"] != "no_desktop" {
+		t.Fatalf("the longest text a step types: %d %v", status, data)
+	}
+	if status, _ := post(client, "/call", typed); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a call of a companion tool that long: %d", status)
+	}
+	longer := `{"tool":"type","args":{"ref":"e1","text":"` + strings.Repeat("a", 2*maxDesktopCall) + `"}}`
+	if status, _ := post(client, "/desktop/call", longer); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a call longer than any step: %d", status)
+	}
 	if status, _ := post(serve(uids{}), "/call", `{"tool":"wake","args":{}}`); status != http.StatusUnauthorized {
 		t.Fatalf("not a member's UID: %d", status)
 	}

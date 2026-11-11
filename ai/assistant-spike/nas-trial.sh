@@ -185,6 +185,9 @@ update_trial() {
   done
   ((${#ready[@]})) || fail "no member has an assistant folder; use install"
   say "--- stopping the running assistants"
+  # The waker first: it would start a round of scheduled tasks on a runtime that is being
+  # replaced. assistant-install.sh starts it again, with the new script.
+  systemctl stop anas-assistant-cron-waker.service 2>/dev/null || true
   systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
     'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
   install_packages

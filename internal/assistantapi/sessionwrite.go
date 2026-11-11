@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Hermes commits a write to a stored conversation only behind its fence: a
@@ -25,14 +26,26 @@ type sessionFence struct {
 
 // writeSession renames (PATCH, with the fields to change) or deletes (DELETE) a
 // stored conversation, and answers like rest. A conversation that is not there
-// answers 404. A conflict is tried once more with fresh counters: a turn that
-// ended between the snapshot and the write moved them.
+// answers 404. A conflict over the counters is tried once more with fresh
+// ones: a turn that ended between the snapshot and the write moved them.
 func (h *Handler) writeSession(ctx context.Context, account, method, id string, fields map[string]any) (int, []byte, error) {
 	status, data, err := h.fencedWrite(ctx, account, method, id, fields)
-	if err == nil && status == http.StatusConflict {
+	if err == nil && status == http.StatusConflict && !settledConflict(data) {
 		return h.fencedWrite(ctx, account, method, id, fields)
 	}
 	return status, data, err
+}
+
+// settledConflict reports a conflict that fresh counters would not change: a
+// turn is writing to the conversation, or this Hermes wants something else of
+// the request altogether.
+func settledConflict(data []byte) bool {
+	var failure struct {
+		Detail string `json:"detail"`
+	}
+	_ = json.Unmarshal(data, &failure)
+	return failure.Detail == "session_busy" || strings.HasPrefix(failure.Detail, "client_upgrade_required") ||
+		failure.Detail == "mutation_identity_required"
 }
 
 func (h *Handler) fencedWrite(ctx context.Context, account, method, id string, fields map[string]any) (int, []byte, error) {

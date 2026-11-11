@@ -35,7 +35,8 @@ DESKTOP = anas_window_call.SOCKET
 # 120 s, counted from when the call queued behind the server's other calls.
 TIMEOUT = 40
 
-# The product service reads at most 8 KiB of a call.
+# The product service reads a call as far as 4000 bytes of typed text can take in JSON
+# (maxDesktopCall, internal/assistantapi/desktop.go).
 TOO_LONG = {"status": "rejected", "reason": "bad-request", "message": "参数太长：一次输入最多 4000 字节"}
 
 SAID = {
@@ -99,8 +100,9 @@ def picture(result: dict) -> list:
     if not isinstance(data, str) or not data or kind != "image/png":
         return [TextContent(type="text", text="桌面的画面没有取到。")]
     said = "成员桌面此刻的画面如下；用 vision_analyze 看它，并写清要看什么。"
-    labels = [f"{label.get('ref')} {label.get('name')}".strip() for label in result.get("annotations") or []
-              if isinstance(label, dict) and label.get("ref")]
+    annotations = result.get("annotations")
+    labels = [f"{label['ref']} {label.get('name') or ''}".strip() for label in (annotations if isinstance(annotations, list) else [])
+              if isinstance(label, dict) and isinstance(label.get("ref"), str) and label["ref"]]
     if labels:
         said += "画面上标出的控件：" + "；".join(labels) + "。"
     return [TextContent(type="text", text=said), ImageContent(type="image", data=data, mime_type=kind)]
