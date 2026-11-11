@@ -170,6 +170,17 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
     expect(detail().anim).toBe("工作状态-清点归档");
   });
 
+  it("goes on with a card's clip though the step ends just before the card's answer comes", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    startTurn("s1");
+    reportEvent("s1", "tool.start", { name: "mcp__anas__submit_changes", tool_id: "c1" });
+    reportCards([{ requestId: "r1", sessionId: "s1", status: "awaiting" }]);
+    reportEvent("s1", "tool.complete", { name: "mcp__anas__submit_changes", tool_id: "c1" });
+    reportCards([]);
+    vi.advanceTimersByTime(5000);
+    expect(detail()).toEqual({ anim: "工作状态-原地踱步张望", task: "搞定一步，继续看看哦~" });
+  });
+
   it("shows a step that came while a card waited with its own clip once the card is answered", () => {
     startTurn("s1");
     reportEvent("s1", "tool.start", { name: "terminal", tool_id: "c1" });

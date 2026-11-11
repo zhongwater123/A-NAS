@@ -363,9 +363,18 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
   for (const [requestId, sessionId] of waiting)
     if (!cards.has(requestId)) {
       const id = `card:${requestId}`;
-      cards.set(requestId, { id, sessionId, step: lines.get(sessionId)?.key ?? null });
+      cards.set(requestId, { id, sessionId, step: stepCall(lines.get(sessionId)?.key) });
       set(id, "waiting", behaviorStep("waiting", "card"));
     }
+}
+
+/**
+ * The step a line was picked for, whatever its stage and whether it is done: the tool call a step done names
+ * is its step's (stepOf's keys). The card's answer and the call's end come in either order.
+ */
+function stepCall(key: string | undefined): string | null {
+  if (key === undefined) return null;
+  return key.slice(key.indexOf("\u0000") + 1).replace(/^done:/, "");
 }
 
 /**
@@ -376,7 +385,7 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
 function keepCardClip(sessionId: string, step: string | null) {
   const stage = store.stateOf(sessionId);
   if (!prompting.has(sessionId) || stage === null || stage === undefined) return;
-  if (stage === "success" || stage === "error" || lines.get(sessionId)?.key !== step) return;
+  if (stage === "success" || stage === "error" || stepCall(lines.get(sessionId)?.key) !== step) return;
   const anim = BEHAVIORS.waiting.clip;
   clips.set(sessionId, anim);
   store.setDetail(sessionId, { task: lines.get(sessionId)?.task ?? null, anim });

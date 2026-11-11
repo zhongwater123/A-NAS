@@ -443,6 +443,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (el === null) return;
       el.loop = false;
       el.onended = (event: Event) => deps.onEnded(handleEnded(event));
+      // A-NAS: a step's clip held at its last frame (work-hold) has ended already and ends no more: the chain
+      // goes on from it now, as at its end.
+      if (el.ended && pending === null)
+        queueMicrotask(() => {
+          if (frontVideo() === el && el.ended && pending === null) deps.onEnded(handleEnded());
+        });
     },
     setCueUrl: (url) => {
       cueUrl = url;

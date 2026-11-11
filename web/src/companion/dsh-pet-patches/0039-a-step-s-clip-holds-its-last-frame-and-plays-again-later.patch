@@ -4,8 +4,9 @@ A step's own clip looped for as long as the step lasted, so a long step played
 the same gesture from the start over and over. With stepReplayMs set (the page
 sets it), the clip plays once and holds its last frame, its closing pose, and
 plays again after stepReplayMs if the same step still asks for it and nothing
-else has played since. A frozen or sleeping card skips that replay. Without
-stepReplayMs the clip loops as before.
+else has played since. A frozen or sleeping card skips that replay. A clip held
+at its end has no end to come, so when the stage stops it the chain goes on from
+it at once. Without stepReplayMs the clip loops as before.
 
 diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
 --- a/client/pet/animation/animation.ts
@@ -28,6 +29,19 @@ diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.
      });
      const petId = deps.cfg().id;
      // A-NAS: dsh-pet's trace lines only in a development build.
+@@ -441,6 +443,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       if (el === null) return;
+       el.loop = false;
+       el.onended = (event: Event) => deps.onEnded(handleEnded(event));
++      // A-NAS: a step's clip held at its last frame (work-hold) has ended already and ends no more: the chain
++      // goes on from it now, as at its end.
++      if (el.ended && pending === null)
++        queueMicrotask(() => {
++          if (frontVideo() === el && el.ended && pending === null) deps.onEnded(handleEnded());
++        });
+     },
+     setCueUrl: (url) => {
+       cueUrl = url;
 diff --git a/client/pet/animation/cues.ts b/client/pet/animation/cues.ts
 --- a/client/pet/animation/cues.ts
 +++ b/client/pet/animation/cues.ts

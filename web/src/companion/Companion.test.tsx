@@ -759,6 +759,23 @@ describe("what VNAS asks of the companion", () => {
       }
     });
 
+    it("goes back to idle when a small turn ends with a step's clip held at its end", async () => {
+      serve([IDLE, "写代码"]);
+      const { videos } = await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      const shown = front(videos);
+      Object.defineProperty(shown, "ended", { configurable: true, get: () => true });
+      act(() => fireEvent(shown, new Event("ended")));
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await plays(IDLE);
+    });
+
     it("ends a small turn with its check alone, the step's clip played out", async () => {
       serve([IDLE, "写代码", "放烟花", "工作状态-雀跃庆祝"]);
       const { root, videos } = await mount();
