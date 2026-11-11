@@ -311,6 +311,9 @@ if [[ -x "$assistant_python" ]]; then
   photo_out=$("$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__anas__search_photos {"query": "photo"}' 2>&1 || true)
   check "Hermes's photo search tool returns it" grep -q photo.png <<<"$photo_out"
   echo "INFO assistant photos: $sandbox_libraries"
+  # Hermes's gateway, which runs her scheduled tasks, serves only a home that is its user's own.
+  check "her Hermes home is her own, closed to everyone else, without an ACL" \
+    test "$(stat -c '%u %a' "$data/assistant/alice/hermes"):$(getfacl -cp "$data/assistant/alice/hermes" 2>/dev/null | grep -cE '^(user|group):[^:]|^mask|^default')" = "$alice_id 700:0"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
   # Hermes's own login and the desktop tools (decisions 8 to 10): the old session token is
@@ -331,6 +334,20 @@ if [[ -x "$assistant_python" ]]; then
     journalctl -u anas-api -u anas-host-agent --since "$listed_at" -o cat --no-pager | grep -i assistant | tail -n 5 |
       sed 's/^/INFO assistant gate: /' || true
   fi
+  # Renaming and deleting a conversation: Hermes commits such a write only behind its fence,
+  # which the Product Service names (internal/assistantapi/sessionwrite.go).
+  renamed_id=$(jq -r '.sessions[0].id // empty' /tmp/gate-sessions.json 2>/dev/null || true)
+  deleted_id=$(jq -r '.sessions[1].id // empty' /tmp/gate-sessions.json 2>/dev/null || true)
+  check "alice renames a conversation" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' -X PATCH \
+      -d '{"title":"系统测试改名"}' "$api/api/v1/assistant/sessions/$renamed_id")" = 200
+  check "and deletes another" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/sessions/$deleted_id")" = 204
+  # shellcheck disable=SC2016 # $kept and $gone are jq's
+  check "her list has the new title and no longer the deleted conversation" \
+    jq -e --arg kept "$renamed_id" --arg gone "$deleted_id" \
+      '(.sessions | map(select(.id == $kept)) | .[0].title == "系统测试改名") and (.sessions | map(.id) | index($gone) | not)' \
+      <<<"$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/sessions" || true)"
   # The whole chain: Hermes asks to run 提交更改, the Product Service shows the card, alice
   # confirms it from her session, and the Host Agent's executor writes as alice through her
   # confined worker while the assistant waits.

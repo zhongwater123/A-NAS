@@ -4,7 +4,8 @@
 # exactly the ACL below, written as internal/hostops/linux/acl.go writes them (setfacl
 # --set; defaults dropped first when the ACL has none); a reserved name holding something
 # other than a directory is moved aside, and so is a directory at Agent空间's names that root
-# does not own (an impostor made after the real one was renamed).
+# does not own (an impostor made after the real one was renamed). The one exception is
+# Hermes's home, which is the member's own (member_home).
 #
 # Only for the disposable spike and system-test containers. It chowns and setfacls by path
 # in folders members can write (Shared, a Hermes home) and writes the token into the product
@@ -20,9 +21,11 @@
 #   assistant-layout.sh prepare DATA ACCOUNT...   Agent空间 and its member folders, the
 #                                                 assistant directories, the files Hermes's
 #                                                 home binds, then members
-#   assistant-layout.sh members DATA ACCOUNT...   only what lives in root's own /etc: member
-#                                                 config, instance secrets, instance sockets
-#                                                 (nothing members can write; the trial's update)
+#   assistant-layout.sh members DATA ACCOUNT...   what lives in root's own /etc: member config,
+#                                                 instance secrets, instance sockets; and the
+#                                                 owner of an existing Hermes home (member_home).
+#                                                 Nothing inside a folder members can write
+#                                                 (the trial's update)
 #   assistant-layout.sh quota   DATA SIZE ACCOUNT...  simple quota on the volume, SIZE per
 #                                                 assistant directory
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
@@ -79,6 +82,20 @@ ensure_dir() {
   setfacl --set "$acl" "$path"
 }
 
+# member_home PATH ACCOUNT: Hermes's home is the member's own directory, 0700, without an ACL
+# (ADR 0024 decision 3). Hermes's gateway, which runs the scheduled tasks, serves only a home
+# that the user it runs as owns and that no ACL lets anyone else write. Only this one
+# directory is touched, never what is in it: its parent is root's and the member can only
+# pass through it, so the name cannot be turned into a link to somewhere else.
+member_home() {
+  local path=$1 account=$2
+  if [[ -L "$path" || ( -e "$path" && ! -d "$path" ) ]]; then echo "$path is not a safe directory" >&2; return 1; fi
+  [[ -e "$path" ]] || mkdir -m 0700 "$path"
+  chown --no-dereference "$account:" "$path"
+  chmod u=rwx,go=,g-s "$path"
+  setfacl --remove-all --remove-default "$path"
+}
+
 # Hermes's home needs something at each path the unit binds over; anything else there is
 # moved aside.
 mount_point_file() { [[ -f "$1" && ! -L "$1" ]] || { [[ ! -e "$1" && ! -L "$1" ]] || displace "$1"; install -m 0644 /dev/null "$1"; }; }
@@ -125,13 +142,15 @@ case $cmd in
       home=$data/assistant/$account
       ensure_dir "$home" "user::rwx,group::---,other::---,user:$account:--x,mask::--x" "" subvolume
       ensure_dir "$home/files" "$(inherited "user:$account:rwx")"
-      ensure_dir "$home/hermes" "$(inherited "user:$account:rwx")"
+      member_home "$home/hermes" "$account"
       for file in config.yaml .env SOUL.md active_profile; do mount_point_file "$home/hermes/$file"; done
       for folder in hooks plugins profiles; do mount_point_dir "$home/hermes/$folder"; done
     done
     ;&
   members)
     for account in "$@"; do
+      # An install from before the Hermes home was the member's own left it root's with an ACL.
+      [[ ! -d "$data/assistant/$account/hermes" ]] || member_home "$data/assistant/$account/hermes" "$account"
       # The instance's secret: created once, root-only; the member's password for Hermes's own
       # login (decision 10), which the Host Agent uses for a signed-in session. Without the
       # gate the product service gets its own copy and logs in itself.

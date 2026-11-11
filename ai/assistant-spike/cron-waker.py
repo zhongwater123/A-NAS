@@ -2,8 +2,8 @@
 
 `hermes serve` does not run Hermes's scheduler: only Hermes Desktop's backend does, with
 HERMES_DESKTOP=1, which also hands the agent desktop tools. So every due job runs through
-anas-assistant-cron@<account>.service, Hermes's own `hermes cron tick` in the member's sandbox,
-whether their assistant is running or not. This loop (anas-assistant-cron-waker.service, root)
+anas-assistant-cron@<account>.service, Hermes's gateway for one round in the member's sandbox
+(cron_round.py), whether their assistant is running or not. This loop (anas-assistant-cron-waker.service, root)
 looks at each member's job store every INTERVAL seconds and starts that unit when a job is due.
 It reads the store only to learn when; what runs and how stays Hermes's.
 """

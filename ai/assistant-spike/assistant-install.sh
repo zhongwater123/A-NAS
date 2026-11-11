@@ -48,7 +48,7 @@ install -d -m 0755 /run/anas-assistant-companion && : > /run/anas-assistant-comp
 # serve takes no token any more: it uses Hermes's own login (assistant-start.sh). An
 # install from before that leaves its token unit behind.
 rm -f /etc/systemd/system/anas-assistant-token@.service
-install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-api@.service" \
+install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-net@.service" "$here/anas-assistant-api@.service" \
   "$here/anas-assistant-api@.socket" /etc/systemd/system/
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
@@ -67,10 +67,11 @@ sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of 
   -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-curator@.service
 install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
-# The member's scheduled tasks (Hermes's cronjob): one round of Hermes's own `hermes cron tick`
-# in the same sandbox, behind the same bridge to the model (assistant-start.sh, channel cron),
-# started by anas-assistant-cron-waker.service when a job is due, whether the assistant runs
-# or not. A job may take a while; Hermes's own watchdog ends one that stalls. No job has a
+# The member's scheduled tasks (Hermes's cronjob): one round in the same sandbox and the same
+# private network, behind the same bridge to the model: Hermes's gateway for as long as the
+# jobs that are due take (assistant-start.sh, channel cron; cron_round.py), started by
+# anas-assistant-cron-waker.service when a job is due, whether the assistant runs or not. A
+# job may take a while; Hermes's own watchdog ends one that stalls. No job has a
 # window, so its sandbox has no companion socket and the companion tools answer that no
 # desktop is in use (#412): the Product Service could not tell its calls from those of a
 # conversation, which come from the same UID.

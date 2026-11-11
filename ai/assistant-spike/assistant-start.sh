@@ -1,16 +1,16 @@
 #!/bin/bash
-# Inside the sandbox: the only way out is the gateway's Unix socket, which the
-# model client reaches as http://127.0.0.1:18001 through socat.
-socat TCP-LISTEN:18001,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/anas-assistant-gw/model.sock &
+# Inside the sandbox: the only way out is the model gateway's Unix socket, which the model
+# client reaches as http://127.0.0.1:18001 through the bridge of the member's private network
+# (anas-assistant-net@.service).
 mkdir -p "$HERMES_HOME"
 runtime=/opt/a-nas/assistant-runtimes/spike/venv/bin
 if [ "${ANAS_ASSISTANT_CHANNEL:-serve}" = api_server ]; then
   exec "$runtime/hermes" gateway run
 fi
-# A round of the member's scheduled tasks (anas-assistant-cron@.service): Hermes's own
-# `hermes cron tick` runs the jobs that are due once, behind the same bridge to the model.
+# A round of the member's scheduled tasks (anas-assistant-cron@.service): Hermes's gateway
+# for as long as the jobs that are due take (cron_round.py), behind the same bridge.
 if [ "${ANAS_ASSISTANT_CHANNEL:-serve}" = cron ]; then
-  exec "$runtime/hermes" cron tick
+  exec "$runtime/python" -P /spike/cron_round.py
 fi
 # `hermes serve`, the headless backend Hermes Desktop runs (REST /api/* and JSON-RPC on
 # /api/ws), without HERMES_DESKTOP=1: that would also make it tick cron jobs itself. It uses

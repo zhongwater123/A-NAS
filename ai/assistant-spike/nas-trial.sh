@@ -21,7 +21,8 @@
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
 # write; it therefore refuses to run over anything an earlier run or a member left. update
-# touches only root's own files (assistant-layout.sh members). Both switch on the session
+# touches root's own files and the owner of each existing Hermes home, nothing inside a
+# folder members can write (assistant-layout.sh members). Both switch on the session
 # gate and the photo service's socket for assistants (product-settings.sh, drop-ins that
 # survive deploys) and restart the Host Agent, the photo service and the Product Service.
 set -euo pipefail
@@ -33,7 +34,7 @@ runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
-units=(anas-assistant@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-net@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -184,7 +185,8 @@ update_trial() {
   done
   ((${#ready[@]})) || fail "no member has an assistant folder; use install"
   say "--- stopping the running assistants"
-  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 2>/dev/null || true
+  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+    'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
   install_packages
   install_files
   say "--- the assistant for ${#ready[@]} accounts"
