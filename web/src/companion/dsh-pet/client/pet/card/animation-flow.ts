@@ -75,6 +75,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
     // stage effect skips the ticks of a frozen or sleeping card, so a turn that ended meanwhile would
     // otherwise leave a step's looping clip to play at the next end, after the turn.
     const deferredRef = useRef<{ name: string; once: boolean } | null>(null);
+    // A-NAS: the wait of a step's clip held at its last frame (work-hold), and which hold it is.
+    const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | undefined; hold: number }>({
+      timer: undefined,
+      hold: 0,
+    });
     const deferStage = (stage: { name: string; once: boolean } | null): void => {
       deferredRef.current = stage;
     };
@@ -109,7 +114,10 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
-      card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
+      // A-NAS: a step's own clip plays once and holds its last frame, when the page asks for that.
+      card.actions.setOnce(
+        own === null ? Array.isArray(slot) && slot.length > 1 : hub.cfg().stepReplayMs !== undefined,
+      );
       card.actions.setAnim(name);
       return true;
     };
@@ -174,6 +182,25 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (cue.kind === 'work-replay') {
         card.actions.setOnce(false);
         card.actions.bumpSeq();
+        return;
+      }
+      // A-NAS: a step's own clip has played once: it holds its last frame (an ended video shows it) and
+      // plays again after stepReplayMs, if the same step still asks for it and nothing has played since.
+      if (cue.kind === 'work-hold') {
+        const clip = card.animRef.current;
+        const front = hub.ownAnim.frontVideo();
+        const hold = (holdRef.current.hold += 1);
+        clearTimeout(holdRef.current.timer);
+        holdRef.current.timer = setTimeout(() => {
+          if (holdRef.current.hold !== hold) return;
+          const ws = workStatusRef.current;
+          const active = ws?.state != null && ws.state !== 'success' && ws.state !== 'error';
+          if (!active || ws?.anim !== clip || card.animRef.current !== clip) return;
+          if (hub.ownAnim.isFrozen() || sleeping() || front === null || !front.ended) return;
+          if (hub.ownAnim.frontVideo() !== front) return;
+          card.actions.setOnce(true);
+          card.actions.bumpSeq();
+        }, hub.cfg().stepReplayMs ?? 0);
         return;
       }
       if (cue.kind === 'event-done') {

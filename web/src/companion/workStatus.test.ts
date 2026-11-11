@@ -152,6 +152,33 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
     expect(detail()).toEqual({ anim: null, task: null });
   });
 
+  it("goes on with a card's clip once the card is answered at the same step, not the step's from the start", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    startTurn("s1");
+    reportEvent("s1", "tool.start", { name: "mcp__anas__submit_changes", tool_id: "c1" });
+    expect(detail()).toEqual({ anim: "拆礼物", task: "改好啦，请你过目~" });
+    reportCards([{ requestId: "r1", sessionId: "s1", status: "awaiting" }]);
+    expect(detail().anim).toBe("工作状态-原地踱步张望");
+    reportCards([]);
+    expect(shown()).toBe("working");
+    expect(detail()).toEqual({ anim: "工作状态-原地踱步张望", task: "改好啦，请你过目~" });
+    vi.advanceTimersByTime(5000);
+    reportEvent("s1", "tool.complete", { name: "mcp__anas__submit_changes", tool_id: "c1" });
+    expect(detail()).toEqual({ anim: "工作状态-原地踱步张望", task: "搞定一步，继续看看哦~" });
+    // The next step shows its own.
+    reportEvent("s1", "tool.start", { name: "read_file", tool_id: "c2", args: { path: "/nas/文档/a.md" } });
+    expect(detail().anim).toBe("工作状态-清点归档");
+  });
+
+  it("shows a step that came while a card waited with its own clip once the card is answered", () => {
+    startTurn("s1");
+    reportEvent("s1", "tool.start", { name: "terminal", tool_id: "c1" });
+    reportCards([{ requestId: "r1", sessionId: "s1", status: "awaiting" }]);
+    reportEvent("s1", "tool.start", { name: "read_file", tool_id: "c2" });
+    reportCards([]);
+    expect(detail().anim).toBe("工作状态-清点归档");
+  });
+
   describe("fireworks only for a big turn", () => {
     const end = () => reportEvent("s1", "message.complete", { status: "complete" });
     beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0));
