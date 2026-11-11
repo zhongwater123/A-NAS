@@ -110,6 +110,23 @@ class RenderTest(unittest.TestCase):
         self.assertIn("fade=t=out:st=4.000:d=1.000[x]", graph)
         self.assertTrue(graph.split(";")[1].startswith("anullsrc="))
 
+    def test_an_upright_part_stands_on_a_blurred_copy_of_itself(self):
+        graph = render.part_args("c.mov", 0, 3, True, "out.mkv", blurred=True)
+        graph = graph[graph.index("-filter_complex") + 1]
+        self.assertTrue(graph.startswith("[0:v]split[back][front];"))
+        self.assertIn("gblur", graph)
+        self.assertIn("[behind][shown]overlay=(W-w)/2:(H-h)/2", graph)
+        self.assertNotIn("pad=", graph)
+        self.assertIn("[0:a]aresample=48000", graph)
+        plain = render.part_args("c.mov", 0, 3, True, "out.mkv")
+        self.assertNotIn("gblur", plain[plain.index("-filter_complex") + 1])
+
+    def test_only_a_picture_off_sixteen_by_nine_is_blurred(self):
+        for size, off in (((1080, 1920), True), ((1440, 1440), True), ((1920, 1080), False), ((3840, 2160), False),
+                          ((1280, 720), False), ((1920, 1088), False), (None, False)):
+            with mock.patch.object(render, "shown_size", return_value=size):
+                self.assertEqual(render.not_wide("v.mov"), off, size)
+
     def test_a_part_without_sound_gets_silence_of_its_length(self):
         graph = render.part_args("b.mp4", 0, 3, False, "out.mkv")
         graph = graph[graph.index("-filter_complex") + 1].split(";")[1]

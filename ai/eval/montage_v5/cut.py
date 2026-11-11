@@ -47,10 +47,11 @@ CASES = {"01": ("case01", "剪成一条悬疑感的电影预告片，保留关�
          "02": ("shanghai", "按时间顺序讲完博主在上海的这一天，保留说话的关键片段", 90, "旅行", "上海vlog"),
          "04": ("case04", "把两集合成一条深圳旅行故事，以冲浪为高潮", 60, "旅行", "深圳冲浪"),
          "ne": ("newzealand", "按拍摄时间顺序剪一条新西兰旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "新西兰"),
-         "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "川西")}
+         "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "川西"),
+         "pj": ("pinjie", "按拍摄时间顺序剪一条新西兰旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "新西兰（品杰手机）")}
 # The user's own camera footage (第五版): its cards and exclusions live in paths.V5, and straight from the
 # camera it carries no title, credits or film name, so no card is asked about 报幕.
-RAW = {"ne": "newzealand", "ch": "chuanxi"}
+RAW = {"ne": "newzealand", "ch": "chuanxi", "pj": "pinjie"}
 # A frame is 报幕 when a title (look.TITLES) is laid over a plain picture, one level over at least
 # PLAIN of it (credits on black: 0.84-0.99), or when the title is the film's name (片名) over
 # anything ("Meridian" over a street, 0.4). A shop sign read as a logo (全家, 0.10-0.15) and a
@@ -63,6 +64,14 @@ WIDEN = 3.0         # a clip widened to whole sentences runs at most this much p
 # Each run of a case is a take: CUT_TAG ("-1", "-2") names its files, and its seed varies the plans.
 TAG = os.environ.get("CUT_TAG", "")
 SEED = int(os.environ.get("CUT_SEED", "0")) or None
+# The cut in shooting order, or (CUT_ORDER=free) in no order asked for: the request and step 1 lose their
+# shooting-order asks (ORDER_ASKS). Both are made, for the user to choose (2026-11-11: free order chose
+# shots that fit the music's mood better on 品杰 and 川西; 新西兰 cut back and forth between places).
+FREE_ORDER = os.environ.get("CUT_ORDER") == "free"
+if FREE_ORDER:
+    CASES = {k: (v[0], v[1].replace("按拍摄时间顺序", ""), *v[2:]) for k, v in CASES.items()}
+ORDER_ASKS = (("开头、中间、结尾按拍摄时间先后安排；", ""), ("检查内容和先后顺序", "检查内容"),
+              ("，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：", "："))
 
 
 def chat(url, system, user, schema, name, max_tokens=3000):
@@ -601,6 +610,11 @@ def plan_block(url, instruction, style, cards, lines, many, what, what_note, tar
         user = user.replace(FREE_WEIGHT, FREE_SECONDS).replace(*FREE_SCENES)
     if m:
         user = user.replace(FREE_WEIGHT + "\n", "").replace(*MUSIC_SCENES)
+    if FREE_ORDER:
+        for a, b in ORDER_ASKS:
+            if a not in user:
+                raise ValueError(f"CUT_ORDER: the prompt no longer says {a}")
+            user = user.replace(a, b)
     ids = [c["id"] for c in cards]
     # 2026-11-09 (the user): the opening and the ending each with a reason, written before the parts.
     schema = {"type": "object", "required": ["design", "opening", "ending", "unmet", "parts"], "properties": {
@@ -979,6 +993,12 @@ def cut_to_music(case):
                 anchor = cards[c0]["times"][int(j0) - 1]
                 pool.sort(key=lambda b: abs(cards[b.rsplit("/", 1)[0]]["times"][int(b.rsplit("/", 1)[1]) - 1] - anchor))
             order = listed + [b for b in pool if b not in listed]
+            # Then the other cards step 1 named for this picture, and only then the cards shot next to them
+            # (新西兰 fortnight-free-1: step 2 listed ne-153 alone, and its neighbour in shooting order, the
+            # starry-sky ne-154, filled the slot where step 1 had also named ne-101, in the helicopter).
+            named = [f"{cid}/{n}" for cid in step1["scenes"][k - 1]["cards"] if cid in cards
+                     for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+            order += [b for b in named if b not in order]
             order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
             for a, b in reversed(slots) if ending else slots:
                 need, first = round(b * fps) - round(a * fps), True

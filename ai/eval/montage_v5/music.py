@@ -118,12 +118,17 @@ def from_structure(path, target):
     if end - start > target + bar * PHRASE:
         end = min((t for t in bars if t > start + target - bar), key=lambda t: abs(t - start - target))
     parts = []
-    for g in segs[i:j + 1]:
+    for n, g in enumerate(segs[i:j + 1], i):
         a, b = max(g["start"], start), min(g["end"], end)
         if b - a < 1.0:
             continue
         level = LABELS.get(g["label"], "中等")
-        lines = [t for t in bars if a + 0.5 < t < b - 0.5][::1 if level == "高潮" else 2]
+        # Every second bar line from the section's start: [1::2], the 2nd, 4th, 6th (2026-11-10: [::2] cut on
+        # the 1st, 3rd, 5th, leaving a one-bar shot at each end of the section, and the cut's last shot a
+        # bar short of the rest). In the excerpt's last section they count back from its end, so that an odd
+        # bar falls at its start and the cut's last shot is whole (Fortnight's last verse is seven bars).
+        inside = [t for t in bars if a + 0.5 < t < b - 0.5]
+        lines = inside if level == "高潮" else inside[::-1][1::2][::-1] if n == j else inside[1::2]
         cuts = [a, *lines, b]
         parts.append({"start": round(a - start, 2), "end": round(b - start, 2), "level": level, "label": g["label"],
                       "slots": [[round(x - start, 2), round(y - start, 2)] for x, y in itertools.pairwise(cuts) if y - x > 0.5]})
