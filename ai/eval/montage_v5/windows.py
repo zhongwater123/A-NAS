@@ -13,12 +13,13 @@ import numpy as np
 class Index:
     def __init__(self, index: dict, vectors: dict):
         self.videos = index["videos"]
-        rows, frames, flat = [], [], []
+        rows, frames, flat, self.frame_ms = [], [], [], []
         for video, meta in sorted(self.videos.items()):
             for window in meta["windows"]:
                 rows.append((video, window["start"], window["end"]))
                 frames.append(vectors[f"{video}/{window['frame']}"])
                 flat.append(window["flat"])
+                self.frame_ms.append(window["frame"])
         self.rows, self.frames, self.flat = rows, np.stack(frames), np.array(flat)
 
     @classmethod
