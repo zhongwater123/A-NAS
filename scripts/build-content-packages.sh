@@ -10,13 +10,17 @@
 #   search-runtimes/<id>.tar.gz   scripts/build-search-runtime.sh's tarball
 #   qdrant/<sha256>/<file>        scripts/fetch-qdrant.sh's tarball
 #   llama/<sha256>/<file>         scripts/fetch-llama.sh's tarball
-# Models, Qdrant and llama.cpp are checked against their pins.
+#   assistant-runtimes/<sha256>/runtime.tar.gz
+#                                 the assistant trial's Hermes runtime
+# Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
+# pins.
 #
 # With --stand-in, the models and the two runtimes are stand-ins under the
 # same names, for the system test: small random files, and virtual
 # environments around Debian's Python, where web search's holds the system
 # test's stand-in for SearXNG. Qdrant and llama.cpp are the real ones from
-# CONTENT. Stand-ins go to a directory of their own, never to a repository.
+# CONTENT; the assistant trial's runtime is left out. Stand-ins go to a
+# directory of their own, never to a repository.
 #
 # Usage: scripts/build-content-packages.sh [--stand-in] OUT CONTENT
 set -euo pipefail
@@ -49,7 +53,8 @@ pinned() {
 }
 
 # package NAME ARCH DEPENDS DESCRIPTION COPYRIGHT: builds the package from
-# $work/NAME, the tree it installs, unless OUT has it.
+# $work/NAME, the tree it installs. DEPENDS may go on with more fields of the
+# control file, one per line.
 package() {
   local name=$1 arch=$2 depends=$3 description=$4 copyright=$5 root=$work/$1
   local deb=$out/${name}_1_$arch.deb
@@ -162,4 +167,32 @@ if ! have "$name" amd64; then
  llama-server with its libraries, as deploy/llama/llama.json pins them,
  in /opt/a-nas/llama/$sha." "Source: $(pin_field "$pin" source)
 License: $(pin_field "$pin" license)"
+fi
+
+# The assistant trial's Hermes runtime (ai/assistant-spike/runtime.json). Its
+# scripts name /opt/a-nas/assistant-runtimes/spike, so one is installed at a
+# time: each provides, conflicts with and replaces a-nas-assistant-runtime.
+pin=$repo/ai/assistant-spike/runtime.json
+name=$(assistant_runtime_package "$repo")
+if ! "$stand_in" && ! have "$name" amd64; then
+  sha=$(pin_field "$pin" sha256)
+  tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
+  if [[ ! -e "$tarball" ]]; then
+    # A release needs it; the system test does not.
+    echo "note: no $tarball, so no $name" >&2
+  elif ! pinned "$tarball" "$pin"; then
+    echo "not as pinned: $tarball (ai/assistant-spike/runtime.json)" >&2
+    exit 2
+  else
+    install -d "$work/$name/opt/a-nas/assistant-runtimes"
+    tar -C "$work/$name/opt/a-nas/assistant-runtimes" --no-same-owner -xzf "$tarball"
+    package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
+Provides: a-nas-assistant-runtime
+Conflicts: a-nas-assistant-runtime
+Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant trial
+ The runtime ai/assistant-spike/runtime.json pins by SHA-256 $sha, in
+ /opt/a-nas/assistant-runtimes/spike, for development testing only
+ (docs/runbooks/try-ai-assistant-on-experimental-nas.md)." \
+      "Hermes Agent (MIT) with the packages its build installs, each under its own license."
+  fi
 fi

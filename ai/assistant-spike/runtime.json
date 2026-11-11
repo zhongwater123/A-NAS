@@ -1,0 +1,7 @@
+{
+  "name": "hermes-runtime",
+  "file": "runtime.tar.gz",
+  "sizeBytes": 132374625,
+  "sha256": "f5567f29525f9110cd18ed5e4b8d1c746b1c009a224828c7e66e521fd19f64a7",
+  "note": "The Hermes runtime ai/assistant-spike/run.sh build packs (spike/ under /opt/a-nas/assistant-runtimes), which the Experimental NAS has run since 2026-11-10. Rebuilding it changes its SHA-256: pin the new tarball here, and its content package follows (scripts/build-content-packages.sh)."
+}

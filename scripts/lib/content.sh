@@ -55,7 +55,11 @@ pinned_package() { echo "a-nas-$2-$(pin_field "$1/$3" sha256 | cut -c1-12)"; }
 qdrant_package() { pinned_package "$1" qdrant deploy/qdrant/qdrant.json; }
 llama_package() { pinned_package "$1" llama deploy/llama/llama.json; }
 
-# content_packages REPO: every content package a release depends on.
+# assistant_runtime_package REPO: the Hermes runtime of the assistant trial,
+# which a-nas-assistant-trial depends on (ai/assistant-spike/runtime.json).
+assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant-spike/runtime.json; }
+
+# content_packages REPO: every content package a-nas depends on.
 content_packages() {
   local role
   for role in "${ai_roles[@]}"; do

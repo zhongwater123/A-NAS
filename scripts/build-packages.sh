@@ -9,7 +9,9 @@
 #   a-nas-site and a-nas-check. It depends on the content packages it links
 #   to (scripts/lib/content.sh) and on a-nas-host at its own version.
 # - a-nas-host and a-nas-console, which declare what the product needs from
-#   Debian (ADR 0031).
+#   Debian (ADR 0031);
+# - a-nas-assistant-trial, the assistant's trial (ADR 0024), at the version of
+#   a-nas, which it depends on with its Hermes runtime's content package.
 #
 # Files go only to /usr, and the result does not depend on the package's
 # scripts, so the same files make the product's system extension
@@ -138,3 +140,18 @@ printf '%s\n' 'A-NAS: https://github.com/zhongwater123/A-NAS' \
 chmod 0644 "$root/usr/share/doc/a-nas/copyright"
 build "$root"
 
+# The assistant trial (ADR 0024), at this version of a-nas: the spike's
+# scripts, which its nas-trial.sh sets up and updates, and its Hermes runtime
+# as a content package.
+root=$work/a-nas-assistant-trial
+install -d "$root/DEBIAN" "$root/opt/a-nas/assistant-trial"
+control a-nas-assistant-trial "$(assistant_runtime_package "$repo")" >"$root/DEBIAN/control"
+chmod 0644 "$root/DEBIAN/control"
+install -m 0755 "$repo"/deploy/debian/a-nas-assistant-trial/DEBIAN/{postinst,prerm} "$root/DEBIAN/"
+cp -r "$repo/ai/assistant-spike" "$root/opt/a-nas/assistant-trial/spike"
+find "$root/opt/a-nas/assistant-trial/spike" -name __pycache__ -prune -exec rm -rf {} +
+# Scripts run as root: root's alone to change, and executable as they start.
+while IFS= read -r -d '' file; do
+  if [[ "$(head -c 2 "$file")" == '#!' ]]; then chmod 0755 "$file"; else chmod 0644 "$file"; fi
+done < <(find "$root/opt/a-nas/assistant-trial/spike" -type f -print0)
+build "$root"
