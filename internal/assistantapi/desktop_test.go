@@ -118,6 +118,10 @@ func TestAWindowAttachesOnlyToAConversationItOpened(t *testing.T) {
 }
 
 func TestADesktopStepAnswersWithAPictureOfThePage(t *testing.T) {
+	// Megabytes through a WebSocket take longer under the race detector than the
+	// two seconds the other tests give a window; no step here is left unanswered.
+	defer func(receipt time.Duration) { desktopReceipt = receipt }(desktopReceipt)
+	desktopReceipt = time.Minute
 	h := newHarness(t)
 	w, conn := companionTurn(t, h)
 	h.stepStarted(conn, "call-1", "look", `{"annotate":true}`)
