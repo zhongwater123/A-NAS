@@ -12,7 +12,7 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
 |---|---|---|
 | 首次安装向导 [`provision-v1.0.1-rc.sh`](../../scripts/provision-v1.0.1-rc.sh) | 一行 `apt-get install`，12 个包 | 缺 `libgomp1` 与 `libssl3t64`（相册读文字的 llama-server 链接它们），按它装的新机器会在安装器的库检查处以退出码 3 停下 |
 | [实验存储手册](../runbooks/provision-v1.0.1-experimental-storage.md#安装系统服务) | 同一行的副本 | 同上 |
-| [系统服务安装器](../../scripts/install-v1.0.1-system-services.sh) | 检查 18 个命令与 5 个库，缺少时退出码 3 | 只检查、不安装；与上面两份各自维护 |
+| [系统服务安装器](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/install-v1.0.1-system-services.sh) | 检查 18 个命令与 5 个库，缺少时退出码 3 | 只检查、不安装；与上面两份各自维护 |
 | [系统测试镜像](../../scripts/build-system-test-image.sh) | `debootstrap --include` 的清单 | 最全，但混有只供测试用的 `jq`、`yq`、`curl` |
 | [本地控制台手册](../runbooks/operate-local-kiosk.md)、[容器代理手册](../runbooks/install-container-agent.md)、[局域网入口手册](../runbooks/enable-lan-web-access.md)、助手试用的 [`setup.sh`](../../ai/assistant-spike/setup.sh) | 各自的 `apt install` | 本地控制台的 VA-API 驱动是 2026-10-29 补装的 |
 
@@ -38,6 +38,8 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
    它只用 `iproute2` 的 `ip`（列入 `a-nas-host` 的 `Depends`），与 ifupdown、dhcpcd 等网络工具无关。安装时 smbd 若已在运行，监听不变，配置在它下次启动时生效。两个包都只声明依赖，没有维护脚本；单元、环境文件、Chromium 策略与传感器模块等宿主机配置都由安装器按 release 写入。
 3. **release 带上这两个包，安装前先装包。** 暂存的 release 目录含 `a-nas-host.deb` 与 `a-nas-console.deb`，版本写在包内。`deploy-dev.ps1` 与二进制一起输出它们的 SHA-256，root 先与二进制一起核对：包的维护脚本以 root 运行，暂存账号能改动暂存目录，这与 root 运行暂存目录中的安装器是同一层信任（[#171](https://github.com/zhongwater123/A-NAS/issues/171)）。然后 root 执行 `apt install --no-install-recommends --allow-downgrades <release>/a-nas-host.deb`（有屏幕时连同控制台包），再运行安装器。版本只标明 release、不表示先后：未打标签的提交按哈希排序，标签之后的提交也排在标签之前，所以升级在 apt 看来可能是降级，安装一律允许降级。依赖没有变化时 apt 不需要联网。安装器把两个包复制进 `/opt/a-nas/releases/<ID>`，回滚时从那里装回旧版本。
 4. **安装器只核对包的版本。** 安装器不再逐个检查命令与库，改为核对 `a-nas-host` 已安装且版本等于本 release 的版本；不满足时以退出码 3 结束并打印要执行的 `apt install` 命令。依赖是否齐全由 dpkg 保证。
+
+   2026-11-11 起，决定 2 至 4 由 [ADR 0034](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md) 第 2 步取代：两个包与产品一起在签名软件源中，`a-nas` 以 `Depends` 要求同一版本的 `a-nas-host`，版本由提交与标签得出并能排序；smbd 等待地址的附加配置改由 `a-nas-generator` 按 `/etc/a-nas/site.conf` 生成；安装器已删除。
 5. **一处声明，其余引用。** 首次安装向导与各本手册改为安装这两个包，删除各自的清单。系统测试镜像的产品依赖取自 `a-nas-host` 的 `Depends`，只另列系统测试打开的可选功能与测试用的工具，镜像缓存的键包含包的定义；系统测试再以 `dpkg -i` 装上 release 的 `a-nas-host`，它不下载缺少的依赖而是失败。这样系统测试每次都在验证这份清单：包与镜像对不上时，测试就会失败。
 6. **产品本身暂不打包。** 二进制、单元、系统账号、ACL 修复与各项迁移仍由安装器完成。把产品也做成软件包，交由 dpkg 记录文件、校验（`dpkg --verify`）、升级与回滚，是 #189 的下一步，见 [ADR 0034](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（proposed）。
 

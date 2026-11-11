@@ -108,7 +108,7 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
 - 实现：
-  - [`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
+  - [`scripts/install-v1.0.1-system-services.sh`](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
   - [`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go) 的 `applySambaConfiguration`（监听设置变化时重启 smbd）；
   - [`internal/hostops/linux/identity.go`](../../internal/hostops/linux/identity.go) 的 `ensureFixedGroups`（查组与建组串行进行）。
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)、[`internal/hostops/linux/groups_test.go`](../../internal/hostops/linux/groups_test.go)、[`internal/hostops/linux/samba_test.go`](../../internal/hostops/linux/samba_test.go)、[`internal/hostops/linux/root_integration_test.go`](../../internal/hostops/linux/root_integration_test.go)

@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-11-05
+更新时间：2026-11-11
 
 ## 目的
 
@@ -10,7 +10,7 @@
 ## 前提与风险
 
 - 权限：管理员与至少一名成员的 Web 账号；需要 root 的核对由设备所有者执行，开发机只有只读 SSH。
-- 目标：Experimental NAS 当前的 release，开始前记下 `readlink /opt/a-nas/current`。
+- 目标：Experimental NAS 当前的 release，开始前记下 `dpkg-query -W a-nas`。
 - 风险：只用可丢弃测试数据；安装应用、上传与扫描会占用数据卷空间与 CPU。
 - 停止条件：数据卷离线或只读、服务反复重启、出现非预期的数据丢失时停止，按[调查模板](../investigations/_TEMPLATE.md)记录。
 
