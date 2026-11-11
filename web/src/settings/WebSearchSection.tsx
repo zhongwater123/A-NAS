@@ -1,4 +1,4 @@
-import { ChevronRight, Download, FileText, Globe, Magnet, Scale } from "lucide-react";
+import { ChevronRight, Download, FileText } from "lucide-react";
 import { Switch } from "radix-ui";
 import { useEffect, useState } from "react";
 
@@ -17,7 +17,7 @@ import {
 } from "../websearch/api";
 import { pauseReasons } from "../websearch/pauses";
 import { publishWebSearch, useWebSearch } from "../websearch/status";
-import { Banner, Group, IconTile, PageHeader, Pill, type Tone } from "./parts";
+import { Banner, Group, PageHeader, Pill, type Tone } from "./parts";
 import styles from "./settings.module.css";
 
 const runningText: Record<WebSearchStatus["running"], { text: string; tone: Tone }> = {
@@ -49,21 +49,21 @@ export function WebSearchSection() {
   const state = status && (status.enabled ? runningText[status.running] : { text: "已关闭", tone: "neutral" as Tone });
   return (
     <>
-      <PageHeader title="网页搜索" subtitle="搜索请求从这台 NAS 发往下列搜索引擎" />
+      <PageHeader title="网页搜索" />
       {error && (
         <Banner tone="error" onClose={() => setError("")}>
           {error}
         </Banner>
       )}
-      <Group title="开关">
-        <div className={styles.setRow}>
-          <IconTile tone="accent" icon={Globe} />
+      {/* Searches leave from this NAS to the engines listed below. Off, no
+          account sees web search and the NAS contacts no engine. */}
+      <Group>
+        <div className={styles.setRow} data-setting="web-search">
           <div className={styles.setRowText}>
             <span>
               网页搜索
               {state && <Pill tone={state.tone}>{state.text}</Pill>}
             </span>
-            <small>关闭后所有账号都看不到网页搜索，NAS 不再访问任何搜索引擎。</small>
           </div>
           <Switch.Root
             className={styles.setSwitch}
@@ -75,8 +75,7 @@ export function WebSearchSection() {
             <Switch.Thumb />
           </Switch.Root>
         </div>
-        <div className={styles.setRow}>
-          <IconTile tone="warning" icon={Magnet} />
+        <div className={styles.setRow} data-setting="torrents">
           <div className={styles.setRowText}>
             <span>种子搜索</span>
             <small>种子与文件站的结果多为未经授权的内容。</small>
@@ -93,7 +92,7 @@ export function WebSearchSection() {
         </div>
       </Group>
       {status && (
-        <Group title="搜索引擎">
+        <Group title="搜索引擎" anchor="engines">
           {allCategories.map((category) => {
             const names = status.engines[category];
             return (
@@ -110,10 +109,9 @@ export function WebSearchSection() {
         </Group>
       )}
       {status?.enabled && (
-        <Group
-          title="暂停的网站"
-          footnote="网站拦截后暂停 1 小时，恢复后再次被拦则加倍，最长 1 天；同一网站的各类搜索一起暂停。"
-        >
+        // A site that blocks us is paused for an hour, doubling each time it
+        // blocks again up to a day; all its kinds of search pause together.
+        <Group title="暂停的网站">
           {status.paused.length === 0 && <div className={styles.setRow}>没有暂停的网站</div>}
           {status.paused.map((paused) => (
             <div key={paused.engine} className={styles.setRow}>
@@ -149,14 +147,13 @@ function LicenseGroup() {
     };
   }, []);
   return (
-    <Group title="开源许可">
+    <Group title="开源许可" anchor="license">
       {license === undefined && !failed && <div className={styles.setRow}>正在读取…</div>}
       {failed && <div className={styles.setRow}>{failed}</div>}
       {license === null && <div className={styles.setRow}>这个版本没有附带网页搜索的运行环境。</div>}
       {license && (
         <>
           <div className={styles.setRow}>
-            <IconTile tone="logs" icon={Scale} />
             <div className={styles.setRowText}>
               <span>
                 {license.name}

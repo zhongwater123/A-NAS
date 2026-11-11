@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { Temperature } from "../api.generated";
 import type { HostState } from "../desktop/api";
-import { Group, IconTile, Pill } from "./parts";
+import { Group, Pill } from "./parts";
 import styles from "./settings.module.css";
 import { FanSpeed, fanName, TemperatureGauge, temperatureLevel } from "./Temperature";
 
@@ -34,64 +34,64 @@ export function DeviceTemperatures({ snapshot }: { snapshot: HostState }) {
   const stopped = fans.filter((fan) => fan.stopped).length;
   const attention = [hot ? `${hot} 项偏高` : "", stopped ? `${stopped} 个风扇停转` : ""].filter(Boolean).join("，");
   const cpuHot = thermal?.cpu !== undefined && temperatureLevel(thermal.cpu) === "hot";
+  // SATA disks' readings come from the SMART cache: at most every 10 minutes,
+  // and a disk in standby is not woken for one.
   return (
-    <Group
-      title="温度与风扇"
-      aside={attention || undefined}
-      footnote="机械硬盘和 SATA 固态硬盘的温度每 10 分钟更新一次，硬盘待机时不会被唤醒。"
-    >
-      <TemperatureRow
-        icon={Cpu}
-        tone="cpu"
-        title="处理器"
-        detail={cpuHot ? "温度偏高，请检查散热器和风扇" : undefined}
-        temperature={thermal?.cpu}
-        missing={thermal ? "未检测到温度传感器" : "暂时无法读取"}
-      />
-      {thermal?.gpus.map((gpu) =>
-        gpu.integrated ? (
-          <TemperatureRow
-            key={gpu.id}
-            icon={CircuitBoard}
-            tone="gpu"
-            title="核显"
-            detail="集成显卡"
-            missing="与处理器相同"
-          />
-        ) : (
-          <TemperatureRow
-            key={gpu.id}
-            icon={CircuitBoard}
-            tone="gpu"
-            title={gpu.name}
-            detail="独立显卡"
-            temperature={gpu.temperature}
-            missing="驱动不提供温度"
-          />
-        ),
-      )}
-      {disks.map((disk) => (
+    <Group title="温度与风扇" aside={attention || undefined} anchor="thermal">
+      <div className={styles.tempGrid}>
         <TemperatureRow
-          key={disk.id}
-          icon={HardDrive}
-          tone={disk.rotational ? "hdd" : "ssd"}
-          title={disk.model}
-          detail={`${diskRole[disk.role]} · ${disk.rotational ? "机械硬盘" : disk.transport === "nvme" ? "NVMe 固态硬盘" : "固态硬盘"}`}
-          temperature={diskTemperature(disk)}
-          missing="暂无读数"
+          icon={Cpu}
+          tone="cpu"
+          title="处理器"
+          detail={cpuHot ? "温度偏高，请检查散热器和风扇" : undefined}
+          temperature={thermal?.cpu}
+          missing={thermal ? "未检测到温度传感器" : "暂时无法读取"}
         />
-      ))}
-      {fans.map((fan) => (
-        <Row
-          key={fan.id}
-          icon={Fan}
-          tone="fan"
-          title={fanName(fan)}
-          detail={fan.stopped ? "风扇停了，请检查风扇和接线" : undefined}
-          flag={fan.stopped ? "已停转" : undefined}
-          end={<FanSpeed fan={fan} />}
-        />
-      ))}
+        {thermal?.gpus.map((gpu) =>
+          gpu.integrated ? (
+            <TemperatureRow
+              key={gpu.id}
+              icon={CircuitBoard}
+              tone="gpu"
+              title="核显"
+              detail="集成显卡"
+              missing="与处理器相同"
+            />
+          ) : (
+            <TemperatureRow
+              key={gpu.id}
+              icon={CircuitBoard}
+              tone="gpu"
+              title={gpu.name}
+              detail="独立显卡"
+              temperature={gpu.temperature}
+              missing="驱动不提供温度"
+            />
+          ),
+        )}
+        {disks.map((disk) => (
+          <TemperatureRow
+            key={disk.id}
+            icon={HardDrive}
+            tone={disk.rotational ? "hdd" : "ssd"}
+            title={disk.model}
+            detail={`${diskRole[disk.role]} · ${disk.rotational ? "机械硬盘" : disk.transport === "nvme" ? "NVMe 固态硬盘" : "固态硬盘"}`}
+            temperature={diskTemperature(disk)}
+            missing="暂无读数"
+          />
+        ))}
+        {fans.map((fan) => (
+          <Row
+            key={fan.id}
+            icon={Fan}
+            tone="fan"
+            title={fanName(fan)}
+            detail={fan.stopped ? "风扇停了，请检查风扇和接线" : undefined}
+            flag={fan.stopped ? "已停转" : undefined}
+            end={<FanSpeed fan={fan} />}
+          />
+        ))}
+      </div>
     </Group>
   );
 }
@@ -123,8 +123,9 @@ function TemperatureRow({
   );
 }
 
+// Row is one sensor: the sensors sit two to a line where the card is wide enough.
 function Row({
-  icon,
+  icon: Icon,
   tone,
   title,
   detail,
@@ -139,8 +140,8 @@ function Row({
   end: ReactNode;
 }) {
   return (
-    <div className={`${styles.setRow} ${styles.tempRow}`}>
-      <IconTile tone={tone} icon={icon} size="lg" />
+    <div className={`${styles.tempRow} ${styles[tone] ?? ""}`}>
+      <Icon className={styles.tempIcon} aria-hidden="true" />
       <div className={styles.setRowText}>
         <span>
           <strong>{title}</strong>
