@@ -43,13 +43,11 @@ describe("the animations the companion plays on its own and when it is clicked",
     expect(everything.turn).toEqual([]);
   });
 
-  it("plays a click response or a category action when clicked, not one whose text would read backwards", () => {
+  it("plays only a click response when clicked with nothing to ask about, the category actions left to chance", () => {
     const all = config.animations as unknown as Animations;
-    const text = all.categories.find((category) => category.noMirror)?.actions ?? [];
-    expect(text.length).toBeGreaterThan(0);
-    for (const name of all.clicks) expect(everything.clicks).toContain(name);
-    expect(everything.clicks).toContain("三球抛接");
-    for (const name of text) expect(everything.clicks).not.toContain(name);
+    expect(everything.clicks).toEqual(all.clicks);
+    expect(everything.clicks.every((name) => name.startsWith("点击回应-"))).toBe(true);
+    expect(everything.categories.flatMap((category) => category.actions)).toContain("三球抛接");
     // A step's own clip plays on while its stage lasts, and ends as an event once the stage is over.
     expect(
       decideEndedCue({ animations: everything, current: "写代码", workState: "working", workAnim: "写代码" }).kind,
@@ -57,8 +55,9 @@ describe("the animations the companion plays on its own and when it is clicked",
     expect(decideEndedCue({ animations: everything, current: "写代码", workState: null, workAnim: null }).kind).toBe(
       "event-done",
     );
-    // A clicked category action ends as a click does: back to the stage, or idle once.
-    expect(decideEndedCue({ animations: everything, current: "三球抛接", workState: null }).kind).toBe(
+    // A category action is the random chain's alone now, and ends as one of it; a click response as a click.
+    expect(decideEndedCue({ animations: everything, current: "三球抛接", workState: null }).kind).toBe("random");
+    expect(decideEndedCue({ animations: everything, current: "点击回应-元气挥手", workState: null }).kind).toBe(
       "interaction-done",
     );
   });
