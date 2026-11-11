@@ -8,6 +8,7 @@ import { Suspense, useEffect, useState } from "react";
 
 import type { AssistantTaskNotice } from "../desktop/api";
 import { lazyCode } from "../ui/lazyCode";
+import { useCompanionMode } from "./quiet";
 
 const CompanionCard = lazyCode(() => import("./petCard").then((module) => module.CompanionCard));
 
@@ -47,8 +48,11 @@ export interface CompanionOpeners {
 }
 
 export function Companion(openers: CompanionOpeners = {}) {
+  // Hidden on this device: not even its animations are listed.
+  const hidden = useCompanionMode() === "hidden";
   const [manifest, setManifest] = useState<CompanionManifest>();
   useEffect(() => {
+    if (hidden) return;
     let current = true;
     let retry: number | undefined;
     let wait = RETRY_MS;
@@ -72,8 +76,8 @@ export function Companion(openers: CompanionOpeners = {}) {
       if (timer !== undefined) window.clearTimeout(timer);
       window.clearTimeout(retry);
     };
-  }, []);
-  if (!manifest) return null;
+  }, [hidden]);
+  if (hidden || !manifest) return null;
   return (
     <Suspense fallback={null}>
       <CompanionCard installed={manifest.animations} pool={manifest.pool} {...openers} />
