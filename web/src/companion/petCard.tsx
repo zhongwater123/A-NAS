@@ -274,6 +274,13 @@ function asleepFromTheStart(animations: Animations): string | null {
   return names.loop;
 }
 
+/**
+ * How long a step's clip shows at the least before the next step's takes over: 1.5 s, about 2.3 s of the clip
+ * at PLAYBACK_RATE, long enough to tell one gesture from another. Steps that come meanwhile give way to the
+ * latest, which shows then; a turn's end or stop does not wait.
+ */
+export const STEP_MIN_MS = 1500;
+
 /** The longest the companion waits for its wake-up clip to play before it tells what waited. */
 const WAKE_CLIP_WAIT_MS = 12_000;
 
@@ -748,6 +755,36 @@ function Card({
   useEffect(() => {
     const baseline = { ...first.baseline };
     const report = makePlaybackReporter({ petId: COMPANION_PET });
+    /** The step clip the card was last given, and when. */
+    let shown: { anim: string | null; at: number } | null = null;
+    /** The latest step, held until the one shown has had STEP_MIN_MS. */
+    let held: StateLeaf | null = null;
+    let heldTimer: number | undefined;
+    const showStage = (leaf: StateLeaf) => {
+      const status = readWorkStatus(leaf);
+      const stage = status?.state ?? null;
+      const step = stage !== null && stage !== "success" && stage !== "error";
+      shown = step ? { anim: status?.anim ?? null, at: performance.now() } : null;
+    };
+    /** Whether a stage must wait for the step shown to have had its time: a new clip, not a turn's end. */
+    const holdBack = (leaf: StateLeaf): boolean => {
+      const status = readWorkStatus(leaf);
+      const stage = status?.state ?? null;
+      if (stage === null || stage === "success" || stage === "error" || shown === null) return false;
+      if ((status?.anim ?? null) === shown.anim) return false;
+      const wait = shown.at + STEP_MIN_MS - performance.now();
+      if (wait <= 0) return false;
+      held = leaf;
+      window.clearTimeout(heldTimer);
+      heldTimer = window.setTimeout(() => {
+        const next = held;
+        held = null;
+        if (!next) return;
+        showStage(next);
+        setLeaves((current) => withLeaf(current, "workStatus", next));
+      }, wait);
+      return true;
+    };
     const take = () => {
       const taken: [LeafName, StateLeaf][] = [];
       for (const { path, leaf } of takeChanged(companionState.read(), baseline)) {
@@ -767,10 +804,21 @@ function Card({
           const status = readWorkStatus(leaf);
           const stage = status?.state ?? null;
           const ends = stage === "success" || stage === "error";
+          if (holdBack(leaf)) continue;
+          // What comes now replaces a step held back.
+          held = null;
+          window.clearTimeout(heldTimer);
+          const idle = { ...leaf, data: { ...status, state: null, anim: null } };
           if (status && ends && (awayFrom(pausedRef.current) || telling.current)) {
             telling.current = false;
-            taken.push([name, { ...leaf, data: { ...status, state: null, anim: null } }]);
+            taken.push([name, idle]);
+          } else if (status && stage === "success" && status.anim === null) {
+            // A small turn ended well (workStatus.ts BIG_TURN_*): its check alone, for as long as a turn's
+            // own. The card idles: the step's clip plays out, and no turn's end is played.
+            setTold({ sign: "success", at: Date.now() });
+            taken.push([name, idle]);
           } else taken.push([name, leaf]);
+          showStage(taken.at(-1)?.[1] ?? leaf);
         } else if (name === "lock") taken.push([name, leaf]);
         // Under the local console's screen saver nobody sees the page either (D12): nothing written
         // then ends a rest, not even a sleep, a wake or the wake a lock brings.
@@ -817,6 +865,7 @@ function Card({
     setCompanionReady(true);
     return () => {
       placing = false;
+      window.clearTimeout(heldTimer);
       stop();
       // A card that leaves the page cuts short what a command asked it to play, as a freeze does:
       // the command hears so now rather than when its wait runs out (an animation already over is left as it was).

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BEHAVIORS } from "./behaviors";
 import { WORK_STATUS_STATES } from "./dsh-pet/shared/work-status";
 import {
+  BIG_TURN_MS,
+  BIG_TURN_TOOLS,
   companionState,
   forgetAll,
   isPrompting,
@@ -135,17 +137,66 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
     expect(shown()).toBe("working");
     expect(detail()).toEqual({ anim: "写代码", task: "跑一下 du -sh /nas/…，稍等哦" });
     vi.advanceTimersByTime(5000);
+    // A step done: its line, and the step's clip goes on until the next step, no clapping.
     reportEvent("s1", "tool.complete", { name: "terminal", tool_id: "c1" });
     expect(shown()).toBe("result");
-    expect(detail()).toEqual({ anim: "工作状态-雀跃庆祝", task: "搞定一步，继续看看哦~" });
+    expect(detail()).toEqual({ anim: "写代码", task: "搞定一步，继续看看哦~" });
     reportEvent("s1", "tool.start", { name: "read_file", tool_id: "c2", args: { path: "/nas/文档/a.md" } });
     expect(detail()).toEqual({ anim: "工作状态-清点归档", task: "我在看 文档/a.md 哦" });
     // VNAS moving the pet shows the stage's own clip and lines, not the last step's.
     reportEvent("s1", "tool.start", { name: "mcp__companion__anim", tool_id: "c3", args: { name: "三球抛接" } });
     expect(detail()).toEqual({ anim: null, task: null });
+    // A small turn ends well with only its check: no clip, no line.
     reportEvent("s1", "message.complete", { status: "complete" });
     expect(shown()).toBe("success");
-    expect(detail()).toEqual({ anim: "放烟花", task: "全部搞定啦！" });
+    expect(detail()).toEqual({ anim: null, task: null });
+  });
+
+  describe("fireworks only for a big turn", () => {
+    const end = () => reportEvent("s1", "message.complete", { status: "complete" });
+    beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0));
+
+    it(`counts ${BIG_TURN_TOOLS} of VNAS's tools, not the companion's or Hermes's own`, () => {
+      startTurn("s1");
+      for (let i = 1; i < BIG_TURN_TOOLS; i += 1) tool("tool.start", "read_file");
+      reportEvent("s1", "tool.start", { name: "mcp__companion__anim" });
+      reportEvent("s1", "tool.start", { name: "_bookkeeping" });
+      end();
+      expect(detail()).toEqual({ anim: null, task: null });
+      startTurn("s1");
+      for (let i = 0; i < BIG_TURN_TOOLS; i += 1) tool("tool.start", "read_file");
+      end();
+      expect(detail()).toEqual({ anim: "放烟花", task: "全部搞定啦！" });
+    });
+
+    it("counts a turn longer than its time", () => {
+      startTurn("s1");
+      vi.advanceTimersByTime(BIG_TURN_MS);
+      end();
+      expect(detail().anim).toBeNull();
+      startTurn("s1");
+      vi.advanceTimersByTime(BIG_TURN_MS + 1);
+      end();
+      expect(detail().anim).toBe("放烟花");
+    });
+
+    it.each([
+      ["a card waited for the member", () => reportCards([{ requestId: "r1", sessionId: "s1", status: "awaiting" }])],
+      ["VNAS asked the member something", () => tool("tool.start", "clarify")],
+      ["changes were submitted", () => tool("tool.start", "mcp__anas__submit_changes")],
+    ])("counts a turn in which %s", (_, what) => {
+      startTurn("s1");
+      what();
+      reportCards([]);
+      end();
+      expect(detail()).toEqual({ anim: "放烟花", task: "全部搞定啦！" });
+    });
+
+    it("leaves an error as it was, however small the turn", () => {
+      startTurn("s1");
+      reportEvent("s1", "message.complete", { status: "error" });
+      expect(detail()).toEqual({ anim: "工作状态-垂头叹气冒汗", task: "呜……这次没做成" });
+    });
   });
 
   it("keeps a step's line while it lasts, and names the todo list's step while thinking", () => {

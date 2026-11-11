@@ -9,6 +9,7 @@ import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
+import { STEP_MIN_MS } from "./petCard";
 import { companionMode, resetCompanionMode, setCompanionMode } from "./quiet";
 import {
   companionReady,
@@ -46,6 +47,12 @@ const serve = (names: string[]) =>
 const write = (leaf: "say" | "anim" | "position" | "throw" | "lock" | "sleep", data: unknown) =>
   act(() => companionState.writePet("main", leaf, data));
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+/** Something waited for the member in the turn: a big one, which ends with its clip (workStatus.ts BIG_TURN_*). */
+const askedMember = (sessionId: string) =>
+  act(() => {
+    reportCards([{ requestId: "asked", sessionId, status: "awaiting" }]);
+    reportCards([]);
+  });
 
 /** The animations the card fetched, by name, in order: what it played or is about to. */
 let fetched: string[] = [];
@@ -222,7 +229,8 @@ describe("the companion on the desktop", () => {
     act(() => fireEvent(front(videos), new Event("ended")));
     await settle();
     expect(fetched.filter((name) => name !== "写代码")).toEqual([]);
-    // The turn ends: fireworks once, then idle.
+    // A turn that asked the member something ends: fireworks once, then idle.
+    await askedMember("live0001");
     act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
     await plays("放烟花");
     await ready(videos);
@@ -704,6 +712,71 @@ describe("what VNAS asks of the companion", () => {
     await plays("碎碎念-发呆碎碎念");
   });
 
+  describe("moving only with what VNAS really does", () => {
+    it("goes on with a step's clip when the step is done, with no clapping", async () => {
+      serve([IDLE, "写代码", "工作状态-雀跃庆祝", "工作状态-清点归档"]);
+      await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      fetched = [];
+      act(() => reportEvent("live0001", "tool.complete", { name: "terminal", tool_id: "c1" }));
+      expect(await screen.findByText(/搞定一步，继续看看哦~|这步好啦！/)).toBeInTheDocument();
+      await settle();
+      expect(fetched).toEqual([]);
+    });
+
+    it("ends a small turn with its check alone, the step's clip played out", async () => {
+      serve([IDLE, "写代码", "放烟花", "工作状态-雀跃庆祝"]);
+      const { root, videos } = await mount();
+      const layer = root.closest("[data-vnas-overlay]") as HTMLElement;
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await waitFor(() => expect(layer.dataset.companionWork).toBe("success"));
+      await settle();
+      expect(fetched).toEqual([]);
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await plays(IDLE);
+      expect(fetched).not.toContain("放烟花");
+      expect(fetched).not.toContain("工作状态-雀跃庆祝");
+    });
+
+    it(`shows a step's clip ${STEP_MIN_MS} ms at the least, then the latest step's, and a turn's end at once`, async () => {
+      serve([IDLE, "写代码", "东张西望", "拆礼物", "工作状态-垂头叹气冒汗"]);
+      await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      const shown = performance.now();
+      fetched = [];
+      act(() => {
+        reportEvent("live0001", "tool.start", { name: "browser_snapshot", tool_id: "c2" });
+        reportEvent("live0001", "tool.start", { name: "mcp__anas__submit_changes", tool_id: "c3" });
+      });
+      await settle();
+      expect(fetched).toEqual([]);
+      await waitFor(() => expect(fetched).toContain("拆礼物"), { timeout: STEP_MIN_MS + 1000 });
+      expect(performance.now() - shown).toBeGreaterThanOrEqual(STEP_MIN_MS - 100);
+      // The step in between gave way to the latest.
+      expect(fetched).not.toContain("东张西望");
+      // A turn's end does not wait for the step shown.
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      await settle();
+      expect(fetched).toContain("工作状态-垂头叹气冒汗");
+    });
+  });
+
   it("keeps what VNAS said last in a turn over the line the turn's end shows", async () => {
     serve([IDLE, "碎碎念-发呆碎碎念", "工作状态-雀跃庆祝"]);
     await mount();
@@ -713,6 +786,7 @@ describe("what VNAS asks of the companion", () => {
     });
     write("say", { text: "照片整理好了" });
     expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+    await askedMember("live0001");
     act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
     await plays("工作状态-雀跃庆祝");
     await settle();
@@ -1055,6 +1129,7 @@ describe("VNAS's commands, carried out by the card", () => {
       outcome = answer;
     });
     await plays("点击回应-元气挥手");
+    await askedMember(SESSION);
     act(() => reportEvent(SESSION, "message.complete", { status: "complete" }));
     await settle();
     expect(fetched).not.toContain("工作状态-雀跃庆祝");
@@ -1261,6 +1336,7 @@ describe("walking, throwing and resting", () => {
     act(() => startTurn("live0001"));
     write("position", { x: 0.25, y: 0.5, mode: "line", duration: 1000 });
     frames(10);
+    await askedMember("live0001");
     act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
     await plays("工作状态-雀跃庆祝");
     frames(80);
