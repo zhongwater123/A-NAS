@@ -147,6 +147,22 @@ func OpenSQLite(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
+	if err := sqlitedb.Migrate(ctx, s.db, databaseSchema); err != nil {
+		return err
+	}
+	return s.allocateMissingIdentities(ctx)
+}
+
+// databaseSchema is control.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "control.db",
+	Baseline: func(ctx context.Context, db *sql.DB) error { return (&Store{db: db}).baseline(ctx) },
+}
+
+// baseline is the structure the store made before it had steps.
+func (s *Store) baseline(ctx context.Context) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -243,7 +259,7 @@ CREATE INDEX IF NOT EXISTS audit_action_resource ON audit_events(action, resourc
 	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET client = ? WHERE client = '' AND expires_at = ?", ViaLoopback, formatTime(localConsoleExpiry)); err != nil {
 		return err
 	}
-	return s.allocateMissingIdentities(ctx)
+	return nil
 }
 
 // ensureColumn adds a column that databases created by earlier versions lack.
