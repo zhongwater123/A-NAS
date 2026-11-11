@@ -23,6 +23,21 @@ func (h *handler) textRoutes() {
 	h.mux.HandleFunc("PUT "+p+"/assets/{assetID}/text/fields/{field}", h.correctText)
 	h.mux.HandleFunc("DELETE "+p+"/assets/{assetID}/text/fields/{field}", h.restoreText)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/text/changes", h.textChanges)
+	h.mux.HandleFunc("GET "+p+"/text-handles/{handle}", h.textHandle)
+}
+
+// textHandle gives a member the value a handle of their assistant stands
+// for. The assistant's own socket does not route it (photoservice).
+func (h *handler) textHandle(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	value, err := h.service.TextHandle(r.Context(), principal, r.PathValue("handle"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	// The value is a number of the member's: no cache keeps it.
+	w.Header().Set("Cache-Control", "no-store")
+	httpjson.Write(w, http.StatusOK, value)
 }
 
 func (h *handler) photoText(w http.ResponseWriter, r *http.Request) {

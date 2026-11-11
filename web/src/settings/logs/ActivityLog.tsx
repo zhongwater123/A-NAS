@@ -247,7 +247,6 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
           <div className={styles.lgChips} role="radiogroup" aria-label="记录类别">
             {[undefined, ...categoryOrder].map((category) => {
               const active = filters.category === category;
-              const Icon = category ? categoryIcons[category] : ScrollText;
               return (
                 <button
                   key={category ?? "all"}
@@ -256,7 +255,6 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
                   className={`${styles.lgChip} ${active ? styles.active : ""}`}
                   onClick={() => setFilters((current) => ({ ...current, category }))}
                 >
-                  <Icon />
                   {category ? categoryInfo[category].label : "全部"}
                 </button>
               );
@@ -365,11 +363,6 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
             <span>没有更早的记录了</span>
           )}
         </div>
-      )}
-      {isAdmin && state.loaded && (
-        <p className={styles.setFootnote}>
-          其他成员个人空间中的文件名不会显示，相册中的操作只有本人能看到；需要找回内容时请在“用户与权限”中开启可审计的只读查看。
-        </p>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ module github.com/zhongwater123/A-NAS
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 // npm packages can carry Go code (flatted does), which ./... would otherwise
 // build, vet, lint and test as part of this module.
