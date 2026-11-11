@@ -24,6 +24,8 @@ const (
 	fakeToken   = "serve-token-alice"
 	fakeRuntime = "0a1b2c3d"
 	fakeStored  = "20261015_120000_abcdef"
+	// fakeGone is a conversation Hermes no longer has.
+	fakeGone = "20261015_150000_cccccc"
 )
 
 // fakeServe stands in for alice's `hermes serve` on <dir>/alice.sock: the
@@ -117,17 +119,39 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/sessions":
 		_, _ = io.WriteString(w, `{"sessions":[`+session+`,{"id":"20261015_130000_aaaaaa","title":null,"preview":null,"started_at":30,"message_count":2},
 			{"id":"20261015_140000_bbbbbb","title":"hidden","started_at":40,"message_count":1,"hidden":1}],"total":3}`)
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/mutation-snapshot"):
+		// The counters a write has to name: revision 3, generation 1.
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/sessions/"), "/mutation-snapshot")
+		if id == fakeGone {
+			_, _ = io.WriteString(w, `{"session_id":"`+id+`","exists":false,"runtime_revision":0,"runtime_generation":null}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"session_id":"`+id+`","exists":true,"runtime_revision":3,"runtime_generation":1}`)
 	case r.Method == http.MethodPatch && r.URL.Path == "/api/sessions/"+fakeStored:
 		body, _ := io.ReadAll(r.Body)
+		var fence struct {
+			Request    string `json:"request_id"`
+			Revision   *int   `json:"expected_revision"`
+			Generation *int   `json:"expected_generation"`
+		}
+		_ = json.Unmarshal(body, &fence)
+		if fence.Request == "" || fence.Revision == nil || *fence.Revision != 3 || fence.Generation == nil || *fence.Generation != 1 {
+			http.Error(w, `{"detail":"client_upgrade_required: this app is out of sync"}`, http.StatusConflict)
+			return
+		}
 		if strings.Contains(string(body), "已有") {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"detail":"Title '已有' is already in use by session 20261015_130000_aaaaaa"}`)
 			return
 		}
 		_, _ = io.WriteString(w, `{"ok":true,"title":"周末"}`)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/sessions/") &&
+		(r.URL.Query().Get("request_id") == "" || r.URL.Query().Get("expected_revision") != "3" || r.URL.Query().Get("expected_generation") != "1"):
+		// Hermes commits no write without its fence.
+		http.Error(w, `{"detail":"client_upgrade_required: this app is out of sync"}`, http.StatusConflict)
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/20261015_130000_aaaaaa":
 		// A turn is writing to it.
-		http.Error(w, `{"detail":"session has an active writer"}`, http.StatusConflict)
+		http.Error(w, `{"detail":"session_busy"}`, http.StatusConflict)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/sessions/"):
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	case r.URL.Path == "/api/learning/graph" || r.URL.Path == "/api/learning/node":
