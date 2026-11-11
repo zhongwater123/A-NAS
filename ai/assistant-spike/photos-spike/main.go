@@ -28,6 +28,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math"
 	"mime/multipart"
@@ -366,6 +367,7 @@ func (a api) upload(ctx context.Context, member, library, name string, content i
 // the library refuses (too large, say) is logged and skipped; the vectors
 // follow in the background.
 func importDir(ctx context.Context, a api, marker, dir string) error {
+	//nolint:gosec // G703: the marker lives in the spike's own state directory, named by whoever starts it.
 	if _, err := os.Stat(marker); err == nil {
 		return nil
 	}
@@ -377,19 +379,24 @@ func importDir(ctx context.Context, a api, marker, dir string) error {
 	if i < 0 {
 		return errors.New("alice has no private library")
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	uploaded, refused := 0, 0
-	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
 		if !slices.Contains([]string{".jpg", ".jpeg", ".png"}, strings.ToLower(filepath.Ext(path))) {
 			return nil
 		}
-		file, err := os.Open(path)
+		file, err := root.Open(path)
 		if err != nil {
 			return err
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		if _, err := a.upload(ctx, "alice", list.Items[i].ID, entry.Name(), file); err != nil {
 			refused++
 			slog.Warn("upload refused", "file", path, "error", err)
@@ -402,7 +409,7 @@ func importDir(ctx context.Context, a api, marker, dir string) error {
 		return err
 	}
 	fmt.Printf("photos-imported %d (%d refused)\n", uploaded, refused)
-	return os.WriteFile(marker, nil, 0o600)
+	return os.WriteFile(marker, nil, 0o600) //nolint:gosec // G703: as above, the spike's own state directory.
 }
 
 // seed fills an empty library and waits for every vector; a library seeded
