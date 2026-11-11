@@ -9,7 +9,7 @@ Wants=network-pre.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/sbin/nft -f /etc/a-nas/anas-internet.nft
+ExecStart=/usr/sbin/nft -f /usr/share/a-nas/anas-internet.nft
 ExecStop=/usr/sbin/nft delete table inet anas_internet
 
 [Install]

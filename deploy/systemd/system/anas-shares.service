@@ -10,7 +10,7 @@ User=a-nas-shares
 Group=a-nas-shares
 # Connects to the media worker; photo content stays private to its owner UID.
 SupplementaryGroups=a-nas-photos
-ExecStart=/opt/a-nas/current/anas-api share-service
+ExecStart=/usr/lib/a-nas/anas-api share-service
 Environment=ANAS_SHARES_ROOT=/srv/a-nas/data/shares
 Environment=ANAS_SHARES_SOCKET=/run/a-nas-shares/shares.sock
 Environment=ANAS_SHARE_FILES_SOCKET=/run/a-nas-share-files/files.sock

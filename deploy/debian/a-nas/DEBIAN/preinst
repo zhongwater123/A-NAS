@@ -1,0 +1,72 @@
+#!/bin/bash
+# preinst of a-nas (ADR 0034). Before anything is unpacked it stops for an
+# account that holds an ID A-NAS needs, and before an upgrade or a rollback it
+# stops the services that write the databases and copies the databases, so
+# that a release whose migrations go wrong can be restored. Everything else
+# the package sets up comes from its files.
+set -euo pipefail
+
+case "${1:-}" in
+  install | upgrade) ;;
+  *) exit 0 ;;
+esac
+
+# The photo, share and family services own their stores under fixed IDs
+# (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
+# systemd-sysusers would leave such an account as it is.
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
+  name=${account%%:*} id=${account#*:}
+  if getent passwd "$name" >/dev/null; then
+    [[ "$(id -u "$name"):$(id -g "$name")" == "$id:$id" ]] ||
+      { echo "a-nas: user $name exists with another UID or GID than $id; nothing was changed" >&2; exit 1; }
+  elif getent passwd "$id" >/dev/null; then
+    echo "a-nas: UID $id, which $name needs, belongs to $(getent passwd "$id" | cut -d: -f1); nothing was changed" >&2
+    exit 1
+  elif getent group "$id" >/dev/null && [[ "$(getent group "$id" | cut -d: -f1)" != "$name" ]]; then
+    echo "a-nas: GID $id, which $name needs, belongs to $(getent group "$id" | cut -d: -f1); nothing was changed" >&2
+    exit 1
+  fi
+done
+
+# Databases exist on an upgrade, a rollback and an installation before the
+# packages (scripts/install-v1.0.1-system-services.sh), which left
+# /opt/a-nas/current.
+if [[ "$1" == upgrade ]]; then
+  from=$2
+elif [[ -L /opt/a-nas/current ]]; then
+  from=installer-$(basename "$(readlink /opt/a-nas/current)")
+else
+  exit 0
+fi
+
+# The writers stop first, so that each copy is whole. The new release starts
+# them again; so does the old one if this one fails to unpack.
+if [[ -d /run/systemd/system ]]; then
+  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service 2>/dev/null || true
+fi
+backups=/var/backups/a-nas
+target=$backups/$(date -u +%Y%m%dT%H%M%SZ)-${from//[^A-Za-z0-9.+~_-]/_}
+install -d -m 0700 "$backups" "$target"
+copy() {
+  local database=$1 into=$target/$2
+  [[ -f "$database" ]] || return 0
+  install -d -m 0700 "$into"
+  # SQLite's write-ahead log and index belong to the database.
+  for file in "$database" "$database-wal" "$database-shm"; do
+    [[ ! -e "$file" ]] || cp -a --reflink=auto -- "$file" "$into/"
+  done
+}
+for database in /var/lib/a-nas/*.db; do
+  copy "$database" system-disk
+done
+# The data volume's stores, while it is mounted.
+if mountpoint -q /srv/a-nas/data; then
+  copy /srv/a-nas/data/photos/catalog.db photos
+  copy /srv/a-nas/data/shares/catalog.db shares
+  copy /srv/a-nas/data/family/family.db family
+fi
+echo "a-nas: the databases of $from are copied to $target"
+# The two newest copies stay.
+find "$backups" -mindepth 1 -maxdepth 1 -type d -name '2*' -printf '%f\n' | sort -r | tail -n +3 |
+  while read -r old; do rm -rf -- "${backups:?}/$old"; done
+exit 0
