@@ -65,6 +65,7 @@ import {
 import {
   type ComponentPropsWithoutRef,
   createContext,
+  isValidElement,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
@@ -107,7 +108,9 @@ import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.g
 import { MemoryView } from "./MemoryView";
 import { linkPhotos, type NamedPhoto, photoOf, photosIn } from "./photoLinks";
 import { TasksView } from "./TasksView";
+import { TextHandle } from "./TextHandle";
 import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
+import { linkTextHandles, textHandleOf } from "./textHandles";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import { ControlError, type Danger, WebosController } from "./webosControl";
@@ -837,7 +840,9 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
   return {
     id: message.id,
     role: "assistant",
-    content: message.parts.map((part) => (part.type === "text" ? { ...part, text: linkPhotos(part.text) } : part)),
+    content: message.parts.map((part) =>
+      part.type === "text" ? { ...part, text: linkTextHandles(linkPhotos(part.text)) } : part,
+    ),
     createdAt,
     status: message.pending
       ? { type: "running" }
@@ -1184,10 +1189,13 @@ function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown
 }
 
 // A photo the assistant names is a link to it in the text (the picture itself
-// shows under the answer) and opens in the photo app; other links open in a
-// new tab.
+// shows under the answer) and opens in the photo app; a sensitive number it
+// names by its handle shows as the number, which the window asks the photo
+// service for; other links open in a new tab.
 function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
   const open = useContext(PhotoOpener);
+  const handle = textHandleOf(href);
+  if (handle) return <TextHandle handle={handle} label={plainText(children) || "号码"} onOpenPhoto={open} />;
   const photo = photoOf(href);
   if (!photo)
     return (
@@ -1207,6 +1215,13 @@ function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWi
       {children}
     </button>
   );
+}
+
+// plainText is the text of what Markdown rendered inside a link.
+function plainText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(plainText).join("");
+  return isValidElement<{ children?: ReactNode }>(node) ? plainText(node.props.children) : "";
 }
 
 // Pictures in an answer load only from A-NAS itself. An outside address

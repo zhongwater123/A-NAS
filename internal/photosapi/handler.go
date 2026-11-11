@@ -687,7 +687,11 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
 	case errors.Is(err, photos.ErrSensitivePhoto):
 		httpjson.WriteError(w, http.StatusForbidden, "sensitive_photo",
-			"the photo shows an ID, card or account number; its text gives the assistant each as a handle instead")
+			"the photo is an ID card, a bank card, a bank slip, an invoice or a receipt, or shows a long number; "+
+				"an assistant reads its text instead, where each sensitive number is a handle")
+	case errors.Is(err, photos.ErrUnreadPhoto):
+		httpjson.WriteError(w, http.StatusForbidden, "unread_photo",
+			"the photo's text is not read yet; until it is, an assistant gets no view of it")
 	case errors.Is(err, photos.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
 	case errors.Is(err, photos.ErrConflict):

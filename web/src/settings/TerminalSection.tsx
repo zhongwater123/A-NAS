@@ -61,7 +61,7 @@ export function TerminalSection({
   if (availability !== "enabled") {
     return (
       <div className={styles.setPage} hidden={!active}>
-        <PageHeader title="终端" subtitle="在网页里打开这台设备的 Shell" />
+        <PageHeader title="终端" />
         {availability === "checking" && (
           <div className={`${styles.setCard} ${styles.tmNotice} ${styles.tmChecking}`}>
             <span className="loader" />
@@ -91,7 +91,6 @@ export function TerminalSection({
             <pre className={styles.tmCode} aria-label="开启终端的命令">
               <code>{"echo ANAS_TERMINAL=enabled >> /etc/a-nas/anas-api.env\nsystemctl restart anas-api"}</code>
             </pre>
-            <p className={styles.tmNoticeFoot}>开启后，系统升级会保留这个设置。</p>
             <button className={styles.setBtn} onClick={checkAgain}>
               重新检查
             </button>
@@ -106,7 +105,6 @@ export function TerminalSection({
     <div className={`${styles.setPage} ${styles.tmPage}`} hidden={!active}>
       <PageHeader
         title="终端"
-        subtitle={`以 ${username} 的 Linux 账号在${device}上运行的 Shell`}
         action={
           <div className={styles.tmActions}>
             <StatusPill status={status} />
@@ -151,10 +149,9 @@ export function TerminalSection({
           </div>
         )}
       </section>
-      <p className={styles.setFootnote}>
-        Shell 的文件权限与你在网页中一致，没有 root 或
-        sudo。切换到其他分区或最小化窗口时它继续运行，关闭设置窗口会结束它。
-      </p>
+      {/* The shell has the member's own file permissions, no root or sudo. It
+          keeps running across sections and while minimised; closing the
+          settings window ends it. */}
     </div>
   );
 }

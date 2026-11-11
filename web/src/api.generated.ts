@@ -2710,7 +2710,7 @@ export interface paths {
         };
         /**
          * The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo's text.
+         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo's text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.
          */
         get: operations["viewPhoto"];
         put?: never;
@@ -2794,6 +2794,26 @@ export interface paths {
          * @description For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
          */
         get: operations["listPhotoTextChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/text-handles/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The value a handle of the caller's AI assistant stands for
+         * @description An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+         */
+        get: operations["getPhotoTextHandle"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5988,7 +6008,7 @@ export interface components {
             closest: number;
             /** @description How many results, counted over all pages, match the query by name or user tag; they come first. */
             names: number;
-            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
             texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
@@ -6062,6 +6082,17 @@ export interface components {
             };
             /** Format: date-time */
             at: string;
+        };
+        PhotoTextHandleValue: {
+            /** @description The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码. */
+            label: string;
+            /** @description What the handle stands for now: what the field holds, what was read for it, or the number as its digits. */
+            value: string;
+            /** @description True for a field's value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong. */
+            unchecked: boolean;
+            /** @description The photo the value was read from. */
+            assetId: string;
+            assetName: string;
         };
         PhotoSimilarResults: {
             items: components["schemas"]["PhotoAsset"][];
@@ -7061,6 +7092,8 @@ export interface components {
         PhotoOccurrenceID: string;
         /** @description A field of the photo's document type, such as 合计 */
         PhotoTextField: string;
+        /** @description The letters after the dot of a handle, such as 6d48a8 */
+        PhotoTextHandle: string;
         MediaLibraryID: string;
         MediaVideoID: string;
         /** @description A video or show ID. */
@@ -7248,6 +7281,7 @@ export type PhotoSearchResults = components['schemas']['PhotoSearchResults'];
 export type PhotoText = components['schemas']['PhotoText'];
 export type PhotoTextCorrectionRequest = components['schemas']['PhotoTextCorrectionRequest'];
 export type PhotoTextChange = components['schemas']['PhotoTextChange'];
+export type PhotoTextHandleValue = components['schemas']['PhotoTextHandleValue'];
 export type PhotoSimilarResults = components['schemas']['PhotoSimilarResults'];
 export type PhotoImageSearch = components['schemas']['PhotoImageSearch'];
 export type PhotoAiStatus = components['schemas']['PhotoAIStatus'];
@@ -7341,6 +7375,7 @@ export type ParameterPhotoAlbumId = components['parameters']['PhotoAlbumID'];
 export type ParameterPhotoPersonId = components['parameters']['PhotoPersonID'];
 export type ParameterPhotoOccurrenceId = components['parameters']['PhotoOccurrenceID'];
 export type ParameterPhotoTextField = components['parameters']['PhotoTextField'];
+export type ParameterPhotoTextHandle = components['parameters']['PhotoTextHandle'];
 export type ParameterMediaLibraryId = components['parameters']['MediaLibraryID'];
 export type ParameterMediaVideoId = components['parameters']['MediaVideoID'];
 export type ParameterMediaTitleId = components['parameters']['MediaTitleID'];
@@ -13017,6 +13052,30 @@ export interface operations {
                 };
             };
             403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoTextHandle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The letters after the dot of a handle, such as 6d48a8 */
+                handle: components["parameters"]["PhotoTextHandle"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoTextHandleValue"];
+                };
+            };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
         };

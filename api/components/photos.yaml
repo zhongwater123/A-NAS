@@ -6,6 +6,7 @@ parameters:
   PhotoPersonID: { name: personId, in: path, required: true, schema: { type: string } }
   PhotoOccurrenceID: { name: occurrenceId, in: path, required: true, schema: { type: string } }
   PhotoTextField: { name: field, in: path, required: true, description: "A field of the photo's document type, such as 合计", schema: { type: string } }
+  PhotoTextHandle: { name: handle, in: path, required: true, description: "The letters after the dot of a handle, such as 6d48a8", schema: { type: string, pattern: "^[0-9a-f]{6}$" } }
 schemas:
   PhotoLibrary:
     type: object
@@ -220,7 +221,7 @@ schemas:
       texts:
         type: integer
         minimum: 0
-        description: "How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked."
+        description: "How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked."
       objects:
         type: object
         additionalProperties: false
@@ -276,6 +277,16 @@ schemas:
     required: [value]
     properties:
       value: { type: string, maxLength: 200, description: "What the field holds; spaces around it are dropped, and it may be empty." }
+  PhotoTextHandleValue:
+    type: object
+    additionalProperties: false
+    required: [label, value, unchecked, assetId, assetName]
+    properties:
+      label: { type: string, description: "The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码." }
+      value: { type: string, description: "What the handle stands for now: what the field holds, what was read for it, or the number as its digits." }
+      unchecked: { type: boolean, description: "True for a field's value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong." }
+      assetId: { type: string, description: The photo the value was read from. }
+      assetName: { type: string }
   PhotoTextChange:
     type: object
     additionalProperties: false

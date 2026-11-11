@@ -618,9 +618,9 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 
 | 工具 | 相册接口 | 用途 |
 |---|---|---|
-| `search_photos(query, page)` | `GET /search` | 按画面内容（设备上的向量检索）、名称与本人的标签搜索；`closest` 标出最接近的一组 |
+| `search_photos(query, page)` | `GET /search`；2026-11-10 起对按名称或文字命中的照片并入 `GET /assets/{id}/text` | 按画面内容（设备上的向量检索）、名称、本人的标签与照片上的文字搜索；`closest` 标出最接近的一组 |
 | `browse_photos(month, album_id, tag, page)` | `…/timeline/months`、`…/timeline?month=`、`…/albums`、`/albums/{id}/assets`、`/tags`、`/tags/{name}/assets` | 不填参数时列出每月的照片数、相册与标签；按月、相册或标签列出 |
-| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置 |
+| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata`，2026-11-10 起并入 `GET /assets/{id}/text` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置；照片上读出的文字与字段 |
 | `similar_photos(photo_id, page)` | `GET /assets/{id}/similar` | 画面相似的照片 |
 | `look_at_photo(photo_id)`（2026-10-19） | `GET /assets/{id}/view` | 取出画面交给看图模型 |
 
@@ -629,7 +629,7 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 - 按月浏览翻完所有页（每个图库最多 2,000 张，超过时注明不完整）。相册连不上或回答的不是 JSON 时给模型一句“相册暂时连不上，请稍后再试”。AI Worker 不可用时只按名称与标签匹配，结果中注明。
 - 最初 4 个工具的定义合计约 1,860 字符，每次模型请求都带上（2026-10-15）。
 
-spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，18 张种子照片（alice 私有 13 张，含“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。
+spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，20 张种子照片（alice 私有 15 张，含“2025 夏天 青岛”相册与“青岛”标签，2026-11-10 起含一张身份证的两面，替身 Worker 读出它们的文字，姓名与号码是编的；bob 私有 2 张；共享 3 张）。
 
 - [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)（2026-10-15 为 23 项，2026-10-20 为 27 项）：两个成员的助手各自只看到本人与共享的图库；拿着 bob 照片的编号也打不开；带会话令牌没有作用；缩略图与改名得到 `not_found`；沙箱里连不到相册服务的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员进不了 alice 的 `/proc/<pid>/root`；对端是 root 时 503；相册服务重启后正在运行的助手照常读相册，服务停止时一次连接就把它拉起；只有 socket 单元停止时工具说“相册暂时连不上”，实例重启后恢复；本人照片的视图是 JPEG、元数据读得到，bob 的拿不到。
 - [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：照片工具都不请求审批，同一会话中的“提交更改”照常请求。
@@ -654,6 +654,23 @@ spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/a
 
 - 做不到的（认人、看画面）与越权的都如实回答，没有编造人物或地点。
 - 模型会逐张调用 `photo_details` 找地点或人物（“室内”那一轮查了 13 张）。说明改为“只多出尺寸、标签与相册，没有地点、人物或画面内容，不要为找这些逐张查看”后：找海边照片从 12 次降到 6 次，“室内”从 16 次降到 9 次（逐张查看从 13 次降到 2 次），token 基本不变（5.5 万、5.7 万）。2026-10-20 起它带元数据，说明告诉模型拍摄位置在这里查。
+
+### 问证件上的号码（2026-11-10）
+
+起因是用户在实验 NAS 上的一次对话：相册里有一张身份证的两面，问 VNAS“我身份证号码是多少”，它翻了 11 次文件；提示“相册里面没有吗”后又用 5 次调用搜索、逐张取画面，国徽面的画面被交给云端看图模型，人像面被挡住，最后答不出号码。原因与改法见 [OCR 实施方案](../architecture/photo-ocr.md#助手的工具)。
+
+评测在 spike 里重放这段对话：种子图库加了身份证的两面（文件名不带含义，替身 Worker 读出文字），三句话在同一段对话里，deepseek-flash，改动前后各跑一次（[`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 末尾三行是同一组的常设用例）。“改动前”是主干 `c203b668` 加上这两张种子照片。
+
+| 请求 | 改动前 | 改动后 |
+|---|---|---|
+| 我身份证号码是多少 | 只翻文件，答不出；4 次调用，8.3 万 token，25 秒 | `search_photos("身份证")` 一次，回答里是号码的句柄，并带出国徽面的签发机关与有效期；1 次调用，4.2 万 token，12 秒 |
+| （接着）相册里面没有吗？ | 搜索、浏览、取 3 张画面（国徽面放行，人像面被挡）、2 次识图，答不出；8 次调用，9.5 万 token，18 秒 | 直接按已有结果回答两张照片各是什么；0 次调用，2.3 万 token，5 秒 |
+| （接着）身份证有效期到什么时候？ | 答不出：“相册把证件上的文字整张内容都拦住了” | 到 2040 年 1 月 1 日，出处是国徽面那张；0 次调用，2 秒 |
+
+- 改动后没有一次取画面：证件的画面没有发给云端。
+- 第一版说明下，模型在搜索后又查了一次 `photo_details`，还向成员解释“⟦身份证号·…⟧ 是占位，窗口会显示成数字”。在说明里加上“结果里带着 fields 的照片不必再查”和“不要解释句柄”后，这两样都没有再出现。表中是加上之后的结果。
+- 每种情况只跑了一次，模型的回答有随机性；数字说明量级，不是稳定的均值。
+- 替身 Worker 的照片是纯色图，改动前的识图什么也看不出；实验 NAS 上那次，云端模型从国徽面读出了签发机关与有效期。
 
 ### 接入相册服务
 

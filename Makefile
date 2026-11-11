@@ -130,6 +130,8 @@ ops-check:
 	$(ACTIONLINT) .github/workflows/*.yml
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
+	@# A control character in a deploy script, such as the BEL a "\a" became in deploy-dev.ps1, breaks a path without a syntax error.
+	! grep -rIlP '[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]' scripts deploy Makefile .github
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	grep -Fqx 'ConditionPathExists=/opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
