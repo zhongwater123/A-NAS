@@ -426,6 +426,10 @@ if [[ -x "$assistant_python" ]]; then
     jq -e '.jobs[0].last_status == "ok"' "$jobs_file"
   check "her assistant itself stayed stopped" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
   echo "INFO assistant tasks: $(jq -c '.jobs[0] | {name, last_status, last_error}' "$jobs_file" 2>/dev/null || true)"
+  # The round's gateway is gone, and with it the last unit that needed her private network.
+  for _ in $(seq 1 30); do [[ "$(systemctl is-active anas-assistant-net@alice.service || true)" == active ]] || break; sleep 2; done
+  check "her assistant's private network stops cleanly once nothing needs it" \
+    test "$(systemctl is-active anas-assistant-net@alice.service || true)" = inactive
   # The system test's last check uses /tmp/alice.jar.
   alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
   tasks=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/tasks" || true)
