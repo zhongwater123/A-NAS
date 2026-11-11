@@ -3,8 +3,10 @@
 // desktop has drawn; the card's code and animations load only when some are, so a NAS
 // without them shows nothing and pays nothing. A list it could not read is asked for
 // again, at longer and longer intervals: only an empty one means there is no companion.
+
 import { Suspense, useEffect, useState } from "react";
 
+import type { AssistantTaskNotice } from "../desktop/api";
 import { lazyCode } from "../ui/lazyCode";
 
 const CompanionCard = lazyCode(() => import("./petCard").then((module) => module.CompanionCard));
@@ -38,7 +40,13 @@ export async function loadInstalledAnimations(): Promise<CompanionManifest> {
   };
 }
 
-export function Companion() {
+/** What a click on the companion opens: the VNAS window, or a run of a scheduled task in it (petCard.tsx). */
+export interface CompanionOpeners {
+  onOpenVnas?: () => void;
+  onOpenTaskRun?: (run: AssistantTaskNotice) => void;
+}
+
+export function Companion(openers: CompanionOpeners = {}) {
   const [manifest, setManifest] = useState<CompanionManifest>();
   useEffect(() => {
     let current = true;
@@ -68,7 +76,7 @@ export function Companion() {
   if (!manifest) return null;
   return (
     <Suspense fallback={null}>
-      <CompanionCard installed={manifest.animations} pool={manifest.pool} />
+      <CompanionCard installed={manifest.animations} pool={manifest.pool} {...openers} />
     </Suspense>
   );
 }

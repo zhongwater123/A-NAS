@@ -41,6 +41,8 @@ const bridge = createWorkStatusBridge({ state: companionState, workStatus: store
 const prompting = new Set<string>();
 /** Waiting entries for the member's cards, by card: card id -> entry id. */
 const cards = new Map<string, string>();
+/** The turns this window started, by conversation: since when, and how many of VNAS's tools they called. */
+const turns = new Map<string, { startedAt: number; steps: number }>();
 const terminalTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let seq = 0;
 
@@ -188,6 +190,7 @@ export function stageOf(type: string, payload?: GatewayPayload): HostWorkStatusS
 /** This window started a turn of the conversation (it registered as its browser and prompts). */
 export function startTurn(sessionId: string): void {
   prompting.add(sessionId);
+  turns.set(sessionId, { startedAt: Date.now(), steps: 0 });
   turnListener?.started();
 }
 
@@ -199,6 +202,7 @@ export function startTurn(sessionId: string): void {
  */
 export function stopTurn(sessionId: string): void {
   if (!prompting.delete(sessionId)) return;
+  turns.delete(sessionId);
   todos.delete(sessionId);
   clear(sessionId);
   stoppedListener?.();
@@ -211,6 +215,7 @@ export function stopTurn(sessionId: string): void {
  */
 export function withdrawTurn(sessionId: string): void {
   if (!prompting.delete(sessionId)) return;
+  turns.delete(sessionId);
   todos.delete(sessionId);
   clear(sessionId);
 }
@@ -238,6 +243,25 @@ export function onTurnStopped(listener: () => void): () => void {
   };
 }
 
+/** Whether a card waits for the member in a turn this window started (reportCards). */
+export function cardWaiting(): boolean {
+  return cards.size > 0;
+}
+
+/**
+ * The newest turn of this window under way (not ended, no card waiting in it): how many of VNAS's tools it
+ * called, since when, and the line its stage shows now; null when none is.
+ */
+export function turnUnderWay(): { steps: number; startedAt: number; line: string | null } | null {
+  let newest: { id: string; startedAt: number; steps: number } | null = null;
+  for (const [id, turn] of turns) {
+    const stage = store.stateOf(id);
+    if (stage === null || stage === undefined || stage === "success" || stage === "error") continue;
+    if (!newest || turn.startedAt > newest.startedAt) newest = { id, ...turn };
+  }
+  return newest && { steps: newest.steps, startedAt: newest.startedAt, line: lines.get(newest.id)?.task ?? null };
+}
+
 /**
  * Whether the conversation's running turn is one this window started: only such a turn's commands
  * move this device's companion (commands.ts answers any other not-controlling).
@@ -249,6 +273,9 @@ export function isPrompting(sessionId: string): boolean {
 /** A gateway event of a conversation: counts only for a turn this window started. */
 export function reportEvent(sessionId: string, type: string, payload?: GatewayPayload): void {
   if (!prompting.has(sessionId)) return;
+  const turn = turns.get(sessionId);
+  // A step of VNAS's own: not the companion's tools, which only move it.
+  if (turn && type === "tool.start" && !String(payload?.name ?? "").startsWith("mcp__companion__")) turn.steps += 1;
   if (type === "todo.updated") {
     const current = Array.isArray(payload?.todos) ? currentTaskFromTodo({ data: { todos: payload.todos } }) : null;
     if (current) todos.set(sessionId, current);
@@ -259,6 +286,7 @@ export function reportEvent(sessionId: string, type: string, payload?: GatewayPa
   const next = stepOf(type === "todo.updated" ? "message.start" : type, payload, todos.get(sessionId));
   if (type === "message.complete") {
     prompting.delete(sessionId);
+    turns.delete(sessionId);
     todos.delete(sessionId);
     const stage = next?.stage;
     if (stage === "success" || stage === "error") turnListener?.ended(sessionId, stage);
@@ -290,6 +318,7 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
  * cards, so the companion goes back to idle instead of keeping their last stage.
  */
 export function forgetAll(): void {
+  turns.clear();
   prompting.clear();
   cards.clear();
   lines.clear();

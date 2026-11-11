@@ -24,12 +24,19 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
-import { currentTaskNotices, loadTaskNotices, taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
+import {
+  currentTaskNotices,
+  loadTaskNotices,
+  readTaskNotice,
+  taskNoticesLoaded,
+  useTaskNotices,
+} from "../assistant/taskNotices";
+import type { AssistantTaskNotice } from "../desktop/api";
 import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
 import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine, shortDetail } from "./behaviors";
-import type { InstalledAnimations } from "./Companion";
+import type { CompanionOpeners, InstalledAnimations } from "./Companion";
 import styles from "./companion.module.css";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { createPetCard } from "./dsh-pet/client/pet/card/pet-card";
@@ -48,7 +55,7 @@ import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { isTerminalStatus } from "./dsh-pet/host/playback/status";
-import { PET_REF_WIDTH, ROUTE_PATH } from "./dsh-pet/shared/constants";
+import { DRAG_THRESHOLD, PET_REF_WIDTH, ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { bodyPixelBox } from "./dsh-pet/shared/physics";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
@@ -73,12 +80,14 @@ import { clearBox, withinArea } from "./stepAside";
 import {
   COMPANION_PET,
   COMPANION_SIZE,
+  cardWaiting,
   companionState,
   onTurnStopped,
   onTurns,
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
+  turnUnderWay,
 } from "./workStatus";
 
 // As dsh-pet's own page builds its card (client/pet.ts): React handed in, the styles put in once.
@@ -299,6 +308,13 @@ function awayFrom(paused: boolean): boolean {
   return paused || document.hidden || localConsoleCovered();
 }
 
+/** How long a turn has run, as the companion says it: "1 分 05 秒", or "12 秒" under a minute. */
+export function elapsedText(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes} 分 ${String(seconds % 60).padStart(2, "0")} 秒` : `${seconds} 秒`;
+}
+
 /** Where the member last left the companion on this device, as a position command's data. */
 function rememberedPlace(): unknown {
   try {
@@ -398,17 +414,29 @@ function playbackSettled(playbackId: string): boolean {
   return record !== undefined && isTerminalStatus(record.status);
 }
 
-export function CompanionCard({ installed, pool }: { installed: InstalledAnimations; pool?: string }) {
+export function CompanionCard({
+  installed,
+  pool,
+  ...openers
+}: { installed: InstalledAnimations; pool?: string } & CompanionOpeners) {
   // Safari draws no alpha in VP9: it needs dsh-pet's HEVC animations, which this pool may lack.
   const format = prefersMov() ? "mov" : "webm";
   const animations = useMemo(
     () => installedAnimations((name) => Boolean(installed[name]?.[format])),
     [installed, format],
   );
-  return animations ? <Card animations={animations} pool={pool} /> : null;
+  return animations ? <Card animations={animations} pool={pool} openers={openers} /> : null;
 }
 
-function Card({ animations, pool }: { animations: Animations; pool?: string }) {
+function Card({
+  animations,
+  pool,
+  openers = {},
+}: {
+  animations: Animations;
+  pool?: string;
+  openers?: CompanionOpeners;
+}) {
   /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
   const [walkable, setWalkable] = useState(true);
   const cfg = useMemo<RuntimePet>(
@@ -909,6 +937,92 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
   const sign = useWorkSign(leaves);
   const work = told?.sign ?? sign;
+
+  // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
+  // first that holds: a card of this window's turn waits for the member (the VNAS window comes up with the
+  // card in view); a result of a scheduled task is unread (it opens, as its notice's 查看结果 does); a turn
+  // of this window is under way (its step's line, how many steps and how long, with no clip); a turn just
+  // ended in an error, its cross still up (the VNAS window comes up). With nothing to tell it plays a click
+  // response, as the card does. What it says also goes to the screen reader. A drag let go, a sleeping or
+  // locked companion are the card's own. On the screen the family shares, no task's name or object.
+  const [spoken, setSpoken] = useState("");
+  const ask = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    ask.current = () => {
+      const own = companionState.read().pets[COMPANION_PET];
+      if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return false;
+      const shared = isLocalConsole();
+      const say = (text: string) => {
+        companionState.writePet(COMPANION_PET, "say", { text, anim: false });
+        setSpoken(text);
+      };
+      if (cardWaiting()) {
+        say("等你确认");
+        openers.onOpenVnas?.();
+        window.setTimeout(
+          () =>
+            document
+              .querySelector('[data-window-id="assistant"] [aria-label="本对话中等你确认或回答的事"]')
+              ?.scrollIntoView({ block: "nearest" }),
+          0,
+        );
+        return true;
+      }
+      const unread = currentTaskNotices().at(-1);
+      if (unread?.task) {
+        const run = unread.task as AssistantTaskNotice;
+        say(shared ? "有新结果" : `${shortDetail(run.name)} 有新结果`);
+        readTaskNotice(unread.id);
+        openers.onOpenTaskRun?.(run);
+        return true;
+      }
+      const turn = turnUnderWay();
+      if (turn) {
+        const progress = `第 ${Math.max(1, turn.steps)} 步 · 已用 ${elapsedText(Date.now() - turn.startedAt)}`;
+        say(turn.line ? `${turn.line}\n${progress}` : progress);
+        return true;
+      }
+      if (work === "error") {
+        say("这一轮出错了，打开 VNAS 看看");
+        openers.onOpenVnas?.();
+        return true;
+      }
+      return false;
+    };
+  }, [openers, work]);
+  useEffect(() => {
+    const layer = clipSpeed.current;
+    if (!layer) return;
+    const onPet = (event: Event) => event.target instanceof Element && event.target.closest(".dsh-pet-hit") !== null;
+    let pressed: { x: number; y: number } | null = null;
+    const press = (event: PointerEvent) => {
+      pressed = onPet(event) ? { x: event.clientX, y: event.clientY } : null;
+    };
+    const click = (event: MouseEvent) => {
+      if (!onPet(event)) return;
+      const from = pressed;
+      pressed = null;
+      // The click that ends a drag is the card's, which tells it from a click.
+      if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) > DRAG_THRESHOLD) return;
+      if (ask.current()) event.stopPropagation();
+    };
+    const key = (event: KeyboardEvent) => {
+      if ((event.key !== "Enter" && event.key !== " ") || event.repeat || !onPet(event)) return;
+      if (!ask.current()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // A key the companion took is the member's input still.
+      resume.current();
+    };
+    layer.addEventListener("pointerdown", press, true);
+    layer.addEventListener("click", click, true);
+    layer.addEventListener("keydown", key, true);
+    return () => {
+      layer.removeEventListener("pointerdown", press, true);
+      layer.removeEventListener("click", click, true);
+      layer.removeEventListener("keydown", key, true);
+    };
+  }, [clipSpeed]);
   // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
   // does its toasts, since a click through the browser tools would wake it or take its lock back.
   return (
@@ -929,6 +1043,9 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
         playbackSettled={playbackSettled}
         onPlace={place}
       />
+      <p className="sr-only" aria-live="polite">
+        {spoken}
+      </p>
     </div>
   );
 }

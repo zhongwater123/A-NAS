@@ -3,7 +3,7 @@ import { HttpResponse } from "msw";
 import { type ReactElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadTaskNotices } from "../assistant/taskNotices";
+import { loadTaskNotices, resetTaskNotices } from "../assistant/taskNotices";
 import { publishFocusedWindow } from "../desktop/focusedWindow";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
@@ -86,6 +86,7 @@ afterEach(() => {
     companionState.writePet("main", "lock", { locked: false });
   });
   publishFocusedWindow(null);
+  act(() => resetTaskNotices());
   localStorage.clear();
   // A test that plays Safari must not leave the next one in it.
   vi.restoreAllMocks();
@@ -1194,23 +1195,122 @@ describe("walking, throwing and resting", () => {
     expect(fetched).toEqual([IDLE]);
   });
 
-  it("answers a click during VNAS's turn, then goes back to the turn's stage", async () => {
+  it("says how far VNAS's turn got when clicked during it, without a clip of its own", async () => {
     serve([IDLE, "点击回应-元气挥手", "东张西望"]);
-    const { pet, videos } = await mount();
+    const { pet, root } = await mount();
     act(() => {
       startTurn("live0001");
       reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
     });
     await plays("东张西望");
-    await ready(videos);
     fetched = [];
     fireEvent.click(pet);
-    await plays("点击回应-元气挥手");
-    await ready(videos);
-    fetched = [];
-    act(() => fireEvent(front(videos), new Event("ended")));
-    await plays("东张西望");
-    expect(fetched).toEqual(["东张西望"]);
+    const [said] = await screen.findAllByText(/第 1 步 · 已用 \d+ 秒/);
+    // The step's own line first, and the same for the screen reader.
+    expect(said.textContent).toMatch(/^(看看桌面上有什么~|我先瞅一眼屏幕哦)/);
+    expect(root.closest("[data-vnas-overlay]")?.querySelector("[aria-live]")?.textContent).toBe(said.textContent);
+    await settle();
+    expect(fetched).toEqual([]);
+  });
+
+  describe("asked by a click", () => {
+    const run = { taskId: "0123456789ab", name: "整理照片", status: "ok", ranAt: "2026-11-06T08:00:00Z" };
+    const notice = (id: string) => ({
+      id,
+      kind: "assistant_task" as const,
+      actorUsername: "frank",
+      task: run,
+      createdAt: "2026-11-06T08:00:00Z",
+    });
+    const opened = { vnas: 0, runs: [] as unknown[] };
+    const openers = {
+      onOpenVnas: () => {
+        opened.vnas += 1;
+      },
+      onOpenTaskRun: (task: unknown) => {
+        opened.runs.push(task);
+      },
+    };
+    beforeEach(() => {
+      opened.vnas = 0;
+      opened.runs = [];
+    });
+
+    it("brings up VNAS's window at the card that waits for the member", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-原地踱步张望"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportCards([{ requestId: "r1", sessionId: "live0001", status: "awaiting" }]);
+      });
+      fetched = [];
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("等你确认"))[0]).toBeInTheDocument();
+      expect(opened.vnas).toBe(1);
+      await settle();
+      expect(fetched).not.toContain("点击回应-元气挥手");
+    });
+
+    it("opens an unread result of a scheduled task, as its notice does, and reads it", async () => {
+      server.use(http.get("/api/v1/notifications", ({ response }) => response(200).json({ items: [notice("n-1")] })));
+      server.use(
+        http.untyped.post(
+          `${origin}/api/v1/notifications/:id/acknowledge`,
+          () => new HttpResponse(null, { status: 204 }),
+        ),
+      );
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      await act(() => loadTaskNotices());
+      fireEvent.keyDown(pet, { key: "Enter" });
+      expect((await screen.findAllByText("整理照片 有新结果"))[0]).toBeInTheDocument();
+      expect(opened.runs).toEqual([run]);
+      // Read: a second click has nothing to open and plays a click response.
+      fetched = [];
+      fireEvent.click(pet);
+      await plays("点击回应-元气挥手");
+      expect(opened.runs).toHaveLength(1);
+    });
+
+    it("says only that a result came on the screen the family shares", async () => {
+      cover.local = true;
+      server.use(http.get("/api/v1/notifications", ({ response }) => response(200).json({ items: [notice("n-1")] })));
+      server.use(
+        http.untyped.post(
+          `${origin}/api/v1/notifications/:id/acknowledge`,
+          () => new HttpResponse(null, { status: 204 }),
+        ),
+      );
+      serve([IDLE]);
+      const { pet } = await mount(<Companion {...openers} />);
+      await act(() => loadTaskNotices());
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("有新结果"))[0]).toBeInTheDocument();
+      expect(screen.queryByText(/整理照片/)).toBeNull();
+      expect(opened.runs).toEqual([run]);
+    });
+
+    it("brings up VNAS's window while a turn's cross is up", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-思考冒泡", "工作状态-垂头叹气冒汗"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+        reportEvent("live0001", "message.complete", { status: "error" });
+      });
+      await plays("工作状态-垂头叹气冒汗");
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("这一轮出错了，打开 VNAS 看看"))[0]).toBeInTheDocument();
+      expect(opened.vnas).toBe(1);
+    });
+
+    it("plays a click response with nothing to tell", async () => {
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      fireEvent.click(pet);
+      await plays("点击回应-元气挥手");
+      expect(opened).toEqual({ vnas: 0, runs: [] });
+    });
   });
 
   it("is dragged with its drag clip, put down where it is let go, and remembers the place on this device", async () => {
