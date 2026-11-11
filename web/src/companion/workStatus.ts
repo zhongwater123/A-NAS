@@ -305,6 +305,8 @@ export function subscribeCompanionState(listener: () => void): () => void {
 
 /** The pet companionState speaks of: dsh-pet's id for its main pet, whose animations 大肥鱼 plays. */
 export const COMPANION_PET = "main";
+/** Its width on the page, in CSS pixels; its clips are 16:9. */
+export const COMPANION_SIZE = 240;
 
 let cardReady = false;
 

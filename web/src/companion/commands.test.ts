@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { publishFocusedWindow } from "../desktop/focusedWindow";
 import {
   type CompanionCommand,
   type CompanionOutcome,
@@ -201,6 +202,28 @@ describe("what VNAS says and where it puts the companion", () => {
     expect(await run("broadcast", { text: " " })).toEqual(refused("bad-request"));
     expect(await run("broadcast", { text: "看", duration: -1 })).toEqual(refused("bad-request"));
     expect(writes()).toBe(before);
+  });
+
+  it("moves it clear of the window on top, and says where it went", async () => {
+    // VNAS's window on top, laid out as it opens on a 1024×768 page (jsdom lays nothing out).
+    const element = document.createElement("section");
+    element.dataset.windowId = "assistant";
+    const laid = { offsetLeft: 260, offsetTop: 54, offsetWidth: 700, offsetHeight: 600 };
+    for (const [name, value] of Object.entries(laid)) Object.defineProperty(element, name, { value });
+    document.body.append(element);
+    publishFocusedWindow({ id: "assistant", x: 260, y: 54, width: 700, height: 600, maximized: false });
+    try {
+      // Its centre at the middle of the page would put its hit area on the window: it goes out to the left.
+      const answer = await run("position", { x: 0.5, y: 0.5, mode: "spring" });
+      const x = Math.round(((260 - 12 - 90 - 75 + 120) / 1024) * 1000) / 1000;
+      expect(answer).toEqual(ok({ x, y: 0.5, stepped_aside: true }));
+      expect(leaf("position")).toEqual({ x, y: 0.5, mode: "spring" });
+      // Clear of it, it goes where it is asked.
+      expect(await run("position", { x: 0.1, y: 0.5, mode: "instant" })).toEqual(ok({ x: 0.1, y: 0.5 }));
+    } finally {
+      publishFocusedWindow(null);
+      element.remove();
+    }
   });
 
   it("moves it within the page and throws it", async () => {

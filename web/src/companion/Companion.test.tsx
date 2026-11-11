@@ -992,15 +992,36 @@ describe("walking, throwing and resting", () => {
     hit.left >= window.x + window.width ||
     hit.bottom <= window.y ||
     hit.top >= window.y + window.height;
+  /** A window on top, laid out where it is (jsdom lays nothing out), as the desktop publishes it. */
+  const openWindow = (window: { x: number; y: number; width: number; height: number }) => {
+    document.querySelector(`[data-window-id="assistant"]`)?.remove();
+    const element = document.createElement("section");
+    element.dataset.windowId = "assistant";
+    for (const [name, value] of Object.entries({
+      offsetLeft: window.x,
+      offsetTop: window.y,
+      offsetWidth: window.width,
+      offsetHeight: window.height,
+    }))
+      Object.defineProperty(element, name, { configurable: true, value });
+    document.body.append(element);
+    act(() => publishFocusedWindow({ id: "assistant", ...window, maximized: false }));
+  };
+  const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+  afterEach(() => document.querySelector(`[data-window-id="assistant"]`)?.remove());
 
-  it("steps aside from a window that opens over it, without a clip of its own", async () => {
+  it("steps aside from a window that opens over it, springing from its corner, without a clip of its own", async () => {
     serve([IDLE]);
     const { root } = await mount();
     await settle();
     fetched = [];
     // On a 1024×768 page its corner is at the bottom right: a window from 200 to 1000 covers it.
-    const window = { x: 200, y: 40, width: 800, height: 700, maximized: false };
-    act(() => publishFocusedWindow(window));
+    const window = { x: 200, y: 40, width: 800, height: 700 };
+    openWindow(window);
+    // It springs from where it is, not in one jump.
+    frames(2);
+    expect(queue.size).toBeGreaterThan(0);
+    expect(hitArea(root).left).toBeGreaterThan(700);
     frames(400);
     expect(queue.size).toBe(0);
     // Out to the window's left, at the same height.
@@ -1011,11 +1032,20 @@ describe("walking, throwing and resting", () => {
     expect(fetched).toEqual([]);
   });
 
+  it("goes there at once when motion is reduced", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query }));
+    serve([IDLE]);
+    const { root } = await mount();
+    openWindow({ x: 200, y: 40, width: 800, height: 700 });
+    expect(queue.size).toBe(0);
+    expect(hitArea(root).right).toBeCloseTo(200 - 12, 0);
+  });
+
   it("steps aside from the window it is dropped on, once let go", async () => {
     serve([IDLE, "被鼠标拖拽悬空反馈"]);
     const { pet, root } = await mount();
-    const window = { x: 500, y: 200, width: 520, height: 400, maximized: false };
-    act(() => publishFocusedWindow(window));
+    const window = { x: 500, y: 200, width: 520, height: 400 };
+    openWindow(window);
     write("position", { x: 0.25, y: 0.5, mode: "instant" });
     await waitFor(() => expect(root.style.left).toBe(left(0.25)));
     // Clear of the window where VNAS put it: it stays.
@@ -1033,9 +1063,97 @@ describe("walking, throwing and resting", () => {
       60,
     );
     frames(400);
+    await wait(200);
+    frames(400);
     expect(queue.size).toBe(0);
     expect(hitArea(root).right).toBeCloseTo(500 - 12, 0);
     expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("goes on stepping aside after a click cuts it short", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { pet, root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    const window = { x: 150, y: 100, width: 700, height: 500 };
+    openWindow(window);
+    frames(3);
+    // The press stops the move halfway, over the window, and a click leaves no place behind it.
+    const box = root.getBoundingClientRect();
+    drag(pet, [[box.x + 120, box.y + 60]]);
+    expect(queue.size).toBe(0);
+    expect(clear(hitArea(root), window)).toBe(false);
+    await wait(200);
+    frames(400);
+    expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("goes on stepping aside after a lock that starts cuts it short", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    const window = { x: 150, y: 100, width: 700, height: 500 };
+    openWindow(window);
+    frames(3);
+    write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
+    expect(clear(hitArea(root), window)).toBe(false);
+    await settle();
+    frames(400);
+    expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("lets VNAS's move land before it checks the window that came up on the way", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    write("position", { x: 0.75, y: 0.3, mode: "line", duration: 3000 });
+    frames(10);
+    // Over where it set out from, clear of where VNAS sends it.
+    openWindow({ x: 150, y: 330, width: 400, height: 300 });
+    frames(300);
+    expect(root.style.left).toBe(left(0.75));
+    expect(saved()).toEqual({ rx: 0.75, ry: 0.3 });
+  });
+
+  it("steps aside when the page is resized under a window", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    // Clear of its corner on a 1024-wide page; over it on a 700-wide one.
+    const window = { x: 100, y: 40, width: 500, height: 700 };
+    openWindow(window);
+    await settle();
+    expect(root.style.left).toBe("");
+    const width = Object.getOwnPropertyDescriptor(globalThis, "innerWidth");
+    Object.defineProperty(globalThis, "innerWidth", { configurable: true, value: 700 });
+    try {
+      act(() => globalThis.dispatchEvent(new Event("resize")));
+      await wait(250);
+      frames(400);
+      await wait(50);
+      frames(400);
+      expect(clear(hitArea(root), window)).toBe(true);
+      expect(hitArea(root).right).toBeLessThanOrEqual(700 - 8);
+    } finally {
+      if (width) Object.defineProperty(globalThis, "innerWidth", width);
+    }
+  });
+
+  it("does not walk where a walk could end on the window on top", async () => {
+    serve([IDLE, "螃蟹走路"]);
+    const { root, videos } = await mount();
+    write("position", { x: 0.6, y: 0.8, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.6)));
+    // 29 px to its left, within a walk's reach (166 px at its size).
+    openWindow({ x: 300, y: 300, width: 240, height: 400 });
+    await settle();
+    fetched = [];
+    // Every roll would land on a move (animations.ts weighs idle 97, turn 0, move 1 of 100).
+    vi.spyOn(Math, "random").mockReturnValue(0.975);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await settle();
+    expect(fetched).not.toContain("螃蟹走路");
   });
 
   it("flies when it is flung, and lands within the page", async () => {

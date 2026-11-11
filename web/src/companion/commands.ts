@@ -39,7 +39,15 @@ import { TERMINAL_STATUSES } from "./dsh-pet/host/playback/status";
 import type { PlaybackRecord } from "./dsh-pet/host/playback/store";
 import { pickSleepNames } from "./dsh-pet/host/sleep";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { COMPANION_PET, companionPaused, companionReady, companionState, isPrompting } from "./workStatus";
+import { clearCenter } from "./stepAside";
+import {
+  COMPANION_PET,
+  COMPANION_SIZE,
+  companionPaused,
+  companionReady,
+  companionState,
+  isPrompting,
+} from "./workStatus";
 
 /** One command: the companion tool VNAS called and its arguments, as the product service checked them. */
 export interface CompanionCommand {
@@ -327,8 +335,14 @@ async function carryOut(
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
       carry(action);
-      companionState.writePet(d.petId, "position", positionLeafData(d));
-      return ok({ status: "ok", x: d.x, y: d.y });
+      // The companion keeps clear of the window on top (stepAside.ts): where that would cover it, it goes to
+      // where it steps aside to instead, and VNAS hears where that is.
+      const page = { width: window.innerWidth, height: window.innerHeight };
+      const clear = clearCenter({ rx: d.x, ry: d.y }, COMPANION_SIZE, page);
+      const x = clear ? Math.round(clear.rx * 1000) / 1000 : d.x;
+      const y = clear ? Math.round(clear.ry * 1000) / 1000 : d.y;
+      companionState.writePet(d.petId, "position", { ...positionLeafData(d), x, y });
+      return ok(clear ? { status: "ok", x, y, stepped_aside: true } : { status: "ok", x, y });
     }
     case "throw": {
       const d = decideThrow({ cfg, requested: COMPANION_PET, angle: args.angle, power: args.power });

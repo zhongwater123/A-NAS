@@ -141,6 +141,9 @@ def line(data: dict) -> str:
         said += f"：{message.strip()}"
     if not said.endswith("。"):
         said += "。"
+    # Where the companion went instead of where it was asked to, as the window answers a position.
+    if status == "ok" and data.get("stepped_aside") is True:
+        said += f"它让开了最上层的窗口，停在 x={data.get('x')}、y={data.get('y')}。"
     return said
 
 
@@ -162,9 +165,11 @@ TOOLS = {
                   {"text": TEXT, "duration": NUMBER, "anim": FLAG, "lock": TEXT}, ["text"]),
     "bubble_clear": ("收起伙伴的气泡。" + LOCK, {"lock": TEXT}, []),
     "position": ("把伙伴移到屏幕上的某处。x、y：伙伴中心的位置，0–1，左上角为 0；mode：instant 立即到、spring 弹过去、"
-                 "line 直线移动；duration：line 用多少毫秒（0–5000）。结果给出实际到达的 x、y。" + LOCK,
+                 "line 直线移动；duration：line 用多少毫秒（0–5000）。伙伴会让开最上层的窗口：目标会盖住它时，伙伴改去窗口旁最近的"
+                 "空位，结果的 stepped_aside 为 true。结果给出实际到达的 x、y。" + LOCK,
                  {"x": NUMBER, "y": NUMBER, "mode": MODE, "duration": NUMBER, "lock": TEXT}, ["x", "y", "mode"]),
-    "throw": ("把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。" + LOCK,
+    "throw": ("把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。落地后如果盖住最上层的窗口，"
+              "伙伴会自己让开。" + LOCK,
               {"angle": NUMBER, "power": NUMBER, "lock": TEXT}, ["angle", "power"]),
     "sleep": ("让伙伴睡觉；它被锁定时不行。", {}, []),
     "wake": ("叫醒伙伴。", {}, []),

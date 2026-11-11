@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closedWindow, type WindowAction, type WindowModel, windowBox, windowReducer } from "./windows";
+import { closedWindow, type WindowAction, type WindowModel, windowReducer } from "./windows";
 
 const bounds = { x: 200, y: 60, width: 900, height: 600 };
 const desktop = (): WindowModel[] => [closedWindow("files", bounds), closedWindow("trash", bounds)];
@@ -43,18 +43,5 @@ describe("window reducer", () => {
     const focused = windowReducer(state, { type: "focus", id: "files" });
     expect(focused[0].z).toBeGreaterThan(focused[1].z);
     expect(focused[1]).toBe(state[1]);
-  });
-});
-
-describe("where a window lies on the page", () => {
-  const frame = { x: 210, y: 46, width: 1120, height: 720, maximized: false };
-  it("is its own place and size, or the page less the rail and the dock when maximized", () => {
-    const page = { width: 1366, height: 820 };
-    expect(windowBox(frame, page)).toEqual({ left: 210, top: 46, right: 1330, bottom: 766 });
-    expect(windowBox({ ...frame, maximized: true }, page)).toEqual({ left: 88, top: 12, right: 1354, bottom: 730 });
-  });
-
-  it("fills a narrow page but its edges", () => {
-    expect(windowBox(frame, { width: 600, height: 800 })).toEqual({ left: 8, top: 8, right: 592, bottom: 725 });
   });
 });

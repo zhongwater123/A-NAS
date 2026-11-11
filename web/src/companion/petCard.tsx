@@ -48,7 +48,7 @@ import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { isTerminalStatus } from "./dsh-pet/host/playback/status";
-import { ROUTE_PATH } from "./dsh-pet/shared/constants";
+import { PET_REF_WIDTH, ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { bodyPixelBox } from "./dsh-pet/shared/physics";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
@@ -69,9 +69,10 @@ import {
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { stepAside } from "./stepAside";
+import { clearBox } from "./stepAside";
 import {
   COMPANION_PET,
+  COMPANION_SIZE,
   companionState,
   onTurnStopped,
   setCompanionPaused,
@@ -130,7 +131,7 @@ const pet: Omit<RuntimePet, "animations"> = {
   id: COMPANION_PET,
   name: "大肥鱼",
   assetRoot: COMPANION_PET,
-  size: 240,
+  size: COMPANION_SIZE,
   position: { corner: "bottom-right", marginX: 24, marginY: 88 },
   display: "web",
   workStatusEnabled: true,
@@ -305,21 +306,21 @@ function cornerBox(page: Viewport): BoxPoint {
   };
 }
 
-/**
- * Where the companion goes so as not to cover the window on top, from its last place (null: its corner),
- * as the data of an instant or spring position command; null when it stays.
- */
-function clearOfWindow(placed: Center | null): unknown {
-  const page = { width: window.innerWidth, height: window.innerHeight };
-  const { halfW, halfH, bottomPad } = derivePetMetrics(pet.size);
-  const half = { w: halfW, h: halfH };
-  const box = placed ? centerToBox(placed, page, half) : cornerBox(page);
-  const hit = bodyPixelBox({ ...box, size: pet.size, bottomPad });
-  const to = stepAside(hit, focusedWindowBox(page), page);
-  if (!to) return null;
-  const center = boxToRatio({ x: box.x + to.x - hit.left, y: box.y + to.y - hit.top }, page, half);
-  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-  return { x: center.rx, y: center.ry, mode: still ? "instant" : "spring" };
+/** How long a step aside of its own may take before the companion checks that it got clear. */
+const SETTLE_MS = 1_500;
+/** How long a throw may fly before the companion checks the window on top again without its landing. */
+const FLIGHT_MS = 10_000;
+/** How many times a step aside goes again that did not get there: cut short, or the page's frames held back. */
+const RETRIES = 2;
+
+const pageSize = (): Viewport => ({ width: window.innerWidth, height: window.innerHeight });
+const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+/** The farthest a walk of its own can take the companion: dsh-pet's moves, scaled to its size. */
+function walkReach(animations: Animations): number {
+  const { moves } = animations;
+  const farthest = Math.max(0, ...moves.actions.map((action) => ({ ...moves.default, ...action.params }).maxDist));
+  return (farthest * pet.size) / PET_REF_WIDTH;
 }
 
 function remember(center: Center): void {
@@ -370,9 +371,16 @@ export function CompanionCard({ installed, pool }: { installed: InstalledAnimati
 }
 
 function Card({ animations, pool }: { animations: Animations; pool?: string }) {
+  /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
+  const [walkable, setWalkable] = useState(true);
   const cfg = useMemo<RuntimePet>(
-    () => ({ ...pet, animations, ...(pool ? { assetVersion: pool } : {}) }),
-    [animations, pool],
+    () => ({
+      ...pet,
+      animations,
+      animationWeights: walkable ? companionWeights : { ...companionWeights, move: 0 },
+      ...(pool ? { assetVersion: pool } : {}),
+    }),
+    [animations, pool, walkable],
   );
   const arena = useRef<PetCardProps["arena"]["current"]>({ slots: {} });
   const clipSpeed = useClipSpeed();
@@ -389,24 +397,132 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const resume = useRef(() => {});
   /** Where the companion was last left, null while it is in its corner. */
   const placed = useRef<Center | null>(null);
+  /** Until when (Date.now()) a move is under way, VNAS's or a step aside: its landing is checked instead. */
+  const movingUntil = useRef(0);
+  /** The step aside about to go has just put the card's box where the companion is, for its spring to start. */
+  const seeded = useRef(false);
+  /** Step asides sent again since the companion was last clear of the window. */
+  const retries = useRef(0);
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reach = useMemo(() => walkReach(animations), [animations]);
+
+  /** Where the companion's box is now: where a move has drawn it, else its last place or its corner. */
+  const liveBox = useCallback(
+    (page: Viewport): BoxPoint => {
+      const root = clipSpeed.current?.querySelector<HTMLElement>(".dsh-pet-root");
+      if (root?.style.left && root.style.top)
+        return { x: Number.parseFloat(root.style.left), y: Number.parseFloat(root.style.top) };
+      const { halfW, halfH } = derivePetMetrics(pet.size);
+      return placed.current ? centerToBox(placed.current, page, { w: halfW, h: halfH }) : cornerBox(page);
+    },
+    [clipSpeed],
+  );
+  const moveTo = useCallback((box: BoxPoint, mode: "instant" | "spring") => {
+    const { halfW, halfH } = derivePetMetrics(pet.size);
+    const center = boxToRatio(box, pageSize(), { w: halfW, h: halfH });
+    const data = { x: center.rx, y: center.ry, mode };
+    setLeaves((current) => withLeaf(current, "position", { counter: 0, data }));
+  }, []);
 
   // The companion stays above the windows but keeps clear of the one on top (stepAside.ts): when that window
   // changes, the page is resized, or a move of the companion's ends (a drag let go, a walk, a flight, VNAS's
   // position or throw), a hit area that covers the window goes to the nearest free place. It goes by the
   // card's own position command, as VNAS's does: no clip changes, and it moves resting, asleep or locked
-  // too. The member who drops it on the window sees it step aside: the window comes first.
+  // too. The member who drops it on the window sees it step aside: the window comes first. A move under
+  // way is left to land, and checked then. A lock that starts or a press on the companion stops a move:
+  // what it stopped is checked again.
+  /** The check again, for the timer that goes on with a step aside that did not get there. */
+  const again = useRef(() => {});
   const keepClear = useCallback(() => {
-    const data = clearOfWindow(placed.current);
-    if (data) setLeaves((current) => withLeaf(current, "position", { counter: 0, data }));
-  }, []);
+    if (Date.now() < movingUntil.current) return;
+    const page = pageSize();
+    const box = liveBox(page);
+    const onTop = focusedWindowBox();
+    const hit = bodyPixelBox({ ...box, size: pet.size, bottomPad: derivePetMetrics(pet.size).bottomPad });
+    setWalkable(
+      onTop === null ||
+        hit.right + reach <= onTop.left ||
+        hit.left - reach >= onTop.right ||
+        hit.bottom <= onTop.top ||
+        hit.top >= onTop.bottom,
+    );
+    const to = clearBox(box, pet.size, page);
+    if (to === null) {
+      seeded.current = false;
+      retries.current = 0;
+      return;
+    }
+    if (stillMotion()) {
+      moveTo(to, "instant");
+      return;
+    }
+    // A spring starts from the card's box, which is not known in the corner and is stale after a resize: an
+    // instant move to where the companion is first, whose landing comes back here.
+    if (!seeded.current) {
+      seeded.current = true;
+      moveTo(box, "instant");
+      return;
+    }
+    seeded.current = false;
+    movingUntil.current = Date.now() + SETTLE_MS;
+    globalThis.clearTimeout(retry.current);
+    if (retries.current < RETRIES) {
+      retries.current += 1;
+      retry.current = globalThis.setTimeout(() => {
+        movingUntil.current = 0;
+        again.current();
+      }, SETTLE_MS);
+    }
+    moveTo(to, "spring");
+  }, [liveBox, moveTo, reach]);
+  useEffect(() => {
+    again.current = keepClear;
+  }, [keepClear]);
   const place = useCallback(
     (center: Center) => {
       remember(center);
       placed.current = center;
+      movingUntil.current = 0;
       keepClear();
     },
     [keepClear],
   );
+  useEffect(() => () => globalThis.clearTimeout(retry.current), []);
+  // A lock that starts stops the move under way (lock-freeze.ts).
+  const lockHeldNow = leaves.lock?.locked === true;
+  const wasLocked = useRef(lockHeldNow);
+  useEffect(() => {
+    const was = wasLocked.current;
+    wasLocked.current = lockHeldNow;
+    if (!lockHeldNow || was) return;
+    movingUntil.current = 0;
+    const timer = globalThis.setTimeout(keepClear, 0);
+    return () => globalThis.clearTimeout(timer);
+  }, [lockHeldNow, keepClear]);
+  // So does a press on the companion. Once it is let go, unless it is on its way (thrown, or going on to
+  // where a drag left it, which is checked where it lands).
+  useEffect(() => {
+    const layer = clipSpeed.current;
+    if (!layer) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const release = () => {
+      const before = liveBox(pageSize());
+      globalThis.clearTimeout(timer);
+      timer = globalThis.setTimeout(() => {
+        const after = liveBox(pageSize());
+        if (Math.abs(after.x - before.x) >= 1 || Math.abs(after.y - before.y) >= 1) return;
+        movingUntil.current = 0;
+        keepClear();
+      }, 150);
+    };
+    layer.addEventListener("pointerup", release, true);
+    layer.addEventListener("pointercancel", release, true);
+    return () => {
+      globalThis.clearTimeout(timer);
+      layer.removeEventListener("pointerup", release, true);
+      layer.removeEventListener("pointercancel", release, true);
+    };
+  }, [clipSpeed, keepClear, liveBox]);
   useEffect(() => {
     let resized: number | undefined;
     const resize = () => {
@@ -493,6 +609,10 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
           // its reply without touching anything: it ends a pause their absence started, and counts
           // as their input, so that a pause does not start in the middle of what it shows.
           resume.current();
+          // VNAS's move lands before the companion checks the window on top again.
+          const position = name === "position" ? readPosition(leaf) : null;
+          if (position && position.mode !== "instant") movingUntil.current = Date.now() + position.duration + SETTLE_MS;
+          if (name === "throw") movingUntil.current = Date.now() + FLIGHT_MS;
           taken.push([name, leaf]);
         } else if (name === "sleep") heldSleep.current = leaf;
         else {

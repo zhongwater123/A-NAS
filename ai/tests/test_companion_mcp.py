@@ -173,6 +173,15 @@ class CompanionToolTests(unittest.TestCase):
         self.assertIn("睡着了", result.content[0].text)
         self.assertEqual(self.received, [("/call", {"tool": "anim", "args": {"name": "wave", "facing": "left"}})])
 
+    def test_a_position_that_stepped_aside_says_where_the_companion_went(self):
+        self.serve(200, {"status": "ok", "x": 0.198, "y": 0.5, "stepped_aside": True})
+        result = companion.call("position", {"x": 0.5, "y": 0.5, "mode": "spring"})
+        self.assertAnswered(result, "ok")
+        self.assertIn("让开了最上层的窗口", result.content[0].text)
+        self.assertIn("x=0.198", result.content[0].text)
+        # Where it was asked to go, nothing more.
+        self.assertEqual(companion.line({"status": "ok", "x": 0.1, "y": 0.5}), "伙伴照做了。")
+
     def test_only_the_given_arguments_are_passed_on(self):
         self.serve(200, {"status": "ok", "x": 0.5, "y": 1})
         result = companion.call("position", {"x": 0.5, "y": 1.5, "mode": "line", "duration": 300, "lock": None,
