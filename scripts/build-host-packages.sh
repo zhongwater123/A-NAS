@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
 # Builds the host packages of ADR 0031 from deploy/debian: OUT/a-nas-host.deb
-# and OUT/a-nas-console.deb, at the Debian form of VERSION, the product version
-# (the Makefile's VERSION). A release tag v1.0.1-rc.7 becomes 1.0.1~rc.7, which
-# Debian sorts before 1.0.1; anything else, such as a commit or "dev", becomes
-# 0~<it>. The installer only compares versions for equality, so a version
-# names a release and does not order them: commits sort by their hashes, and
-# every commit after a tag sorts before it. Hosts install the packages with
-# apt's --allow-downgrades.
+# and OUT/a-nas-console.deb, at VERSION, the product's Debian version that
+# scripts/release-version.sh gives (the Makefile's VERSION).
 #
 # Usage: scripts/build-host-packages.sh OUT VERSION
 set -euo pipefail
@@ -16,15 +11,12 @@ if [[ $# -ne 2 ]]; then
   exit 2
 fi
 out=$1
-version=$2
+debian_version=$2
 repo=$(cd "$(dirname "$0")/.." && pwd)
-
-if [[ "$version" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?(\+([0-9A-Za-z.-]+))?$ ]]; then
-  debian_version=${BASH_REMATCH[1]}
-  if [[ -n "${BASH_REMATCH[3]}" ]]; then debian_version+="~${BASH_REMATCH[3]//-/.}"; fi
-  if [[ -n "${BASH_REMATCH[5]}" ]]; then debian_version+="+${BASH_REMATCH[5]//-/.}"; fi
-else
-  debian_version="0~$(printf '%s' "$version" | tr -c 'A-Za-z0-9.+~' '.')"
+# A Debian upstream version without a revision (scripts/release-version.sh).
+if [[ ! "$debian_version" =~ ^[0-9][A-Za-z0-9.+~]*$ ]]; then
+  echo "not a Debian version: $debian_version (see scripts/release-version.sh)" >&2
+  exit 2
 fi
 
 # The same commit builds the same packages.

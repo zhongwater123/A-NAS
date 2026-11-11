@@ -9,7 +9,8 @@ NPM ?= npm
 RUFF ?= ruff
 PIP_AUDIT ?= pip-audit
 BUILD_DIR ?= build
-VERSION ?= dev
+# The product's Debian version, from the commit and its release tag (ADR 0034).
+VERSION ?= $(shell scripts/release-version.sh)
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 # The contract's generators have a package of their own: openapi-typescript
 # needs TypeScript 5's compiler API, and the Web client is on TypeScript 7.
@@ -130,6 +131,8 @@ ops-check:
 	$(ACTIONLINT) .github/workflows/*.yml
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
+	@# Release versions sort as ADR 0034 says: candidates, development builds and releases in order.
+	bash scripts/release-version.sh --check
 	@# A control character in a deploy script, such as the BEL a "\a" became in deploy-dev.ps1, breaks a path without a syntax error.
 	! grep -rIlP '[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]' scripts deploy Makefile .github
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config

@@ -126,14 +126,14 @@ try {
         $currentAgentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
         $reuseValidation =
             $validation.commit -eq $version -and
-            $validation.product_version -eq $productVersion -and
             $validation.api_sha256 -eq $currentApiHash -and
             $validation.host_agent_sha256 -eq $currentAgentHash
     }
     if ($reuseValidation) {
         Write-Host "Reusing full validation for $productVersion ($version)."
     } else {
-        & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$productVersion"
+        # The packages take their version from the commit (scripts/release-version.sh).
+        & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check"
         if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
     }
 
