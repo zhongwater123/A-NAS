@@ -256,12 +256,16 @@ def out_of_focus(points):
 
 
 def poor(case):
-    """The cards quality.py would leave out: {card: [reasons]}."""
+    """The cards quality.py would leave out: {card: [reasons]}, but those the user kept on review (reviewed.json:
+    2026-11-11, 品杰's dolphins off the bow, a calm sea the blocked rule takes for something at the lens)."""
     path = cards_dir(case) / f"quality-{case}.json"
     if case not in RAW or not QUALITY or not path.exists():
         return {}
+    kept = set(read_json(V5 / "reviewed.json").get(RAW[case], [])) if (V5 / "reviewed.json").exists() else set()
     out = {}
     for cid, q in read_json(path).items():
+        if cid in kept:
+            continue
         why = [w for w, bad in (("黑帧", math.isnan(q["blur"])), ("模糊", q["blur"] > BLUR_MOST and q["shake"] > BLUR_MOVING),
                                 ("抖动", q["shake"] > SHAKE_MOST), ("遮挡", q["blocked"] >= BLOCKED_MOST),
                                 ("失焦", out_of_focus(q.get("points", [])))) if bad]
