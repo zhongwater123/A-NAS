@@ -550,6 +550,93 @@ describe("the companion on the desktop", () => {
       expect(sign()).toBeUndefined();
     });
 
+    it("keeps a result through the rest of the turn under way, and tells it before the turn's check", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", "写代码", WAVE, "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      // The same turn takes its next step, then ends: neither is a new turn.
+      act(() => reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" }));
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+    });
+
+    it("keeps a result when the next turn starts", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      act(() => {
+        startTurn("live0002");
+        reportEvent("live0002", "message.start");
+      });
+      act(() => stopTurn("live0002"));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+    });
+
+    it("keeps an error over another conversation's later success", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", SIGH, "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        startTurn("live0002");
+        reportEvent("live0001", "message.start");
+        reportEvent("live0002", "message.start");
+      });
+      hide(true);
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      act(() => reportEvent("live0002", "message.complete", { status: "complete" }));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(SIGH);
+      expect(sign()).toBe("error");
+    });
+
+    it("tells a turn that ended under the screen saver once it goes, though the companion had not paused", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      // The screen saver comes up before the companion's minute without input runs out.
+      cover.up = true;
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await settle();
+      expect(sign()).toBeUndefined();
+      expect(fetched).not.toContain("放烟花");
+      cover.up = false;
+      act(() => {
+        for (const listener of cover.dismissed) listener();
+      });
+      await waitFor(() => expect(sign()).toBe("success"));
+      expect(fetched).not.toContain("放烟花");
+    });
+
+    it("reads the results again on return, so as not to wave at one read on another device", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      // Read on another device: this page has not listed the notices since.
+      items = [];
+      hide(false);
+      await settle();
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+    });
+
     it("forgets what waited when the next turn starts", async () => {
       const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
       endAway("complete");
