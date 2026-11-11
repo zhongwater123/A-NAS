@@ -35,7 +35,14 @@ AI 助手固定在 Hermes 2026-10-13 的提交 `0e427d78`。2026-11-10 试着前
 
 代价：一轮定时任务期间，定时单元约占 410–610 MB，其中三个 MCP 服务器约 240 MB。
 
-还没有实现。实现要修订 ADR 0024 的决定 3、8，并在真实安装器的布局上重跑系统测试；固定提交在那之后才前进。验证时还发现对话的改名与删除在新提交上要带写入凭据，产品服务要一起改，见上面的研究。
+2026-11-11 已实现，固定提交前进到 `8fd9f706`（[研究](../research/hermes-agent-runtime.md#2026-11-11-实现)）：
+
+- 布局：[`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 的 `member_home`；已装的试用由 `update` 改属主。
+- 一轮定时任务：[`cron_round.py`](../../ai/assistant-spike/cron_round.py)。
+- 共用的网络与通往模型的桥：[`anas-assistant-net@.service`](../../ai/assistant-spike/anas-assistant-net@.service)，实例、定时任务、闲时整理与接口桥都加入它。
+- ADR 0024 的决定 3、8 已修订。
+
+验证时还发现对话的改名与删除在新提交上要带写入凭据，产品服务一起改了（[`sessionwrite.go`](../../internal/assistantapi/sessionwrite.go)）。
 
 ## 关联
 
