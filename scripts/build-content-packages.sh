@@ -43,7 +43,11 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
-work=$(mktemp -d)
+# The packages' trees are as large as their content, one at a time: they are
+# made in /var/tmp, not in /tmp, which may be a small tmpfs, and on a POSIX
+# file system, whose modes dpkg-deb records (a Windows drive in WSL shows
+# every file as 0777).
+work=$(mktemp -d "${ANAS_CONTENT_WORK:-/var/tmp}/a-nas-content.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 # pinned FILE MANIFEST: FILE is the one MANIFEST pins by size and SHA-256.

@@ -24,7 +24,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
   - NAS 上的 root。
 - 目标：Experimental NAS（主机名 `a-nas-dev`），Debian 13，已装 `a-nas-host`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）。
 - 签名密钥：现在是测试密钥（开发机上的 `~/.local/share/a-nas/release-test-key`）。正式密钥由用户决定（[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)）；换密钥后，各台机器要重新做一次第 4 步。软件源放在哪里同样待定（[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)），现在由部署机复制。
-- 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。
+- 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。开发机上 `make release` 在 `/var/tmp` 逐个组装内容包，最大的约 2.6 GiB，用完即删；2026-11-11 用全部真实内容第一次运行，用时 22 分钟，软件源 4.1 GB。
 - 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库。
 - 停止条件：
   - 第 4 步的哈希与开发者给出的不一致；
