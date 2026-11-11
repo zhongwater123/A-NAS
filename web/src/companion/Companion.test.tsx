@@ -637,6 +637,43 @@ describe("the companion on the desktop", () => {
       expect(fetched).not.toContain(WAVE);
     });
 
+    /** Away while a turn runs, a result comes, and the member is back before the turn ends. */
+    const backDuringTurn = async () => {
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      hide(false);
+      await settle();
+    };
+
+    it("keeps a result for the end of a turn the member came back during, and waves then instead of the fireworks", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", WAVE, "放烟花"]);
+      await backDuringTurn();
+      expect(fetched).not.toContain(WAVE);
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+      await settle();
+      expect(fetched).not.toContain("放烟花");
+    });
+
+    it("tells a turn's error at its end over a result that waited", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", SIGH, WAVE]);
+      await backDuringTurn();
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      await plays(SIGH);
+      expect(sign()).toBe("error");
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+      expect(screen.queryByText(/有新结果/)).toBeNull();
+    });
+
     it("forgets what waited when the next turn starts", async () => {
       const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
       endAway("complete");
