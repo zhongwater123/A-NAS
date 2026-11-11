@@ -177,8 +177,10 @@ class CompanionToolTests(unittest.TestCase):
         self.serve(200, {"status": "ok", "x": 0.198, "y": 0.5, "stepped_aside": True})
         result = companion.call("position", {"x": 0.5, "y": 0.5, "mode": "spring"})
         self.assertAnswered(result, "ok")
-        self.assertIn("让开了最上层的窗口", result.content[0].text)
-        self.assertIn("x=0.198", result.content[0].text)
+        self.assertEqual(
+            result.content[0].text,
+            "伙伴没去要求的位置：为了不挡住最上层的窗口（通常是 VNAS 窗口），它停在 x=0.198、y=0.5。",
+        )
         # Where it was asked to go, nothing more.
         self.assertEqual(companion.line({"status": "ok", "x": 0.1, "y": 0.5}), "伙伴照做了。")
 
