@@ -7934,10 +7934,10 @@ components:
       name: sessionId
       in: path
       required: true
-      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).'
+      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes''s gateway).'
       schema:
         type: string
-        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$
+        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6}|local-[0-9a-f]{64})$
     AssistantTaskID:
       name: taskId
       in: path

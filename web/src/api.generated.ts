@@ -4026,7 +4026,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4050,7 +4050,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -7113,7 +7113,7 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
-        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
         AssistantTaskID: string;
@@ -15573,7 +15573,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15599,7 +15599,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15636,7 +15636,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;

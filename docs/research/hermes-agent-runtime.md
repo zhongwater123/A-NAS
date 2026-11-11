@@ -1031,6 +1031,17 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 - 与 gateway 无关的发现：在 `8fd9f706` 上，对话的改名（`PATCH /api/sessions/<id>`）与删除（`DELETE`）要带写入凭据 `request_id` 与 `expected_revision`，删除还要 `expected_generation`；后两个的值在会话列表每行的 `runtime_revision`、`runtime_generation` 里。产品服务只发 `title`，得到 409 `client_upgrade_required`，带上凭据后成功，主目录归谁都一样。系统测试没有覆盖对话的改名与删除，所以 2026-11-10 的失败项里没有它。
 - 没有验证的：真实安装器的布局上 Host Agent 的对账会不会把属主改回 root；唤醒服务与系统测试；运行很久的任务；实例在任务中途停下时模型桥的交接。
 
+### 2026-11-11 实现
+
+用户看过上面的结果后说开始实现。固定提交前进到 `8fd9f706`，连同 2026-11-10 已经做好的四处（`run.sh` 的提交、补丁 0001、managed scope、聊天层）。
+
+- 主目录：[`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 的 `member_home` 把 `assistant/<账号>/hermes` 建成或改成成员所有、0700、不带 ACL，只动这一层目录。它的上一层归 root、成员只能穿过，名字换不成链接，所以按路径改它是安全的。Host Agent 还不管理助手目录，没有对账会把它改回去。已装的试用由 `nas-trial.sh update` 改属主。
+- 一轮定时任务：[`cron_round.py`](../../ai/assistant-spike/cron_round.py) 启动 gateway，等它就绪（至多 180 秒），运行 `hermes cron tick`，等到连续 5 秒没有任务在执行，再 `hermes gateway stop`。Hermes 在还有任务运行时拒绝停，所以中途到期的任务先跑完；拒绝三次或一轮满 55 分钟后用 `--yes` 停。“gateway 是否就绪”“有没有任务在执行”取自上游内部的 `discover_gateway_endpoint` 与 `live_executions`，不解析命令的输出：升级后它们改了名，这一轮直接失败。
+- 网络：新单元 [`anas-assistant-net@.service`](../../ai/assistant-spike/anas-assistant-net@.service) 持有一个成员的私有网络命名空间与唯一的模型桥（socat 监听 18001）。实例、定时任务、闲时整理、探针与接口桥都 `JoinsNamespaceOf` 它，实例一类还 `Requires` 它；没有单元需要它时它自己停。这取代了沙箱试验里“两边各自重试监听”的做法，实例停在任务中途时桥不会断。
+- 对话的写入凭据：产品服务在改名、删除对话前向 Hermes 取 `mutation-snapshot`，带上 `request_id`、`expected_revision` 与 `expected_generation`；遇到 409 用新的计数再试一次（[`sessionwrite.go`](../../internal/assistantapi/sessionwrite.go)）。清除全部对话与删除任务的运行走同一条路。
+- 任务运行的编号：gateway 上一次运行的对话编号是 `local-<sha256>`，不再是 `cron_<任务>_<时间>`。产品服务原先把它当成无效编号：运行的通知里没有回答的内容，删除任务时也不删它的运行。编号的格式（产品服务与接口契约）加上了这一种。这是第一次系统测试里唯一的失败项查出来的。
+- 系统测试新增：Hermes 主目录归成员、0700、不带 ACL；经产品服务改名、删除对话。
+
 ### 以后怎么升级
 
 A-NAS 依赖 Hermes 的面，按稳定程度排：
