@@ -941,7 +941,7 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 
 用户想参照 OpenAI 的 Dot 把 VNAS 做成常驻的个人智能体，问 Hermes 支持到什么程度，随后决定前进固定提交。用户的理由：升级要是能在长期减轻开发负担就值得做；同步上游能迫使 A-NAS 与 Hermes 解耦，并跟上它的进度。
 
-结果：操作桌面已经与 Hermes 解耦（下面“操作桌面改经 A-NAS 的 MCP 服务器”）。固定提交没有前进：在上游当天的 main `8fd9f706` 上，对话、确认卡片、操作桌面、照片、记忆、后台复盘与登录都通过，定时任务不再运行，怎么越过去[待用户决定](../decisions/2026-11-10-hermes-gateway-runtime.md)。
+结果：操作桌面已经与 Hermes 解耦（下面“操作桌面改经 A-NAS 的 MCP 服务器”）。固定提交没有前进：在上游当天的 main `8fd9f706` 上，对话、确认卡片、操作桌面、照片、记忆、后台复盘与登录都通过，定时任务不再运行。怎么越过去用户在 2026-11-11 定了（[决定记录](../decisions/2026-11-10-hermes-gateway-runtime.md)），做法在沙箱里验证过（下面“2026-11-11 在沙箱里验证 gateway”），还没有实现；那次验证还发现对话的改名与删除在新提交上也要改。
 
 ### 上游四周里变了什么
 
@@ -992,6 +992,28 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 - 系统测试（真实安装器、产品服务、会话闸门与沙箱）：567 项通过，3 项失败，都是定时任务：到点没有运行，任务列表里没有运行结果，登录后没有通知。唤醒服务照常每 30 秒启动定时单元，`hermes cron tick` 约 2 秒后正常退出，任务被跳过。同一套代码在 `0e427d78` 上全部通过。
 - 内存与冷启动没有实质变化：同样两轮之后 486 MB、峰值 519 MB，`serve` 321 MB；冷启动加两轮都是 10.9 秒。
 
+### 2026-11-11 在沙箱里验证 gateway
+
+用户倾向“到点时在定时单元里运行 gateway”，并提出照上游的要求让 Hermes 主目录归成员本人所有。在 spike 的沙箱里用 `8fd9f706` 的运行环境与脚本化模型验证，任务是“每 1 分钟在助手目录里写一个文件”，定时单元由手工启动（沙箱里没有 Host Agent，唤醒服务跑不了）。
+
+上游检查的原文在 `hermes_cli/gateway_runtime_discovery.py`（`_private_node`、`home_mode_unsafe`）：主目录的属主要是运行 gateway 的用户；别的用户不可写；组位可写并且带访问 ACL 时判为不安全，因为 ACL 的掩码显示成组位。A-NAS 的 `root:root` 加 `user:<账号>:rwx` 两条都不满足，所以只改属主不够。
+
+| 主目录 `hermes/` | 定时单元里运行 | 结果 |
+| --- | --- | --- |
+| `root:root`，带 ACL（现在的布局） | `hermes cron tick` | 跳过：`the gateway is inaccessible (unsafe_control_path)` |
+| `<账号>:<账号>`、0700、不带 ACL | `hermes cron tick` | 跳过：`the gateway is not running` |
+| `<账号>:<账号>`、0700、不带 ACL | gateway，再 `hermes cron tick` | 任务运行，文件由成员写出，记为 `ok` |
+
+- 启动与交接：gateway（`hermes gateway run --quiet`）在没有网络的沙箱里约 8 秒就绪。`hermes cron tick` 把到期的任务交给它，约 2 秒后返回，不等任务结束。任务在单独的工作进程里执行；沙箱里没有用户级 systemd，上游按文档降级为不带 cgroup 隔离的子进程。gateway 自己的调度器在就绪后约 5 秒也会触发到期的任务，不运行 `tick` 也行。
+- 收尾：任务还在执行时停掉 gateway，这次运行被记为出错（worker exited … without writing a durable terminal state），下一轮才对账为完成。等到 `hermes cron list` 里没有 `Execution: running` 再运行 `hermes gateway stop`，gateway 以 0 退出，任务记为 `ok`。上游的 `--idle-exit` 用不上：还有可运行的定时任务就不算空闲，在 systemd 下也不启用。
+- gateway 开了什么：回环地址上的一个随机端口（会话接口，在单元私有的网络命名空间里，外面连不到），主目录里的 `gateway.sock` 与 `state/gateway.loop-tick.*.sock`；停下后主目录里留着 `gateway.lock`、`gateway_state.json` 与 `gateway-starts.log`。沙箱里同一个 UID 的进程都连得到 `gateway.sock`。
+- 内存：定时单元在 gateway 就绪时约 410 MB（gateway 227 MB，它启动的三个 MCP 服务器各约 80 MB，其中 `companion` 与 `desktop` 在没有窗口的定时任务里用不上），一轮的峰值 460–610 MB。`0e427d78` 上定时单元自己执行任务时的内存这次没有量。
+- 成员在线时，实例与定时单元各有自己的网络命名空间：对话、读历史、列任务都正常，任务也跑完；对话的改名与删除返回 503 `owner_unreachable`。实例在主目录里发现 `gateway.sock`，把会话的写操作转给这个拥有者，而 gateway 的会话接口在另一个命名空间里。让定时单元与实例互相 `JoinsNamespaceOf`（[API 桥](../../ai/assistant-spike/anas-assistant-api@.service)已经这样加入实例的命名空间）之后，“成员先在线、任务后到期”和“任务先运行、成员后登录”两种顺序下，改名、删除、对话与任务都成功。共用命名空间后两个单元的模型桥（socat 监听 18001）会抢端口；试验里两边都在端口空出时重新监听，正式实现要定下由谁持有这座桥。
+- 主目录归成员后多出的能力：在沙箱里对它 `chmod 0777`、`setfacl -m u:bob:rwx` 成功（以前是 Operation not permitted），`chown` 仍然失败。上一层 `assistant/<账号>` 归 root、成员只有穿过的权限，所以 bob 列目录、读 `state.db`、往里写文件仍被拒绝。只读绑定的 `config.yaml`、`.env`、`SOUL.md`、`active_profile`、`hooks/`、`plugins/` 与 `profiles/`，改名、覆盖、删除得到 `Device or resource busy`，往里写得到 `Read-only file system`。
+- 归成员的布局上，探针 39 项通过；`desktop-control.sh`、`serve-terminal.sh` 14 项、`review-whitelist.sh` 15 项、`curator.sh` 7 项通过；`memory-skills.sh` 与 `serve-managed.sh` 跑完。
+- 与 gateway 无关的发现：在 `8fd9f706` 上，对话的改名（`PATCH /api/sessions/<id>`）与删除（`DELETE`）要带写入凭据 `request_id` 与 `expected_revision`，删除还要 `expected_generation`；后两个的值在会话列表每行的 `runtime_revision`、`runtime_generation` 里。产品服务只发 `title`，得到 409 `client_upgrade_required`，带上凭据后成功，主目录归谁都一样。系统测试没有覆盖对话的改名与删除，所以 2026-11-10 的失败项里没有它。
+- 没有验证的：真实安装器的布局上 Host Agent 的对账会不会把属主改回 root；唤醒服务与系统测试；运行很久的任务；实例在任务中途停下时模型桥的交接。
+
 ### 以后怎么升级
 
 A-NAS 依赖 Hermes 的面，按稳定程度排：
@@ -1008,7 +1030,7 @@ A-NAS 依赖 Hermes 的面，按稳定程度排：
 1. 改 [`run.sh`](../../ai/assistant-spike/run.sh) 里的提交，`run.sh build`；补丁打不上时先重做补丁。
 2. `run.sh sandbox`：探针里的工具集核对列出要进允许或关闭清单的工具集；再跑 `desktop-control.sh`、`serve-terminal.sh`、`review-whitelist.sh`、`curator.sh`、`memory-skills.sh`、`serve-surface.sh`。`cron.sh` 在 spike 的沙箱里跑不了：唤醒服务要向 Host Agent 核实账号，那里没有，定时任务由系统测试验证。
 3. 用新提交的检出运行 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)，再跑 Web 的类型检查与测试；指向不存在模块的 import 说明要加替身。
-4. `make check`，以及带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 的系统测试：它经真实的产品服务、会话闸门与沙箱走一遍对话、确认卡片、操作桌面、定时任务与登录。
+4. `make check`，以及带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 的系统测试：它经真实的产品服务、会话闸门与沙箱走一遍对话、确认卡片、操作桌面、定时任务与登录。它不覆盖对话的改名与删除，这两项要另外试。
 5. 读上游两个提交之间 `website/docs` 的差别，重点是 security、cron、mcp 与 api-server 几页。
 
 ## 真实模型（DeepSeek）
@@ -1110,7 +1132,7 @@ A-NAS 依赖 Hermes 的面，按稳定程度排：
 - 后台复盘把共享空间里的诱导文字写进记忆与技能（E3、E5）；用户 2026-10-15 决定保留复盘，成员在“记忆”页删除。
 - 试用期间照片画面（`look_at_photo`）与 WebOS 截图经 `vision_analyze` 发给 DeepSeek，与 ADR 0016 的承诺冲突；以后接入本地算力。`agent.image_input_mode` 一旦不是 `text`，像素还会经 `tool.complete` 发给窗口、写进失败时的转储文件。
 - 令牌的另外两处：`GET /` 页面与锁目录中的 `host-serve.token`（见“[实例凭据](#实例凭据)”）。
-- 补丁 0001 要随上游跟进。固定提交要前进，先要定下定时任务在 gateway 运行时上怎么运行（[决定记录](../decisions/2026-11-10-hermes-gateway-runtime.md)）；步骤见“[以后怎么升级](#以后怎么升级)”。
+- 补丁 0001 要随上游跟进。固定提交要前进，先要实现“定时单元里运行 gateway、主目录归成员”（[决定记录](../decisions/2026-11-10-hermes-gateway-runtime.md)），并让产品服务在改名、删除对话时带上写入凭据；步骤见“[以后怎么升级](#以后怎么升级)”。
 - 实例的内存：三个 MCP 服务器之后，脚本化模型两轮对话就到 484 MB，离 640 MiB 的回收线比以前近；要在实验 NAS 上用真实模型多轮复测。
 - 参数摘要来自脱敏的显示副本，含像密钥的字符串时更改不执行；拒绝、超时与停止对模型是同一句话（见“[仍要注意](#仍要注意)”）。
 - 执行方新建的文件夹中被替换的文件，Web 回收站恢复时回到空间根目录。
