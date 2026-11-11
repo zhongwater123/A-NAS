@@ -220,7 +220,15 @@ class CompanionToolTests(unittest.TestCase):
         # have acted, so the model must not hear that nothing happened.
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
-                self.rfile.readline()
+                # Read the whole call, headers and body, before going away:
+                # http.client writes them separately, and a close between the
+                # two would be a call that never got there (busy).
+                length = 0
+                while (line := self.rfile.readline()) not in (b"\r\n", b""):
+                    name, _, value = line.decode().partition(":")
+                    if name.strip().lower() == "content-length":
+                        length = int(value)
+                self.rfile.read(length)
 
         self.service.listen(Handler)
         self.assertAnswered(companion.call("wake", {}), "timeout")
