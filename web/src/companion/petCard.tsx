@@ -259,6 +259,24 @@ function firstRead(state: PollState): { baseline: Record<string, number>; leaves
   return { baseline: flattenCounters(state), leaves };
 }
 
+/**
+ * Quiet on this device since before the companion came (a reload, a new sign-in): it is asleep already,
+ * written to the page's state before the card first reads it. Its sleep starts with the loop, so the card
+ * shows neither its idle clip nor a yawn first.
+ */
+function asleepFromTheStart(animations: Animations): string | null {
+  if (!memberQuiet()) return null;
+  const own = companionState.read().pets[COMPANION_PET];
+  if (own && readSleep(own.sleep)?.sleeping) return null;
+  const names = pickSleepNames(animations);
+  if (!names) return null;
+  companionSleep.enter(COMPANION_PET, { ...names, start: names.loop });
+  return names.loop;
+}
+
+/** The longest the companion waits for its wake-up clip to play before it tells what waited. */
+const WAKE_CLIP_WAIT_MS = 12_000;
+
 /** The lock leaf holds the pet now: a stale one whose time is past does not (as lock-freeze.ts reads it). */
 function lockHeld(leaf: StateLeaf | undefined): boolean {
   const lock = leaf ? readLock(leaf) : null;
@@ -446,19 +464,24 @@ function Card({
 }) {
   /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
   const [walkable, setWalkable] = useState(true);
+  const [first] = useState(() => {
+    const opening = asleepFromTheStart(animations);
+    return { ...firstRead(companionState.read()), opening };
+  });
+  const [leaves, setLeaves] = useState(first.leaves);
+  // Asleep from the start: the card's first clip, its idle list's first, is the sleep's loop while it sleeps.
+  const opening = first.opening !== null && leaves.sleep?.sleeping === true ? first.opening : null;
   const cfg = useMemo<RuntimePet>(
     () => ({
       ...pet,
-      animations,
+      animations: opening ? { ...animations, idle: [opening, ...animations.idle] } : animations,
       animationWeights: walkable ? companionWeights : { ...companionWeights, move: 0 },
       ...(pool ? { assetVersion: pool } : {}),
     }),
-    [animations, pool, walkable],
+    [animations, opening, pool, walkable],
   );
   const arena = useRef<PetCardProps["arena"]["current"]>({ slots: {} });
   const clipSpeed = useClipSpeed();
-  const [first] = useState(() => firstRead(companionState.read()));
-  const [leaves, setLeaves] = useState(first.leaves);
   const [paused, setPaused] = useState(() => document.hidden);
   const pausedRef = useRef(paused);
   /**
@@ -485,6 +508,8 @@ function Card({
     return () => window.clearTimeout(timer);
   }, [told]);
   const comeBack = useRef(() => {});
+  /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
+  const wakingUp = useRef(false);
   /** Where the companion was last left, null while it is in its corner. */
   const placed = useRef<Center | null>(null);
   /**
@@ -868,7 +893,7 @@ function Card({
   // nothing asleep or locked. On the screen the family shares, no task's name.
   useEffect(() => {
     comeBack.current = () => {
-      if (document.hidden || localConsoleCovered()) return;
+      if (document.hidden || localConsoleCovered() || wakingUp.current) return;
       // Back during a turn: what waits stays until the turn ends, and is told then. Asleep (quiet, or put to
       // sleep by VNAS) or locked, it stays until the companion is free.
       const state = companionState.read();
@@ -960,6 +985,9 @@ function Card({
   const wasAsleep = useRef(asleep);
   /** It sleeps, or slept, at the member's asking: its waking is their return. */
   const quietSleep = useRef(false);
+  /** Stops waiting for the wake-up clip. */
+  const stopWaiting = useRef(() => {});
+  useEffect(() => () => stopWaiting.current(), []);
   useEffect(() => {
     const [quietBefore, asleepBefore] = [wasQuiet.current, wasAsleep.current];
     wasQuiet.current = quiet;
@@ -972,8 +1000,26 @@ function Card({
     if (quiet) setCompanionMode("normal");
     if (!quietSleep.current) return;
     quietSleep.current = false;
-    window.setTimeout(() => comeBack.current(), 0);
-  }, [quiet, asleep]);
+    // It tells once it is up: when the clip it wakes with has played, or could not, not over that clip.
+    stopWaiting.current();
+    wakingUp.current = true;
+    const layer = clipSpeed.current;
+    const up = (event?: Event) => {
+      if (event && !(event.target instanceof HTMLVideoElement)) return;
+      stopWaiting.current();
+      comeBack.current();
+    };
+    const timer = window.setTimeout(up, WAKE_CLIP_WAIT_MS);
+    layer?.addEventListener("ended", up, true);
+    layer?.addEventListener("error", up, true);
+    stopWaiting.current = () => {
+      wakingUp.current = false;
+      window.clearTimeout(timer);
+      layer?.removeEventListener("ended", up, true);
+      layer?.removeEventListener("error", up, true);
+      stopWaiting.current = () => {};
+    };
+  }, [quiet, asleep, clipSpeed]);
 
   // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
   // first that holds: a card of this window's turn waits for the member (the VNAS window comes up with the
