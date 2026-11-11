@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 )
@@ -62,9 +63,7 @@ func (h *Handler) fencedWrite(ctx context.Context, account, method, id string, f
 	if fence.Generation != nil {
 		body["expected_generation"] = *fence.Generation
 	}
-	for key, value := range fields {
-		body[key] = value
-	}
+	maps.Copy(body, fields)
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return 0, nil, err
