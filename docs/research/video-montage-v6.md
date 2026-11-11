@@ -2,7 +2,7 @@
 
 > 状态：开发机完成（三组旅行素材、三首歌；成片已人工观看；未装进 `montage.case`，未在 x86 容器里跑）  
 > 更新日期：2026-11-11  
-> 适用范围：[#405](https://github.com/zhongwater123/A-NAS/issues/405) 第五版之后的第六版，实验脚本在 [`ai/eval/montage_v5/`](../../ai/eval/montage_v5/)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)  
+> 适用范围：[#405](https://github.com/zhongwater123/A-NAS/issues/405) 第五版之后的第六版，实验脚本与用法在 [`ai/eval/montage_v5/`](../../ai/eval/montage_v5/README.md)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)  
 > 关联：[CutClaw 调研](video-editing-cutclaw.md)、[剪辑第四版消融实验](video-montage-ablation-v4.md)、[照片与视频成片规格](../specs/photo-to-video.md)
 
 第五版全程用本机 Qwen3.5-4B 规划。卡片超过 150 张时，4B 只从目录前面挑卡片，新西兰 6 段里有 5 段来自前 46 张。第六版换了两件事：成片按一首歌的段落和小节来剪（CutClaw 的做法），规划改用云端 Claude Opus；卡片描述、画质检查和渲染仍在本机。
@@ -125,5 +125,6 @@
 ## 关联
 
 - 代码：[`cut.py`](../../ai/eval/montage_v5/cut.py)（`CUT_ORDER`、`ORDER_ASKS`、`cut_to_music`）、[`music.py`](../../ai/eval/montage_v5/music.py)（`from_structure`、`BUILD_RISE`）、[`structure.py`](../../ai/eval/montage_v5/structure.py)、[`quality.py`](../../ai/eval/montage_v5/quality.py)、[`held.py`](../../ai/eval/montage_v5/held.py)、[`render.py`](../../ai/montage/render.py)（`not_wide`、`BLURRED`）
-- 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)
+- 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)、[`ai/tests/test_montage_v5.py`](../../ai/tests/test_montage_v5.py)
+- 2026-11-11 精简：只留第六版的流程（第四、五版的电影用例、本机规划、按秒数剪等分支删除，数据目录里的描述、方向检查脚本和方案 B 的提示词收进本目录）；同一批卡片和规划下，两步提示词、4B 描述请求、卡片和镜头清单与精简前逐字相同
 - 数据：卡片、规划和成片在 `~/A-NAS-datasets/剪辑对比/第四版/剪法24（2026-11-08）/`，不进仓库；对比页 `品杰对比.html`、`新西兰对比.html`、`川西对比.html` 在同一目录。

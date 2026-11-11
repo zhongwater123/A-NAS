@@ -1,20 +1,22 @@
-"""Where 剪法25's working files live: outside the repository, in the data folder the cards, plans
-and cuts were made in (2026-11-08/09). ANAS_MONTAGE_DATA moves it."""
+"""Where the working files live: outside the repository, in a data folder. Each can be moved by its
+environment variable; the defaults are the development machine's (2026-11).
+
+  VIDEOS   the source videos, one folder per set (ANAS_MONTAGE_VIDEOS)
+  INDEXES  each set's window index, video-moments-<key>/embeddinggemma*/{index.json,frames.npz}, built
+           beforehand by A-NAS's video indexer (ANAS_MONTAGE_INDEXES)
+  CARDS    cards, key frames, quality measures and the user's marks: cards-<case>.json, quality-<case>.json,
+           excluded.json, rotation.json, reviewed.json, frames/ (ANAS_MONTAGE_CARDS)
+  CUTS     songs' structures and slots, plans, cuts and the rendered films (ANAS_MONTAGE_CUTS)
+"""
 import json
 import os
 from pathlib import Path
 
-DATA = Path(os.environ.get("ANAS_MONTAGE_DATA", Path.home() / "A-NAS-datasets" / "剪辑对比" / "第四版"))
-# Cards (cards.py, process_cards.py): key frames, beats, process, summary per card.
-CARDS = DATA / "关键帧卡片（2026-11-08）"
-# Plans, shots, cuts and the rendered films (cut.py), and the 报幕 marks.
-CUTS = DATA / "剪法24（2026-11-08）"
-# 方案 B's prompt profiles (film, travel-vlog) and tag_split.py, whose helpers tag_beats.py uses.
-B_DIR = DATA / "模型对比-2B-4B" / "b"
-# 第五版 (2026-11-09): the user's own DJI Pocket sets (新西兰, 川西), cards described with the process
-# (describe.py there, same as cards.py) and excluded.json, the mis-shot seconds left out.
-V5 = DATA.parent / "第五版"
-VIDEOS = Path.home() / "A-NAS-datasets" / "videos"
+ROOT = Path.home() / "A-NAS-datasets"
+VIDEOS = Path(os.environ.get("ANAS_MONTAGE_VIDEOS", ROOT / "videos"))
+INDEXES = Path(os.environ.get("ANAS_MONTAGE_INDEXES", ROOT / "cache"))
+CARDS = Path(os.environ.get("ANAS_MONTAGE_CARDS", ROOT / "剪辑对比" / "第五版"))
+CUTS = Path(os.environ.get("ANAS_MONTAGE_CUTS", ROOT / "剪辑对比" / "第四版" / "剪法24（2026-11-08）"))
 
 
 def read_json(path):

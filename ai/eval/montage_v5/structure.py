@@ -2,7 +2,7 @@
 downbeats by All-In-One (allin1, Kim & Nam 2023: source separation, then a transformer over the stems;
 MIT). Loudness alone made the last loud stretch of keshi's Forever its peak, not its first chorus at 49 s.
 
-  ~/A-NAS-datasets/tools/allin1-venv/bin/python structure.py SONG ...
+  python structure.py SONG ...     (in a venv with allin1; see README)
       (writes structure-<stem>.json under paths.CUTS; the separated stems are not kept)
 
 A script file with a main guard: allin1 spreads its spectrograms over processes, which on macOS start by

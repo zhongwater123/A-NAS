@@ -22,22 +22,19 @@ lens in 新西兰 018 included, so each is measured on its own:
           whose key frames are dark is out of focus under POINTS_LEAST (cut.poor). blur cannot tell it: 6.7,
           under the still dusks the user kept (8-10.8).
 
-  python3 quality.py ne ch     (writes quality-<case>.json beside the cards; resumes)
+  python3 quality.py ne ch pj     (writes quality-<case>.json beside the cards; resumes; --rule measures blocked again)
 """
 
 import json
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-import numpy as np
-from PIL import Image
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # ai/, for montage
 import cut
 import held
+import numpy as np
 from paths import read_json, write_json
+from PIL import Image
 
 SHAKE_FPS, SHAKE_SIZE, SMOOTH = 10, (320, 180), 5
 GRID = held.GRID
@@ -126,13 +123,12 @@ RULE_AGAIN = "--rule" in sys.argv     # the blocked rule again on measured cards
 def main():
     cases = [a for a in sys.argv[1:] if not a.startswith("--")]
     for case in cases:
-        key = cut.CASES[case][0]
-        d = next((Path.home() / "A-NAS-datasets" / "cache" / f"video-moments-{key}").glob("embeddinggemma*"))
+        d = cut.index_dir(case)
         videos = json.loads((d / "index.json").read_text(encoding="utf-8"))["videos"]
-        path = cut.cards_dir(case) / f"quality-{case}.json"
+        path = cut.CARDS / f"quality-{case}.json"
         done = read_json(path) if path.exists() else {}
         t0 = time.time()
-        for n, c in enumerate(cut.load(case), 1):
+        for n, c in enumerate(read_json(cut.CARDS / f"cards-{case}.json").values(), 1):
             if c["id"] in done and "blockedRule" in done[c["id"]] and not RULE_AGAIN:
                 if "points" not in done[c["id"]]:
                     file = cut.VIDEOS / videos[c["video"]]["file"]
