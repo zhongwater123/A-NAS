@@ -440,6 +440,8 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const away = useRef<Away>(nothingAway());
   /** When the companion last told the member something on return: a result listed just after waits. */
   const toldAt = useRef(Number.NEGATIVE_INFINITY);
+  /** A turn ends with the member there and something waiting: the card does not show its end, which is told. */
+  const telling = useRef(false);
   /** A turn's check or cross shown after the member came back, for as long as a turn's own. */
   const [told, setTold] = useState<{ sign: "success" | "error"; at: number } | null>(null);
   useEffect(() => {
@@ -704,9 +706,11 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
         if (name === "workStatus") {
           const status = readWorkStatus(leaf);
           const stage = status?.state ?? null;
-          if (status && awayFrom(pausedRef.current) && (stage === "success" || stage === "error"))
+          const ends = stage === "success" || stage === "error";
+          if (status && ends && (awayFrom(pausedRef.current) || telling.current)) {
+            telling.current = false;
             taken.push([name, { ...leaf, data: { ...status, state: null, anim: null } }]);
-          else taken.push([name, leaf]);
+          } else taken.push([name, leaf]);
         } else if (name === "lock") taken.push([name, leaf]);
         // Under the local console's screen saver nobody sees the page either (D12): nothing written
         // then ends a rest, not even a sleep, a wake or the wake a lock brings.
@@ -796,7 +800,9 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
 
   // How a turn of this window ends while the member is away waits for them; an error is not overwritten by
   // another conversation's success. A turn that starts forgets it: what it ends in is the news then. New
-  // results of scheduled tasks have nothing to do with turns and stay.
+  // results of scheduled tasks have nothing to do with turns and stay. A turn that ends with the member there
+  // but something still waiting (they came back during it) is told with what waited, as one thing: the card
+  // does not show the turn's own end then.
   useEffect(
     () =>
       onTurns({
@@ -805,9 +811,14 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
           setTold(null);
         },
         ended: (_sessionId, state) => {
-          if (!awayFrom(pausedRef.current)) return;
-          if (state === "success" && away.current.ended?.state === "error") return;
-          away.current.ended = { state, at: Date.now() };
+          const present = !awayFrom(pausedRef.current);
+          const waiting = away.current.ended !== null || away.current.results.size > 0;
+          if (present && !waiting) return;
+          if (state === "error" || away.current.ended?.state !== "error")
+            away.current.ended = { state, at: Date.now() };
+          if (!present) return;
+          telling.current = true;
+          window.setTimeout(() => comeBack.current(), 0);
         },
       }),
     [],
@@ -818,11 +829,15 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // line. VNAS waiting for them first, which its stage shows as it is; then a turn that ended in an error
   // (a sigh, its cross for as long as a turn's own); then a new result of a scheduled task still unread (a
   // wave), by the list read again now, as another device may have read it meanwhile; then a turn that ended
-  // well (only its check, no fireworks again). Nothing during a turn, asleep or locked. On the screen the
-  // family shares, no task's name.
+  // well (only its check, no fireworks again). Nothing during a turn, which keeps it for the turn's end;
+  // nothing asleep or locked. On the screen the family shares, no task's name.
   useEffect(() => {
     comeBack.current = () => {
       if (document.hidden || localConsoleCovered()) return;
+      // Back during a turn: what waits stays until the turn ends, and is told then.
+      const state = companionState.read();
+      const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
+      if (stage !== null && stage !== "success" && stage !== "error") return;
       const { ended, results } = away.current;
       away.current = nothingAway();
       const now = Date.now();
@@ -830,9 +845,6 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
       const outcome = ended && recent(ended.at) ? ended.state : null;
       if (outcome === null && waiting.size === 0) return;
-      const state = companionState.read();
-      const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
-      if (stage !== null && stage !== "success" && stage !== "error") return;
       const own = state.pets[COMPANION_PET];
       if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const tell = () => {
