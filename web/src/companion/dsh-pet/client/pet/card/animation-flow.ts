@@ -94,6 +94,29 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (state.sleeping) deferredRef.current = null;
       sleep().apply(state);
     };
+    /**
+     * A-NAS: the step's clip in front, held at its last frame, plays again after stepReplayMs, if the same step
+     * still asks for it and nothing has played since; a frozen or sleeping card skips it, and its resume
+     * (resumeWorkStatusAnim) starts the wait again.
+     */
+    const holdThenReplay = (): void => {
+      const card = hub.card;
+      const clip = card.animRef.current;
+      const front = hub.ownAnim.frontVideo();
+      const hold = (holdRef.current.hold += 1);
+      clearTimeout(holdRef.current.timer);
+      holdRef.current.timer = setTimeout(() => {
+        if (holdRef.current.hold !== hold) return;
+        const ws = workStatusRef.current;
+        const active = ws?.state != null && ws.state !== 'success' && ws.state !== 'error';
+        if (!active || ws?.anim !== clip || card.animRef.current !== clip) return;
+        if (hub.ownAnim.isFrozen() || sleeping() || front === null || !front.ended) return;
+        if (hub.ownAnim.frontVideo() !== front) return;
+        card.actions.setOnce(true);
+        card.actions.bumpSeq();
+      }, hub.cfg().stepReplayMs ?? 0);
+    };
+
     /** 非终态工作状态回到档位循环；冻结、空闲与终态都返回 false。 */
     const resumeWorkStatusAnim = (): boolean => {
       const card = hub.card;
@@ -118,6 +141,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       card.actions.setOnce(
         own === null ? Array.isArray(slot) && slot.length > 1 : hub.cfg().stepReplayMs !== undefined,
       );
+      // A-NAS: back on the step whose clip is in front, held at its end (the replay due meanwhile was skipped):
+      // it plays again after stepReplayMs from now.
+      const held = hub.ownAnim.frontVideo()?.ended === true;
+      if (own !== null && name === card.animRef.current && hub.cfg().stepReplayMs !== undefined && held)
+        holdThenReplay();
       card.actions.setAnim(name);
       return true;
     };
@@ -185,22 +213,9 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
         return;
       }
       // A-NAS: a step's own clip has played once: it holds its last frame (an ended video shows it) and
-      // plays again after stepReplayMs, if the same step still asks for it and nothing has played since.
+      // plays again later (holdThenReplay).
       if (cue.kind === 'work-hold') {
-        const clip = card.animRef.current;
-        const front = hub.ownAnim.frontVideo();
-        const hold = (holdRef.current.hold += 1);
-        clearTimeout(holdRef.current.timer);
-        holdRef.current.timer = setTimeout(() => {
-          if (holdRef.current.hold !== hold) return;
-          const ws = workStatusRef.current;
-          const active = ws?.state != null && ws.state !== 'success' && ws.state !== 'error';
-          if (!active || ws?.anim !== clip || card.animRef.current !== clip) return;
-          if (hub.ownAnim.isFrozen() || sleeping() || front === null || !front.ended) return;
-          if (hub.ownAnim.frontVideo() !== front) return;
-          card.actions.setOnce(true);
-          card.actions.bumpSeq();
-        }, hub.cfg().stepReplayMs ?? 0);
+        holdThenReplay();
         return;
       }
       if (cue.kind === 'event-done') {

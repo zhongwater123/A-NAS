@@ -759,6 +759,40 @@ describe("what VNAS asks of the companion", () => {
       }
     });
 
+    it(`plays a held step again ${STEP_REPLAY_MS} ms after a rest that skipped its replay`, async () => {
+      serve([IDLE, "写代码"]);
+      const { videos } = await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      const shown = front(videos);
+      const asked = vi.spyOn(globalThis, "fetch");
+      const replays = () =>
+        asked.mock.calls.filter(([url]) =>
+          decodeURIComponent(String(url instanceof Request ? url.url : url)).includes("写代码"),
+        ).length;
+      Object.defineProperty(shown, "ended", { configurable: true, get: () => true });
+      vi.useFakeTimers({ shouldClearNativeTimers: true });
+      try {
+        act(() => fireEvent(shown, new Event("ended")));
+        // The page rests (hidden) while the replay falls due: it is skipped.
+        hide(true);
+        act(() => vi.advanceTimersByTime(STEP_REPLAY_MS));
+        expect(replays()).toBe(0);
+        // Back: the wait starts again.
+        hide(false);
+        act(() => vi.advanceTimersByTime(STEP_REPLAY_MS - 1));
+        expect(replays()).toBe(0);
+        act(() => vi.advanceTimersByTime(1));
+        expect(replays()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("goes back to idle when a small turn ends with a step's clip held at its end", async () => {
       serve([IDLE, "写代码"]);
       const { videos } = await mount();
