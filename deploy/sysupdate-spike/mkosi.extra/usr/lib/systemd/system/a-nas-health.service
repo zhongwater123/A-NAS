@@ -1,0 +1,13 @@
+# Enabled from /usr (boot-complete.target.requires/, made by mkosi.postinst):
+# a boot that systemd-boot counts is blessed only once this has passed. A
+# failure reboots, so the next try starts without anyone at the device.
+[Unit]
+Description=A-NAS boot health check
+RequiresMountsFor=/srv/a-nas /var/lib/a-nas
+Before=boot-complete.target
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/a-nas/health-check.sh

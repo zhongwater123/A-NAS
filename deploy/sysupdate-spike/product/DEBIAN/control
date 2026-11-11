@@ -1,0 +1,11 @@
+Package: a-nas-demo
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: admin
+Priority: optional
+Depends: systemd
+Description: stand-in for the product package in the sysupdate verification
+ Laid out the way a Debian package usually is: a service, a system user, a
+ conffile in /etc and a postinst. verify.sh turns it into a system extension
+ to see which of these survive (docs/research/sysupdate-image-verification.md).

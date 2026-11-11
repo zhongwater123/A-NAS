@@ -11,6 +11,7 @@
 - [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
 - [安装伙伴动画](install-companion-animations.md)（draft；2026-11-10 在实验 NAS 装上池 `36492963e4112f55`）
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
+- [用发布包暂存 release](stage-a-release-bundle.md)（draft；开发机连不到 NAS 时由部署机暂存）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 - [启用相册本地 AI](enable-photo-ai.md)（verified；2026-10-10 部署 `6833c7637f73`）
