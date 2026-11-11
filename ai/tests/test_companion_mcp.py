@@ -173,6 +173,15 @@ class CompanionToolTests(unittest.TestCase):
         self.assertIn("睡着了", result.content[0].text)
         self.assertEqual(self.received, [("/call", {"tool": "anim", "args": {"name": "wave", "facing": "left"}})])
 
+    def test_a_quiet_companion_refuses_wake_with_the_windows_words(self):
+        self.serve(200, {"status": "rejected", "reason": "member-quiet",
+                         "message": "成员让伙伴安静了，只有成员能叫醒它"})
+        result = companion.call("wake", {})
+        self.assertAnswered(result, "rejected")
+        self.assertEqual(result.content[0].text, "伙伴没有照做（member-quiet）：成员让伙伴安静了，只有成员能叫醒它。")
+        self.assertIn("member-quiet", companion.TOOLS["wake"][0])
+        self.assertIn("member-quiet", companion.TOOLS["lock"][0])
+
     def test_a_position_that_stepped_aside_says_where_the_companion_went(self):
         self.serve(200, {"status": "ok", "x": 0.198, "y": 0.5, "stepped_aside": True})
         result = companion.call("position", {"x": 0.5, "y": 0.5, "mode": "spring"})

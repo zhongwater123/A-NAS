@@ -175,9 +175,11 @@ TOOLS = {
               "伙伴会自己让开。" + LOCK,
               {"angle": NUMBER, "power": NUMBER, "lock": TEXT}, ["angle", "power"]),
     "sleep": ("让伙伴睡觉；它被锁定时不行。", {}, []),
-    "wake": ("叫醒伙伴。", {}, []),
+    "wake": ("叫醒伙伴。成员让伙伴安静时（在设备上让它睡下），只有成员能叫醒它：这时回答 rejected（member-quiet），"
+             "不要重试，也不要劝成员叫醒它。", {}, []),
     "lock": ("锁定伙伴一段时间，期间别人的命令不会打断你；之后的命令都要带上返回的 lockId。成员拖动或点击伙伴会收回锁，"
-             "这一轮对话结束时锁也会释放。lockId：续期时带上原来的；ttl：毫秒，1000–300000，默认 120000。",
+             "这一轮对话结束时锁也会释放。成员让伙伴安静时锁不住，回答 rejected（member-quiet）。lockId：续期时带上原来的；"
+             "ttl：毫秒，1000–300000，默认 120000。",
              {"lockId": TEXT, "ttl": NUMBER}, []),
     "lock_release": ("释放 lock 拿到的锁。lockId：锁的 id。", {"lockId": TEXT}, ["lockId"]),
 }
