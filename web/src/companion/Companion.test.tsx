@@ -792,12 +792,36 @@ describe("what VNAS asks of the companion", () => {
       expect(localStorage.getItem(MODE_KEY)).toBeNull();
     });
 
-    it("shows VNAS at work only as a still dot, and when clicked awake tells how the turn ended", async () => {
+    it("comes asleep, in its sleep's loop, when the page loads while it is quiet", async () => {
+      storedQuiet("quiet");
+      serve([IDLE, ...SLEEP]);
+      await mount();
+      await settle();
+      expect(fetched[0]).toBe("睡觉-循环");
+      expect(fetched).not.toContain(IDLE);
+      expect(fetched).not.toContain("睡觉-开始");
+    });
+
+    it("wakes with a click response when clicked before its first loop has played through", async () => {
+      storedQuiet("quiet");
+      serve([IDLE, ...SLEEP, "点击回应-元气挥手"]);
+      const { pet } = await mount();
+      fetched = [];
+      fireEvent.click(pet);
+      await plays("点击回应-元气挥手");
+      await settle();
+      expect(fetched).not.toContain("睡觉-起来");
+      expect(companionMode()).toBe("normal");
+    });
+
+    it("shows VNAS at work only as a still dot, and when clicked awake tells how the turn ended once it is up", async () => {
       storedQuiet("quiet");
       serve([IDLE, ...SLEEP, "写代码", "工作状态-思考冒泡", "工作状态-垂头叹气冒汗"]);
       const { pet, root, videos } = await mount();
       const layer = root.closest("[data-vnas-overlay]") as HTMLElement;
-      await asleep(videos);
+      // Its sleep's loop, played through once: it sleeps on in it.
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await ready(videos);
       fetched = [];
       act(() => {
         startTurn("live0001");
@@ -817,6 +841,12 @@ describe("what VNAS asks of the companion", () => {
       fireEvent.click(pet);
       await plays("睡觉-起来");
       expect(companionMode()).toBe("normal");
+      // Not over the clip it wakes with: once that has played.
+      await ready(videos);
+      await settle();
+      expect(fetched).not.toContain("工作状态-垂头叹气冒汗");
+      expect(layer.dataset.companionWork).toBeUndefined();
+      act(() => fireEvent(front(videos), new Event("ended")));
       await waitFor(() => expect(layer.dataset.companionWork).toBe("error"));
       await plays("工作状态-垂头叹气冒汗");
     });
