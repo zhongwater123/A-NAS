@@ -1474,7 +1474,7 @@ button.net-rates {
 .window-content-trash {
   position: relative;
   overflow: hidden;
-  background: #f4f6f9;
+  background: var(--color-bg);
   container: trashwindow / inline-size;
 }
 /* Docker */

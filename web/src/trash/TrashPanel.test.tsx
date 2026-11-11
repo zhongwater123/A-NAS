@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,8 +6,18 @@ import type { Space, TrashItem } from "../api.generated";
 import { filesHandlers, folder } from "../test/handlers/files";
 import { type Restore, restoredAs, trashHandlers, trashItem } from "../test/handlers/trash";
 import { server } from "../test/server";
-import { expiryOf, groupItems, restoredName } from "./model";
+import { expiryOf, groupItems, purgeSchedule, restoredName, sortItems, splitName } from "./model";
 import { TrashPanel } from "./TrashPanel";
+
+// Radix places its menus by watching their size, which jsdom cannot.
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
 
 const personal: Space = {
   id: "space:personal",
@@ -82,9 +92,9 @@ describe("TrashPanel", () => {
     render(<TrashPanel onShowInFiles={() => undefined} />);
     const card = await screen.findByRole("region", { name: "回收站项目" });
     const totals = screen.getByLabelText("回收站概况");
-    expect(totals.textContent).toContain("项目3");
-    expect(totals.textContent).toContain("占用空间3.0 GiB");
-    expect(totals.textContent).toContain("7 天内清理2");
+    expect(totals.textContent).toContain("3.0 GiB");
+    expect(totals.textContent).toContain("3 项");
+    expect(totals.textContent).toContain("2 项将在 7 天内清理");
 
     // Grouped by the day they were deleted, newest first.
     expect(
@@ -109,13 +119,34 @@ describe("TrashPanel", () => {
 
     // Sorting by expiry puts what goes first on top.
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("radio", { name: "即将清理" }));
+    await user.click(within(totals).getByRole("button", { name: "2 项将在 7 天内清理" }));
     expect(names()).toEqual(["笔记.txt", "旅行照片", "计划.docx"]);
     expect(
       within(card)
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual(["7 天内清理2 项", "更晚清理1 项"]);
+
+    // By size, the largest first, in one group.
+    await user.click(within(card).getByRole("button", { name: "排序" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "占用空间" }));
+    expect(names()).toEqual(["旅行照片", "计划.docx", "笔记.txt"]);
+    expect(within(card).queryAllByRole("heading", { level: 3 })).toEqual([]);
+  });
+
+  it("shows what each coming day deletes, and lists the items of a day", async () => {
+    serve([plan, photos, orphan]);
+    const user = userEvent.setup();
+    render(<TrashPanel onShowInFiles={() => undefined} />);
+    const days = within(await screen.findByRole("group", { name: "清理日程" })).getAllByRole("button");
+    expect(days).toHaveLength(3);
+    const last = days.at(-1)!;
+    expect(last.getAttribute("aria-label")).toMatch(/清理 1 项，共 2\.3 MiB$/);
+    await user.click(last);
+    expect(names()).toEqual(["计划.docx"]);
+    expect(last.getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByTitle("取消筛选"));
+    expect(names()).toHaveLength(3);
   });
 
   it("finds items by name and by space", async () => {
@@ -134,7 +165,27 @@ describe("TrashPanel", () => {
     expect(names()).toHaveLength(3);
   });
 
-  it("restores to the original folder, keeps both when the name is taken and shows where it went", async () => {
+  it("restores to the original folder at once and shows where it went", async () => {
+    const shown = vi.fn();
+    const { restores } = serve([plan, photos]);
+    const user = userEvent.setup();
+    render(<TrashPanel onShowInFiles={shown} />);
+    await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
+    expect(await screen.findByText("已恢复“计划.docx”到 个人空间 / 文档 / 项目")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(restores).toEqual([{ trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" }]);
+    await waitFor(() => expect(names()).toEqual(["旅行照片"]));
+    await user.click(screen.getByRole("button", { name: "在文件管理中显示" }));
+    await waitFor(() =>
+      expect(shown).toHaveBeenCalledWith({
+        spaceId: personal.id,
+        spaceKind: "private",
+        folders: [{ id: "dir:docs", name: "文档" }],
+      }),
+    );
+  });
+
+  it("keeps both when the name is taken where the item goes back", async () => {
     const shown = vi.fn();
     const { restores } = serve([plan], (_id, body) =>
       body.conflict === "ask"
@@ -145,12 +196,10 @@ describe("TrashPanel", () => {
     render(<TrashPanel onShowInFiles={shown} />);
     await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "恢复文件" });
+    const dialog = await screen.findByRole("dialog", { name: "同名项目" });
+    expect(within(dialog).getByText("原位置已有同名文件")).toBeTruthy();
     expect(within(dialog).getByText("个人空间 / 文档 / 项目")).toBeTruthy();
-    expect(within(dialog).getByText("原位置")).toBeTruthy();
-    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
-    const choices = await within(dialog).findByRole("group", { name: "同名项目" });
-    expect(choices.textContent).toContain("这里已有“计划.docx”");
+    const choices = within(dialog).getByRole("group", { name: "同名项目" });
     const keep = within(choices).getByRole("button", { name: /保留两者/ });
     expect(keep.textContent).toContain("“计划 (恢复).docx”");
     expect(document.activeElement).toBe(keep);
@@ -193,15 +242,19 @@ describe("TrashPanel", () => {
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
-    const dialog = await screen.findByRole("dialog", { name: "恢复文件" });
-    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
-    const choices = await within(dialog).findByRole("group", { name: "同名项目" });
+    const dialog = await screen.findByRole("dialog", { name: "同名项目" });
+    const choices = within(dialog).getByRole("group", { name: "同名项目" });
 
     // Another name of one's own goes back through the name field.
-    await user.click(within(choices).getByRole("button", { name: "自己起个名称" }));
+    await user.click(within(choices).getByRole("button", { name: /改用其他名称/ }));
     expect((within(dialog).getByRole("textbox", { name: "恢复后的名称" }) as HTMLInputElement).value).toBe(
       "计划 (恢复).docx",
     );
+    await user.clear(within(dialog).getByRole("textbox", { name: "恢复后的名称" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "恢复后的名称" }), "计划 2.docx");
+    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
+    expect(await within(dialog).findByText("“计划 2.docx”也已存在")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: /改用其他名称/ }));
     await user.clear(within(dialog).getByRole("textbox", { name: "恢复后的名称" }));
     await user.type(within(dialog).getByRole("textbox", { name: "恢复后的名称" }), "计划.docx");
     await user.click(within(dialog).getByRole("button", { name: "恢复" }));
@@ -214,6 +267,7 @@ describe("TrashPanel", () => {
     ).toBeTruthy();
     expect(restores).toEqual([
       { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" },
+      { trashId: plan.id, parentId: "", name: "计划 2.docx", conflict: "ask" },
       { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" },
       { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "replace" },
     ]);
@@ -227,9 +281,9 @@ describe("TrashPanel", () => {
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "恢复 旅行照片" }));
-    const dialog = await screen.findByRole("dialog", { name: "恢复文件夹" });
-    await user.click(within(dialog).getByRole("button", { name: "恢复" }));
-    const choices = await within(dialog).findByRole("group", { name: "同名项目" });
+    const dialog = await screen.findByRole("dialog", { name: "同名项目" });
+    expect(within(dialog).getByText("原位置已有同名文件夹")).toBeTruthy();
+    const choices = within(dialog).getByRole("group", { name: "同名项目" });
     expect(within(choices).getByRole("button", { name: /保留两者/ }).textContent).toContain("“旅行照片 (恢复)”");
     expect(within(choices).queryByRole("button", { name: /替换/ })).toBeNull();
     expect(choices.textContent).toContain("文件夹不会被替换或合并。");
@@ -256,11 +310,10 @@ describe("TrashPanel", () => {
     serve([orphan]);
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
-    await user.click(await screen.findByRole("button", { name: "恢复 笔记.txt" }));
-    const dialog = await screen.findByRole("dialog", { name: "恢复文件" });
-    expect(within(dialog).getByText("个人空间")).toBeTruthy();
-    expect(within(dialog).queryByText("原位置")).toBeNull();
-    expect(within(dialog).getByText("原文件夹“旧项目”已不在，将恢复到个人空间的根目录。")).toBeTruthy();
+    await screen.findByRole("region", { name: "回收站项目" });
+    expect(within(row("笔记.txt")).getByTitle("原文件夹已不在，恢复后放在个人空间")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "恢复 笔记.txt" }));
+    expect(await screen.findByText("已恢复“笔记.txt”到 个人空间")).toBeTruthy();
   });
 
   it("restores a selection and asks once what to do with the items whose name is taken", async () => {
@@ -320,10 +373,55 @@ describe("TrashPanel", () => {
     await user.click(within(dialog).getByRole("button", { name: "跳过" }));
 
     expect(await screen.findByText("已恢复 2 项；跳过 1 项，仍在回收站中")).toBeTruthy();
-    expect(names()).toEqual(["旅行照片"]);
+    await waitFor(() => expect(names()).toEqual(["旅行照片"]));
     expect(screen.getByRole("checkbox", { name: "选择 旅行照片" }).getAttribute("aria-checked")).toBe("true");
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("toolbar", { name: "所选项目的操作" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("toolbar", { name: "所选项目的操作" })).toBeNull());
+  });
+
+  it("selects by a click on the row, a range with Shift and everything with Ctrl+A", async () => {
+    serve([plan, photos, orphan]);
+    const user = userEvent.setup();
+    render(<TrashPanel onShowInFiles={() => undefined} />);
+    await screen.findByRole("region", { name: "回收站项目" });
+    const checked = () =>
+      screen
+        .getAllByRole("checkbox", { name: /^选择 / })
+        .filter((box) => box.getAttribute("aria-checked") === "true")
+        .map((box) => box.getAttribute("aria-label"));
+    await user.click(row("计划.docx"));
+    expect(checked()).toEqual(["选择 计划.docx"]);
+    await user.keyboard("{Shift>}");
+    await user.click(row("笔记.txt"));
+    await user.keyboard("{/Shift}");
+    expect(checked()).toEqual(["选择 计划.docx", "选择 旅行照片", "选择 笔记.txt"]);
+    await user.click(row("旅行照片"));
+    expect(checked()).toEqual(["选择 计划.docx", "选择 笔记.txt"]);
+    await user.keyboard("{Control>}a{/Control}");
+    expect(checked()).toHaveLength(3);
+    expect(screen.getByRole("toolbar", { name: "所选项目的操作" }).textContent).toContain("已选 3 项");
+
+    // Delete asks before deleting the selection for good.
+    await user.keyboard("{Delete}");
+    expect(await screen.findByRole("dialog", { name: "永久删除 3 项？" })).toBeTruthy();
+  });
+
+  it("offers the same from a right-click, for the item or the selection it is part of", async () => {
+    const { restores } = serve([plan, photos, orphan]);
+    const user = userEvent.setup();
+    render(<TrashPanel onShowInFiles={() => undefined} />);
+    await screen.findByRole("region", { name: "回收站项目" });
+    fireEvent.contextMenu(row("笔记.txt"));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "打开原位置" }).getAttribute("aria-disabled")).toBe("true");
+    await user.click(within(menu).getByRole("menuitem", { name: "恢复" }));
+    expect(await screen.findByText("已恢复“笔记.txt”到 个人空间")).toBeTruthy();
+    expect(restores.map((restore) => restore.trashId)).toEqual([orphan.id]);
+
+    await user.click(screen.getByRole("checkbox", { name: "全选" }));
+    fireEvent.contextMenu(row("计划.docx"));
+    await user.click(await screen.findByRole("menuitem", { name: "永久删除 2 项" }));
+    expect(await screen.findByRole("dialog", { name: "永久删除 2 项？" })).toBeTruthy();
   });
 
   it("asks before deleting for good, one item, a selection or everything", async () => {
@@ -332,7 +430,7 @@ describe("TrashPanel", () => {
     render(<TrashPanel onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "永久删除 计划.docx" }));
     let dialog = await screen.findByRole("dialog", { name: "永久删除？" });
-    expect(within(dialog).getByText(/“计划.docx”将被立即删除，无法再恢复/)).toBeTruthy();
+    expect(within(dialog).getByText("这个文件将被立即删除，无法再恢复。")).toBeTruthy();
     expect(purged).toEqual([]);
     await user.click(within(dialog).getByRole("button", { name: "永久删除" }));
     expect(await screen.findByText("已永久删除“计划.docx”")).toBeTruthy();
@@ -350,7 +448,7 @@ describe("TrashPanel", () => {
     render(<TrashPanel onShowInFiles={() => undefined} />);
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
     expect(screen.queryByText(/保留 30 天/)).toBeNull();
-    expect(screen.getByText(/到期前随时可以恢复到原来的位置/)).toBeTruthy();
+    expect(screen.getByText(/到期前可以恢复/)).toBeTruthy();
     expect((screen.getByRole("button", { name: /清空回收站/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
@@ -396,6 +494,30 @@ describe("trash model", () => {
       ["昨天", ["c"]],
       ["10月2日 周五", ["d"]],
     ]);
+  });
+
+  it("sorts by size, plans the coming days and keeps the extension of a name apart", () => {
+    const now = new Date(2026, 9, 13, 18, 0);
+    const due = (days: number) => new Date(2026, 9, 13 + days, 9).toISOString();
+    const list = [
+      item({ id: "a", sizeBytes: 10, purgeAt: due(0) }),
+      item({ id: "b", sizeBytes: 30, purgeAt: due(3) }),
+      item({ id: "c", sizeBytes: 20, purgeAt: due(3) }),
+      item({ id: "d", sizeBytes: 5, purgeAt: due(40) }),
+    ];
+    expect(sortItems(list, "size").map((entry) => entry.id)).toEqual(["b", "c", "a", "d"]);
+    const days = purgeSchedule(list, now);
+    // To the last day anything is due; the item already due counts as due today.
+    expect(days).toHaveLength(41);
+    expect(days.filter((day) => day.count).map((day) => [day.offset, day.count, day.bytes, day.tone])).toEqual([
+      [0, 1, 10, "urgent"],
+      [3, 2, 50, "soon"],
+      [40, 1, 5, "calm"],
+    ]);
+    expect(purgeSchedule([], now)).toHaveLength(31);
+    expect(splitName("计划.docx", "file")).toEqual({ stem: "计划", extension: ".docx" });
+    expect(splitName("v1.2 资料", "directory")).toEqual({ stem: "v1.2 资料", extension: "" });
+    expect(splitName(".bashrc", "file")).toEqual({ stem: ".bashrc", extension: "" });
   });
 
   it("suggests names beside a taken one", () => {
