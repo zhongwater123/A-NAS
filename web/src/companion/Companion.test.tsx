@@ -808,6 +808,7 @@ describe("what VNAS asks of the companion", () => {
       fetched = [];
       act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
       await plays(IDLE);
+      expect(fetched).toEqual([IDLE]);
     });
 
     it("ends a small turn with its check alone, the step's clip played out", async () => {
