@@ -25,6 +25,29 @@ export type WindowAction =
   | { type: "show-desktop" }
   | { type: "restore"; ids: WindowID[] };
 
+// Where a window lies on the page: its own place and size, or the page less these margins when it is
+// maximized, which keep the system rail and the dock clear (AppWindow.tsx).
+export const MAXIMIZED_INSET = { left: 88, top: 12, right: 12, bottom: 90 };
+// On a page this narrow or narrower every window fills it but these margins (desktop.module.css).
+const NARROW_PAGE = 620;
+const NARROW_INSET = { left: 8, top: 8, right: 8, bottom: 75 };
+
+export type WindowFrame = Pick<WindowModel, "x" | "y" | "width" | "height" | "maximized">;
+export interface WindowBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// windowBox is where a window's style lays it out on a page this large.
+export function windowBox(window: WindowFrame, page: { width: number; height: number }): WindowBox {
+  const inset = page.width <= NARROW_PAGE ? NARROW_INSET : window.maximized ? MAXIMIZED_INSET : null;
+  if (inset)
+    return { left: inset.left, top: inset.top, right: page.width - inset.right, bottom: page.height - inset.bottom };
+  return { left: window.x, top: window.y, right: window.x + window.width, bottom: window.y + window.height };
+}
+
 // closedWindow is an app's window before it is first opened.
 export function closedWindow(id: WindowID, bounds: Pick<WindowModel, "x" | "y" | "width" | "height">): WindowModel {
   return { id, open: false, minimized: false, maximized: false, ...bounds, z: 0, opened: 0 };

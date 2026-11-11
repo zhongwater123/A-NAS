@@ -4,6 +4,7 @@ import { type ReactElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadTaskNotices } from "../assistant/taskNotices";
+import { publishFocusedWindow } from "../desktop/focusedWindow";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
@@ -82,6 +83,7 @@ afterEach(() => {
     companionState.writePet("main", "sleep", { sleeping: false });
     companionState.writePet("main", "lock", { locked: false });
   });
+  publishFocusedWindow(null);
   localStorage.clear();
   // A test that plays Safari must not leave the next one in it.
   vi.restoreAllMocks();
@@ -977,6 +979,63 @@ describe("walking, throwing and resting", () => {
     // Let go, it idles.
     await waitFor(() => expect(fetched.at(-1)).toBe(IDLE));
     await ready(videos);
+  });
+
+  /** Where the companion's hit area is (dsh-pet's HIT_BOX on its 240-wide box), from its box's style. */
+  const hitArea = (root: HTMLElement) => {
+    const x = Number.parseFloat(root.style.left);
+    const y = Number.parseFloat(root.style.top);
+    return { left: x + 75, top: y + 30, right: x + 165, bottom: y + 137 };
+  };
+  const clear = (hit: ReturnType<typeof hitArea>, window: { x: number; y: number; width: number; height: number }) =>
+    hit.right <= window.x ||
+    hit.left >= window.x + window.width ||
+    hit.bottom <= window.y ||
+    hit.top >= window.y + window.height;
+
+  it("steps aside from a window that opens over it, without a clip of its own", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    await settle();
+    fetched = [];
+    // On a 1024×768 page its corner is at the bottom right: a window from 200 to 1000 covers it.
+    const window = { x: 200, y: 40, width: 800, height: 700, maximized: false };
+    act(() => publishFocusedWindow(window));
+    frames(400);
+    expect(queue.size).toBe(0);
+    // Out to the window's left, at the same height.
+    expect(hitArea(root).right).toBeCloseTo(200 - 12, 0);
+    expect(hitArea(root).top).toBeCloseTo(768 - 88 - 135 + 30, 0);
+    expect(clear(hitArea(root), window)).toBe(true);
+    expect(saved()?.rx).toBeCloseTo((200 - 12 - 90 - 75 + 120) / 1024, 3);
+    expect(fetched).toEqual([]);
+  });
+
+  it("steps aside from the window it is dropped on, once let go", async () => {
+    serve([IDLE, "被鼠标拖拽悬空反馈"]);
+    const { pet, root } = await mount();
+    const window = { x: 500, y: 200, width: 520, height: 400, maximized: false };
+    act(() => publishFocusedWindow(window));
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    // Clear of the window where VNAS put it: it stays.
+    expect(clear(hitArea(root), window)).toBe(true);
+    const box = root.getBoundingClientRect();
+    const [x, y] = [box.x + 120, box.y + 60];
+    drag(
+      pet,
+      [
+        [x, y],
+        [x + 100, y],
+        [x + 200, y],
+        [x + 300, y],
+      ],
+      60,
+    );
+    frames(400);
+    expect(queue.size).toBe(0);
+    expect(hitArea(root).right).toBeCloseTo(500 - 12, 0);
+    expect(clear(hitArea(root), window)).toBe(true);
   });
 
   it("flies when it is flung, and lands within the page", async () => {

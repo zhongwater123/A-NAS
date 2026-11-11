@@ -21,10 +21,11 @@
 // waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
 // (companion.module.css). The character's credit is in Settings → 概览 (credit.ts), not on
 // the companion.
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
 import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
+import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
 import { localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine } from "./behaviors";
@@ -34,13 +35,21 @@ import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { createPetCard } from "./dsh-pet/client/pet/card/pet-card";
 import type { PetCardProps } from "./dsh-pet/client/pet/card/props";
 import { injectPetCss } from "./dsh-pet/client/pet/css";
-import type { Center } from "./dsh-pet/client/pet/motion/geometry";
+import {
+  type BoxPoint,
+  boxToRatio,
+  type Center,
+  centerToBox,
+  derivePetMetrics,
+  type Viewport,
+} from "./dsh-pet/client/pet/motion/geometry";
 import { makePlaybackReporter } from "./dsh-pet/client/pet/playback-report";
 import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { isTerminalStatus } from "./dsh-pet/host/playback/status";
 import { ROUTE_PATH } from "./dsh-pet/shared/constants";
+import { bodyPixelBox } from "./dsh-pet/shared/physics";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
   flattenCounters,
@@ -60,6 +69,7 @@ import {
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
 import { companionLock, companionPlayback, companionSleep } from "./host";
+import { stepAside } from "./stepAside";
 import {
   COMPANION_PET,
   companionState,
@@ -285,6 +295,33 @@ function rememberedPlace(): unknown {
   }
 }
 
+/** The companion's box in its corner, where it is until it is first moved (dsh-pet's css.ts). */
+function cornerBox(page: Viewport): BoxPoint {
+  const { corner, marginX, marginY } = pet.position;
+  const height = (pet.size * 9) / 16;
+  return {
+    x: corner.endsWith("left") ? marginX : page.width - marginX - pet.size,
+    y: corner.startsWith("top") ? marginY : page.height - marginY - height,
+  };
+}
+
+/**
+ * Where the companion goes so as not to cover the window on top, from its last place (null: its corner),
+ * as the data of an instant or spring position command; null when it stays.
+ */
+function clearOfWindow(placed: Center | null): unknown {
+  const page = { width: window.innerWidth, height: window.innerHeight };
+  const { halfW, halfH, bottomPad } = derivePetMetrics(pet.size);
+  const half = { w: halfW, h: halfH };
+  const box = placed ? centerToBox(placed, page, half) : cornerBox(page);
+  const hit = bodyPixelBox({ ...box, size: pet.size, bottomPad });
+  const to = stepAside(hit, focusedWindowBox(page), page);
+  if (!to) return null;
+  const center = boxToRatio({ x: box.x + to.x - hit.left, y: box.y + to.y - hit.top }, page, half);
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  return { x: center.rx, y: center.ry, mode: still ? "instant" : "spring" };
+}
+
 function remember(center: Center): void {
   try {
     localStorage.setItem(POSITION_KEY, JSON.stringify({ rx: center.rx, ry: center.ry }));
@@ -350,6 +387,40 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const heldSleep = useRef<StateLeaf | null>(null);
   /** Ends a pause the member's absence started (the page is not hidden), as their next input would. */
   const resume = useRef(() => {});
+  /** Where the companion was last left, null while it is in its corner. */
+  const placed = useRef<Center | null>(null);
+
+  // The companion stays above the windows but keeps clear of the one on top (stepAside.ts): when that window
+  // changes, the page is resized, or a move of the companion's ends (a drag let go, a walk, a flight, VNAS's
+  // position or throw), a hit area that covers the window goes to the nearest free place. It goes by the
+  // card's own position command, as VNAS's does: no clip changes, and it moves resting, asleep or locked
+  // too. The member who drops it on the window sees it step aside: the window comes first.
+  const keepClear = useCallback(() => {
+    const data = clearOfWindow(placed.current);
+    if (data) setLeaves((current) => withLeaf(current, "position", { counter: 0, data }));
+  }, []);
+  const place = useCallback(
+    (center: Center) => {
+      remember(center);
+      placed.current = center;
+      keepClear();
+    },
+    [keepClear],
+  );
+  useEffect(() => {
+    let resized: number | undefined;
+    const resize = () => {
+      window.clearTimeout(resized);
+      resized = window.setTimeout(keepClear, 200);
+    };
+    const stop = subscribeFocusedWindow(keepClear);
+    window.addEventListener("resize", resize);
+    return () => {
+      stop();
+      window.clearTimeout(resized);
+      window.removeEventListener("resize", resize);
+    };
+  }, [keepClear]);
 
   // The companion stops while the member is away: after IDLE_MS without input, which is always
   // before the local console's screen saver (180 s without input) covers the page, or while the
@@ -441,8 +512,11 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     // card's own mount has put it in its corner (twice in development, under StrictMode).
     let placing = true;
     queueMicrotask(() => {
-      const place = placing ? rememberedPlace() : null;
-      if (place) setLeaves((current) => withLeaf(current, "position", { counter: 0, data: place }));
+      if (!placing) return;
+      const remembered = rememberedPlace();
+      // From where it was left it steps aside when it gets there; from its corner, now.
+      if (remembered) setLeaves((current) => withLeaf(current, "position", { counter: 0, data: remembered }));
+      else keepClear();
     });
     setActionHandler(answer);
     setCompanionReady(true);
@@ -457,7 +531,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       setActionHandler(null);
       setCompanionReady(false);
     };
-  }, [first]);
+  }, [first, keepClear]);
 
   // A new result of a scheduled task: a wave, on any screen (its content stays in VNAS). A result is
   // new by its notice's id: a task's next result replaces its notice under a new id, so the number of
@@ -522,7 +596,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
         arena={arena}
         paused={paused}
         playbackSettled={playbackSettled}
-        onPlace={remember}
+        onPlace={place}
       />
     </div>
   );
