@@ -130,8 +130,23 @@ export function behaviorLine(behavior: Behavior, detail = "", shared = isLocalCo
   return lines[Math.floor(Math.random() * lines.length)].replace("{detail}", () => shown);
 }
 
-/** The behaviour a call of one of VNAS's tools shows, and what the call works on (toolLabels.ts). */
+/** A search's terms, which are what the bubble names: the wildcards of a pattern (*, ?, [ and ]) read as noise. */
+const SEARCH_TERMS: Readonly<Record<string, string>> = { search_files: "pattern", mcp__anas__search_photos: "query" };
+const WILDCARDS = /[*?[\]]/g;
+
+/**
+ * The behaviour a call of one of VNAS's tools shows, and what the call works on (toolLabels.ts). A search
+ * names its terms without wildcards, and nothing when only wildcards were searched for (a line that names
+ * nothing, behaviorLine).
+ */
 export function toolStep(name: string, args: unknown): { behavior: Behavior; detail: string } {
   const values = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const terms = Object.hasOwn(SEARCH_TERMS, name) ? SEARCH_TERMS[name] : null;
+  const searched = terms === null ? undefined : values[terms];
+  if (terms !== null && typeof searched === "string") {
+    const words = searched.replace(WILDCARDS, "").trim();
+    if (words === "") return { behavior: behaviorOfTool(name), detail: "" };
+    return { behavior: behaviorOfTool(name), detail: toolLabel(name, { ...values, [terms]: words }).detail };
+  }
   return { behavior: behaviorOfTool(name), detail: toolLabel(name, values).detail };
 }

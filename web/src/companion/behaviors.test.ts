@@ -43,6 +43,20 @@ describe("each step of a VNAS turn, as the companion shows it", () => {
     expect(behaviorLine("run", "", false)).toBe("噼里啪啦敲命令中~");
   });
 
+  it("names what a search looks for without its wildcards, and nothing when it is only wildcards", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const line = (pattern: string) => {
+      const { behavior, detail } = toolStep("search_files", { pattern, path: "/nas/共享空间" });
+      return behaviorLine(behavior, detail, false);
+    };
+    // Only wildcards: the line that names nothing.
+    expect(toolStep("search_files", { pattern: "*", path: "/nas/共享空间" }).detail).toBe("");
+    expect(line("*")).toBe("找找看藏在哪里~");
+    expect(line("*照片*")).toBe("帮你找找 “照片” 在 共享空间~");
+    expect(line("照片")).toBe("帮你找找 “照片” 在 共享空间~");
+    expect(toolStep("mcp__anas__search_photos", { query: "海边?" }).detail).toBe("“海边”");
+  });
+
   it("shows a detail as plain text", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     // Not replacement patterns.
