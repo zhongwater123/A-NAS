@@ -69,7 +69,7 @@ import {
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { clearBox } from "./stepAside";
+import { clearBox, withinArea } from "./stepAside";
 import {
   COMPANION_PET,
   COMPANION_SIZE,
@@ -287,9 +287,11 @@ function rememberedPlace(): unknown {
   try {
     const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null") as { rx?: unknown; ry?: unknown } | null;
     if (typeof saved?.rx !== "number" || typeof saved.ry !== "number") return null;
-    // Within the page, as dsh-pet's host keeps a position command (its centre on the page).
-    const within = (value: number) => Math.min(1, Math.max(0, value));
-    return { x: within(saved.rx), y: within(saved.ry), mode: "instant" };
+    // Wholly within the part of the page it may use: a place left on a larger page, or hanging off its
+    // edge, comes back on it. Where it lands, it then keeps clear of the window on top as ever.
+    const page = { width: window.innerWidth, height: window.innerHeight };
+    const { rx, ry } = withinArea({ rx: saved.rx, ry: saved.ry }, pet.size, page);
+    return { x: rx, y: ry, mode: "instant" };
   } catch {
     // An unreadable position leaves the companion in its corner.
     return null;

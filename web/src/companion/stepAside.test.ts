@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { apps } from "../desktop/apps";
 import { floatingArea } from "../desktop/focusedWindow";
-import { type PageBox, stepAside } from "./stepAside";
+import { type PageBox, stepAside, withinArea } from "./stepAside";
 
 /** The companion's hit area in its default place on a 1366×820 page: 90×107 at the bottom right. */
 const hit: PageBox = { left: 1177, top: 627, right: 1267, bottom: 734 };
@@ -88,5 +88,17 @@ describe("where the companion steps aside to", () => {
     const to = stepAside({ left: 200, top: 600, right: 290, bottom: 707 }, window, narrow);
     expect(to).toEqual({ x: 400 - 8 - 90, y: 725 - 107 });
     expect(covers(moved(to, { left: 200, top: 600, right: 290, bottom: 707 }), window)).toBe(false);
+  });
+});
+
+describe("a remembered place, brought back on the page", () => {
+  it("keeps it where it was when it is on the page, and brings in what hangs off it or lies under the rail", () => {
+    expect(withinArea({ rx: 0.5, ry: 0.5 }, 240, page)).toEqual({ rx: 0.5, ry: 0.5 });
+    // From the bottom right corner: the hit area's right and bottom 8 px inside the page.
+    const corner = withinArea({ rx: 1, ry: 1 }, 240, page);
+    expect(corner.rx * page.width - 120 + 165).toBeCloseTo(page.width - 8, 6);
+    // From the top left, under the rail: out to its right.
+    const rail = withinArea({ rx: 0, ry: 0 }, 240, page);
+    expect(rail.rx * page.width - 120 + 75).toBeCloseTo(88, 6);
   });
 });

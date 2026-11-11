@@ -1156,6 +1156,19 @@ describe("walking, throwing and resting", () => {
     expect(fetched).not.toContain("螃蟹走路");
   });
 
+  it("comes back wholly on the page from a place remembered at its very corner", async () => {
+    localStorage.setItem(POSITION_KEY, JSON.stringify({ rx: 1, ry: 1 }));
+    serve([IDLE]);
+    const { root } = await mount();
+    await waitFor(() => expect(root.style.left).not.toBe(""));
+    // Its hit area within the page less 8 px, left of the system rail's 88 px.
+    const hit = hitArea(root);
+    expect(hit.left).toBeGreaterThanOrEqual(88);
+    expect(hit.top).toBeGreaterThanOrEqual(8);
+    expect(hit.right).toBeCloseTo(1024 - 8, 0);
+    expect(hit.bottom).toBeCloseTo(768 - 8, 0);
+  });
+
   it("flies when it is flung, and lands within the page", async () => {
     serve([IDLE, "被鼠标拖拽悬空反馈"]);
     const { pet, root } = await mount();

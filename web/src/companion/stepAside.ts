@@ -87,6 +87,22 @@ export function clearBox(box: BoxPoint, size: number, page: Viewport): BoxPoint 
   return to && { x: box.x + to.x - hit.left, y: box.y + to.y - hit.top };
 }
 
+/**
+ * A centre as a share of the page moved, if need be, so that the companion's hit area is wholly within the
+ * part of the page it may use: a place remembered on a larger page, or at its very edge, comes back on it.
+ */
+export function withinArea(center: Center, size: number, page: Viewport): Center {
+  const { halfW, halfH, bottomPad } = derivePetMetrics(size);
+  const box = { x: center.rx * page.width - halfW, y: center.ry * page.height - halfH };
+  const hit = bodyPixelBox({ ...box, size, bottomPad });
+  const area = floatingArea(page);
+  const shift = (low: number, high: number, start: number, end: number) =>
+    end - start > high - low ? (low + high - start - end) / 2 : start < low ? low - start : end > high ? high - end : 0;
+  const dx = shift(area.left, area.right, hit.left, hit.right);
+  const dy = shift(area.top, area.bottom, hit.top, hit.bottom);
+  return { rx: (box.x + dx + halfW) / page.width, ry: (box.y + dy + halfH) / page.height };
+}
+
 /** The same for a centre as a share of the page, as a position command gives it. */
 export function clearCenter(center: Center, size: number, page: Viewport): Center | null {
   const { halfW, halfH } = derivePetMetrics(size);
