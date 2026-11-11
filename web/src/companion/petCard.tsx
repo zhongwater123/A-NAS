@@ -24,7 +24,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
-import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
+import { currentTaskNotices, loadTaskNotices, taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
 import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
 import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
@@ -75,6 +75,7 @@ import {
   COMPANION_SIZE,
   companionState,
   onTurnStopped,
+  onTurns,
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
@@ -287,16 +288,15 @@ const AWAY_KEEP_MS = 12 * 60 * 60 * 1000;
 
 /** What happened while the member was away: how a turn ended, and new results by their notice's id. */
 interface Away {
-  ended: { state: "success" | "error"; at: number; sessionId: string | null } | null;
+  ended: { state: "success" | "error"; at: number } | null;
   results: Map<string, number>;
 }
 
 const nothingAway = (): Away => ({ ended: null, results: new Map() });
 
-/** A turn's end that a later turn set aside: the page shows it again when that turn goes, as old news. */
-function setAside(away: Away, aside: Set<string>): void {
-  const sessionId = away.ended?.sessionId;
-  if (sessionId) aside.add(sessionId);
+/** Whether the member is away from the companion: it rests, the page is hidden, or the screen saver is up. */
+function awayFrom(paused: boolean): boolean {
+  return paused || document.hidden || localConsoleCovered();
 }
 
 /** Where the member last left the companion on this device, as a position command's data. */
@@ -434,12 +434,12 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   /** Ends a pause the member's absence started (the page is not hidden), as their next input would. */
   const resume = useRef(() => {});
   /**
-   * What happened while the companion was paused, the member away: told once when they come back
-   * (comeBack). It goes when the next turn starts, or after AWAY_KEEP_MS.
+   * What happened while the member was away (awayFrom): told once when they come back (comeBack). A
+   * turn's end goes when the next turn starts; anything goes after AWAY_KEEP_MS.
    */
   const away = useRef<Away>(nothingAway());
-  /** The conversations whose end a later turn set aside before the member came back. */
-  const asideRef = useRef(new Set<string>());
+  /** When the companion last told the member something on return: a result listed just after waits. */
+  const toldAt = useRef(Number.NEGATIVE_INFINITY);
   /** A turn's check or cross shown after the member came back, for as long as a turn's own. */
   const [told, setTold] = useState<{ sign: "success" | "error"; at: number } | null>(null);
   useEffect(() => {
@@ -659,11 +659,13 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       const sleep = heldSleep.current;
       heldSleep.current = null;
       if (sleep) setLeaves((current) => withLeaf(current, "sleep", sleep));
+      // What waited is told once the card goes on: back from a pause, or from under the screen saver,
+      // which can come up while the companion has not paused (a command of VNAS's put that off).
+      const { ended, results } = away.current;
+      if (pausedRef.current || ended !== null || results.size > 0) window.setTimeout(() => comeBack.current(), 0);
       if (!pausedRef.current) return;
       pausedRef.current = false;
       setPaused(false);
-      // Once the card goes on.
-      window.setTimeout(() => comeBack.current(), 0);
     };
     resume.current = wake;
     setCompanionPaused(document.hidden);
@@ -696,23 +698,15 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
               ? target.name
               : null;
         if (name === null) continue;
-        // States go to the card paused or not: it shows them when it goes on. All but how a turn ended
-        // while the member was away: the card idles rather than play it to nobody, and the member is told
-        // when they come back (comeBack). A turn that starts forgets what waited to be told.
+        // States go to the card paused or not: it shows them when it goes on. All but a turn's end while
+        // the member is away: the card idles rather than play it to nobody, and the member is told how the
+        // turn ended when they come back (onTurns, comeBack).
         if (name === "workStatus") {
           const status = readWorkStatus(leaf);
           const stage = status?.state ?? null;
-          if (stage !== null && stage !== "success" && stage !== "error") {
-            setAside(away.current, asideRef.current);
-            away.current = nothingAway();
-            setTold(null);
-          }
-          if (status && pausedRef.current && (stage === "success" || stage === "error")) {
-            const sessionId = status.sessionId ?? null;
-            if (sessionId === null || !asideRef.current.has(sessionId))
-              away.current.ended = { state: stage, at: Date.now(), sessionId };
+          if (status && awayFrom(pausedRef.current) && (stage === "success" || stage === "error"))
             taken.push([name, { ...leaf, data: { ...status, state: null, anim: null } }]);
-          } else taken.push([name, leaf]);
+          else taken.push([name, leaf]);
         } else if (name === "lock") taken.push([name, leaf]);
         // Under the local console's screen saver nobody sees the page either (D12): nothing written
         // then ends a rest, not even a sleep, a wake or the wake a lock brings.
@@ -784,10 +778,12 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     seen.current = new Set(notices.map((notice) => notice.id));
     if (!before || notices.every((notice) => before.has(notice.id))) return;
     // The member is away: told when they come back, unless they read it elsewhere first.
-    if (pausedRef.current) {
+    if (awayFrom(pausedRef.current)) {
       for (const notice of notices) if (!before.has(notice.id)) away.current.results.set(notice.id, Date.now());
       return;
     }
+    // Just told something on return: a result listed a moment later is not a second thing to tell.
+    if (Date.now() - toldAt.current < BUBBLE_DURATION_MS) return;
     const state = companionState.read();
     const own = state.pets[COMPANION_PET];
     if (readWorkStatus(state.sections.workStatus)?.state || lockHeld(own?.lock)) return;
@@ -798,28 +794,52 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
   }, [notices, animations]);
 
+  // How a turn of this window ends while the member is away waits for them; an error is not overwritten by
+  // another conversation's success. A turn that starts forgets it: what it ends in is the news then. New
+  // results of scheduled tasks have nothing to do with turns and stay.
+  useEffect(
+    () =>
+      onTurns({
+        started: () => {
+          away.current.ended = null;
+          setTold(null);
+        },
+        ended: (_sessionId, state) => {
+          if (!awayFrom(pausedRef.current)) return;
+          if (state === "success" && away.current.ended?.state === "error") return;
+          away.current.ended = { state, at: Date.now() };
+        },
+      }),
+    [],
+  );
+
   // The member comes back to the page (an input after a pause, the page shown again, the local console's
   // screen saver gone): the companion tells the one thing that most needs them, once, with one clip and one
   // line. VNAS waiting for them first, which its stage shows as it is; then a turn that ended in an error
   // (a sigh, its cross for as long as a turn's own); then a new result of a scheduled task still unread (a
-  // wave); then a turn that ended well (only its check, no fireworks again). Nothing during a turn, asleep
-  // or locked. On the screen the family shares, no task's name.
+  // wave), by the list read again now, as another device may have read it meanwhile; then a turn that ended
+  // well (only its check, no fireworks again). Nothing during a turn, asleep or locked. On the screen the
+  // family shares, no task's name.
   useEffect(() => {
     comeBack.current = () => {
+      if (document.hidden || localConsoleCovered()) return;
       const { ended, results } = away.current;
       away.current = nothingAway();
-      asideRef.current.clear();
       const now = Date.now();
       const recent = (at: number) => now - at < AWAY_KEEP_MS;
-      const unread = notices.filter((notice) => recent(results.get(notice.id) ?? Number.NEGATIVE_INFINITY));
+      const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
       const outcome = ended && recent(ended.at) ? ended.state : null;
-      if (outcome === null && unread.length === 0) return;
+      if (outcome === null && waiting.size === 0) return;
       const state = companionState.read();
       const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
       if (stage !== null && stage !== "success" && stage !== "error") return;
       const own = state.pets[COMPANION_PET];
       if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
+      const tell = () => {
+        toldAt.current = Date.now();
+      };
       if (outcome === "error") {
+        tell();
         setTold({ sign: "error", at: now });
         const line = behaviorLine("error");
         if (line) companionState.writePet(COMPANION_PET, "say", { text: line, anim: false });
@@ -828,18 +848,31 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
           companionState.writePet(COMPANION_PET, "anim", { name: clip });
         return;
       }
-      if (unread.length > 0) {
+      const done = () => {
+        if (outcome !== "success") return;
+        tell();
+        setTold({ sign: "success", at: now });
+      };
+      if (waiting.size === 0) {
+        done();
+        return;
+      }
+      void loadTaskNotices().finally(() => {
+        const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
+        if (unread.length === 0) {
+          done();
+          return;
+        }
+        tell();
         const task = unread.at(-1)?.task?.name;
         const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
         companionState.writePet(COMPANION_PET, "say", { text, anim: false });
         const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
         if (responses.length > 0)
           companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
-        return;
-      }
-      setTold({ sign: "success", at: now });
+      });
     };
-  }, [notices, animations]);
+  }, [animations]);
 
   // The member stopped a turn here: its stage is gone, and the companion curtsies once with a line, then
   // idles, through the page's state as the wave does. Only when it can be seen and is free to move: not
