@@ -1,7 +1,7 @@
 # Web 桌面终端
 
 状态：implemented（opt-in，默认关闭）
-更新时间：2026-10-21
+更新时间：2026-11-11
 
 ## 目标
 
@@ -20,7 +20,7 @@
 
 - Given：设备的 root 已按[运行手册](../runbooks/enable-admin-terminal.md)开启终端，设备管理员已登录。
 - When：管理员打开“设置”，在侧栏选择“终端”；在“全部应用”中搜索“终端”或“命令行”会找到“设置”。
-- Then：内容区变为占满高度的深色终端。页头写明“以 <账号> 的 Linux 账号在 <主机名> 上运行的 Shell”，并显示连接状态（正在连接、已连接、已结束）和“新建会话”；终端顶栏显示 `<账号>@<主机名>` 与当前行列数。Shell 在新 PTY 中以**该管理员本人的 Linux 账号**（UID 与 `a-nas-users`、`a-nas-admins` 组，[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）启动登录 Shell（`/bin/bash -l`，缺失时 `/bin/sh -l`），起始目录为其个人空间，窗口尺寸变化会同步到 PTY 行列数。终端中的文件权限与该管理员通过 Web 访问一致，不能读取其他成员的个人空间。
+- Then：内容区变为占满高度的深色终端。页头显示连接状态（正在连接、已连接、已结束）和“新建会话”；终端顶栏显示 `<账号>@<主机名>` 与当前行列数。Shell 在新 PTY 中以**该管理员本人的 Linux 账号**（UID 与 `a-nas-users`、`a-nas-admins` 组，[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）启动登录 Shell（`/bin/bash -l`，缺失时 `/bin/sh -l`），起始目录为其个人空间，窗口尺寸变化会同步到 PTY 行列数。终端中的文件权限与该管理员通过 Web 访问一致，不能读取其他成员的个人空间。
 - And：桌面、程序坞和“全部应用”中没有单独的“终端”图标；已保存的桌面图标顺序中的旧“终端”记录被忽略。成员的设置侧栏没有“终端”。
 
 ### 切换分区与最小化保留会话

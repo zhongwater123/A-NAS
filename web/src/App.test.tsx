@@ -362,7 +362,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       return screen.getByRole("dialog", { name: "设置" });
     };
     let settings = await openAccount();
-    await user.click(await within(settings).findByRole("button", { name: "修改密码…" }));
+    await user.click(await within(settings).findByRole("button", { name: /^密码/ }));
     await user.type(within(settings).getByLabelText("当前密码"), "correct horse battery staple");
 
     const statusBar = screen.getByRole("banner", { name: "设备状态" });
@@ -371,7 +371,7 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     settings = await openAccount();
     expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
-    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
+    expect(within(settings).getByRole("button", { name: /^密码/ })).toBeTruthy();
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {
@@ -946,7 +946,7 @@ describe("Settings on the desktop", () => {
     expect((await within(settings).findByRole("button", { name: "我的账号" })).getAttribute("aria-current")).toBe(
       "page",
     );
-    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
+    expect(within(settings).getByRole("button", { name: /^密码/ })).toBeTruthy();
   });
 
   it("lets a member choose a nickname that the desktop shows instead of the account name", async () => {
@@ -956,7 +956,7 @@ describe("Settings on the desktop", () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: "账号（alice）" })).toBeTruthy();
     const settings = await openSettingsOn(user, "我的账号");
-    await user.click(within(settings).getByRole("button", { name: "设置昵称…" }));
+    await user.click(within(settings).getByRole("button", { name: /^昵称/ }));
     const form = within(settings).getByRole("form", { name: "修改昵称" });
     await user.type(within(form).getByLabelText("昵称"), "小爱");
     await user.click(within(form).getByRole("button", { name: "保存昵称" }));
@@ -1008,7 +1008,7 @@ describe("Settings on the desktop", () => {
       "/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef",
     );
 
-    await user.click(within(settings).getByRole("button", { name: "移除" }));
+    await user.click(within(settings).getByRole("button", { name: "移除头像" }));
     expect(await within(settings).findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.querySelector("img")).toBeNull();
     expect(account.textContent).toContain("A");
