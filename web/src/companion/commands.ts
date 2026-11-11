@@ -39,6 +39,7 @@ import { TERMINAL_STATUSES } from "./dsh-pet/host/playback/status";
 import type { PlaybackRecord } from "./dsh-pet/host/playback/store";
 import { pickSleepNames } from "./dsh-pet/host/sleep";
 import { companionLock, companionPlayback, companionSleep } from "./host";
+import { memberQuiet } from "./quiet";
 import { clearCenter } from "./stepAside";
 import {
   COMPANION_PET,
@@ -367,9 +368,13 @@ async function carryOut(
       return ok({ status: "ok", sleeping: true, changed });
     }
     case "wake":
+      // The member asked for quiet: only they wake it.
+      if (memberQuiet()) return refuse("member-quiet", "成员让伙伴安静了，只有成员能叫醒它");
       carry(action);
       return ok({ status: "ok", sleeping: false, changed: companionSleep.wake(COMPANION_PET) });
     case "lock": {
+      // Taking the lock would wake it.
+      if (memberQuiet()) return refuse("member-quiet", "成员让伙伴安静了，只有成员能叫醒它");
       const ttl = typeof args.ttl === "number" && args.ttl > LOCK_TTL_CAP_MS ? LOCK_TTL_CAP_MS : args.ttl;
       const d = companionLock.acquire({ petId: COMPANION_PET, lockId: args.lockId, ttl });
       if (!d.ok) {

@@ -9,6 +9,7 @@ import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
+import { companionMode, resetCompanionMode, setCompanionMode } from "./quiet";
 import {
   companionReady,
   companionState,
@@ -88,6 +89,7 @@ afterEach(() => {
   publishFocusedWindow(null);
   act(() => resetTaskNotices());
   localStorage.clear();
+  act(() => resetCompanionMode());
   // A test that plays Safari must not leave the next one in it.
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -758,6 +760,84 @@ describe("what VNAS asks of the companion", () => {
     fireEvent.click(pet);
     await plays("睡觉-起来");
     expect((companionState.read().pets.main.sleep.data as { sleeping: boolean }).sleeping).toBe(false);
+  });
+
+  describe("quiet at the member's asking", () => {
+    const SLEEP = ["睡觉-开始", "睡觉-循环", "睡觉-起来"];
+    const MODE_KEY = "a-nas.companion.mode";
+    /** Quiet as this device stored it, before the companion comes. */
+    const storedQuiet = (mode: "quiet" | "hidden") => {
+      localStorage.setItem(MODE_KEY, mode);
+      act(() => resetCompanionMode());
+    };
+    /** The sleep's start played to its end: the loop comes. */
+    const asleep = async (videos: HTMLVideoElement[]) => {
+      await plays("睡觉-开始");
+      await ready(videos);
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await plays("睡觉-循环");
+      await ready(videos);
+    };
+
+    it("yawns and sleeps on Esc, remembers it on this device, and wakes when Settings sets it as usual", async () => {
+      serve([IDLE, ...SLEEP]);
+      const { pet, videos } = await mount();
+      fireEvent.keyDown(pet, { key: "Escape" });
+      await asleep(videos);
+      expect(localStorage.getItem(MODE_KEY)).toBe("quiet");
+      expect(companionMode()).toBe("quiet");
+      act(() => setCompanionMode("normal"));
+      await plays("睡觉-起来");
+      expect((companionState.read().pets.main.sleep.data as { sleeping: boolean }).sleeping).toBe(false);
+      expect(localStorage.getItem(MODE_KEY)).toBeNull();
+    });
+
+    it("shows VNAS at work only as a still dot, and when clicked awake tells how the turn ended", async () => {
+      storedQuiet("quiet");
+      serve([IDLE, ...SLEEP, "写代码", "工作状态-思考冒泡", "工作状态-垂头叹气冒汗"]);
+      const { pet, root, videos } = await mount();
+      const layer = root.closest("[data-vnas-overlay]") as HTMLElement;
+      await asleep(videos);
+      fetched = [];
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await waitFor(() => expect(layer.dataset.companionWork).toBe("quiet"));
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      await settle();
+      expect(layer.dataset.companionWork).toBeUndefined();
+      expect(fetched).toEqual([]);
+      // Away and back while it sleeps: what waits stays for its waking.
+      hide(true);
+      hide(false);
+      await settle();
+      expect(fetched).toEqual([]);
+      fireEvent.click(pet);
+      await plays("睡觉-起来");
+      expect(companionMode()).toBe("normal");
+      await waitFor(() => expect(layer.dataset.companionWork).toBe("error"));
+      await plays("工作状态-垂头叹气冒汗");
+    });
+
+    it("is not loaded at all while hidden on this device", async () => {
+      storedQuiet("hidden");
+      let listed = 0;
+      server.use(
+        http.untyped.get(`${origin}/companion/animations`, () => {
+          listed += 1;
+          return HttpResponse.json({ animations: served([IDLE]) });
+        }),
+      );
+      render(<Companion />);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 1500)));
+      expect(listed).toBe(0);
+      expect(screen.queryByLabelText("大肥鱼")).toBeNull();
+      act(() => setCompanionMode("normal"));
+      expect(await screen.findByLabelText("大肥鱼", {}, { timeout: 4000 })).toBeInTheDocument();
+      expect(listed).toBe(1);
+    });
   });
 
   it("holds still under a lock, and goes on when the lock ends", async () => {

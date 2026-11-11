@@ -73,6 +73,13 @@
   color: #c23b3b;
 }
 
+/* Quiet, asleep at the member's asking: VNAS is busy, only a still dot says so. */
+.layer[data-companion-work="quiet"] :global(.dsh-pet-root)::after {
+  content: "•";
+  color: #3a4766;
+  animation: none;
+}
+
 /* The companion rests: so does the sign. */
 .layer[data-companion-rest] :global(.dsh-pet-root)::after {
   animation-play-state: paused;
