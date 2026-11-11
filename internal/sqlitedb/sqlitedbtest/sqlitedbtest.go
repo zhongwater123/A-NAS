@@ -56,46 +56,47 @@ func Structure(t testing.TB, db *sql.DB) string {
 		t.Fatal(err)
 	}
 	fmt.Fprintf(&out, "version %d\n", version)
-	rows, err := db.Query(`SELECT type, name, IFNULL(sql, '') FROM sqlite_master
+	objects := rowsOf(t, db, 3, `SELECT type, name, IFNULL(sql, '') FROM sqlite_master
 WHERE name NOT LIKE 'sqlite_%' AND name <> 'schema_downgrades' ORDER BY type, name`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	type object struct{ kind, name, sql string }
-	var objects []object
-	for rows.Next() {
-		var o object
-		if err := rows.Scan(&o.kind, &o.name, &o.sql); err != nil {
-			t.Fatal(err)
-		}
-		objects = append(objects, o)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
 	for _, o := range objects {
-		if o.kind != "table" {
+		kind, name, statement := o[0], o[1], o[2]
+		if kind != "table" {
 			// SQLite keeps an index's, trigger's or view's statement as written.
-			fmt.Fprintf(&out, "%s %s: %s\n", o.kind, o.name, strings.Join(strings.Fields(o.sql), " "))
+			fmt.Fprintf(&out, "%s %s: %s\n", kind, name, strings.Join(strings.Fields(statement), " "))
 			continue
 		}
 		// ALTER TABLE rewrites a table's statement, so its columns stand for it.
-		fmt.Fprintf(&out, "table %s\n", o.name)
-		columns, err := db.Query("SELECT name, type, \"notnull\", IFNULL(dflt_value, ''), pk, hidden FROM pragma_table_xinfo(?) ORDER BY cid", o.name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for columns.Next() {
-			var name, kind, defaultValue string
-			var notNull, pk, hidden int
-			if err := columns.Scan(&name, &kind, &notNull, &defaultValue, &pk, &hidden); err != nil {
-				t.Fatal(err)
-			}
-			fmt.Fprintf(&out, "  %s %s notnull=%d default=%s pk=%d hidden=%d\n", name, kind, notNull, defaultValue, pk, hidden)
-		}
-		if err := columns.Close(); err != nil {
-			t.Fatal(err)
+		fmt.Fprintf(&out, "table %s\n", name)
+		for _, c := range rowsOf(t, db, 6, `SELECT name, type, "notnull", IFNULL(dflt_value, ''), pk, hidden
+FROM pragma_table_xinfo(?) ORDER BY cid`, name) {
+			fmt.Fprintf(&out, "  %s %s notnull=%s default=%s pk=%s hidden=%s\n", c[0], c[1], c[2], c[3], c[4], c[5])
 		}
 	}
 	return out.String()
+}
+
+// rowsOf is every row of a query with width columns, each as text.
+func rowsOf(t testing.TB, db *sql.DB, width int, query string, args ...any) [][]string {
+	t.Helper()
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var all [][]string
+	for rows.Next() {
+		row := make([]string, width)
+		pointers := make([]any, width)
+		for i := range row {
+			pointers[i] = &row[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return all
 }
