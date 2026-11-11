@@ -22,6 +22,10 @@ fail() {
 # The product and the Debian packages it runs on are one release (ADR 0031).
 product=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas 2>/dev/null)
 host=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-host 2>/dev/null)
+# a-nas's postinst runs this check while dpkg still calls a-nas half-configured.
+if [[ "${DPKG_MAINTSCRIPT_PACKAGE:-}" == a-nas && "$product" == half-configured\ * ]]; then
+  product="installed ${product#half-configured }"
+fi
 if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
   pass "a-nas and a-nas-host ${product#installed }"
 else
@@ -70,6 +74,11 @@ fi
 
 for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service \
   anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket smbd.service; do
+  # A unit that is starting or restarting, as smbd does when the Host Agent
+  # writes Samba's configuration, gets time to finish.
+  for _ in $(seq 1 30); do
+    case "$(systemctl is-active "$unit")" in activating | reloading | deactivating) sleep 1 ;; *) break ;; esac
+  done
   if systemctl is-active --quiet "$unit"; then
     pass "$unit is active"
   else

@@ -32,7 +32,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test release build build-binaries packages check check-steps clean
 
 all: check
 
@@ -344,10 +344,20 @@ ai-test:
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
 
-# Installs the release into a disposable Debian 13 systemd container; needs
-# Docker and the image from scripts/build-system-test-image.sh.
+# Installs the release with apt from a signed repository into a disposable
+# Debian 13 systemd container, then upgrades, rolls back and upgrades again;
+# needs Docker, Go and the image from scripts/build-system-test-image.sh.
 system-test: packages
 	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
+
+# A release (ADR 0034): the packages make check and make system-test passed at
+# this commit, with the content packages from CONTENT, in the signed apt
+# repository REPO (scripts/release.sh). GnuPG and aptly run in the system
+# test's image.
+REPO ?= $(BUILD_DIR)/apt
+release:
+	@test -n "$(CONTENT)" || { echo "make release needs CONTENT, the release content store (scripts/build-content-packages.sh)" >&2; exit 2; }
+	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/release.sh $(REPO) $(CONTENT)
 
 build: web-build build-binaries
 

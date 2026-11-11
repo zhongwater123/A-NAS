@@ -79,8 +79,12 @@ package() {
   rm -rf -- "$root"
   echo "$name"
 }
-# have NAME ARCH: OUT has the package already.
-have() { [[ -f "$out/${1}_1_$2.deb" ]]; }
+# have NAME ARCH: OUT has the package already, or the apt repository that
+# ANAS_CONTENT_REPOSITORY names does (scripts/release.sh).
+have() {
+  [[ -f "$out/${1}_1_$2.deb" ]] ||
+    [[ -n "${ANAS_CONTENT_REPOSITORY:-}" && -f "$ANAS_CONTENT_REPOSITORY/pool/main/a/$1/${1}_1_$2.deb" ]]
+}
 
 # Models (ADR 0016).
 for role in "${ai_roles[@]}"; do
@@ -178,7 +182,7 @@ if ! "$stand_in" && ! have "$name" amd64; then
   sha=$(pin_field "$pin" sha256)
   tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
   if [[ ! -e "$tarball" ]]; then
-    # A release needs it; the system test does not.
+    # A release needs it (scripts/release.sh); the system test does not.
     echo "note: no $tarball, so no $name" >&2
   elif ! pinned "$tarball" "$pin"; then
     echo "not as pinned: $tarball (ai/assistant-spike/runtime.json)" >&2

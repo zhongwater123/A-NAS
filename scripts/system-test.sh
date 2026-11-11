@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 # System test of the multi-user permission model. It installs the release's
-# Debian packages (ADR 0034) into a disposable Debian 13 container where
-# systemd is PID 1, then checks every entry point that touches the data
-# volume: Web files (File Broker workers), SMB, the photo API, the FFmpeg
+# Debian packages with apt from a signed repository (ADR 0034) into a
+# disposable Debian 13 container where systemd is PID 1, then checks every
+# entry point that touches the data volume: Web files (File Broker workers), SMB, the photo API, the FFmpeg
 # worker shared by the media center and music, the administrator terminal,
 # the LAN Web entry that Caddy serves on port 80, and the internet entry's
 # HTTPS site. Unlike tests that start the daemons by hand, it runs them under
 # the production sandboxes, so it catches a unit that takes the Host Agent's
 # CAP_SETUID (issue #38).
 #
+# The repository holds three releases: the one under test, the "previous" one
+# (the same programs at a lower version) and a "next" one whose Product
+# Service has one more database step (internal/accounts/rollbacktest.go). The
+# test installs the previous release, upgrades to this one, and at the end
+# upgrades to the next, rolls back to this one and to the previous, and
+# upgrades again, as the runbooks' apt commands do. On success it writes
+# build/.system-tested, which names the packages make release may publish.
+#
 # Usage: make packages && scripts/build-system-test-image.sh &&
 #        scripts/system-test.sh [IMAGE]
-# Prints PASS/FAIL lines and exits non-zero on any failure.
+# Needs Docker and Go. Prints PASS/FAIL lines and exits non-zero on any
+# failure.
 #
 # The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
 # Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
@@ -43,6 +52,24 @@ if [[ "${1:-}" != --inside ]]; then
     content=build/stand-in-content
     bash "$repo/scripts/build-content-packages.sh" --stand-in "$repo/$content" "$repo/build" >/dev/null
   fi
+  # The repository, signed with a key made for this run; GnuPG and aptly
+  # run in the same image (scripts/apt-repository.sh).
+  export IMAGE=$image
+  version=$(dpkg-deb --field "${products[0]}" Version)
+  work=$repo/build/system-test
+  rm -rf -- "$work"
+  trap 'rm -rf -- "$work"' EXIT
+  bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
+  install -d "$work/next-programs"
+  cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
+  (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
+    -o "$work/next-programs/anas-api" ./cmd/anas-api)
+  bash "$repo/scripts/build-packages.sh" "$work/next" "$version+next" "$work/next-programs" >/dev/null
+  bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$version" "$work/gnupg" >/dev/null
+  bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host}_*.deb "$work"/next/a-nas{,-host}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -50,16 +77,20 @@ if [[ "${1:-}" != --inside ]]; then
   fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" -e "ANAS_SYSTEM_TEST_CONTENT_PACKAGES=/src/$content" \
-    "${real[@]}" "${assistant[@]}" "$image" >/dev/null
-  trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
+    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" -e ANAS_SYSTEM_TEST_REPOSITORY=/src/build/system-test/repository \
+    -e "ANAS_SYSTEM_TEST_VERSION=$version" "${real[@]}" "${assistant[@]}" "$image" >/dev/null
+  trap 'docker rm -f "$name" >/dev/null 2>&1; rm -rf -- "$work"' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
     [[ "$state" == running || "$state" == degraded ]] && break
     sleep 1
   done
   status=0
+  rm -f "$repo/build/.system-tested"
   docker exec "$name" bash /src/scripts/system-test.sh --inside || status=$?
+  if ((status == 0)); then
+    (cd "$repo/build/packages" && sha256sum -- *.deb >"$repo/build/.system-tested")
+  fi
   # The container goes with this script, so the logs a failed run gathered
   # come out first; CI uploads them (#318).
   if ((status != 0)); then
@@ -99,13 +130,15 @@ trap diagnose EXIT
 # private mounts, which would hide that.
 mount --make-rshared /
 
-# The release's packages: the product's, and its content packages, real or
-# stand-ins (the outer script).
+# The release under test, the one before it and the next one, in the signed
+# repository the outer script made, with the content packages, real or
+# stand-ins.
 # shellcheck source=lib/content.sh
 . /src/scripts/lib/content.sh
-shopt -s nullglob
-packages=(/src/build/packages/a-nas-host_*.deb "$ANAS_SYSTEM_TEST_CONTENT_PACKAGES"/*.deb /src/build/packages/a-nas_*.deb)
-shopt -u nullglob
+repository=$ANAS_SYSTEM_TEST_REPOSITORY
+version=$ANAS_SYSTEM_TEST_VERSION
+previous=$version~previous
+next=$version+next
 # Each model role's manifest, as $ai/ROLE.json, for the checks below.
 ai=/tmp/ai-manifests
 install -d "$ai"
@@ -189,14 +222,29 @@ ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit
 install -d -m 0750 /etc/a-nas
 printf 'ANAS_SMB_INTERFACE=%s\n' "$iface" > /etc/a-nas/site.conf
 
+# apt reads the A-NAS repository alone, as the deploy runbook adds it: the
+# image's Debian and Caddy sources would need the network, and every package
+# A-NAS depends on is installed already.
+install -d /etc/apt/sources.list.d/disabled
+mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
+dpkg -i "$repository"/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_*.deb >/tmp/keyring.log
+sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
+  /usr/share/doc/a-nas-archive-keyring/a-nas.sources >/etc/apt/sources.list.d/a-nas.sources
+# apt_install VERSION NAME: the runbook's command for the product's packages
+# at VERSION, which may be older; apt's output goes to /tmp/NAME.log.
+apt_install() {
+  apt-get update -qq >"/tmp/$2.log" 2>&1 &&
+    apt-get install -y --no-install-recommends --allow-downgrades "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
+}
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
-# dpkg, not apt: it fails instead of downloading a dependency the image lacks.
-if ! dpkg -i "${packages[@]}" >/tmp/install.log 2>&1; then
-  tail -40 /tmp/install.log
-  echo "FAIL the release's packages install"
-  exit 1
-fi
-echo "PASS the release's packages install"
+for release in "$previous" "$version"; do
+  if ! apt_install "$release" "install-$release" || ! a-nas-check >"/tmp/check-$release.log" 2>&1; then
+    tail -n 40 "/tmp/install-$release.log" "/tmp/check-$release.log"
+    echo "FAIL apt installs A-NAS $release from the signed repository"
+    exit 1
+  fi
+  echo "PASS apt installs A-NAS $release from the signed repository"
+done
 
 # Record the volume as storage initialization would have, so the Product
 # Service's volume guard accepts it, then restart it to load the record. It
@@ -348,16 +396,18 @@ verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a 
 }
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
-# reinstall NAME: installs the product's packages again over themselves, as an
-# upgrade does with their scripts, leaving the content packages as they are;
-# then waits until the restarted Product Service answers and the photo service
-# is ready again. dpkg's output goes to /tmp/NAME.log.
+# reinstall NAME [VERSION]: installs the product's packages at VERSION, this
+# release's unless given, with apt, the runbook's command, which runs their
+# scripts as an upgrade does even over the same version; the content packages
+# stay as they are. Then waits until the restarted Product Service answers and
+# the photo service is ready again. apt's output goes to /tmp/NAME.log.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 reinstall() {
   local since
   since=$(date '+%Y-%m-%d %H:%M:%S')
-  if ! dpkg -i /src/build/packages/a-nas-host_*.deb /src/build/packages/a-nas_*.deb >"/tmp/$1.log" 2>&1; then
-    echo "  dpkg failed; the end of /tmp/$1.log:"
+  if ! apt-get install -y --no-install-recommends --allow-downgrades --reinstall \
+    "a-nas=${2:-$version}" "a-nas-host=${2:-$version}" >"/tmp/$1.log" 2>&1; then
+    echo "  apt failed; the end of /tmp/$1.log:"
     tail -n 30 "/tmp/$1.log" | sed 's/^/  | /'
     return 1
   fi
@@ -366,7 +416,7 @@ reinstall() {
       journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
     sleep 0.2
   done
-  echo "  dpkg finished, but the services were not ready within 30 seconds:"
+  echo "  apt finished, but the services were not ready within 30 seconds:"
   curl -sS -o /dev/null -w '  healthz answered %{http_code}\n' "$api/healthz" || true
   systemctl status --no-pager --lines=10 anas-api anas-photos | sed 's/^/  | /'
   return 1
@@ -392,6 +442,29 @@ product_environment() { systemctl show -p Environment --value anas-api | tr ' ' 
 check "dpkg finds every file of the release's packages as packaged" \
   test -z "$(dpkg --verify a-nas a-nas-host $(content_packages /src) 2>&1)"
 check "a-nas-check finds the installed product working" quiet a-nas-check
+
+# apt takes only what the signed index lists: a package changed on the way and
+# an index changed after signing are refused (#171).
+tampered=/var/tmp/tampered-repository
+this_deb=$(cd "$repository" && find pool -name "a-nas_${version}_amd64.deb")
+install -d "$tampered/$(dirname "$this_deb")"
+cp -r "$repository/dists" "$tampered/"
+cp "$repository/$this_deb" "$tampered/$this_deb"
+printf x >>"$tampered/$this_deb"
+sed -i "s|^URIs: .*|URIs: file:$tampered|" /etc/apt/sources.list.d/a-nas.sources
+apt-get update -qq >/tmp/tampered.log 2>&1 || true
+check "apt refuses a package that differs from the signed index" \
+  fails apt-get install -y --reinstall --no-install-recommends "a-nas=$version"
+sed -i 's/^\(SHA256:\)$/\1\n 0000000000000000000000000000000000000000000000000000000000000000 1 main\/binary-amd64\/Packages/' \
+  "$tampered/dists/dev/InRelease"
+# apt update keeps the index it had and exits 0, so the refusal shows only in
+# its output.
+# shellcheck disable=SC2317,SC2329 # invoked through check
+index_refused() { apt-get update 2>&1 | tee -a "$hidden" | grep -Fq 'OpenPGP signature verification failed'; }
+check "apt refuses an index changed after signing" index_refused
+sed -i "s|^URIs: .*|URIs: file:$repository|" /etc/apt/sources.list.d/a-nas.sources
+apt-get update -qq >/tmp/apt-update.log 2>&1
+rm -rf "$tampered"
 
 # --- The units as installed, with every drop-in, read by Debian 13's systemd
 # as on the NAS (#278): each directive and value, and that each command exists.
@@ -1114,7 +1187,7 @@ detector_file=$(readlink /usr/lib/a-nas/ai/detector.onnx)
 detector_package=$(dpkg-query --search "$detector_file" | cut -d: -f1)
 printf x >> "$detector_file"
 check "dpkg finds a model file that changed" bash -c "dpkg --verify '$detector_package' | grep -Fq '$detector_file'"
-dpkg -i "$ANAS_SYSTEM_TEST_CONTENT_PACKAGES/${detector_package}_1_all.deb" >/tmp/detector-again.log 2>&1 || true
+apt-get install -y --reinstall "$detector_package" >/tmp/detector-again.log 2>&1 || true
 check "installing its package again restores it" test -z "$(dpkg --verify "$detector_package" 2>&1)"
 
 # --- The vector index (ADR 0028): one Qdrant instance per owning service,
@@ -2074,6 +2147,37 @@ ip link del anas-relay
 . /src/ai/assistant-spike/system-test.sh
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/disable-system-test.sh
+
+# --- Upgrade, roll back and upgrade again (ADR 0034), with apt from the
+# signed repository. The next release adds a step to control.db; rolling back,
+# this release takes the database back with the Down that step stored.
+# probe_table: control.db's user_version and whether it has the next
+# release's table.
+probe_table() {
+  python3 - <<'PY'
+import sqlite3
+db = sqlite3.connect("file:/var/lib/a-nas/control.db?mode=ro", uri=True)
+version = db.execute("PRAGMA user_version").fetchone()[0]
+probe = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'rollback_probe'").fetchone()[0]
+print(f"{version}:{probe}")
+PY
+}
+check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
+check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the upgrade copied the databases first" \
+  test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
+check "apt rolls back to this release" reinstall rollback-this "$version"
+check "this release took the database back with the newer release's Down" test "$(probe_table)" = 0:0
+check "a-nas-check passes after the rollback" quiet a-nas-check
+login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+check "a-nas-check passes on the previous release" quiet a-nas-check
+check "apt upgrades to this release again" reinstall upgrade-again "$version"
+check "a-nas-check passes after upgrading again" quiet a-nas-check
+login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "two copies of the databases stay" test "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' | wc -l)" = 2
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops
