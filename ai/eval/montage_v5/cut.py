@@ -71,7 +71,11 @@ FREE_ORDER = os.environ.get("CUT_ORDER") == "free"
 if FREE_ORDER:
     CASES = {k: (v[0], v[1].replace("按拍摄时间顺序", ""), *v[2:]) for k, v in CASES.items()}
 ORDER_ASKS = (("开头、中间、结尾按拍摄时间先后安排；", ""), ("检查内容和先后顺序", "检查内容"),
-              ("，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：", "："))
+              ("，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：", "："),
+              # 2026-11-11 (the user's wording, its example too): free order cut 新西兰 back and forth between
+              # places, its helicopter flight broken by roads, sheep and lakes.
+              ("- 每部分的画面个数不超过", "- 同一地点的画面连续排列：切到别的地点后，不再切回之前用过的地点。比如开头是雪山，"
+               "中间切到别的地方，之后又切回雪山，画面就不连贯了；\n- 每部分的画面个数不超过"))
 
 
 def chat(url, system, user, schema, name, max_tokens=3000):
@@ -937,6 +941,7 @@ def cut(case):
 
 
 PIECE_LEAST = 1.5    # seconds: no shot of a music cut shorter, the slots' and the fills'
+NEAR = 6            # cards either side in shooting order a short slot may be filled from
 SLOW_MOST = 2.5      # times: the ending shot drawn out at most this much to fill its slot
 # Sources tagged upside down over upright pixels (V5/rotation.json), turned back in every render of this
 # module, narrative or music: set once here, not per cut, so no cut can miss them.
@@ -958,22 +963,33 @@ def cut_to_music(case):
     fps = render.FPS
     spans = held.Spans(HERE / f"held-{case}.json")
     # A slot its picture's cards cannot fill (川西's opening stream, ch-001, is 2.3 s against a 3.2 s
-    # slot) is filled on from the cards next to them in shooting order, the next first: a slot short of
-    # its frames moves every later cut off the bar lines.
+    # slot) is filled on from the cards shot near them, NEAR either side of each in shooting order, the
+    # one whose picture is most like theirs first: a slot short of its frames moves every later cut off
+    # the bar lines. (2026-11-11, the user: the nearest alone put a starry night after a helicopter, ne-154
+    # after ne-153, and a window and a rotor after an aurora; likeness alone, 0.73-0.79 for those and 0.76
+    # for fills that were right, would reach other places.)
     catalog = [c["id"] for c in usable_cards(case)]
+    seen_as = {}
+
+    def picture(cid):
+        """The card's mean frame vector, over the index windows its span touches."""
+        if cid not in seen_as:
+            import numpy as np
+
+            c = cards[cid]
+            rows = [i for i, (v, a, b) in enumerate(ix.rows) if v == c["video"] and a < c["end"] and b > c["start"]]
+            v = ix.frames[rows].mean(axis=0)
+            seen_as[cid] = v / np.linalg.norm(v)
+        return seen_as[cid]
 
     def neighbours(ids):
-        at = sorted(catalog.index(i) for i in ids if i in catalog)
+        at = [catalog.index(i) for i in ids if i in catalog]
         if not at:
             return []
-        out = []
-        for d in range(1, len(catalog)):
-            for k in (at[-1] + d, at[0] - d):
-                if 0 <= k < len(catalog) and catalog[k] not in out and catalog[k] not in ids:
-                    out.append(catalog[k])
-            if len(out) >= 6:
-                break
-        return [f"{cid}/{n}" for cid in out for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+        near = sorted({catalog[k] for i in at for k in range(max(0, i - NEAR), min(len(catalog), i + NEAR + 1))} - set(ids))
+        like = sum(picture(i) for i in ids if i in cards)
+        near.sort(key=lambda cid: -float(picture(cid) @ like))
+        return [f"{cid}/{n}" for cid in near for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
 
     clips, taken, short = [], [], []
     many = len(planned["answer"]["parts"])

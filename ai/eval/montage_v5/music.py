@@ -84,13 +84,19 @@ def analyse(path, target):
 
 # allin1's labels (structure.py) as the montage's levels: a chorus is the peak; a verse, bridge, instrumental
 # or solo is 中等; an intro, outro, break, start or end is 安静.
-LABELS = {"chorus": "高潮", "verse": "中等", "bridge": "中等", "inst": "中等", "solo": "中等",
+LABELS = {"chorus": "高潮", "verse": "中等", "bridge": "中等", "inst": "中等", "solo": "中等", "build": "中等",
           "intro": "安静", "outro": "安静", "break": "安静", "start": "安静", "end": "安静"}
+# A section allin1 calls a chorus, followed by one at least BUILD_RISE dB louder, is the build before a drop:
+# the louder one is the chorus, whatever allin1 calls it. Forester's Symphony: chorus at 47.8 s (-9.2 dB),
+# then 63.7 s (-4.4 dB), where the user hears the chorus (1:03); All My Days: chorus at 61.2 s (-6.5 dB),
+# then "inst" at 77.6 s (-4.3 dB), the user's 1:15. Forever's and Fortnight's choruses are as loud as what
+# follows them (+0.1 dB, 0 dB) and keep their labels (2026-11-11).
+BUILD_RISE = 2.0
 
 
 def from_structure(path, target):
     """The excerpt and slots from allin1's sections and downbeats (structure-<stem>.json): whole sections
-    holding the first chorus, nearest the target and then earliest; when whole sections run over by more
+    holding the first chorus (after BUILD_RISE), nearest the target and then earliest; when whole sections run over by more
     than a phrase, the last is cut at a downbeat. Slots on downbeats: every bar in a chorus, every two
     elsewhere. (By loudness, keshi's Forever peaked at its last loud stretch, not its first chorus at 49 s.)"""
     st = json.loads(path.read_text(encoding="utf-8"))
@@ -110,6 +116,17 @@ def from_structure(path, target):
         t = min(bars, key=lambda x: abs(x - nxt["start"]))
         if abs(t - nxt["start"]) <= bar / 2:
             g["end"] = nxt["start"] = t
+    y, sr = librosa.load(st["song"], sr=SR, mono=True)
+    rms = librosa.feature.rms(y=y)[0]
+    times = librosa.times_like(rms, sr=sr)
+
+    def loudness(g):
+        return 20 * float(np.log10(rms[(times >= g["start"]) & (times < g["end"])].mean() / rms.max()))
+
+    for g, nxt in itertools.pairwise(segs):
+        if g["label"] == "chorus" and loudness(nxt) - loudness(g) >= BUILD_RISE:
+            g |= {"allin1": g["label"], "label": "build"}
+            nxt |= {"allin1": nxt["label"], "label": "chorus"}
     first = next(k for k, g in enumerate(segs) if g["label"] == "chorus")
     options = [(i, j) for i in range(first + 1) for j in range(first, len(segs))]
     i, j = min(options, key=lambda o: (max(0.0, abs(segs[o[1]]["end"] - segs[o[0]]["start"] - target) - bar * PHRASE),
@@ -131,6 +148,7 @@ def from_structure(path, target):
         lines = inside if level == "高潮" else inside[::-1][1::2][::-1] if n == j else inside[1::2]
         cuts = [a, *lines, b]
         parts.append({"start": round(a - start, 2), "end": round(b - start, 2), "level": level, "label": g["label"],
+                      **({"allin1": g["allin1"]} if "allin1" in g else {}),
                       "slots": [[round(x - start, 2), round(y - start, 2)] for x, y in itertools.pairwise(cuts) if y - x > 0.5]})
     return {"song": st["song"], "tempo": st["bpm"], "bar": round(bar, 2), "structure": st["segments"],
             "excerpt": [round(start, 2), round(end, 2)], "seconds": round(end - start, 2), "parts": parts}
