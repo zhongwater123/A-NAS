@@ -116,6 +116,7 @@ case "${1:-}" in
       fi
       debs+=("${seen[$directory]}/$(basename "$deb")")
     done
+    # shellcheck disable=SC2016 # the script expands its variables in the image
     in_image "$gnupg:/gnupg" "$base:/base" "${mounts[@]}" -- env APTLY_CONFIG="/base/$state/aptly.conf" bash -c '
       set -euo pipefail
       dist=$1 key=$2
