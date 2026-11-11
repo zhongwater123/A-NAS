@@ -107,6 +107,12 @@ systemctl restart anas-site.service || true
 systemctl start smbd.service || true
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 systemctl try-restart 'anas-kiosk@*.service' || true
+# A running container agent takes the new program; stopping it cancels an
+# app installation in progress, which the App Center then rolls back.
+systemctl try-restart anas-container-agent.service || true
+# A running container agent takes the new program; stopping it cancels an
+# app installation in progress, which the App Center then rolls back.
+systemctl try-restart anas-container-agent.service || true
 for unit in anas-internet-firewall.service wg-quick@wg-anas.service; do
   if [[ -e "/run/systemd/generator/multi-user.target.wants/$unit" ]]; then
     systemctl restart "$unit" || true
