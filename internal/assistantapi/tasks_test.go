@@ -398,3 +398,21 @@ func TestQuietAnswersAreHermessSilenceMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestAStoredIDIsAConversationOrARunOfAScheduledTask(t *testing.T) {
+	for id, want := range map[string]bool{
+		fakeStored:                          true,
+		"cron_a1b2c3d4e5f6_20261020_080001": true,
+		// A run on Hermes's gateway keeps the id the runtime minted.
+		"local-" + strings.Repeat("0a", 32): true,
+		"local-" + strings.Repeat("0a", 31): false,
+		"local-" + strings.Repeat("0A", 32): false,
+		"local-":                            false,
+		"20261015":                          false,
+		"计划":                                false,
+	} {
+		if storedIDPattern.MatchString(id) != want {
+			t.Errorf("stored id %q accepted = %t, want %t", id, !want, want)
+		}
+	}
+}
