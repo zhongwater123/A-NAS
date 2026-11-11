@@ -217,7 +217,8 @@ describe("what VNAS says and where it puts the companion", () => {
       const answer = await run("position", { x: 0.5, y: 0.5, mode: "spring" });
       const x = Math.round(((260 - 12 - 90 - 75 + 120) / 1024) * 1000) / 1000;
       expect(answer).toEqual(ok({ x, y: 0.5, stepped_aside: true }));
-      expect(leaf("position")).toEqual({ x, y: 0.5, mode: "spring" });
+      // The leaf is where it steps aside to, exactly; the answer to three places.
+      expect(leaf("position")).toEqual({ x: (260 - 12 - 90 - 75 + 120) / 1024, y: 0.5, mode: "spring" });
       // Clear of it, it goes where it is asked.
       expect(await run("position", { x: 0.1, y: 0.5, mode: "instant" })).toEqual(ok({ x: 0.1, y: 0.5 }));
     } finally {

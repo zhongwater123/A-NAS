@@ -31,7 +31,7 @@ function clamp(value: number, low: number, high: number): number {
  * when it does not cover it, there is no window, or it is already where it would go. Of the places out to
  * the window's left or right at the same height, or above it, wholly within the area, the one the hit area
  * moves least to (left, right, above on a tie). When none fits (a maximized window), the corner of the area
- * where it covers the least of the window, never the window's bottom right.
+ * where it covers the least of the window, the nearest of those, never the window's bottom right.
  */
 export function stepAside(hit: PageBox, window: PageBox | null, area: PageBox): { x: number; y: number } | null {
   if (window === null || overlap(hit, window) === 0) return null;
@@ -72,11 +72,11 @@ export function stepAside(hit: PageBox, window: PageBox | null, area: PageBox): 
   ];
   const best = corners
     .filter(([left, top]) => overlap(at(left, top), corner) === 0)
-    .reduce<[number, number] | null>(
-      (chosen, place) =>
-        chosen === null || overlap(at(...place), window) < overlap(at(...chosen), window) ? place : chosen,
-      null,
-    );
+    .reduce<[number, number] | null>((chosen, place) => {
+      if (chosen === null) return place;
+      const [covers, chosenCovers] = [overlap(at(...place), window), overlap(at(...chosen), window)];
+      return covers < chosenCovers || (covers === chosenCovers && distance(place) < distance(chosen)) ? place : chosen;
+    }, null);
   return best === null ? null : moved(...best);
 }
 

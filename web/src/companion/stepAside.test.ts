@@ -80,6 +80,12 @@ describe("where the companion steps aside to", () => {
     expect(stepAside(moved(to)!, window, area)).toBeNull();
   });
 
+  it("goes to the nearer of two corners that cover the window as little", () => {
+    // Neither side nor above has room, and both bottom corners lie below the window: the right one is nearer.
+    const window = box({ x: 177, y: 100, width: 1100, height: 600 });
+    expect(stepAside(hit, window, area)).toEqual({ x: 1366 - 8 - 90, y: 820 - 8 - 107 });
+  });
+
   it("finds the gap beside a window on a narrow page, above the rail along its bottom", () => {
     // On a 400×800 page a window spans 8 to 104 short of the right edge (desktop.module.css).
     const narrow = floatingArea({ width: 400, height: 800 });

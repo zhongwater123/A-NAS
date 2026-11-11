@@ -339,10 +339,11 @@ async function carryOut(
       // where it steps aside to instead, and VNAS hears where that is.
       const page = { width: window.innerWidth, height: window.innerHeight };
       const clear = clearCenter({ rx: d.x, ry: d.y }, COMPANION_SIZE, page);
-      const x = clear ? Math.round(clear.rx * 1000) / 1000 : d.x;
-      const y = clear ? Math.round(clear.ry * 1000) / 1000 : d.y;
-      companionState.writePet(d.petId, "position", { ...positionLeafData(d), x, y });
-      return ok(clear ? { status: "ok", x, y, stepped_aside: true } : { status: "ok", x, y });
+      const leaf = positionLeafData(d);
+      companionState.writePet(d.petId, "position", clear ? { ...leaf, x: clear.rx, y: clear.ry } : leaf);
+      if (!clear) return ok({ status: "ok", x: d.x, y: d.y });
+      const short = (value: number) => Math.round(value * 1000) / 1000;
+      return ok({ status: "ok", x: short(clear.rx), y: short(clear.ry), stepped_aside: true });
     }
     case "throw": {
       const d = decideThrow({ cfg, requested: COMPANION_PET, angle: args.angle, power: args.power });

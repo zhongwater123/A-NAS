@@ -1098,9 +1098,102 @@ describe("walking, throwing and resting", () => {
     frames(3);
     write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
     expect(clear(hitArea(root), window)).toBe(false);
-    await settle();
+    // Once it holds still: a flight would be left to land.
+    await wait(200);
     frames(400);
     expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("goes on stepping aside after a lock that starts once an earlier one ran out", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    write("lock", { locked: true, expiresAt: Date.now() + 50 });
+    await wait(100);
+    const window = { x: 150, y: 100, width: 700, height: 500 };
+    openWindow(window);
+    frames(3);
+    write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
+    await wait(200);
+    frames(400);
+    expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("lets VNAS's move go on when it starts soon after a step aside", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    // From its corner it steps to the right of a window from 500 to 900.
+    openWindow({ x: 500, y: 40, width: 400, height: 700 });
+    frames(400);
+    expect(hitArea(root).left).toBeCloseTo(900 + 12, 0);
+    // VNAS sends it across the window to the left, within the step aside's 1.5 s.
+    write("position", { x: 0.2, y: 0.5, mode: "line", duration: 3000 });
+    frames(10);
+    await wait(1600);
+    frames(300);
+    expect(root.style.left).toBe(left(0.2));
+  });
+
+  it("checks the window again when an animation cuts VNAS's move short over it", { timeout: 10_000 }, async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { root } = await mount();
+    const window = { x: 300, y: 100, width: 400, height: 400 };
+    openWindow(window);
+    write("position", { x: 0.12, y: 0.4, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.12)));
+    write("position", { x: 0.85, y: 0.4, mode: "line", duration: 1000 });
+    frames(25);
+    write("anim", { name: "点击回应-元气挥手" });
+    frames(2);
+    expect(clear(hitArea(root), window)).toBe(false);
+    // Its hold runs out (the move's 1 s and 1.5 s more): then it steps aside.
+    await wait(2700);
+    frames(400);
+    await wait(50);
+    frames(400);
+    expect(clear(hitArea(root), window)).toBe(true);
+  });
+
+  it("goes on to VNAS's target though the page is resized on the way", async () => {
+    serve([IDLE]);
+    const { root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    write("position", { x: 0.75, y: 0.3, mode: "line", duration: 3000 });
+    frames(10);
+    openWindow({ x: 150, y: 330, width: 400, height: 300 });
+    const width = Object.getOwnPropertyDescriptor(globalThis, "innerWidth");
+    Object.defineProperty(globalThis, "innerWidth", { configurable: true, value: 1000 });
+    try {
+      act(() => globalThis.dispatchEvent(new Event("resize")));
+      await wait(250);
+      frames(300);
+      expect(root.style.left).toBe(`${0.75 * 1000 - 120}px`);
+    } finally {
+      if (width) Object.defineProperty(globalThis, "innerWidth", width);
+    }
+  });
+
+  it("stops a walk under way when a window comes up within its reach", async () => {
+    serve([IDLE, "螃蟹走路"]);
+    const { root, videos } = await mount();
+    write("position", { x: 0.6, y: 0.8, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.6)));
+    vi.spyOn(Math, "random").mockReturnValue(0.975);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays("螃蟹走路");
+    await ready(videos);
+    Object.defineProperty(front(videos), "currentTime", { configurable: true, value: 5 });
+    frames(3);
+    expect(queue.size).toBe(1);
+    const walked = root.style.left;
+    expect(walked).not.toBe(left(0.6));
+    // Clear of it, within a walk's reach to its left.
+    openWindow({ x: 250, y: 300, width: 240, height: 400 });
+    expect(queue.size).toBe(0);
+    expect(Number.parseFloat(root.style.left)).toBeCloseTo(Number.parseFloat(walked), 3);
+    expect((saved()?.rx ?? 0) * 1024 - 120).toBeCloseTo(Number.parseFloat(walked), 0);
   });
 
   it("lets VNAS's move land before it checks the window that came up on the way", async () => {

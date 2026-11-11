@@ -314,6 +314,25 @@ const SETTLE_MS = 1_500;
 const FLIGHT_MS = 10_000;
 /** How many times a step aside goes again that did not get there: cut short, or the page's frames held back. */
 const RETRIES = 2;
+/** How long the companion must hold still after a release or a lock before it is checked again. */
+const STILL_MS = 150;
+
+/** A move under way: until when (performance.now()), and the centre it goes to; null for a throw. */
+interface Hold {
+  until: number;
+  target: Center | null;
+}
+
+/** The companion's box where it was last left, or in its corner. */
+function placedBox(placed: Center | null, page: Viewport): BoxPoint {
+  const { halfW, halfH } = derivePetMetrics(pet.size);
+  return placed ? centerToBox(placed, page, { w: halfW, h: halfH }) : cornerBox(page);
+}
+
+/** Whether a place is a move's target, within a pixel. */
+function reached(center: Center, target: Center, page: Viewport): boolean {
+  return Math.abs(center.rx - target.rx) * page.width < 1 && Math.abs(center.ry - target.ry) * page.height < 1;
+}
 
 const pageSize = (): Viewport => ({ width: window.innerWidth, height: window.innerHeight });
 const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
@@ -399,13 +418,19 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const resume = useRef(() => {});
   /** Where the companion was last left, null while it is in its corner. */
   const placed = useRef<Center | null>(null);
-  /** Until when (Date.now()) a move is under way, VNAS's or a step aside: its landing is checked instead. */
-  const movingUntil = useRef(0);
+  /**
+   * A move under way, whose landing is checked rather than the window on the way: VNAS's position (to its
+   * target), VNAS's throw, or a step aside of its own (to where it steps). Until when, by performance.now().
+   */
+  const hold = useRef<Hold | null>(null);
+  /** Checks again when the hold ends, though the move never landed (an animation, a whisper or sleep cut it). */
+  const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** The step aside about to go has just put the card's box where the companion is, for its spring to start. */
   const seeded = useRef(false);
-  /** Step asides sent again since the companion was last clear of the window. */
-  const retries = useRef(0);
-  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** Step asides sent since the companion was last clear of the window. */
+  const sent = useRef(0);
+  /** A stillness check after a release or a lock, so that a flight is left to land. */
+  const stillTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reach = useMemo(() => walkReach(animations), [animations]);
 
   /** Where the companion's box is now: where a move has drawn it, else its last place or its corner. */
@@ -414,8 +439,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       const root = clipSpeed.current?.querySelector<HTMLElement>(".dsh-pet-root");
       if (root?.style.left && root.style.top)
         return { x: Number.parseFloat(root.style.left), y: Number.parseFloat(root.style.top) };
-      const { halfW, halfH } = derivePetMetrics(pet.size);
-      return placed.current ? centerToBox(placed.current, page, { w: halfW, h: halfH }) : cornerBox(page);
+      return placedBox(placed.current, page);
     },
     [clipSpeed],
   );
@@ -431,27 +455,51 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // position or throw), a hit area that covers the window goes to the nearest free place. It goes by the
   // card's own position command, as VNAS's does: no clip changes, and it moves resting, asleep or locked
   // too. The member who drops it on the window sees it step aside: the window comes first. A move under
-  // way is left to land, and checked then. A lock that starts or a press on the companion stops a move:
-  // what it stopped is checked again.
-  /** The check again, for the timer that goes on with a step aside that did not get there. */
+  // way is left to land, and checked then, or when its hold runs out. A lock that starts or a press on the
+  // companion stops a move: once it holds still, what it stopped is checked again.
+  /** The check again, for the timers. */
   const again = useRef(() => {});
+  const startHold = useCallback((next: Hold | null) => {
+    hold.current = next;
+    globalThis.clearTimeout(holdTimer.current);
+    if (next === null) return;
+    holdTimer.current = globalThis.setTimeout(
+      () => {
+        if (hold.current !== next) return;
+        hold.current = null;
+        again.current();
+      },
+      Math.max(0, next.until - performance.now()),
+    );
+  }, []);
   const keepClear = useCallback(() => {
-    if (Date.now() < movingUntil.current) return;
+    const held = hold.current;
+    if (held !== null) {
+      if (performance.now() < held.until) return;
+      startHold(null);
+    }
     const page = pageSize();
     const box = liveBox(page);
     const onTop = focusedWindowBox();
     const hit = bodyPixelBox({ ...box, size: pet.size, bottomPad: derivePetMetrics(pet.size).bottomPad });
-    setWalkable(
+    const walkable =
       onTop === null ||
-        hit.right + reach <= onTop.left ||
-        hit.left - reach >= onTop.right ||
-        hit.bottom <= onTop.top ||
-        hit.top >= onTop.bottom,
-    );
+      hit.right + reach <= onTop.left ||
+      hit.left - reach >= onTop.right ||
+      hit.bottom <= onTop.top ||
+      hit.top >= onTop.bottom;
+    setWalkable(walkable);
+    // A walk of its own under way (drawn off its last place at the same height) that could end on the window
+    // stops where it is: an instant move there, whose landing comes back here.
+    const last = placedBox(placed.current, page);
+    if (!walkable && Math.abs(box.x - last.x) >= 1 && Math.abs(box.y - last.y) < 1) {
+      moveTo(box, "instant");
+      return;
+    }
     const to = clearBox(box, pet.size, page);
     if (to === null) {
       seeded.current = false;
-      retries.current = 0;
+      sent.current = 0;
       return;
     }
     if (stillMotion()) {
@@ -466,65 +514,77 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       return;
     }
     seeded.current = false;
-    movingUntil.current = Date.now() + SETTLE_MS;
-    globalThis.clearTimeout(retry.current);
-    if (retries.current < RETRIES) {
-      retries.current += 1;
-      retry.current = globalThis.setTimeout(() => {
-        movingUntil.current = 0;
-        again.current();
-      }, SETTLE_MS);
-    }
+    // Sent at most RETRIES more times when it does not get there (cut short, or the page's frames held back).
+    if (sent.current > RETRIES) return;
+    sent.current += 1;
+    const { halfW, halfH } = derivePetMetrics(pet.size);
+    startHold({ until: performance.now() + SETTLE_MS, target: boxToRatio(to, page, { w: halfW, h: halfH }) });
     moveTo(to, "spring");
-  }, [liveBox, moveTo, reach]);
+  }, [liveBox, moveTo, reach, startHold]);
   useEffect(() => {
     again.current = keepClear;
   }, [keepClear]);
+  /** Checks again once the companion holds still for a moment, its hold let go: not while it flies. */
+  const whenStill = useCallback(() => {
+    const before = liveBox(pageSize());
+    globalThis.clearTimeout(stillTimer.current);
+    stillTimer.current = globalThis.setTimeout(() => {
+      const after = liveBox(pageSize());
+      if (Math.abs(after.x - before.x) >= 1 || Math.abs(after.y - before.y) >= 1) return;
+      startHold(null);
+      keepClear();
+    }, STILL_MS);
+  }, [keepClear, liveBox, startHold]);
   const place = useCallback(
     (center: Center) => {
       remember(center);
       placed.current = center;
-      movingUntil.current = 0;
-      keepClear();
+      const held = hold.current;
+      if (held === null) {
+        keepClear();
+        return;
+      }
+      // dsh-pet's own re-layout after a resize sets a place too, which is not the move's end: a move to a
+      // target ends there, and a throw once the companion holds still.
+      if (held.target === null) whenStill();
+      else if (reached(center, held.target, pageSize())) {
+        startHold(null);
+        keepClear();
+      }
     },
-    [keepClear],
+    [keepClear, startHold, whenStill],
   );
-  useEffect(() => () => globalThis.clearTimeout(retry.current), []);
-  // A lock that starts stops the move under way (lock-freeze.ts).
-  const lockHeldNow = leaves.lock?.locked === true;
-  const wasLocked = useRef(lockHeldNow);
+  useEffect(
+    () => () => {
+      globalThis.clearTimeout(holdTimer.current);
+      globalThis.clearTimeout(stillTimer.current);
+    },
+    [],
+  );
+  // A lock that starts stops the move under way (lock-freeze.ts). It starts when none was held: none before,
+  // or one whose time had run out.
+  const lock = leaves.lock ?? null;
+  const lastLock = useRef(lock);
   useEffect(() => {
-    const was = wasLocked.current;
-    wasLocked.current = lockHeldNow;
-    if (!lockHeldNow || was) return;
-    movingUntil.current = 0;
-    const timer = globalThis.setTimeout(keepClear, 0);
-    return () => globalThis.clearTimeout(timer);
-  }, [lockHeldNow, keepClear]);
+    const before = lastLock.current;
+    lastLock.current = lock;
+    const now = Date.now();
+    const held = lock?.locked === true && lock.expiresAt > now;
+    const heldBefore = before?.locked === true && before.expiresAt > now;
+    if (held && !heldBefore) whenStill();
+  }, [lock, whenStill]);
   // So does a press on the companion. Once it is let go, unless it is on its way (thrown, or going on to
   // where a drag left it, which is checked where it lands).
   useEffect(() => {
     const layer = clipSpeed.current;
     if (!layer) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const release = () => {
-      const before = liveBox(pageSize());
-      globalThis.clearTimeout(timer);
-      timer = globalThis.setTimeout(() => {
-        const after = liveBox(pageSize());
-        if (Math.abs(after.x - before.x) >= 1 || Math.abs(after.y - before.y) >= 1) return;
-        movingUntil.current = 0;
-        keepClear();
-      }, 150);
-    };
-    layer.addEventListener("pointerup", release, true);
-    layer.addEventListener("pointercancel", release, true);
+    layer.addEventListener("pointerup", whenStill, true);
+    layer.addEventListener("pointercancel", whenStill, true);
     return () => {
-      globalThis.clearTimeout(timer);
-      layer.removeEventListener("pointerup", release, true);
-      layer.removeEventListener("pointercancel", release, true);
+      layer.removeEventListener("pointerup", whenStill, true);
+      layer.removeEventListener("pointercancel", whenStill, true);
     };
-  }, [clipSpeed, keepClear, liveBox]);
+  }, [clipSpeed, whenStill]);
   useEffect(() => {
     let resized: number | undefined;
     const resize = () => {
@@ -611,10 +671,15 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
           // its reply without touching anything: it ends a pause their absence started, and counts
           // as their input, so that a pause does not start in the middle of what it shows.
           resume.current();
-          // VNAS's move lands before the companion checks the window on top again.
+          // VNAS's move lands before the companion checks the window on top again: at its target, or for a
+          // throw where it comes to rest. It takes over from a step aside under way.
           const position = name === "position" ? readPosition(leaf) : null;
-          if (position && position.mode !== "instant") movingUntil.current = Date.now() + position.duration + SETTLE_MS;
-          if (name === "throw") movingUntil.current = Date.now() + FLIGHT_MS;
+          if (position) {
+            const until = performance.now() + position.duration + SETTLE_MS;
+            startHold({ until, target: { rx: position.x, ry: position.y } });
+          }
+          if (name === "throw") startHold({ until: performance.now() + FLIGHT_MS, target: null });
+          if (position || name === "throw") sent.current = 0;
           taken.push([name, leaf]);
         } else if (name === "sleep") heldSleep.current = leaf;
         else {
@@ -653,7 +718,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       setActionHandler(null);
       setCompanionReady(false);
     };
-  }, [first, keepClear]);
+  }, [first, keepClear, startHold]);
 
   // A new result of a scheduled task: a wave, on any screen (its content stays in VNAS). A result is
   // new by its notice's id: a task's next result replaces its notice under a new id, so the number of
