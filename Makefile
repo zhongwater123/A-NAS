@@ -11,8 +11,11 @@ NPM ?= npm
 RUFF ?= ruff
 PIP_AUDIT ?= pip-audit
 BUILD_DIR ?= build
-# The product's Debian version, from the commit and its release tag (ADR 0034).
-VERSION ?= $(shell scripts/release-version.sh)
+# The product's Debian version, from the commit and its release tag (ADR 0034),
+# worked out once: every target of one make run builds the same version.
+ifndef VERSION
+VERSION := $(shell scripts/release-version.sh)
+endif
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 # The contract's generators have a package of their own: openapi-typescript
 # needs TypeScript 5's compiler API, and the Web client is on TypeScript 7.

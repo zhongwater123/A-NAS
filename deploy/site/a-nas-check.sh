@@ -31,6 +31,20 @@ if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
 else
   fail "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
 fi
+# A local console's a-nas-console declares what its screen needs from Debian
+# for the same release; apt changes it only when the command names it. In the
+# middle of one apt run it may be unpacked and not yet configured.
+console=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-console 2>/dev/null)
+case "${console%% *}" in
+  '' | not-installed | config-files) ;;
+  *)
+    if [[ "${console#* }" == "${product#* }" ]]; then
+      pass "a-nas-console ${console#* }"
+    else
+      fail "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
+    fi
+    ;;
+esac
 
 # Accounts that own data keep fixed IDs (ADR 0011); the others cannot log in.
 for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
@@ -87,6 +101,36 @@ for unit in anas-host-agent.service anas-api.service anas-photos.service anas-sh
 done
 # Stopped is a valid state for web search: the administrator turns it off.
 echo "INFO web search: $(systemctl is-active anas-search.service)"
+
+# A store on the data volume that its service opened before opens again. A
+# service whose database does not open, as when a rollback finds no reverse
+# step for a newer release's change, waits with its unit active; the last of
+# its "ready" and "unavailable" lines since it started tells.
+if mountpoint -q /srv/a-nas/data; then
+  for store in 'anas-photos photos/catalog.db photo' 'anas-shares shares/catalog.db member-share' \
+    'anas-family family/family.db family'; do
+    read -r unit database name <<<"$store"
+    if [[ ! -f "/srv/a-nas/data/$database" ]]; then
+      echo "INFO $unit: no $database yet"
+      continue
+    fi
+    since=$(systemctl show -p ActiveEnterTimestamp --value "$unit.service")
+    state=
+    for _ in $(seq 1 30); do
+      state=$(journalctl -u "$unit.service" --since "${since:-today}" -o cat --no-pager 2>/dev/null |
+        grep -Eo "$name (service ready|store unavailable|store lost)" | tail -n 1)
+      [[ "$state" == "$name service ready" ]] && break
+      sleep 1
+    done
+    if [[ "$state" == "$name service ready" ]]; then
+      pass "$unit serves /srv/a-nas/data/$database"
+    else
+      fail "$unit has not opened /srv/a-nas/data/$database (${state:-no ready line}); see journalctl -u $unit. After a rollback, restore the copy taken before the upgrade (docs/runbooks/deploy-a-nas-packages.md)"
+    fi
+  done
+else
+  echo "INFO the data volume is not mounted: the stores on it were not checked"
+fi
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at

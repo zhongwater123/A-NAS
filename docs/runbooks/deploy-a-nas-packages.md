@@ -25,7 +25,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
 - 目标：Experimental NAS（主机名 `a-nas-dev`），Debian 13，已装 `a-nas-host`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）。
 - 签名密钥：现在是测试密钥（开发机上的 `~/.local/share/a-nas/release-test-key`）。正式密钥由用户决定（[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)）；换密钥后，各台机器要重新做一次第 4 步。软件源放在哪里同样待定（[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)），现在由部署机复制。
 - 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。开发机上 `make release` 在 `/var/tmp` 逐个组装内容包，最大的约 2.6 GiB，用完即删；2026-11-11 用全部真实内容第一次运行，用时 22 分钟，软件源 4.1 GB。
-- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库。
+- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享与家庭的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
 - 停止条件：
   - 第 4 步的哈希与开发者给出的不一致；
   - apt 报告签名或哈希错误（`NO_PUBKEY`、`BADSIG`、`Hash Sum mismatch`）；
@@ -75,7 +75,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    apt-get update
    apt-get install --no-install-recommends a-nas=<版本> a-nas-host=<版本>
    ```
-   - apt 按 `a-nas` 的依赖装上这一版的内容包；内容没变的不下载。`a-nas` 依赖同一版本的 `a-nas-host`。
+   - apt 按 `a-nas` 的依赖装上这一版的内容包；内容没变的不下载。`a-nas` 依赖同一版本的 `a-nas-host`；`a-nas-console` 只在命令写出时才变，装着却不是这一版时 `a-nas-check` 报告 `FAIL`。
    - 预期：`preinst` 输出数据库副本的位置（升级时），`postinst` 最后运行 `a-nas-check`，全部 `PASS`。
    - 完成标准：`a-nas-check` 退出码为 0。
 7. NAS（root）：本机设置改了之后（`site.conf`、`internet.env`），不用重装，运行：
@@ -88,9 +88,9 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
 
 Experimental NAS 现在由安装器（`install-v1.0.1-system-services.sh`）装好：程序在 `/opt/a-nas/releases/<ID>`，`/opt/a-nas/current` 指向它，单元在 `/etc/systemd/system`。第一次按第 4、6 步装包时，`a-nas` 自动接管：
 
-- `preinst` 停下写数据库的服务，把数据库复制到 `/var/backups/a-nas/<时间>-installer-<ID>/`；
+- `preinst` 停下写数据库的服务，把数据库复制到 `/var/backups/a-nas/<时间>-installer-<ID>/`（数据卷上的在 `/srv/a-nas/data/.a-nas-backups/` 的同名目录）；
 - `postinst` 从 `/etc/a-nas/host-agent.env`、`anas-api.env` 与 `kiosk.env` 取出 `ANAS_SMB_INTERFACE`、`ANAS_TERMINAL`、`ANAS_CONTAINERS_MODE` 与本地屏幕的设置，写成 `/etc/a-nas/site.conf`；
-- 把安装器写的单元、附加配置、sysusers、tmpfiles、传感器模块与环境文件移到 `/var/backups/a-nas/installer-layout/`，删除 `/opt/a-nas/current`；本地控制台与容器代理原来开着的，从软件包的单元重新开启；
+- 把安装器写的单元、附加配置、sysusers、tmpfiles、传感器模块与环境文件移到 `/var/backups/a-nas/installer-layout/`，删除 `/opt/a-nas/current`；本地控制台与容器代理原来开着的，从软件包的单元重新开启；安装器开启的向量索引 socket 实例与互联网入口的隧道（`wg-quick@wg-anas`）的链接从 `/etc` 删除，改由软件包的链接与 `a-nas-generator` 决定；
 - 模型、运行环境、Qdrant 与 llama.cpp 留在 `/opt/a-nas` 的原处，由内容包接管；`/opt/a-nas/releases` 保留。
 
 装好后核对：
@@ -125,17 +125,21 @@ rm -rf /opt/a-nas/releases /var/backups/a-nas/installer-layout /home/anas-dev/ap
   apt-get install --no-install-recommends --allow-downgrades a-nas=<旧版本> a-nas-host=<旧版本>
   ```
   - 新版本改过的数据库结构，由旧版本启动时按新版本存下的反向步骤退回（[`internal/sqlitedb/migrate.go`](../../internal/sqlitedb/migrate.go)）。
-- 旧版本启动时报告 `the newer build left no reverse step`：从升级前的副本恢复。
+- 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。
   ```bash
-  systemctl stop anas-api anas-photos anas-shares anas-family
-  ls /var/backups/a-nas
-  cp -a /var/backups/a-nas/<时间>-<旧版本>/system-disk/. /var/lib/a-nas/
-  cp -a /var/backups/a-nas/<时间>-<旧版本>/photos/. /srv/a-nas/data/photos/
-  cp -a /var/backups/a-nas/<时间>-<旧版本>/shares/. /srv/a-nas/data/shares/
-  cp -a /var/backups/a-nas/<时间>-<旧版本>/family/. /srv/a-nas/data/family/
-  systemctl start anas-photos anas-shares anas-family anas-api
+  systemctl stop anas-api anas-photos anas-shares anas-family anas-host-agent
+  name=<时间>-<旧版本>
+  ls /var/backups/a-nas /srv/a-nas/data/.a-nas-backups
+  rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
+    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm}
+  cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
+  for store in photos shares family; do
+    [[ ! -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]] || cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
+  done
+  systemctl start anas-host-agent anas-photos anas-shares anas-family anas-api
+  a-nas-check
   ```
-  副本是升级那一刻的数据库，之后的改动会丢失。`/var/backups/a-nas` 保留最近两份。
+  副本是升级那一刻的数据库，之后的改动会丢失。两处各保留最近两份；副本不含 `-shm`，它由 SQLite 从日志重建。
 - 第一次换成软件包后要回到安装器：
   ```bash
   apt-get remove a-nas

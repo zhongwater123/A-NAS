@@ -13,6 +13,9 @@
 # - a-nas-assistant-trial, the assistant's trial (ADR 0024), at the version of
 #   a-nas, which it depends on with its Hermes runtime's content package.
 #
+# OUT then holds this version's packages alone: those of an earlier build go,
+# so that the system test and make release find the ones just built.
+#
 # Files go only to /usr, and the result does not depend on the package's
 # scripts, so the same files make the product's system extension
 # (docs/research/sysupdate-image-verification.md#第-6-项产品层做成-sysext-时软件包的约束).
@@ -36,6 +39,9 @@ if [[ ! "$version" =~ ^[0-9][A-Za-z0-9.+~]*$ ]]; then
 fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
+done
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial; do
+  rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
 . "$repo/scripts/lib/content.sh"

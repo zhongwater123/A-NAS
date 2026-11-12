@@ -3,6 +3,7 @@ package sqlitedb
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 )
@@ -24,6 +25,15 @@ type Step struct {
 // one, takes it back to its own version with the newer build's own Downs.
 // The release's packages back the databases up before an upgrade; a database
 // that lacks a Down is left alone and the store does not open.
+//
+// A step after the released ones, and every Down, runs as SQLite's procedure
+// for other schema changes (https://www.sqlite.org/lang_altertable.html,
+// "Making Other Kinds Of Table Schema Changes"): foreign keys are off on its
+// connection, so that rebuilding a table, the only way to drop a column that
+// is indexed, referenced or constrained, neither deletes the rows that refer
+// to it through ON DELETE CASCADE nor fails; and the step commits only if it
+// leaves no more references without their row than there were before. The
+// released steps keep running as they were released, with foreign keys on.
 type Schema struct {
 	// Name names the database in errors, such as "control.db".
 	Name string
@@ -81,7 +91,8 @@ func Migrate(ctx context.Context, db *sql.DB, schema Schema) error {
 		}
 	}
 	for ; version < len(schema.Steps); version++ {
-		if err := stepUp(ctx, db, version+1, schema.Steps[version]); err != nil {
+		released := version < schema.WithoutDown
+		if err := stepUp(ctx, db, version+1, schema.Steps[version], released); err != nil {
 			return fmt.Errorf("migrate %s to version %d: %w", schema.Name, version+1, err)
 		}
 	}
@@ -94,8 +105,12 @@ func userVersion(ctx context.Context, db *sql.DB) (int, error) {
 	return version, err
 }
 
-func stepUp(ctx context.Context, db *sql.DB, version int, step Step) error {
-	return inTx(ctx, db, func(tx *sql.Tx) error {
+func stepUp(ctx context.Context, db *sql.DB, version int, step Step, released bool) error {
+	apply := inSchemaChange
+	if released {
+		apply = inTx
+	}
+	return apply(ctx, db, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, step.Up); err != nil {
 			return err
 		}
@@ -115,7 +130,7 @@ func stepUp(ctx context.Context, db *sql.DB, version int, step Step) error {
 }
 
 func stepBack(ctx context.Context, db *sql.DB, version int) error {
-	return inTx(ctx, db, func(tx *sql.Tx) error {
+	return inSchemaChange(ctx, db, func(tx *sql.Tx) error {
 		var statements string
 		err := tx.QueryRowContext(ctx, "SELECT statements FROM "+downgrades+" WHERE version = ?", version).Scan(&statements)
 		if errors.Is(err, sql.ErrNoRows) || err != nil && !hasDowngrades(ctx, tx) {
@@ -152,4 +167,72 @@ func inTx(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// inSchemaChange runs apply in a transaction on one connection with foreign
+// keys off, as SQLite's procedure for schema changes does, and commits only
+// if apply left no more references without their row than there were. The
+// connection goes back to the pool with foreign keys as they were, or is
+// closed.
+func inSchemaChange(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) (err error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, conn.Close()) }()
+	var enforced int
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enforced); err != nil {
+		return err
+	}
+	if enforced != 0 {
+		// PRAGMA foreign_keys has no effect inside a transaction.
+		if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+			return err
+		}
+		defer func() {
+			if _, restore := conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys = ON"); restore != nil {
+				// A connection without foreign keys must not serve the store.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+				err = errors.Join(err, fmt.Errorf("turn foreign keys on again: %w", restore))
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	before, err := danglingReferences(ctx, tx)
+	if err == nil {
+		err = apply(tx)
+	}
+	if err == nil {
+		err = referencesHold(ctx, tx, before)
+	}
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// danglingReferences counts the rows whose foreign key names a row that is not
+// there.
+func danglingReferences(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_foreign_key_check").Scan(&count)
+	return count, err
+}
+
+// referencesHold fails when there are more dangling references than before,
+// naming one of them.
+func referencesHold(ctx context.Context, tx *sql.Tx, before int) error {
+	after, err := danglingReferences(ctx, tx)
+	if err != nil || after <= before {
+		return err
+	}
+	var table, parent string
+	if err := tx.QueryRowContext(ctx, `SELECT "table", parent FROM pragma_foreign_key_check LIMIT 1`).Scan(&table, &parent); err != nil {
+		return err
+	}
+	return fmt.Errorf("the step leaves %d rows that refer to rows no longer there, such as a row of %s for one of %s", after-before, table, parent)
 }

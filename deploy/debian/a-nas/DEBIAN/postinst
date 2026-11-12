@@ -62,6 +62,14 @@ take_over() {
         enabled+=("$unit")
       fi
     done
+    # Instances the installer enabled, whose links the loop below cannot
+    # reach: the package's own link turns the vector index's socket on, and
+    # a-nas-generator the internet entry's tunnel while internet.env turns
+    # the entry on. Left in /etc, the first would point at a template that is
+    # gone and the second would start the tunnel after the entry is off.
+    for unit in anas-vectors-proxy@a-nas-photos.socket wg-quick@wg-anas.service; do
+      systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
+    done
   fi
   for file in "${installer_files[@]}"; do
     [[ -e "$file" ]] || continue
@@ -107,12 +115,10 @@ systemctl restart anas-site.service || true
 systemctl start smbd.service || true
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 systemctl try-restart 'anas-kiosk@*.service' || true
-# A running container agent takes the new program; stopping it cancels an
-# app installation in progress, which the App Center then rolls back.
-systemctl try-restart anas-container-agent.service || true
-# A running container agent takes the new program; stopping it cancels an
-# app installation in progress, which the App Center then rolls back.
-systemctl try-restart anas-container-agent.service || true
+# A running container agent keeps its program until the administrator restarts
+# it: stopping it cancels an app installation in progress, which the App
+# Center then rolls back (docs/runbooks/install-container-agent.md). It and
+# the Product Service work together at any version.
 for unit in anas-internet-firewall.service wg-quick@wg-anas.service; do
   if [[ -e "/run/systemd/generator/multi-user.target.wants/$unit" ]]; then
     systemctl restart "$unit" || true

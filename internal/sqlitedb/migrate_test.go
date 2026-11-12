@@ -173,8 +173,105 @@ func TestAFailedStepLeavesTheVersionBefore(t *testing.T) {
 	}
 }
 
+// albumsSchema has a table that others refer to with ON DELETE CASCADE, and a
+// step whose Down rebuilds it, as SQLite needs to drop an indexed column.
+func albumsSchema(down string) sqlitedb.Schema {
+	return sqlitedb.Schema{
+		Name: "albums.db",
+		Baseline: sqlitedb.Statements(`
+CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE);`),
+		Steps: []sqlitedb.Step{{
+			Up:   `ALTER TABLE albums ADD COLUMN cover TEXT NOT NULL DEFAULT ''; CREATE INDEX albums_by_cover ON albums(cover);`,
+			Down: down,
+		}},
+	}
+}
+
+const rebuildAlbums = `
+CREATE TABLE albums_before (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+INSERT INTO albums_before (id, name) SELECT id, name FROM albums;
+DROP TABLE albums;
+ALTER TABLE albums_before RENAME TO albums;`
+
+func photoCount(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM photos").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func TestADownThatRebuildsATableKeepsTheRowsThatReferToIt(t *testing.T) {
+	ctx := context.Background()
+	db := open(t, filepath.Join(t.TempDir(), "albums.db"))
+	schema := albumsSchema(rebuildAlbums)
+	if err := sqlitedb.Migrate(ctx, db, schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO albums (id, name) VALUES (1, 'summer'); INSERT INTO photos VALUES (1, 1), (2, 1);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitedb.Migrate(ctx, db, withSteps(schema, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if got := photoCount(t, db); got != 2 || version(t, db) != 0 {
+		t.Fatalf("%d photos at version %d after the Down; want 2 at version 0", got, version(t, db))
+	}
+	// The store's connection enforces foreign keys again afterwards.
+	if _, err := db.Exec("DELETE FROM albums WHERE id = 1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := photoCount(t, db); got != 0 {
+		t.Fatalf("%d photos after deleting their album; want the cascade to remove them", got)
+	}
+}
+
+func TestAStepThatLeavesReferencesWithoutTheirRowChangesNothing(t *testing.T) {
+	ctx := context.Background()
+	db := open(t, filepath.Join(t.TempDir(), "albums.db"))
+	schema := albumsSchema(`DROP INDEX albums_by_cover; ALTER TABLE albums DROP COLUMN cover; DELETE FROM albums;`)
+	if err := sqlitedb.Migrate(ctx, db, schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO albums (id, name) VALUES (1, 'summer'); INSERT INTO photos VALUES (1, 1);`); err != nil {
+		t.Fatal(err)
+	}
+	err := sqlitedb.Migrate(ctx, db, withSteps(schema, 0))
+	if err == nil || !strings.Contains(err.Error(), "refer to rows no longer there") {
+		t.Fatalf("got %v; want the dangling reference named", err)
+	}
+	var albums int
+	if err := db.QueryRow("SELECT COUNT(*) FROM albums").Scan(&albums); err != nil {
+		t.Fatal(err)
+	}
+	if albums != 1 || photoCount(t, db) != 1 || version(t, db) != 1 {
+		t.Fatalf("%d albums, %d photos at version %d; want the database as it was", albums, photoCount(t, db), version(t, db))
+	}
+}
+
+func TestADanglingReferenceFromBeforeDoesNotStopAStep(t *testing.T) {
+	ctx := context.Background()
+	db := open(t, filepath.Join(t.TempDir(), "albums.db"))
+	schema := albumsSchema(rebuildAlbums)
+	if err := sqlitedb.Migrate(ctx, db, withSteps(schema, 0)); err != nil {
+		t.Fatal(err)
+	}
+	// One connection: the pragma holds for the insert.
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF; INSERT INTO photos VALUES (1, 99); PRAGMA foreign_keys = ON;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitedb.Migrate(ctx, db, schema); err != nil {
+		t.Fatalf("a photo of a missing album, from before, stopped the step: %v", err)
+	}
+	if err := sqlitedb.Migrate(ctx, db, withSteps(schema, 0)); err != nil {
+		t.Fatalf("it stopped the Down: %v", err)
+	}
+}
+
 func TestCheckReversible(t *testing.T) {
-	sqlitedbtest.CheckReversible(t, notesSchema(nil), func(path string) (*sql.DB, error) {
-		return sqlitedb.Open(path, sqlitedb.Options{})
-	})
+	open := func(path string) (*sql.DB, error) { return sqlitedb.Open(path, sqlitedb.Options{}) }
+	sqlitedbtest.CheckReversible(t, notesSchema(nil), open)
+	sqlitedbtest.CheckReversible(t, albumsSchema(rebuildAlbums), open)
 }

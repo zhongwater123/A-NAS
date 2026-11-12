@@ -79,6 +79,24 @@ if [[ "${1:-}" == --check ]]; then
       failed=1
     fi
   done
+  # The tag a commit's version follows, in a repository of its own: a v-tag
+  # that is not a release (v1.1) is passed over for the release before it.
+  scratch=$(mktemp -d)
+  trap 'rm -rf -- "$scratch"' EXIT
+  in_scratch() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@invalid \
+      GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@invalid GIT_AUTHOR_DATE=2026-11-20T10:00:00Z \
+      GIT_COMMITTER_DATE=2026-11-20T10:00:00Z git -C "$scratch" "$@" >/dev/null 2>&1
+  }
+  in_scratch -c init.defaultBranch=main init
+  in_scratch commit --allow-empty -m one
+  in_scratch tag v1.0.1
+  in_scratch commit --allow-empty -m two
+  in_scratch tag v1.1
+  in_scratch commit --allow-empty -m three
+  expect "1.0.2~dev20261120.2+g$(git -C "$scratch" rev-parse --short=12 HEAD)" bash "$0" "$scratch"
+  in_scratch tag v1.0.2-rc.1
+  expect 1.0.2~rc.1 bash "$0" "$scratch"
   exit "$failed"
 fi
 
@@ -96,14 +114,18 @@ while read -r tag; do
 done < <(git -C "$repo" tag --points-at HEAD --sort=-version:refname --list 'v[0-9]*')
 commit=$(git -C "$repo" rev-parse --short=12 HEAD)
 date=$(TZ=UTC git -C "$repo" log -1 --format=%cd --date=format-local:%Y%m%d HEAD)
-# The newest release tag the commit follows on its first-parent line.
+# The newest release tag the commit follows on its first-parent line. git
+# describe names one tag; a v-tag that is not a release, such as v1.1, is
+# excluded and the next one asked for.
 tag=
-while read -r candidate; do
+excluded=()
+while candidate=$(git -C "$repo" describe --tags --first-parent --abbrev=0 --match 'v[0-9]*' "${excluded[@]}" HEAD 2>/dev/null); do
   if debian_of_tag "$candidate" >/dev/null; then
     tag=$candidate
     break
   fi
-done < <(git -C "$repo" describe --tags --first-parent --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)
+  excluded+=(--exclude "$candidate")
+done
 if [[ -z "$tag" ]]; then
   echo "0~dev$date.$(git -C "$repo" rev-list --count --first-parent HEAD)+g$commit"
   exit 0

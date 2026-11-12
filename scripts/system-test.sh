@@ -217,10 +217,28 @@ cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
 
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
-# This machine's settings, as its administrator writes them before the first
-# install (docs/runbooks/deploy-a-nas-packages.md).
+# An installation from before the packages, as the Experimental NAS has it
+# (scripts/install-v1.0.1-system-services.sh, removed): a release that
+# /opt/a-nas/current names, units and links in /etc, and the environment files
+# that hold this machine's settings, here the SMB interface. The first install
+# takes over from it (deploy/debian/a-nas/DEBIAN/postinst) and writes
+# site.conf from those files; its checks follow the definitions below.
+install -d /opt/a-nas/releases/system-test-installer /etc/systemd/system/multi-user.target.wants \
+  /etc/systemd/system/sockets.target.wants /etc/systemd/system/smbd.service.d
+ln -s /opt/a-nas/releases/system-test-installer /opt/a-nas/current
 install -d -m 0750 /etc/a-nas
-printf 'ANAS_SMB_INTERFACE=%s\n' "$iface" > /etc/a-nas/site.conf
+printf '%s\n' 'ANAS_STATE_DIR=/var/lib/a-nas' "ANAS_SMB_INTERFACE=$iface" > /etc/a-nas/host-agent.env
+printf '%s\n' 'ANAS_HTTP_ADDR=127.0.0.1:8080' 'ANAS_HOSTSTATE_MODE=agent' > /etc/a-nas/anas-api.env
+for unit in anas-host-agent.service anas-api.service anas-search-dns.path anas-vectors-proxy@.socket; do
+  sed 's|/usr/lib/a-nas|/opt/a-nas/current|g' "/src/deploy/systemd/system/$unit" > "/etc/systemd/system/$unit"
+done
+printf '[Service]\nRestart=on-failure\n' > /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf
+ln -s /etc/systemd/system/anas-host-agent.service /etc/systemd/system/multi-user.target.wants/
+ln -s /etc/systemd/system/anas-api.service /etc/systemd/system/multi-user.target.wants/
+ln -s /etc/systemd/system/anas-vectors-proxy@.socket /etc/systemd/system/sockets.target.wants/anas-vectors-proxy@a-nas-photos.socket
+# The installer enabled the internet entry's tunnel when it turned the entry on.
+ln -s /usr/lib/systemd/system/wg-quick@.service /etc/systemd/system/multi-user.target.wants/wg-quick@wg-anas.service
+systemctl daemon-reload
 
 # apt reads the A-NAS repository alone, as the deploy runbook adds it: the
 # image's Debian and Caddy sources would need the network, and every package
@@ -396,6 +414,20 @@ verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a 
 }
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
+
+# --- The first install took over from the installation before the packages.
+check "the takeover wrote site.conf from the installer's environment files" \
+  test "$(grep -cx "ANAS_SMB_INTERFACE=$iface" /etc/a-nas/site.conf):$(grep -c '^ANAS_HTTP_ADDR=' /etc/a-nas/site.conf)" = 1:0
+check "the takeover moved the installer's units, drop-ins and environment files aside" \
+  test ! -e /etc/systemd/system/anas-host-agent.service -a ! -e /etc/systemd/system/anas-vectors-proxy@.socket \
+  -a ! -e /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf -a ! -e /etc/a-nas/host-agent.env \
+  -a ! -e /opt/a-nas/current -a -f /var/backups/a-nas/installer-layout/etc/systemd/system/anas-host-agent.service \
+  -a -f /var/backups/a-nas/installer-layout/etc/a-nas/anas-api.env
+check "no link the installer made is left in /etc" \
+  test -z "$(find /etc/systemd/system -type l \( -name 'anas-*' -o -name 'wg-quick@wg-anas.service' \) -print)"
+check "the vector index's socket is on after the takeover" \
+  test "$(systemctl is-active anas-vectors-proxy@a-nas-photos.socket)" = active
+
 # reinstall NAME [VERSION]: installs the product's packages at VERSION, this
 # release's unless given, with apt, the runbook's command, which runs their
 # scripts as an upgrade does even over the same version; the content packages
@@ -1734,8 +1766,17 @@ check "web search turned off stays off across an upgrade" test "$(systemctl is-a
 rm -f /var/lib/a-nas-host/web-search-disabled
 systemctl start anas-search
 check "the upgrade copied the databases first" \
-  test -n "$(find /var/backups/a-nas -path '*/system-disk/control.db')" -a -n "$(find /var/backups/a-nas -path '*/photos/catalog.db')"
-check "the databases' copies are root's alone" test "$(stat -c '%U %a' /var/backups/a-nas)" = 'root 700'
+  test -n "$(find /var/backups/a-nas -path '*/system-disk/control.db')" -a -n "$(find "$data/.a-nas-backups" -path '*/photos/catalog.db')"
+check "the databases' copies are root's alone" \
+  test "$(stat -c '%U %a' /var/backups/a-nas):$(stat -c '%U %a' "$data/.a-nas-backups")" = 'root 700:root 700'
+# The data volume's copies share the catalog's blocks: reflinked, not
+# written again (btrfs).
+check "the photo catalog's copy stays on the data volume" \
+  test -z "$(find /var/backups/a-nas -name catalog.db)" -a "$(stat -f -c %T "$data/.a-nas-backups")" = btrfs
+# A copy holds no -shm: SQLite rebuilds it from the log, and a stale one must
+# never be restored.
+check "the databases' copies leave out the log's index" \
+  test -z "$(find /var/backups/a-nas "$data/.a-nas-backups" -name '*-shm')"
 check "an upgrade keeps eight FFmpeg admission slots" test "$(find /run/a-nas-ffmpeg/slots -type f | wc -l)" = 8
 check "music decodes through the worker after an upgrade" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
@@ -2177,7 +2218,10 @@ check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
-check "two copies of the databases stay" test "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' | wc -l)" = 2
+check "two copies of the databases stay, under the same names on both disks" \
+  test "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" = \
+  "$(find "$data/.a-nas-backups" -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" \
+  -a "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' | wc -l)" = 2
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

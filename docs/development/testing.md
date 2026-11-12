@@ -173,7 +173,8 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
   - 相册服务建好集合、同步照片；重启后的一次搜索读索引，后台核对与 Catalog 一致，没有回退到 Catalog。
 
   运行前需要 `scripts/fetch-qdrant.sh` 取得的压缩包。
-- 升级到多了一步数据库迁移的“下一 release”、回滚到本 release 与上一 release、再升级：回滚后数据库按新版本存下的反向步骤退回，文件与账号保留，`a-nas-check` 每次通过，数据库副本保留最近两份；
+- 第一次安装从模拟的安装器布局（`/opt/a-nas/current`、`/etc` 中的单元、链接与环境文件）接管：`site.conf` 由环境文件写成，安装器的单元、附加配置与环境文件移到 `/var/backups/a-nas/installer-layout`，`/etc` 中不留安装器开启的链接；
+- 升级到多了一步数据库迁移的“下一 release”、回滚到本 release 与上一 release、再升级：回滚后数据库按新版本存下的反向步骤退回，文件与账号保留，`a-nas-check` 每次通过（含数据卷上的数据库重新打开）；数据库副本两处同名、各保留最近两份，数据卷上的留在数据卷，副本不含 `-shm`；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
