@@ -62,7 +62,7 @@ var desktopTools = map[string]toolRule{
 	"click":    {args: map[string]companionParam{"ref": textParam(desktopName)}, required: []string{"ref"}},
 	"type": {args: map[string]companionParam{"ref": textParam(desktopName), "text": textParam(desktopText)},
 		required: []string{"ref", "text"}},
-	"press":  {args: map[string]companionParam{"key": textParam(desktopName)}, required: []string{"key"}},
+	"press":  {args: map[string]companionParam{"key": textParam(desktopKey)}, required: []string{"key"}},
 	"scroll": {args: map[string]companionParam{"direction": textParam(oneOf("up", "down"))}, required: []string{"direction"}},
 	"look":   {args: map[string]companionParam{"annotate": flagParam}},
 }
@@ -74,6 +74,15 @@ func desktopName(value any) (any, string) {
 		return s, ""
 	}
 	return nil, fmt.Sprintf("应为 1–%d 个字符", maxDesktopName)
+}
+
+// desktopKey accepts a key's name, and the space the Space key types: the
+// key's own value in a browser, which the window takes as well as "Space".
+func desktopKey(value any) (any, string) {
+	if value == " " {
+		return value, ""
+	}
+	return desktopName(value)
 }
 
 // desktopText accepts what a step types into a control; nothing clears it.

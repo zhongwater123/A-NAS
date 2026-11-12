@@ -58,6 +58,8 @@ class _World:
         self.ticked, self.calls, self.gateway = None, [], None
         self.stop_answers, self.stop_asked, self.ends_when_stopped = [], False, True
         self.exits_early = False
+        # hangs: the Hermes commands that never return; the round ends them after their time.
+        self.hangs = set()
 
     # --- what cron_round imports from Hermes
     def load_jobs(self):
@@ -88,6 +90,9 @@ class _World:
     def run(self, command, check=False, timeout=None):
         name = " ".join(command[1:])
         self.calls.append((name, self.now))
+        if name in self.hangs:
+            self.now += timeout
+            raise subprocess.TimeoutExpired(command, timeout)
         code = 0
         if name == "cron tick":
             self.ticked = self.now
@@ -186,6 +191,31 @@ class CronRoundTests(unittest.TestCase):
         self.assertEqual(self.module.main(), 1)
         self.assertEqual(len(world.said("gateway stop")), 3)
         self.assertEqual(len(world.said("gateway stop --yes")), 1)
+        self.assertEqual(world.gateway.signals, [])
+
+    def test_a_stop_that_does_not_return_is_taken_for_a_refusal(self):
+        world = self.round(live=[(1, 5)])
+        world.hangs = {"gateway stop"}
+        self.assertEqual(self.module.main(), 1)
+        self.assertEqual(len(world.said("gateway stop")), 3)
+        self.assertEqual(len(world.said("gateway stop --yes")), 1)
+        # Hermes took the stop over what runs, so the gateway ended by itself.
+        self.assertEqual(world.gateway.signals, [])
+
+    def test_a_gateway_no_stop_reached_is_ended_by_the_round(self):
+        world = self.round(live=[(1, 5)])
+        world.hangs = {"gateway stop", "gateway stop --yes"}
+        self.assertEqual(self.module.main(), 1)
+        self.assertEqual(len(world.said("gateway stop --yes")), 1)
+        # Not left running for the unit's hour, and not killed without a chance to end.
+        self.assertEqual(world.gateway.signals, ["terminate"])
+
+    def test_a_tick_that_does_not_return_fails_the_round_and_the_gateway_still_stops(self):
+        world = self.round(live=[])
+        world.hangs = {"cron tick"}
+        self.assertEqual(self.module.main(), 1)
+        self.assertEqual([call for call, _ in world.calls], ["gateway run --quiet", "cron tick", "gateway stop"])
+        self.assertGreaterEqual(world.said("gateway stop")[0] - world.said("cron tick")[0], self.module.TICK)
         self.assertEqual(world.gateway.signals, [])
 
     def test_a_gateway_that_is_not_the_rounds_is_used_and_left_running(self):

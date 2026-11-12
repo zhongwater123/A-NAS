@@ -194,7 +194,24 @@ type companionCommand struct {
 	// answer gets the tool's result once; nil for the Product Service's own
 	// release of a lock, whose answer nobody waits for.
 	answer chan map[string]any
+	// way is how far the command got on its way to its window, and overdue
+	// that it was settled while send was writing it: the window is then told
+	// once the command is there (arrived). Under m.mu.
+	way     commandWay
+	overdue bool
 }
+
+// commandWay is how far a command got on its way to its window.
+type commandWay int
+
+const (
+	// commandHeld has not been written: settled now, send drops it.
+	commandHeld commandWay = iota
+	// commandLeaving is being written by send.
+	commandLeaving
+	// commandThere was written to the window.
+	commandThere
+)
 
 type sentCommand struct {
 	at     time.Time
@@ -230,6 +247,9 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 		m.settleLocked(c.id, map[string]any{"status": companionCancelled, "reason": "turn-ended"})
 		waiting = false
 	}
+	if waiting {
+		c.way = commandLeaving
+	}
 	m.mu.Unlock()
 	if !waiting {
 		return
@@ -241,6 +261,32 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 	write, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 	_ = c.browser.toBrowserWithin(write, c.event)
+	c.arrived(m)
+}
+
+// arrived records that the command was written to its window, and tells the
+// window when the command was settled meanwhile: word that a command is no
+// longer waited for never reaches a window before the command, which the
+// window would then carry out for nobody.
+func (c *companionCommand) arrived(m *member) {
+	m.mu.Lock()
+	c.way = commandThere
+	overdue := c.overdue
+	c.overdue = false
+	m.mu.Unlock()
+	if overdue {
+		c.tellGone()
+	}
+}
+
+// tellGone tells the command's window that the command is no longer waited
+// for. On a goroutine of its own: a window that takes no frames must not hold
+// up whoever holds m.mu.
+func (c *companionCommand) tellGone() {
+	if !c.browser.hasWindow() {
+		return
+	}
+	go c.browser.toBrowser(eventFrame(c.family.cancel, c.session, map[string]any{"command_id": c.id}))
 }
 
 // sendRelease sends the Product Service's own release of a lock, which
@@ -757,15 +803,21 @@ func (m *member) settle(id string, result map[string]any) {
 
 // settleLocked gives a command a result that is not its window's answer, and
 // tells the window so when the command's family has it told: what the window
-// still holds for the command, such as a card asking the member, is over.
+// still holds for the command, such as a card asking the member, is over. A
+// command that never left for its window needs no word, and one that is
+// leaving gets it once it is there (arrived).
 func (m *member) settleLocked(id string, result map[string]any) {
 	c := m.settled(id, result)
-	if c == nil || c.family.cancel == "" || !c.browser.hasWindow() {
+	if c == nil || c.family.cancel == "" {
 		return
 	}
-	// On a goroutine of its own: a window that takes no frames must not hold
-	// up whoever holds m.mu.
-	go c.browser.toBrowser(eventFrame(c.family.cancel, c.session, map[string]any{"command_id": id}))
+	switch c.way {
+	case commandLeaving:
+		c.overdue = true
+	case commandThere:
+		c.tellGone()
+	case commandHeld:
+	}
 }
 
 // settled gives a command its result, unless it already has one, and returns

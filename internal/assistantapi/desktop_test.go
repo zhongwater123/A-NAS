@@ -205,6 +205,53 @@ func TestTheWindowIsToldWhenItsStepIsNoLongerWaitedFor(t *testing.T) {
 	}
 }
 
+func TestWordThatAStepIsOverNeverReachesTheWindowBeforeTheStep(t *testing.T) {
+	h := newHarness(t)
+	w, _ := companionTurn(t, h)
+	h.api.membersMu.Lock()
+	m := h.api.members["alice"]
+	h.api.membersMu.Unlock()
+	step := func() *companionCommand {
+		t.Helper()
+		c, refusal := m.command(fakeRuntime, desktopFamily, "click", map[string]any{"ref": "e1"})
+		if refusal != nil {
+			t.Fatalf("refused: %v", refusal)
+		}
+		return c
+	}
+	ended := map[string]any{"status": companionCancelled, "reason": "turn-ended"}
+	either := func(f frame) bool { return isEvent(f, "anas.desktop") || isEvent(f, "anas.desktop.cancel") }
+
+	// The turn ends while send is writing the step to the window: the window
+	// hears of the step first, or it would carry out a step nobody waits for.
+	leaving := step()
+	m.mu.Lock()
+	leaving.way = commandLeaving
+	m.settleLocked(leaving.id, ended)
+	m.mu.Unlock()
+	if err := leaving.browser.toBrowserWithin(context.Background(), leaving.event); err != nil {
+		t.Fatal(err)
+	}
+	leaving.arrived(m)
+	if first := w.waitFor(either); !isEvent(first, "anas.desktop") || !strings.Contains(string(first.Params), leaving.id) {
+		t.Fatalf("the window heard this before the step: %s", first.Params)
+	}
+	if told := w.waitFor(either); !isEvent(told, "anas.desktop.cancel") || !strings.Contains(string(told.Params), leaving.id) {
+		t.Fatalf("after the step the window heard: %s", told.Params)
+	}
+
+	// A step that ended before it left is dropped, and the window hears
+	// nothing of it: the next it hears of is the step after.
+	held := step()
+	m.settle(held.id, ended)
+	held.send(context.Background(), m)
+	next := step()
+	next.send(context.Background(), m)
+	if heard := w.waitFor(either); !isEvent(heard, "anas.desktop") || !strings.Contains(string(heard.Params), next.id) {
+		t.Fatalf("the window heard of a step that never left: %s", heard.Params)
+	}
+}
+
 func TestWithoutAWindowThereIsNoDesktop(t *testing.T) {
 	h := newHarness(t)
 	// No window of alice's at all, as when a scheduled task calls.
@@ -244,6 +291,15 @@ func TestDesktopStepsAreCheckedAndCountedApartFromTheCompanions(t *testing.T) {
 	// as a string is the flag.
 	if args, _, problem := checkCompanion(desktopFamily, "type", json.RawMessage(`{"ref":"e1","text":""}`)); problem != "" || args["text"] != "" {
 		t.Fatalf("typing nothing: %v %q", args, problem)
+	}
+	// The Space key by its name or by the space it types; a ref is never blank.
+	for _, key := range []string{"Space", " "} {
+		if args, _, problem := checkCompanion(desktopFamily, "press", json.RawMessage(`{"key":"`+key+`"}`)); problem != "" || args["key"] != key {
+			t.Fatalf("pressing %q: %v %q", key, args, problem)
+		}
+	}
+	if _, _, problem := checkCompanion(desktopFamily, "click", json.RawMessage(`{"ref":" "}`)); !strings.Contains(problem, "ref：") {
+		t.Fatalf("a blank ref: %q", problem)
 	}
 	if args, _, problem := checkCompanion(desktopFamily, "snapshot", json.RawMessage(`{"full":"true"}`)); problem != "" || args["full"] != true {
 		t.Fatalf("a full snapshot: %v %q", args, problem)

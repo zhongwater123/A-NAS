@@ -422,7 +422,7 @@ export class WebosController {
       throw new ControlError(
         EDITING_KEYS.has(key)
           ? `${key} 只能在输入框里用来删字；要删除或移走内容，请点界面上的按钮`
-          : `不能按 ${given}；可以按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`,
+          : `不能按 ${given}；可以按 Enter、Escape、Tab、Space、ArrowUp、ArrowDown、ArrowLeft、ArrowRight、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`,
       );
     }
     hidden(target);

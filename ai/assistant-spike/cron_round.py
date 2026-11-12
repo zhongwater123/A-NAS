@@ -30,12 +30,23 @@ READY = 180  # seconds for the gateway to serve the home; about 8 on the develop
 HANDOVER = 90  # seconds for a job that was due to be taken up once the tick handed it over
 QUIET = 5  # seconds without a live run before the round ends
 ROUND = 55 * 60  # the unit's own limit is an hour; Hermes's watchdog ends a job that stalls
+TICK = 120  # seconds for `hermes cron tick`, which hands the jobs over in about 2
 STOP = 120  # seconds for one `hermes gateway stop`, and for the gateway to end after it
 GONE = 20  # seconds for the gateway to end after a stop that said it stopped it
 
 
 def say(text):
     print(f"cron round: {text}", flush=True)
+
+
+def hermes(*command, timeout):
+    """The exit status of one Hermes command, or None when it did not return in time: it is
+    ended then, and the round goes on to stop the gateway instead of hanging with it."""
+    try:
+        return subprocess.run([HERMES, *command], check=False, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        say(f"hermes {' '.join(command)} did not return within {timeout} s")
+        return None
 
 
 def live():
@@ -113,26 +124,27 @@ def ended(gateway, seconds):
 
 
 def stop(gateway, deadline):
-    """Stops the gateway once nothing runs; False when it had to be stopped over running jobs.
-    Hermes refuses to stop over live work, so a job that came due meanwhile runs first; a stop
-    that claims success while the gateway goes on is taken for a refusal."""
+    """Stops the gateway once nothing runs. Returns whether it stopped that way, and otherwise
+    whether Hermes took the stop over running jobs that follows: a gateway nobody got to stop
+    is the caller's to end. Hermes refuses to stop over live work, so a job that came due
+    meanwhile runs first; a stop that claims success while the gateway goes on, or that does
+    not return, is taken for a refusal."""
     idle = wait_idle(deadline)
     for _ in range(3):
         if not idle:
             break
-        said = subprocess.run([HERMES, "gateway", "stop"], check=False, timeout=STOP).returncode
+        said = hermes("gateway", "stop", timeout=STOP)
         if said == 0 and ended(gateway, GONE):
-            return True
+            return True, False
         if gateway.poll() is not None:
-            return True
+            return True, False
         idle = wait_idle(deadline)
     say(
         "the round's time is up with jobs still running; stopping them"
         if not idle
         else "hermes gateway stop did not stop the gateway; stopping over what runs"
     )
-    subprocess.run([HERMES, "gateway", "stop", "--yes"], check=False, timeout=STOP)
-    return False
+    return False, hermes("gateway", "stop", "--yes", timeout=STOP) == 0
 
 
 def main():
@@ -143,26 +155,26 @@ def main():
         # Somebody else's gateway serves the home: its jobs run there, and it is not this round's to stop.
         say("a gateway already serves this home; handing it the jobs that are due")
         before = due()
-        tick = subprocess.run([HERMES, "cron", "tick"], check=False).returncode
+        tick = hermes("cron", "tick", timeout=TICK)
         wait_handover(before, deadline)
         idle = wait_idle(deadline)
         say(f"ended after {time.monotonic() - started:.0f} s")
         return 0 if tick == 0 and idle else 1
     gateway = subprocess.Popen([HERMES, "gateway", "run", "--quiet"])
-    status, asked = 1, False
+    status, stopping = 1, False
     try:
         wait_ready(gateway, home)
         say(f"the gateway is ready after {time.monotonic() - started:.0f} s")
         before = due()
-        tick = subprocess.run([HERMES, "cron", "tick"], check=False).returncode
+        tick = hermes("cron", "tick", timeout=TICK)
         wait_handover(before, deadline)
-        asked = True
-        stopped = stop(gateway, deadline)
+        stopped, stopping = stop(gateway, deadline)
         status = 0 if tick == 0 and stopped else 1
     finally:
-        if gateway.poll() is None:
-            if not asked:
-                gateway.terminate()
+        # Still there: Hermes is stopping it, or nobody got it to stop (the round failed
+        # before, or no stop was taken) and it is ended as systemd would end it.
+        if gateway.poll() is None and not (stopping and ended(gateway, STOP)):
+            gateway.terminate()
             if not ended(gateway, STOP):
                 gateway.kill()
                 gateway.wait()

@@ -61,7 +61,8 @@ TOOLS = {
     "click": ("点击桌面上的一个控件。ref：snapshot 或 look 给出的编号，例如 e12。", {"ref": TEXT}, ["ref"]),
     "type": ("在一个输入框里输入文字，替换原有内容。ref：输入框的编号；text：要输入的文字。",
              {"ref": TEXT, "text": TEXT}, ["ref", "text"]),
-    "press": ("在上一次操作的控件上按一个键：Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End；"
+    "press": ("在上一次操作的控件上按一个键：Enter、Escape、Tab、Space、ArrowUp、ArrowDown、ArrowLeft、ArrowRight、"
+              "PageUp、PageDown、Home、End；"
               "Backspace 和 Delete 只能在输入框里。key：键名。", {"key": TEXT}, ["key"]),
     "scroll": ("滚动上一次操作所在的区域。direction：up 或 down。", {"direction": DIRECTION}, ["direction"]),
     "look": ("取成员桌面此刻的画面（不含 VNAS 自己的窗口）：快照里看不出来的，例如图片里是什么、颜色、布局。"

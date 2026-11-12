@@ -23,6 +23,10 @@ func (e *Executor) disableAssistant(ctx context.Context, username string) error 
 	templates := []string{
 		"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket",
 		"anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer",
+		// The member's private network with its bridge to the model, which the
+		// units above need: without them it would stop by itself, but only
+		// after this returns, and it still runs as the member.
+		"anas-assistant-net@.service",
 	}
 	var units []string
 	for _, template := range templates {
