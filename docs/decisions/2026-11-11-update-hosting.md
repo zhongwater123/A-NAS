@@ -1,7 +1,7 @@
 # 软件源与更新文件放在哪里
 
-状态：pending
-更新时间：2026-11-11
+状态：decided（2026-11-12，用户）
+更新时间：2026-11-12
 
 ## 问题
 
@@ -22,10 +22,20 @@
 
 ## 决定
 
-待用户决定。
+用户 2026-11-12 问“先把 github 作为分发源是否可行”，看过下面的做法后说“按方案做”：先用 GitHub，以后需要时再换。
+
+- **单独的公开仓库** `zhongwater123/A-NAS-dist`，只放发布文件。代码仓库以后改为私有，设备照样能更新；私有仓库的附件要令牌才能下载，设备上不放令牌。
+- **apt 的平铺软件源**：GitHub 的发布附件不能放在目录里，apt 要的 `dists/` 与 `pool/` 无法照搬。每个渠道是一个固定的发布（`apt-release`、`apt-dev`），签名索引（`InRelease`、`Release`、`Packages`）与全部软件包并排。索引由 `apt-ftparchive` 生成，用 A-NAS 存档密钥签名；软件包以 SHA-256 命名，因为 GitHub 会改掉文件名中的 `~` 与 `+`。开发机上的 aptly 软件源仍是正本，`make publish` 由它生成平铺的副本并上传（[`publish-github.sh`](../../scripts/publish-github.sh)）。`release` 保留每个版本，`dev` 只保留最近 20 个。
+- **单个文件 2 GiB 的上限**：OCR 模型（2.59 GiB）由 llama.cpp 自带的 `llama-gguf-split` 切成两份（1.80 GB 与 0.98 GB），各成一个内容包，llama-server 从第一份读起；AI Worker 逐份核对 SHA-256（[`split-model.sh`](../../scripts/split-model.sh)，[清单](../../deploy/models/qwen3.5-4b-q4_k_m.json)）。同一模型与工具切两次，结果相同。
+- **公开分发**：模型都是 Apache-2.0 或 MIT 许可，可以再分发；许可说明随内容包附带。
+- **速度**：2026-11-12 从开发机与 Experimental NAS 下载 GitHub 的发布附件，都在 1.6–1.7 MB/s：产品更新约 45 MB，约 30 秒；首次装全部模型约 4.2 GB，约 45 分钟。
+- **以后**：家里的设备嫌慢时，改用国内的对象存储或 CDN，只是换设备取更新的地址；签名不变。
+
+设备的软件源写法见 [`a-nas-github.sources`](../../deploy/apt/a-nas-github.sources)，步骤见[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)。
 
 ## 关联
 
 - [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
 - [部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)
 - [发布用的签名密钥由谁、怎样保管](2026-11-11-release-signing-key.md)
+- 代码：[`publish-github.sh`](../../scripts/publish-github.sh)、[`split-model.sh`](../../scripts/split-model.sh)、[`a-nas-github.sources`](../../deploy/apt/a-nas-github.sources)
