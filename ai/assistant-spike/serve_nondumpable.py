@@ -17,7 +17,26 @@ libc = ctypes.CDLL(None, use_errno=True)
 if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
     sys.exit(f"prctl(PR_SET_DUMPABLE) failed: {os.strerror(ctypes.get_errno())}")
 
-from hermes_cli.main import main  # noqa: E402  only once the token is out of reach
+from hermes_cli import gateway_runtime_start  # noqa: E402  only once the token is out of reach
+from hermes_cli.gateway_runtime_service import RuntimeStartError  # noqa: E402
+from hermes_cli.main import main  # noqa: E402
+
+# The instance runs no gateway. Hermes starts one from any client that needs it and finds none:
+# running a scheduled task now (the cron route's trigger, the model's cronjob_manage run) did,
+# inside this unit, and the gateway stayed for the unit's life with three MCP servers of its
+# own, took over the member's due tasks and recorded its first run as failed (#469). Tasks run
+# in a round of the cron unit, which starts and stops its own gateway (cron_round.py), so here
+# the start is refused and the caller hears that no gateway serves the home. The name is
+# internal to Hermes: an upgrade that moves it stops the instance from starting, loudly.
+if not callable(getattr(gateway_runtime_start, "spawn_unmanaged_gateway", None)):
+    sys.exit("hermes_cli.gateway_runtime_start.spawn_unmanaged_gateway is gone: see serve_nondumpable.py")
+
+
+def no_gateway(*_args, **_kwargs):
+    raise RuntimeStartError("anas_instance_runs_no_gateway")
+
+
+gateway_runtime_start.spawn_unmanaged_gateway = no_gateway
 
 sys.argv = ["hermes", "serve", *sys.argv[1:]]
 sys.exit(main())
