@@ -23,7 +23,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
   - 部署机：能以 `anas-dev` 登录 NAS（[连接手册](bootstrap-experimental-nas-ssh.md)），有 `scp` 或 `rsync`；
   - NAS 上的 root。
 - 目标：Experimental NAS（主机名 `a-nas-dev`）或新机器。Debian 13，安装时启用 `non-free-firmware` 组件，安装程序按硬件装上固件与微码；能访问 Debian 的镜像源。`a-nas-host`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）依赖的 Debian 包从镜像源装，Docker、Caddy 与产品从 A-NAS 软件源装（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
-- 签名密钥：现在是测试密钥（开发机上的 `~/.local/share/a-nas/release-test-key`）。正式密钥由用户决定（[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)）；换密钥后，各台机器要重新做一次第 4 步。软件源放在哪里同样待定（[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)），现在由部署机复制。
+- 签名密钥：A-NAS 存档密钥，开发机 B 与开发机 A 各用自己的子密钥签名（[管理发布签名密钥](manage-release-key.md)）。测试密钥只签开发机自己的测试软件源；换了密钥的软件源，各台机器要重新做一次第 4 步。软件源放在哪里同样待定（[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)），现在由部署机复制。
 - 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB，Docker 与 Caddy 每更新一次约 92 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。开发机上 `make release` 在 `/var/tmp` 逐个组装内容包，最大的约 2.6 GiB，用完即删；2026-11-11 用全部真实内容第一次运行，用时 22 分钟，软件源 4.1 GB。
 - 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享与家庭的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
 - 停止条件：
@@ -41,7 +41,8 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    make release REPO=/mnt/d/A-NAS-releases/apt CONTENT=/mnt/d/A-NAS-releases/content
    ```
    - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与助手试用的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
-   - 预期：最后三行是 `A-NAS <版本> (<提交>) is in …`、签名密钥的指纹与 `a-nas-archive-keyring` 的 SHA-256。
+   - `make release` 要存档密钥的口令（[管理发布签名密钥](manage-release-key.md)第 6 步）。
+   - 预期：最后三行是 `A-NAS <版本> (<提交>) is in …`、签名密钥的指纹（主密钥与本机的子密钥）与 `a-nas-archive-keyring` 的 SHA-256。
    - 完成标准：把版本、指纹与哈希交给部署的人。打了 release 标签的提交进 `release` 与 `dev`，其他提交只进 `dev`。
 2. 部署机：把软件源目录原样复制到 NAS 的暂存账号下，例如：
    ```bash
@@ -62,7 +63,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    dpkg -i "$keyring"
    sed -e 's|^Suites: .*|Suites: release dev|' /usr/share/doc/a-nas-archive-keyring/a-nas.sources > /etc/apt/sources.list.d/a-nas.sources
    ```
-   - 预期：SHA-256 与第 1 步给出的一致，一致才 `dpkg -i`。测试机跟随 `release` 与 `dev`，家里的设备只跟随 `release`。
+   - 预期：SHA-256 与第 1 步给出的一致，一致才 `dpkg -i`；`gpg --show-keys /usr/share/keyrings/a-nas-archive-keyring.pgp` 列出的主密钥指纹与[决定记录](../decisions/2026-11-11-release-signing-key.md)中的一致。测试机跟随 `release` 与 `dev`，家里的设备只跟随 `release`。
    - 以前从上游源装过 Caddy 或 Docker 的机器（Experimental NAS）：删除这些源与它们的公钥，之后 Docker 与 Caddy 只从 A-NAS 软件源更新。
      ```bash
      rm -f /etc/apt/sources.list.d/caddy-stable.list /etc/apt/preferences.d/caddy /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
@@ -81,6 +82,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本> a-nas-docker-policy
    ```
    - apt 按 `a-nas` 的依赖装上这一版的内容包；内容没变的不下载。`a-nas` 依赖同一版本的 `a-nas-host`；`a-nas-console` 只在命令写出时才变，装着却不是这一版时 `a-nas-check` 报告 `FAIL`。
+   - `a-nas-host` 带上本版本或更新的 `a-nas-archive-keyring`：存档密钥增加或吊销了子密钥，设备随这次升级收到。
    - 显式写出 `a-nas-docker-policy`，使其保留为手动安装的宿主机保护。它不与产品一起降级；即使回滚到尚不依赖它的历史版本，`apt autoremove` 也不会删掉它。不要为回滚而卸载此包。
    - `a-nas-host` 带上 Caddy、Docker、WireGuard 与 nftables，Caddy 与 Docker 不低于这一版固定的版本，低了 apt 就升级它们；Docker 升级时它与全部容器重启。Caddy 装上即提供局域网入口（[启用局域网 Web 访问](enable-lan-web-access.md)）；Docker 在地址池写好之前不启动，应用中心按[容器代理手册](install-container-agent.md)打开。`a-nas-check` 的 `INFO` 行列出这几项的状态。
    - `--force-confold` 保留 A-NAS 与管理员改过的配置文件，例如 `/etc/caddy/Caddyfile`；没有它时，上游包改了自带的配置文件，apt 会停下来询问。
@@ -179,5 +181,6 @@ git diff deploy/upstream/packages.json
 
 - ADR：[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)、[0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 - 决定记录：[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)、[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)
+- 运行手册：[管理发布签名密钥](manage-release-key.md)
 - 代码：[`make release`](../../scripts/release.sh)、[软件源](../../scripts/apt-repository.sh)、[软件包](../../scripts/build-packages.sh)、[内容包](../../scripts/build-content-packages.sh)、[Docker 与 Caddy 的固定版本](../../deploy/upstream/packages.json)（[更新](../../scripts/update-upstream-packages.sh)、[下载](../../scripts/fetch-upstream-packages.sh)）、[`a-nas` 的维护脚本](../../deploy/debian/a-nas/DEBIAN/postinst)、[`a-nas-check`](../../deploy/site/a-nas-check.sh)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)、[系统测试](../../scripts/system-test.sh)
 - 研究：[设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)（软件包布局的约束）

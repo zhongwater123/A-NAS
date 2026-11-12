@@ -77,7 +77,10 @@ if [[ "${1:-}" != --inside ]]; then
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
     -o "$work/next-programs/anas-api" ./cmd/anas-api)
   bash "$repo/scripts/build-packages.sh" "$work/next" "$version+next" "$work/next-programs" >/dev/null
-  bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$version" "$work/gnupg" >/dev/null
+  # a-nas-host depends on the keyring at least at its own version.
+  for release in "$version" "$version+next"; do
+    bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$release" "$work/gnupg" >/dev/null
+  done
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
@@ -260,7 +263,7 @@ systemctl daemon-reload
 # repository.
 install -d /etc/apt/sources.list.d/disabled
 mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
-dpkg -i "$repository"/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_*.deb >/tmp/keyring.log
+dpkg -i "$repository/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_${version}_all.deb" >/tmp/keyring.log
 sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
   /usr/share/doc/a-nas-archive-keyring/a-nas.sources >/etc/apt/sources.list.d/a-nas.sources
 # apt_install VERSION NAME: the runbook's command for the product's packages
@@ -2306,6 +2309,7 @@ PY
 }
 check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
 check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the newer release brought its keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "the upgrade copied the databases first" \
   test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
 check "apt rolls back to this release" reinstall rollback-this "$version"
@@ -2337,6 +2341,7 @@ check "an empty config cannot bypass the policy after rolling back" \
 systemctl reset-failed docker.socket docker.service
 rm /etc/docker/daemon.json
 check "a-nas-check passes on the previous release" quiet a-nas-check
+check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true

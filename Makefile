@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release build build-binaries packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test release build build-binaries packages check check-steps clean
 
 all: check
 
@@ -373,10 +373,18 @@ root-integration-test:
 system-test: packages
 	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
 
+# The A-NAS archive key's procedures with a throwaway key: two machines sign
+# one repository, one subkey is revoked, another is added, and apt in the
+# system test's image accepts and refuses as a device would
+# (docs/runbooks/manage-release-key.md); needs Docker.
+release-key-test:
+	scripts/test-release-key.sh $(SYSTEM_TEST_IMAGE)
+
 # A release (ADR 0034): the packages make check and make system-test passed at
 # this commit, with the content packages from CONTENT, in the signed apt
-# repository REPO (scripts/release.sh). GnuPG and aptly run in the system
-# test's image.
+# repository REPO (scripts/release.sh), signed with this machine's subkey of
+# the A-NAS archive key, whose passphrase it asks for. GnuPG and aptly run in
+# the system test's image.
 REPO ?= $(BUILD_DIR)/apt
 release:
 	@test -n "$(CONTENT)" || { echo "make release needs CONTENT, the release content store (scripts/build-content-packages.sh)" >&2; exit 2; }

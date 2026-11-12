@@ -18,12 +18,13 @@ builder=${2:-debian:bookworm}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 lock=$repo/deploy/upstream/packages.json
 packages=systemd,systemd-sysv,dbus,
-# The packages that a-nas-host and the upstream packages depend on: the first
-# of each alternative, without its version, and not the upstream packages,
-# which a-nas-host's control file names as @UPSTREAM@.
+# The packages that a-nas-host, a-nas-docker-policy and the upstream packages
+# depend on: the first of each alternative, without its version, and not the
+# upstream packages, which a-nas-host's control file names as @UPSTREAM@, nor
+# A-NAS's own packages, such as its keyring.
 packages+=$(
   { sed -n 's/^Depends: //p' "$repo"/deploy/debian/{a-nas-host,a-nas-docker-policy}/DEBIAN/control; jq -r '.packages[].depends' "$lock"; } |
-    sed -e 's/([^)]*)//g' -e 's/|[^,]*//g' | tr ',' '\n' | tr -d ' ' | grep -v -e '^$' -e '^@' -e '^a-nas-docker-policy$' |
+    sed -e 's/([^)]*)//g' -e 's/|[^,]*//g' | tr ',' '\n' | tr -d ' ' | grep -v -e '^$' -e '^@' -e '^a-nas-' |
     grep -vxF -f <(jq -r '.packages[].name' "$lock") | sort -u | paste -sd, -
 ),
 # What the AI assistant's trial depends on (ai/assistant-spike): PID 1 in its

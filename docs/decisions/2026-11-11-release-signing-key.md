@@ -1,7 +1,7 @@
 # 发布用的签名密钥由谁、怎样保管
 
-状态：pending
-更新时间：2026-11-11
+状态：decided（2026-11-12，用户）
+更新时间：2026-11-12
 
 ## 问题
 
@@ -24,11 +24,21 @@ A-NAS 的软件源以 GPG 签名（[ADR 0034](../adr/0034-release-as-signed-debi
 
 ## 决定
 
-待用户决定。
+用户 2026-11-12 决定，正式密钥由本台开发机（开发机 B）和另一台开发机（开发机 A）保管。同日用户确认了下面的做法（“开始做”）：
+
+- **结构**：一把 A-NAS 存档密钥。主密钥只用于签发与吊销，不签软件源；每台开发机各有一把自己的签名子密钥（`dev-b`、`dev-a`）。设备的 `a-nas-archive-keyring` 装的是主公钥连同全部子密钥，取自仓库中的 `deploy/release/a-nas-archive-key.asc`（生成密钥后提交），所以改动公钥要经过评审。
+- **保管**：每台开发机的签名目录只有自己的子密钥，没有主密钥的私钥。主密钥的私钥与吊销证书加口令导出后，在两台开发机上各存一份，放在签名目录之外；另建议在 U 盘上再存一份。
+- **口令**：每次 `make release` 时输入，不存进文件；没有终端时从 `ANAS_RELEASE_PASSPHRASE_FILE` 读取。
+- **不设有效期**：长期离线的家用设备不会因为密钥过期而收不到更新；泄露靠吊销处理。
+- **谁发布**：平时开发机 B 发布，开发机 A 备用；接手前把软件源目录复制过去，签名时接上已发布的内容。软件源放在哪里定下之前，同一时间只由一台发布。
+- **测试密钥**：只签开发机自己的测试软件源。`make release` 不会用另一把密钥签已有的软件源，所以第一个正式 release 写进新的软件源，测试密钥签的 `D:\A-NAS-releases\apt` 在用户确认后删除。
+
+一台开发机丢失或泄露时，另一台用主密钥的备份吊销它的子密钥，并发布新的 keyring；设备随下一次更新收到，不用重装。步骤见[管理发布签名密钥](../runbooks/manage-release-key.md)。
 
 ## 关联
 
 - [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
-- [软件源脚本](../../scripts/apt-repository.sh)、[`make release`](../../scripts/release.sh)
+- [管理发布签名密钥](../runbooks/manage-release-key.md)
+- [软件源脚本](../../scripts/apt-repository.sh)、[`make release`](../../scripts/release.sh)、[密钥脚本](../../scripts/release-key.sh)、[密钥流程的测试](../../scripts/test-release-key.sh)
 - [部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)
 - [软件源与更新文件放在哪里](2026-11-11-update-hosting.md)
