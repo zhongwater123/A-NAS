@@ -18,11 +18,15 @@
       session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602.
       client.capabilities, approval.pending and approval.received are answered by the product service itself:
       requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an
-      AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args})
-      at the window that is the conversation's browser and sent its prompt, and at no other; that window answers
-      each once with companion.result ({session_id, command_id, ok, result or error}), which the product service
-      also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when
-      the member's session ends.
+      AssistantApproval. A window becomes a conversation's browser with desktop.attach ({session_id}), which the
+      product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it
+      has. The companion tools' commands arrive as anas.companion events ({command_id, action, args}), and the
+      commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is
+      the conversation's browser and sent its prompt, and at no other; that window answers each once with
+      companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service
+      also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has
+      not answered is no longer waited for. The connection reaches the instance through the session gate
+      (decision 10) and closes when the member's session ends.
     responses:
       "101": { description: Switched to WebSocket }
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }

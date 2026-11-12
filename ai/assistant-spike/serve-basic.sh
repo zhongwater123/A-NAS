@@ -7,8 +7,6 @@ user=${1:-alice}
 other=$([ "$user" = alice ] && echo bob || echo alice)
 sock=/run/a-nas-assistant/$user.sock
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
-other_token=$("$py" /spike/hermes_login.py "$other")
 # The instance's secret, the old session token: since Hermes's login gate is on, only a password.
 secret=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
 rest() { curl -sS --max-time 150 --unix-socket "$sock" -o /dev/null -w '%{http_code}' "$@"; }
@@ -18,6 +16,10 @@ start=$(date +%s.%N)
 echo "first GET /api/health (public): HTTP $(rest http://127.0.0.1:9119/api/health)"
 python3 -c "import sys,time; print('cold start through socket activation: %.1f s' % (time.time() - float(sys.argv[1])))" "$start"
 systemctl is-active "anas-assistant@$user.service" | sed 's/^/assistant unit: /'
+# Access tokens of Hermes's own login, from the instance that just started: serve signs
+# them with a key it draws at start, so one from before a restart is refused.
+token=$("$py" /spike/hermes_login.py "$user")
+other_token=$("$py" /spike/hermes_login.py "$other")
 
 echo "--- REST: /api/sessions"
 echo "no token:                 HTTP $(rest http://127.0.0.1:9119/api/sessions)"

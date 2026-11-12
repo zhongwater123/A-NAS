@@ -22,7 +22,10 @@ import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "anas_companion_mcp.py"
+SPIKE = Path(__file__).resolve().parents[1] / "assistant-spike"
+SOURCE = SPIKE / "anas_companion_mcp.py"
+# The servers import what they share from their own folder (anas_window_call.py).
+sys.path.insert(0, str(SPIKE))
 
 
 class _Server:
@@ -45,15 +48,15 @@ def _module(name, **attributes):
     return module
 
 
-def _exec(name):
-    spec = importlib.util.spec_from_file_location(name, SOURCE)
+def _exec(name, source=SOURCE):
+    spec = importlib.util.spec_from_file_location(name, source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def load():
-    """The server module with stand-ins for the MCP SDK and anyio."""
+def load(name="anas_companion_mcp", source=SOURCE):
+    """A server module with stand-ins for the MCP SDK and anyio."""
     stdio = _module("mcp.server.stdio", stdio_server=None)
     server = _module("mcp.server", Server=_Server, stdio=stdio)
     to_thread = _module("anyio.to_thread", run_sync=lambda function, *args: function(*args))
@@ -61,14 +64,15 @@ def load():
         "mcp": _module("mcp", server=server),
         "mcp.server": server,
         "mcp.server.stdio": stdio,
-        "mcp_types": _module("mcp_types", CallToolResult=_Result, ListToolsResult=_Result, TextContent=_Result, Tool=_Result),
+        "mcp_types": _module("mcp_types", CallToolResult=_Result, ListToolsResult=_Result, TextContent=_Result,
+                             ImageContent=_Result, Tool=_Result),
         "anyio": _module("anyio", to_thread=to_thread, run=None),
         "anyio.to_thread": to_thread,
     }
     saved = {name: sys.modules.get(name) for name in stand_ins}
     sys.modules.update(stand_ins)
     try:
-        return _exec("anas_companion_mcp")
+        return _exec(name, source)
     finally:
         for name, previous in saved.items():
             if previous is None:
@@ -85,16 +89,16 @@ class _Service(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 class _Companion:
-    """A product service on a socket of its own, for the server module given."""
+    """A product service on a socket of its own, for the server module given, which names the socket in attribute."""
 
-    def __init__(self, case, module):
+    def __init__(self, case, module, attribute="COMPANION"):
         self.case = case
         self.module = module
         temporary = tempfile.TemporaryDirectory()
         case.addCleanup(temporary.cleanup)
         self.path = os.path.join(temporary.name, "companion.sock")
-        case.addCleanup(setattr, module, "COMPANION", module.COMPANION)
-        module.COMPANION = self.path
+        case.addCleanup(setattr, module, attribute, getattr(module, attribute))
+        setattr(module, attribute, self.path)
         self.received = []
 
     def serve(self, status, body):

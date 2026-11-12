@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 
 export interface TodoItem {

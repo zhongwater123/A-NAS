@@ -15,7 +15,8 @@ import {
 
 const leaf = () => companionState.read().sections.workStatus;
 const shown = () => (leaf().data as { state?: string } | null)?.state ?? null;
-const tool = (type: "tool.start" | "tool.complete", name = "browser_snapshot") => reportEvent("s1", type, { name });
+const tool = (type: "tool.start" | "tool.complete", name = "mcp__desktop__snapshot") =>
+  reportEvent("s1", type, { name });
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {

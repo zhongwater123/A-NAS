@@ -18,13 +18,9 @@ import (
 )
 
 const (
-	// maxControllerResult bounds the result of one browser command the window
-	// carries out: a screenshot of the page is the largest, a PNG the window
-	// keeps under 4 MiB of base64.
-	maxControllerResult = 5 << 20
 	// maxBrowserFrame bounds one frame from the window: a message is at most
-	// maxInputBytes, a browser command's result maxControllerResult.
-	maxBrowserFrame = maxControllerResult + 16<<10
+	// maxInputBytes, a desktop command's result maxDesktopResult (desktop.go).
+	maxBrowserFrame = maxDesktopResult + 16<<10
 	// maxUpstreamBytes bounds one frame or REST reply from Hermes; resuming a
 	// long conversation returns its messages.
 	maxUpstreamBytes = 64 << 20
@@ -286,7 +282,10 @@ func (h *Handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	u.browser = nil
 	u.mu.Unlock()
 	u.m.windowLeft(u)
-	u.detachControllers(ctx)
+	// A turn going on without its window has no desktop: its steps are
+	// answered at once instead of waiting for a window that is gone. A session
+	// whose browser is now another window keeps it.
+	u.m.leaveBrowser(u)
 	u.linger(ctx)
 	u.close()
 }
@@ -389,11 +388,6 @@ func (u *upstream) hermesEvent(f frame) {
 		}
 	}
 	u.h.observe(u.m, u, ev)
-	if controllerEvents[ev.Type] {
-		// Only this connection's window registered as the session's browser.
-		u.toBrowser(f)
-		return
-	}
 	if !forwardedEvents[ev.Type] {
 		return
 	}
@@ -463,10 +457,6 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 	var session string
 	_ = json.Unmarshal(call.params["session_id"], &session)
 	switch call.method {
-	case "browser.controller.register":
-		u.m.becomeBrowser(session, u)
-	case "browser.controller.detach":
-		u.m.leaveBrowser(u, session)
 	case "session.create", "session.resume", "session.activate":
 		var live, stored string
 		_ = json.Unmarshal(result["session_id"], &live)
@@ -548,10 +538,6 @@ func (u *upstream) readBrowser(ctx context.Context) {
 			u.toBrowser(rpcError(f.ID, code, err.Error()))
 			continue
 		}
-		if f.Method == "browser.controller.register" && u.m.browserTaken(unquote(params["session_id"]), u) {
-			u.toBrowser(rpcError(f.ID, codeInvalidParams, "another window is the browser of the turn under way"))
-			continue
-		}
 		if f.Method == "session.interrupt" {
 			// Before Hermes hears of it: the stopped turn's end may come before
 			// Hermes's answer.
@@ -572,54 +558,32 @@ func (u *upstream) readBrowser(ctx context.Context) {
 	}
 }
 
-// detachControllers ends the window's part as the browser of its sessions once
-// it left: a turn going on without it then has no browser tools, instead of
-// commands that wait for a window that is gone. A session whose browser is now
-// another window keeps it.
-func (u *upstream) detachControllers(ctx context.Context) {
-	for _, session := range u.m.leaveBrowser(u, "") {
-		detachCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if _, err := u.call(detachCtx, "browser.controller.detach", map[string]string{"session_id": session}); err != nil {
-			u.h.logger.Debug("assistant browser not detached", "account", u.m.account, "session", session, "error", err)
-		}
-		cancel()
+// becomeBrowser records the window that attached last as the session's
+// browser: the session's window commands go to it alone from now on. It
+// reports false, and changes nothing, while a turn runs on the session with
+// another window as its browser: that window stays its browser until the turn
+// ends, so a step and its confirmation never move to another device mid-turn
+// (#160).
+func (m *member) becomeBrowser(session string, u *upstream) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.session(session)
+	if s.turn && s.browser != nil && s.browser != u {
+		return false
 	}
+	s.browser = u
+	return true
 }
 
-// becomeBrowser records the window that registered last as the session's
-// browser: Hermes sends the session's commands to it alone from now on.
-func (m *member) becomeBrowser(session string, u *upstream) {
-	if !runtimeIDPattern.MatchString(session) {
-		return
-	}
+// leaveBrowser forgets u as the browser of its sessions.
+func (m *member) leaveBrowser(u *upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.session(session).browser = u
-}
-
-// browserTaken reports whether a turn runs on the session with another window
-// as its browser: that window stays its browser until the turn ends, so a step
-// and its confirmation never move to another device mid-turn (#160).
-func (m *member) browserTaken(session string, u *upstream) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	s := m.sessions[session]
-	return s != nil && s.turn && s.browser != nil && s.browser != u
-}
-
-// leaveBrowser forgets u as the browser of one session, or of all its
-// sessions when session is empty, and returns the sessions it was the browser of.
-func (m *member) leaveBrowser(u *upstream, session string) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var left []string
-	for id, s := range m.sessions {
-		if s.browser == u && (session == "" || id == session) {
+	for _, s := range m.sessions {
+		if s.browser == u {
 			s.browser = nil
-			left = append(left, id)
 		}
 	}
-	return left
 }
 
 // local answers the methods that are the Product Service's own.
@@ -640,7 +604,11 @@ func (u *upstream) local(f frame) frame {
 		}
 		return rpcResult(f.ID, map[string]any{"approvals": pending})
 	case "companion.result":
-		return u.companionResult(f)
+		return u.companionResult(f, companionFamily)
+	case "desktop.result":
+		return u.companionResult(f, desktopFamily)
+	case "desktop.attach":
+		return u.attachDesktop(f)
 	default: // approval.received: the card is A-NAS's, nothing to tell Hermes
 		return rpcResult(f.ID, map[string]bool{"acknowledged": true})
 	}

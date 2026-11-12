@@ -41,7 +41,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
-commit=0e427d788d253630d38a3a51cd76849e73cd6925
+commit=8fd9f70600f143b2d8e294f3848e0874377c206d
 name=${HERMES_SPIKE_NAME:-hermes-spike-sbx}
 run=${HERMES_SPIKE_RUN:-$work/run}
 
