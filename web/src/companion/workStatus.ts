@@ -59,6 +59,13 @@ const lines = new Map<string, { key: string; task: string | null }>();
 /** The step each conversation's todo list is at, which its thinking names. */
 const todos = new Map<string, string>();
 let stoppedListener: (() => void) | null = null;
+/** Who hears that a turn of this window starts or ends (the companion's card, which tells it on return). */
+let turnListener: TurnListener | null = null;
+
+export interface TurnListener {
+  started: () => void;
+  ended: (sessionId: string, state: "success" | "error") => void;
+}
 
 function behaviorStep(behavior: Behavior, key: string, detail = "", shared = isLocalConsole()): Step {
   return { key, anim: BEHAVIORS[behavior].clip, line: () => behaviorLine(behavior, detail, shared) };
@@ -181,6 +188,7 @@ export function stageOf(type: string, payload?: GatewayPayload): HostWorkStatusS
 /** This window started a turn of the conversation (it attached as its browser and prompts). */
 export function startTurn(sessionId: string): void {
   prompting.add(sessionId);
+  turnListener?.started();
 }
 
 /**
@@ -205,6 +213,18 @@ export function withdrawTurn(sessionId: string): void {
   if (!prompting.delete(sessionId)) return;
   todos.delete(sessionId);
   clear(sessionId);
+}
+
+/**
+ * Tells the listener when a turn of this window starts (startTurn) and how one ends (its message.complete):
+ * once each, unlike the stage, which the page publishes again when another entry goes. Returns the call
+ * that removes it.
+ */
+export function onTurns(listener: TurnListener): () => void {
+  turnListener = listener;
+  return () => {
+    if (turnListener === listener) turnListener = null;
+  };
 }
 
 /**
@@ -240,6 +260,8 @@ export function reportEvent(sessionId: string, type: string, payload?: GatewayPa
   if (type === "message.complete") {
     prompting.delete(sessionId);
     todos.delete(sessionId);
+    const stage = next?.stage;
+    if (stage === "success" || stage === "error") turnListener?.ended(sessionId, stage);
   }
   if (next === undefined) return;
   if (next.stage === null) clear(sessionId);

@@ -24,11 +24,11 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
-import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
+import { currentTaskNotices, loadTaskNotices, taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
 import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
-import { localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
-import { BEHAVIORS, behaviorLine } from "./behaviors";
+import { BEHAVIORS, behaviorLine, shortDetail } from "./behaviors";
 import type { InstalledAnimations } from "./Companion";
 import styles from "./companion.module.css";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
@@ -75,6 +75,7 @@ import {
   COMPANION_SIZE,
   companionState,
   onTurnStopped,
+  onTurns,
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
@@ -282,6 +283,22 @@ function useWorkSign(leaves: Leaves): string | undefined {
   return stage;
 }
 
+/** How long what happened while the member was away waits to be told when they come back. */
+const AWAY_KEEP_MS = 12 * 60 * 60 * 1000;
+
+/** What happened while the member was away: how a turn ended, and new results by their notice's id. */
+interface Away {
+  ended: { state: "success" | "error"; at: number } | null;
+  results: Map<string, number>;
+}
+
+const nothingAway = (): Away => ({ ended: null, results: new Map() });
+
+/** Whether the member is away from the companion: it rests, the page is hidden, or the screen saver is up. */
+function awayFrom(paused: boolean): boolean {
+  return paused || document.hidden || localConsoleCovered();
+}
+
 /** Where the member last left the companion on this device, as a position command's data. */
 function rememberedPlace(): unknown {
   try {
@@ -416,6 +433,23 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const heldSleep = useRef<StateLeaf | null>(null);
   /** Ends a pause the member's absence started (the page is not hidden), as their next input would. */
   const resume = useRef(() => {});
+  /**
+   * What happened while the member was away (awayFrom): told once when they come back (comeBack). A
+   * turn's end goes when the next turn starts; anything goes after AWAY_KEEP_MS.
+   */
+  const away = useRef<Away>(nothingAway());
+  /** When the companion last told the member something on return: a result listed just after waits. */
+  const toldAt = useRef(Number.NEGATIVE_INFINITY);
+  /** A turn ends with the member there and something waiting: the card does not show its end, which is told. */
+  const telling = useRef(false);
+  /** A turn's check or cross shown after the member came back, for as long as a turn's own. */
+  const [told, setTold] = useState<{ sign: "success" | "error"; at: number } | null>(null);
+  useEffect(() => {
+    if (told === null) return;
+    const timer = window.setTimeout(() => setTold(null), BUBBLE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [told]);
+  const comeBack = useRef(() => {});
   /** Where the companion was last left, null while it is in its corner. */
   const placed = useRef<Center | null>(null);
   /**
@@ -627,6 +661,10 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       const sleep = heldSleep.current;
       heldSleep.current = null;
       if (sleep) setLeaves((current) => withLeaf(current, "sleep", sleep));
+      // What waited is told once the card goes on: back from a pause, or from under the screen saver,
+      // which can come up while the companion has not paused (a command of VNAS's put that off).
+      const { ended, results } = away.current;
+      if (pausedRef.current || ended !== null || results.size > 0) window.setTimeout(() => comeBack.current(), 0);
       if (!pausedRef.current) return;
       pausedRef.current = false;
       setPaused(false);
@@ -662,8 +700,18 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
               ? target.name
               : null;
         if (name === null) continue;
-        // States go to the card paused or not: it shows them when it goes on.
-        if (name === "workStatus" || name === "lock") taken.push([name, leaf]);
+        // States go to the card paused or not: it shows them when it goes on. All but a turn's end while
+        // the member is away: the card idles rather than play it to nobody, and the member is told how the
+        // turn ended when they come back (onTurns, comeBack).
+        if (name === "workStatus") {
+          const status = readWorkStatus(leaf);
+          const stage = status?.state ?? null;
+          const ends = stage === "success" || stage === "error";
+          if (status && ends && (awayFrom(pausedRef.current) || telling.current)) {
+            telling.current = false;
+            taken.push([name, { ...leaf, data: { ...status, state: null, anim: null } }]);
+          } else taken.push([name, leaf]);
+        } else if (name === "lock") taken.push([name, leaf]);
         // Under the local console's screen saver nobody sees the page either (D12): nothing written
         // then ends a rest, not even a sleep, a wake or the wake a lock brings.
         else if (!document.hidden && !localConsoleCovered()) {
@@ -732,7 +780,14 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     if (!taskNoticesLoaded()) return;
     const before = seen.current;
     seen.current = new Set(notices.map((notice) => notice.id));
-    if (!before || notices.every((notice) => before.has(notice.id)) || pausedRef.current) return;
+    if (!before || notices.every((notice) => before.has(notice.id))) return;
+    // The member is away: told when they come back, unless they read it elsewhere first.
+    if (awayFrom(pausedRef.current)) {
+      for (const notice of notices) if (!before.has(notice.id)) away.current.results.set(notice.id, Date.now());
+      return;
+    }
+    // Just told something on return: a result listed a moment later is not a second thing to tell.
+    if (Date.now() - toldAt.current < BUBBLE_DURATION_MS) return;
     const state = companionState.read();
     const own = state.pets[COMPANION_PET];
     if (readWorkStatus(state.sections.workStatus)?.state || lockHeld(own?.lock)) return;
@@ -742,6 +797,94 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     if (responses.length === 0) return;
     companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
   }, [notices, animations]);
+
+  // How a turn of this window ends while the member is away waits for them; an error is not overwritten by
+  // another conversation's success. A turn that starts forgets it: what it ends in is the news then. New
+  // results of scheduled tasks have nothing to do with turns and stay. A turn that ends with the member there
+  // but something still waiting (they came back during it) is told with what waited, as one thing: the card
+  // does not show the turn's own end then.
+  useEffect(
+    () =>
+      onTurns({
+        started: () => {
+          away.current.ended = null;
+          setTold(null);
+        },
+        ended: (_sessionId, state) => {
+          const present = !awayFrom(pausedRef.current);
+          const waiting = away.current.ended !== null || away.current.results.size > 0;
+          if (present && !waiting) return;
+          if (state === "error" || away.current.ended?.state !== "error")
+            away.current.ended = { state, at: Date.now() };
+          if (!present) return;
+          telling.current = true;
+          window.setTimeout(() => comeBack.current(), 0);
+        },
+      }),
+    [],
+  );
+
+  // The member comes back to the page (an input after a pause, the page shown again, the local console's
+  // screen saver gone): the companion tells the one thing that most needs them, once, with one clip and one
+  // line. VNAS waiting for them first, which its stage shows as it is; then a turn that ended in an error
+  // (a sigh, its cross for as long as a turn's own); then a new result of a scheduled task still unread (a
+  // wave), by the list read again now, as another device may have read it meanwhile; then a turn that ended
+  // well (only its check, no fireworks again). Nothing during a turn, which keeps it for the turn's end;
+  // nothing asleep or locked. On the screen the family shares, no task's name.
+  useEffect(() => {
+    comeBack.current = () => {
+      if (document.hidden || localConsoleCovered()) return;
+      // Back during a turn: what waits stays until the turn ends, and is told then.
+      const state = companionState.read();
+      const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
+      if (stage !== null && stage !== "success" && stage !== "error") return;
+      const { ended, results } = away.current;
+      away.current = nothingAway();
+      const now = Date.now();
+      const recent = (at: number) => now - at < AWAY_KEEP_MS;
+      const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
+      const outcome = ended && recent(ended.at) ? ended.state : null;
+      if (outcome === null && waiting.size === 0) return;
+      const own = state.pets[COMPANION_PET];
+      if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
+      const tell = () => {
+        toldAt.current = Date.now();
+      };
+      if (outcome === "error") {
+        tell();
+        setTold({ sign: "error", at: now });
+        const line = behaviorLine("error");
+        if (line) companionState.writePet(COMPANION_PET, "say", { text: line, anim: false });
+        const { clip } = BEHAVIORS.error;
+        if ([...animations.events.workStatus.flat(), ...(animations.events.steps ?? [])].includes(clip))
+          companionState.writePet(COMPANION_PET, "anim", { name: clip });
+        return;
+      }
+      const done = () => {
+        if (outcome !== "success") return;
+        tell();
+        setTold({ sign: "success", at: now });
+      };
+      if (waiting.size === 0) {
+        done();
+        return;
+      }
+      void loadTaskNotices().finally(() => {
+        const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
+        if (unread.length === 0) {
+          done();
+          return;
+        }
+        tell();
+        const task = unread.at(-1)?.task?.name;
+        const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
+        companionState.writePet(COMPANION_PET, "say", { text, anim: false });
+        const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
+        if (responses.length > 0)
+          companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
+      });
+    };
+  }, [animations]);
 
   // The member stopped a turn here: its stage is gone, and the companion curtsies once with a line, then
   // idles, through the page's state as the wave does. Only when it can be seen and is free to move: not
@@ -764,7 +907,8 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.
   const say =
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
-  const work = useWorkSign(leaves);
+  const sign = useWorkSign(leaves);
+  const work = told?.sign ?? sign;
   // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
   // does its toasts, since a click through the desktop tools would wake it or take its lock back.
   return (

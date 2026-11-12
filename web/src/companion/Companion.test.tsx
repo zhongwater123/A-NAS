@@ -21,10 +21,11 @@ import {
 
 // Whether the local console's screen saver or black screen covers the page; the rest of the module as it is.
 // A test that takes the cover away tells who listens, as the screen saver does.
-const cover = vi.hoisted(() => ({ up: false, dismissed: new Set<() => void>() }));
+const cover = vi.hoisted(() => ({ up: false, local: false, dismissed: new Set<() => void>() }));
 vi.mock("../desktop/LocalConsoleScreenSaver", async (original) => ({
   ...(await original<typeof import("../desktop/LocalConsoleScreenSaver")>()),
   localConsoleCovered: () => cover.up,
+  isLocalConsole: () => cover.local,
   onLocalConsoleDismissed: (listener: () => void) => {
     cover.dismissed.add(listener);
     return () => cover.dismissed.delete(listener);
@@ -75,6 +76,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cover.up = false;
+  cover.local = false;
   // The page's state outlives the companion, and so a test: back to awake, unlocked and idle.
   act(() => {
     resetWorkStatus();
@@ -423,6 +425,268 @@ describe("the companion on the desktop", () => {
     items = [notice("n-2")];
     await act(() => loadTaskNotices());
     await plays("点击回应-元气挥手");
+  });
+
+  describe("when the member comes back", () => {
+    const notice = (id: string) => ({
+      id,
+      kind: "assistant_task" as const,
+      actorUsername: "frank",
+      task: { taskId: "0123456789ab", name: "整理照片", status: "ok", ranAt: "2026-11-06T08:00:00Z" },
+      createdAt: "2026-11-06T08:00:00Z",
+    });
+    let items: ReturnType<typeof notice>[] = [];
+    const WAVE = "点击回应-元气挥手";
+    const SIGH = "工作状态-垂头叹气冒汗";
+    /** The companion on the page, with the notices it finds there listed once. */
+    const arrive = async (names: string[]) => {
+      items = [notice("n-1")];
+      server.use(http.get("/api/v1/notifications", ({ response }) => response(200).json({ items })));
+      serve(names);
+      const mounted = await mount();
+      await act(() => loadTaskNotices());
+      await settle();
+      // The store of notices outlives a test: what the last one left may have looked new here.
+      fetched = [];
+      const layer = mounted.root.closest("[data-vnas-overlay]") as HTMLElement;
+      return { ...mounted, sign: () => layer.dataset.companionWork };
+    };
+    /** A turn of this window that ends while the page is hidden. */
+    const endAway = (status: "complete" | "error") => {
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      hide(true);
+      act(() => reportEvent("live0001", "message.complete", { status }));
+    };
+
+    it("waves once at a result that came while the member was away, saying so, when they come back", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+      hide(false);
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+      // Once: away and back again, nothing more to tell.
+      fetched = [];
+      hide(true);
+      hide(false);
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+    });
+
+    it("does not wave at a result read elsewhere meanwhile", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      items = [];
+      await act(() => loadTaskNotices());
+      hide(false);
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+    });
+
+    it("names no task on the screen the family shares", async () => {
+      cover.local = true;
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      hide(false);
+      expect(await screen.findByText("有新结果")).toBeInTheDocument();
+      expect(screen.queryByText(/整理照片/)).toBeNull();
+    });
+
+    it("shows a turn's check for 10 s once back, without its fireworks", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
+      endAway("complete");
+      await settle();
+      expect(sign()).toBeUndefined();
+      fetched = [];
+      vi.useFakeTimers({ shouldClearNativeTimers: true });
+      try {
+        hide(false);
+        act(() => vi.advanceTimersByTime(0));
+        expect(sign()).toBe("success");
+        act(() => vi.advanceTimersByTime(9_999));
+        expect(sign()).toBe("success");
+        act(() => vi.advanceTimersByTime(1));
+        expect(sign()).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+      await settle();
+      expect(fetched).not.toContain("放烟花");
+    });
+
+    it("tells only the error when a turn failed and a result came too", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", SIGH, WAVE]);
+      endAway("error");
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(SIGH);
+      expect(sign()).toBe("error");
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+      expect(screen.queryByText(/有新结果/)).toBeNull();
+    });
+
+    it("tells nothing that waited more than 12 hours", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
+      endAway("complete");
+      await settle();
+      const later = Date.now() + 12 * 60 * 60 * 1000 + 1;
+      vi.spyOn(Date, "now").mockReturnValue(later);
+      hide(false);
+      await settle();
+      expect(sign()).toBeUndefined();
+    });
+
+    it("keeps a result through the rest of the turn under way, and tells it before the turn's check", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", "写代码", WAVE, "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      // The same turn takes its next step, then ends: neither is a new turn.
+      act(() => reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" }));
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+    });
+
+    it("keeps a result when the next turn starts", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      act(() => {
+        startTurn("live0002");
+        reportEvent("live0002", "message.start");
+      });
+      act(() => stopTurn("live0002"));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+    });
+
+    it("keeps an error over another conversation's later success", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", SIGH, "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        startTurn("live0002");
+        reportEvent("live0001", "message.start");
+        reportEvent("live0002", "message.start");
+      });
+      hide(true);
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      act(() => reportEvent("live0002", "message.complete", { status: "complete" }));
+      await settle();
+      fetched = [];
+      hide(false);
+      await plays(SIGH);
+      expect(sign()).toBe("error");
+    });
+
+    it("tells a turn that ended under the screen saver once it goes, though the companion had not paused", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      // The screen saver comes up before the companion's minute without input runs out.
+      cover.up = true;
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await settle();
+      expect(sign()).toBeUndefined();
+      expect(fetched).not.toContain("放烟花");
+      cover.up = false;
+      act(() => {
+        for (const listener of cover.dismissed) listener();
+      });
+      await waitFor(() => expect(sign()).toBe("success"));
+      expect(fetched).not.toContain("放烟花");
+    });
+
+    it("reads the results again on return, so as not to wave at one read on another device", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      // Read on another device: this page has not listed the notices since.
+      items = [];
+      hide(false);
+      await settle();
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+    });
+
+    /** Away while a turn runs, a result comes, and the member is back before the turn ends. */
+    const backDuringTurn = async () => {
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+      });
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      hide(false);
+      await settle();
+    };
+
+    it("keeps a result for the end of a turn the member came back during, and waves then instead of the fireworks", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", WAVE, "放烟花"]);
+      await backDuringTurn();
+      expect(fetched).not.toContain(WAVE);
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await plays(WAVE);
+      expect(await screen.findByText("整理照片 有新结果")).toBeInTheDocument();
+      await settle();
+      expect(fetched).not.toContain("放烟花");
+    });
+
+    it("tells a turn's error at its end over a result that waited", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", SIGH, WAVE]);
+      await backDuringTurn();
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "error" }));
+      await plays(SIGH);
+      expect(sign()).toBe("error");
+      await settle();
+      expect(fetched).not.toContain(WAVE);
+      expect(screen.queryByText(/有新结果/)).toBeNull();
+    });
+
+    it("forgets what waited when the next turn starts", async () => {
+      const { sign } = await arrive([IDLE, "工作状态-思考冒泡", "放烟花"]);
+      endAway("complete");
+      // The next turn starts while the member is still away, and is stopped.
+      act(() => {
+        startTurn("live0002");
+        reportEvent("live0002", "message.start");
+      });
+      act(() => stopTurn("live0002"));
+      hide(false);
+      await settle();
+      expect(sign()).toBeUndefined();
+    });
   });
 });
 
