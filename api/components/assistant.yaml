@@ -1,5 +1,5 @@
 parameters:
-  AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$" } }
+  AssistantSessionID: { name: sessionId, in: path, required: true, description: "A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway).", schema: { type: string, pattern: "^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6}|local-[0-9a-f]{64})$" } }
   AssistantTaskID: { name: taskId, in: path, required: true, description: "A Hermes cron job id; a job's name is not accepted.", schema: { type: string, pattern: "^[0-9a-f]{12}$" } }
   AssistantMemoryID: { name: memoryId, in: path, required: true, description: "A learning-graph id: memory:<store>:<n>:<fingerprint>, or a skill's name.", schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$" } }
   AssistantRequestID: { name: requestId, in: path, required: true, description: "The approval's request id from Hermes.", schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" } }

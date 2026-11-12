@@ -4,7 +4,7 @@ Documentation=https://github.com/zhongwater123/A-NAS
 After=systemd-user-sessions.service plymouth-quit-wait.service
 Before=graphical.target
 ConditionPathExists=/dev/tty0
-ConditionPathExists=/opt/a-nas/current/kiosk-launcher
+ConditionPathExists=/usr/lib/a-nas/kiosk-launcher
 Wants=dbus.socket systemd-logind.service
 After=dbus.socket systemd-logind.service
 Conflicts=getty@%i.service
@@ -13,15 +13,15 @@ After=getty@%i.service
 [Service]
 Type=simple
 # An account of its own (deploy/sysusers.d/a-nas-kiosk.conf, issue #174), not
-# the staging account: it cannot log in, and cannot write staged releases. The
-# launcher comes from the installed release. The state directory holds the
+# the staging account: it cannot log in, and cannot write the product's files.
+# The launcher comes from the a-nas package. The state directory holds the
 # Chromium profile and serves as HOME, as the account has none.
 User=a-nas-kiosk
 StateDirectory=a-nas-kiosk
 StateDirectoryMode=0700
 Environment=HOME=%S/a-nas-kiosk
-EnvironmentFile=-/etc/a-nas/kiosk.env
-ExecStart=/usr/bin/cage -s -- /opt/a-nas/current/kiosk-launcher
+EnvironmentFile=-/etc/a-nas/site.conf
+ExecStart=/usr/bin/cage -s -- /usr/lib/a-nas/kiosk-launcher
 ExecStartPost=+/bin/sh -c "tty_name='%i'; exec /usr/bin/chvt $${tty_name#tty}"
 Restart=always
 RestartSec=3s

@@ -1,7 +1,7 @@
 # 启用互联网访问
 
 状态：draft（系统测试已验证 NAS 一侧；边缘服务器已按第 2 步准备，NAS 一侧与开放待执行）
-更新时间：2026-11-05
+更新时间：2026-11-11
 
 ## 目的
 
@@ -28,7 +28,7 @@
   - 边缘服务器上运行着 IT 的监控代理，所以它的防火墙只限制来自公网地址的流量。
 - 停止条件：
   - 边缘服务器上已有其他程序占用 80、443 或 UDP 51820；
-  - NAS 的安装器以非 0 结束；
+  - NAS 上的 `a-nas-site` 以非 0 结束；
   - 开放后从外网能连到 443 以外的端口；
   - 证书无法签发。
 
@@ -58,8 +58,8 @@
 
    - 预期：`cat /etc/a-nas/internet.env` 正好四行。域名用小写；中文域名写成 `xn--` 形式。
    - 完成标准：文件属主为 root，内容与上面一致。
-5. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装包含本功能的发布。安装器检测到 `internet.env` 后先校验四项配置与 Caddy 配置，再写入隧道、防火墙与 Caddy 的互联网站点。
-   - 预期：安装器正常结束，并打印 `internet entry: https://<域名> through 172.25.4.8:51820; this NAS's tunnel public key: <NAS 公钥>`。
+5. 在 NAS 上应用配置（root）：运行 `a-nas-site`。还没有装包含本功能的版本时，先按[部署 A-NAS 软件包](deploy-a-nas-packages.md)安装，安装时同样会应用。`anas-site.service` 发现 `internet.env` 后先校验四项配置，确认 Caddy 2.7 起的版本、WireGuard 与 nftables 都已安装，再写入隧道配置与 Caddy 的互联网站点；`a-nas-generator` 让产品服务监听 `127.0.0.1:8081`，开机时启动防火墙与隧道。
+   - 预期：`a-nas-site` 以 0 结束；`journalctl -u anas-site -b -o cat` 中有 `internet entry: https://<域名> through 172.25.4.8:51820; this NAS's tunnel public key: <NAS 公钥>`。
    - 完成标准：
      - `systemctl is-active anas-internet-firewall wg-quick@wg-anas caddy anas-api` 均为 `active`；
      - `ss -ltn 'sport = :8081'` 只有 `127.0.0.1:8081`；
@@ -91,8 +91,8 @@
 ## 回滚或恢复
 
 - 立即关闭外网访问：在边缘服务器上执行步骤 2 的命令（不带域名与公钥）。脚本关闭 HAProxy 并移除对端，NAS 不需要改动。
-- 只在 NAS 一侧关闭：root 执行 `systemctl stop wg-quick@wg-anas`，隧道断开后外网就到不了 NAS。下次安装发布时会重新启动隧道。
-- 彻底停用：删除 `/etc/a-nas/internet.env`，再安装下一个发布。安装器移除 Caddy 的互联网站点、产品服务的 8081 端口、隧道与防火墙，保留 `/etc/wireguard/wg-anas.key`，以后启用时公钥不变。
+- 只在 NAS 一侧关闭：root 执行 `systemctl stop wg-quick@wg-anas`，隧道断开后外网就到不了 NAS。下次运行 `a-nas-site`、安装软件包或重启时会重新启动隧道。
+- 彻底停用：删除 `/etc/a-nas/internet.env`，再运行 `a-nas-site`。它换回只有局域网入口的 Caddy 站点，去掉产品服务的 8081 端口，停止隧道与防火墙并删除隧道配置，保留 `/etc/wireguard/wg-anas.key`，以后启用时公钥不变。
 - 恢复 HAProxy 原配置：`install -m 0644 /etc/haproxy/haproxy.cfg.before-a-nas /etc/haproxy/haproxy.cfg`。
 
 ## 关联
@@ -100,4 +100,4 @@
 - 规格：[互联网访问](../specs/internet-access.md)、[局域网 Web 访问](../specs/lan-web-access.md)
 - ADR：[0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)、[0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 - 调查：不涉及
-- 代码：[`deploy/edge/setup-edge.sh`](../../deploy/edge/setup-edge.sh)、[`deploy/caddy/Caddyfile.internet`](../../deploy/caddy/Caddyfile.internet)、[`deploy/internet/anas-internet.nft`](../../deploy/internet/anas-internet.nft)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)
+- 代码：[`deploy/edge/setup-edge.sh`](../../deploy/edge/setup-edge.sh)、[`deploy/caddy/Caddyfile.internet`](../../deploy/caddy/Caddyfile.internet)、[`deploy/internet/anas-internet.nft`](../../deploy/internet/anas-internet.nft)、[`anas-site.service`](../../deploy/site/apply.sh)、[`a-nas-generator`](../../deploy/site/a-nas-generator.sh)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)

@@ -1,7 +1,7 @@
 # 向量索引技术设计
 
 状态：相册的向量同步进索引，排序也从索引读（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，accepted）；Experimental NAS 上同步与影子比对已运行，读路径的部署见[当前状态](../status/CURRENT.md)
-更新时间：2026-11-06
+更新时间：2026-11-11
 
 本页说明向量索引如何运行、交付、同步与验证。决定与权衡见 ADR 0028；相册的检索语义仍以[相册本地 AI](photo-ai.md#语义搜索)为准。
 
@@ -40,7 +40,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - 实例名就是所属服务的账号，例如 `anas-vectors@a-nas-photos.service`。单元里只用 `%i`：`%I` 会把 `-` 还原成 `/`。
 - 动态用户的名字默认取单元前缀，所有实例会共用一个 UID，所以显式写 `User=a-nas-vec-%i`（不超过 31 个字符）。
 - 实例在 `anas-vectors.slice` 里，它位于 `anas.slice` 之下：相册的 AI 门控只看 `system.slice` 与 `user.slice` 的压力，Qdrant 建索引不会因此关掉门控。
-- `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次当前 release，检查完存储后 `exec` 同一个 Qdrant，安装器切换 release 的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
+- `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次 `/usr/lib/a-nas/vectors/qdrant` 的链接，检查完存储后 `exec` 同一个 Qdrant，软件包升级换掉链接的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
   - **版本**：版本戳记录写入存储的 Qdrant 版本（`qdrant --version`）。版本相同或同一 minor 内的补丁升级，保留存储；换了 minor（单节点不能跳过 minor 版本），或比写入者更旧（降级），清空。
   - **启动失败**：连续两次启动失败也清空，例如段损坏让 Qdrant 加载时 panic（系统测试用损坏的集合配置验证）。每次启动先计为失败，`wait-ready.sh` 等到端口可连后清掉计数。
 - `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。
@@ -80,7 +80,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 - [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定官方 `qdrant-x86_64-unknown-linux-musl.tar.gz` 的版本、大小与 SHA-256。
 - 开发机与 CI 用 [`scripts/fetch-qdrant.sh`](../../scripts/fetch-qdrant.sh) 下载到 `build/qdrant/<sha256>/` 并核对，测试与评估都用这份二进制。
-- `deploy-dev.ps1` 只在 NAS 暂存区缺这份内容时上传。安装器先复制到自己的临时目录，再核对大小与哈希，解出二进制，放到 `/opt/a-nas/qdrant/<sha256>/qdrant`。release 的 `vectors/` 目录链接它，并带上清单、配置与两个脚本。
+- `make release` 取内容库 `qdrant/<sha256>/` 中的压缩包，核对大小与哈希后解出二进制，打成内容包，软件源中已有时不再构建（[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)）。内容包把它放到 `/opt/a-nas/qdrant/<sha256>/qdrant`；`a-nas` 包的 `/usr/lib/a-nas/vectors/` 链接它，并带上清单、配置与两个脚本。
 
 ## 客户端：`internal/vectorindex`
 

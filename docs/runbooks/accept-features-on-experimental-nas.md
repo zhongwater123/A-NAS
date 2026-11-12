@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-11-05
+更新时间：2026-11-11
 
 ## 目的
 
@@ -10,7 +10,7 @@
 ## 前提与风险
 
 - 权限：管理员与至少一名成员的 Web 账号；需要 root 的核对由设备所有者执行，开发机只有只读 SSH。
-- 目标：Experimental NAS 当前的 release，开始前记下 `readlink /opt/a-nas/current`。
+- 目标：Experimental NAS 当前的 release，开始前记下 `dpkg-query -W a-nas`。
 - 风险：只用可丢弃测试数据；安装应用、上传与扫描会占用数据卷空间与 CPU。
 - 停止条件：数据卷离线或只读、服务反复重启、出现非预期的数据丢失时停止，按[调查模板](../investigations/_TEMPLATE.md)记录。
 
@@ -39,7 +39,6 @@
 - 会话只在登录时的客户端上有效（#205）：局域网浏览器重新登录一次、本机屏幕保持登录；打开一个应用的网页后桌面仍登录；CSP 下 PDF 预览、终端、VNAS、影视与音乐播放正常。
 - 账号规则（#101）：按管理员、成员与被禁用账号核对登录、禁用、重置与改密。
 - 身份同步（#261）：按[调查的后续工作](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md#后续工作)核对产品服务启动后的身份同步日志、已禁用账号的登记，以及被禁用成员没有 SMB 会话。
-- smbd 等局域网地址：部署后正常重启一次，`ss -ltn` 中 445 监听 `172.18.45.48`，`journalctl -u smbd -b` 中没有等待超时的记录；若有，说明 DHCP 超过 20 秒，smbd 应在拿到地址后自动启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。
 - SMART 改为后台读取（#126）：日志中 smartctl 被杀与超时的条数、大文件夹的加载耗时、数据盘能否待机（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
 - 温度与风扇（#360）：部署后只读核对 `name` 为 `nct6798` 的 hwmon 目录中的 `fan2_input`，在“设置 → 概览”与“任务管理器 → 设备运行状态”确认 2 号风扇可见且转速相符；不拔风扇或改写传感器。异常 SMART 温度由本地故障夹具验证，实机只确认其他设备指标持续可用（[调查](../investigations/2026-11-09-hwmon-truncation-and-smart-temperature.md)）。
 
@@ -48,7 +47,7 @@
 - 快照清扫（#204）：部署前后记下 `.a-nas-snapshots` 的条目数并查看清扫日志，确认大空间出现凌晨 3 点的定时快照（[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)）；各空间默认的每日快照都出现。
 - 实测“找回文件 → 最近删除或移走”在真实空间上的耗时。
 - 硬盘用途（#149、#198）：加盘后不重启即显示为已使用（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)），生成计划后可以取消；按[加盘手册](add-a-disk-to-the-data-volume.md)补做 Scrub。
-- 镜像缺盘（M2）：部署后重启一次，确认 mount unit 不再随单块设备停止；再按[镜像缺盘与更换硬盘](replace-a-mirror-disk.md)拔盘开机、接回，有空闲盘时验证更换（[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
+- 镜像缺盘（M2）：2026-11-10 部署后重启，mount unit 已不再随单块设备停止（`StopPropagatedFrom=` 为空）；还要按[镜像缺盘与更换硬盘](replace-a-mirror-disk.md)拔盘开机、接回，有空闲盘时验证更换（[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 存储计划不随页面中断（#165）：需要一块空闲盘。按[调查的后续工作](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md#后续工作)在加盘执行中关闭页面，回来后向导接着显示并完成。
 - 无法识别的设备（#263）：插入空读卡器或没有序列号的 U 盘，“设置 → 存储”照常列出其他硬盘，该设备说明原因且不可选（[调查](../investigations/2026-10-26-unidentified-device-blocks-host-state.md)）。
 - 系统健康（#143）：概览的“健康检查”与 SMART、温度、挂载、只读、剩余空间和 Btrfs 错误计数一致。

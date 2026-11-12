@@ -13,8 +13,8 @@
 
 ## 前提与风险
 
-- 权限：NAS 上的 root 步骤由用户执行；开发机上的准备与暂存经 `ssh a-nas-dev`。
-- 目标：主机名 `a-nas-dev`；`/opt/a-nas/current` 指向含助手代码的 release（`df2a9837dc2d` 或更新）；数据卷 `/srv/a-nas/data` 为 `/dev/sda1`，Btrfs，UUID `09e275fe-794a-458d-8200-b6e67c55cc22`（与[数据卷手册](provision-v1.0.1-experimental-storage.md)一致）。
+- 权限：NAS 上的 root 步骤由用户执行。
+- 目标：主机名 `a-nas-dev`；已装 `a-nas` 软件包（[部署 A-NAS 软件包](deploy-a-nas-packages.md)）；数据卷 `/srv/a-nas/data` 为 `/dev/sda1`，Btrfs，UUID `09e275fe-794a-458d-8200-b6e67c55cc22`（与[数据卷手册](provision-v1.0.1-experimental-storage.md)一致）。
 - 隐私：成员使用助手时，它读到的个人空间与 Shared 文件内容会发往云端模型。规格要求本地模型接入前不在保存真实家庭数据的设备上开启；实验 NAS 只存可丢弃测试数据。搜索结果里的照片名称、拍摄时间、标签与相册名会发给模型；它查看照片详情时，原图记录的元数据也会，包括相机记下的拍摄位置；成员要它看照片的画面时，那几张照片的 1600 像素视图也会。模型网关只记 token 用量与工具名，不记消息，日志目录只有 root 可读。
 - 数据卷写入：每个账号一个 Btrfs 子卷 `assistant/<账号>`，Shared 中的 `Agent空间/<账号>`，以及执行方的 `assistant/.changes`。不开启 simple quota：ADR 0024 要求先在测试卷上验证它对快照与删除的影响（#116），因此试用期间助手目录没有 10 GiB 上限。
 - 服务影响：安装、更新与移除各重启一次 Host Agent、相册服务与产品服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。
@@ -23,29 +23,21 @@
   - `Agent空间` 及账号目录由 Host Agent 管理；先更新并重启 Host Agent，确认这些目录归 root 所有且不是链接，再安装新版试用包。安装脚本只检查并复用它们，不按路径重写其 ACL；它们已存在不算旧试用残留，移除试用也保留。助手自身目录仍由 spike 按路径创建，因此只在信任现有成员、没有并发目录改动的全新试用状态执行。Shared 中名为 `Agent空间` 的条目不通过 SMB 访问，发布内容使用 Web 或助手读取。
   - 实例套接字、模型网关与 `/run` 下的挂载点在重启后自动恢复（已启用的单元与 tmpfiles）。Host Agent 重启后，已在运行的实例里绑定的执行方套接字失效，提交更改会失败，直到实例空闲退出后重开。
   - 相册接给助手的方式（ADR 0024 决定 6）：相册服务多开一个只给助手的套接字（`anas-photos-assistant.socket`，由 systemd 持有，只绑定进每个助手的沙箱），按连接者的 UID 认出成员，只读，只看本人私有图库与共享图库，拿不到原图与缩略图；Host Agent 为它提供按 UID 查成员（`ANAS_PHOTO_ASSISTANT_LOOKUP=1`）。窗口里的照片由成员本人的会话加载。
-  - 这些设置与会话闸门一起写成 systemd drop-in（`/etc/systemd/system/<服务>.service.d/assistant-trial.conf`，由 [`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 写入）：正式部署会重写 `/etc/a-nas/*.env`，写在那里的会话闸门每次部署后都要重新加；drop-in 不受部署影响。
+  - 这些设置与会话闸门一起写成 systemd drop-in（`/etc/systemd/system/<服务>.service.d/assistant-trial.conf`，由 [`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 写入）：早先的安装器每次部署重写 `/etc/a-nas/*.env`，写在那里的会话闸门要重新加；drop-in 不受升级影响。
   - `video_analyze` 把整段视频交给模型，DeepSeek 不收视频，这个工具会报错；看图（`vision_analyze`）可用。
   - 模型可能提到 Hermes 的 `/help` 与上手引导（[待定](../decisions/2026-10-15-assistant-help-and-onboarding.md)）。
-- 停止条件：`check` 报告不是全新状态、数据卷或 release 不符、bundle 校验失败；`install` 输出 `STOP` 或 `FAIL`。出现时不要继续，按“回滚或恢复”处理。
+- 停止条件：`check` 报告不是全新状态、数据卷不符；`install` 输出 `STOP` 或 `FAIL`。出现时不要继续，按“回滚或恢复”处理。
 
 ## 步骤
 
-1. 开发机：生成并暂存 bundle。
+1. NAS（root）：从 A-NAS 的软件源安装试用包，版本与已装的 `a-nas` 相同（[部署 A-NAS 软件包](deploy-a-nas-packages.md)）。试用包依赖同一版本的 `a-nas`、Hermes 运行环境的内容包与 socat、ripgrep、tini。
    ```bash
-   ai/assistant-spike/nas-trial-bundle.sh assistant-trial-<提交>
+   apt-get install --no-install-recommends a-nas-assistant-trial="$(dpkg-query -W -f='${Version}' a-nas)"
+   bash /opt/a-nas/assistant-trial/spike/nas-trial.sh check
    ```
-   在 WSL 中运行（需要 `run.sh build` 做好的运行环境与本地 Debian 13 镜像），再 `scp` 到 `a-nas-dev:~/`。
-   - 预期：打印 socat、ripgrep 的依赖与压缩包的 SHA-256。
-   - 完成标准：依赖都已在 NAS 上（`dpkg-query -W`），压缩包已在 `/home/anas-dev/`。
-2. NAS（root）：核对、解包、检查。
-   ```bash
-   sha256sum /home/anas-dev/assistant-trial-<提交>.tar.gz
-   tar -C /root -xzf /home/anas-dev/assistant-trial-<提交>.tar.gz
-   bash /root/assistant-trial-<提交>/spike/nas-trial.sh check
-   ```
-   - 预期：SHA-256 与第 1 步一致；`check` 列出主机、release、数据卷（UUID 如上）、账号与 `fresh`，`key` 为 `MISSING`。
+   - 预期：安装输出 `not set up here`；`check` 列出主机、`a-nas` 与试用包的版本、数据卷（UUID 如上）、账号与 `fresh`，`key` 为 `MISSING`。
    - 完成标准：以上都符合。
-3. NAS（root）：写入模型密钥。不要把密钥写进命令行，它会留在 shell 历史里。
+2. NAS（root）：写入模型密钥。不要把密钥写进命令行，它会留在 shell 历史里。
    ```bash
    install -d -m 0700 /etc/anas-spike
    (umask 077; cat > /etc/anas-spike/model.key)
@@ -53,26 +45,28 @@
    粘贴密钥，回车，再按 Ctrl-D。
    - 完成标准：再次 `check` 显示 `key: /etc/anas-spike/model.key (600 root)`。
    - 密钥只写这一次：`install`、`update` 与 `remove` 都不动它，只有 `remove --purge-key` 删除它。
-4. NAS（root）：安装。
+3. NAS（root）：安装。
    ```bash
-   bash /root/assistant-trial-<提交>/spike/nas-trial.sh install
+   bash /opt/a-nas/assistant-trial/spike/nas-trial.sh install
    ```
-   - 预期：依次输出 packages、files、the assistant for N accounts、the session gate, and photos for the assistants，最后 11 行 `PASS` 与 `installed`。
+   - 预期：依次输出 files、the assistant for N accounts、the session gate, and photos for the assistants，最后 11 行 `PASS` 与 `installed`。
    - 完成标准：没有 `STOP` 或 `FAIL`。
-5. NAS（root，可选）：测冷启动与它能看到的相册，不调用模型。
+4. NAS（root，可选）：测冷启动与它能看到的相册，不调用模型。
    ```bash
-   bash /root/assistant-trial-<提交>/spike/nas-trial.sh smoke <账号> 钓鱼
+   bash /opt/a-nas/assistant-trial/spike/nas-trial.sh smoke <账号> 钓鱼
    ```
    - 预期：`ready after N s` 与实例内存；第一次启动要把 Hermes 自带的技能写进主目录，最长约一分钟。之后 `photo libraries: 200 [...]` 列出本人的私有图库（`private:`）与共享图库（`shared:`），`photos for "钓鱼"` 列出这个账号搜到的照片名称，与在相册里搜索的结果一致。
 
 ## 更新
 
-包含 [#178 修复](../investigations/2026-10-27-assistant-cron-waker-member-isolation.md) 的版本，先更新 Host Agent，再更新助手 bundle。安装器和定时任务唤醒器现在通过 Host Agent 的私有 socket 查询活动账号；旧 Host Agent 不提供该查询，检查失败时不会启用或唤醒成员助手。停用账号会停止并 mask 其助手、API、定时任务与复盘单元，更新保留这些 mask；不要为排查连接故障手动 unmask 停用账号。回滚到缺少此修复的版本会失去这项保证。
+试用包与 `a-nas` 一起升级：部署手册的升级命令带上 `a-nas-assistant-trial=<版本>`。试用包依赖同一版本的 `a-nas`，所以 apt 先装好产品服务与 Host Agent，再执行试用包的 `postinst`，它运行 `nas-trial.sh update`。下面各条中“先部署产品服务、再 `update`”的顺序由此满足。
 
-新的 bundle 暂存后，校验并解包（第 2 步），然后：
+包含 [#178 修复](../investigations/2026-10-27-assistant-cron-waker-member-isolation.md) 的版本，先更新 Host Agent，再更新助手。安装器和定时任务唤醒器现在通过 Host Agent 的私有 socket 查询活动账号；旧 Host Agent 不提供该查询，检查失败时不会启用或唤醒成员助手。停用账号会停止并 mask 其助手、API、定时任务与复盘单元，更新保留这些 mask；不要为排查连接故障手动 unmask 停用账号。回滚到缺少此修复的版本会失去这项保证。
+
+需要单独重做时：
 
 ```bash
-bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
+bash /opt/a-nas/assistant-trial/spike/nas-trial.sh update
 ```
 
 - 换上新的脚本、单元、Hermes 策略与运行环境，重新生成会话令牌与成员配置（都在 root 自己的 `/etc` 中），停止正在运行的实例；成员的助手目录、对话与记忆保留，成员可写的文件夹不碰。
@@ -82,6 +76,8 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 - 2026-10-19 之后的 bundle 接上相册（`check` 的最后两行 `PASS photo service ...`），并把会话闸门从 `/etc/a-nas/*.env` 移到 drop-in；`update` 删掉环境文件里旧的那一行。之后的正式部署不再需要重新加它（[研究](../research/hermes-agent-runtime.md#接入相册服务)）。
 - 2026-10-20 之后的 bundle 开启定时任务：装上唤醒服务 `anas-assistant-cron-waker.service` 与运行单元 `anas-assistant-cron@.service`（`check` 多一行 `PASS scheduled tasks are started when due`），以及系统技能 `anas-scheduled-tasks`。任务列表、立即运行与桌面提示在产品服务中，要正式部署带上它们才有（[研究](../research/hermes-agent-runtime.md#定时任务)）。
 - 带“VNAS 操作 WebOS”的 bundle 把实例换成 Hermes 自己的登录，旧的产品服务连不上它，带登录的产品服务也登不进旧实例，所以**同一次维护里先正式部署产品服务（含 Host Agent 的文件代理），再立即 `update`**；中间这一会儿 VNAS 不可用。它带上 `hermes-patches/0002` 与系统技能 `anas-desktop`，删掉旧的 `anas-assistant-token@.service`（[研究](../research/hermes-agent-runtime.md#让-vnas-操作-webos)）。
+- 2026-11-10 之后的 bundle 让操作桌面改经 A-NAS 自己的 `desktop` 服务器，不再带 `hermes-patches/0002` 与 0003；Hermes 的提交没有变。窗口与产品服务之间的协议随之改变：新的窗口向产品服务登记，旧 bundle 里没有 `desktop` 服务器；旧的窗口向 Hermes 注册，新 bundle 的策略已经关掉 Hermes 的浏览器工具，所以**同一次维护里先正式部署产品服务，再立即 `update`**；中间这一会儿 VNAS 能对话，但不能操作桌面（[研究](../research/hermes-agent-runtime.md#2026-11-10-升级到上游-main-的尝试)）。
+- 2026-11-11 之后的 bundle 把 Hermes 前进到上游 2026-11-10 的 main。对话的改名与删除在新 Hermes 上要带写入凭据，之前构建的产品服务不带，所以同样**先正式部署产品服务，再立即 `update`**；中间这一会儿对话不能改名、删除。`update` 另外做三件事：把每个成员的 `assistant/<账号>/hermes` 这一层目录改为成员本人所有、0700、不带 ACL（只动这一层，不动里面的文件）；装上每个成员的网络单元 `anas-assistant-net@<账号>`；停掉正在运行的定时任务与闲时整理。定时任务此后每一轮都临时运行 Hermes 的 gateway，期间多占约 400–600 MB（[研究](../research/hermes-agent-runtime.md#2026-11-11-实现)）。
 - 带虚拟伙伴（#412）的 bundle 把伙伴套接字交给产品服务；之前构建的产品服务不读它，伙伴的每次调用都要等满 20 秒。所以**先正式部署带伙伴套接字的产品服务，再 `update`**。`check` 与 `install`、`update` 的最后一行只有在产品服务在这个套接字上应答时才是 `PASS photo service serves assistants`；否则状态里写 `companion for assistants unanswered`，那一行是 `FAIL`。
 
 ## 验证
@@ -104,13 +100,15 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh update
 ## 回滚或恢复
 
 ```bash
-bash /root/assistant-trial-<提交>/spike/nas-trial.sh remove
+bash /opt/a-nas/assistant-trial/spike/nas-trial.sh remove
+apt-get remove a-nas-assistant-trial
 ```
 
 - 关闭会话闸门与相册的助手套接字（删除三个 drop-in、`anas-photos-assistant.socket` 与环境文件里早先试用留下的那一行），重启 Host Agent、相册服务与产品服务。
 - 停止并删除每个账号的实例、令牌、成员配置与 `assistant/<账号>` 子卷：助手目录里的文件、对话与记忆一并删除。
 - 删除空的 `Agent空间` 文件夹；有内容的保留并列出，由用户决定。
-- 删除单元、tmpfiles、`/etc/hermes`、`/etc/a-nas-assistant`、运行环境、`/spike` 与网关日志。密钥保留，测试结束时用 `remove --purge-key` 一并删除。socat 与 ripgrep 保留，`dpkg -r socat ripgrep` 可卸载。
+- 删除单元、tmpfiles、`/etc/hermes`、`/etc/a-nas-assistant`、`/spike` 与网关日志。密钥保留，测试结束时用 `remove --purge-key` 一并删除。
+- 之后 `apt-get remove` 删除试用包的文件；试用仍装着时试用包拒绝卸载。运行环境与 socat、ripgrep、tini 由 `apt-get autoremove` 删除。
 - 完成后 `check` 显示 `fresh`。安装中途失败时同样运行 `remove`。
 
 ## 关联
@@ -119,4 +117,4 @@ bash /root/assistant-trial-<提交>/spike/nas-trial.sh remove
 - ADR：[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 研究：[Hermes Agent 作为 AI 助手运行时](../research/hermes-agent-runtime.md)
 - Issue：[#116](https://github.com/zhongwater123/A-NAS/issues/116)
-- 代码：[`nas-trial.sh`](../../ai/assistant-spike/nas-trial.sh)、[`nas-trial-bundle.sh`](../../ai/assistant-spike/nas-trial-bundle.sh)、[网关单元](../../ai/assistant-spike/anas-assistant-trial-gateway.service)、[tmpfiles](../../ai/assistant-spike/anas-assistant-trial.tmpfiles)、[`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)、[`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)
+- 代码：[`nas-trial.sh`](../../ai/assistant-spike/nas-trial.sh)、[试用包的脚本](../../deploy/debian/a-nas-assistant-trial/DEBIAN/postinst)、[运行环境的固定版本](../../ai/assistant-spike/runtime.json)、[网关单元](../../ai/assistant-spike/anas-assistant-trial-gateway.service)、[tmpfiles](../../ai/assistant-spike/anas-assistant-trial.tmpfiles)、[`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)、[`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

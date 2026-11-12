@@ -1453,6 +1453,72 @@
 .as-photo-ref:disabled {
   cursor: default;
 }
+/* A sensitive number the assistant named by its handle: the number itself,
+   which the window asked the photo service for, with its copy and its photo. */
+.as-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  max-width: 100%;
+  padding: 0 2px 0 7px;
+  border: 1px solid var(--as-line-strong);
+  border-radius: 6px;
+  color: var(--as-ink);
+  background: var(--as-accent-soft);
+  line-height: 1.55;
+  vertical-align: baseline;
+}
+.as-handle.pending {
+  padding: 0 7px;
+  border-style: dashed;
+  color: var(--as-muted);
+  background: none;
+}
+.as-handle-value {
+  min-width: 0;
+  padding-right: 4px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+.as-handle-note {
+  flex: none;
+  margin-right: 3px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--as-ink-2);
+  background: var(--as-surface);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.as-handle button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--as-muted);
+  background: none;
+  cursor: pointer;
+}
+.as-handle button:hover,
+.as-handle button:focus-visible {
+  color: var(--as-ink);
+  background: var(--as-hover);
+}
+.as-handle button.copied {
+  color: var(--as-success);
+}
+.as-handle svg {
+  width: 13px;
+  height: 13px;
+}
 .as-outside-image {
   display: inline-flex;
   align-items: baseline;

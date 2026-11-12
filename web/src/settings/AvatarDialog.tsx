@@ -171,7 +171,6 @@ function CropStage({
               <Preview key={size} picked={picked} area={area} size={size} />
             ))}
           </div>
-          <p className={styles.avdPreviewNote}>从左到右：我的账号、系统快捷栏、问题反馈中的大小</p>
           <label className={styles.avdZoom}>
             <ZoomOut aria-hidden="true" />
             <input

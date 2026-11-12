@@ -27,41 +27,24 @@ schema is only what the model is shown; the arguments reach the product
 service as the model wrote them, and it answers a wrong or missing one with
 rejected/bad-request.
 """
-import http.client
-import json
-import socket
-
 import anyio
 import anyio.to_thread
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool
 
-COMPANION = "/run/anas-assistant-companion/companion.sock"
+import anas_window_call
+
+COMPANION = anas_window_call.SOCKET
 # The product service waits for the window up to 15 s, and for the turn's own
 # tool.start 1.5 s before that; Hermes gives up on this server after 120 s,
 # counted from when the call queued behind the server's other calls.
 TIMEOUT = 20
 
-
-class UnixHTTP(http.client.HTTPConnection):
-    def __init__(self, path: str):
-        super().__init__("localhost")
-        self.path = path
-
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.settimeout(TIMEOUT)
-        self.sock.connect(self.path)
-
-
-NO_DESKTOP = {"status": "no_desktop"}
 # The product service reads at most 8 KiB of a call (maxCompanionCall); only a
 # text far over its 200 characters gets there.
 TOO_LONG = {"status": "rejected", "reason": "bad-request",
             "message": "参数太长：text 最多 200 字，name 最多 64 字，lock、lockId 最多 128 字"}
-BAD_REQUEST = {"status": "rejected", "reason": "bad-request", "message": "参数无法读取"}
-BUSY = {"status": "busy"}
 
 SAID = {
     "ok": "伙伴照做了。",
@@ -77,55 +60,7 @@ SAID = {
 
 def ask(tool: str, args: dict) -> dict:
     """The product service's answer to one call, or what to say without it."""
-    try:
-        body = json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode()
-    except (TypeError, ValueError):
-        # A string with a lone surrogate, which UTF-8 cannot carry: the
-        # product service would not read it either.
-        return BAD_REQUEST
-    conn = UnixHTTP(COMPANION)
-    try:
-        try:
-            conn.connect()
-        except OSError:
-            # No socket (a scheduled task's sandbox), or nobody serving it:
-            # the call never reached the product service.
-            return NO_DESKTOP
-        sent = True
-        try:
-            conn.request("POST", "/call", body, {"Content-Type": "application/json"})
-        except OSError:
-            # The product service closed the connection before taking the
-            # call: over the member's connections it answers busy as it
-            # accepts one, before reading anything, and the answer is still
-            # there to read.
-            sent = False
-        try:
-            response = conn.getresponse()
-            raw = response.read()
-        except (OSError, http.client.HTTPException):
-            if not sent:
-                # Not even a refusal: the call never got there.
-                return BUSY
-            # A timeout, or the product service went away (a restart) once the
-            # call was on its way: the window may have acted on it.
-            return {"status": "timeout"}
-    finally:
-        conn.close()
-    if response.status == 413:
-        return TOO_LONG
-    if response.status == 400:
-        return BAD_REQUEST
-    if response.status != 200:
-        # The product service does not take this member's calls.
-        return NO_DESKTOP
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return NO_DESKTOP
-    if not isinstance(data, dict) or not isinstance(data.get("status"), str):
-        return NO_DESKTOP
-    return data
+    return anas_window_call.ask(COMPANION, "/call", tool, args, TIMEOUT, TOO_LONG)
 
 
 def line(data: dict) -> str:

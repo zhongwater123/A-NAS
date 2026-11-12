@@ -35,6 +35,7 @@
 - [2026-10-30：AI 助手能用敏感字段，但看不到具体的值](../decisions/2026-10-30-ocr-assistant-handles.md)，见“AI 助手：能用，看不到具体的值”。
 - [2026-11-02：分流用照片已有的向量，目标召回 99%](../decisions/2026-11-02-ocr-routing-recall.md)。
 - [2026-11-03：字段核对的单字概率取 0.99](../decisions/2026-11-03-ocr-character-confidence.md)。
+- [2026-11-10：AI 助手看不到证件、票据和文字还没读完的照片的画面](../decisions/2026-11-10-assistant-view-of-documents.md)，修订 2026-11-06 的“文字里有敏感值的照片不给画面”。
 - [2026-11-03：更正按内容对象存，修改记录对能看到照片的人公开](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（ADR 0033，修订上面五项建议中“更正记入活动记录”一项）。
 
 ## 整体结构
@@ -217,6 +218,7 @@
 
   文字是照片上实际写着的，可靠程度接近名称，但它是机器读出来的，界面上要标明（见“界面”）。
 - **匹配方式**：查询文字出现在全文、字段值或用户更正中即命中。
+  - 查询里有文档类型的叫法时，读出为这一类型的照片也命中：“身份证”“证件”找身份证的两面，“银行卡”“发票”“回单”“小票”“收据”同理。身份证人像面上没有“身份证”三个字，只按文字找不到它。叫法在 [`textread.go`](../../internal/photos/textread/textread.go)。
   - 数字较多的查询，两边都去掉空格和连字符再比，“6222 0200”也能找到“6222020…”。
   - 只在调用者可见的照片里匹配，走现有的图库 Policy。
   - AI 助手的搜索只匹配脱敏后的文字，见“AI 助手：能用，看不到具体的值”。
@@ -247,6 +249,10 @@
   - 照片要已读出、所在图库开着开关，字段要属于读出的文档类型。值最多 200 字，不能有控制字符。
   - 把没更正过的字段设成读出的值，就是“确认”：它也成为一条更正，界面据此不再标“待核对”。
 - `GET …/text/changes`：修改记录，新的在前，含修改人、旧值、新值和从哪个图库改的。AI 助手拿不到。
+- `GET /api/v1/photos/text-handles/{handle}`：句柄代表的值，给助手窗口用（见“AI 助手：能用，看不到具体的值”）。
+  - 只给句柄所属的成员本人，用他自己的会话；助手的套接字上没有这条路由。
+  - 成员要仍能看到那张照片、所在图库开着开关；其余情况一律答找不到，不说原因。
+  - 返回值、它的种类（身份证号、卡号等）、是否还没有人核对，以及出自哪张照片；不缓存。
 - 照片详情（`GET /api/v1/photos/assets/{assetId}`）带 `text`：`read`、`queued` 或 `failed`，图库关着开关或不读文字的照片没有这一项。查看器据此只为有文字的照片请求上面的接口。
 
 ## 权限与隐私
@@ -272,11 +278,11 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
   - 不能由号码推出来：用号码的哈希做句柄的话，身份证号的取值空间有限，可以穷举反推；
   - 照片删除或本人不再能看到这张照片时，句柄失效。
 - **防止试探**：助手的搜索只匹配脱敏后的文字。否则它可以用号码片段反复搜索，看有没有结果，把号码一位一位试出来。
-- **使用句柄**：助手把句柄交给工具，产品服务在本机、以本人身份、按图库 Policy 再核对一次后，把它换成真实的值。只允许换到结果不会再回到模型的地方：
-  - 助手窗口里显示或复制给本人；
-  - 经“提交更改”写进本人空间的文件。之后助手再读这些文件时，文件代理把其中本人的敏感值替换回句柄。
+- **使用句柄**：句柄只在本机、以本人身份、按图库 Policy 再核对一次后换成真实的值，而且只换到结果不会再回到模型的地方：
+  - 助手窗口里显示或复制给本人（已实现，见“助手窗口里的号码”）；
+  - 经“提交更改”写进本人空间的文件。之后助手再读这些文件时，文件代理把其中本人的敏感值替换回句柄（未实现）。
 - **暂不允许**：
-  - 经浏览器控制填进网页表单：页面截图会发给云端模型；
+  - 经操作桌面的工具填进页面上的表单：页面的画面会发给云端模型；
   - 发往外部服务。
 
   以后要开放时，按 #160 的规则，属于“可能外泄的写入”，须本人在确认卡片上看到真实的值后同意。
@@ -290,12 +296,43 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
     - 不存号码的摘要：身份证号的取值空间有限，摘要可以穷举反推，关闭开关、清除文字之后也还留着。
     - 同一个值对同一个人总是同一个句柄，不同成员的助手拿到的不同。
   - 助手的搜索只在这样脱敏后的全文与字段中找。
-  - 文字里有敏感值的照片，助手拿不到它的画面（`GET …/view` 答 403 `sensitive_photo`）：模型看图就能读出号码，句柄就白换了。
-    - 只有手机号的照片照常给（2026-11-06 用户决定），手机截图常有手机号；手机号在文字里仍是句柄。
-    - 还没读出文字的照片照常给，包括排队中的、分流漏掉的和开关关着的图库里的。
+  - 助手拿不到这些照片的画面（[决定](../decisions/2026-11-10-assistant-view-of-documents.md)）：模型看图就能读出号码，句柄就白换了。
+    - 读出的类型是文档的（身份证的任一面、银行卡、银行回单、发票、小票），以及不是文档但文字里有号码的：`GET …/view` 答 403 `sensitive_photo`。国徽面没有号码，也是证件。
+    - 分流选中、还没读完或读取失败的：答 403 `unread_photo`。读完之前不知道它上面有什么，而读一张要约两分钟。
+    - 不是文档、只有手机号的照片照常给（2026-11-06 用户决定），手机截图常有手机号；手机号在文字里仍是句柄。
+    - 分流漏掉的照片和开关关着的图库里的照片没有读取任务，照常给。
 - **实现分工**：
   - 本方案的步骤 4 实现：句柄登记、助手接口的脱敏、搜索只匹配脱敏文字；
-  - 在助手窗口和文件代理中把句柄换成真实的值，属于 AI 助手的工作（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)），另开后续实现；在那之前，助手只能指出“哪张照片里有哪种号码”。
+  - 助手的工具与窗口（2026-11-10，见下两节）；
+  - 在文件代理中把句柄换成真实的值，属于 AI 助手的工作（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)），另开后续实现。
+
+### 助手的工具
+
+2026-11-10 用户在实验 NAS 上问 VNAS“我身份证号码是多少”，它翻了 11 次文件，再问才去相册，又用 5 次调用逐张取画面，最后拿不到号码：相册服务给助手的文字接口没有任何工具在用。按[工具设计的通行做法](https://www.anthropic.com/engineering/writing-tools-for-agents)（少而精、一次调用带回要用的信息、报错写明下一步），文字并进现有的两个工具，不加新工具（[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py)）：
+
+- **`search_photos`**：第一页里按名称或文字命中的照片（至多 10 张）带上读出的内容：
+  - `document`：文档类型；
+  - `fields`：读出的字段，敏感的是句柄；
+  - `unchecked`：还没有人核对的字段；
+  - `text`：不是文档的照片带文字的前 200 字。
+
+  工具说明写明：成员问证件、银行卡、票据上的信息时先用它，直接搜类型。
+- **`photo_details`**：带全部文字与字段；文字还没读完、没读出来或没读全时注明。
+- **`look_at_photo`**：说明里写明读字不用它。被拒绝时，工具按相册的错误码告诉模型下一步：`sensitive_photo` 是“用 `photo_details` 读文字，句柄原样写进回答”，`unread_photo` 是“请成员稍后再问”。
+- **句柄怎么用**写在两个带文字的工具的说明里：成员要号码时，把句柄原样写进回答正文，不要说自己看不到。
+
+部署时相册服务、产品服务（含 Web）与助手的 MCP 工具（[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)的 `update`）一起更新：只更新一边时，助手要么拿不到文字，要么窗口换不出号码。
+
+评测用例在 [`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 与 [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)，结果见[研究记录](../research/hermes-agent-runtime.md#问证件上的号码2026-11-10)。
+
+### 助手窗口里的号码
+
+- 窗口在助手的回答里找到句柄，向 `GET /api/v1/photos/text-handles/{handle}` 换成真实的值，显示在句柄的位置（[`TextHandle.tsx`](../../web/src/assistant/TextHandle.tsx)、[`textHandles.ts`](../../web/src/assistant/textHandles.ts)）。请求用成员自己的浏览器会话，值不经过模型，也不写进 Hermes 的对话记录：记录里存的始终是句柄，重新打开对话时再换一次。
+- 号码完整显示，可以复制，旁边的按钮在相册中打开那张照片；还没有人核对的标“待核对”。换不到时显示“（无法显示）”。
+- 句柄跟着它的键走：字段被更正后，同一个句柄显示更正后的值。
+- 只有助手窗口会换。定时任务的结果、通知与虚拟伙伴的气泡里仍是句柄。
+- **不回流**：VNAS 操作桌面时把页面读成文字（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）。它不读自己的窗口，所以读不到窗口里换出来的号码；相册查看器里“照片中的文字”一栏标了 `data-vnas-private`，它也读不到、不能操作。
+- **没有堵住的**：取画面的工具（`desktop` 服务器的 `look`）把当前页面画成图片交给云端看图模型，试用期间不遮挡任何区域（2026-10-21 用户决定）。成员让 VNAS 打开一张证件照片再“看看屏幕”，画面仍会发出去。要堵住得在桌面截图里遮住相册查看器，需要另行决定。
 
 ## 资源策略
 
@@ -327,7 +364,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
   - “修改记录”列出谁、何时、从哪个图库改了什么。“改回”回到这次修改之前：之前是另一条更正的，恢复那条更正；之前显示识别结果的（第一次更正、确认，或恢复之后的修改），去掉更正。字段已经是那样的不显示“改回”；
   - 排队中与读取失败的照片各有一行说明；不读文字的照片和关了开关的图库不显示这一栏；
   - 经查看授权看到的照片与回收站里的照片只读。
-- **搜索结果**：名称匹配之后，文字命中的照片单独成组，组标题“照片中的文字包含“…””（引号里是去掉人名后的搜索词，与搜索实际匹配的一致），并注明文字由本地 AI 识别、可能有误；之后的照片另起一组（“画面相近的照片”，或“检测到 … 的照片”）。搜索结果为此多了名称匹配的张数 `names`。
+- **搜索结果**：名称匹配之后，文字命中的照片单独成组，组标题“照片中的文字匹配“…””（引号里是去掉人名后的搜索词，与搜索实际匹配的一致；按文档类型命中的照片也在这一组），并注明文字由本地 AI 识别、可能有误；之后的照片另起一组（“画面相近的照片”，或“检测到 … 的照片”）。搜索结果为此多了名称匹配的张数 `names`。
 - **整理进度**：照片都整理完、还有文字没读时，侧栏的 AI 卡片显示“正在读取文字 已读 / 总数”、无法识别的张数与读不出文字的张数。AI 状态为此多了 `texts`：已读、排队与失败的张数。
 - **开关**：AI 聚合中的“本地 AI 设置”（原“人物与宠物设置”）每个图库列出“人物与宠物”与“照片中的文字”两个开关：
   - 私有图库由所有者、共享图库由管理员设置；
@@ -407,5 +444,5 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - [模型评估](../research/photo-ocr-model-evaluation.md)、[模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md#ocr)
 - [#128](https://github.com/zhongwater123/A-NAS/issues/128)（真实样本）、[#321](https://github.com/zhongwater123/A-NAS/pull/321)（内存规则）、[#323](https://github.com/zhongwater123/A-NAS/issues/323)（4B 级候选）
 - [ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（更正与修改记录）
-- 测试：[`internal/photos/textview_test.go`](../../internal/photos/textview_test.go)、[`internal/photos/textread/sensitive_test.go`](../../internal/photos/textread/sensitive_test.go)
+- 测试：[`internal/photos/textview_test.go`](../../internal/photos/textview_test.go)、[`internal/photos/textread/sensitive_test.go`](../../internal/photos/textread/sensitive_test.go)、[`ai/tests/test_anas_mcp.py`](../../ai/tests/test_anas_mcp.py)、[`web/src/assistant/markdown.test.tsx`](../../web/src/assistant/markdown.test.tsx)
 - 代码：[`internal/photos/search.go`](../../internal/photos/search.go)、[`internal/photos/textsearch.go`](../../internal/photos/textsearch.go)、[`internal/photos/textview.go`](../../internal/photos/textview.go)、[`internal/photos/textread/sensitive.go`](../../internal/photos/textread/sensitive.go)、[`internal/photosapi/text.go`](../../internal/photosapi/text.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`ai/anas_ai/worker.py`](../../ai/anas_ai/worker.py)、[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)

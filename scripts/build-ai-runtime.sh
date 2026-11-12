@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Builds the AI Worker's Python runtime on the development machine (ADR 0016):
 # a virtual environment for Debian 13's Python 3, installed from the wheels
-# ai/requirements.txt pins by hash and packed as a tarball. The root installer
-# unpacks it into /opt/a-nas/ai-runtimes/<id>, so the NAS never runs pip or
-# reaches the network. The ID derives from the lock and the Python version; an
-# existing tarball for that ID is reused, so its SHA-256 stays the one the NAS
-# has seen.
+# ai/requirements.txt pins by hash and packed as a tarball. Its content package
+# (scripts/build-content-packages.sh) unpacks it into
+# /opt/a-nas/ai-runtimes/<id>, so the NAS never runs pip or reaches the
+# network. The ID derives from the lock and the Python version
+# (scripts/lib/content.sh); an existing tarball for that ID is reused.
 #
 # Usage: scripts/build-ai-runtime.sh [IMAGE]
 #        scripts/build-ai-runtime.sh --lock [UV-OPTION...]
@@ -35,12 +35,18 @@ if [[ "${1:-}" == --lock ]]; then
 fi
 
 image=${1:-anas-ai-dev:trixie}
-lock=$repo/ai/requirements.txt
 # pip check knows nothing of requirements.excludes, so it reports the
 # dependencies left out there as missing; it may report nothing else.
 excluded=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$repo/ai/requirements.excludes" | paste -sd '|')
 python=$(image_python "$image")
-id=$( { cat "$lock"; printf 'python=%s\n' "$python"; } | sha256sum | cut -c1-16)
+# shellcheck source=lib/content.sh
+. "$repo/scripts/lib/content.sh"
+if [[ "$python" != "$TARGET_PYTHON" ]]; then
+  echo "$image has Python $python; the runtime is for Debian 13's $TARGET_PYTHON (scripts/lib/content.sh)" >&2
+  exit 2
+fi
+# The ID the release's packages name (scripts/lib/content.sh).
+id=$(ai_runtime_id "$repo")
 out=$repo/build/ai-runtime
 tarball=$out/$id.tar.gz
 mkdir -p "$out"

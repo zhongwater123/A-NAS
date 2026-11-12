@@ -170,7 +170,7 @@ const definitions = {
     title: "设置",
     icon: Settings,
     tone: "settings",
-    bounds: { x: 300, y: 76, width: 920, height: 620 },
+    bounds: { x: 240, y: 56, width: 1020, height: 700 },
     launcher: {
       id: "settings",
       // The administrator terminal lives in Settings → 终端, so searching for it in the launcher finds 设置.

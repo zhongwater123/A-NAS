@@ -1,67 +1,49 @@
 import {
   Activity,
-  AtSign,
-  Camera,
   ChevronRight,
-  CircleArrowUp,
-  CircleCheck,
-  Clock3,
-  Database,
-  Ellipsis,
-  FolderLock,
   Globe,
   HardDrive,
-  History,
-  Images,
-  KeyRound,
   LayoutDashboard,
-  LogOut,
   type LucideIcon,
-  Monitor,
-  Network,
   Palette,
-  PenLine,
   ScrollText,
-  ShieldCheck,
+  Search,
   SquareTerminal,
-  TriangleAlert,
-  UserPlus,
   UsersRound,
-  UserX,
+  X,
 } from "lucide-react";
-import { FormEvent, ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
-
-import type { Health, Session, User } from "../api.generated";
 import {
-  nicknameProblem,
-  nicknameRuleText,
-  passwordProblem,
-  passwordRuleText,
-  usernameProblem,
-  usernameRuleText,
-} from "../auth/accountRules";
-import { changePassword, removeAvatar, updateNickname } from "../auth/api";
-import { HostState } from "../desktop/api";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import type { Session, User } from "../api.generated";
 import type { HostStateView } from "../desktop/useHostState";
-import { formatBytes } from "../lib/bytes";
-import { displayName, fullName, usePeople } from "../people/people";
-import { AvatarDialog } from "./AvatarDialog";
-import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
-import { CompanionCredit } from "./CompanionCredit";
-import { DeviceTemperatures } from "./DeviceTemperatures";
-import { describeFinding } from "./health";
-import { HostStateBanner, HostStatePending } from "./hostState";
+import type { PinyinMatch } from "../music/library";
+import { loadPinyin } from "../music/pinyin";
+import { displayName } from "../people/people";
+import { useToasts } from "../ui/feedback";
+import { AccountSection } from "./AccountSection";
+import { roleLabel } from "./labels";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
+import { OverviewSection } from "./OverviewSection";
 import { PersonalizationSection } from "./PersonalizationSection";
-import { Avatar, Banner, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
-import { StorageSection, useVolumes, type VolumesView, volumeState, volumeUsage } from "./StorageSection";
+import { Avatar, type SettingsKit, SettingsKitContext } from "./parts";
+import { StorageSection, useVolumes } from "./StorageSection";
+import { type SearchEntry, searchEntries, searchSettings } from "./search";
 // After the sections' stylesheets, which these rules follow.
 import styles from "./settings.module.css";
 import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
+import { UsersSection } from "./UsersSection";
 import { WebSearchSection } from "./WebSearchSection";
 
 export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
@@ -77,28 +59,40 @@ export type SettingsSection =
   | "task-manager"
   | "web-search";
 
-const systemSections: Array<{
+interface SectionLink {
   id: SettingsSection;
   label: string;
   icon: LucideIcon;
-  tone: string;
   adminOnly?: boolean;
-}> = [
-  { id: "overview", label: "概览", icon: LayoutDashboard, tone: "overview" },
-  { id: "task-manager", label: "任务管理器", icon: Activity, tone: "security" },
-  { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
-  { id: "personalization", label: "个性化", icon: Palette, tone: "personalize", adminOnly: true },
-  { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
-  { id: "web-search", label: "网页搜索", icon: Globe, tone: "accent", adminOnly: true },
-  { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
-  { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
+}
+
+// The sidebar's sections, in groups: the device, the household, diagnostics.
+const sectionGroups: SectionLink[][] = [
+  [
+    { id: "overview", label: "概览", icon: LayoutDashboard },
+    { id: "storage", label: "存储", icon: HardDrive },
+    { id: "task-manager", label: "任务管理器", icon: Activity },
+  ],
+  [
+    { id: "users", label: "用户与权限", icon: UsersRound, adminOnly: true },
+    { id: "personalization", label: "个性化", icon: Palette, adminOnly: true },
+    { id: "web-search", label: "网页搜索", icon: Globe, adminOnly: true },
+  ],
+  [
+    { id: "logs", label: "日志", icon: ScrollText },
+    { id: "terminal", label: "终端", icon: SquareTerminal, adminOnly: true },
+  ],
 ];
 
-const plannedSections: Array<{ label: string; icon: LucideIcon; tone: string }> = [
-  { label: "网络与访问", icon: Network, tone: "network" },
-  { label: "安全", icon: ShieldCheck, tone: "security" },
-  { label: "系统更新", icon: CircleArrowUp, tone: "update" },
-];
+const sectionLinks = sectionGroups.flat();
+const sectionLabel = (section: SettingsSection) =>
+  section === "account" ? "我的账号" : (sectionLinks.find((link) => link.id === section)?.label ?? "");
+
+// A row the search led to: found again after the section has rendered it.
+interface Target {
+  anchor: string;
+  id: number;
+}
 
 export function SettingsPanel({
   session,
@@ -120,12 +114,10 @@ export function SettingsPanel({
 }) {
   const { user } = session;
   const isAdmin = user.role === "admin";
-  const current =
-    (section === "users" || section === "terminal" || section === "personalization") && !isAdmin ? "overview" : section;
-  // 用户与权限 can open My account with its password form showing; the request
-  // is used up once the form is shown. The form's own state lives in
-  // AccountSection, so switching away from My account by any route closes it.
-  const [passwordFormRequested, setPasswordFormRequested] = useState(false);
+  const current = !isAdmin && sectionLinks.some((link) => link.id === section && link.adminOnly) ? "overview" : section;
+  // 用户与权限 can open My account with its password dialog showing; the
+  // request is used up once the dialog is shown.
+  const [passwordRequested, setPasswordRequested] = useState(false);
   // "登录记录" in My account opens the logs on sign-ins.
   const [logsPreset, setLogsPreset] = useState<LogsPreset>();
   const volumes = useVolumes(storagePlan.plan?.state);
@@ -134,1202 +126,317 @@ export function SettingsPanel({
   const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
   const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
   if (current === "terminal" && !terminalOpened) setTerminalOpened(true);
+
+  // A narrow window shows one pane at a time: the section list, or a section
+  // with a way back. A section opened from outside shows the section.
+  const [pane, setPane] = useState<"sections" | "page">("page");
+  const [seenSection, setSeenSection] = useState(section);
+  if (section !== seenSection) {
+    setSeenSection(section);
+    setPane("page");
+  }
+  const go = (next: SettingsSection) => {
+    onSectionChange(next);
+    setPane("page");
+  };
+
+  const shell = useRef<HTMLDivElement>(null);
+  const main = useRef<HTMLDivElement>(null);
+  const { toast, element: toasts } = useToasts();
+  const kit = useMemo<SettingsKit>(
+    () => ({ container: shell, toast, showSections: () => setPane("sections") }),
+    [toast],
+  );
+
+  // Each section starts at its top.
+  useEffect(() => {
+    if (!main.current) return;
+    main.current.scrollTop = 0;
+    main.current.removeAttribute("data-scrolled");
+  }, [current]);
+
+  // The search leads to a row: wait for the section to render it, bring it
+  // into view and mark it for a moment.
+  const [target, setTarget] = useState<Target>();
+  useEffect(() => {
+    if (!target) return;
+    let tries = 0;
+    let marked: Element | null = null;
+    let clear = 0;
+    const find = window.setInterval(() => {
+      const found = main.current?.querySelector(`[data-setting="${target.anchor}"]`);
+      if (!found && ++tries < 20) return;
+      window.clearInterval(find);
+      if (!found) return;
+      marked = found;
+      // Scrolls the page alone: scrollIntoView would also move the desktop behind the window.
+      const view = main.current?.getBoundingClientRect();
+      const box = found.getBoundingClientRect();
+      if (view)
+        main.current?.scrollBy({ top: box.top - view.top - (view.height - box.height) / 2, behavior: "smooth" });
+      found.setAttribute("data-found", "");
+      clear = window.setTimeout(() => found.removeAttribute("data-found"), 2000);
+    }, 80);
+    return () => {
+      window.clearInterval(find);
+      window.clearTimeout(clear);
+      marked?.removeAttribute("data-found");
+    };
+  }, [target]);
+
+  const open = (entry: SearchEntry) => {
+    go(entry.section);
+    if (entry.anchor) setTarget({ anchor: entry.anchor, id: Date.now() });
+  };
+
+  const links = sectionGroups
+    .map((group) => group.filter((link) => isAdmin || !link.adminOnly))
+    .filter((group) => group.length > 0);
+
   return (
-    <div className={styles.setShell}>
-      <nav className={styles.setNav} aria-label="设置分区">
-        <button
-          className={`${styles.setNavAccount} ${current === "account" ? styles.active : ""}`}
-          aria-label="我的账号"
-          aria-current={current === "account" ? "page" : undefined}
-          onClick={() => onSectionChange("account")}
+    <SettingsKitContext value={kit}>
+      <div className={styles.setShell} ref={shell} data-pane={pane}>
+        <div className={styles.setSide}>
+          <SettingsSearch isAdmin={isAdmin} onOpen={open}>
+            <SectionNav
+              user={user}
+              groups={links}
+              current={current}
+              terminalRunning={current !== "terminal" && terminalStatus?.state === "connected"}
+              onGo={go}
+            />
+          </SettingsSearch>
+        </div>
+        <div
+          className={`${styles.setMain} ${current === "terminal" ? styles.fill : ""}`}
+          data-settings-main=""
+          ref={main}
+          onScroll={(event) => event.currentTarget.toggleAttribute("data-scrolled", event.currentTarget.scrollTop > 6)}
         >
-          <Avatar who={user} />
-          <span>
-            <strong>{displayName(user)}</strong>
-            <small>{roleLabel(user.role)} · 我的账号</small>
-          </span>
-        </button>
-        {systemSections
-          .filter((link) => isAdmin || !link.adminOnly)
-          .map(({ id, label, icon, tone }) => (
+          {current !== "terminal" && (
+            <div
+              key={current}
+              className={`${styles.setPage} ${current === "task-manager" ? styles.taskManagerPage : current === "logs" ? styles.wide : ""}`}
+            >
+              {current === "account" && (
+                <AccountSection
+                  session={session}
+                  openPassword={passwordRequested}
+                  onPasswordShown={() => setPasswordRequested(false)}
+                  onUserChange={onUserChange}
+                  onLogout={onLogout}
+                  onShowSignIns={() => {
+                    setLogsPreset({ category: "session", id: Date.now() });
+                    go("logs");
+                  }}
+                />
+              )}
+              {current === "overview" && (
+                <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => go("storage")} />
+              )}
+              {current === "storage" && (
+                <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />
+              )}
+              {current === "personalization" && <PersonalizationSection />}
+              {current === "web-search" && <WebSearchSection />}
+              {current === "users" && (
+                <UsersSection
+                  currentUser={user}
+                  onChangeOwnPassword={() => {
+                    setPasswordRequested(true);
+                    go("account");
+                  }}
+                />
+              )}
+              {current === "task-manager" && <TaskManagerSection />}
+              {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
+            </div>
+          )}
+          {isAdmin && terminalOpened && (
+            <TerminalSection
+              username={user.username}
+              hostname={host.snapshot?.system.hostname}
+              active={current === "terminal"}
+              onStatus={setTerminalStatus}
+            />
+          )}
+        </div>
+        {toasts}
+      </div>
+    </SettingsKitContext>
+  );
+}
+
+// SectionNav is the sidebar's list: the account, then the sections in groups.
+// One raised pill marks the current section and glides to the next one; it is
+// placed from the current button's own box, so it follows whatever the list
+// holds for this role.
+function SectionNav({
+  user,
+  groups,
+  current,
+  terminalRunning,
+  onGo,
+}: {
+  user: User;
+  groups: SectionLink[][];
+  current: SettingsSection;
+  terminalRunning: boolean;
+  onGo: (section: SettingsSection) => void;
+}) {
+  const nav = useRef<HTMLElement>(null);
+  const [pill, setPill] = useState<{ top: number; height: number }>();
+  const count = groups.reduce((sum, group) => sum + group.length, 0);
+  useLayoutEffect(() => {
+    const active = nav.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    setPill(active ? { top: active.offsetTop, height: active.offsetHeight } : undefined);
+  }, [current, count]);
+  return (
+    <nav className={styles.setNav} aria-label="设置分区" ref={nav}>
+      {pill && (
+        <span
+          className={styles.setNavPill}
+          style={{ height: pill.height, transform: `translateY(${pill.top}px)` }}
+          aria-hidden="true"
+        />
+      )}
+      <button
+        className={`${styles.setNavAccount} ${current === "account" ? styles.active : ""}`}
+        aria-label="我的账号"
+        aria-current={current === "account" ? "page" : undefined}
+        onClick={() => onGo("account")}
+      >
+        <Avatar who={user} size="lg" />
+        <span>
+          <strong>{displayName(user)}</strong>
+          <small>{roleLabel(user.role)}</small>
+        </span>
+        <ChevronRight className={styles.setNavGo} aria-hidden="true" />
+      </button>
+      {groups.map((group) => (
+        <div key={group[0].id} className={styles.setNavGroup}>
+          {group.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               className={current === id ? styles.active : ""}
               aria-current={current === id ? "page" : undefined}
-              onClick={() => onSectionChange(id)}
+              onClick={() => onGo(id)}
             >
-              <IconTile tone={tone} icon={icon} />
-              {label}
-              {id === "terminal" && current !== "terminal" && terminalStatus?.state === "connected" && (
+              <Icon className={styles.setNavIcon} aria-hidden="true" />
+              <span>{label}</span>
+              {id === "terminal" && terminalRunning && (
                 <span className={styles.setNavLive} title="Shell 正在运行" aria-hidden="true" />
               )}
+              <ChevronRight className={styles.setNavGo} aria-hidden="true" />
             </button>
           ))}
-        <p className={styles.setNavLabel}>规划中</p>
-        {plannedSections.map(({ label, icon, tone }) => (
-          <button key={label} aria-label={`${label}，规划中`} disabled>
-            <IconTile tone={tone} icon={icon} />
-            {label}
-          </button>
-        ))}
-      </nav>
-      <div className={`${styles.setMain} ${current === "terminal" ? styles.fill : ""}`} data-settings-main="">
-        {current !== "terminal" && (
-          <div
-            className={`${styles.setPage} ${current === "task-manager" ? styles.taskManagerPage : current === "logs" ? styles.wide : ""}`}
-          >
-            {current === "account" && (
-              <AccountSection
-                session={session}
-                openPasswordForm={passwordFormRequested}
-                onPasswordFormShown={() => setPasswordFormRequested(false)}
-                onUserChange={onUserChange}
-                onLogout={onLogout}
-                onShowSignIns={() => {
-                  setLogsPreset({ category: "session", id: Date.now() });
-                  onSectionChange("logs");
-                }}
-              />
-            )}
-            {current === "overview" && (
-              <OverviewSection
-                host={host}
-                volumes={volumes}
-                isAdmin={isAdmin}
-                onOpenStorage={() => onSectionChange("storage")}
-              />
-            )}
-            {current === "storage" && (
-              <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />
-            )}
-            {current === "personalization" && <PersonalizationSection />}
-            {current === "web-search" && <WebSearchSection />}
-            {current === "users" && (
-              <UsersSection
-                currentUser={user}
-                onChangeOwnPassword={() => {
-                  setPasswordFormRequested(true);
-                  onSectionChange("account");
-                }}
-              />
-            )}
-            {current === "task-manager" && <TaskManagerSection />}
-            {current === "logs" && <LogsSection session={session} preset={logsPreset} />}
-          </div>
-        )}
-        {isAdmin && terminalOpened && (
-          <TerminalSection
-            username={user.username}
-            hostname={host.snapshot?.system.hostname}
-            active={current === "terminal"}
-            onStatus={setTerminalStatus}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- My account
-
-function AccountSection({
-  session,
-  openPasswordForm,
-  onPasswordFormShown,
-  onUserChange,
-  onLogout,
-  onShowSignIns,
-}: {
-  session: Session;
-  openPasswordForm: boolean;
-  onPasswordFormShown: () => void;
-  onUserChange: (user: User) => void;
-  onLogout: () => void;
-  onShowSignIns: () => void;
-}) {
-  const { user } = session;
-  const [editing, setEditing] = useState(openPasswordForm);
-  const shown = useEffectEvent(() => {
-    if (openPasswordForm) onPasswordFormShown();
-  });
-  useEffect(() => shown(), []);
-  const people = usePeople();
-  const [choosingAvatar, setChoosingAvatar] = useState(false);
-  const [profileNotice, setProfileNotice] = useState("");
-  const [profileError, setProfileError] = useState("");
-  const [removing, setRemoving] = useState(false);
-  const profileSaved = (next: User, message: string) => {
-    onUserChange(next);
-    setProfileError("");
-    setProfileNotice(message);
-  };
-  const dropAvatar = async () => {
-    setRemoving(true);
-    setProfileNotice("");
-    try {
-      profileSaved(await removeAvatar(), "已移除头像，现在显示文字头像。");
-    } catch (caught) {
-      setProfileError(messageOf(caught));
-    } finally {
-      setRemoving(false);
-    }
-  };
-  const resetBy = session.credentialReset ? people.byUsername(session.credentialReset.actorUsername) : undefined;
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [saving, setSaving] = useState(false);
-  const open = () => {
-    setError("");
-    setNotice("");
-    setEditing(true);
-  };
-  const cancel = () => {
-    setError("");
-    setEditing(false);
-  };
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const next = String(data.get("newPassword"));
-    const problem = passwordProblem(next);
-    if (problem) {
-      setError(problem);
-      return;
-    }
-    if (next !== String(data.get("confirmPassword"))) {
-      setError("两次输入的新密码不一致");
-      return;
-    }
-    setSaving(true);
-    try {
-      await changePassword(String(data.get("currentPassword")), next);
-      setError("");
-      setNotice("密码已更新，SMB 凭据已同步。");
-      setEditing(false);
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-  const localConsole = isLocalConsole();
-  return (
-    <>
-      <PageHeader title="我的账号" subtitle="你的头像、昵称、密码与当前会话" />
-      <div className={`${styles.setCard} ${styles.acctHero}`}>
-        <button
-          className={styles.acctAvatar}
-          aria-label="更换头像"
-          title="更换头像"
-          onClick={() => setChoosingAvatar(true)}
-        >
-          <Avatar who={user} size="xl" />
-          <span className={styles.acctAvatarBadge} aria-hidden="true">
-            <Camera />
-          </span>
-        </button>
-        <div className={styles.acctHeroText}>
-          <h3>{displayName(user)}</h3>
-          <p>
-            <Pill tone={user.role === "admin" ? "accent" : "neutral"}>{roleLabel(user.role)}</Pill>
-            <StatusText status={user.status} />
-            {user.nickname && <span className={styles.acctHandle}>账号名 {user.username}</span>}
-          </p>
         </div>
-        <button className={styles.setBtn} onClick={onLogout}>
-          <LogOut />
-          退出登录
-        </button>
-      </div>
-      {profileError && (
-        <Banner tone="error" onClose={() => setProfileError("")}>
-          {profileError}
-        </Banner>
-      )}
-      {profileNotice && (
-        <Banner tone="success" onClose={() => setProfileNotice("")}>
-          {profileNotice}
-        </Banner>
-      )}
-      <Group
-        title="个人资料"
-        footnote="昵称和头像会显示在桌面、日志、问题反馈和相册中，家里的每个账号都能看到。登录和 SMB 共享仍使用账号名。"
-      >
-        <Row
-          icon={<Avatar who={user} />}
-          label="头像"
-          detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示文字头像"}
-        >
-          {user.avatarVersion && (
-            <button className={styles.setBtn} disabled={removing} onClick={() => void dropAvatar()}>
-              {removing ? "正在移除…" : "移除"}
-            </button>
-          )}
-          <button
-            className={styles.setBtn}
-            onClick={() => {
-              setProfileNotice("");
-              setChoosingAvatar(true);
-            }}
-          >
-            {user.avatarVersion ? "更换…" : "设置头像…"}
-          </button>
-        </Row>
-        <NicknameRow
-          user={user}
-          onEditing={() => setProfileNotice("")}
-          onSaved={(next) =>
-            profileSaved(
-              next,
-              next.nickname ? `昵称已改为“${next.nickname}”。` : `已清除昵称，现在显示账号名 ${next.username}。`,
-            )
-          }
-        />
-        <Row
-          icon={<IconTile tone="handle" icon={AtSign} />}
-          label="账号名"
-          detail="登录、SMB 共享和设备上的 Linux 账号使用，不能修改"
-        >
-          <span className={styles.acctUsername}>{user.username}</span>
-        </Row>
-      </Group>
-      {choosingAvatar && (
-        <AvatarDialog
-          onClose={() => setChoosingAvatar(false)}
-          onSaved={(next) => {
-            setChoosingAvatar(false);
-            profileSaved(next, "头像已更新。");
-          }}
-        />
-      )}
-      <Group title="登录与安全">
-        <Row icon={<IconTile tone="key" icon={KeyRound} />} label="密码" detail="网页登录和 SMB 共享使用同一个密码">
-          {!editing && (
-            <button className={styles.setBtn} onClick={open}>
-              修改密码…
-            </button>
-          )}
-        </Row>
-        {session.credentialReset && (
-          <Row
-            icon={<IconTile tone="warning" icon={TriangleAlert} />}
-            label="管理员重置过密码"
-            detail={`${session.credentialReset.actorUsername ? fullName(resetBy ?? { username: session.credentialReset.actorUsername }) : "管理员"} 于 ${new Date(session.credentialReset.at).toLocaleString("zh-CN")} 重置了这个账号的密码。此后的密码若不是你自己设置的，请当面确认。`}
-          />
-        )}
-        {editing && (
-          <form
-            className={styles.acctForm}
-            aria-label="修改密码"
-            autoComplete="off"
-            onSubmit={(event) => void submit(event)}
-          >
-            <Field label="当前密码">
-              <input
-                className={styles.setInput}
-                name="currentPassword"
-                type="password"
-                required
-                autoComplete="current-password"
-                autoFocus
-              />
-            </Field>
-            <Field label="新密码" hint={passwordRuleText}>
-              <input
-                className={styles.setInput}
-                name="newPassword"
-                type="password"
-                minLength={12}
-                required
-                autoComplete="new-password"
-              />
-            </Field>
-            <Field label="确认新密码">
-              <input
-                className={styles.setInput}
-                name="confirmPassword"
-                type="password"
-                minLength={12}
-                required
-                autoComplete="new-password"
-              />
-            </Field>
-            {error && <Banner tone="error">{error}</Banner>}
-            <div className={styles.acctFormActions}>
-              <button type="button" className={styles.setBtn} onClick={cancel}>
-                取消
-              </button>
-              <button className={`${styles.setBtn} primary`} disabled={saving}>
-                {saving ? "正在保存…" : "保存新密码"}
-              </button>
-            </div>
-          </form>
-        )}
-        {notice && (
-          <div className={styles.setInlineNote} role="status">
-            <CircleCheck />
-            {notice}
-          </div>
-        )}
-        <Row
-          icon={<IconTile tone="session" icon={localConsole ? Monitor : Globe} />}
-          label="本次登录"
-          detail={
-            localConsole
-              ? "设备本机屏幕 · 退出登录前一直保持登录"
-              : `浏览器 · ${formatDateTime(session.expiresAt)} 前有效，之后需要重新登录`
-          }
-        />
-        <Row
-          icon={<IconTile tone="logs" icon={History} />}
-          label="登录记录"
-          detail="这个账号在哪里登录过、是否有人输错过密码"
-        >
-          <button className={styles.setBtn} onClick={onShowSignIns}>
-            查看
-            <ChevronRight />
-          </button>
-        </Row>
-      </Group>
-    </>
-  );
-}
-
-function NicknameRow({
-  user,
-  onEditing,
-  onSaved,
-}: {
-  user: User;
-  onEditing: () => void;
-  onSaved: (user: User) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const open = () => {
-    setValue(user.nickname ?? "");
-    setError("");
-    setEditing(true);
-    onEditing();
-  };
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const problem = nicknameProblem(value);
-    if (problem) {
-      setError(problem);
-      return;
-    }
-    setSaving(true);
-    try {
-      const next = await updateNickname(value.trim());
-      setEditing(false);
-      setError("");
-      onSaved(next);
-    } catch (caught) {
-      setError(messageOf(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <>
-      <Row
-        icon={<IconTile tone="nickname" icon={PenLine} />}
-        label="昵称"
-        detail={user.nickname || `未设置，显示账号名 ${user.username}`}
-      >
-        {!editing && (
-          <button className={styles.setBtn} onClick={open}>
-            {user.nickname ? "修改…" : "设置昵称…"}
-          </button>
-        )}
-      </Row>
-      {editing && (
-        <form
-          className={styles.acctForm}
-          aria-label="修改昵称"
-          autoComplete="off"
-          onSubmit={(event) => void submit(event)}
-        >
-          <Field label="昵称" hint={`${nicknameRuleText}。留空则显示账号名。`}>
-            <input
-              className={styles.setInput}
-              name="nickname"
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={user.username}
-              autoFocus
-              spellCheck={false}
-            />
-          </Field>
-          {error && <Banner tone="error">{error}</Banner>}
-          <div className={styles.acctFormActions}>
-            <button
-              type="button"
-              className={styles.setBtn}
-              onClick={() => {
-                setEditing(false);
-                setError("");
-              }}
-            >
-              取消
-            </button>
-            <button className={`${styles.setBtn} primary`} disabled={saving}>
-              {saving ? "正在保存…" : "保存昵称"}
-            </button>
-          </div>
-        </form>
-      )}
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ Overview
-
-function OverviewSection({
-  host,
-  volumes,
-  isAdmin,
-  onOpenStorage,
-}: {
-  host: HostStateView;
-  volumes: VolumesView;
-  isAdmin: boolean;
-  onOpenStorage: () => void;
-}) {
-  const { snapshot } = host;
-  const header = (
-    <PageHeader
-      title="概览"
-      subtitle="这台 A-NAS 的运行状态"
-      action={
-        snapshot && <RefreshButton label="刷新设备状态" busy={host.refreshing} onClick={() => void host.refresh()} />
-      }
-    />
-  );
-  if (!snapshot)
-    return (
-      <>
-        {header}
-        <HostStatePending host={host} />
-        <CompanionCredit />
-      </>
-    );
-  const totalCapacity = snapshot.disks.reduce((sum, disk) => sum + disk.capacityBytes, 0);
-  const volume = volumes.items?.[0];
-  const usage = volume ? volumeUsage(volume) : undefined;
-  const health = healthPresentation(snapshot.system.health);
-  const systemStorage = snapshot.system.storage;
-  const systemUsedPercent = systemStorage
-    ? Math.round((1 - systemStorage.availableBytes / systemStorage.totalBytes) * 100)
-    : undefined;
-  return (
-    <>
-      {header}
-      <HostStateBanner host={host} snapshot={snapshot} />
-      <div className={styles.ovHero}>
-        <DeviceArt />
-        <div>
-          <h3>{snapshot.system.hostname}</h3>
-          <p>A-NAS 家庭存储</p>
-          <div className={styles.ovHeroPills}>
-            <Pill tone={health.tone}>
-              <span className={styles.setDot} />
-              {health.label}
-            </Pill>
-            <Pill tone={snapshot.dataSource === "live" ? "success" : "warning"}>
-              {snapshot.dataSource === "live" ? "实时主机" : "模拟数据"}
-            </Pill>
-          </div>
-        </div>
-      </div>
-      <div className={styles.ovStats}>
-        <div className={styles.ovStat}>
-          <span>
-            <Clock3 />
-            运行时间
-          </span>
-          <strong>{formatUptime(snapshot.system.uptimeSeconds)}</strong>
-          <small>观测于 {formatTime(snapshot.observedAt)}</small>
-        </div>
-        <div className={styles.ovStat}>
-          <span>
-            <HardDrive />
-            磁盘
-          </span>
-          <strong>{snapshot.disks.length} 块</strong>
-          <small>{snapshot.disks.length ? `总容量 ${formatBytes(totalCapacity)}` : "尚未发现块设备"}</small>
-        </div>
-        <button className={styles.ovStat} onClick={onOpenStorage} aria-label="查看存储">
-          <span>
-            <Database />
-            数据卷
-            <ChevronRight className={styles.ovStatGo} />
-          </span>
-          {volumes.items === undefined ? (
-            <>
-              <strong>—</strong>
-              <small>正在读取</small>
-            </>
-          ) : !volume ? (
-            <>
-              <strong>未初始化</strong>
-              <small>{isAdmin ? "前往存储完成初始化" : "等待管理员初始化"}</small>
-            </>
-          ) : usage?.known ? (
-            <>
-              <strong>已用 {usage.percent}%</strong>
-              <small>可用 {formatBytes(usage.available)}</small>
-              <span className={styles.ovStatBar}>
-                <i style={{ width: `${usage.percent}%` }} />
-              </span>
-            </>
-          ) : (
-            <>
-              <strong>{volumeState(volume.state).label}</strong>
-              <small>已用空间未知</small>
-            </>
-          )}
-        </button>
-      </div>
-      <HealthChecks snapshot={snapshot} onOpenStorage={onOpenStorage} />
-      <DeviceTemperatures snapshot={snapshot} />
-      <Group title="系统盘空间">
-        {systemStorage ? (
-          <>
-            <InfoRow label="已用" value={`${systemUsedPercent}%`} />
-            <InfoRow label="可用空间" value={formatBytes(systemStorage.availableBytes)} />
-            <InfoRow label="总容量" value={formatBytes(systemStorage.totalBytes)} />
-          </>
-        ) : (
-          <InfoRow label="空间占用" value="暂时无法读取" />
-        )}
-      </Group>
-      <Group title="关于本机">
-        <InfoRow label="产品版本" value={snapshot.productVersion} />
-        <InfoRow
-          label="操作系统"
-          value={`${snapshot.system.operatingSystem.name} ${snapshot.system.operatingSystem.version}`}
-        />
-        <InfoRow label="系统架构" value={snapshot.system.architecture} />
-        <InfoRow label="设备标识" value={<span className={styles.setMono}>{snapshot.system.id}</span>} />
-        <InfoRow label="最近观测" value={formatTime(snapshot.observedAt)} />
-      </Group>
-      <CompanionCredit />
-    </>
-  );
-}
-
-// HealthChecks says why the system is rated as it is: each finding with what
-// to do about it, or what was checked when nothing is wrong
-// (docs/specs/system-health.md).
-function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpenStorage: () => void }) {
-  const findings = snapshot.system.healthFindings;
-  if (snapshot.system.health === "unknown") {
-    return (
-      <Group title="健康检查">
-        <div className={`${styles.setRow} ${styles.healthRow}`}>
-          <IconTile tone="overview" icon={ShieldCheck} size="lg" />
-          <div className={styles.setRowText}>
-            <span>
-              <strong>还没有可以检查的磁盘</strong>
-            </span>
-            <small>读到磁盘后会检查硬盘健康、温度和数据卷。</small>
-          </div>
-        </div>
-      </Group>
-    );
-  }
-  return (
-    <Group title="健康检查" aside={findings.length ? `${findings.length} 项需要处理` : undefined}>
-      {findings.length === 0 ? (
-        <div className={`${styles.setRow} ${styles.healthRow}`}>
-          <IconTile tone="security" icon={ShieldCheck} size="lg" />
-          <div className={styles.setRowText}>
-            <span>
-              <strong>未发现问题</strong>
-            </span>
-            <small>已检查硬盘健康（SMART）、处理器与硬盘的温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small>
-          </div>
-        </div>
-      ) : (
-        <>
-          {findings.map((finding, index) => {
-            const described = describeFinding(finding, snapshot.disks);
-            const critical = finding.severity === "critical";
-            return (
-              <div
-                key={`${finding.code}:${finding.diskId ?? ""}:${index}`}
-                className={`${styles.setRow} ${styles.healthRow}`}
-              >
-                <IconTile tone={critical ? "danger" : "warning"} icon={described.icon} size="lg" />
-                <div className={styles.setRowText}>
-                  <span>
-                    <strong>{described.title}</strong>
-                    <Pill tone={critical ? "danger" : "warning"}>{critical ? "严重" : "注意"}</Pill>
-                  </span>
-                  <small>{described.detail}</small>
-                </div>
-              </div>
-            );
-          })}
-          <button className={`${styles.setRow} ${styles.healthGo}`} onClick={onOpenStorage}>
-            在存储中查看磁盘与数据卷
-            <ChevronRight />
-          </button>
-        </>
-      )}
-    </Group>
-  );
-}
-
-function DeviceArt() {
-  const id = useId().replace(/[^\w-]/g, "");
-  return (
-    <svg className={styles.ovArt} viewBox="0 0 80 80" aria-hidden="true">
-      <defs>
-        <linearGradient id={`${id}-body`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#465468" />
-          <stop offset="1" stopColor="#141a24" />
-        </linearGradient>
-        <linearGradient id={`${id}-bay`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#5f6c80" />
-          <stop offset="1" stopColor="#2a3240" />
-        </linearGradient>
-      </defs>
-      <ellipse cx="40" cy="74" rx="24" ry="3" fill="rgba(20,30,45,.18)" />
-      <rect x="15" y="7" width="50" height="64" rx="10" fill={`url(#${id}-body)`} />
-      <rect x="15.5" y="7.5" width="49" height="63" rx="9.5" fill="none" stroke="rgba(255,255,255,.16)" />
-      {[15, 36].map((y) => (
-        <g key={y}>
-          <rect x="22" y={y} width="36" height="17" rx="4" fill={`url(#${id}-bay)`} />
-          <path
-            d={`M27 ${y + 6}h18M27 ${y + 11}h18`}
-            stroke="rgba(255,255,255,.22)"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-          <circle cx="52" cy={y + 8.5} r="2" fill="#4ade80" />
-        </g>
       ))}
-      <circle cx="40" cy="62" r="2.4" fill="#60a5fa" />
-    </svg>
+    </nav>
   );
 }
 
-// --------------------------------------------------------- Users & permissions
-
-type UserDialog =
-  | { kind: "create" }
-  | { kind: "reset"; user: User }
-  | { kind: "viewing"; user: User; scope: ViewingScope }
-  | { kind: "disable"; user: User };
-
-function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User; onChangeOwnPassword: () => void }) {
-  const [users, setUsers] = useState<User[]>();
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [dialog, setDialog] = useState<UserDialog>();
-  const refresh = useCallback(
-    () =>
-      listUsers()
-        .then((items) => {
-          setUsers(items);
-          setError("");
-        })
-        .catch((caught: unknown) => {
-          setError(messageOf(caught));
-        }),
-    [],
-  );
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  const open = (next: UserDialog) => {
-    setNotice("");
-    setDialog(next);
-  };
-  const finish = async (message: string) => {
-    setDialog(undefined);
-    setNotice(message);
-    await refresh();
-  };
-  return (
-    <>
-      <PageHeader
-        title="用户与权限"
-        subtitle="管理家庭成员的账号"
-        action={
-          <button className={`${styles.setBtn} primary`} onClick={() => open({ kind: "create" })}>
-            <UserPlus />
-            添加成员
-          </button>
-        }
-      />
-      {error && <Banner tone="error">{error}</Banner>}
-      {notice && (
-        <Banner tone="success" onClose={() => setNotice("")}>
-          {notice}
-        </Banner>
-      )}
-      <Group
-        title="账号"
-        aside={users ? `${users.length} 个` : undefined}
-        overflowVisible
-        footnote="管理员默认看不到成员的个人空间和私有图库。需要找回内容时可以开启只读查看：必须填写原因，会写入审计并通知对方，24 小时后自动结束。"
-      >
-        {users === undefined ? (
-          <div className={`${styles.setState} ${styles.compact}`}>
-            <span className="loader" />
-            <p>正在读取账号…</p>
-          </div>
-        ) : (
-          sortUsers(users, currentUser.id).map((user) => {
-            const self = user.id === currentUser.id;
-            return (
-              <div className={styles.setRow} key={user.id}>
-                <Avatar who={user} />
-                <div className={styles.setRowText}>
-                  <span>
-                    <strong>{displayName(user)}</strong>
-                    {user.nickname && <span className={styles.setHandle}>{user.username}</span>}
-                    {self && <Pill tone="accent">你</Pill>}
-                  </span>
-                  <small>
-                    <span className={`${styles.setDot} ${styles[`status-${user.status}`] ?? ""}`} />
-                    {roleLabel(user.role)} · {statusLabel(user.status)}
-                  </small>
-                </div>
-                <div className={styles.setRowEnd}>
-                  {self ? (
-                    <button className={styles.setBtn} onClick={onChangeOwnPassword}>
-                      修改我的密码
-                    </button>
-                  ) : (
-                    <RowMenu
-                      label={`${fullName(user)} 的更多操作`}
-                      items={[
-                        { label: "重置密码…", icon: KeyRound, onSelect: () => open({ kind: "reset", user }) },
-                        {
-                          label: "查看个人空间…",
-                          icon: FolderLock,
-                          onSelect: () => open({ kind: "viewing", user, scope: "space" }),
-                        },
-                        {
-                          label: "查看私有图库…",
-                          icon: Images,
-                          onSelect: () => open({ kind: "viewing", user, scope: "library" }),
-                        },
-                        "separator",
-                        {
-                          label: user.status === "disabled" ? "账号已禁用" : "禁用账号…",
-                          icon: UserX,
-                          danger: true,
-                          disabled: user.status === "disabled",
-                          onSelect: () => open({ kind: "disable", user }),
-                        },
-                      ]}
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </Group>
-      {dialog && (
-        <UserDialogView
-          dialog={dialog}
-          onClose={() => setDialog(undefined)}
-          onDone={(message) => void finish(message)}
-        />
-      )}
-    </>
-  );
-}
-
-function UserDialogView({
-  dialog,
-  onClose,
-  onDone,
-}: {
-  dialog: UserDialog;
-  onClose: () => void;
-  onDone: (message: string) => void;
-}) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const run = async (action: () => Promise<string>) => {
-    setBusy(true);
-    setError("");
-    try {
-      onDone(await action());
-    } catch (caught) {
-      setError(messageOf(caught));
-      setBusy(false);
-    }
-  };
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const value = (name: string) => String(data.get(name));
-    const problem =
-      dialog.kind === "create"
-        ? (usernameProblem(value("username")) ?? passwordProblem(value("password")))
-        : dialog.kind === "reset"
-          ? passwordProblem(value("password"))
-          : undefined;
-    if (problem) {
-      setError(problem);
-      return;
-    }
-    if (dialog.kind === "create") {
-      void run(async () => {
-        const member = await createMember(value("username"), value("password"));
-        return `已添加成员 ${member.username}。`;
-      });
-    } else if (dialog.kind === "reset") {
-      void run(async () => {
-        await resetMember(dialog.user.id, value("password"));
-        return `已重置 ${fullName(dialog.user)} 的密码。对方下次登录时必须先设置新密码，SMB 共享在此之前保持停用。`;
-      });
-    } else if (dialog.kind === "viewing") {
-      const { user, scope } = dialog;
-      void run(async () => {
-        await startViewing(user.id, value("password"), value("reason"), scope);
-        return scope === "library"
-          ? `已开启对 ${fullName(user)} 私有图库的只读查看，可在相册中选择“只读查看 · ${displayName(user)}”。`
-          : `已开启对 ${fullName(user)} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${displayName(user)}”。`;
-      });
-    } else {
-      void run(async () => {
-        await disableMember(dialog.user.id);
-        return `已禁用 ${fullName(dialog.user)}。`;
-      });
-    }
-  };
-  const what = dialog.kind === "viewing" && dialog.scope === "library" ? "私有图库" : "个人空间";
-  const content = {
-    create: {
-      title: "添加成员",
-      label: "添加成员",
-      icon: UserPlus,
-      tone: "accent",
-      description: "成员拥有自己的个人空间和私有图库，并可使用 Shared 共享空间。",
-      submit: "创建成员",
-      danger: false,
-    },
-    reset: dialog.kind === "reset" && {
-      title: `重置 ${fullName(dialog.user)} 的密码`,
-      label: `重置 ${fullName(dialog.user)} 的密码`,
-      icon: KeyRound,
-      tone: "warning",
-      description: `重置后 ${displayName(dialog.user)} 下次登录必须先设置新密码，在此之前 SMB 共享保持停用。重置会写入审计，并一直显示在对方的“我的账号”中。`,
-      submit: "确认重置",
-      danger: false,
-    },
-    viewing: dialog.kind === "viewing" && {
-      title: `只读查看 ${fullName(dialog.user)} 的${what}`,
-      label: `查看 ${fullName(dialog.user)} 的${what}`,
-      icon: what === "私有图库" ? Images : FolderLock,
-      tone: "warning",
-      description: `查看他人${what}会写入审计，并在 ${displayName(dialog.user)} 下次登录时通知对方。访问为只读，24 小时后自动结束。`,
-      submit: "开始只读查看",
-      danger: false,
-    },
-    disable: dialog.kind === "disable" && {
-      title: `禁用 ${fullName(dialog.user)}？`,
-      label: `禁用 ${fullName(dialog.user)}`,
-      icon: UserX,
-      tone: "danger",
-      description: `${displayName(dialog.user)} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开；个人空间中的文件不会被删除。账号禁用后暂时无法重新启用。`,
-      submit: "禁用账号",
-      danger: true,
-    },
-  }[dialog.kind] as {
-    title: string;
-    label: string;
-    icon: LucideIcon;
-    tone: string;
-    description: string;
-    submit: string;
-    danger: boolean;
-  };
-  return (
-    <Dialog title={content.title} onClose={busy ? undefined : onClose}>
-      <form className={styles.setDialogForm} aria-label={content.label} autoComplete="off" onSubmit={submit}>
-        <header>
-          <IconTile tone={content.tone} icon={content.icon} size="lg" />
-          <h3>{content.title}</h3>
-          <p>{content.description}</p>
-        </header>
-        {dialog.kind === "create" && (
-          <>
-            <Field label="账号" hint={usernameRuleText}>
-              <input
-                className={styles.setInput}
-                name="username"
-                required
-                autoFocus
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-            </Field>
-            <Field label="初始密码" hint={`${passwordRuleText}；成员可在“我的账号”中自行修改`}>
-              <input
-                className={styles.setInput}
-                name="password"
-                type="password"
-                minLength={12}
-                autoComplete="new-password"
-                required
-              />
-            </Field>
-          </>
-        )}
-        {dialog.kind === "reset" && (
-          <Field label="新密码" hint={passwordRuleText}>
-            <input
-              className={styles.setInput}
-              name="password"
-              type="password"
-              minLength={12}
-              autoComplete="new-password"
-              required
-              autoFocus
-            />
-          </Field>
-        )}
-        {dialog.kind === "viewing" && (
-          <>
-            <Field label="查看原因">
-              <input
-                className={styles.setInput}
-                name="reason"
-                maxLength={500}
-                required
-                autoFocus
-                placeholder="例如：帮助找回误删的照片"
-              />
-            </Field>
-            <Field label="你的密码" hint="为确认是你本人操作">
-              <input
-                className={styles.setInput}
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-              />
-            </Field>
-          </>
-        )}
-        {error && <Banner tone="error">{error}</Banner>}
-        <footer>
-          <button type="button" className={styles.setBtn} onClick={onClose} disabled={busy}>
-            取消
-          </button>
-          <button className={`${styles.setBtn} ${content.danger ? styles.danger : "primary"}`} disabled={busy}>
-            {busy ? "正在处理…" : content.submit}
-          </button>
-        </footer>
-      </form>
-    </Dialog>
-  );
-}
-
-type MenuItem =
-  | { label: string; icon: LucideIcon; onSelect: () => void; danger?: boolean; disabled?: boolean }
-  | "separator";
-
-function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!anchor.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", closeOutside);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOutside);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-  return (
-    <div className={styles.setMenuAnchor} ref={anchor}>
-      <button
-        className={`${styles.setIconBtn} ${styles.bordered} ${open ? styles.open : ""}`}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Ellipsis />
-      </button>
-      {open && (
-        <div className={styles.setMenu} role="menu" aria-label={label}>
-          {items.map((item, index) =>
-            item === "separator" ? (
-              <hr key={index} />
-            ) : (
-              <button
-                key={item.label}
-                role="menuitem"
-                className={item.danger ? styles.danger : ""}
-                disabled={item.disabled}
-                onClick={() => {
-                  setOpen(false);
-                  item.onSelect();
-                }}
-              >
-                <item.icon />
-                {item.label}
-              </button>
-            ),
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Dialog({ title, onClose, children }: { title: string; onClose?: () => void; children: ReactNode }) {
-  useEffect(() => {
-    if (!onClose) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-  return (
-    <div
-      className={styles.setDialogLayer}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose?.();
-      }}
-    >
-      <div className={styles.setDialog} role="dialog" aria-modal="true" aria-label={title}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// -------------------------------------------------------------- Shared parts
-
-function Row({
-  icon,
-  label,
-  detail,
+// SettingsSearch is the field at the top of the sidebar. While it holds a
+// query its results take the place of the section list (its children); the
+// arrow keys move through them and Enter opens one.
+function SettingsSearch({
+  isAdmin,
+  onOpen,
   children,
 }: {
-  icon?: ReactNode;
-  label: string;
-  detail?: string;
-  children?: ReactNode;
+  isAdmin: boolean;
+  onOpen: (entry: SearchEntry) => void;
+  children: ReactNode;
 }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  // Pinyin matching loads the first time the field is used.
+  const [pinyin, setPinyin] = useState<PinyinMatch>();
+  const [wanted, setWanted] = useState(false);
+  useEffect(() => {
+    if (!wanted || pinyin) return;
+    let live = true;
+    loadPinyin().then(
+      (match) => {
+        if (live) setPinyin(() => match);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [wanted, pinyin]);
+  const entries = useMemo(() => searchEntries.filter((entry) => isAdmin || !entry.adminOnly), [isAdmin]);
+  const results = useMemo(() => searchSettings(entries, query, sectionLabel, pinyin), [entries, query, pinyin]);
+  const listID = useId();
+  const searching = query.trim() !== "";
+  const choose = (entry: SearchEntry) => {
+    setQuery("");
+    setActive(0);
+    onOpen(entry);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape" && query) {
+      event.stopPropagation();
+      setQuery("");
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (results.length)
+        setActive((value) => (value + (event.key === "ArrowDown" ? 1 : results.length - 1)) % results.length);
+    } else if (event.key === "Enter" && results[active]) {
+      event.preventDefault();
+      choose(results[active]);
+    }
+  };
   return (
-    <div className={styles.setRow}>
-      {icon}
-      <div className={styles.setRowText}>
-        <span>{label}</span>
-        {detail && <small>{detail}</small>}
+    <>
+      <div className={styles.setSearch}>
+        <Search aria-hidden="true" />
+        <input
+          type="text"
+          role="combobox"
+          aria-label="搜索设置"
+          aria-expanded={searching}
+          aria-controls={listID}
+          aria-autocomplete="list"
+          aria-activedescendant={searching && results[active] ? `${listID}-${active}` : undefined}
+          placeholder="搜索"
+          value={query}
+          spellCheck={false}
+          onFocus={() => setWanted(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
+        />
+        {query && (
+          <button aria-label="清除搜索" onClick={() => setQuery("")}>
+            <X />
+          </button>
+        )}
       </div>
-      {children && <div className={styles.setRowEnd}>{children}</div>}
-    </div>
+      {searching ? (
+        <div className={styles.setResults} id={listID} role="listbox" aria-label="搜索结果">
+          {results.map((entry, index) => (
+            <button
+              key={`${entry.section}:${entry.title}`}
+              id={`${listID}-${index}`}
+              role="option"
+              aria-selected={index === active}
+              className={index === active ? styles.active : ""}
+              onPointerMove={() => setActive(index)}
+              onClick={() => choose(entry)}
+            >
+              <span>{entry.title}</span>
+              <small>{sectionLabel(entry.section)}</small>
+            </button>
+          ))}
+          {results.length === 0 && <p>没有找到“{query.trim()}”</p>}
+        </div>
+      ) : (
+        children
+      )}
+    </>
   );
-}
-
-function InfoRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className={`${styles.setRow} ${styles.info}`}>
-      <span>{label}</span>
-      <span className={styles.setValue}>{value}</span>
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className={styles.setField}>
-      <label>
-        <span>{label}</span>
-        {children}
-      </label>
-      {hint && <small>{hint}</small>}
-    </div>
-  );
-}
-
-function StatusText({ status }: { status: User["status"] }) {
-  return (
-    <span className={styles.setStatus}>
-      <span className={`${styles.setDot} ${styles[`status-${status}`] ?? ""}`} />
-      {statusLabel(status)}
-    </span>
-  );
-}
-
-// ------------------------------------------------------------------ Helpers
-
-function healthPresentation(health: Health): { label: string; tone: Tone } {
-  return {
-    healthy: { label: "运行正常", tone: "success" as Tone },
-    warning: { label: "需要注意", tone: "warning" as Tone },
-    critical: { label: "严重故障", tone: "danger" as Tone },
-    unknown: { label: "健康未评估", tone: "neutral" as Tone },
-  }[health];
-}
-
-// The signed-in account comes first, then administrators, then members by name.
-function sortUsers(users: User[], selfID: string): User[] {
-  const rank = (user: User) => (user.id === selfID ? 0 : user.role === "admin" ? 1 : 2);
-  return [...users].sort(
-    (left, right) => rank(left) - rank(right) || displayName(left).localeCompare(displayName(right), "zh-CN"),
-  );
-}
-
-function roleLabel(role: User["role"]): string {
-  return role === "admin" ? "管理员" : "成员";
-}
-
-function statusLabel(status: User["status"]): string {
-  return { active: "正常", pending: "创建中", disabled: "已禁用", error: "凭据异常" }[status];
-}
-
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  if (days > 0) return `${days} 天 ${hours} 小时`;
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours} 小时 ${minutes} 分钟`;
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("zh-CN", {
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(date);
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
-        date,
-      );
 }

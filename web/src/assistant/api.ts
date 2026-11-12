@@ -14,6 +14,7 @@ export type {
   AssistantStatus,
   AssistantTask,
   AssistantTaskRun,
+  PhotoTextHandleValue as TextHandleValue,
 } from "../api.generated";
 /** Something the assistant asked the member in a running turn, waiting for or given an answer. */
 export type Approval = AssistantApproval;
@@ -36,6 +37,11 @@ const request = (requestId: string) => ({ params: { path: { requestId } } });
 const task = (taskId: string) => ({ params: { path: { taskId } } });
 
 export const assistantStatus = () => call(client.GET("/api/v1/assistant/status"));
+// The number a handle in an answer stands for (docs/architecture/photo-ocr.md):
+// the photo service gives it to the member's own session, never to the
+// assistant, which knows the number only by this handle.
+export const getTextHandle = (handle: string) =>
+  call(client.GET("/api/v1/photos/text-handles/{handle}", { params: { path: { handle } } }));
 export const listSessions = async () => (await call(client.GET("/api/v1/assistant/sessions"))).sessions;
 export const renameSession = (sessionId: string, title: string) =>
   call(client.PATCH("/api/v1/assistant/sessions/{sessionId}", { ...session(sessionId), body: { title } }));

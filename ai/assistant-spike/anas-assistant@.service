@@ -4,6 +4,12 @@ Description=A-NAS assistant for %i (spike)
 # 45 s after its last connection. The Product Service holds one from the member's
 # sign-in until their last session ends, so it runs while they are signed in.
 StopWhenUnneeded=yes
+# The member's private network and its bridge to the model (anas-assistant-net@.service).
+# The units assistant-install.sh makes from this one (scheduled tasks, curator, probe) join
+# the same network.
+Requires=anas-assistant-net@%i.service
+After=anas-assistant-net@%i.service
+JoinsNamespaceOf=anas-assistant-net@%i.service
 
 [Service]
 Type=simple
@@ -29,7 +35,8 @@ BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i:/nas/个人空间
 BindReadOnlyPaths=/srv/a-nas/data/spaces/shared:/nas/共享空间
 BindReadOnlyPaths=/run/anas-assistant-gw
 BindPaths=/srv/a-nas/data/assistant/%i/files:/nas/助手
-# Hermes's own state, outside the workspace its file tools may write.
+# Hermes's own state, outside the workspace its file tools may write. The directory is the
+# member's own (assistant-layout.sh, member_home): Hermes's gateway serves no other.
 BindPaths=/srv/a-nas/data/assistant/%i/hermes:/var/lib/hermes-home
 # Hermes loads code and settings from these at start (hooks are trusted by
 # placement), so they are read-only and not the agent's to change.

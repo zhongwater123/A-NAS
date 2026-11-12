@@ -14,7 +14,7 @@ import {
 import { type CSSProperties, type ReactNode, useId, useState } from "react";
 
 import { formatBytes, formatRate } from "../../lib/bytes";
-import { Banner } from "../parts";
+import { Banner, PageHeader } from "../parts";
 import styles from "../settings.module.css";
 import { FanSpeed, fanName, TemperatureGauge } from "../Temperature";
 import {
@@ -50,9 +50,7 @@ export function TaskManagerSection() {
   const [section, setSection] = useState("设备运行状态");
   return (
     <>
-      <header className={styles.setHeader}>
-        <h2>任务管理器</h2>
-      </header>
+      <PageHeader title="任务管理器" />
       <Choices label="任务管理器板块" items={["设备运行状态", "服务与进程"]} value={section} onChange={setSection} />
       {section === "设备运行状态" ? <DevicePanel /> : <TasksPanel />}
     </>
@@ -287,7 +285,7 @@ function DeviceDetails({
             value={data.memory.totalBytes > 0 ? size(Math.max(0, data.memory.totalBytes - data.memory.usedBytes)) : "—"}
           />
         </div>
-        <p className={styles.setFootnote}>可回收缓存计入可用内存。</p>
+        {/* 可用内存 counts reclaimable cache as available. */}
       </>
     );
   if (tab === "GPU" || tab === "NPU")

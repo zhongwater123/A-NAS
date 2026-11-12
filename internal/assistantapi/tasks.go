@@ -239,7 +239,7 @@ func (h *Handler) deleteTask(w http.ResponseWriter, r *http.Request, account str
 			}
 			tried[run.ID] = true
 			fresh++
-			if status, _, err := h.rest(r.Context(), account, http.MethodDelete, "/api/sessions/"+run.ID, nil); err == nil && status < 300 {
+			if status, _, err := h.writeSession(r.Context(), account, http.MethodDelete, run.ID, nil); err == nil && status < 300 {
 				deleted++
 			}
 		}

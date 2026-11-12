@@ -1,0 +1,138 @@
+#!/bin/bash
+# postinst of a-nas (ADR 0034). The accounts, directories, units and their
+# links come from the package's files, which systemd also applies at boot; this
+# script applies them now, in the order the services need, and reports with
+# a-nas-check. On a machine set up before the packages it first takes over
+# from that installation, once.
+set -euo pipefail
+
+case "${1:-}" in
+  configure | abort-upgrade | abort-remove | abort-deconfigure) ;;
+  *) exit 0 ;;
+esac
+running=false
+[[ -d /run/systemd/system ]] && running=true
+
+# What scripts/install-v1.0.1-system-services.sh wrote outside /opt, which
+# the package's files replace. Units in /etc/systemd/system override those in
+# /usr/lib, so they go; everything is kept under /var/backups/a-nas.
+installer_files=(
+  /etc/systemd/system/anas-host-agent.service /etc/systemd/system/anas-api.service
+  /etc/systemd/system/anas-photos.service /etc/systemd/system/anas-shares.service
+  /etc/systemd/system/anas-family.service /etc/systemd/system/anas.slice
+  /etc/systemd/system/anas-ai.socket /etc/systemd/system/anas-ai.service
+  /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
+  /etc/systemd/system/anas-ffmpeg.socket /etc/systemd/system/anas-ffmpeg@.service
+  /etc/systemd/system/system-anasffmpeg.slice /etc/systemd/system/anas-media.socket
+  /etc/systemd/system/anas-media@.service /etc/systemd/system/system-anasmedia.slice
+  /etc/systemd/system/anas-vectors.slice /etc/systemd/system/anas-vectors@.service
+  /etc/systemd/system/anas-vectors-proxy@.socket /etc/systemd/system/anas-vectors-proxy@.service
+  /etc/systemd/system/anas-search.service /etc/systemd/system/anas-search-dns.service
+  /etc/systemd/system/anas-search-dns.path /etc/systemd/system/anas-kiosk@.service
+  /etc/systemd/system/anas-internet-firewall.service /etc/systemd/system/anas-container-agent.service
+  /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf
+  /etc/sysusers.d/a-nas-kiosk.conf /etc/sysusers.d/a-nas-search.conf
+  /etc/tmpfiles.d/a-nas-shares.conf /etc/tmpfiles.d/a-nas-ffmpeg.conf /etc/tmpfiles.d/a-nas-media.conf
+  /etc/modules-load.d/a-nas-sensors.conf /etc/sysctl.d/60-anas-internet.conf
+  /etc/a-nas/anas-internet.nft /etc/a-nas/anas-api.env /etc/a-nas/host-agent.env /etc/a-nas/kiosk.env
+  /usr/local/lib/a-nas/anas-container-agent
+)
+
+take_over() {
+  local saved=/var/backups/a-nas/installer-layout file unit enabled=()
+  install -d -m 0700 "$saved"
+  # The administrator's values in the installer's environment files.
+  if [[ ! -e /etc/a-nas/site.conf ]]; then
+    {
+      echo "# This machine's settings (/usr/share/a-nas/site.conf.example), taken from the"
+      echo "# installer's environment files by the a-nas package on $(date -u +%F)."
+      grep -E '^ANAS_SMB_INTERFACE=' /etc/a-nas/host-agent.env 2>/dev/null || true
+      grep -E '^ANAS_(TERMINAL|CONTAINERS_MODE)=' /etc/a-nas/anas-api.env 2>/dev/null || true
+      grep -E '^ANAS_KIOSK_[A-Z]+=' /etc/a-nas/kiosk.env 2>/dev/null || true
+    } >/etc/a-nas/site.conf.incoming
+    chown root:a-nas /etc/a-nas/site.conf.incoming
+    chmod 0640 /etc/a-nas/site.conf.incoming
+    mv -f -- /etc/a-nas/site.conf.incoming /etc/a-nas/site.conf
+  fi
+  # The local console and the container agent stay on if they were; the
+  # package's own links turn the other services on.
+  if "$running"; then
+    for unit in anas-kiosk@tty1.service anas-container-agent.service; do
+      if [[ "$(systemctl is-enabled "$unit" 2>/dev/null)" == enabled ]]; then
+        enabled+=("$unit")
+      fi
+    done
+    # Instances the installer enabled, whose links the loop below cannot
+    # reach: the package's own link turns the vector index's socket on, and
+    # a-nas-generator the internet entry's tunnel while internet.env turns
+    # the entry on. Left in /etc, the first would point at a template that is
+    # gone and the second would start the tunnel after the entry is off.
+    for unit in anas-vectors-proxy@a-nas-photos.socket wg-quick@wg-anas.service; do
+      systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
+    done
+  fi
+  for file in "${installer_files[@]}"; do
+    [[ -e "$file" ]] || continue
+    unit=${file##*/}
+    if "$running" && [[ "$file" == /etc/systemd/system/*.* && "$file" != *.d/* && "$unit" != *@.* ]]; then
+      systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
+    fi
+    install -d -m 0700 "$saved$(dirname "$file")"
+    mv -f -- "$file" "$saved$file"
+  done
+  if "$running"; then
+    for unit in "${enabled[@]}"; do
+      systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
+    done
+    systemctl daemon-reload
+    for unit in "${enabled[@]}"; do
+      systemctl enable "$unit" >/dev/null 2>&1 || echo "a-nas: could not turn $unit on again: systemctl enable $unit" >&2
+    done
+  fi
+  rm -f -- /opt/a-nas/current
+  echo "a-nas: took over from the installer; its files are in $saved, its releases stay in /opt/a-nas/releases"
+}
+
+# The accounts come first: the takeover gives site.conf to group a-nas.
+systemd-sysusers a-nas.conf a-nas-kiosk.conf a-nas-search.conf
+if [[ "$1" == configure && -L /opt/a-nas/current ]]; then
+  take_over
+fi
+systemd-tmpfiles --create a-nas.conf
+"$running" || exit 0
+
+systemctl daemon-reload
+# A running Worker and vector index belong to the previous release; the next
+# connection starts this release's. Clients reconnect to this release's
+# FFmpeg worker and its shared admission slots.
+systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
+systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
+# This machine's settings: failures leave the product running and are
+# reported below.
+systemctl restart anas-site.service || true
+# smbd that waits for the SMB interface's address keeps trying without it,
+# which must not stop the installation halfway.
+systemctl start smbd.service || true
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
+systemctl try-restart 'anas-kiosk@*.service' || true
+# A running container agent keeps its program until the administrator restarts
+# it: stopping it cancels an app installation in progress, which the App
+# Center then rolls back (docs/runbooks/install-container-agent.md). It and
+# the Product Service work together at any version.
+for unit in anas-internet-firewall.service wg-quick@wg-anas.service; do
+  if [[ -e "/run/systemd/generator/multi-user.target.wants/$unit" ]]; then
+    systemctl restart "$unit" || true
+  elif systemctl is-active --quiet "$unit"; then
+    systemctl stop "$unit" || true
+  fi
+done
+# Web search follows this release's runtime; its unit's condition keeps it
+# stopped while the administrator has turned it off. It cannot fail the
+# installation: the desktop answers web_search_unavailable while it is down.
+systemctl restart anas-search-dns.path || true
+systemctl start anas-search-dns.service || true
+systemctl restart anas-search.service || true
+
+/usr/sbin/a-nas-check ||
+  echo "a-nas: a-nas-check failed; roll back if it does not pass (docs/runbooks/deploy-a-nas-packages.md)" >&2
+exit 0
