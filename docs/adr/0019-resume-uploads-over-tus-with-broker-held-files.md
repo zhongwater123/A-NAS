@@ -2,6 +2,8 @@
 
 状态：proposed（2026-10-12，随传输中心 PR 提交评审）；行为见[传输中心规格](../specs/transfer-center.md)。
 
+2026-11-10 修订计划：保留 tus 与分片队列；产品只持配额暂存 FD，可信提交生成独立的受保护 inode，同名替换不能销毁历史，并持久记录提交阶段。见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)及[受保护提交契约](../architecture/compromised-product-data-protection.md#受保护提交与文件接口)，尚未实施。
+
 Web 上传原本是每个文件一个 multipart 请求：连接一断整个文件重来，批量上传在第一个失败处静默停止，进度无从得知。家庭 NAS 上的上传常常是几十 GB 的视频和成百上千张照片，走的是不稳定的 Wi-Fi，可续传是基本要求。我们决定：上传使用开放的 [tus 1.0](https://tus.io/protocols/resumable-upload) 协议，浏览器端用 [tus-js-client](https://github.com/tus/tus-js-client)（MIT），产品服务用 [tusd](https://github.com/tus/tusd) 的 `pkg/handler`（MIT）处理协议；tusd 的数据存储由我们实现，字节写入文件代理以登录者本人身份（[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)）在目标文件夹中创建的临时文件，产品服务在上传期间持有这个文件描述符，文件代理协议不增加任何操作。
 
 ## 决定

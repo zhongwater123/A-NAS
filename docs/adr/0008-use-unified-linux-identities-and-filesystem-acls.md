@@ -2,6 +2,8 @@
 
 状态：accepted；已实现（[#11–#16](https://github.com/zhongwater123/A-NAS/issues?q=is%3Aissue+%5BADR+0008%5D)，2026-10-07 合并）。实机部署与验收进度见[当前状态](../status/CURRENT.md)。
 
+2026-11-10 修订计划：保留统一 UID 与文件 ACL；身份权威、凭据重置与敏感授权从产品服务迁出，产品持有的写 FD 仅限暂存，旧 Shell 与管理 IPC 通道关闭后再按新契约开放。当前产品仍可写会话/凭据权威，文件代理自行读库不足以抵御产品失陷；证据和原延后取舍见 [#98](https://github.com/zhongwater123/A-NAS/issues/98)。新目标由 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)及[修订矩阵](../architecture/compromised-product-data-protection.md#adr-修订矩阵)定义，尚未实施。
+
 决定前（v1.0.1-rc.5 及更早），Web 由产品服务账号 `a-nas` 代为读写、SMB 以每个用户自己的 UID 读写，两个入口没有共同的写入身份，授权只存在于产品服务的应用层（见 [issue #9](https://github.com/zhongwater123/A-NAS/issues/9)）。我们决定采用 DSM 式模型：一套身份、一个授权来源、所有入口以用户本人身份访问磁盘。
 
 ## 决定

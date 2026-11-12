@@ -1,5 +1,7 @@
 # Vendor a reviewed app catalog and enforce an install policy
 
+2026-11-10 修订计划：固定审查清单继续保留；安装策略新增持久数据保护单元、应用一致性 Adapter、写预算与敏感授权，不允许产品服务经安装/升级/卸载改变保护范围。未通过保护资格的写应用保持停用或只读；见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)及[修订矩阵](../architecture/compromised-product-data-protection.md#adr-修订矩阵)。
+
 The runtime-identity paragraph below is superseded by [ADR 0022](0022-reach-shared-folders-only-as-the-app-identity.md): every service runs as the app identity, switches to it after root initialization, or keeps its image's user and then may not mount the Shared folder.
 
 The App Center installs apps only from a catalog compiled into the binaries: unmodified Compose manifests and icons copied from CasaOS-AppStore (Apache-2.0) at a pinned commit, kept in `internal/appstore/catalog` with a NOTICE and the upstream LICENSE. The store never downloads manifests at runtime, so what can run on a NAS is exactly what was reviewed in this repository, and updating the catalog is an ordinary, testable change.

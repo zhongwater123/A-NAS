@@ -2,6 +2,8 @@
 
 状态：proposed（2026-10-12，随“设置 → 日志”PR 提交评审）；行为见[日志规格](../specs/logs.md)。
 
+2026-11-10 修订计划：保留只读日志白名单与有界查询，补充身份/保护侧独立保存的可信审计，产品日志不再承担唯一授权或销毁证据。见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)及[修订矩阵](../architecture/compromised-product-data-protection.md#adr-修订矩阵)，尚未实施。
+
 管理员需要在 Web 中查看 A-NAS 服务的运行日志，而这些日志只在 systemd journal 中，读取它需要 root 或 `systemd-journal` 组；非特权的产品服务（`a-nas`）两者都没有。我们决定：由 root Host Agent 提供一个只读、类型化的系统日志查询，按固定参数运行 `journalctl`，只匹配 A-NAS 服务白名单中的单元；产品服务只把管理员的筛选条件转成这个查询，不获得任何读取 journal 的权限。
 
 ## 决定

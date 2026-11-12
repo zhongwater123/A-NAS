@@ -2,6 +2,8 @@
 
 状态：proposed（2026-10-10，随影视中心 PR 提交评审）；行为见[影视中心规格](../specs/media-center.md)，实现见[影视中心技术设计](../architecture/media-center.md)。2026-10-12 补充：第 4 条的 Worker 改为与应用无关的共用 FFmpeg 边界，影视中心经适配层使用它，音乐的音频解码也经它运行，见 [ADR 0018](0018-index-music-in-place-through-the-file-broker.md)。
 
+2026-11-10 修订计划：保留原地索引和隔离解码；进度/收藏等用户元数据进入受保护提交，派生缓存与源文件统一授权和版本校验，后台会话降权。见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)及[修订矩阵](../architecture/compromised-product-data-protection.md#adr-修订矩阵)，尚未实施。
+
 影视中心要读取用户放在个人空间和共享空间里的视频，而这些文件只由数据卷 POSIX ACL 授权、以登录者本人身份访问（[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)），产品服务账号 `a-nas` 不在任何 ACL 中。同时，扫描、截图与转码需要用 FFmpeg 解析来自任何人的媒体文件，这是历史上漏洞最多的一类代码。我们决定：影视中心作为产品服务内的模块，只经文件代理以某个有效会话的用户身份读取文件；FFmpeg 只在一个没有网络、看不到数据卷和产品服务状态、按连接启动的动态身份 Worker 中运行，只接收只读文件描述符。
 
 ## 决定

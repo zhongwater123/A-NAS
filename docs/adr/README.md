@@ -44,6 +44,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
 - [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
 
+- [0036：恢复能力独立于产品服务，产品会话不授予不可逆销毁权](0036-protect-recovery-from-a-compromised-product-service.md)（proposed；安全目标已确认，工程待实施）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 读这一行与索引的标记核对，状态行写在第一个小节之前的其他位置时报错。

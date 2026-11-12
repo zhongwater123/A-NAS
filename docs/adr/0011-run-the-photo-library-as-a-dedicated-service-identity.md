@@ -2,6 +2,8 @@
 
 状态：accepted；已实现（M1 切片 1–6）。部署与验收进度见[当前状态](../status/CURRENT.md)，部署步骤见[启用相册服务](../runbooks/enable-photo-service.md)。
 
+2026-11-10 修订计划：本 ADR 的存储隔离与受管图库方向保留；其产品失陷承诺需要由 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)加强并部分替代。身份查询、保护引用、GC、Catalog 恢复集及敏感授权逐条修改见[八项修订明细](../architecture/compromised-product-data-protection.md#adr-0011-的具体修订)。以下记录原有决定；目标改造未实现、未部署。
+
 [ADR 0006](0006-use-a-managed-photo-library.md) 让相册持有原图身份与生命周期；[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md) 让普通文件只由数据卷 POSIX ACL 授权、以用户本人身份访问，产品服务账号 `a-nas` 不持有任何空间权限。受管图库的几项要求无法用空间根目录 ACL 表达：同一不可变内容对象可同时被私有图库和共享图库的照片资产引用；共享图库按单张照片区分上传者的修改权；回收站到期、缩略图与 AI 任务在没有用户会话时运行，而文件代理只服务有效会话和 20100–29999 的账号。我们决定把受管图库作为 ADR 0008 的限定例外：由独立进程以专用身份独占相册存储，照片资产的授权由相册 Catalog 中的 Policy 判定。
 
 ## 决定
