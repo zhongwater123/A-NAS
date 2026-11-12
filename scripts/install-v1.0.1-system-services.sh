@@ -361,6 +361,13 @@ elif getent passwd "$family_id" >/dev/null; then
 else
   useradd --system --uid "$family_id" --gid "$family_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-family
 fi
+# Removable modules (ADR 0037) install with their own scripts. The Product
+# Service connects to their sockets through a-nas-modules, and modules reach
+# the Host Agent's session lookup through a-nas-module-sessions, which only
+# their units grant. Neither group owns files, so their IDs may differ.
+for group in a-nas-modules a-nas-module-sessions; do
+  getent group "$group" >/dev/null || groupadd --system "$group"
+done
 # The local console's account owns no data, so its ID may differ between
 # installs; it must not be able to log in.
 install -d -o root -g root -m 0755 /etc/sysusers.d

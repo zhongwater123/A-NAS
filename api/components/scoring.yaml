@@ -1,0 +1,157 @@
+parameters:
+  ScoringBatchID: { name: batchId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  ScoringAnchorID: { name: anchorId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+  ScoringClaimToken: { name: token, in: path, required: true, schema: { type: string, minLength: 1 } }
+  ScoringAccountID: { name: accountId, in: path, required: true, schema: { type: string, minLength: 1 } }
+schemas:
+  ScoringMe:
+    type: object
+    additionalProperties: false
+    required: [admin, rater]
+    properties:
+      admin: { type: boolean, description: "The caller is an A-NAS administrator and so administers photo scoring." }
+      rater: { type: boolean, description: An administrator chose the caller as a rater. }
+  ScoringRaterBatch:
+    type: object
+    additionalProperties: false
+    required: [id, name, rubric, rated, finished]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      rubric: { type: string, description: "The administrator's scoring guide." }
+      rated: { type: integer, minimum: 0, description: "The caller's own answers in the batch, skips and marks included." }
+      finished: { type: boolean, description: No photo of the batch is left for the caller. }
+  ScoringAnchor:
+    type: object
+    additionalProperties: false
+    required: [id, score, width, height]
+    properties:
+      id: { type: integer }
+      score: { type: number, minimum: 0, maximum: 5, description: "The reference score, 0 to 5 with at most two decimals." }
+      width: { type: integer, minimum: 1 }
+      height: { type: integer, minimum: 1 }
+  ScoringRecentScore:
+    type: object
+    additionalProperties: false
+    required: [token, score, width, height]
+    properties:
+      token: { type: string, description: "The claim the score answered; its thumbnail and preview are the rater's own." }
+      score: { type: number, minimum: 0, maximum: 5 }
+      width: { type: integer, minimum: 1, description: "The preview's width, for the thumbnail's proportions." }
+      height: { type: integer, minimum: 1 }
+  ScoringClaim:
+    type: object
+    additionalProperties: false
+    required: [token, expiresAt, width, height]
+    properties:
+      token: { type: string, description: "All the rater learns about the photo; it is neither the content hash nor the file name." }
+      expiresAt: { type: string, format: date-time }
+      width: { type: integer, minimum: 1, description: "The preview's width; its longer side is at most 2048." }
+      height: { type: integer, minimum: 1 }
+  ScoringClaims:
+    type: object
+    additionalProperties: false
+    required: [items, finished]
+    properties:
+      items: { type: array, maxItems: 3, items: { $ref: "#/schemas/ScoringClaim" } }
+      finished: { type: boolean, description: "Nothing is held and nothing is left for the caller, or the batch is closed." }
+  ScoringSize:
+    type: object
+    additionalProperties: false
+    required: [width, height]
+    properties:
+      width: { type: integer, minimum: 0, maximum: 100000 }
+      height: { type: integer, minimum: 0, maximum: 100000 }
+  ScoringRatingInput:
+    type: object
+    additionalProperties: false
+    required: [submission, kind, viewMs]
+    properties:
+      submission: { type: string, pattern: "^[A-Za-z0-9-]{8,64}$", description: "Chosen by the page for each answer; retrying the same answer sends the same value." }
+      kind: { type: string, enum: [score, skip, flag], description: "skip: cannot judge; flag: something is wrong with the photo." }
+      score: { type: number, minimum: 0, maximum: 5, description: "Only with kind score: 0 to 5 with at most two decimals; more decimals are refused (validation_failed)." }
+      viewMs: { type: integer, minimum: 0, description: From the photo appearing to the answer. }
+      viewport: { $ref: "#/schemas/ScoringSize" }
+      display: { $ref: "#/schemas/ScoringSize" }
+      pixelRatio: { type: number, minimum: 0, maximum: 16 }
+  ScoringBatch:
+    type: object
+    additionalProperties: false
+    required: [id, name, source, required, rubric, state, createdAt, import, photos, anchors, complete, started, flagged]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      source: { type: string, description: "The folder in 照片打分 the batch was imported from." }
+      required: { type: integer, minimum: 1, maximum: 10, description: How many raters each photo needs. }
+      rubric: { type: string }
+      state: { type: string, enum: [importing, open, closed] }
+      createdAt: { type: string, format: date-time }
+      import:
+        type: object
+        additionalProperties: false
+        required: [files, imported, skipped]
+        properties:
+          files: { type: integer, minimum: 0, description: "Files found in the folder; 0 until it was scanned." }
+          imported: { type: integer, minimum: 0 }
+          skipped: { type: integer, minimum: 0, description: "Unsupported, unreadable or undecodable files, and anchors without a score in their name." }
+      photos: { type: integer, minimum: 0, description: "Distinct photos to score, anchors excluded." }
+      anchors: { type: integer, minimum: 0 }
+      complete: { type: integer, minimum: 0, description: Photos with the required number of scores. }
+      started: { type: integer, minimum: 0, description: "Photos with some scores but not all." }
+      flagged: { type: integer, minimum: 0, description: Photos a rater marked as having a problem. }
+  ScoringBatchInput:
+    type: object
+    additionalProperties: false
+    required: [name, source, required, rubric]
+    properties:
+      name: { type: string, minLength: 1, maxLength: 40 }
+      source: { type: string, minLength: 1 }
+      required: { type: integer, minimum: 1, maximum: 10 }
+      rubric: { type: string, maxLength: 2000 }
+  ScoringBatchPatch:
+    type: object
+    additionalProperties: false
+    properties:
+      name: { type: string, minLength: 1, maxLength: 40 }
+      rubric: { type: string, maxLength: 2000 }
+      required: { type: integer, minimum: 1, maximum: 10 }
+      state: { type: string, enum: [open, closed] }
+  ScoringPerson:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id: { type: string }
+      username: { type: string, description: Missing once the account is no longer active. }
+      nickname: { type: string }
+      avatarVersion: { type: string }
+  ScoringRaterEntry:
+    type: object
+    additionalProperties: false
+    required: [id, username, rater]
+    properties:
+      id: { type: string }
+      username: { type: string }
+      nickname: { type: string }
+      avatarVersion: { type: string }
+      rater: { type: boolean }
+  ScoringRaterStats:
+    type: object
+    additionalProperties: false
+    required: [rater, active, scores, skips, flags, repeats, medianViewMs, mean, standardDeviation, agreement, agreementPhotos, repeatDifference, fastShare, longestRun, lastAt]
+    properties:
+      rater: { $ref: "#/schemas/ScoringPerson" }
+      active: { type: boolean, description: The account is still active. }
+      scores: { type: integer, minimum: 0 }
+      skips: { type: integer, minimum: 0 }
+      flags: { type: integer, minimum: 0 }
+      repeats: { type: integer, minimum: 0, description: Answers to photos shown again to check consistency. }
+      medianViewMs: { type: integer, minimum: 0 }
+      mean: { type: number, minimum: 0, maximum: 5 }
+      standardDeviation: { type: number, minimum: 0 }
+      agreement: { type: [number, "null"], minimum: -1, maximum: 1, description: "Correlation with the other raters' mean on the same photos; null below 20 such photos." }
+      agreementPhotos: { type: integer, minimum: 0 }
+      repeatDifference: { type: [number, "null"], minimum: 0, description: "Mean absolute difference between a repeat and the current score of that photo; null without repeats." }
+      fastShare: { type: number, minimum: 0, maximum: 1, description: Share of scores given within a second. }
+      longestRun: { type: integer, minimum: 0, description: Longest run of the same score in a row. }
+      lastAt: { type: string, format: date-time }

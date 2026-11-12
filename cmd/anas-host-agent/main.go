@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+	"github.com/zhongwater123/A-NAS/internal/modulemanifest"
 	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/systemdscope"
@@ -93,6 +95,11 @@ type config struct {
 	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
 	FamilySessionGroup   string `env:"ANAS_FAMILY_SESSION_GROUP"`
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
+	// Removable modules (ADR 0037): their manifests name the stores to
+	// keep, and their units grant the group of their session lookup.
+	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`
+	ModuleSessionGroup  string `env:"ANAS_MODULE_SESSION_GROUP" envDefault:"a-nas-module-sessions"`
+	ModuleSessionSocket string `env:"ANAS_MODULE_SESSION_SOCKET" envDefault:"/run/a-nas-module-sessions/sessions.sock"`
 }
 
 func loadConfig(environment map[string]string) (config, error) {
@@ -242,10 +249,16 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopFamilyLookup()
+	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, logger)
+	if err != nil {
+		return err
+	}
+	defer stopModuleLookup()
 	// Serving waits for nothing on the data volume: one that cannot be
 	// reconciled, or a long walk over a large space, leaves Web files, the
 	// terminal and the logs working (#166).
-	go keepDataVolume(ctx, executor, &reconcileFailed, logger)
+	go keepDataVolume(ctx, executor, config.ModuleManifests, &reconcileFailed, logger)
+	go keepNewModuleStores(ctx, executor, config.ModuleManifests, logger)
 	go keepViewing(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
@@ -342,7 +355,7 @@ func serveSessionLookup(config config, sessions *sessiondir.Directory, logger *s
 // such as a volume Btrfs turned read-only, is logged and reported in the host
 // state through failed, and the next round reconciles everything again; the
 // Host Agent keeps serving either way.
-func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed *atomic.Bool, logger *slog.Logger) {
+func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, moduleManifests string, failed *atomic.Bool, logger *slog.Logger) {
 	if changed, err := executor.EnsureMountUnit(ctx); err != nil {
 		logger.ErrorContext(ctx, "data-volume mount unit update failed", "error", err)
 	} else if changed {
@@ -369,6 +382,7 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed
 		failed.Store(err != nil)
 		logRepairs(logger, repaired)
 		ensureManagedStores(ctx, executor, logger)
+		ensureModuleStores(ctx, executor, moduleManifests, logger, nil)
 		continueConversion(ctx, executor, logger)
 		restoreRedundancy(ctx, executor, logger)
 	}
@@ -428,6 +442,55 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
 	}
 	logRepairs(logger, repaired)
+}
+
+// ensureModuleStores keeps the store of each installed removable module
+// (ADR 0037). With ensured, it skips modules already in it and adds those
+// it ensured, so that a new manifest gets its store soon without repeating
+// the work for the others; nil ensures every module.
+func ensureModuleStores(ctx context.Context, executor *linuxhostops.Executor, dir string, logger *slog.Logger, ensured map[string]bool) {
+	manifests, err := modulemanifest.Read(dir)
+	if err != nil {
+		logger.ErrorContext(ctx, "reading module manifests failed", "error", err)
+	}
+	// A module removed since is forgotten, so that installing it again
+	// makes its store again.
+	for id := range ensured {
+		if !slices.ContainsFunc(manifests, func(manifest modulemanifest.Manifest) bool { return manifest.ID == id }) {
+			delete(ensured, id)
+		}
+	}
+	for _, manifest := range manifests {
+		if ensured != nil && ensured[manifest.ID] {
+			continue
+		}
+		ready, repaired, err := executor.EnsureModuleStore(ctx, manifest)
+		if err != nil {
+			logger.ErrorContext(ctx, "module store repair failed", "module", manifest.ID, "error", err)
+			continue
+		}
+		logRepairs(logger, repaired)
+		if ensured != nil && ready {
+			ensured[manifest.ID] = true
+		}
+	}
+}
+
+// keepNewModuleStores gives a module installed while the Host Agent runs
+// its store within 30 seconds, so that its install script need not wait for
+// the 15-minute round of keepDataVolume.
+func keepNewModuleStores(ctx context.Context, executor *linuxhostops.Executor, dir string, logger *slog.Logger) {
+	ensured := map[string]bool{}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ensureModuleStores(ctx, executor, dir, logger, ensured)
+		}
+	}
 }
 
 // keepViewing revokes Administrative Viewing Mode grants on time: those that
