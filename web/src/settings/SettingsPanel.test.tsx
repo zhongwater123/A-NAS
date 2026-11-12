@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import type { ActivityPage, Disk, FileEntry, Session, Space, Volume } from "../api.generated";
+import { companionMode, setCompanionMode } from "../companion/quiet";
 import { useHostState } from "../desktop/useHostState";
 import { healthyState, session as signIn } from "../test/fixtures";
 import { type SettingsOptions, settingsHandlers, terminalHandlers } from "../test/handlers/settings";
@@ -469,6 +470,34 @@ describe("Settings", () => {
     expect(screen.getByText("A-NAS Fake HDD")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "初始化数据卷…" })).toBeNull();
     expect(screen.queryByRole("region", { name: "初始化数据卷" })).toBeNull();
+  });
+
+  it("credits the desktop companion's makers and licence to members on 概览", async () => {
+    serve();
+    renderSettings(member);
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+    const credit = screen.getByText("桌面伙伴").closest("p");
+    for (const part of ["大肥鱼", "@上善无形", "@ZipZipPipe", "CC BY-NC-SA 4.0", "github.com/PC2005-cloud/dsh-pet"])
+      expect(credit?.textContent).toContain(part);
+  });
+
+  it("lets a member set how the companion is on this device", async () => {
+    serve();
+    const user = userEvent.setup();
+    renderSettings(member);
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+    const choice = screen.getByRole("radiogroup", { name: "这台设备上的伙伴" });
+    const radio = (name: string) => within(choice).getByRole("radio", { name });
+    expect(radio("正常").getAttribute("aria-checked")).toBe("true");
+    try {
+      await user.click(radio("安静"));
+      expect(companionMode()).toBe("quiet");
+      expect(radio("安静").getAttribute("aria-checked")).toBe("true");
+      await user.click(radio("隐藏"));
+      expect(localStorage.getItem("a-nas.companion.mode")).toBe("hidden");
+    } finally {
+      act(() => setCompanionMode("normal"));
+    }
   });
 
   it("opens a member's sign-in records from My account", async () => {

@@ -4865,3 +4865,11 @@ a.set-btn {
   padding: 0 16px 14px;
   line-height: 1.7;
 }
+
+/* The companion's credit, the last line of 概览 (CompanionCredit). */
+.setFootnote {
+  margin: 4px 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--set-muted);
+}

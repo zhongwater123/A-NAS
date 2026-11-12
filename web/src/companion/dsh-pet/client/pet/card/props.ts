@@ -51,6 +51,9 @@ export interface PetCardProps {
   /** A-NAS: the page is idle, hidden or under the screen saver. The card freezes as under a lock and
    *  holds a flight too; the container sends it no commands meanwhile. */
   paused?: boolean;
+  /** A-NAS: whether a command was answered before its clip showed, so that the card does not show it. The
+   *  page is the card's host and knows; dsh-pet's card heard of a command's answer from no one. */
+  playbackSettled?: (playbackId: string) => boolean;
   /** A-NAS: where the pet was left (its centre, as shares of the viewport), for the page to keep on this
    *  device; dsh-pet keeps it for the page's life only. */
   onPlace?: (center: Center) => void;

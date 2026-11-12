@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import type { AppShortcut, Transfer } from "./api.generated";
+import { focusedWindow } from "./desktop/focusedWindow";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
 import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
@@ -259,6 +260,62 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
     await user.click(screen.getByRole("button", { name: "恢复设置" }));
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
+  });
+
+  it("tells what floats above the windows which window is on top, as windows open, move, change and go", async () => {
+    serveDesktop();
+    serveWindows();
+    const user = userEvent.setup();
+    const capture = Object.getOwnPropertyDescriptor(Element.prototype, "setPointerCapture");
+    // jsdom captures no pointer, which a window's title bar and handle take.
+    Object.defineProperty(Element.prototype, "setPointerCapture", { configurable: true, value: vi.fn() });
+    try {
+      render(<App />);
+      const desktop = await screen.findByRole("region", { name: "桌面应用" });
+      const onTop = () => focusedWindow()?.id ?? null;
+      expect(onTop()).toBeNull();
+      await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+      expect(onTop()).toBe("settings");
+      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+      expect(onTop()).toBe("trash");
+      // Brought to the front by a press.
+      const settings = screen.getByRole("dialog", { name: "设置" });
+      fireEvent.pointerDown(settings);
+      expect(onTop()).toBe("settings");
+      // Moved and resized: once the pointer lets go.
+      const at = { ...focusedWindow() };
+      const pointer = { button: 0, pointerId: 1, pointerType: "mouse" };
+      const titleBar = settings.firstElementChild as HTMLElement;
+      fireEvent.pointerDown(titleBar, { ...pointer, clientX: 400, clientY: 80 });
+      fireEvent.pointerMove(titleBar, { ...pointer, clientX: 500, clientY: 120 });
+      expect(focusedWindow()?.x).toBe(at.x);
+      fireEvent.pointerUp(titleBar, { ...pointer, clientX: 500, clientY: 120 });
+      expect(focusedWindow()).toMatchObject({ x: (at.x ?? 0) + 100, y: (at.y ?? 0) + 40 });
+      const handle = settings.lastElementChild as HTMLElement;
+      fireEvent.pointerDown(handle, { ...pointer, clientX: 900, clientY: 700 });
+      fireEvent.pointerMove(handle, { ...pointer, clientX: 950, clientY: 720 });
+      fireEvent.pointerUp(handle, { ...pointer, clientX: 950, clientY: 720 });
+      expect(focusedWindow()).toMatchObject({ width: (at.width ?? 0) + 50, height: (at.height ?? 0) + 20 });
+      await user.click(within(settings).getByRole("button", { name: "最大化设置" }));
+      expect(focusedWindow()?.maximized).toBe(true);
+      await user.click(within(settings).getByRole("button", { name: "还原设置" }));
+      expect(focusedWindow()?.maximized).toBe(false);
+      // Minimized, the one under it is on top; closed, none.
+      await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
+      expect(onTop()).toBe("trash");
+      await user.click(
+        within(screen.getByRole("dialog", { name: "回收站" })).getByRole("button", { name: "关闭回收站" }),
+      );
+      expect(onTop()).toBeNull();
+      // 显示桌面 puts every window away.
+      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+      expect(onTop()).toBe("trash");
+      await user.click(screen.getByRole("button", { name: "显示桌面" }));
+      expect(onTop()).toBeNull();
+    } finally {
+      if (capture) Object.defineProperty(Element.prototype, "setPointerCapture", capture);
+      else delete (Element.prototype as Partial<Element>).setPointerCapture;
+    }
   });
 
   it("maximizes a window above the dock and restores it", async () => {
