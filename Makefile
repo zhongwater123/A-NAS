@@ -153,6 +153,8 @@ ops-check:
 	grep -Fqx '#ANAS_CONTAINERS_MODE=agent' deploy/site/site.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
+	@# a-nas-host depends on the upstream packages that A-NAS's repository carries (ADR 0015).
+	grep -Eq '^Depends: (.*, )?@UPSTREAM@(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	grep -Eq '^Depends: a-nas-host \(= @VERSION@\), ' deploy/debian/a-nas/DEBIAN/control
 	grep -Fq '"a-nas=$$VERSION" "a-nas-host=$$VERSION"' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null

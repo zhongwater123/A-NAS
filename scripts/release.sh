@@ -9,6 +9,9 @@
 # - The content packages come from the release content store CONTENT
 #   (scripts/build-content-packages.sh); one the repository has is not built
 #   again.
+# - The Docker and Caddy packages that a-nas-host depends on are the upstream
+#   files deploy/upstream/packages.json pins (ADR 0015), fetched into
+#   CONTENT/upstream once.
 # - a-nas-archive-keyring carries the public key that signs the repository.
 #
 # A commit with a release tag goes to the release distribution and to dev,
@@ -77,6 +80,9 @@ for name in $(content_packages "$repo") "$(assistant_runtime_package "$repo")"; 
   [[ -n "$deb" ]] || { echo "missing $name: its content in $content (scripts/build-content-packages.sh)" >&2; exit 2; }
   debs+=("$deb")
 done
+upstream=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream")
+mapfile -t upstream <<<"$upstream"
+debs+=("${upstream[@]}")
 "$repo/scripts/apt-repository.sh" keyring "$incoming" "$version" "$gnupg"
 debs+=("$incoming/a-nas-archive-keyring_${version}_all.deb")
 "$repo/scripts/apt-repository.sh" publish "$repository" dev "$gnupg" "${debs[@]}"

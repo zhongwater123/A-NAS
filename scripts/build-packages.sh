@@ -9,7 +9,10 @@
 #   a-nas-site and a-nas-check. It depends on the content packages it links
 #   to (scripts/lib/content.sh) and on a-nas-host at its own version.
 # - a-nas-host and a-nas-console, which declare what the product needs from
-#   Debian (ADR 0031);
+#   Debian (ADR 0031); a-nas-host also needs Docker and Caddy at least at the
+#   versions deploy/upstream/packages.json pins (ADR 0015), so installing a
+#   release upgrades them to the ones its system test ran, and rolling back
+#   leaves them;
 # - a-nas-assistant-trial, the assistant's trial (ADR 0024), at the version of
 #   a-nas, which it depends on with its Hermes runtime's content package.
 #
@@ -52,9 +55,10 @@ export SOURCE_DATE_EPOCH
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
+upstream=$(jq -r '.packages | map("\(.name) (>= \(.version))") | join(", ")' "$repo/deploy/upstream/packages.json")
 # control PACKAGE CONTENT: the package's control file at this version.
 control() {
-  sed -e "s/@VERSION@/$version/g" -e "s/@CONTENT@/$2/g" "$repo/deploy/debian/$1/DEBIAN/control"
+  sed -e "s/@VERSION@/$version/g" -e "s/@CONTENT@/$2/g" -e "s/@UPSTREAM@/$upstream/g" "$repo/deploy/debian/$1/DEBIAN/control"
 }
 
 # build ROOT: the package in ROOT, named as Debian names it, printed.
@@ -127,6 +131,10 @@ wants sockets.target anas-ai.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path
+# Docker, which a-nas-host depends on, waits for its address pool (ADR 0013).
+for unit in docker.service docker.socket; do
+  install -D -m 0644 "$repo/deploy/systemd/docker-address-pool.conf" "$units/$unit.d/a-nas-address-pool.conf"
+done
 
 # What follows the machine: its settings, and the health check.
 install -m 0755 "$repo/deploy/site/a-nas-generator.sh" "$root/usr/lib/systemd/system-generators/a-nas-generator"

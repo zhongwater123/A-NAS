@@ -12,6 +12,8 @@
 #   llama/<sha256>/<file>         scripts/fetch-llama.sh's tarball
 #   assistant-runtimes/<sha256>/runtime.tar.gz
 #                                 the assistant trial's Hermes runtime
+#   upstream/<sha256>/<file>      Docker and Caddy, which scripts/release.sh
+#                                 fetches there (not content packages)
 # Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
 # pins.
 #
