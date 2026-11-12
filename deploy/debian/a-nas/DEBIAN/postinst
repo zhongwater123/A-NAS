@@ -93,11 +93,11 @@ take_over() {
   echo "a-nas: took over from the installer; its files are in $saved, its releases stay in /opt/a-nas/releases"
 }
 
+# The accounts come first: the takeover gives site.conf to group a-nas.
+systemd-sysusers a-nas.conf a-nas-kiosk.conf a-nas-search.conf
 if [[ "$1" == configure && -L /opt/a-nas/current ]]; then
   take_over
 fi
-
-systemd-sysusers a-nas.conf a-nas-kiosk.conf a-nas-search.conf
 systemd-tmpfiles --create a-nas.conf
 "$running" || exit 0
 
