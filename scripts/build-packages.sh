@@ -116,7 +116,7 @@ for role in "${ai_roles[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
   install -m 0644 "$manifest" "$lib/ai/$name.json"
-  ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)/$(pin_field "$manifest" file)" "$lib/ai/$name.${rest%%:*}"
+  ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)/$(model_link_file "$manifest")" "$lib/ai/$name.${rest%%:*}"
 done
 ln -s "/opt/a-nas/ai-runtimes/$(ai_runtime_id "$repo")" "$lib/ai/runtime"
 install -m 0644 "$repo/deploy/llama/llama.json" "$lib/ai/"
