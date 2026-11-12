@@ -1,0 +1,11 @@
+Package: a-nas-archive-keyring
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: misc
+Priority: optional
+Description: the key that signs the A-NAS apt repository
+ /usr/share/keyrings/a-nas-archive-keyring.pgp, which the repository's
+ .sources file names in Signed-By, so apt trusts this key for the A-NAS
+ repository alone (docs/adr/0034). An example .sources file is in
+ /usr/share/doc/a-nas-archive-keyring.

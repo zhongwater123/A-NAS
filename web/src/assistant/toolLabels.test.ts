@@ -17,6 +17,9 @@ describe("what the assistant's tools are called for the member", () => {
       detail: "“发票” 在 文档",
     });
     expect(toolLabel("browser_scroll", { direction: "up" })).toEqual({ label: "滚动", detail: "向上" });
+    expect(toolLabel("mcp__desktop__scroll", { direction: "up" })).toEqual({ label: "滚动", detail: "向上" });
+    expect(toolLabel("mcp__desktop__click", { ref: "e12" })).toEqual({ label: "点击", detail: "e12" });
+    expect(toolLabel("mcp__desktop__look", {})).toEqual({ label: "看桌面画面", detail: "" });
   });
 
   it("keeps the first line of a long command and names an unknown tool by itself", () => {

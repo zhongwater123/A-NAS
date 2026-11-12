@@ -132,18 +132,8 @@ const SUGGESTIONS = [
 ];
 
 // How long a step VNAS takes on the desktop waits for the member to allow it:
-// Hermes gives the window 30 s to answer a browser command.
+// the product service gives the window 30 s to answer a desktop command.
 const CONTROL_CONFIRM_MS = 25_000;
-// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
-// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
-const CONTROL_CAPABILITIES = [
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_press",
-  "browser_scroll",
-  "browser_screenshot",
-];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -289,11 +279,16 @@ export function AssistantPanel({
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
-  // VNAS operates the WebOS page it is on as Hermes's browser for its live
-  // conversation (Hermes's browser control). A step whose writes delete, move,
-  // share or change settings, and any step in the terminal, Docker or 应用中心,
-  // waits here for the member.
-  const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
+  // VNAS operates the WebOS page it is on for its live conversation: the
+  // commands of A-NAS's `desktop` MCP server come here through the product
+  // service (ADR 0024 decision 8). A step whose writes delete, move, share or
+  // change settings, and any step in the terminal, Docker or 应用中心, waits
+  // here for the member.
+  const [controlAsk, setControlAsk] = useState<{
+    danger: Danger;
+    until: number;
+    answer(allowed: boolean): void;
+  }>();
   const asking = useRef<(allowed: boolean) => void>(undefined);
   // One card at a time: a write that arrives while another card is open waits its turn.
   const cards = useRef(Promise.resolve());
@@ -314,7 +309,11 @@ export function AssistantPanel({
               };
               asking.current = answer;
               timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
-              setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+              setControlAsk({
+                danger,
+                until: Date.now() + CONTROL_CONFIRM_MS,
+                answer,
+              });
             }),
         );
         cards.current = shown.then(() => undefined);
@@ -325,69 +324,88 @@ export function AssistantPanel({
     return installed.install();
   }, []);
   // The window that sends a prompt is the conversation's browser for its turn:
-  // it registers again before every prompt, so the steps and their cards stay
+  // it attaches again before every prompt, so the steps and their cards stay
   // on the device the member is using; a window that only shows the
-  // conversation never registers (#160). These are the live sessions this
-  // connection registered for.
+  // conversation never attaches (#160). These are the live sessions this
+  // connection attached to.
   const controlled = useRef(new Set<string>());
   useLayoutEffect(() => {
     controlled.current.clear();
   }, [gateway.generation]);
   const beforePrompt = useCallback(
     (liveId: string) =>
-      gateway.client
-        .request("browser.controller.register", {
-          session_id: liveId,
-          protocol_version: 1,
-          controller_id: "vnas-window",
-          browser_profile_id: "webos",
-          capabilities: CONTROL_CAPABILITIES,
-        })
-        .then(
-          () => {
-            controlled.current.add(liveId);
-            startTurn(liveId);
-          },
-          () => {
-            controlled.current.delete(liveId);
-          },
-        ),
+      gateway.client.request("desktop.attach", { session_id: liveId }).then(
+        () => {
+          controlled.current.add(liveId);
+          startTurn(liveId);
+        },
+        () => {
+          controlled.current.delete(liveId);
+        },
+      ),
     [gateway.client],
   );
+  // The desktop commands that reached this window are carried out one at a
+  // time, so the steps of two conversations never interleave on the page and a
+  // card always asks about the step under way: `current` is that step, and
+  // `waiting` are the ones that have not had their turn.
+  const steps = useRef({
+    current: "",
+    waiting: new Set<string>(),
+    queue: Promise.resolve(),
+  });
   useEffect(
     () =>
       gateway.client.onEvent((event) => {
         const type = event.type as string;
         const session = typeof event.session_id === "string" ? event.session_id : "";
-        if (type === "browser.controller.cancel") {
-          // Hermes stopped waiting: the step is not taken.
-          asking.current?.(false);
+        const command = (event.payload ?? {}) as {
+          command_id?: unknown;
+          action?: unknown;
+          args?: unknown;
+        };
+        const { command_id: commandId, action } = command;
+        const state = steps.current;
+        if (type === "anas.desktop.cancel") {
+          if (typeof commandId !== "string") return;
+          // The product service stopped waiting for the step: under way, it is
+          // not taken, so the card asking about it closes; still waiting, it
+          // loses its turn.
+          if (state.current === commandId) asking.current?.(false);
+          else state.waiting.delete(commandId);
           return;
         }
-        if (type !== "browser.controller.command" || !controlled.current.has(session)) return;
-        const command = (event.payload ?? {}) as {
-          command_id?: string;
-          action?: string;
-          arguments?: Record<string, unknown>;
-        };
-        if (!command.command_id || !command.action || !controller.current) return;
-        void controller.current
-          .run(command.action, command.arguments ?? {})
-          .then(
+        if (type !== "anas.desktop" || !controlled.current.has(session)) return;
+        if (typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
+        if (!controller.current) return;
+        const args =
+          command.args && typeof command.args === "object" && !Array.isArray(command.args)
+            ? (command.args as Record<string, unknown>)
+            : {};
+        state.waiting.add(commandId);
+        state.queue = state.queue.then(async () => {
+          // Given up on before its turn: nothing is done and nobody waits for an answer.
+          if (!state.waiting.delete(commandId) || !controller.current) return;
+          state.current = commandId;
+          const outcome = await controller.current.run(action, args).then(
             (result) => ({ ok: true, result }),
             (reason) => ({
               ok: false,
-              error: { message: reason instanceof ControlError ? reason.message : "这一步没有完成" },
+              error: {
+                message: reason instanceof ControlError ? reason.message : "这一步没有完成",
+              },
             }),
-          )
-          .then((outcome) =>
-            gateway.client.request("browser.controller.result", {
+          );
+          state.current = "";
+          // Not awaited: the next step does not wait for the answer to arrive.
+          void gateway.client
+            .request("desktop.result", {
               session_id: session,
-              command_id: command.command_id,
+              command_id: commandId,
               ...outcome,
-            }),
-          )
-          .catch(() => undefined);
+            })
+            .catch(() => undefined);
+        });
       }),
     [gateway.client],
   );
@@ -401,7 +419,11 @@ export function AssistantPanel({
     const off = gateway.client.onEvent((event) => {
       if ((event.type as string) !== "anas.companion") return;
       const session = typeof event.session_id === "string" ? event.session_id : "";
-      const command = (event.payload ?? {}) as { command_id?: unknown; action?: unknown; args?: unknown };
+      const command = (event.payload ?? {}) as {
+        command_id?: unknown;
+        action?: unknown;
+        args?: unknown;
+      };
       const { command_id: commandId, action } = command;
       if (!session || typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
       const args =
@@ -412,7 +434,11 @@ export function AssistantPanel({
         .then((outcome) =>
           closed.signal.aborted
             ? undefined
-            : gateway.client.request("companion.result", { session_id: session, command_id: commandId, ...outcome }),
+            : gateway.client.request("companion.result", {
+                session_id: session,
+                command_id: commandId,
+                ...outcome,
+              }),
         )
         .catch(() => undefined);
     });
@@ -863,10 +889,20 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
     };
   }
   if (message.role === "user")
-    return { id: message.id, role: "user", content: message.parts.filter((part) => part.type === "text"), createdAt };
+    return {
+      id: message.id,
+      role: "user",
+      content: message.parts.filter((part) => part.type === "text"),
+      createdAt,
+    };
   if (message.role === "system") {
     const text = chatMessageText(message).trim();
-    return { id: message.id, role: "system", content: [{ type: "text", text: TURN_NOTICES[text] ?? text }], createdAt };
+    return {
+      id: message.id,
+      role: "system",
+      content: [{ type: "text", text: TURN_NOTICES[text] ?? text }],
+      createdAt,
+    };
   }
   return {
     id: message.id,
@@ -886,7 +922,7 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
 }
 
 // A step VNAS wants to take on the desktop that deletes, replaces or resets
-// something: the member allows it, or not, before Hermes stops waiting.
+// something: the member allows it, or not, before the product service stops waiting.
 function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(allowed: boolean): void } }) {
   const [left, setLeft] = useState(() => Math.max(0, Math.ceil((ask.until - Date.now()) / 1000)));
   useEffect(() => {
@@ -1428,6 +1464,14 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   skill_view: Wrench,
   skills_list: Wrench,
   skill_manage: Wrench,
+  // The desktop server's tools; the browser_* names are Hermes's own browser tools, which conversations
+  // from before the desktop server still hold.
+  mcp__desktop__snapshot: MonitorSmartphone,
+  mcp__desktop__look: Eye,
+  mcp__desktop__click: MousePointerClick,
+  mcp__desktop__type: Keyboard,
+  mcp__desktop__press: Keyboard,
+  mcp__desktop__scroll: MousePointerClick,
   browser_snapshot: MonitorSmartphone,
   browser_vision: Eye,
   browser_click: MousePointerClick,
@@ -1769,10 +1813,22 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, img: MarkdownImage, CodeHeader };
-const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = {
+  a: MarkdownLink,
+  img: MarkdownImage,
+  CodeHeader,
+};
+const ASSISTANT_PARTS = {
+  Text: MarkdownText,
+  ChainOfThought: Steps,
+  Empty: Thinking,
+};
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
-const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: SystemNotice };
+const THREAD_COMPONENTS = {
+  UserMessage,
+  AssistantMessage,
+  SystemMessage: SystemNotice,
+};
 
 // Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
 

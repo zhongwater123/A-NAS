@@ -8,7 +8,7 @@ Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd
 Suggests: caddy, wireguard-tools, nftables, docker-ce, docker-compose-plugin, tini, socat, ripgrep
 Description: what an A-NAS device needs from Debian
  The Host Agent, the Product Service and their workers run these commands
- and link these libraries. The A-NAS installer requires this package at the
+ and link these libraries. The a-nas package requires this package at the
  version of the release it installs (docs/adr/0031). Caddy (the LAN entry),
  WireGuard and nftables (the internet entry, docs/adr/0032), Docker (the App
  Center) and the assistant's sandbox tools are suggested: each is turned on

@@ -1,7 +1,7 @@
 # 安装伙伴动画
 
 状态：draft（系统测试已验证；2026-11-10 在实验 NAS 执行第 1–2 步，池 `36492963e4112f55`，HTTP 核对通过）
-更新时间：2026-11-10
+更新时间：2026-11-11
 
 ## 目的
 
@@ -10,7 +10,7 @@
 ## 前提与风险
 
 - 权限：开发机能以 `anas-dev` 用 SSH 登录 NAS；NAS 上有 root。
-- 目标：已安装含 `install-media-pool.sh` 的 release 的 NAS（`/opt/a-nas/current/install-media-pool.sh` 存在）。
+- 目标：已安装 `a-nas` 软件包的 NAS（`/usr/lib/a-nas/install-media-pool.sh` 存在）。
 - 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交；Safari 用的 HEVC 动画是 `dsh-pet-mov-assets-mov.zip`，SHA-256 为 `3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d`（[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py) 中的 `MOV_ZIP`）。从私有仓库 A-NAS-assets 取：`gh release download sha256-3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d --repo zhongwater123/A-NAS-assets --dir <目录>`。不要从 dsh-pet 的 `assets-mov` 发布下载：上游每次构建都同名覆盖这个文件，编码结果也每次不同，与固定的哈希对不上（2026-11-10 的情况）。动画仅限非商业试验，许可与署名见同一 README。
 - 验证用电脑：与 NAS 同一局域网、能打开 `http://<NAS 地址>` 的另一台电脑（[启用局域网 Web 访问](enable-lan-web-access.md)）。NAS 默认没有 `curl`，HTTP 检查不在 NAS 上做。
 - 风险：只写 `/var/lib/a-nas/companion` 与暂存账号的 `~/apps/a-nas/companion`，不涉及数据盘。本地控制台在运行时会被重启一次，本机屏幕重新打开桌面。
@@ -29,7 +29,7 @@
 2. 以 root 安装：
 
    ```bash
-   /opt/a-nas/current/install-media-pool.sh companion 36492963e4112f55
+   /usr/lib/a-nas/install-media-pool.sh companion 36492963e4112f55
    ```
 
    - 预期：脚本只接受这个 release 固定的池 `36492963e4112f55`，其他池在改动前拒绝；`--unpinned` 只给系统测试的替身用，不在真 NAS 上使用。脚本复核池 ID 与每个文件的 SHA-256，任一不符即在改动前停止；全部通过后建池并原子切换 `current`。暂存区由暂存账号所有，脚本只读其中的普通文件，不经末端的符号链接，不等 FIFO 的写入方，清单最大 1 MiB、每段动画最大 256 MiB；清单含 NUL 字节或最后一行没有换行也拒绝。产品服务每次请求重新读取目录，无需重启。本地控制台的页面只在打开桌面时读一次动画清单，所以本地控制台（`anas-kiosk@tty1`）在运行时由脚本重启；没有运行时不启动它。其他电脑与手机上已打开的页面继续播放原来的池，刷新后换成新池。

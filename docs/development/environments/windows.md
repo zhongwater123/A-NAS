@@ -1,6 +1,6 @@
 # Windows 与 WSL 开发环境
 
-更新时间：2026-10-27
+更新时间：2026-11-11
 
 记录开发机 A、B 的配置与差异。检查目标见[测试与验证](../testing.md)；完整门禁命令统一维护在 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md)，Fake 预览按 [fake-preview](../../../.claude/skills/fake-preview/SKILL.md)。
 
@@ -113,7 +113,7 @@ scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm
 
 ### 与实验 NAS 联调
 
-开发机 B 的 SSH 别名、授权撤销见[SSH 手册](../../runbooks/bootstrap-experimental-nas-ssh.md#开发机-b-的连接配置)。暂存与安装步骤见[实验存储手册](../../runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
+开发机 B 的 SSH 别名、授权撤销见[SSH 手册](../../runbooks/bootstrap-experimental-nas-ssh.md#开发机-b-的连接配置)。发布与安装步骤见[部署 A-NAS 软件包](../../runbooks/deploy-a-nas-packages.md)，开发机上的注意事项见[实验存储手册](../../runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
 
 ## 关联
 

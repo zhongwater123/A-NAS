@@ -766,7 +766,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
   const work = useWorkSign(leaves);
   // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
-  // does its toasts, since a click through the browser tools would wake it or take its lock back.
+  // does its toasts, since a click through the desktop tools would wake it or take its lock back.
   return (
     <div
       ref={clipSpeed}

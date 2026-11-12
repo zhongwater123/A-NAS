@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Trial of the AI assistant (ADR 0024) on the Experimental NAS with a cloud model, for
-# development testing only: docs/runbooks/try-ai-assistant-on-experimental-nas.md. Run as
-# root from the unpacked bundle that nas-trial-bundle.sh makes (spike/, runtime.tar.gz,
-# debs/, SHA256SUMS).
+# development testing only: docs/runbooks/try-ai-assistant-on-experimental-nas.md. The
+# a-nas-assistant-trial package installs this directory in /opt/a-nas/assistant-trial/spike
+# and the Hermes runtime in /opt/a-nas/assistant-runtimes/spike, at the version of a-nas;
+# its postinst runs update over an install. Run as root:
 #
 #   nas-trial.sh check        what is in place and what install would do; changes nothing
 #   nas-trial.sh install      install for every member of a-nas-users, once, on fresh state
-#   nas-trial.sh update       this bundle's scripts, units, policy and runtime over an install,
+#   nas-trial.sh update       this package's scripts, units, policy and runtime over an install,
 #                             keeping each member's assistant folder, conversations and memory
 #   nas-trial.sh smoke USER [QUERY]
 #                             start USER's assistant and wait for it (no model call), then
@@ -21,19 +22,20 @@
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
 # write; it therefore refuses to run over anything an earlier run or a member left. update
-# touches only root's own files (assistant-layout.sh members). Both switch on the session
+# touches root's own files and the owner of each existing Hermes home, nothing inside a
+# folder members can write (assistant-layout.sh members). Both switch on the session
 # gate and the photo service's socket for assistants (product-settings.sh, drop-ins that
-# survive deploys) and restart the Host Agent, the photo service and the Product Service.
+# survive upgrades) and restart the Host Agent, the photo service and the Product Service.
+# remove undoes install; removing the package afterwards removes its files.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-bundle=$(dirname "$here")
 data=/srv/a-nas/data
 trial=/opt/a-nas/assistant-trial
 runtimes=/opt/a-nas/assistant-runtimes
 key=/etc/anas-spike/model.key
 model=${ANAS_TRIAL_MODEL:-deepseek-flash}
 upstream=${ANAS_TRIAL_UPSTREAM:-api.deepseek.com}
-units=(anas-assistant@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
+units=(anas-assistant@.service anas-assistant-net@.service anas-assistant-curator@.service anas-assistant-curator@.timer anas-assistant-cron@.service anas-assistant-cron-waker.service anas-assistant-api@.service anas-assistant-api@.socket anas-assistant-probe@.service
   anas-assistant-trial-gateway.service)
 python=$runtimes/spike/venv/bin/python
 
@@ -56,8 +58,8 @@ leftovers() {
   local path
   # Agent空间 belongs to the Host Agent's ordinary space layout, including
   # before the assistant is enabled; its presence is not a stale trial.
-  for path in "$data/assistant" /etc/hermes /etc/a-nas-assistant /spike "$trial" \
-    "$runtimes/spike" /opt/a-nas/assistant-skills /etc/systemd/system/anas-assistant@.service; do
+  for path in "$data/assistant" /etc/hermes /etc/a-nas-assistant /spike \
+    /opt/a-nas/assistant-skills /etc/systemd/system/anas-assistant@.service; do
     if [[ -e "$path" || -L "$path" ]]; then printf '%s\n' "$path"; fi
   done
 }
@@ -65,9 +67,9 @@ leftovers() {
 preflight() {
   [[ $EUID -eq 0 ]] || fail "run as root"
   [[ "$(findmnt -n -o FSTYPE --target "$data" 2>/dev/null)" == btrfs ]] || fail "$data is not the mounted Btrfs data volume"
-  grep -q ANAS_ASSISTANT_SOCKET_DIR /opt/a-nas/current/anas-host-agent ||
-    fail "the installed release ($(readlink -f /opt/a-nas/current)) has no assistant support"
-  (cd "$bundle" && sha256sum --quiet -c SHA256SUMS) || fail "the bundle does not match its SHA256SUMS"
+  grep -q ANAS_ASSISTANT_SOCKET_DIR /usr/lib/a-nas/anas-host-agent ||
+    fail "the installed release ($(dpkg-query -W -f='${Version}' a-nas)) has no assistant support"
+  [[ "$here" == "$trial/spike" && -x "$python" ]] || fail "run the a-nas-assistant-trial package's $trial/spike/nas-trial.sh"
   local api_user
   api_user=$(systemctl show -p User --value anas-api)
   if [[ -z "$api_user" ]] || ! getent passwd "$api_user" >/dev/null; then fail "no Product Service account"; fi
@@ -79,7 +81,7 @@ check() {
   api_user=$(preflight)
   list=$(accounts)
   say "host:         $(hostname) ($(uname -r))"
-  say "release:      $(readlink -f /opt/a-nas/current)"
+  say "release:      a-nas $(dpkg-query -W -f='${Version}' a-nas), a-nas-assistant-trial $(dpkg-query -W -f='${Version}' a-nas-assistant-trial)"
   say "data volume:  $(findmnt -n -o SOURCE,FSTYPE,UUID --target "$data")"
   say "memory:       $(free -m | awk '/^Mem|^内存/ {print $7 " MiB available of " $2}')"
   say "product user: $api_user"
@@ -96,27 +98,11 @@ check() {
   else say "fresh:        nothing from an earlier install"; fi
 }
 
-install_packages() {
-  local deb todo=()
-  say "--- packages"
-  for deb in "$bundle"/debs/*.deb; do
-    if ! dpkg-query -W -f='${Status}' "$(dpkg-deb -f "$deb" Package)" 2>/dev/null | grep -q 'install ok installed'; then
-      todo+=("$deb")
-    fi
-  done
-  if ((${#todo[@]})); then dpkg -i "${todo[@]}"; fi
-  for tool in socat rg tini; do command -v "$tool" >/dev/null || fail "$tool is missing"; done
-}
-
-# install_files puts this bundle's scripts and runtime in place, replacing earlier ones.
+# install_files sets up what the package's files need outside /opt: the runtime
+# directories and the model gateway's unit for the chosen service.
 install_files() {
   say "--- files"
-  install -d -m 0755 "$trial" "$runtimes"
-  rm -rf -- "$trial/spike" "$runtimes/spike"
-  cp -r "$bundle/spike" "$trial/spike"
-  chown -R root:root "$trial" && chmod -R go-w "$trial"
-  tar -C "$runtimes" -xzf "$bundle/runtime.tar.gz"
-  chown -R root:root "$runtimes/spike"
+  for tool in socat rg tini; do command -v "$tool" >/dev/null || fail "$tool is missing"; done
   install -m 0644 "$trial/spike/anas-assistant-trial.tmpfiles" /etc/tmpfiles.d/anas-assistant-trial.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/anas-assistant-trial.conf
   sed "s/@UPSTREAM@/$upstream/" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
@@ -131,7 +117,6 @@ install_trial() {
   list=$(accounts)
   [[ -n "$list" ]] || fail "no member of a-nas-users has a space"
 
-  install_packages
   install_files
   ln -s "$trial/spike" /spike
 
@@ -184,8 +169,11 @@ update_trial() {
   done
   ((${#ready[@]})) || fail "no member has an assistant folder; use install"
   say "--- stopping the running assistants"
-  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 2>/dev/null || true
-  install_packages
+  # The waker first: it would start a round of scheduled tasks on a runtime that is being
+  # replaced. assistant-install.sh starts it again, with the new script.
+  systemctl stop anas-assistant-cron-waker.service 2>/dev/null || true
+  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+    'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
   install_files
   say "--- the assistant for ${#ready[@]} accounts"
   ASSISTANT_GATE=host-agent PRODUCT_USER=$api_user SPIKE_MODEL=$model SPIKE_MODEL_GATEWAY=external ASSISTANT_LAYOUT=members \
@@ -257,7 +245,7 @@ remove_trial() {
   systemctl daemon-reload
   drop /run/a-nas-assistant /run/a-nas-assistant-start /run/anas-assistant-start /run/anas-assistant-gw /run/anas-assistant-photos \
     /run/anas-assistant-companion /run/anas-change-agent /run/anas-spike-broker \
-    /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills "$runtimes/spike" "$trial"
+    /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills
   rmdir "$runtimes" 2>/dev/null || true
   if [[ -L /spike ]]; then rm -f /spike; fi
   say "--- the gateway's log"
@@ -268,7 +256,7 @@ remove_trial() {
   else
     say "the key stays at $key (remove --purge-key deletes it)"
   fi
-  say "removed; socat and ripgrep stay installed (dpkg -r socat ripgrep removes them)"
+  say "removed; apt remove a-nas-assistant-trial removes its files"
 }
 
 case ${1:-} in
@@ -277,5 +265,5 @@ case ${1:-} in
   update) update_trial ;;
   smoke) smoke "${2:-}" "${3:-}" ;;
   remove) remove_trial "${2:-}" ;;
-  *) sed -n '2,26p' "$0"; exit 2 ;;
+  *) sed -n '2,28p' "$0"; exit 2 ;;
 esac
