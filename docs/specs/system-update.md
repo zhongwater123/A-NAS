@@ -12,7 +12,7 @@
 - **软件包设备**：由人装好 Debian、从 A-NAS 的签名软件源用 apt 安装的机器，例如 Experimental NAS（[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)）。更新服务替管理员执行部署手册第 6 步的 apt 命令与 `a-nas-check`，失败时执行手册中的回滚。
 - **镜像设备**：家里的设备，以两个系统分区更新（ADR 0034 决定 2，第 5 步）。更新服务调用 `systemd-sysupdate --json=short`；系统更新要重启，产品层的更新不重启；新版本启动失败由 systemd-boot 退回。
 
-先实现软件包设备；镜像设备随第 5 步接入，本规格写明两者的差别。
+先实现软件包设备；镜像设备随第 5 步接入，本规格写明两者的差别。自动下载、自动安装、谁能看到、回到上一版本与提示位置的默认做法由用户 2026-11-12 确认（[决定记录](../decisions/2026-11-12-system-update-defaults.md)）。
 
 ## 非目标
 
@@ -130,7 +130,7 @@
 ## 关联
 
 - ADR：[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
-- 决定记录：[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)、[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)
+- 决定记录：[系统更新的默认做法](../decisions/2026-11-12-system-update-defaults.md)、[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)、[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)
 - 规格：[设置](settings.md)、[系统健康](system-health.md)、[日志](logs.md)
 - 运行手册：[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)
 - 研究：[设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)
