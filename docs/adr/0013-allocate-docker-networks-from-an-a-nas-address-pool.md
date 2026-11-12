@@ -6,7 +6,7 @@ Docker 为应用新建网络时，默认从 172.17–172.31/16 与 192.168.0.0/1
 
 ## 决定
 
-1. **地址池**：安装容器代理时在 `/etc/docker/daemon.json` 中配置 `default-address-pools` 与 `bip`，网段由现场（IT）确认在内网中不被使用。这些地址只在 NAS 内部使用，容器出站经 NAT 以 NAS 的地址出现，不需要内网路由。Experimental NAS 使用 `10.96.64.0/18`。
+1. **地址池**：安装容器代理时在 `/etc/docker/daemon.json` 中配置 `default-address-pools` 与 `bip`，网段由现场（IT）确认在内网中不被使用。这些地址只在 NAS 内部使用，容器出站经 NAT 以 NAS 的地址出现，不需要内网路由。Experimental NAS 使用 `10.96.64.0/18`。2026-11-12 起 Docker 随 `a-nas-host` 安装（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)），`a-nas` 给它加的附加配置让它在这个文件存在之前不启动，所以不会先按默认网段建网桥。
 2. **规划时拒绝**：安装计划列出 Compose 将创建的网络（含隐式 `default`）。有网络而 Docker 未配置地址池时返回 `address_pool_missing`；清单自带 `ipam` 子网或驱动的网络在渲染时即被拒绝。
 3. **安装后核对**：`compose up` 之后，项目网络的每个子网都必须落在地址池内；有任一不在池内或无法检查时，立即 `compose down` 回滚并让安装任务失败。
 4. **单一配置来源**：A-NAS 不维护公司网段列表，地址池是唯一的现场配置。

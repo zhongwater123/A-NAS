@@ -1,7 +1,7 @@
 # 局域网 Web 访问
 
-状态：implemented（NAS 安装 Caddy 后启用）
-更新时间：2026-11-03
+状态：implemented（Caddy 随 `a-nas-host` 安装，入口默认开放）
+更新时间：2026-11-12
 
 ## 目标
 
@@ -17,7 +17,7 @@
 
 ### 从局域网登录
 
-- Given：NAS 已安装 Caddy 并运行包含本功能的系统服务安装器，访问者的电脑能连接 NAS 的 TCP 80。
+- Given：NAS 装了 A-NAS 的软件包（`a-nas-host` 带上 Caddy），访问者的电脑能连接 NAS 的 TCP 80。
 - When：访问者打开 `http://172.18.45.48` 并用 A-NAS 账号登录。
 - Then：显示与本地控制台相同的 Web 桌面；会话 12 小时有效，过期后回到登录页并提示“登录已过期，请重新登录”。
 
@@ -45,11 +45,11 @@
 - When：打开应用的网页 `http://<NAS 地址>:<应用端口>`。
 - Then：浏览器会把桌面的会话 Cookie 一并发给应用，但这个 Cookie 只在登录它的客户端上有效，应用无法用它访问 A-NAS；应用页面也不能嵌入桌面（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 决定 7）。
 
-### 未安装 Caddy
+### 关闭入口
 
-- Given：NAS 没有安装 Caddy。
-- When：运行系统服务安装器，或从局域网访问 80 端口。
-- Then：安装器跳过 Caddy 配置；80 端口没有服务。本地控制台、SSH 隧道与 SMB 不受影响。
+- Given：管理员以 `systemctl disable --now caddy` 停用了 Caddy。
+- When：升级 A-NAS、重启，或从局域网访问 80 端口。
+- Then：Caddy 保持停止，80 端口没有服务；`anas-site.service` 照常更新 A-NAS 的 Caddyfile，但不启动 Caddy。本地控制台、SSH 隧道与 SMB 不受影响。
 
 ## 边界与失败
 
@@ -64,7 +64,7 @@
 - 桌面页面与静态资源返回 `X-Frame-Options: DENY` 与 CSP：`default-src 'self'`、`script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`img-src 'self' data: blob:`、`media-src 'self' blob:`、`connect-src 'self' data: blob:`、`frame-src 'self'`、`object-src 'none'`、`base-uri 'none'`、`form-action 'self'`、`frame-ancestors 'none'`。`/api/` 与 `/healthz` 返回 `X-Frame-Options: SAMEORIGIN`，桌面仍可嵌入自己的 PDF 预览。
 - 应用页面仍能覆盖或挤掉桌面的会话 Cookie，让用户回到登录页，但不能取得会话（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 后果）。
 - 应用中心的安装策略拒绝 1024 以下的端口并保留 8080，应用不会占用入口端口（[ADR 0010](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)）。
-- 安装器在写入前用 `caddy validate` 校验配置，校验失败时停止且不改动现有配置；`/etc/caddy/Caddyfile` 第一次被替换前保存为 `/etc/caddy/Caddyfile.before-a-nas`。
+- `anas-site.service` 在写入前用 `caddy validate` 校验配置，校验失败时报告失败且不改动现有配置；`/etc/caddy/Caddyfile` 第一次被替换前保存为 `/etc/caddy/Caddyfile.before-a-nas`。
 - Caddy 停止或配置错误时局域网 Web 不可用，其他入口不受影响。
 - 登录密码（同时是 SMB 密码）、会话 Cookie 与文件内容在局域网明文传输，只适用于设备所有者认可的可信内网。浏览器地址栏显示“不安全”，功能不受影响。
 
@@ -77,7 +77,7 @@
 - 会话绑定：[`TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn`](../../internal/httpapi/product_test.go)覆盖应用容器经 Caddy 重放、其他局域网地址、回环与局域网互用、本机会话经 Caddy 均返回 `401`，以及应用加的同名 Cookie 排在前面时仍用本人的会话；[账号测试](../../internal/accounts/session_client_test.go)覆盖 IPv6 /64、IPv4 映射地址与规则生效前的旧会话。
 - 嵌入与 CSP：[`TestHandlerKeepsOtherOriginsFromFramingTheDesktop`](../../internal/webui/handler_test.go)覆盖桌面页面与接口的响应头；[助手 Markdown 测试](../../web/src/assistant/markdown.test.tsx)覆盖回答中的外部图片只显示为链接。
 - 入口端口：[渲染测试](../../internal/appstore/render_test.go)的 `low port` 用例覆盖应用不能占用 80。
-- 系统测试：[系统测试](../../scripts/system-test.sh)在装有 Caddy 的 Debian 13 容器中用真实安装器配置入口，验证经 80 端口健康检查、登录、上传与 12 小时会话，以及局域网会话不能经回环使用、本机会话不能经入口使用、经入口取得的桌面页面禁止嵌入。
+- 系统测试：[系统测试](../../scripts/system-test.sh)在 Debian 13 容器中从软件源装上 Caddy，由 `anas-site.service` 配置入口，验证经 80 端口健康检查、登录、上传与 12 小时会话，以及局域网会话不能经回环使用、本机会话不能经入口使用、经入口取得的桌面页面禁止嵌入。
 - 实机：按[启用局域网 Web 访问](../runbooks/enable-lan-web-access.md)验证。
 
 ## 关联

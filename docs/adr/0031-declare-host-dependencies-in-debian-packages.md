@@ -28,6 +28,8 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
      - Caddy：局域网入口装了 Caddy 才开放（[局域网 Web 访问](../specs/lan-web-access.md)）；
      - Docker（`docker-ce`、`docker-compose-plugin`）：来自 Docker 的官方源（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)），应用中心照旧在运行时检查最低能力；
      - 助手沙箱的 `tini`、`socat`、`ripgrep`：由助手试用脚本安装。
+
+     2026-11-12 起 Caddy、Docker、WireGuard 与 nftables 改为 `a-nas-host` 的 `Depends`，装包即装齐；Caddy 与 Docker 是 A-NAS 软件源携带的官方软件包，依赖写明不低于本 release 固定的版本（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。助手沙箱的工具由 `a-nas-assistant-trial` 依赖。`Suggests` 已删除。
    - **`a-nas-console`**：只给有本机屏幕的设备（[ADR 0005](0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)）。`Depends` 为同一版本的 `a-nas-host`、`cage`、`chromium`、`chromium-sandbox`、`chromium-l10n`、`fonts-noto-cjk`、`wlr-randr`、`libinput-tools`、`vainfo`，以及 VA-API 驱动 `intel-media-va-driver | mesa-va-drivers`：默认装 Intel 的，AMD 显卡的设备先装 `mesa-va-drivers`。驱动不写成 `Recommends`，因为本项目的安装命令都带 `--no-install-recommends`。没有屏幕的设备不装它，系统测试的镜像也不装。
 2. **smbd 等局域网接口有了地址再启动，由安装器配置。** smbd 按 `bind interfaces only` 只监听启动时已有的地址；Debian 安装程序把网卡写成 `allow-hotplug`、用 DHCP 取地址，开机时地址可能晚于 smbd 到达。安装器知道 SMB 接口，为 smbd 写入附加配置 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`：
    - 启动前最多等 20 秒，等这个接口有 IPv4 地址；
