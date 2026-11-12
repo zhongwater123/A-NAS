@@ -244,6 +244,7 @@ remove_trial() {
     /etc/systemd/system/anas-assistant-token@.service
   systemctl daemon-reload
   drop /run/a-nas-assistant /run/a-nas-assistant-start /run/anas-assistant-start /run/anas-assistant-gw /run/anas-assistant-photos \
+    /run/anas-assistant-run-now \
     /run/anas-assistant-companion /run/anas-change-agent /run/anas-spike-broker \
     /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills
   rmdir "$runtimes" 2>/dev/null || true

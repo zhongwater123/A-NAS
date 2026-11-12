@@ -9,19 +9,26 @@ gateway stop`. Stopped while a job runs, the gateway would leave that run record
 A gateway that already serves the home (the API Server channel runs one in the instance) is
 used as it is and left running: the round stops only the gateway it started.
 
+A task the member asked to run now is run by a round too, never by `hermes serve`, which would
+start a gateway of its own inside the instance and leave it there (#469). The round finds the
+jobs asked for in its own directory (run-requests.sh) and queues each with Hermes's
+trigger_job before anything else: due now, the occurrence it was waiting for kept, a paused
+job resumed. From there they are jobs that are due.
+
 Whether a run is live is read from Hermes's execution ledger and whether the gateway is ready
 from its own discovery, both internal to Hermes: an upgrade that moves them fails this round
 loudly (docs/research/hermes-agent-runtime.md, "以后怎么升级").
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
 from datetime import UTC, datetime
 
 from cron.executions import live_executions
-from cron.jobs import load_jobs
+from cron.jobs import load_jobs, trigger_job
 from hermes_cli.gateway_runtime import discover_gateway_endpoint
 from hermes_constants import get_hermes_home
 
@@ -33,6 +40,8 @@ ROUND = 55 * 60  # the unit's own limit is an hour; Hermes's watchdog ends a job
 TICK = 120  # seconds for `hermes cron tick`, which hands the jobs over in about 2
 STOP = 120  # seconds for one `hermes gateway stop`, and for the gateway to end after it
 GONE = 20  # seconds for the gateway to end after a stop that said it stopped it
+RUNS = os.environ.get("ANAS_ASSISTANT_RUNS", "")  # the jobs asked to run now, a file each
+JOB = re.compile(r"[0-9a-f]{12}")
 
 
 def say(text):
@@ -47,6 +56,26 @@ def hermes(*command, timeout):
     except subprocess.TimeoutExpired:
         say(f"hermes {' '.join(command)} did not return within {timeout} s")
         return None
+
+
+def requested():
+    """The jobs the member asked to run now: the names in the round's directory that are job ids."""
+    try:
+        return sorted(name for name in os.listdir(RUNS) if JOB.fullmatch(name)) if RUNS else []
+    except OSError:
+        return []
+
+
+def queue(jobs):
+    """Queues each job for the next tick. Only the job store changes, so no gateway is needed yet."""
+    for job in jobs:
+        try:
+            found = trigger_job(job)
+        except ValueError as error:
+            # A one-off that already ran: Hermes wants a new occurrence made for it.
+            say(f"{job} cannot run now: {error}")
+            continue
+        say(f"{job} queued to run now" if found else f"{job} is not a job of this member")
 
 
 def live():
@@ -151,6 +180,7 @@ def main():
     home = get_hermes_home().resolve()
     started = time.monotonic()
     deadline = started + ROUND
+    queue(requested())
     if ready(home).state == "ready":
         # Somebody else's gateway serves the home: its jobs run there, and it is not this round's to stop.
         say("a gateway already serves this home; handing it the jobs that are due")

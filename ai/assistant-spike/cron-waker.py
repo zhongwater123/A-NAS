@@ -7,6 +7,10 @@ anas-assistant-cron@<account>.service, Hermes's gateway for one round in the mem
 looks at each member's job store every INTERVAL seconds and starts that unit when a job is due.
 It reads the store only to learn when; what runs and how stays Hermes's.
 
+A task the member asked to run now starts a round too. The File Broker starts it itself; a
+request that came while a round was running waits (run-requests.sh), and this loop starts the
+round that takes it.
+
 A round costs a gateway's start, so a round that left every job it was started for as due as
 before holds the next one back: HOLD seconds, doubling up to HOLD_MAX, until a job is newly due
 or one of them moves. Such a job is one Hermes does not take up, or one the member's own
@@ -35,6 +39,8 @@ COMMAND_TIMEOUT = 3
 HOST_SOCKET = os.environ.get("ANAS_HOST_AGENT_SOCKET", "/run/a-nas/host-agent.sock")
 # Root's own notes on the last round started for each member (the unit's RuntimeDirectory).
 STATE = os.environ.get("ANAS_CRON_WAKER_STATE", "/run/anas-assistant-cron-waker")
+# The tasks members asked to run now that no round has taken yet, the File Broker's notes.
+RUNS = os.environ.get("ANAS_ASSISTANT_RUN_DIR", "/run/a-nas/assistant-runs")
 HOLD = 120
 HOLD_MAX = 3600
 MARKS = 256
@@ -113,6 +119,14 @@ def note_round(account, marks, rounds, now):
         print(f"round of {account} not noted: {type(error).__name__}", file=sys.stderr, flush=True)
 
 
+def asked(account):
+    """Whether a task the member asked to run now still waits for a round."""
+    try:
+        return bool(os.listdir(f"{RUNS}/{account}"))
+    except OSError:
+        return False
+
+
 def running(unit):
     return subprocess.run(
         ["/usr/bin/systemctl", "is-active", "--quiet", unit], check=False, timeout=COMMAND_TIMEOUT,
@@ -154,9 +168,11 @@ def wake(account):
         raise ValueError("invalid account")
     unit = f"anas-assistant-cron@{account}.service"
     marks = due(account, datetime.now(UTC))
-    if not marks or running(unit):
+    waiting = asked(account)
+    if not (marks or waiting) or running(unit):
         return
-    spent = rounds_spent(account, marks, time.time())
+    # A task asked for is run whatever the earlier rounds left unmoved.
+    spent = 0 if waiting else rounds_spent(account, marks, time.time())
     if spent is None or not active_account(account):
         return
     subprocess.run(
