@@ -1,0 +1,7 @@
+{
+  "name": "hermes-runtime",
+  "file": "runtime.tar.gz",
+  "sizeBytes": 139306833,
+  "sha256": "ebdfff187e29ca19d7be3783a1f242dc7ec933e26c80d441f319d902796e96b0",
+  "note": "The Hermes runtime ai/assistant-spike/run.sh build packs (spike/ under /opt/a-nas/assistant-runtimes): upstream main 8fd9f706 with hermes-patches/0001, built 2026-11-11 (docs/research/hermes-agent-runtime.md). Rebuilding it changes its SHA-256: pin the new tarball here, and its content package follows (scripts/build-content-packages.sh)."
+}

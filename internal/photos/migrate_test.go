@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb/sqlitedbtest"
 )
 
 // A Catalog written by the first schema keeps its rows and gains thumbnail
@@ -19,7 +22,7 @@ func TestMigrationFromFirstSchemaQueuesThumbnails(t *testing.T) {
 		t.Fatalf("open catalog: %v", err)
 	}
 	for _, statement := range []string{
-		migrations[0],
+		migrations[0].Up,
 		"PRAGMA user_version = 1",
 		"INSERT INTO libraries(id, kind, owner_user_id, created_at) VALUES('library:a', 'private', 'user:alice', '2026-10-01T00:00:00.000000000Z')",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('" + zeroObjectID + "', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -58,7 +61,7 @@ func TestMigrationQueuesVectorsForExistingThumbnails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	statements := append([]string{}, migrations[:3]...)
+	statements := upStatements(migrations[:3])
 	statements = append(statements,
 		"PRAGMA user_version = 3",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('"+zeroObjectID+"', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -90,7 +93,7 @@ func TestMigrationQueuesDetectionsAndFaceScansForExistingThumbnails(t *testing.T
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	statements := append([]string{}, migrations[:6]...)
+	statements := upStatements(migrations[:6])
 	statements = append(statements,
 		"PRAGMA user_version = 6",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('"+zeroObjectID+"', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -263,4 +266,18 @@ func mustMkdir(t *testing.T, path string) string {
 		t.Fatalf("mkdir: %v", err)
 	}
 	return path
+}
+
+// upStatements are the Ups of steps, as a build with only them ran them.
+func upStatements(steps []sqlitedb.Step) []string {
+	statements := make([]string, 0, len(steps))
+	for _, step := range steps {
+		statements = append(statements, step.Up)
+	}
+	return statements
+}
+
+func TestCatalogMigrationsAfterThePackagedReleasesHaveDowns(t *testing.T) {
+	sqlitedbtest.CheckReversible(t, sqlitedb.Schema{Name: "the photo catalog", Steps: migrations, WithoutDown: migrationsWithoutDown},
+		func(path string) (*sql.DB, error) { return sqlitedb.Open(path, sqlitedb.Options{Durable: true}) })
 }

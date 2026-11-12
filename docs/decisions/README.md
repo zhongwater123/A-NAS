@@ -44,12 +44,14 @@
 - [2026-11-02：OCR 分流的目标召回取 99%](2026-11-02-ocr-routing-recall.md)
 - [2026-11-03：OCR 字段核对的单字概率取 0.99](2026-11-03-ocr-character-confidence.md)
 - [2026-11-06：照片中的文字在界面上不遮挡](2026-11-06-ocr-no-masking-in-the-ui.md)
+- [2026-11-10：AI 助手看不到证件、票据和文字还没读完的照片的画面](2026-11-10-assistant-view-of-documents.md)
 
 ### AI 助手
 
 - [2026-10-15：助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](2026-10-15-assistant-help-and-onboarding.md)
 - [2026-10-16：AI 助手在界面上叫 VNAS](2026-10-16-assistant-name-vnas.md)
 - [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)
+- [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 
 ### 桌面与设置
 
@@ -72,6 +74,11 @@
 ### 网页搜索
 
 - [2026-11-02：网页搜索像人一样询问引擎](2026-11-02-web-search-pacing.md)
+
+### 发布与更新
+
+- [2026-11-11：发布用的签名密钥由谁、怎样保管](2026-11-11-release-signing-key.md)
+- [2026-11-11：软件源与更新文件放在哪里](2026-11-11-update-hosting.md)
 
 ## 状态
 

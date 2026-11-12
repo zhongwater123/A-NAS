@@ -6,8 +6,8 @@
 # sha256-<its SHA-256> there. A file of 2 GiB or more, which GitHub refuses as
 # one asset, is split into <file>.part-NN, joined in order. Every file is
 # checked against its manifest's size and SHA-256 before it takes its place
-# in DIR, in the directories that deploy-dev.ps1's defaults and
-# scripts/system-test.sh expect (layout below). A file already in place that
+# in DIR, in the directories listed below (layout), from which the
+# release content store is filled (scripts/build-content-packages.sh). A file already in place that
 # passes the check is kept. An interrupted download keeps the parts it
 # finished in DIR/.incoming/<sha256>/; a file that fails the check is
 # removed, and the next run downloads it again.

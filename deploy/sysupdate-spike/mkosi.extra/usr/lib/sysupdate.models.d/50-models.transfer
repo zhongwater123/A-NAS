@@ -1,0 +1,13 @@
+# Content that rarely changes (models): a component of its own, versioned
+# apart from the OS, unpacked onto the persistent root.
+[Source]
+Type=url-tar
+Path=https://10.0.2.2:8443/models/
+MatchPattern=a-nas-models_@v.tar
+
+[Target]
+Type=directory
+Path=/var/lib/a-nas/models
+MatchPattern=models_@v
+CurrentSymlink=current
+InstancesMax=2

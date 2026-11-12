@@ -9,7 +9,7 @@ Type=simple
 # data volume nor the Product Service's state (ADR 0017); the system test
 # proves both. The connection is standard input; logs go to the journal so
 # they never mix with the protocol.
-ExecStart=/opt/a-nas/current/anas-api ffmpeg-worker
+ExecStart=/usr/lib/a-nas/anas-api ffmpeg-worker
 StandardInput=socket
 StandardOutput=journal
 StandardError=journal

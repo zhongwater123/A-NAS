@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Starts a vector index instance (anas-vectors@.service), as the instance's
-# own user (docs/architecture/vector-index.md). It resolves the release once,
-# so the storage check and the exec name the same Qdrant even while an
-# installer switches releases, and empties the storage, for its owner to
+# own user (docs/architecture/vector-index.md). It resolves the product's
+# Qdrant link once, so the storage check and the exec name the same Qdrant
+# even while an upgrade replaces it, and empties the storage, for its owner to
 # rebuild from its Catalog, when that Qdrant cannot use it:
 #
 # - another minor release wrote it, or a newer one: a single node can neither

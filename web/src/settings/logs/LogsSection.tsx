@@ -26,14 +26,7 @@ export function LogsSection({ session, preset }: { session: Session; preset?: Lo
   const current = isAdmin ? tab : "activity";
   return (
     <>
-      <PageHeader
-        title={isAdmin ? "日志" : "我的活动"}
-        subtitle={
-          isAdmin
-            ? "谁在什么时候登录、做了什么，以及 A-NAS 服务的运行日志"
-            : "你的登录与操作，以及管理员对你账号所做的事"
-        }
-      />
+      <PageHeader title={isAdmin ? "日志" : "我的活动"} />
       {isAdmin && (
         <div className={styles.lgTabs} role="tablist" aria-label="日志类型">
           {(

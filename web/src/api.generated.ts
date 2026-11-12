@@ -2710,7 +2710,7 @@ export interface paths {
         };
         /**
          * The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo's text.
+         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo's text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.
          */
         get: operations["viewPhoto"];
         put?: never;
@@ -2794,6 +2794,26 @@ export interface paths {
          * @description For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
          */
         get: operations["listPhotoTextChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/text-handles/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The value a handle of the caller's AI assistant stands for
+         * @description An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+         */
+        get: operations["getPhotoTextHandle"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3970,7 +3990,7 @@ export interface paths {
         };
         /**
          * The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
+         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. A window becomes a conversation's browser with desktop.attach ({session_id}), which the product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it has. The companion tools' commands arrive as anas.companion events ({command_id, action, args}), and the commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has not answered is no longer waited for. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
          */
         get: operations["openAssistantGateway"];
         put?: never;
@@ -4006,7 +4026,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4030,7 +4050,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -5988,7 +6008,7 @@ export interface components {
             closest: number;
             /** @description How many results, counted over all pages, match the query by name or user tag; they come first. */
             names: number;
-            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
             texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
@@ -6062,6 +6082,17 @@ export interface components {
             };
             /** Format: date-time */
             at: string;
+        };
+        PhotoTextHandleValue: {
+            /** @description The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码. */
+            label: string;
+            /** @description What the handle stands for now: what the field holds, what was read for it, or the number as its digits. */
+            value: string;
+            /** @description True for a field's value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong. */
+            unchecked: boolean;
+            /** @description The photo the value was read from. */
+            assetId: string;
+            assetName: string;
         };
         PhotoSimilarResults: {
             items: components["schemas"]["PhotoAsset"][];
@@ -7061,6 +7092,8 @@ export interface components {
         PhotoOccurrenceID: string;
         /** @description A field of the photo's document type, such as 合计 */
         PhotoTextField: string;
+        /** @description The letters after the dot of a handle, such as 6d48a8 */
+        PhotoTextHandle: string;
         MediaLibraryID: string;
         MediaVideoID: string;
         /** @description A video or show ID. */
@@ -7080,7 +7113,7 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
-        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
         AssistantTaskID: string;
@@ -7248,6 +7281,7 @@ export type PhotoSearchResults = components['schemas']['PhotoSearchResults'];
 export type PhotoText = components['schemas']['PhotoText'];
 export type PhotoTextCorrectionRequest = components['schemas']['PhotoTextCorrectionRequest'];
 export type PhotoTextChange = components['schemas']['PhotoTextChange'];
+export type PhotoTextHandleValue = components['schemas']['PhotoTextHandleValue'];
 export type PhotoSimilarResults = components['schemas']['PhotoSimilarResults'];
 export type PhotoImageSearch = components['schemas']['PhotoImageSearch'];
 export type PhotoAiStatus = components['schemas']['PhotoAIStatus'];
@@ -7341,6 +7375,7 @@ export type ParameterPhotoAlbumId = components['parameters']['PhotoAlbumID'];
 export type ParameterPhotoPersonId = components['parameters']['PhotoPersonID'];
 export type ParameterPhotoOccurrenceId = components['parameters']['PhotoOccurrenceID'];
 export type ParameterPhotoTextField = components['parameters']['PhotoTextField'];
+export type ParameterPhotoTextHandle = components['parameters']['PhotoTextHandle'];
 export type ParameterMediaLibraryId = components['parameters']['MediaLibraryID'];
 export type ParameterMediaVideoId = components['parameters']['MediaVideoID'];
 export type ParameterMediaTitleId = components['parameters']['MediaTitleID'];
@@ -13018,6 +13053,30 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoTextHandle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The letters after the dot of a handle, such as 6d48a8 */
+                handle: components["parameters"]["PhotoTextHandle"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoTextHandleValue"];
+                };
+            };
+            404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
         };
     };
@@ -15514,7 +15573,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15540,7 +15599,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15577,7 +15636,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;

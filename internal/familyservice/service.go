@@ -215,10 +215,18 @@ func Accounts(profiles func(context.Context) ([]accounts.Profile, error)) func(c
 func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
 	ticker := time.NewTicker(config.RetryInterval)
 	defer ticker.Stop()
+	// The first failure is a warning, as a store that does not open, such as
+	// family.db from a newer release, keeps this unit active (a-nas-check).
+	warned := false
 	for ctx.Err() == nil {
 		store, opened, err := open(config)
 		if err != nil {
-			config.Logger.DebugContext(ctx, "waiting for the family store", "error", err)
+			if !warned {
+				config.Logger.WarnContext(ctx, "family store unavailable; waiting", "error", err)
+				warned = true
+			} else {
+				config.Logger.DebugContext(ctx, "waiting for the family store", "error", err)
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -228,6 +236,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 		}
 		serve(familyapi.New(store, config.Logger, config.Media))
 		config.Logger.Info("family service ready")
+		warned = false
 		purged := time.Time{}
 		for {
 			if time.Since(purged) >= purgeInterval {

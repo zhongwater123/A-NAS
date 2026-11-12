@@ -45,5 +45,5 @@
 
 - [网页搜索规格](../specs/web-search.md)
 - [ADR 0016：相册 AI 随系统内置安装](0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0024：AI 助手](0024-run-a-sandboxed-hermes-agent-per-member.md)
-- [AI 运行环境构建脚本](../../scripts/build-ai-runtime.sh)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[产品服务到其他服务的套接字代理](../../internal/serviceproxy/serviceproxy.go)
+- [AI 运行环境构建脚本](../../scripts/build-ai-runtime.sh)、[系统服务安装器](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/install-v1.0.1-system-services.sh)、[产品服务到其他服务的套接字代理](../../internal/serviceproxy/serviceproxy.go)
 - 上游：[SearXNG](https://github.com/searxng/searxng)、[设置说明](https://docs.searxng.org/admin/settings/settings.html)、[搜索接口](https://docs.searxng.org/dev/search_api.html)

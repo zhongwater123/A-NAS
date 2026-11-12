@@ -12,7 +12,7 @@ check() {
   if "$@" >/dev/null 2>&1; then echo "PASS $name"; else echo "FAIL $name"; fi
 }
 check "the policy has anas ask and companion not" \
-  yq -e '.mcp_servers.anas.trust == "untrusted" and .mcp_servers.companion.trust == "full"' /etc/hermes/config.yaml
+  yq -e '.mcp_servers.anas.trust == "untrusted" and .mcp_servers.companion.trust == "full" and .mcp_servers.desktop.trust == "full"' /etc/hermes/config.yaml
 cp -p "$home/config.yaml" /tmp/user-config.yaml
 # The member config repeats the managed mcp_servers block (setup.sh); trust it
 # there. yq is Debian's jq wrapper for YAML; "off" stays a string.

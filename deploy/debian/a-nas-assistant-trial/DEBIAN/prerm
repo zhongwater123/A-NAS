@@ -1,0 +1,13 @@
+#!/bin/bash
+# prerm of a-nas-assistant-trial (ADR 0034). The trial's units in /etc run its
+# scripts, and its members' folders hold their conversations: removing the
+# package while the trial is set up would leave them without the scripts, so
+# it stops until nas-trial.sh remove has undone the trial.
+set -euo pipefail
+
+trial=/opt/a-nas/assistant-trial/spike
+if [[ "${1:-}" == remove && "$(readlink /spike 2>/dev/null)" == "$trial" ]]; then
+  echo "a-nas-assistant-trial: the trial is set up here; run $trial/nas-trial.sh remove first" >&2
+  exit 1
+fi
+exit 0

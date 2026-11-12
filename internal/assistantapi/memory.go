@@ -265,12 +265,14 @@ func (h *Handler) deleteConversations(ctx context.Context, account string) (int,
 	}
 	deleted, busy := 0, 0
 	for _, id := range ids {
-		status, _, err := h.rest(ctx, account, http.MethodDelete, "/api/sessions/"+id, nil)
+		status, _, err := h.writeSession(ctx, account, http.MethodDelete, id, nil)
 		switch {
 		case err != nil:
 			return deleted, busy, err
 		case status == http.StatusOK || status == http.StatusNoContent:
 			deleted++
+		case status == http.StatusNotFound:
+			// Gone since it was listed.
 		default:
 			busy++
 		}

@@ -284,7 +284,6 @@ describe("Settings terminal", () => {
     await openSection(user, "终端");
     expect(await screen.findByTestId("xterm-session")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "终端" })).toBeTruthy();
-    expect(await screen.findByText("以 owner 的 Linux 账号在 anas-fake 上运行的 Shell")).toBeTruthy();
     expect(await screen.findByText("已连接")).toBeTruthy();
     expect(xterm.mounts).toBe(1);
   });
@@ -337,8 +336,9 @@ describe("Settings terminal", () => {
     await screen.findByTestId("xterm-session");
 
     act(() => xterm.onStatus?.({ state: "ended", exitCode: 0 }));
-    const notice = screen.getByRole("status");
-    expect(notice.textContent).toContain("Shell 已退出（代码 0）");
+    // The window's toasts are a status region too.
+    const notice = screen.getByText(/Shell 已退出（代码 0）/).closest<HTMLElement>('[role="status"]');
+    if (!notice) throw new Error("the notice is not a status region");
     expect(screen.getByText("已结束")).toBeTruthy();
 
     await user.click(within(notice).getByRole("button", { name: "新建会话" }));
@@ -384,7 +384,7 @@ describe("ADR 0008 account safeguards", () => {
     renderSettings();
     await openSection(user, "我的账号");
     expect(within(sections()).getByRole("button", { name: "我的账号" }).getAttribute("aria-current")).toBe("page");
-    await user.click(screen.getByRole("button", { name: "修改密码…" }));
+    await user.click(screen.getByRole("button", { name: /^密码/ }));
     const form = screen.getByRole("form", { name: "修改密码" });
     await user.type(within(form).getByLabelText("当前密码"), "correct horse battery staple");
     await user.type(within(form).getByLabelText("新密码"), "administrator chosen password");
@@ -433,7 +433,7 @@ describe("ADR 0008 account safeguards", () => {
       within(screen.getByRole("menu", { name: "alice 的更多操作" })).getByRole("menuitem", { name: "查看私有图库…" }),
     );
     const form = screen.getByRole("form", { name: "查看 alice 的私有图库" });
-    expect(within(form).getByText(/查看他人私有图库会写入审计/)).toBeTruthy();
+    expect(screen.getByText(/查看他人私有图库会写入审计/)).toBeTruthy();
     await user.type(within(form).getByLabelText("查看原因"), "找婚礼照片");
     await user.type(within(form).getByLabelText("你的密码"), "correct horse battery staple");
     await user.click(within(form).getByRole("button", { name: "开始只读查看" }));
@@ -461,8 +461,8 @@ describe("Settings", () => {
     expect(enabled.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
       "我的账号",
       "概览",
-      "任务管理器",
       "存储",
+      "任务管理器",
       "日志",
     ]);
     expect(await screen.findByRole("heading", { name: "尚未创建数据卷" })).toBeTruthy();
@@ -506,7 +506,7 @@ describe("Settings", () => {
     const user = userEvent.setup();
     renderSettings(member);
     await openSection(user, "我的账号");
-    await user.click(screen.getByRole("button", { name: "查看" }));
+    await user.click(screen.getByRole("button", { name: "登录记录" }));
     expect(within(sections()).getByRole("button", { name: "日志" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("heading", { name: "我的活动" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
@@ -534,7 +534,7 @@ describe("Settings", () => {
     const user = userEvent.setup();
     renderSettings(member);
     await openSection(user, "我的账号");
-    await user.click(screen.getByRole("button", { name: "修改密码…" }));
+    await user.click(screen.getByRole("button", { name: /^密码/ }));
     const form = screen.getByRole("form", { name: "修改密码" });
     await user.type(within(form).getByLabelText("当前密码"), "alice old password");
     await user.type(within(form).getByLabelText("新密码"), "alice new password");
@@ -592,7 +592,7 @@ describe("Settings", () => {
     renderSettings();
     await openSection(user, "概览");
     expect(await screen.findByText("严重故障")).toBeTruthy();
-    expect(screen.getByText("2 项需要处理")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "需要处理" })).getByText("2 项")).toBeTruthy();
     expect(screen.getByText("数据卷变成了只读")).toBeTruthy();
     expect(screen.getByText("A-NAS Fake HDD 温度 57 °C，偏高")).toBeTruthy();
     expect(screen.queryByText("健康未评估")).toBeNull();
@@ -600,13 +600,13 @@ describe("Settings", () => {
     expect(within(sections()).getByRole("button", { name: "存储" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("says what was checked when nothing is wrong", async () => {
+  it("lists nothing to handle when nothing is wrong", async () => {
     serve();
     const user = userEvent.setup();
     renderSettings();
     await openSection(user, "概览");
     expect(await screen.findByText("运行正常")).toBeTruthy();
-    expect(screen.getByText("未发现问题")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "需要处理" })).toBeNull();
     expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
   });
 
@@ -625,7 +625,7 @@ describe("Settings", () => {
     await openSection(user, "概览");
     expect(await screen.findByText("系统盘空间")).toBeTruthy();
     if (observed) {
-      expect(screen.getByText("75%")).toBeTruthy();
+      expect(screen.getByText("可用 25.0 GiB，共 100 GiB")).toBeTruthy();
       expect(screen.queryByText("暂时无法读取")).toBeNull();
     } else {
       expect(screen.getByText("暂时无法读取")).toBeTruthy();
@@ -1180,8 +1180,9 @@ describe("Settings", () => {
     const user = userEvent.setup();
     renderSettings();
     await openSection(user, "用户与权限");
-    expect(await screen.findByText("成员 · 正常")).toBeTruthy();
-    expect(screen.getByText("管理员 · 正常")).toBeTruthy();
+    const accounts = screen.getByRole("region", { name: "账号" });
+    expect(await within(accounts).findByText("成员")).toBeTruthy();
+    expect(within(accounts).getByText("管理员")).toBeTruthy();
     expect(screen.getByText("你")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "alice 的更多操作" }));
@@ -1302,8 +1303,9 @@ describe("Avatars and nicknames", () => {
     const user = userEvent.setup();
     renderSettings(member);
     await openSection(user, "我的账号");
-    expect(screen.getByText("未设置，显示账号名 alice")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "设置昵称…" }));
+    const nickname = screen.getByRole("button", { name: /^昵称/ });
+    expect(nickname.textContent).toContain("未设置");
+    await user.click(nickname);
     const form = screen.getByRole("form", { name: "修改昵称" });
     await user.type(within(form).getByLabelText("昵称"), "一二三四五六七八九十一二三四五六七八九十一二三四五");
     await user.click(within(form).getByRole("button", { name: "保存昵称" }));
@@ -1321,7 +1323,7 @@ describe("Avatars and nicknames", () => {
     expect(await screen.findByText("昵称已改为“小爱”。")).toBeTruthy();
     expect(account.sent.profiles.at(-1)).toEqual({ nickname: "小爱" });
     expect(screen.getByRole("heading", { name: "小爱" })).toBeTruthy();
-    expect(screen.getByText("账号名 alice")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^昵称/ }).textContent).toContain("小爱");
     expect(myAccount().textContent).toContain("小爱");
   });
 
@@ -1355,7 +1357,7 @@ describe("Avatars and nicknames", () => {
       "/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef",
     );
 
-    await user.click(screen.getByRole("button", { name: "移除" }));
+    await user.click(screen.getByRole("button", { name: "移除头像" }));
     expect(await screen.findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.sent.avatarRemovals).toBe(1);
     expect(myAccount().querySelector("img")).toBeNull();
@@ -1405,7 +1407,7 @@ describe("Avatars and nicknames", () => {
     const user = userEvent.setup();
     renderSettings(member);
     await openSection(user, "我的账号");
-    await user.click(screen.getByRole("button", { name: "设置头像…" }));
+    await user.click(screen.getByRole("button", { name: "更换头像" }));
     const picker = screen.getByRole("dialog", { name: "更换头像" });
     await user.click(within(picker).getByRole("tab", { name: "NAS 文件" }));
     const spaceList = await within(picker).findByRole("group", { name: "空间" });
