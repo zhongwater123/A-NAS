@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-sqlite3"
+
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -129,8 +130,11 @@ func Open(directory string, options Options) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-// migrations run in order; user_version records how many have run.
-var migrations = []string{`
+// migrations run in order; user_version records how many have run
+// (sqlitedb.Migrate). Add a new one, with the Down that undoes it (ADR 0034);
+// the first three were released before migrations had Downs
+// (databaseSchema).
+var migrations = []sqlitedb.Step{{Up: `
 CREATE TABLE family (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     created_at TEXT NOT NULL,
@@ -239,7 +243,7 @@ CREATE TABLE audit_events (
     detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX audit_events_actor ON audit_events(actor_user_id, occurred_at DESC, id DESC);
-`, `
+`}, {Up: `
 CREATE TABLE reactions (
     record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     account_id TEXT NOT NULL,
@@ -247,30 +251,13 @@ CREATE TABLE reactions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (record_id, account_id, reaction)
 );
-`, activity.IndexStatement}
+`}, {Up: activity.IndexStatement}}
 
 func (s *Store) migrate(ctx context.Context) error {
-	var version int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return err
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("family.db is version %d, newer than this program (%d)", version, len(migrations))
-	}
-	for ; version < len(migrations); version++ {
-		err := s.inTx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, migrations[version]); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version+1))
-			return err
-		})
-		if err != nil {
-			return fmt.Errorf("migrate family.db to version %d: %w", version+1, err)
-		}
-	}
-	return nil
+	return sqlitedb.Migrate(ctx, s.db, databaseSchema)
 }
+
+var databaseSchema = sqlitedb.Schema{Name: "family.db", Steps: migrations, WithoutDown: 3}
 
 func (s *Store) inTx(ctx context.Context, apply func(*sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)

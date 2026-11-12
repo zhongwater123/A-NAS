@@ -9,112 +9,60 @@
 - 已移除 Debian 安装 U 盘；用户已确认实际实验盘型号、500 GB 标称容量、序列号和 WWN，并且产品已显示其稳定 `disk:*` ID。
 - 用户已核对磁盘型号、容量、序列身份和计划列出的待清除签名。
 - 若候选盘显示为系统盘、USB、removable、in-use、swap/md/dm 成员，或稳定 ID 与预期不一致，立即停止。
-- 已在开发机运行 `make check` 与 [`make system-test`](../development/testing.md#系统测试)，并以 `deploy-dev.ps1 -StageOnly` 把同一制品上传到不可变的 `/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>`；不要把尚未安装的 stage 目录误记为 `current`。
-- 明确选择仅面向可信局域网的接口名，例如 `enp2s0`；不得使用空值、`0.0.0.0` 或未经核对的无线/公网接口。
+- 已按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1–4 步，在开发机对同一提交运行 `make check` 与 [`make system-test`](../development/testing.md#系统测试) 后把软件包放进软件源，复制到 NAS，并在 NAS 上加好软件源。
+- 明确选择仅面向可信局域网的接口名，例如 `enp2s0`，写在 `/etc/a-nas/site.conf` 的 `ANAS_SMB_INTERFACE`；不得使用空值、`0.0.0.0` 或未经核对的无线/公网接口。
 
 ## 安装系统服务
 
-已初始化数据卷的设备升级时，不要重新执行磁盘初始化或首次配置向导，只核对暂存制品并运行系统服务安装器：
-
-1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API、Host Agent 与两个宿主机软件包（`a-nas-host`、`a-nas-console`，[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
-2. 以 root 查看本地控制台以哪个账号运行：
-
-   ```bash
-   systemctl show -p User --value anas-kiosk@tty1.service
-   ```
-
-   结果是 `anas-dev` 时，这是第一次安装含 [issue #174](https://github.com/zhongwater123/A-NAS/issues/174) 的 release：安装器会把本地控制台换成 `a-nas-kiosk`。先按[本地控制台运行手册的迁移前步骤](operate-local-kiosk.md#迁移前)记下当前状态，并在本机屏幕上退出登录，再继续。
-3. 以 root 核对并安装：
-
-   ```bash
-   release_id=<12 位提交 SHA>
-   source_release=/home/anas-dev/apps/a-nas/releases/$release_id
-   smb_interface=enp2s0
-
-   cat "$source_release/RELEASE"
-   printf '%s  %s\n' \
-     <API SHA-256> "$source_release/anas-api" \
-     <Host Agent SHA-256> "$source_release/anas-host-agent" \
-     <a-nas-host SHA-256> "$source_release/a-nas-host.deb" \
-     <a-nas-console SHA-256> "$source_release/a-nas-console.deb" |
-     sha256sum --check
-
-   findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
-   ip -brief link show dev "$smb_interface"
-
-   # 有本机屏幕的设备连同 a-nas-console 一起装；没有屏幕的只装 a-nas-host。
-   apt install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
-   "$source_release/install-v1.0.1-system-services.sh" \
-     "$source_release" "$release_id" "$smb_interface"
-   ```
-
-4. 安装器已重启正在运行的本地控制台：它以 `a-nas-kiosk` 运行，启动程序来自 `/opt/a-nas/current`，不再需要切换 `anas-dev` 名下的启动链接。第一次迁移后，在本机屏幕上重新登录，再按[迁移后的验证](operate-local-kiosk.md#迁移后的验证)核对。其余时候确认：
-
-   ```bash
-   test -x /opt/a-nas/current/kiosk-launcher
-   systemctl show -p User --value anas-kiosk@tty1.service   # a-nas-kiosk
-   ```
-
-两个包的版本只用来标明 release，不表示先后：未打标签的提交按哈希排序，打过标签之后的提交也都排在该标签之前，所以 apt 可能把升级列为 `DOWNGRADED`。安装器只核对版本是否等于本 release 的版本，因此安装时一律带 `--allow-downgrades`；不带它时，交互式的 `apt install` 要再确认一次，带 `-y` 的则直接失败。
-
-安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
-
-屏保视频不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装器保留当前视频池。首次升级时，安装器会导入旧安装器留下的池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
-
-本地 AI 随每个 release 安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：安装器把 release 引用的模型与运行环境按内容各存一份，已有时直接复用，并启用 `anas-ai.socket`。第一次安装带 AI 的 release 时按[启用相册本地 AI](enable-photo-ai.md)核对，第一次安装带物体检测器的 release 时按[启用相册物体检测](enable-photo-objects.md)核对。安装器还按本机逻辑核数写入 `/etc/systemd/system/anas-ai.service.d/cpu-reserve.conf`，让 AI 至多用到核数减 2，并安装 `/etc/systemd/system/anas.slice`，让后台 AI 在争用时把 CPU 让给设备上的其他工作。
-
-安装器最后核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时以退出码 5 结束，此时新版本已切换但 Web 文件与终端不可用，按[回滚](#回滚)恢复上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
-
-全新实验机首次安装才使用发布目录中的交互向导；它会复核稳定磁盘身份、安装依赖、停止旧用户级预览服务、安装系统服务并逐步引导产品初始化：
+已初始化数据卷的设备升级时，不要重新执行磁盘初始化或首次配置向导，只按[部署 A-NAS 软件包](deploy-a-nas-packages.md)安装或升级软件包。安装前以 root 核对数据卷与网卡，任一不符时停止：
 
 ```bash
-source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
+findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
+grep '^ANAS_SMB_INTERFACE=' /etc/a-nas/site.conf
+ip -brief link show dev <上一行的网卡>
+```
 
-SOURCE_RELEASE="$source_release" \
-RELEASE_ID=<GIT_SHA> \
+有本机屏幕的设备在部署手册第 6 步的命令中加上 `a-nas-console=<版本>`，本地控制台见[本地控制台运行手册](operate-local-kiosk.md)。
+
+安装或升级会重启 Host Agent，由它幂等修复现有卷的目录和 ACL；软件包不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，`anas-site.service` 同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。
+
+屏保视频不随软件包发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装与升级保留当前视频池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
+
+本地 AI 随每个版本安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：模型与运行环境各是一个内容包，按内容各存一份，已装的不再下载；`a-nas` 启用 `anas-ai.socket`。核对方法见[启用相册本地 AI](enable-photo-ai.md#验证)与[启用相册物体检测](enable-photo-objects.md#验证)。`a-nas-generator` 按本机逻辑核数写入 `/run/systemd/generator/anas-ai.service.d/a-nas-reserve.conf`，让 AI 至多用到核数减 2；`anas.slice` 让后台 AI 在争用时把 CPU 让给设备上的其他工作。
+
+`a-nas-check` 核对 Host Agent 能否以登录用户身份启动文件 Worker：它的 `CapEff` 必须含 `CAP_SETUID`/`CAP_SETGID`，日志必须出现 `file broker identity switch verified`。不满足时这一项为 `FAIL`，Web 文件与终端不可用，按[回滚](#回滚)退回上一版本；原因见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)。
+
+宿主机需要的 Debian 软件包由 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif；`a-nas` 依赖同一版本的 `a-nas-host`。smbd 只监听启动时已有的地址，所以 `a-nas-generator` 按 `ANAS_SMB_INTERFACE` 写入 `/run/systemd/generator/smbd.service.d/a-nas-lan-address.conf`：smbd 等该接口有了 IPv4 地址才启动，每次最多等 20 秒，等不到就 5 秒后再试；重启后它不再只监听回环（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。安装时 smbd 若已在运行，这项配置在它下次启动时生效；没有运行且接口还没有地址时，安装照常完成，`a-nas-check` 报告 `smbd.service` 不是 active。
+
+全新实验机首次安装使用交互向导 [`scripts/provision-v1.0.1-rc.sh`](../../scripts/provision-v1.0.1-rc.sh)。先按部署手册第 2–4 步加好软件源；向导不在软件包中，从仓库复制到 NAS 后以 root 运行。它复核稳定磁盘身份与网卡，写入 `ANAS_SMB_INTERFACE`，安装 `a-nas`、`a-nas-host` 与 `a-nas-console`，再逐步引导产品初始化：
+
+```bash
+VERSION=<版本> \
 SMB_INTERFACE=enp2s0 \
 EXPECTED_DISK_WWN=0x5000c500518d4994 \
 EXPECTED_DISK_SERIAL=Z2AYDZPB \
-  "$source_release/provision-v1.0.1-rc.sh"
+  bash provision-v1.0.1-rc.sh
 ```
 
-若必须逐步排障，可不用向导而执行以下等价安装步骤；把示例值替换为本次 RC：
+若必须逐步排障，可不用向导：按部署手册第 5–6 步安装，在本地控制台创建首个管理员，再按[生成和执行计划](#生成和执行计划)初始化数据卷。apt 失败时停止，不进入格式化流程。
 
-```bash
-source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
-release_id=<GIT_SHA>
-smb_interface=enp2s0
-
-# 若 apt 失败，停止，不进入格式化流程。
-apt-get update
-apt-get install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
-
-readlink -f /opt/a-nas/current
-ip -brief link
-
-"$source_release/install-v1.0.1-system-services.sh" \
-  "$source_release" "$release_id" "$smb_interface"
-```
-
-宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。smbd 只监听启动时已有的地址，所以安装器为它写入 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`：smbd 等 `$smb_interface` 有了 IPv4 地址才启动，每次最多等 20 秒，等不到就 5 秒后再试；重启后它不再只监听回环（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。安装时 smbd 若已在运行，这项配置在它下次启动时生效；没有运行且接口还没有地址时，安装器照常完成，最后提示 smbd 尚未启动。
-
-完成标准：`dpkg-query -W a-nas-host` 显示本 release 的版本；`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+完成标准：`a-nas-check` 全部 `PASS`；`/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 链接到 `/usr/share/a-nas/chromium-policy.json` 并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ### 移入 Host Agent 的记录
 
-Host Agent 的五个记录（`space-registry`、`identity-registry`、`viewing-grants`、`app-identities` 与 `volume-operations`，均为 `.json`）自 [issue #176](https://github.com/zhongwater123/A-NAS/issues/176) 起在 `/var/lib/a-nas-host`，Host Agent 启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来，但只移动 root 所有、只有一个链接的普通文件。安装器在改动任何东西之前核对：某个记录在新位置还没有，旧位置的又不符合时，以退出码 3 停止并给出 `stat` 结果，否则重启后这个记录会停用（日志 `a Host Agent record cannot be used`）。产品服务的 `StateDirectory=a-nas` 在目录本身属主不对时会把整个目录递归改归 `a-nas`，这是记录不归 root 的可能原因。处理时先停服务，再逐个核对：
+Host Agent 的五个记录（`space-registry`、`identity-registry`、`viewing-grants`、`app-identities` 与 `volume-operations`，均为 `.json`）自 [issue #176](https://github.com/zhongwater123/A-NAS/issues/176) 起在 `/var/lib/a-nas-host`，Host Agent 启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来，但只移动 root 所有、只有一个链接的普通文件。软件包安装时不核对这些记录：某个记录在新位置还没有，旧位置的又不符合时，Host Agent 启动后停用这个记录，日志 `a Host Agent record cannot be used` 给出文件名。产品服务的 `StateDirectory=a-nas` 在目录本身属主不对时会把整个目录递归改归 `a-nas`，这是记录不归 root 的可能原因。处理时先停服务，再逐个核对：
 
 ```bash
 systemctl stop anas-api anas-host-agent
-record=/var/lib/a-nas/app-identities.json   # 安装器报出的文件
+record=/var/lib/a-nas/app-identities.json   # 日志报出的文件
 stat -c '%U:%G %h %F %y' -- "$record"
 cat -- "$record"
 ```
 
 - 是普通文件、内容可以确认是 Host Agent 写的（与 `getent passwd`、空间目录和数据卷的 `.a-nas-identities.json` 对照）时，换成 root 的单链接副本：`install -o root -g root -m 0600 -- "$record" "$record.new" && mv -f -- "$record.new" "$record"`。
-- 符号链接、硬链接，或无法确认的内容：移出目录留作证据，例如 `mv -- "$record" /root/`。Host Agent 对这个记录从空开始，后果见[回滚](#回滚)中对空记录的说明。
+- 符号链接、硬链接，或无法确认的内容：移出目录留作证据，例如 `mv -- "$record" /root/`。Host Agent 对这个记录从空开始：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错。
 
-然后重新运行安装器。
+然后执行 `systemctl start anas-host-agent anas-api`。
 
 ## 升级到统一身份（ADR 0008）
 
@@ -177,77 +125,27 @@ journalctl -u anas-host-agent | grep -E 'repaired drifted|file worker'
 
 ## 回滚
 
-在尚未执行格式化计划时，可以回到上一个已安装的 release。只切换 `/opt/a-nas/current` 不会恢复 `/etc/systemd/system` 中的单元，而安装器拒绝重复安装已存在的 release（退出码 4），所以单元要从上一 release 的暂存目录恢复：
+在尚未执行格式化计划时，可以退回上一个版本：按[部署 A-NAS 软件包的回滚](deploy-a-nas-packages.md#回滚或恢复)执行，之后运行 `a-nas-check`。第一次换成软件包后要回到安装器的 release，也按该节执行。
 
-```bash
-previous=<上一 release 的 12 位提交 SHA>
-stage=/home/anas-dev/apps/a-nas/releases/$previous
-worker_installer=/opt/a-nas/current/install-ffmpeg-units.sh
-worker=ffmpeg
-if [[ ! -f "$stage/anas-ffmpeg-system.socket" ]]; then worker=media; fi
-test -d "/opt/a-nas/releases/$previous"
-test -x "$worker_installer"
-for suffix in .socket @.service .slice; do
-  test -f "$stage/anas-$worker-system$suffix"
-done
-systemctl stop anas-api.service anas-photos.service anas-shares.service
-"$worker_installer" "$stage"
-for unit in anas-host-agent anas-api anas-photos anas-shares; do
-  install -o root -g root -m 0644 "$stage/$unit-system.service" "/etc/systemd/system/$unit.service"
-done
-if [[ -f "$stage/anas-ai-system.service" ]]; then
-  install -o root -g root -m 0644 "$stage/anas-ai-system.service" /etc/systemd/system/anas-ai.service
-  grep -Fq -- --detector /etc/systemd/system/anas-ai.service ||
-    rm -f /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
-  systemctl stop anas-ai.service
-fi
-# Releases before issue #176 read the Host Agent's records from /var/lib/a-nas.
-if ! grep -Fqx 'StateDirectory=a-nas-host' "$stage/anas-host-agent-system.service"; then
-  systemctl stop anas-host-agent.service
-  for record in space-registry identity-registry viewing-grants app-identities volume-operations; do
-    if [[ -f "/var/lib/a-nas-host/$record.json" ]]; then
-      mv -f -- "/var/lib/a-nas-host/$record.json" "/var/lib/a-nas/$record.json"
-    fi
-  done
-fi
-# The local console's unit and PAM stack come from the same release: before
-# issue #174 they start the launcher in anas-dev's current link as anas-dev.
-install -o root -g root -m 0644 "$stage/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
-install -o root -g root -m 0644 "$stage/a-nas-kiosk.pam" /etc/pam.d/a-nas-kiosk
-ln -sfn -- "/opt/a-nas/releases/$previous" /opt/a-nas/current
-runuser -u anas-dev -- ln -sfn "$stage" /home/anas-dev/apps/a-nas/current.next
-runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
-systemctl daemon-reload
-systemctl enable --now "anas-$worker.socket"
-systemctl restart anas-host-agent anas-photos anas-shares anas-api anas-kiosk@tty1
-```
-
-目标 release 带有宿主机软件包（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）时，在执行上面的脚本之前先装回它的版本：`apt install --no-install-recommends --allow-downgrades "/opt/a-nas/releases/$previous/a-nas-host.deb"`，有本机屏幕时连同同一目录的 `a-nas-console.deb`。新版本多装的软件包留在系统上，不影响旧版本运行。更早的 release 没有这两个包，由它们的安装器自己检查依赖，这一步跳过。
-
-回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在本机屏幕上重新登录。
-
-AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
-
-Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。新版本启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来：先写入并刷盘新副本，再删除原件；不移动符号链接、硬链接或不归 root 所有的文件，安装器遇到它们会先停下（见[移入 Host Agent 的记录](#移入-host-agent-的记录)）。旧版本只在 `/var/lib/a-nas` 读这些记录，所以回滚到它之前时，上面的脚本先停止 Host Agent，再把记录移回去。漏掉这一步时，旧二进制以空记录启动：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错，新版本发出的查看授权到期也不撤销（再次升级后由新版本撤销）；它写下的新记录留在 `/var/lib/a-nas`。再次升级时，新版本只用 `/var/lib/a-nas-host` 中已有的记录，删除与之相同的旧副本，并在日志中报告内容不同的旧记录（`differs from the one in use`），由管理员核对。按脚本移回的记录会在再次升级时重新移入。
-
-FFmpeg Worker 改名后的升级与回滚会停止正在播放、解码或扫描的请求，维护完成后重新打开播放。回滚使用切换前版本的 `install-ffmpeg-units.sh`，按目标暂存目录选择新名称或旧 `anas-media` 名称，移除另一套单元与套接字，恢复相应准入目录和环境变量。核对 `systemctl is-active "anas-$worker.socket"`、`systemctl show -p ExecStart "anas-$worker@probe.service"`，并分别播放影视与音乐、打开相册预览；另一套 socket 不应存在。其他 `/etc/a-nas/*.env` 配置不因这次改名恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
-
+- 单元与程序同在 `a-nas` 包中，一起退回。AI Worker 的单元写明模型参数，`postinst` 停止正在运行的 Worker，下一次连接启动退回版本的 Worker。
+- Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。软件包的各个版本都在这里读这些记录，退回时不用移动它们。issue #176 之前的 release 在 `/var/lib/a-nas` 读，新版本启动时把留在那里的记录移过来，见[移入 Host Agent 的记录](#移入-host-agent-的记录)。
+- 回滚不改变屏保视频池：产品服务的单元把独立于版本的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。
 - 不支持回滚到 ADR 0008 之前（rc.5 及更早）：旧账号已删除重建，旧版本的启动修复还会重新授予 `a-nas` 访问空间的 ACL。
-- 回滚到 ADR 0011 之前的版本时，先 `systemctl disable --now anas-photos.service`：旧二进制没有 `photo-service` 子命令。
 
 执行格式化后，回滚程序不会恢复旧分区或签名；保留磁盘现状并按 `needs_attention` 调查。绝不对不确定的 `/dev/sdX` 运行手工擦除命令。
 
 ## 开发机暂存注意事项
 
-- 先按[测试与验证](../development/testing.md)验证候选提交，再用 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>` 暂存（开发机 B）；开发机 A 使用脚本默认的 WSL 发行版与用户。SSH 配置见[连接手册](bootstrap-experimental-nas-ssh.md)。
-- 开发机连不到 NAS 时，用 `deploy-dev.ps1 -BundleDirectory <目录>` 写出发布包，由部署机复制到 NAS 并运行包里的 `stage.sh` 暂存，见[用发布包暂存 release](stage-a-release-bundle.md)。暂存出的 release 与 `-NasHost` 相同，root 的步骤不变。
-- `deploy-dev.ps1` 仅在 `build/.validated-build` 与提交、产品版本和二进制哈希一致时复用门禁结果；该清单由 Makefile 的 `check` 目标生成。无 Git 的 ext4 副本运行 `check-steps` 只提供测试证据，不生成部署清单。
-- 屏保视频不随 release 暂存，更换时使用[本地控制台手册](operate-local-kiosk.md#更换屏保视频)中的独立上传流程。早于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 的旧安装器分支应先合入主干，再部署。
+- 先按[测试与验证](../development/testing.md)验证候选提交，再按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1–2 步发布并复制到 NAS。SSH 配置见[连接手册](bootstrap-experimental-nas-ssh.md)。
+- 开发机连不到 NAS 时，把软件源目录交给部署机原样复制（部署手册第 2 步）；apt 按签名核对，复制的人不在信任链上。
+- `make release` 只发布通过了门禁与系统测试的软件包：`build/.validated-build` 由 Makefile 的 `check` 目标按提交、产品版本与二进制哈希写出，`build/.system-tested` 由通过的系统测试按软件包哈希写出。无 Git 的 ext4 副本运行 `check-steps` 只提供测试证据，不生成 `build/.validated-build`。
+- 屏保视频不随软件包发布，更换时使用[本地控制台手册](operate-local-kiosk.md#更换屏保视频)中的独立上传流程。
 - 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 
 ## 关联
 
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [存储与文件架构](../architecture/storage-and-files.md)
-- [`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- [部署 A-NAS 软件包](deploy-a-nas-packages.md)
+- [`scripts/build-packages.sh`](../../scripts/build-packages.sh)
 - [`scripts/provision-v1.0.1-rc.sh`](../../scripts/provision-v1.0.1-rc.sh)

@@ -53,7 +53,7 @@ gh 下载时直接写入最终文件名，中断后 `--skip-existing` 会保留�
 make check
 ```
 
-日常迭代先运行受影响的现有目标，例如 `go test ./internal/storage`、`make web-test` 或 `make ops-check`；RC 提交只运行一次完整 `make check VERSION=<RC>`。完整检查会把提交、产品版本和两个二进制哈希写入可丢弃的 `build/.validated-build`，`deploy-dev.ps1` 只有在四者全部一致时才复用结果，否则自动重跑完整门禁。这样不会用“跳过测试”换速度，也不会为同一制品重复执行全量测试。
+日常迭代先运行受影响的现有目标，例如 `go test ./internal/storage`、`make web-test` 或 `make ops-check`；RC 提交只运行一次完整 `make check`。版本由提交与它的 release 标签得出（[`scripts/release-version.sh`](../../scripts/release-version.sh)，ADR 0034），不再手写 `VERSION=`。完整检查会把提交、产品版本和两个二进制哈希写入可丢弃的 `build/.validated-build`，系统测试通过后把软件包的哈希写入 `build/.system-tested`；`make release` 只发布两者都对得上的软件包，`deploy-dev.ps1` 在对得上时不重跑门禁（[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)）。这样不会用“跳过测试”换速度，也不会为同一制品重复执行全量测试。
 
 完整检查中的 `make vuln-check` 用 `go.mod` 的 `tool` 指令固定的 govulncheck 扫描代码可达的已知漏洞，需要能访问 `vuln.go.dev`。它报告可达漏洞时检查失败：升级对应模块，或一起修改 `.go-version` 与 `go.mod` 的 `toolchain` 行来升级 Go。CI 每周一还在 `main` 上单独运行一次（`.github/workflows/vuln.yml`，也可手动触发），这样没有人推送时，新公布的漏洞也会报出；修改这个工作流的 PR 也会运行它，其他 PR 不运行，所以它不能设为必需检查。
 
@@ -148,37 +148,39 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
 
 ## 系统测试
 
-root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，用真实安装器、unit 与发布二进制安装 A-NAS，再按用户检查：
+root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，从签名软件源用 apt 安装 A-NAS 的软件包（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)），再按用户检查：
 
-- 装好的单元连同安装器写的 drop-in，经与 NAS 相同版本的 `systemd-analyze verify` 校验，警告也算失败。`make ops-check` 的 grep 只核对单元中的约定值，不做这项：校验要求单元启动的命令与依赖的单元都存在，开发机与 CI 的检查作业没有它们；
+- 软件包：先装上一 release、再升级到本 release，`a-nas-check` 通过，`dpkg --verify` 没有差异；软件源里被改过的包、签名之后被改过的索引，apt 都拒绝；本机设置从 `site.conf` 经 `a-nas-site` 生效；升级前数据库被复制；
+- 装好的单元经与 NAS 相同版本的 `systemd-analyze verify` 校验，警告也算失败。`make ops-check` 的 grep 只核对单元中的约定值，不做这项：校验要求单元启动的命令与依赖的单元都存在，开发机与 CI 的检查作业没有它们；
 - Host Agent 保留 `CAP_SETUID`/`CAP_SETGID` 并通过启动自检；
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
 - SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
 - 禁用账号会断开它连着的 SMB 会话，之后产品服务启动时的身份同步照常成功。Host Agent 的沙箱让 Samba 命令在标准错误打印告警，root 集成测试碰不到这一点（[调查](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)）；
 - smbd 等 SMB 接口有了 IPv4 地址才启动：在一个暂时没有地址的接口上，smbd 不启动、超时后再试，加上地址后启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）；
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
-- 安装器配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
+- `anas-site.service` 配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 活动记录为经入口的登录记下客户端地址、为本机屏幕登录记下来源；Host Agent 在正式单元的沙箱中以 `journalctl` 读到产品服务与 systemd 关于白名单单元的日志，成员读不到系统日志，白名单外的单元被拒绝（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)）；
 - 重启 Host Agent 后以上行为保持；
-- 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；从旧安装器首次升级时以硬链接导入它留下的池；
-- 本地 AI 随系统安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：套接字只对相册服务的组开放，搜索经套接字按需启动 Worker，Worker 以动态分配的身份运行；单元的 CPU 上限是本机逻辑核数减 2（安装器写入的 drop-in），内存先回收后上限；上传的照片在 Worker 沙箱中得到向量与检测结果（相册服务的空闲期经 drop-in 缩短为 2 秒）；放在 Worker 自己单元中的探针打不开网络套接字、列不出数据卷，而同一探针在沙箱外可以；暂存的模型或检测器与清单不符时拒绝安装且不留改动；升级不重复复制模型、检测器与运行环境，并启动新 release 的 Worker。CI 使用替身模型与检测器、只含 Debian Python 的运行环境与 Worker 的假 Provider；
-- 照片文字识别（[实施方案](../architecture/photo-ocr.md)）：release 链接按内容保存一次的 llama.cpp，只含清单列出的文件；llama-server 在 Worker 自己的单元中能运行；Worker 经套接字读出照片中的文字；压缩包与清单不符时拒绝安装且不留改动。替身下读文字用假 Provider，真实模型时由 llama-server 读出合成图片上的字。运行前需要 `scripts/fetch-llama.sh` 取得的压缩包；
+- 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；
+- 本地 AI 随系统安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：套接字只对相册服务的组开放，搜索经套接字按需启动 Worker，Worker 以动态分配的身份运行；单元的 CPU 上限是本机逻辑核数减 2（`a-nas-generator` 生成的 drop-in），内存先回收后上限；上传的照片在 Worker 沙箱中得到向量与检测结果（相册服务的空闲期经 drop-in 缩短为 2 秒）；放在 Worker 自己单元中的探针打不开网络套接字、列不出数据卷，而同一探针在沙箱外可以；被改过的模型文件由 `dpkg --verify` 查出，重装它的内容包后复原；升级不动模型、检测器与运行环境，并启动新 release 的 Worker。CI 使用替身内容包：替身模型与检测器、只含 Debian Python 的运行环境与 Worker 的假 Provider；
+- 照片文字识别（[实施方案](../architecture/photo-ocr.md)）：`a-nas` 链接 llama.cpp 内容包中的文件，只含清单列出的；llama-server 在 Worker 自己的单元中能运行；Worker 经套接字读出照片中的文字。替身下读文字用假 Provider，真实模型时由 llama-server 读出合成图片上的字。运行前需要 `scripts/fetch-llama.sh` 取得的压缩包；
 - 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：
   - 套接字只属于相册服务的账号，产品服务的账号连不上；
   - 连接时拉起实例，实例与代理同在一个只有 `lo` 的网络命名空间，以每个实例自己的动态身份运行；
   - 代理空闲（经 drop-in 缩短为 3 秒）后实例停止；
   - 换了 Qdrant 二进制时存储被清空；
   - 放在实例单元中的探针看不到网络、读不到数据卷与产品状态；
-  - 篡改的压缩包被拒绝；
   - 相册服务建好集合、同步照片；重启后的一次搜索读索引，后台核对与 Catalog 一致，没有回退到 Catalog。
 
   运行前需要 `scripts/fetch-qdrant.sh` 取得的压缩包。
+- 第一次安装从模拟的安装器布局（`/opt/a-nas/current`、`/etc` 中的单元、链接与环境文件）接管：`site.conf` 由环境文件写成，安装器的单元、附加配置与环境文件移到 `/var/backups/a-nas/installer-layout`，`/etc` 中不留安装器开启的链接；
+- 升级到多了一步数据库迁移的“下一 release”、回滚到本 release 与上一 release、再升级：回滚后数据库按新版本存下的反向步骤退回，文件与账号保留，`a-nas-check` 每次通过（含数据卷上的数据库重新打开）；数据库副本两处同名、各保留最近两份，数据卷上的留在数据卷，副本不含 `-shm`；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），另加系统测试打开的可选功能（Caddy、助手沙箱的工具）与只供测试用的工具。
-- 系统测试按部署的顺序安装：安装器先在没有 `a-nas-host`、以及装着另一个版本时拒绝安装且不改变系统，然后以 `dpkg -i` 装上 release 的 `a-nas-host`。dpkg 不下载依赖，包列出了镜像中没有的依赖时，这一步失败。
+- 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
 - 每条检查在它保护的东西坏掉时都要失败（[#423](https://github.com/zhongwater123/A-NAS/issues/423)）：

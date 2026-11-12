@@ -39,13 +39,13 @@
 
 - Given：未设置 `ANAS_TERMINAL` 或其值为 `disabled`。
 - When：管理员打开“设置 → 终端”。
-- Then：显示“终端尚未开启”，说明终端默认关闭、只能由设备的 root 开启，列出写入 `/etc/a-nas/anas-api.env` 并重启 `anas-api` 的两行命令，并提供“重新检查”；服务端拒绝建立会话。
+- Then：显示“终端尚未开启”，说明终端默认关闭、只能由设备的 root 开启，列出写入 `/etc/a-nas/site.conf` 并运行 `a-nas-site` 的两行命令，并提供“重新检查”；服务端拒绝建立会话。
 
 ### 升级保留开启状态
 
-- Given：root 已在 `/etc/a-nas/anas-api.env` 写入 `ANAS_TERMINAL=enabled`。
-- When：用系统服务安装器安装新版本，它每次都会重写该文件。
-- Then：安装器保留这一行，升级后终端仍然可用。此前的安装器会丢弃它，所以即使手工开启，下一次部署也会让终端回到“未开启”（2026-10-13 发现）。
+- Given：root 已在 `/etc/a-nas/site.conf` 写入 `ANAS_TERMINAL=enabled`。
+- When：安装新版本的软件包，或退回旧版本。
+- Then：软件包从不改写已有的 `site.conf`，这一行保留，终端仍然可用。安装器时期，安装器每次重写环境文件 `/etc/a-nas/anas-api.env`；2026-10-13 发现更早的安装器会丢弃这一行，下一次部署让终端回到“未开启”。
 
 ## 边界与失败
 
@@ -63,7 +63,7 @@
 
 ## 验收证据
 
-- 系统测试：[系统测试](../../scripts/system-test.sh)在 Debian 13 systemd 容器中用真实安装器验证新设备上终端关闭且拒绝会话、按手册开启后管理员经局域网入口获得以本人 UID 运行、起始于个人空间且不能列出成员个人空间的 Shell、退出码经关闭帧到达浏览器、本机屏幕同样可用、成员会话被拒绝、Shell 运行在自己的 scope 中、`logger -t anas-host-agent` 写入的内容不出现在 Host Agent 的日志中、Shell 不能创建命名空间、数据卷只读时终端仍可打开，以及升级保留 `ANAS_TERMINAL=enabled`。
+- 系统测试：[系统测试](../../scripts/system-test.sh)在 Debian 13 systemd 容器中用真实软件包验证新设备上终端关闭且拒绝会话、按手册开启后管理员经局域网入口获得以本人 UID 运行、起始于个人空间且不能列出成员个人空间的 Shell、退出码经关闭帧到达浏览器、本机屏幕同样可用、成员会话被拒绝、Shell 运行在自己的 scope 中、`logger -t anas-host-agent` 写入的内容不出现在 Host Agent 的日志中、Shell 不能创建命名空间、数据卷只读时终端仍可打开，以及升级保留 `ANAS_TERMINAL=enabled`。
 - 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/rootbroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/ptyshell/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
 - root：[终端身份测试](../../internal/hostops/linux/root_terminal_integration_test.go) 在特权容器中验证 Shell 的 UID、组、起始目录与 PTY 属主，且读取其他成员的文件被拒绝。
 - 契约：[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
@@ -73,7 +73,7 @@
 
 ## 关联
 
-- 代码：[`internal/terminal`](../../internal/terminal/terminal.go)、[`internal/filebroker`](../../internal/filebroker/terminal.go)、[`cmd/anas-api`](../../cmd/anas-api/main.go)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[`TerminalSection`](../../web/src/settings/TerminalSection.tsx)、[`XtermSession`](../../web/src/settings/XtermSession.tsx)
+- 代码：[`internal/terminal`](../../internal/terminal/terminal.go)、[`internal/filebroker`](../../internal/filebroker/terminal.go)、[`cmd/anas-api`](../../cmd/anas-api/main.go)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)、[`TerminalSection`](../../web/src/settings/TerminalSection.tsx)、[`XtermSession`](../../web/src/settings/XtermSession.tsx)
 - 规格：[设置](settings.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)
 - 运行手册：[开启管理员终端](../runbooks/enable-admin-terminal.md)
 - 调查：[本地 Kiosk 浏览器约束](../investigations/2026-10-06-kiosk-browser-confinement.md)、[一处故障让 Host Agent 的全部入口失效](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)
