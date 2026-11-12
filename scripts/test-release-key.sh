@@ -59,7 +59,7 @@ accepts() {
     install -D -m 0644 /keyring.pgp /etc/apt/keyrings/a-nas.pgp
     printf "Types: deb\nURIs: file:/repo\nSuites: dev\nComponents: main\nSigned-By: /etc/apt/keyrings/a-nas.pgp\n" \
       >/etc/apt/sources.list.d/a-nas.sources
-    apt-get update 2>&1' 2>&1)
+    apt-get -o APT::Sandbox::User=root update 2>&1' 2>&1)
   echo "$out"
   grep -q 'file:/repo dev InRelease' <<<"$out" && ! grep -qiE 'verification failed|NO_PUBKEY|not signed|revoked' <<<"$out"
 }
