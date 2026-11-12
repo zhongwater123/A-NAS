@@ -29,7 +29,7 @@ usage() {
 # The companion pool this release's code plays: the first 16 hexadecimal digits
 # of the SHA-256 of web/src/companion/dsh-pet/animations.sha256, which
 # scripts/check-dsh-pet-vendor.sh (make check-steps) keeps equal.
-companion_pool=efc3b4c6eebf8963
+companion_pool=36492963e4112f55
 [[ $# -ge 2 ]] || usage
 kind=$1
 shift

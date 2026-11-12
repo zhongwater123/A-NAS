@@ -4883,7 +4883,7 @@ paths:
     get:
       operationId: viewPhoto
       summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo''s text.'
+      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo''s text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -5034,6 +5034,22 @@ paths:
                       $ref: '#/components/schemas/PhotoTextChange'
         '403':
           $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/text-handles/{handle}:
+    get:
+      operationId: getPhotoTextHandle
+      summary: The value a handle of the caller's AI assistant stands for
+      description: An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+      parameters:
+        - $ref: '#/components/parameters/PhotoTextHandle'
+      responses:
+        '200':
+          description: The value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoTextHandleValue'
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
@@ -7170,7 +7186,7 @@ paths:
     get:
       operationId: openAssistantGateway
       summary: The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
+      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. A window becomes a conversation''s browser with desktop.attach ({session_id}), which the product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it has. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}), and the commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has not answered is no longer waited for. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
       responses:
         '101':
           description: Switched to WebSocket
@@ -7810,6 +7826,14 @@ components:
       description: A field of the photo's document type, such as 合计
       schema:
         type: string
+    PhotoTextHandle:
+      name: handle
+      in: path
+      required: true
+      description: The letters after the dot of a handle, such as 6d48a8
+      schema:
+        type: string
+        pattern: ^[0-9a-f]{6}$
     MediaLibraryID:
       name: libraryId
       in: path
@@ -7910,10 +7934,10 @@ components:
       name: sessionId
       in: path
       required: true
-      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).'
+      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes''s gateway).'
       schema:
         type: string
-        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$
+        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6}|local-[0-9a-f]{64})$
     AssistantTaskID:
       name: taskId
       in: path
@@ -12135,7 +12159,7 @@ components:
         texts:
           type: integer
           minimum: 0
-          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
+          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
         objects:
           type: object
           additionalProperties: false
@@ -12309,6 +12333,30 @@ components:
         at:
           type: string
           format: date-time
+    PhotoTextHandleValue:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - value
+        - unchecked
+        - assetId
+        - assetName
+      properties:
+        label:
+          type: string
+          description: 'The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码.'
+        value:
+          type: string
+          description: 'What the handle stands for now: what the field holds, what was read for it, or the number as its digits.'
+        unchecked:
+          type: boolean
+          description: 'True for a field''s value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong.'
+        assetId:
+          type: string
+          description: The photo the value was read from.
+        assetName:
+          type: string
     PhotoSimilarResults:
       type: object
       additionalProperties: false

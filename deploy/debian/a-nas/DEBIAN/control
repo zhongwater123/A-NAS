@@ -1,0 +1,16 @@
+Package: a-nas
+Version: @VERSION@
+Architecture: amd64
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: admin
+Priority: optional
+Depends: a-nas-host (= @VERSION@), systemd (>= 257), python3, @CONTENT@
+Description: the A-NAS product
+ The Host Agent, the Product Service and its photo, share and family
+ services, the AI Worker, web search, the vector index and the local
+ console's launcher, with their systemd units, accounts and directories
+ (docs/adr/0034). The models, runtimes, Qdrant and llama.cpp are content
+ packages of their own, and the Debian packages the product runs on come
+ with a-nas-host. This machine's settings are in /etc/a-nas/site.conf,
+ which the package never writes; a-nas-check tells whether the product
+ works.

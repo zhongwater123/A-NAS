@@ -1,0 +1,19 @@
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=url-file
+Path=https://10.0.2.2:8443/os/
+MatchPattern=a-nas_@v.efi
+
+[Target]
+Type=regular-file
+Path=/EFI/Linux
+PathRelativeTo=boot
+MatchPattern=a-nas_@v+@l-@d.efi \
+             a-nas_@v+@l.efi \
+             a-nas_@v.efi
+Mode=0444
+TriesLeft=3
+TriesDone=0
+InstancesMax=2

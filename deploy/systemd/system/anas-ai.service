@@ -13,11 +13,11 @@ Type=simple
 # the system test proves both.
 User=a-nas-ai
 DynamicUser=true
-# The installer links the release's runtime, models and llama.cpp to the
-# copies it keeps once per content under /opt/a-nas.
-Environment=PYTHONPATH=/opt/a-nas/current/ai
+# The a-nas package links its runtime, models and llama.cpp to their content
+# packages under /opt/a-nas (ADR 0034).
+Environment=PYTHONPATH=/usr/lib/a-nas/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json --face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json --animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json --ocr-server /opt/a-nas/current/ai/llama/llama-server --ocr-runtime-manifest /opt/a-nas/current/ai/llama.json --ocr-model /opt/a-nas/current/ai/ocr-model.gguf --ocr-model-manifest /opt/a-nas/current/ai/ocr-model.json --ocr-mmproj /opt/a-nas/current/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /opt/a-nas/current/ai/ocr-mmproj.json
+ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_ai.worker --model /usr/lib/a-nas/ai/model.litertlm --manifest /usr/lib/a-nas/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /usr/lib/a-nas/ai/detector.onnx --detector-manifest /usr/lib/a-nas/ai/detector.json --face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json --animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json --ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json
 # XNNPack keeps repacked weights here so later starts load faster.
 CacheDirectory=a-nas-ai
 CacheDirectoryMode=0700
@@ -44,16 +44,16 @@ SystemCallArchitectures=native
 # Memory has no fixed budget (user, 2026-10-28): background work loads a
 # model only if 1 GiB stays free afterwards, and the Worker releases its
 # models when free memory falls below that (internal/photoservice/gate.go,
-# docs/architecture/photo-objects.md#资源策略). The installer's
-# anas-ai.service.d/memory-reserve.conf caps the Worker at all of this
+# docs/architecture/photo-objects.md#资源策略). a-nas-generator's
+# anas-ai.service.d/a-nas-reserve.conf caps the Worker at all of this
 # machine's memory but 2.5 GiB, only against a runaway. The models are never
 # swapped out, which would make inference crawl and keep the disk busy, and
 # when memory runs out the kernel ends the Worker before anything else.
 MemorySwapMax=0
 OOMScoreAdjust=500
 # AI works while the photo library is idle with every core but two, which stay
-# free for what the user does next: the Worker runs that many threads, and the
-# installer caps it at that many cores in anas-ai.service.d/cpu-reserve.conf.
+# free for what the user does next: the Worker runs that many threads, and
+# a-nas-generator caps it at that many cores in the same drop-in.
 # A slice of its own under anas.slice, beside system.slice and user.slice:
 # anas.slice gives way to those, the device's other work, whenever they want
 # a core, and the photo service stops AI work when their pressure rises; the

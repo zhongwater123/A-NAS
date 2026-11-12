@@ -83,6 +83,13 @@ const TOOL_BEHAVIORS: Readonly<Record<string, Behavior>> = {
   video_analyze: "look",
   mcp__anas__look_at_photo: "look",
   mcp__anas__browse_photos: "look",
+  // The desktop server's tools, and Hermes's own browser tools that conversations from before it hold.
+  mcp__desktop__snapshot: "desktop-look",
+  mcp__desktop__look: "desktop-look",
+  mcp__desktop__click: "desktop-operate",
+  mcp__desktop__type: "desktop-operate",
+  mcp__desktop__press: "desktop-operate",
+  mcp__desktop__scroll: "desktop-operate",
   browser_snapshot: "desktop-look",
   browser_vision: "desktop-look",
   browser_click: "desktop-operate",

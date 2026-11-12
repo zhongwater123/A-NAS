@@ -1,0 +1,91 @@
+#!/bin/bash
+# preinst of a-nas (ADR 0034). Before anything is unpacked it stops for an
+# account that holds an ID A-NAS needs, and before an upgrade or a rollback it
+# stops the services that write the databases and copies the databases, so
+# that a release whose migrations go wrong can be restored. Everything else
+# the package sets up comes from its files.
+set -euo pipefail
+
+case "${1:-}" in
+  install | upgrade) ;;
+  *) exit 0 ;;
+esac
+
+# The photo, share and family services own their stores under fixed IDs
+# (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
+# systemd-sysusers would leave such an account as it is.
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
+  name=${account%%:*} id=${account#*:}
+  if getent passwd "$name" >/dev/null; then
+    [[ "$(id -u "$name"):$(id -g "$name")" == "$id:$id" ]] ||
+      { echo "a-nas: user $name exists with another UID or GID than $id; nothing was changed" >&2; exit 1; }
+  elif getent passwd "$id" >/dev/null; then
+    echo "a-nas: UID $id, which $name needs, belongs to $(getent passwd "$id" | cut -d: -f1); nothing was changed" >&2
+    exit 1
+  elif getent group "$id" >/dev/null && [[ "$(getent group "$id" | cut -d: -f1)" != "$name" ]]; then
+    echo "a-nas: GID $id, which $name needs, belongs to $(getent group "$id" | cut -d: -f1); nothing was changed" >&2
+    exit 1
+  fi
+done
+
+# The databases a release writes: the system disk's, and the data volume's
+# stores while it is mounted. Each is copied before every upgrade, rollback
+# or installation that finds it: one left by a removed release, or by an
+# installation before the packages (scripts/install-v1.0.1-system-services.sh,
+# which left /opt/a-nas/current), may be newer than the release coming in.
+shopt -s nullglob
+databases=(/var/lib/a-nas/*.db)
+stores=()
+if mountpoint -q /srv/a-nas/data; then
+  for store in photos/catalog.db shares/catalog.db family/family.db; do
+    [[ ! -f "/srv/a-nas/data/$store" ]] || stores+=("$store")
+  done
+fi
+((${#databases[@]} + ${#stores[@]} > 0)) || exit 0
+if [[ -n "${2:-}" ]]; then
+  from=$2
+elif [[ -L /opt/a-nas/current ]]; then
+  from=installer-$(basename "$(readlink /opt/a-nas/current)")
+else
+  from=unknown
+fi
+
+# The writers stop first, so that each copy is whole. The new release starts
+# them again; so does the old one if this one fails to unpack.
+if [[ -d /run/systemd/system ]]; then
+  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service 2>/dev/null || true
+fi
+# The system disk's copies go to /var/backups/a-nas; the data volume's stay on
+# it, where a copy shares the database's blocks until either changes. Both
+# copies of one upgrade have the same name.
+name=$(date -u +%Y%m%dT%H%M%SZ)-${from//[^A-Za-z0-9.+~_-]/_}
+system_backups=/var/backups/a-nas
+volume_backups=/srv/a-nas/data/.a-nas-backups
+# copy DATABASE INTO: the database with its write-ahead log, which holds
+# committed changes not yet in the file. The log's index (-shm) is rebuilt
+# from the log, and a stale one must never be restored.
+copy() {
+  install -d -m 0700 "$2"
+  for file in "$1" "$1-wal"; do
+    [[ ! -e "$file" ]] || cp -a --reflink=auto -- "$file" "$2/"
+  done
+}
+# keep_two BACKUPS: the two newest copies stay.
+keep_two() {
+  find "$1" -mindepth 1 -maxdepth 1 -type d -name '2*' -printf '%f\n' | sort -r | tail -n +3 |
+    while read -r old; do rm -rf -- "${1:?}/$old"; done
+}
+install -d -m 0700 "$system_backups"
+for database in "${databases[@]}"; do
+  copy "$database" "$system_backups/$name/system-disk"
+done
+if ((${#stores[@]} > 0)); then
+  install -d -m 0700 "$volume_backups"
+  for store in "${stores[@]}"; do
+    copy "/srv/a-nas/data/$store" "$volume_backups/$name/${store%%/*}"
+  done
+  keep_two "$volume_backups"
+fi
+keep_two "$system_backups"
+echo "a-nas: the databases of $from are copied to $system_backups/$name${stores:+ and $volume_backups/$name}"
+exit 0

@@ -19,6 +19,11 @@ import styles from "./photos.module.css";
 // document's fields, which members check and correct for every library that
 // holds the photo, the whole text, and every change made, with who made it.
 
+// VNAS, operating the desktop for the member, reads pages as text
+// (assistant/webosControl.ts). This panel shows in full the numbers the photo
+// service gives an assistant only as handles, so it is not read or acted on.
+const VNAS_PRIVATE = "照片上读出的文字";
+
 type Field = PhotoText["fields"][number];
 type Reason = NonNullable<Field["reasons"]>[number];
 
@@ -151,7 +156,7 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
 
   if (status !== "read") {
     return (
-      <section className={styles.phText} aria-label="照片中的文字">
+      <section className={styles.phText} aria-label="照片中的文字" data-vnas-private={VNAS_PRIVATE}>
         <h4>
           <ScanText />
           照片中的文字
@@ -167,7 +172,7 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
 
   const plain = !text.fields.length;
   return (
-    <section className={styles.phText} aria-label="照片中的文字">
+    <section className={styles.phText} aria-label="照片中的文字" data-vnas-private={VNAS_PRIVATE}>
       <h4>
         <ScanText />
         照片中的文字

@@ -137,7 +137,7 @@ export function PlaceView({
         ? [
             {
               at: textBand.names,
-              title: `照片中的文字包含“${textBand.query}”`,
+              title: `照片中的文字匹配“${textBand.query}”`,
               text: "文字由本地 AI 识别，可能有误",
               group: "text" as const,
             },

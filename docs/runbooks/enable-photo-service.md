@@ -1,7 +1,7 @@
 # 启用相册服务
 
 状态：服务身份、存储与 IPC 已在 Experimental NAS 部署；用户功能验收待完成
-更新时间：2026-10-08
+更新时间：2026-11-11
 
 ## 目的
 
@@ -27,32 +27,30 @@
 - **停止条件**（出现任一项立即停止）：
   - 主机或指纹不符，或数据卷 UUID、挂载与记录不一致。
   - UID 或 GID 31000 已被其他账号或组占用。
-  - 安装器以退出码 3 结束（身份冲突），或以退出码 5 结束（Host Agent 无法以用户身份启动文件 Worker，见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
+  - `a-nas` 的 `preinst` 报告账号或 ID 被占用（身份冲突），或 `a-nas-check` 报告 Host Agent 不能以用户身份启动文件 Worker（见 [issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
   - `anas-photos` 无法以 `a-nas-photos` 启动。
   - `photos` 不是 `a-nas-photos 0700`，或产品服务账号 `a-nas` 能列出它。
 
 ## 步骤
 
-1. 在开发机对候选提交完整运行门禁、[系统测试](../development/testing.md#系统测试)和[相册服务冒烟](../development/testing.md#root-集成测试)，并只暂存、不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。
-   - 预期：输出 API 与 Host Agent 的 SHA-256。发布目录包含 `anas-photos-system.service` 与新的安装器。
-   - 完成标准：在 NAS 上用 `sha256sum --check` 核对两个二进制，与门禁输出一致。
+1. 在开发机对候选提交完整运行门禁、[系统测试](../development/testing.md#系统测试)和[相册服务冒烟](../development/testing.md#root-集成测试)，再按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1–3 步发布并复制到 NAS。
+   - 预期：`make release` 输出版本、签名密钥的指纹与 `a-nas-archive-keyring` 的 SHA-256。
+   - 完成标准：NAS 上 `ls /var/local/a-nas-repository/dists` 列出 `dev`。
 2. 核对固定身份未被占用。
    - 命令：`getent passwd 31000; getent group 31000; getent passwd a-nas-photos; getent group a-nas-photos`
    - 预期：四条均无输出；或者只出现 `a-nas-photos`，且 UID 与 GID 都是 31000。
    - 完成标准：没有其他名称占用 31000。否则停止，不得修改既有账号。
 3. 核对数据卷与网卡。
-   - 命令：`findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS`、`ip -brief link show dev "$smb_interface"`
+   - 命令：`findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS`、`grep '^ANAS_SMB_INTERFACE=' /etc/a-nas/site.conf`、`ip -brief link show dev <上一条的网卡>`
    - 完成标准：挂载为 `btrfs`，来源与记录的分区一致，网卡存在。
-4. 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对制品并运行系统服务安装器，包括切换本地控制台链接。
-   - 命令：`"$source_release/install-v1.0.1-system-services.sh" "$source_release" "$release_id" "$smb_interface"`
-   - 预期：安装器依次完成以下动作：
-     - 创建 `a-nas-photos`；
-     - 安装 `anas-photos.service`；
-     - 写入 `ANAS_PHOTOS_SOCKET`、`ANAS_PHOTO_SESSION_SOCKET` 与 `ANAS_PHOTO_SESSION_GROUP`；
-     - 依次重启 Host Agent、相册服务和产品服务。
-   - 预期：Debian 的 `useradd` 会提示 `uid 31000 is greater than SYS_UID_MAX`。该 UID 是有意固定的，此提示不影响安装。
-   - 完成标准：`systemctl is-active anas-host-agent anas-photos anas-api` 全为 `active`。
-   - 启动协调：安装器并行启动 Host Agent 与相册服务时，相册服务可能先记录一次 `photo store unavailable; waiting`；Host Agent 创建并授权 `photos` 子卷后，它必须自行进入 `photo service ready`，无需重启。只有持续等待或最终未 ready 才算失败。
+4. 按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 4–6 步安装。
+   - 预期：`a-nas` 软件包完成以下动作：
+     - `systemd-sysusers` 创建 `a-nas-photos`（UID/GID 31000）；
+     - 带有并启用 `anas-photos.service`；
+     - 单元中写明 `ANAS_PHOTOS_SOCKET`、`ANAS_PHOTO_SESSION_SOCKET` 与 `ANAS_PHOTO_SESSION_GROUP`；
+     - `postinst` 重启 Host Agent、相册服务和产品服务。
+   - 完成标准：`a-nas-check` 全部 `PASS`，其中 `anas-host-agent`、`anas-photos` 与 `anas-api` 均为 `active`。
+   - 启动协调：Host Agent 与相册服务一同重启时，相册服务可能先记录一次 `photo store unavailable; waiting`；Host Agent 创建并授权 `photos` 子卷后，它必须自行进入 `photo service ready`，无需重启。只有持续等待或最终未 ready 才算失败。
 
 ## 验证
 
@@ -100,9 +98,7 @@
 ## 回滚或恢复
 
 - **只停用相册**：`systemctl disable --now anas-photos.service`。产品服务的相册接口返回 `photos_unavailable`，其他功能不受影响。
-- **回到上一版本**：按 [实机配置手册](provision-v1.0.1-experimental-storage.md#回滚) 恢复 `/opt/a-nas/current` 与旧单元。
-  - 旧单元不引用 `a-nas-photos`，账号与组可以保留。
-  - 若改为删除账号与组，必须先确认 `/etc/systemd/system/anas-api.service` 不再含 `SupplementaryGroups=a-nas-photos`，否则产品服务无法启动。
+- **回到上一版本**：按[部署 A-NAS 软件包的回滚](deploy-a-nas-packages.md#回滚或恢复)退回。软件包的每个版本都带相册服务，`a-nas-photos` 账号与组保留；产品服务的单元含 `SupplementaryGroups=a-nas-photos`，删除这个组会让产品服务无法启动。
 - **清除测试照片（不可逆）**：只在确认 `photos` 中只有可丢弃测试数据时执行。
   1. 停止相册服务。
   2. 执行 `btrfs subvolume delete /srv/a-nas/data/photos`。
@@ -113,6 +109,6 @@
 - 规格：[相册](../specs/photo-library.md)
 - ADR：[0011 相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0008 统一身份](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)
 - 架构：[相册技术设计](../architecture/photo-library.md)、[存储与文件](../architecture/storage-and-files.md)
-- 代码：[`anas-photos.service`](../../deploy/systemd/system/anas-photos.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[`internal/photoservice`](../../internal/photoservice/photoservice.go)、[`internal/hostops/linux/photos.go`](../../internal/hostops/linux/photos.go)
+- 代码：[`anas-photos.service`](../../deploy/systemd/system/anas-photos.service)、[账号](../../deploy/sysusers.d/a-nas.conf)、[`a-nas` 的 `preinst`](../../deploy/debian/a-nas/DEBIAN/preinst)、[`internal/photoservice`](../../internal/photoservice/photoservice.go)、[`internal/hostops/linux/photos.go`](../../internal/hostops/linux/photos.go)
 - 测试：[root 集成测试](../../internal/hostops/linux/root_photos_integration_test.go)
 - 调查：不涉及

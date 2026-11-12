@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS local Product Service
 Documentation=https://github.com/zhongwater123/A-NAS
-After=anas-host-agent.service
-Wants=anas-host-agent.service
+After=anas-host-agent.service anas-site.service
+Wants=anas-host-agent.service anas-site.service
 
 [Service]
 Type=simple
@@ -11,8 +11,26 @@ Group=a-nas
 # Reaches the photo service's API socket; the photo store itself stays
 # private to a-nas-photos (ADR 0011). Web search's socket likewise (ADR 0030).
 SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search
-EnvironmentFile=/etc/a-nas/anas-api.env
-ExecStart=/opt/a-nas/current/anas-api
+Environment=ANAS_HTTP_ADDR=127.0.0.1:8080
+Environment=ANAS_HOSTSTATE_MODE=agent
+Environment=ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock
+Environment=ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock
+Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
+Environment=ANAS_FFMPEG_SOCKET=/run/a-nas-ffmpeg/ffmpeg.sock
+Environment=ANAS_FFMPEG_SLOTS=/run/a-nas-ffmpeg/slots
+Environment=ANAS_STATE_DIR=/var/lib/a-nas
+# Screen saver videos are long-lived media outside the release (ADR 0014).
+Environment=ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current
+Environment=ANAS_DATA_MOUNT=/srv/a-nas/data
+Environment=ANAS_WEB_SEARCH_SOCKET=/run/a-nas-search/search.sock
+Environment=ANAS_WEB_SEARCH_RELEASE=/usr/lib/a-nas/search
+# SearXNG's secret, which anas-site.service makes once (ADR 0030).
+Environment=ANAS_WEB_SEARCH_SECRET_FILE=/etc/a-nas/search.env
+# This machine's settings: the terminal and the App Center are off until the
+# administrator turns them on there (ADR 0034). a-nas-generator adds the
+# internet entry's listener when /etc/a-nas/internet.env turns it on.
+EnvironmentFile=-/etc/a-nas/site.conf
+ExecStart=/usr/lib/a-nas/anas-api
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=20s

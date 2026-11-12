@@ -175,6 +175,7 @@ paths:
   /api/v1/photos/assets/{assetId}/text: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text" }
   /api/v1/photos/assets/{assetId}/text/fields/{field}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1fields~1{field}" }
   /api/v1/photos/assets/{assetId}/text/changes: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1changes" }
+  /api/v1/photos/text-handles/{handle}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1text-handles~1{handle}" }
   /api/v1/photos/assets/{assetId}/motion: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion" }
   /api/v1/photos/assets/{assetId}/motion/play: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion~1play" }
   /api/v1/photos/assets/{assetId}/download: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1download" }
@@ -280,6 +281,7 @@ components:
     PhotoPersonID: { $ref: "components/photos.yaml#/parameters/PhotoPersonID" }
     PhotoOccurrenceID: { $ref: "components/photos.yaml#/parameters/PhotoOccurrenceID" }
     PhotoTextField: { $ref: "components/photos.yaml#/parameters/PhotoTextField" }
+    PhotoTextHandle: { $ref: "components/photos.yaml#/parameters/PhotoTextHandle" }
     MediaLibraryID: { $ref: "components/media.yaml#/parameters/MediaLibraryID" }
     MediaVideoID: { $ref: "components/media.yaml#/parameters/MediaVideoID" }
     MediaTitleID: { $ref: "components/media.yaml#/parameters/MediaTitleID" }
@@ -465,6 +467,7 @@ components:
     PhotoText: { $ref: "components/photos.yaml#/schemas/PhotoText" }
     PhotoTextCorrectionRequest: { $ref: "components/photos.yaml#/schemas/PhotoTextCorrectionRequest" }
     PhotoTextChange: { $ref: "components/photos.yaml#/schemas/PhotoTextChange" }
+    PhotoTextHandleValue: { $ref: "components/photos.yaml#/schemas/PhotoTextHandleValue" }
     PhotoSimilarResults: { $ref: "components/photos.yaml#/schemas/PhotoSimilarResults" }
     PhotoImageSearch: { $ref: "components/photos.yaml#/schemas/PhotoImageSearch" }
     PhotoAIStatus: { $ref: "components/photos.yaml#/schemas/PhotoAIStatus" }

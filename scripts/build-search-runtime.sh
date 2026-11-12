@@ -71,9 +71,15 @@ if [[ "${1:-}" == --lock ]]; then
 fi
 
 image=${1:-anas-systemd:trixie}
-lock=$search/requirements.txt
 python=$(image_python "$image")
-id=$( { cat "$lock"; printf 'python=%s\nsearxng=%s\n' "$python" "$source_sha"; } | sha256sum | cut -c1-16)
+# shellcheck source=lib/content.sh
+. "$repo/scripts/lib/content.sh"
+if [[ "$python" != "$TARGET_PYTHON" ]]; then
+  echo "$image has Python $python; the runtime is for Debian 13's $TARGET_PYTHON (scripts/lib/content.sh)" >&2
+  exit 2
+fi
+# The ID the release's packages name (scripts/lib/content.sh).
+id=$(search_runtime_id "$repo")
 out=$repo/build/search-runtime
 tarball=$out/$id.tar.gz
 mkdir -p "$out"

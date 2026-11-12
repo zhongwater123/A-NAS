@@ -244,13 +244,21 @@ func openStore(ctx context.Context, config Config) (*openedStore, error) {
 func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
 	ticker := time.NewTicker(config.RetryInterval)
 	defer ticker.Stop()
+	// The first failure is a warning, as a store that does not open, such as
+	// a catalog from a newer release, keeps this unit active (a-nas-check).
+	warned := false
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		store, err := openStore(ctx, config)
 		if err != nil {
-			config.Logger.DebugContext(ctx, "waiting for member-share store or bridge", "error", err)
+			if !warned {
+				config.Logger.WarnContext(ctx, "member-share store unavailable; waiting", "error", err)
+				warned = true
+			} else {
+				config.Logger.DebugContext(ctx, "waiting for member-share store or bridge", "error", err)
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -291,6 +299,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			_ = store.Interrupt(reason)
 		}
 		config.Logger.Info("member-share service ready")
+		warned = false
 		for {
 			select {
 			case <-ctx.Done():
