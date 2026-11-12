@@ -34,8 +34,8 @@ interface Callbacks {
   onChanged(): void;
   /**
    * A prompt is about to go in: the window makes itself the session's browser
-   * (Hermes's browser control) first, so the turn has the browser tools and
-   * its steps come to the window the member sends from.
+   * (desktop.attach) first, so the turn's desktop and companion commands come
+   * to the window the member sends from.
    */
   beforePrompt?(liveId: string): Promise<void>;
   /** The prompt did not go in after beforePrompt: the window undoes what it set up for the turn. */

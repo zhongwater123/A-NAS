@@ -14,8 +14,16 @@ assistant only read. They hand the model text only: names, capture times,
 libraries, tags and albums, never pixels. The same JSON is the structured
 result, so the A-NAS window finds the photo IDs in it and shows the
 thumbnails with the member's own session.
+
+The text the device read from a photo (docs/architecture/photo-ocr.md) comes
+with the search results that matched by it and with a photo's details: the
+document type, its fields and the whole text. The photo service has already
+replaced every sensitive number with a handle such as ⟦身份证号·1a2b3c⟧; the
+model writes the handle in its answer and the A-NAS window shows the member
+the number in its place, so no tool here ever holds one.
 """
 import base64
+import contextlib
 import http.client
 import io
 import json
@@ -32,7 +40,8 @@ READ_ONLY = ToolAnnotations(read_only_hint=True)
 
 server = MCPServer("anas", instructions=(
     "A-NAS 文件更改与相册。个人空间与本人的 Agent空间子目录只能经 submit_changes 更改，"
-    "用户在对话中同意后才执行；共享空间的其他位置不能写。相册只能读。"))
+    "用户在对话中同意后才执行；共享空间的其他位置不能写。相册只能读；证件、银行卡、发票、回单、小票"
+    "上的信息（号码、有效期、金额等）在相册照片读出的文字里，用 search_photos 找。"))
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -76,7 +85,31 @@ def recent_changes() -> str:
 
 
 class PhotoError(Exception):
-    pass
+    """A failed read of the photo API: the message is for the model, the code is the API's."""
+
+    def __init__(self, message: str, code: str = ""):
+        super().__init__(message)
+        self.code = code
+
+
+def refused(status: int, raw: bytes) -> PhotoError:
+    """What the photo API said when it answered anything but 200."""
+    try:
+        error = json.loads(raw or b"{}").get("error") or {}
+    except (ValueError, AttributeError):
+        return PhotoError(f"相册返回了看不懂的结果（{status}）")
+    # What to do next, in the tools' own words; the API's message says only what happened.
+    code = error.get("code") or ""
+    return PhotoError(NEXT_STEP.get(code) or error.get("message") or f"相册返回 {status}", code)
+
+
+# Refusals an assistant can act on, by the photo API's error code.
+NEXT_STEP = {
+    "sensitive_photo": ("这张照片是证件、银行卡或票据，或写有账号一类的长号码，不提供画面。用 photo_details 读它的文字"
+                        "和字段；其中的敏感号码是句柄，把句柄原样写进回答，窗口会向成员显示真实的号码。"),
+    "unread_photo": ("这张照片上可能有文字，设备还没读完或没读出来，在那之前不提供画面。请成员稍后再问，"
+                     "或自己在相册里打开它；不要改用别的办法去看。"),
+}
 
 
 def photos(path: str, **query) -> dict:
@@ -92,13 +125,12 @@ def photos(path: str, **query) -> dict:
         raise PhotoError("相册暂时连不上，请稍后再试") from None
     finally:
         conn.close()
+    if response.status != 200:
+        raise refused(response.status, raw)
     try:
-        body = json.loads(raw or b"{}")
+        return json.loads(raw or b"{}")
     except ValueError:
         raise PhotoError(f"相册返回了看不懂的结果（{response.status}）") from None
-    if response.status != 200:
-        raise PhotoError((body.get("error") or {}).get("message") or f"相册返回 {response.status}")
-    return body
 
 
 # A month of one library longer than this is reported as cut short.
@@ -135,6 +167,46 @@ def photo(asset: dict, libs: dict[str, str]) -> dict:
     return item
 
 
+# The document types the device reads fields from, as members call them.
+DOCUMENTS = {"id_card": "身份证人像面", "id_card_back": "身份证国徽面", "bank_card": "银行卡", "bank_slip": "银行回单",
+             "invoice": "发票", "receipt": "小票"}
+# A search result carries this much of a photo's plain text; photo_details has all of it.
+EXCERPT = 200
+# The text of this many leading results comes with a search.
+TEXT_RESULTS = 10
+
+
+def read_text(photo_id: str, whole: bool) -> dict:
+    """What the device read from a photo, as the model gets it: the document type, its fields
+    with the ones nobody checked yet, and the text (all of it, or for a search result only an
+    excerpt of a photo that is no document). Empty for a photo with no text to give."""
+    reading = photos(f"/assets/{urllib.parse.quote(photo_id, safe='')}/text")
+    if reading["status"] == "queued":
+        return {"text_status": "照片上的文字还没读完"} if whole else {}
+    if reading["status"] == "failed":
+        return {"text_status": "照片上的文字没能读出来"} if whole else {}
+    if reading["status"] != "read":
+        return {}
+    data = {}
+    document = DOCUMENTS.get(reading.get("kind", ""))
+    if document:
+        data["document"] = document
+    fields = {field["name"]: field["value"] for field in reading["fields"] if field["value"]}
+    if fields:
+        data["fields"] = fields
+        unchecked = [field["name"] for field in reading["fields"] if field["value"] and not field["passed"]]
+        if unchecked:
+            data["unchecked"] = unchecked
+    text = reading.get("text", "")
+    if whole:
+        data["text"] = text
+        if not reading["complete"]:
+            data["text_status"] = "文字没有读完，后面的缺失"
+    elif not document and text:
+        data["text"] = text if len(text) <= EXCERPT else text[:EXCERPT] + "…"
+    return data
+
+
 def result(data: dict) -> CallToolResult:
     # The text is the structured result itself, so Hermes passes it on once.
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, ensure_ascii=False))],
@@ -156,19 +228,33 @@ PHOTO_NOTE = ("只读。结果里没有照片画面，只有名称、拍摄时�
               "本人加的标签与相册；拍摄地点与相机等原图信息用 photo_details 查，认不出照片里是谁。要看画面用 look_at_photo。回答中提到某张照片时写成 "
               "[名称](照片的 id)，id 原样照抄（它本身以 photo: 开头），窗口会显示它的缩略图。")
 
+# How the text read from photos reaches the model, for the two tools that carry it.
+TEXT_NOTE = ("设备读出过文字的照片带有：document（证件或票据的类型）、fields（读出的字段）、unchecked（还没有人核对的"
+             "字段，转述时说明是机器识别、可能有误）和 text（照片上的文字）。形如 ⟦身份证号·1a2b3c⟧ 的是敏感号码的句柄："
+             "你看不到号码本身，成员要这个号码时把句柄原样写进回答正文（不改动，不放进代码块），窗口会在那个位置向成员"
+             "显示真实的号码，成员看到的就是号码：不要解释句柄，不要说自己看不到，也不要请成员自己去看。")
+
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
-    "用一句话按画面内容、名称和标签搜索本人图库与共享图库的照片，最相关的在前：前 closest 张是最接近的一组，"
-    "其余不太相关。搜索不看时间，请按 taken 自己筛选。query：要找的内容，如“海边”“生日蛋糕”；"
-    "page：上一次结果中的 next。" + PHOTO_NOTE))
+    "用一句话按画面内容、名称、标签和照片上的文字搜索本人图库与共享图库的照片，最相关的在前：前 closest 张是最接近的一组，"
+    "其余不太相关。成员问起写在证件、银行卡、发票、回单、小票上的信息（证件号、卡号、有效期、金额、商户等）时先用它，"
+    "直接搜类型（“身份证”“银行卡”“发票”）或上面的字，相册里常有它们的照片；结果里带着 fields 的照片不必再用 "
+    "photo_details 查。搜索不看时间，请按 taken 自己筛选。"
+    "query：要找的内容，如“海边”“生日蛋糕”“身份证”；page：上一次结果中的 next。" + PHOTO_NOTE + TEXT_NOTE))
 def search_photos(query: str, page: str = ""):
     try:
         found = photos("/search", q=query, cursor=page, limit="30")
         libs = libraries()
     except PhotoError as error:
         return failed(error)
-    data = {"query": query, "closest": found.get("closest", 0),
-            "photos": [photo(asset, libs) for asset in found["items"]]}
+    items = [photo(asset, libs) for asset in found["items"]]
+    if not page:
+        # The results that matched by name or by their text lead the first page; what was read
+        # from them comes along, so that one search answers what a document says.
+        for item in items[:min(found.get("names", 0) + found.get("texts", 0), TEXT_RESULTS)]:
+            with contextlib.suppress(PhotoError):
+                item.update(read_text(item["id"], whole=False))
+    data = {"query": query, "closest": found.get("closest", 0), "photos": items}
     if not found.get("semantic"):
         data["note"] = "设备上的 AI 暂时不可用，只按名称与标签匹配。"
     if found.get("next"):
@@ -210,9 +296,10 @@ def browse_photos(month: str = "", album_id: str = "", tag: str = "", page: str 
 
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
-    "一张照片的详细信息：尺寸、标签、所在相册，以及原图记录的全部元数据（exif：相机、镜头、曝光、拍摄时间等；"
-    "location：相机记下的拍摄位置，经纬度与海拔，没有记下就没有）。经纬度可以换算成大致地点；没有人物与画面内容，"
-    "不要为找这些逐张查看。" + PHOTO_NOTE))
+    "一张照片的详细信息：尺寸、标签、所在相册，原图记录的全部元数据（exif：相机、镜头、曝光、拍摄时间等；"
+    "location：相机记下的拍摄位置，经纬度与海拔，没有记下就没有），以及设备从照片上读出的全部文字与字段。"
+    "要知道照片上写了什么就用它，不用看画面。经纬度可以换算成大致地点；没有人物与画面内容，"
+    "不要为找这些逐张查看。" + PHOTO_NOTE + TEXT_NOTE))
 def photo_details(photo_id: str):
     quoted = urllib.parse.quote(photo_id, safe='')
     try:
@@ -220,6 +307,8 @@ def photo_details(photo_id: str):
         data = photo(asset, libraries())
         if asset.get("mediaType", "").startswith("image/"):
             data.update(photos(f"/assets/{quoted}/metadata"))
+        if asset.get("text"):
+            data.update(read_text(photo_id, whole=True))
     except PhotoError as error:
         return failed(error)
     data.update(width=asset["width"], height=asset["height"], bytes=asset["sizeBytes"])
@@ -249,16 +338,13 @@ def photo_view(photo_id: str) -> bytes:
     finally:
         conn.close()
     if response.status != 200:
-        try:
-            message = (json.loads(raw).get("error") or {}).get("message")
-        except ValueError:
-            message = None
-        raise PhotoError(message or f"相册返回 {response.status}")
+        raise refused(response.status, raw)
     return raw
 
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
     "取出一张照片的画面，好看清里面有什么：成员要你看照片，或问到名称、时间、标签回答不了的画面内容时用。"
+    "读照片上的字不用它，用 photo_details；证件、银行卡、票据、写有长号码的照片和文字还没读完的照片不提供画面。"
     "返回一张图片（最长边不超过 1600 像素，不带拍摄地点等原图信息）；结果里有它的路径，用 vision_analyze "
     "读这个路径并写清要看什么，才能看到画面。一次一张，只取需要的几张；视频没有画面可取。photo_id：照片的 id。"))
 def look_at_photo(photo_id: str):

@@ -1,7 +1,7 @@
 # 重启后 smbd 早于 DHCP 地址启动，只监听回环
 
-状态：fixed，待实机验收
-更新时间：2026-11-06
+状态：resolved；2026-11-10 部署 `61744597719c` 后正常重启，smbd 未经手动重启即监听 `172.18.45.48:445`
+更新时间：2026-11-10
 
 ## 症状与影响
 
@@ -50,7 +50,11 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
   - 在没有地址的 veth 上，smbd 停在 `activating`；等待超时后 systemd 按 `Restart=on-failure` 再试；加上地址后约 1 秒启动，并监听这个地址的 445；
   - 一个排在 smbd 之后、`Wants=` 它的单元（与 Host Agent 相同）在第一次失败后启动，不等以后的重试；
   - smbd 没有运行时，`smbcontrol all reload-config` 退出码为 0。
-- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
+- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。
+- 实机（2026-11-10，`61744597719c`，NAS 上的 `/var/tmp/a-nas-after-reboot-61744597719c.log`）：
+  - 16:02:19 开机，16:02:23 网络服务就绪，16:02:36 smbd 启动，即等了约 13 秒地址，第一次等待内就拿到了；
+  - smbd 监听 `127.0.0.1`、`[::1]` 与 `172.18.45.48` 的 445，`NRestarts=0`，开机以来 smbd 与 A-NAS 的单元没有错误日志；
+  - 代价：开机的用户空间阶段从 4.3 秒变为 15.1 秒，因为排在 smbd 之后的 Host Agent 也随之晚启动。
   - 2026-11-05 起，CI 中“smbd listens on the SMB interface's address”时好时坏（`fff0c2b0` 推送后，以及 #397、#400、#403、#407）。
     - #397 认为原因是 smbd 先告诉 systemd 已就绪、再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），把检查改为最多等 10 秒。
     - 之后 #400、#403、#407 等满 10 秒仍然失败，说明这个诊断不完整。
@@ -95,9 +99,8 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 
 ## 后续工作
 
-- 部署修复之前，每次重启后由 root 执行 `systemctl restart smbd`。
-- Experimental NAS 上由 `0~70853075ca40` 启用的 `ifupdown-wait-online.service`，在部署修复时停用，与新装的宿主机一致。
 - DHCP 续租换了地址时 smbd 仍不会跟随；需要时再加 ADR 0031 中列出的钩子。
+- Experimental NAS 上由 `0~70853075ca40` 启用的 `ifupdown-wait-online.service` 已在 2026-11-10 部署时停用，与新装的宿主机一致。
 
 ## 关联
 
@@ -105,7 +108,7 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
 - 实现：
-  - [`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
+  - [`scripts/install-v1.0.1-system-services.sh`](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
   - [`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go) 的 `applySambaConfiguration`（监听设置变化时重启 smbd）；
   - [`internal/hostops/linux/identity.go`](../../internal/hostops/linux/identity.go) 的 `ensureFixedGroups`（查组与建组串行进行）。
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)、[`internal/hostops/linux/groups_test.go`](../../internal/hostops/linux/groups_test.go)、[`internal/hostops/linux/samba_test.go`](../../internal/hostops/linux/samba_test.go)、[`internal/hostops/linux/root_integration_test.go`](../../internal/hostops/linux/root_integration_test.go)

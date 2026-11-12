@@ -15,6 +15,7 @@ import (
 var assistantUnits = []string{
 	"anas-assistant@alice.service", "anas-assistant-api@alice.service", "anas-assistant-api@alice.socket",
 	"anas-assistant-cron@alice.service", "anas-assistant-curator@alice.service", "anas-assistant-curator@alice.timer",
+	"anas-assistant-net@alice.service",
 }
 
 // installedAssistant returns a system root with every assistant template.
@@ -25,7 +26,7 @@ func installedAssistant(t *testing.T) string {
 	if err := os.MkdirAll(units, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, template := range []string{"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket", "anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer"} {
+	for _, template := range []string{"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket", "anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer", "anas-assistant-net@.service"} {
 		if err := os.WriteFile(filepath.Join(units, template), []byte("[Service]\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

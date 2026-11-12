@@ -232,6 +232,8 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 		{http.MethodPut, "/api/v1/photos/assets/" + asset.ID + "/text/fields/合计"},
 		{http.MethodDelete, "/api/v1/photos/assets/" + asset.ID + "/text/fields/合计"},
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/text/changes"},
+		// What a handle stands for is the member's to ask, never the assistant's.
+		{http.MethodGet, "/api/v1/photos/text-handles/0123ab"},
 	} {
 		response := assistantRequest(t, socket, request[0], request[1], nil)
 		if response.StatusCode != http.StatusNotFound || errorCode(t, response) != "not_found" {

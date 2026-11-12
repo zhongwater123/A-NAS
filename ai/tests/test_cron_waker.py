@@ -37,7 +37,7 @@ class JobFileTests(unittest.TestCase):
             "import importlib.util, sys; from datetime import UTC, datetime; "
             "s=importlib.util.spec_from_file_location('waker', sys.argv[1]); "
             "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
-            "m.DATA=sys.argv[2]; assert m.due('alice', datetime.now(UTC)) is False"
+            "m.DATA=sys.argv[2]; assert m.due('alice', datetime.now(UTC)) == []"
         )
         try:
             result = subprocess.run(
@@ -73,10 +73,32 @@ class JobFileTests(unittest.TestCase):
         ):
             with self.subTest(fields=fields):
                 self.path.write_text('{"jobs":[{' + fields + '}]}')
-                self.assertEqual(waker.due("alice", self.now), expected)
+                self.assertEqual(bool(waker.due("alice", self.now)), expected)
+
+    def test_a_due_job_is_marked_by_the_instant_it_is_due_for(self):
+        def marks(*jobs):
+            self.path.write_text(json.dumps({"jobs": list(jobs)}))
+            return waker.due("alice", self.now)
+
+        first = {"id": "a1", "next_run_at": "2026-10-26T00:00:00Z"}
+        other = {"id": "b2", "next_run_at": "2026-10-26T00:00:00Z"}
+        self.assertEqual(marks(first), marks(dict(first, last_status="error")))
+        self.assertNotEqual(marks(first), marks(dict(first, next_run_at="2026-10-26T00:01:00Z")))
+        self.assertNotEqual(marks(first), marks(other))
+        self.assertEqual(len(marks(first, other)), 2)
+        many = [{"id": f"job{n}", "next_run_at": "2026-10-26T00:00:00Z"} for n in range(waker.MARKS + 50)]
+        self.assertEqual(len(marks(*many)), waker.MARKS)
 
 
 class WakeTests(unittest.TestCase):
+    def setUp(self):
+        # Root's notes on the rounds it started go to a directory of the test's own.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        state = patch.object(waker, "STATE", temporary.name)
+        state.start()
+        self.addCleanup(state.stop)
+
     def test_activity_is_verified_over_the_host_agents_unix_socket(self):
         for status, name, expected in ((200, "alice", True), (200, "bob", False), (401, "alice", False), (404, "alice", None), (503, "alice", None)):
             with self.subTest(status=status, name=name), tempfile.TemporaryDirectory() as root:
@@ -110,22 +132,72 @@ class WakeTests(unittest.TestCase):
                         thread.join()
 
     def test_disabled_account_is_never_started(self):
-        with patch.object(waker, "due", return_value=True), \
+        with patch.object(waker, "due", return_value=["a"]), \
              patch.object(waker, "running", return_value=False), \
              patch.object(waker, "active_account", return_value=False), \
              patch.object(waker.subprocess, "run") as run:
             waker.wake("alice")
         run.assert_not_called()
+        self.assertEqual(os.listdir(waker.STATE), [])
 
     def test_active_check_precedes_start(self):
         order = []
-        with patch.object(waker, "due", return_value=True), \
+        with patch.object(waker, "due", return_value=["a"]), \
              patch.object(waker, "running", return_value=False), \
              patch.object(waker, "active_account", side_effect=lambda _: order.append("check") or True), \
              patch.object(waker.subprocess, "run", side_effect=lambda *a, **k: order.append("start")) as run:
             waker.wake("alice")
         self.assertEqual(order, ["check", "start"])
         self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "start", "--no-block", "anas-assistant-cron@alice.service"])
+
+    def starts(self, marks, at):
+        """Whether a look at the member's store at second `at`, with these jobs due, starts a round."""
+        with patch.object(waker, "due", return_value=marks), \
+             patch.object(waker, "running", return_value=False), \
+             patch.object(waker, "active_account", return_value=True), \
+             patch.object(waker.time, "time", return_value=1_000_000.0 + at), \
+             patch.object(waker.subprocess, "run") as run:
+            waker.wake("alice")
+        return run.called
+
+    def test_a_round_that_moved_no_due_job_holds_the_next_one_back_longer_each_time(self):
+        self.assertTrue(self.starts(["a"], 0))
+        self.assertFalse(self.starts(["a"], waker.HOLD - 1))
+        self.assertTrue(self.starts(["a"], waker.HOLD))
+        # The second round moved it no more than the first: twice as long now.
+        self.assertFalse(self.starts(["a"], waker.HOLD + 2 * waker.HOLD - 1))
+        self.assertTrue(self.starts(["a"], waker.HOLD + 2 * waker.HOLD))
+
+    def test_the_hold_never_exceeds_its_limit(self):
+        at = 0
+        for _ in range(12):
+            self.assertTrue(self.starts(["a"], at))
+            at += waker.HOLD_MAX
+        self.assertFalse(self.starts(["a"], at - 1))
+        self.assertTrue(self.starts(["a"], at))
+
+    def test_a_job_that_is_newly_due_or_moved_starts_a_round_at_once(self):
+        self.assertTrue(self.starts(["a"], 0))
+        # Another job came due beside the one that did not move.
+        self.assertTrue(self.starts(["a", "b"], 30))
+        # The round ran b; a is still there and is held again.
+        self.assertFalse(self.starts(["a"], 60))
+        # a ran and is due for its next instant: another mark.
+        self.assertTrue(self.starts(["a-next"], 90))
+        self.assertTrue(self.starts(["a-next-again"], 120))
+
+    def test_a_clock_that_went_back_or_damaged_notes_hold_nothing(self):
+        self.assertTrue(self.starts(["a"], 0))
+        self.assertTrue(self.starts(["a"], -3600))
+        Path(waker.STATE, "alice").write_text("{")
+        self.assertTrue(self.starts(["a"], -3599))
+
+    def test_a_round_starts_even_when_it_cannot_be_noted(self):
+        blocked = Path(waker.STATE) / "a-file"
+        blocked.write_text("")
+        with patch.object(waker, "STATE", str(blocked)):
+            self.assertTrue(self.starts(["a"], 0))
+            self.assertTrue(self.starts(["a"], 1))
 
     def test_an_account_failure_or_timeout_does_not_skip_the_next_account(self):
         for error in (RuntimeError("bad job"), subprocess.TimeoutExpired("worker", 10)):

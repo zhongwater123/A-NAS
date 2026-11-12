@@ -268,11 +268,10 @@ func (h *Handler) renameSession(w http.ResponseWriter, r *http.Request, account 
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_title", "a title has 1 to 100 characters")
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"title": title})
 	var updated struct {
 		Title string `json:"title"`
 	}
-	if !h.call(w, r, account, http.MethodPatch, "/api/sessions/"+id, payload, &updated) {
+	if !h.writeCall(w, r, account, http.MethodPatch, id, map[string]any{"title": title}, &updated) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"id": id, "title": updated.Title})
@@ -283,7 +282,7 @@ func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request, account 
 	if !ok {
 		return
 	}
-	if h.call(w, r, account, http.MethodDelete, "/api/sessions/"+id, nil, nil) {
+	if h.writeCall(w, r, account, http.MethodDelete, id, nil, nil) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -380,6 +379,20 @@ func (h *Handler) call(w http.ResponseWriter, r *http.Request, account, method, 
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 	status, data, err := h.rest(ctx, account, method, path, body)
+	return h.answered(w, account, status, data, err, into)
+}
+
+// writeCall is call for a write to a stored conversation, behind Hermes's
+// fence (writeSession).
+func (h *Handler) writeCall(w http.ResponseWriter, r *http.Request, account, method, id string, fields map[string]any, into any) bool {
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+	status, data, err := h.writeSession(ctx, account, method, id, fields)
+	return h.answered(w, account, status, data, err, into)
+}
+
+// answered writes our error for an instance's failure, or decodes its answer.
+func (h *Handler) answered(w http.ResponseWriter, account string, status int, data []byte, err error, into any) bool {
 	if err != nil {
 		h.unavailable(w, account, err)
 		return false

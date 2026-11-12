@@ -71,7 +71,8 @@ check "disabling stops the running task" \
   test "$(systemctl show -p MainPID --value anas-assistant-cron@bob.service)" = 0
 
 for unit in anas-assistant@bob.service anas-assistant-api@bob.service anas-assistant-api@bob.socket \
-  anas-assistant-cron@bob.service anas-assistant-curator@bob.service anas-assistant-curator@bob.timer; do
+  anas-assistant-cron@bob.service anas-assistant-curator@bob.service anas-assistant-curator@bob.timer \
+  anas-assistant-net@bob.service; do
   check "a disabled account cannot restart $unit" fails systemctl start "$unit"
   check "$unit remains masked" test "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = masked
 done

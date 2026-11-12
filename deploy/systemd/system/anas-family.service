@@ -12,7 +12,7 @@ Group=a-nas-family
 # reader's own session, and the media worker for recordings browsers cannot
 # play; the photo store stays private to a-nas-photos (ADR 0029).
 SupplementaryGroups=a-nas-photos
-ExecStart=/opt/a-nas/current/anas-api family-service
+ExecStart=/usr/lib/a-nas/anas-api family-service
 Environment=ANAS_FAMILY_ROOT=/srv/a-nas/data/family
 Environment=ANAS_FAMILY_SOCKET=/run/a-nas-family/family.sock
 Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock

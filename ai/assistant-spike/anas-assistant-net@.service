@@ -1,0 +1,53 @@
+[Unit]
+Description=Private network of the A-NAS assistant of %i, with its bridge to the model (spike)
+# One member's instance, round of scheduled tasks, curator and API bridge join this unit's
+# network namespace (JoinsNamespaceOf): it has only loopback. They have to share it, because
+# Hermes's gateway, which a round of scheduled tasks runs, owns the member's Hermes home
+# while it runs, and `hermes serve` then hands its conversation writes to it over a loopback
+# port. This unit also holds the only way out of that network, the bridge to the model
+# gateway's Unix socket, so that it outlives whichever of them stops first.
+StopWhenUnneeded=yes
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+# Inside the sandbox the model client reaches the model gateway as http://127.0.0.1:18001.
+ExecStart=/usr/bin/socat TCP-LISTEN:18001,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/anas-assistant-gw/model.sock
+ExecStartPost=/bin/bash /spike/wait-port.sh 18001
+TimeoutStartSec=150
+# socat answers SIGTERM by exiting with 143; stopping when nothing needs it is no failure.
+SuccessExitStatus=143
+TemporaryFileSystem=/srv:ro
+InaccessiblePaths=-/etc/anas-spike
+InaccessiblePaths=-/etc/a-nas-assistant/tokens
+InaccessiblePaths=-/run/anas-spike-tokens
+InaccessiblePaths=-/run/anas-spike-broker
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectProc=invisible
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @privileged
+SystemCallErrorNumber=EPERM
+TasksMax=64
+MemoryMax=128M
