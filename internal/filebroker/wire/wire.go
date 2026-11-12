@@ -50,9 +50,12 @@ const (
 // prepares, approves, rejects and expires changes with the member's session,
 // which the broker checks itself (decision 10); the assistant's MCP tool
 // applies them on the assistant socket, where the member is the caller's UID.
+// assistant_run asks for one of the member's scheduled tasks to run now, in a
+// round of the member's cron unit (#469).
 const (
 	OpTerminal      = "terminal"
 	OpAssistant     = "assistant"
+	OpAssistantRun  = "assistant_run"
 	OpShareReset    = "share_reset"
 	OpShareFence    = "share_fence"
 	OpShareCheck    = "share_check"
@@ -93,6 +96,8 @@ type Request struct {
 	// Fresh asks for a new login to the assistant: the last access token was
 	// refused (the instance restarted and signs with a new key).
 	Fresh bool `json:"fresh,omitempty"`
+	// Task is the scheduled task assistant_run asks to run now.
+	Task string `json:"task,omitempty"`
 }
 
 type ChangeRequest struct {

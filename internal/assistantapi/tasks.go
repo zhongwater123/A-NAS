@@ -16,11 +16,12 @@ import (
 // makes one in a conversation, with Hermes's own cronjob tool, and
 // anas-assistant-cron-waker runs it when due in the member's own sandbox,
 // with nobody there to confirm a change. These routes show the member's tasks
-// and each task's runs, and pause, resume, run or delete a task, through
-// Hermes's own cron routes as Hermes Desktop uses them. They do not make or
-// edit tasks: what a task does is what the member asked for in a
-// conversation. A run is a conversation of its own (source cron), listed
-// under its task, not among the conversations.
+// and each task's runs, and pause, resume or delete a task, through Hermes's
+// own cron routes as Hermes Desktop uses them; running a task now is asked of
+// the File Broker instead (runTask). They do not make or edit tasks: what a
+// task does is what the member asked for in a conversation. A run is a
+// conversation of its own (source cron), listed under its task, not among the
+// conversations.
 
 // taskIDPattern is the id Hermes gives a job (uuid4 hex, 12 digits); matching
 // it also shuts out Hermes's lookups by job name.
@@ -28,15 +29,18 @@ var taskIDPattern = regexp.MustCompile(`^[0-9a-f]{12}$`)
 
 const (
 	taskRunLimit = 20
-	// runTimeout bounds a run started from the window, as the cron unit's
-	// own TimeoutStartSec bounds a scheduled one.
+	// runTimeout is the longest a run lasts: the cron unit's own
+	// TimeoutStartSec.
 	runTimeout = time.Hour
 )
 
-// runStartWait is how long running a task now waits for Hermes before
-// answering that the run started: Hermes answers when the run ends. Tests
-// shorten it.
-var runStartWait = 3 * time.Second
+// TaskRunner has one of the signed-in member's scheduled tasks run now, in a
+// round of the member's cron unit, where every scheduled task runs. It acts
+// for the member whose session the context carries, and returns once the
+// round was asked for.
+type TaskRunner interface {
+	RunTask(ctx context.Context, task string) error
+}
 
 // task is what the window shows of one of the member's scheduled tasks.
 // Fields Hermes keeps for itself (the model, the profile's home, delivery
@@ -253,51 +257,43 @@ func (h *Handler) deleteTask(w http.ResponseWriter, r *http.Request, account str
 	}
 }
 
-// runTask runs a task now, in the member's instance, as Hermes Desktop's
-// "run now" does; Hermes resumes a paused task it runs, and runs a finished
-// one-off again. Hermes answers when the run ends, so a run that takes longer
-// than runStartWait is answered as started (202) and goes on; its end shows
-// in the task and as a notice.
+// runTask has a task run now, and answers once that was asked for (202): the
+// run's end shows in the task and as a notice. The task runs in a round of
+// the member's cron unit, like one that is due, and never in the instance:
+// asked through Hermes's own trigger route, `hermes serve` starts a gateway
+// of its own inside the instance, which stays there, takes over the member's
+// due tasks and records its first run as failed (#469). The round queues the
+// task with Hermes's own "run on the next tick", which resumes a paused task
+// and leaves the run it was waiting for where it was.
 func (h *Handler) runTask(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := taskID(w, r)
 	if !ok {
 		return
 	}
-	type outcome struct {
-		status int
-		data   []byte
-		err    error
+	if h.options.Tasks == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "assistant_unavailable", "tasks cannot be run from here on this device")
+		return
 	}
-	done := make(chan outcome, 1)
-	// The run outlives this request; the session it was asked with still
-	// passes the gate, and signing out ends it there.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), runTimeout)
-	go func() {
-		defer cancel()
-		status, data, err := h.rest(ctx, account, http.MethodPost, "/api/cron/jobs/"+id+"/trigger", nil)
-		if err != nil || status >= 300 {
-			h.logger.Info("assistant task run ended", "account", account, "task", id, "status", status, "error", err)
-		}
-		done <- outcome{status, data, err}
-	}()
-	select {
-	case result := <-done:
-		switch {
-		case result.err != nil:
-			h.unavailable(w, account, result.err)
-		case result.status >= 300:
-			h.relayTaskError(w, result.status, result.data)
-		default:
-			var job hermesJob
-			_ = json.Unmarshal(result.data, &job)
-			h.logger.Info("assistant task run", "account", account, "task", id)
-			httpjson.Write(w, http.StatusOK, map[string]any{"task": job.view(), "finished": true})
-		}
-	case <-time.After(runStartWait):
-		h.logger.Info("assistant task run started", "account", account, "task", id)
-		httpjson.Write(w, http.StatusAccepted, map[string]any{"finished": false})
-	case <-r.Context().Done():
+	// The task is one of the member's, and one a round can run: Hermes runs
+	// no task whose runs are over, and one run of a task at a time.
+	var job hermesJob
+	if !h.taskCall(w, r, account, http.MethodGet, "/api/cron/jobs/"+id, &job) {
+		return
 	}
+	switch found := job.view(); {
+	case found.Running:
+		httpjson.WriteError(w, http.StatusConflict, "task_running", "the task is already running")
+		return
+	case found.State == "completed" || found.State == "error":
+		httpjson.WriteError(w, http.StatusConflict, "task_finished", "the task has no more runs")
+		return
+	}
+	if err := h.options.Tasks.RunTask(r.Context(), id); err != nil {
+		h.unavailable(w, account, err)
+		return
+	}
+	h.logger.Info("assistant task asked to run now", "account", account, "task", id)
+	httpjson.Write(w, http.StatusAccepted, map[string]any{"finished": false})
 }
 
 // taskCall is call with a task's errors: a missing task, or one already

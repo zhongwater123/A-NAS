@@ -4,13 +4,14 @@
 # disposable Debian 13 container where systemd is PID 1, then checks every
 # entry point that touches the data volume: Web files (File Broker workers), SMB, the photo API, the FFmpeg
 # worker shared by the media center and music, the administrator terminal,
-# the LAN Web entry that Caddy serves on port 80, and the internet entry's
-# HTTPS site. Unlike tests that start the daemons by hand, it runs them under
+# the LAN Web entry that Caddy serves on port 80, the internet entry's
+# HTTPS site, and the App Center's Docker and container agent. Unlike tests that start the daemons by hand, it runs them under
 # the production sandboxes, so it catches a unit that takes the Host Agent's
 # CAP_SETUID (issue #38).
 #
 # The repository holds three releases: the one under test, the "previous" one
-# (the same programs at a lower version) and a "next" one whose Product
+# (the same programs at a lower version, without the Docker policy dependency,
+# as before that policy existed) and a "next" one whose Product
 # Service has one more database step (internal/accounts/rollbacktest.go). The
 # test installs the previous release, upgrades to this one, and at the end
 # upgrades to the next, rolls back to this one and to the previous, and
@@ -34,7 +35,9 @@
 # scripts/build-content-packages.sh describes), it installs the real models
 # and runtimes instead; SearXNG then starts without reaching any engine.
 # Qdrant and the text reader's llama-server are always the real ones that
-# scripts/fetch-qdrant.sh and scripts/fetch-llama.sh fetch.
+# scripts/fetch-qdrant.sh and scripts/fetch-llama.sh fetch, and so are Docker
+# and Caddy, which the repository carries as A-NAS's does
+# (scripts/fetch-upstream-packages.sh, ADR 0015).
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -61,15 +64,29 @@ if [[ "${1:-}" != --inside ]]; then
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
+  # The old package boundary predates a-nas-docker-policy. A previous package
+  # made entirely by today's builder would otherwise mask its removal on a
+  # historical rollback. Keep the same programs for the database tests, but
+  # give the previous host package that older dependency contract.
+  legacy_host=$work/legacy-host
+  dpkg-deb --raw-extract "$work/previous/a-nas-host_${version}~previous_all.deb" "$legacy_host"
+  sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
+  dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
     -o "$work/next-programs/anas-api" ./cmd/anas-api)
   bash "$repo/scripts/build-packages.sh" "$work/next" "$version+next" "$work/next-programs" >/dev/null
-  bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$version" "$work/gnupg" >/dev/null
+  # a-nas-host depends on the keyring at least at its own version.
+  for release in "$version" "$version+next"; do
+    bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$release" "$work/gnupg" >/dev/null
+  done
+  upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
+  mapfile -t upstream <<<"$upstream"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host}_*.deb "$work"/next/a-nas{,-host}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb >/dev/null
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -241,18 +258,20 @@ ln -s /usr/lib/systemd/system/wg-quick@.service /etc/systemd/system/multi-user.t
 systemctl daemon-reload
 
 # apt reads the A-NAS repository alone, as the deploy runbook adds it: the
-# image's Debian and Caddy sources would need the network, and every package
-# A-NAS depends on is installed already.
+# image's Debian sources would need the network, and every Debian package
+# A-NAS depends on is installed already. Docker and Caddy come from the
+# repository.
 install -d /etc/apt/sources.list.d/disabled
 mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
-dpkg -i "$repository"/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_*.deb >/tmp/keyring.log
+dpkg -i "$repository/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_${version}_all.deb" >/tmp/keyring.log
 sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
   /usr/share/doc/a-nas-archive-keyring/a-nas.sources >/etc/apt/sources.list.d/a-nas.sources
 # apt_install VERSION NAME: the runbook's command for the product's packages
 # at VERSION, which may be older; apt's output goes to /tmp/NAME.log.
 apt_install() {
   apt-get update -qq >"/tmp/$2.log" 2>&1 &&
-    apt-get install -y --no-install-recommends --allow-downgrades "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
+    apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold \
+      "a-nas=$1" "a-nas-host=$1" a-nas-docker-policy >>"/tmp/$2.log" 2>&1
 }
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 for release in "$previous" "$version"; do
@@ -667,6 +686,59 @@ sharing_smoke() {
   return 1
 }
 check "member sharing works through production service sandboxes" sharing_smoke
+# --- Docker and Caddy (ADR 0015): apt installed them from A-NAS's repository
+# as a-nas-host depends on them, at the versions deploy/upstream/packages.json
+# pins. Docker waits for the address pool the App Center's runbook gives it
+# (ADR 0013), then the container agent reaches it.
+upstream_pinned() {
+  local name pinned
+  while read -r name pinned; do
+    [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+}
+check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "Docker waits for its address pool" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker does not start on request before it has its address pool" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket'
+install -d /etc/docker
+for config in '{}' '{"log-driver":"json-file"}' '{"bip":"10.96.127.1/24"}' \
+  '{"default-address-pools":[{"base":"10.96.64.0/19","size":24}]}' \
+  '{"bip":"10.96.127.1/24","default-address-pools":[]}' '{'; do
+  printf '%s\n' "$config" >/etc/docker/daemon.json
+  systemctl reset-failed docker.socket docker.service
+  systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+  check "Docker refuses incomplete or malformed address-pool config: $config" \
+    bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+done
+systemctl reset-failed docker.socket docker.service
+printf '{"bip": "10.96.127.1/24", "default-address-pools": [{"base": "10.96.64.0/19", "size": 24}]}\n' >/etc/docker/daemon.json
+check "Docker accepts the runbook's address pool" quiet dockerd --validate --config-file /etc/docker/daemon.json
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker starts with its address pool" systemctl is-active --quiet docker.service
+check "Docker allocates networks from the pool alone" \
+  test "$(docker info --format '{{json .DefaultAddressPools}}' 2>>"$hidden")" = '[{"Base":"10.96.64.0/19","Size":24}]'
+check "Docker's bridge has the runbook's address" \
+  test "$(ip -4 -o addr show dev docker0 2>>"$hidden" | awk '{print $4}')" = 10.96.127.1/24
+systemctl start anas-container-agent.service >>"$hidden" 2>&1 || true
+# The engine's version, as docker-ce's Debian version 5:29.9.3-1~debian.13~trixie carries it.
+docker_engine=$(jq -r '.packages[] | select(.name == "docker-ce") | .version' /src/deploy/upstream/packages.json |
+  sed -e 's/^[0-9]*://' -e 's/-[^-]*$//')
+agent_snapshot() {
+  for _ in $(seq 1 50); do
+    setpriv --reuid=a-nas --regid=a-nas --init-groups curl -fsS --unix-socket /run/a-nas-container/agent.sock \
+      http://agent/v1/snapshot 2>>"$hidden" | jq -e --arg version "$docker_engine" '.engine.version == $version' >/dev/null && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "the container agent gives the Product Service the pinned Docker engine" agent_snapshot
+# The rest of the test runs as the packages leave a machine whose
+# administrator has not turned the App Center on.
+systemctl stop anas-container-agent.service docker.socket docker.service >>"$hidden" 2>&1 || true
+rm -f /etc/docker/daemon.json
+ip link delete docker0 2>/dev/null || true
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
@@ -2237,6 +2309,7 @@ PY
 }
 check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
 check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the newer release brought its keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "the upgrade copied the databases first" \
   test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
 check "apt rolls back to this release" reinstall rollback-this "$version"
@@ -2245,7 +2318,30 @@ check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+legacy_without_policy() {
+  ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
+}
+policy_stays() {
+  local file
+  for file in /usr/lib/systemd/system/docker.{service,socket}.d/a-nas-docker-policy.conf \
+    /usr/lib/a-nas-docker-policy/check-address-pool; do
+    [[ "$(dpkg-query -S "$file")" == "a-nas-docker-policy: $file" ]] || return 1
+  done
+}
+check "the previous host package has no Docker policy dependency" legacy_without_policy
+check "Docker policy remains independently installed after a historical-layout rollback" policy_stays
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker stays stopped without a pool after rolling back to a pre-policy package" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+printf '{}\n' >/etc/docker/daemon.json
+systemctl reset-failed docker.socket docker.service
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "an empty config cannot bypass the policy after rolling back" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+systemctl reset-failed docker.socket docker.service
+rm /etc/docker/daemon.json
 check "a-nas-check passes on the previous release" quiet a-nas-check
+check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true

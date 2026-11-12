@@ -4,12 +4,15 @@ Architecture: all
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
-Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64
-Suggests: caddy, wireguard-tools, nftables, docker-ce, docker-compose-plugin, tini, socat, ripgrep
-Description: what an A-NAS device needs from Debian
+Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64, @UPSTREAM@, nftables, wireguard-tools, a-nas-archive-keyring (>= @VERSION@), a-nas-docker-policy (>= @VERSION@)
+Description: what an A-NAS device needs from Debian and upstream
  The Host Agent, the Product Service and their workers run these commands
  and link these libraries. The a-nas package requires this package at the
- version of the release it installs (docs/adr/0031). Caddy (the LAN entry),
- WireGuard and nftables (the internet entry, docs/adr/0032), Docker (the App
- Center) and the assistant's sandbox tools are suggested: each is turned on
- by its own runbook.
+ version of the release it installs (docs/adr/0031). Caddy serves the LAN
+ entry (docs/adr/0012) and, with WireGuard and nftables, the internet entry
+ (docs/adr/0032); Docker runs the App Center's apps. Caddy and Docker are the
+ upstream packages that A-NAS's repository carries, at least at the versions
+ deploy/upstream/packages.json pins for this release (docs/adr/0015). The
+ internet entry and the App Center stay off until their runbooks turn them
+ on. Each release brings the keyring it was signed for, so a revoked or added
+ subkey of the archive key reaches the device with the next upgrade.

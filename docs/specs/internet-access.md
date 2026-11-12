@@ -68,7 +68,7 @@
 
 - 配置只有 `/etc/a-nas/internet.env` 一处：`ANAS_INTERNET_HOST`（域名）、`ANAS_INTERNET_RELAY_ENDPOINT`（边缘服务器的 `IPv4:端口`）、`ANAS_INTERNET_RELAY_PUBLIC_KEY`（边缘服务器的 WireGuard 公钥）与 `ANAS_INTERNET_TUNNEL_PREFIX`（隧道的 ULA /64）。安装器校验四项，任何一项不合法时以退出码 2 停止，不改动系统。
 - 文件存在时，安装器还要求：
-  - 已装 Caddy，且带 `caddy.listeners.proxy_protocol` 模块，即官方源的 2.7 或更新版本；
+  - 已装 Caddy，且带 `caddy.listeners.proxy_protocol` 模块，即 Caddy 官方的 2.7 或更新版本（A-NAS 软件源携带，`a-nas-host` 依赖它）；
   - 已装 `wg`、`wg-quick` 与 `nft`。
 
   缺少时以退出码 3 停止，打印要安装的软件包。删除该文件后再运行安装器，就停用互联网入口：安装器移除 Caddy 站点、产品服务的互联网端口、防火墙表与隧道，保留 NAS 的隧道密钥。

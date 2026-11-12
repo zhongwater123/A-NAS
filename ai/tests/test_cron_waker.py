@@ -98,6 +98,11 @@ class WakeTests(unittest.TestCase):
         state = patch.object(waker, "STATE", temporary.name)
         state.start()
         self.addCleanup(state.stop)
+        # And nobody asked to run a task now, unless a test says so.
+        self.runs = Path(temporary.name) / "runs"
+        runs = patch.object(waker, "RUNS", str(self.runs))
+        runs.start()
+        self.addCleanup(runs.stop)
 
     def test_activity_is_verified_over_the_host_agents_unix_socket(self):
         for status, name, expected in ((200, "alice", True), (200, "bob", False), (401, "alice", False), (404, "alice", None), (503, "alice", None)):
@@ -191,6 +196,25 @@ class WakeTests(unittest.TestCase):
         self.assertTrue(self.starts(["a"], -3600))
         Path(waker.STATE, "alice").write_text("{")
         self.assertTrue(self.starts(["a"], -3599))
+
+    def test_a_task_asked_to_run_now_starts_a_round_with_nothing_due(self):
+        self.assertFalse(self.starts([], 0))
+        (self.runs / "alice").mkdir(parents=True)
+        self.assertFalse(self.starts([], 1))
+        (self.runs / "alice" / "a1b2c3d4e5f6").touch()
+        self.assertTrue(self.starts([], 2))
+        # Another member's request is not hers.
+        (self.runs / "alice" / "a1b2c3d4e5f6").unlink()
+        (self.runs / "bob").mkdir()
+        (self.runs / "bob" / "a1b2c3d4e5f6").touch()
+        self.assertFalse(self.starts([], 3))
+
+    def test_a_task_asked_to_run_now_is_not_held_back_by_jobs_that_did_not_move(self):
+        self.assertTrue(self.starts(["a"], 0))
+        self.assertFalse(self.starts(["a"], 30))
+        (self.runs / "alice").mkdir(parents=True)
+        (self.runs / "alice" / "a1b2c3d4e5f6").touch()
+        self.assertTrue(self.starts(["a"], 31))
 
     def test_a_round_starts_even_when_it_cannot_be_noted(self):
         blocked = Path(waker.STATE) / "a-file"

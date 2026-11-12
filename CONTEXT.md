@@ -273,7 +273,7 @@ _Avoid_：生产 NAS、开发主机
 _Avoid_：桌面环境、无头预览、特权 UI
 
 **局域网 Web 入口（LAN Web Entry）**：
-NAS 上由 Caddy 在 80 端口以 HTTP 提供、转发到只监听回环的产品服务的局域网访问点；未安装 Caddy 时不存在。
+NAS 上由 Caddy 在 80 端口以 HTTP 提供、转发到只监听回环的产品服务的局域网访问点；Caddy 随 `a-nas-host` 安装，管理员停用 Caddy 时不存在。
 _Avoid_：公网访问、远程访问、直接开放产品服务
 
 **互联网入口（Internet Entry）**：

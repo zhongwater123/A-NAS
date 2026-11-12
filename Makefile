@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release build build-binaries packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test release build build-binaries packages check check-steps clean
 
 all: check
 
@@ -157,6 +157,7 @@ vendor-check:
 # out what ai/requirements.excludes names, which a lock regenerated without
 # --excludes (Dependabot's) would not.
 ops-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS)
@@ -186,6 +187,8 @@ ops-check:
 	grep -Fqx '#ANAS_CONTAINERS_MODE=agent' deploy/site/site.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
+	@# a-nas-host depends on the upstream packages that A-NAS's repository carries (ADR 0015).
+	grep -Eq '^Depends: (.*, )?@UPSTREAM@(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	grep -Eq '^Depends: a-nas-host \(= @VERSION@\), ' deploy/debian/a-nas/DEBIAN/control
 	grep -Fq '"a-nas=$$VERSION" "a-nas-host=$$VERSION"' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
@@ -336,6 +339,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
+	$(RUFF) check --config ai/ruff.toml deploy/docker
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
@@ -369,10 +373,18 @@ root-integration-test:
 system-test: packages
 	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
 
+# The A-NAS archive key's procedures with a throwaway key: two machines sign
+# one repository, one subkey is revoked, another is added, and apt in the
+# system test's image accepts and refuses as a device would
+# (docs/runbooks/manage-release-key.md); needs Docker.
+release-key-test:
+	scripts/test-release-key.sh $(SYSTEM_TEST_IMAGE)
+
 # A release (ADR 0034): the packages make check and make system-test passed at
 # this commit, with the content packages from CONTENT, in the signed apt
-# repository REPO (scripts/release.sh). GnuPG and aptly run in the system
-# test's image.
+# repository REPO (scripts/release.sh), signed with this machine's subkey of
+# the A-NAS archive key, whose passphrase it asks for. GnuPG and aptly run in
+# the system test's image.
 REPO ?= $(BUILD_DIR)/apt
 release:
 	@test -n "$(CONTENT)" || { echo "make release needs CONTENT, the release content store (scripts/build-content-packages.sh)" >&2; exit 2; }

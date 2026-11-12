@@ -24,7 +24,7 @@ ip -brief link show dev <上一行的网卡>
 
 有本机屏幕的设备在部署手册第 6 步的命令中加上 `a-nas-console=<版本>`，本地控制台见[本地控制台运行手册](operate-local-kiosk.md)。
 
-安装或升级会重启 Host Agent，由它幂等修复现有卷的目录和 ACL；软件包不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，`anas-site.service` 同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。
+安装或升级会重启 Host Agent，由它幂等修复现有卷的目录和 ACL；软件包不会重新分区或格式化已经挂载的数据盘。`anas-site.service` 同时校验并更新局域网 Web 入口（Caddy 随 `a-nas-host` 安装），见[启用局域网 Web 访问](enable-lan-web-access.md)。
 
 屏保视频不随软件包发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)），安装与升级保留当前视频池。更换视频的步骤见[本地控制台运行手册](operate-local-kiosk.md#更换屏保视频)。
 
