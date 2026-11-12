@@ -22,6 +22,7 @@ import { Companion } from "../companion/Companion";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
+import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
 import { useStoragePlan } from "../settings/storagePlan";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
@@ -160,6 +161,30 @@ export function Desktop({
   }, [session.user.id]);
   // Only the switch reaches the windows' context, not every minute's read.
   const webSearchEnabled = useWebSearch()?.enabled ?? false;
+  // 照片打分 is read when the account signs in and when the page comes back
+  // into view, so a member an administrator just chose finds it.
+  const [scoring, setScoring] = useState<ScoringAccess>(noScoring);
+  useEffect(() => {
+    let live = true;
+    const read = () =>
+      void scoringAccess()
+        .then((access) => {
+          if (live)
+            setScoring((current) =>
+              current.admin === access.admin && current.rater === access.rater ? current : access,
+            );
+        })
+        .catch(() => undefined);
+    read();
+    const visible = () => {
+      if (!document.hidden) read();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      live = false;
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -174,13 +199,14 @@ export function Desktop({
       isAdmin,
       assistantReady,
       webSearchEnabled,
+      scoring,
       open,
       intents,
       intentHandled,
       changeUser,
       logout: onLogout,
     }),
-    [session, isAdmin, assistantReady, webSearchEnabled, open, intents, intentHandled, changeUser, onLogout],
+    [session, isAdmin, assistantReady, webSearchEnabled, scoring, open, intents, intentHandled, changeUser, onLogout],
   );
   const settingsState = useMemo<SettingsState>(
     () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),

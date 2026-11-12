@@ -685,6 +685,19 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByRole("button", { name: "打开网页搜索" })).not.toBeInTheDocument();
   });
 
+  it("shows 照片打分 only where its module is installed, to the accounts it lets in", async () => {
+    serveDesktop({ scoring: { admin: false, rater: true } });
+    serveWindows();
+    const { unmount } = render(<App />);
+    expect((await screen.findAllByRole("button", { name: "打开照片打分" })).length).toBeGreaterThan(0);
+    unmount();
+
+    serveDesktop({ scoring: { admin: false, rater: false } });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     serveDesktop();
     serveWindows();
