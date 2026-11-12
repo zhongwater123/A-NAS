@@ -149,6 +149,16 @@ case "${1:-}" in
     rmdir "$out"
     trap 'rm -rf -- "$out"' EXIT
     flat "$out" "$repo" "$dist" "$gnupg" "$keep"
+    if ! command -v gh >/dev/null; then
+      # On a Windows development machine gh is signed in on Windows, not in
+      # WSL: the flat form stays for its upload from Git Bash.
+      trap - EXIT
+      echo "no gh here: upload from where gh is signed in, such as Git Bash, then remove the directory:"
+      # Git Bash names /mnt/d/... as D:/...
+      where=$(sed -E 's|^/mnt/([a-z])/|\U\1:/|' <<<"$out")
+      echo "  scripts/publish-github.sh upload $where $github $tag && rm -rf $where"
+      exit 0
+    fi
     upload "$out" "$github" "$tag"
     ;;
 esac

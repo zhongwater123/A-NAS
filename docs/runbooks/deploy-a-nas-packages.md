@@ -50,7 +50,9 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
      make publish REPO=/mnt/d/A-NAS-releases/apt CHANNEL=release   # 只在打了 release 标签时
      ```
      它把这个渠道生成为 apt 的平铺软件源（软件包以 SHA-256 命名，索引由存档密钥签名），先传新的软件包，再传索引，最后删去不再需要的；`dev` 只留最近 20 个版本。要口令。第一次上传全部模型约 4.2 GB。
+     开发机的 `gh` 装在 Windows 而不在 WSL 中时，`make publish` 只生成平铺的目录，并打印要在 Git Bash 中运行的上传命令。
      完成标准：最后一行打印 `https://github.com/zhongwater123/A-NAS-dist/releases/download/apt-<渠道>/`。
+     2026-11-12 用测试密钥签的一个小软件源验证过：上传到发布 `apt-probe` 后，容器中的 apt 经 GitHub 的跳转核对签名、读取索引并装上了软件包，之后删除了这个发布。
 2. 部署机，只对不能上网的机器：把软件源目录原样复制到 NAS 的暂存账号下，例如：
    ```bash
    rsync -a --delete <软件源目录>/ anas-dev@a-nas-dev:apps/a-nas/repository/
