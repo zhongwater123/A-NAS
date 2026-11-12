@@ -23,6 +23,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
   │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
+  ├── /api/v1/modules/<id> 转发 ──► 可移除模块（自己的脚本安装与移除；独占 module-<id> 子卷；如照片打分 a-nas-scoring；ADR 0037）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
@@ -40,7 +41,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
                     │        ├── 助手连接：核对会话后以 root 连接本人的实例套接字并交回，会话失效即切断（ADR 0024）
                     │        └── 助手更改的执行方：凭会话生成卡片与登记授权；助手套接字上按对端 UID 执行，Landlock 限制写入位置
-                    └── 会话与账号查询（供相册和分享服务确认身份，或助手套接字对端 UID 的账号）
+                    ├── 会话与账号查询（供相册和分享服务确认身份，或助手套接字对端 UID 的账号）
+                    └── 按模块清单维护模块存储，并为模块提供会话查询（ADR 0037）
 
 Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
                          ├── 隐藏回收站
@@ -80,6 +82,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 19. 产品服务的配置在启动时从环境一次解析并校验（[`cmd/anas-api/config.go`](../../cmd/anas-api/config.go)，各二进制经 [`internal/envconfig`](../../internal/envconfig/envconfig.go) 读取环境）。`ANAS_HOSTSTATE_MODE` 没有默认值，开发写 `fake`，NAS 写 `agent`；`agent` 拒绝任何开发用的 Adapter：进程内 FFmpeg、Fake 容器、开发用 AI、直连助手套接字与 spike 的更改代理。监听地址只能是回环地址。文件服务必须由调用方给出文件系统：生产是文件代理，进程内的本地文件系统只能经 `files.NewLocalService` 显式选择（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）。
 20. 向量索引是派生数据（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：每个持有向量的服务有自己的 Qdrant 实例，只有它能连；索引只由它从自己的 Catalog 经事务内的 outbox 同步与重建，随时可以清空。点上只有内容 ID 与范围键，索引命中不构成授权，结果返回前仍按 Policy 复核。人脸与宠物向量不进索引。
 21. 网页搜索服务是唯一代成员访问外网的内置服务（[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)）：只有产品服务能连接它的套接字，它看不到数据卷，单元的 IP 访问控制只放行公网地址与本机的 DNS 服务器；搜索词只在请求体中，不进日志。
+22. 可移除模块（[ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)）只经产品服务的转发被访问，只带会话令牌，模块自己向 Host Agent 确认会话；模块没有网络，在数据卷上只看到自己的 `module-<id>` 存储与单元只读绑定的共享文件夹。A-NAS 本体只保留与具体模块无关的转发、会话查询与存储代码：安装与移除模块不改本体，本体也从不删除模块存储。
 
 ## HTTP 接口约定
 
@@ -152,6 +155,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/mediaplay` | 浏览器怎样播放视频：能力解析、直接播放/转封装/转码的决定、转换流的 MIME、起点校验与每个进程的转换槽位；影视中心与相册各自把视频描述为 `mediaplay.Source` 并适配决定 | 已实现，影视中心与相册共用 |
 | `internal/ffmpegworker` | FFmpeg Worker：与应用无关的类型化协议（探测、截图、HEIF 图片、字幕、视频流、音频解码）、FFmpeg 与 libheif 命令、按连接服务端（`anas-api ffmpeg-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker`、相册经 `photos.Options.Media` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md) |
+| `internal/modules` / `internal/modulemanifest` | 可移除模块的通用部分：产品服务按模块登记表转发并判断是否已安装，模块端确认会话与检查存储；`modulemanifest` 只用标准库，供 Host Agent 读清单（[ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)） | 单元测试与系统测试覆盖 |
+| `internal/scoring` / `internal/scoringapi` / `cmd/anas-scoring` | 照片打分模块：批次、领取、盲评的回答、统计与导出，独立进程与账号（[技术设计](photo-scoring.md)） | 单元、接口与系统测试覆盖；实验 NAS 待安装 |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单、评论与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/personalization` | “设置 → 个性化”的设备级设置：系统盘上 `personalization.db` 中全体账号共用的桌面壁纸（图片经转正、缩到 3840 px 并重新编码为 JPEG）与样式，以及本机屏幕的息屏时长 | 已实现，单元测试覆盖；`internal/personalizationapi` 提供 `/api/v1/wallpaper`（已登录读取）与 `/api/v1/local-display`（读取无需登录），修改仅管理员，见[个性化规格](../specs/personalization.md) |
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，`internal/activityapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |

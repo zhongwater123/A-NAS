@@ -26,6 +26,7 @@
 - [把硬盘加入数据卷](add-a-disk-to-the-data-volume.md)（draft；实验 NAS 待执行）
 - [镜像缺盘与更换硬盘](replace-a-mirror-disk.md)（draft；实验 NAS 待执行）
 - [在实验 NAS 上验收已部署的功能](accept-features-on-experimental-nas.md)（draft；按模块分节，验收完成的节随即删去）
+- [安装与移除照片打分](install-and-remove-photo-scoring.md)（draft；系统测试已验证，实验 NAS 待执行）
 
 ## 使用方式
 
