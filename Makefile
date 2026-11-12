@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test release build build-binaries packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release build build-binaries packages check check-steps clean
 
 all: check
 
@@ -91,8 +91,28 @@ web-lint: web-install
 web-test: web-install
 	cd web && $(NPM) test
 
+# The build ships the licenses of the code copied into web/src (each LICENSE
+# there, beside the README that names its source) as
+# assets/third-party-licenses.txt: the bundle keeps no comments. Code copied
+# in (a README.md with a "Copied from [" line) without an MIT LICENSE beside
+# it fails the build.
+THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
+
 web-build: web-install
 	cd web && $(NPM) run build
+	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
+		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
+			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \
+	done
+	@licenses="$$(find web/src -name LICENSE -not -path '*/node_modules/*' | LC_ALL=C sort)"; \
+	{ echo 'Code copied into the A-NAS Web UI from other projects, and its licenses.'; \
+	for license in $$licenses; do \
+		folder="$${license%/LICENSE}"; \
+		from="$$(sed -n 's/^Copied from \[\([^]]*\)\](\([^)]*\)) commit `\([0-9a-f]*\)`.*/\1 (\2) commit \3/p' "$$folder/README.md" 2>/dev/null)"; \
+		printf '\n== %s: %s ==\n\n' "$$folder" "$${from:-see its README.md}"; cat "$$license"; \
+	done; } > $(THIRD_PARTY_LICENSES); \
+	test "$$(grep -c '^Permission is hereby granted' $(THIRD_PARTY_LICENSES))" -eq "$$(grep -l '^Permission is hereby granted' $$licenses | wc -l)" -a -n "$$licenses" || \
+		{ echo "$(THIRD_PARTY_LICENSES) lacks a license of web/src" >&2; exit 1; }
 
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
@@ -117,6 +137,19 @@ docs-check:
 	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
 	lychee --offline --include-fragments --no-progress --files-from -
+
+# dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).
+# Offline: the pool its manifest makes is the one install-media-pool.sh pins and
+# its README is current. With DSH_PET naming a dsh-pet checkout at the pinned
+# commit, it vendors again and requires no difference; DSH_PET_MOV_ZIP, the
+# pinned assets-mov zip, checks the Safari animations too. CI has neither, and
+# the check says what it skipped.
+DSH_PET ?=
+DSH_PET_MOV_ZIP ?=
+VENDOR_PYTHON ?= python3
+
+vendor-check:
+	PYTHON=$(VENDOR_PYTHON) scripts/check-dsh-pet-vendor.sh $(DSH_PET) $(DSH_PET_MOV_ZIP)
 
 # Shell scripts, the GitHub workflows (actionlint), units and installer
 # conventions, Dependabot's groups (tools/depcheck keeps 0.x web packages out
@@ -264,7 +297,7 @@ ops-check:
 	test "$$(grep -c '^f /run/a-nas-ffmpeg/slots/[0-7] 0440 root a-nas-photos -$$' deploy/tmpfiles.d/a-nas.conf)" = 8
 	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
-		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant-spike/companion-mcp-sdk.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
@@ -309,6 +342,23 @@ ai-lint:
 ai-test:
 	cd ai && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .
 
+# The companion's MCP server under the real MCP SDK (ai/tests/test_companion_mcp.py),
+# which make ai-test has not got and the assistant's runtime is not built here
+# for: a virtual environment of its own with the SDK Hermes's lock pins
+# (ai/assistant-spike/companion-mcp-sdk.txt). Without the SDK it fails.
+AI_SDK_VENV ?= $(BUILD_DIR)/companion-mcp-sdk
+AI_SDK_STAMP = $(AI_SDK_VENV)/.installed
+
+$(AI_SDK_STAMP): ai/assistant-spike/companion-mcp-sdk.txt
+	rm -rf $(AI_SDK_VENV)
+	python3 -m venv $(AI_SDK_VENV)
+	$(AI_SDK_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
+		-r ai/assistant-spike/companion-mcp-sdk.txt
+	@touch $(AI_SDK_STAMP)
+
+ai-sdk-test: $(AI_SDK_STAMP)
+	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp
+
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
@@ -350,9 +400,10 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries packages
+check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
 	rm -rf $(BUILD_DIR)/packages
+	rm -rf $(AI_SDK_VENV)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete

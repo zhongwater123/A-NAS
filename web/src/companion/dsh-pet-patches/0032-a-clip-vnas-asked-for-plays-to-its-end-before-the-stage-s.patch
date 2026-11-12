@@ -1,0 +1,150 @@
+A clip VNAS asked for plays to its end before the stage's.
+
+The card switched to a stage's clip whenever the stage changed, also while
+a clip a command asked for was loading or playing: a turn that took its next
+step, or ended, right after VNAS played an animation cut that animation
+short, and its command was answered cancelled (superseded). Upstream a stage
+is a status the pet shows between commands, which come from a third party at
+any time; in A-NAS the commands come from the turn itself, so the turn's
+next step arrived during almost every animation it asked for.
+
+While a command's clip is loading or playing, a stage change now only
+updates the bubble and keeps the stage's clip, which plays at the next end
+instead of the clip the chain would pick (animation-flow applyEndedCue). A
+stage that goes idle meanwhile drops it, and a stage that switches at once,
+or a stage clip put back by the card, replaces it. A click or a drag still
+cuts a command's clip short, as upstream.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+index 28e66387..bc520bc9 100644
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -101,6 +101,8 @@ export interface OwnAnimation {
+   frontVideo: () => HTMLVideoElement | null;
+   /** 正在播的点播编号；自播动画为 `null`。 */
+   playingPlayback: () => string | null;
++  /** A-NAS: whether a command's clip is loading or playing. */
++  commandClip: () => boolean;
+   /** 卸载清理：中断在途请求、释放 blob，之后不可再用。 */
+   dispose: () => void;
+ }
+@@ -396,6 +398,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     isFrozen: () => frozen,
+     frontVideo,
+     playingPlayback: () => playing,
++    commandClip: () => playing !== null || (pending !== null && pending.playbackId !== null),
+     dispose: () => {
+       mounted = false;
+       clearTimeout(failedWait);
+diff --git a/client/pet/card/animation-flow.ts b/client/pet/card/animation-flow.ts
+index e96e8690..de668d25 100644
+--- a/client/pet/card/animation-flow.ts
++++ b/client/pet/card/animation-flow.ts
+@@ -32,6 +32,8 @@ export interface AnimationFlow {
+   sleeping(): boolean;
+   /** 当前睡觉阶段；醒着为 null。点击路径要区分「入睡过渡」与「真睡着」。 */
+   sleepPhase(): 'start' | 'loop' | 'end' | null;
++  /** A-NAS: the stage's clip to play at the next end, after the clip a command asked for (null: none). */
++  deferStage(stage: { name: string; once: boolean } | null): void;
+ }
+ 
+ /** 注入的 react 能力。 */
+@@ -67,6 +69,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+     // 必须放 ref：状态机持有「当前阶段」，放函数体局部变量会在每次渲染重建，睡觉状态当场丢失
+     // （视频还在睡姿、菜单却显示「睡觉」，点它也不叫醒）。
+     const machineRef = useRef<ReturnType<typeof createSleepMachine> | null>(null);
++    // A-NAS: the stage that came while a command's clip was loading or playing (cue-effects).
++    const deferredRef = useRef<{ name: string; once: boolean } | null>(null);
++    const deferStage = (stage: { name: string; once: boolean } | null): void => {
++      deferredRef.current = stage;
++    };
+     const sleep = (): ReturnType<typeof createSleepMachine> =>
+       (machineRef.current ??= createSleepMachine(hub, pickNext, log));
+     /** 此刻是否在睡（含两段过渡）。 */
+@@ -93,6 +100,7 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       if (own === null && (slot === undefined || slot.length === 0)) return false;
+       const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
++      deferredRef.current = null;
+       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
+       card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
+       card.actions.setAnim(name);
+@@ -140,6 +148,15 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       // 睡觉的三段推进与「起来播完回随机链」都在状态机里：它说这次 ended 归它管就直接返回。
+       if (sleep().consumeEnded()) return;
+       if (cue.kind === 'ignore') return;
++      // A-NAS: the clip a command asked for has ended (or what replaced it): the stage that came meanwhile.
++      const stage = deferredRef.current;
++      if (stage !== null) {
++        deferredRef.current = null;
++        card.actions.setOnce(stage.once);
++        card.actions.setAnim(stage.name);
++        card.actions.bumpSeq();
++        return;
++      }
+       if (cue.kind === 'work-rotate') {
+         card.actions.setOnce(true); // 保持 once=true，下一段播完再轮换。
+         card.actions.setAnim(cue.anim);
+@@ -202,6 +219,6 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       hub.bubbles.showWhisper(text, { image, url }, duration);
+     };
+ 
+-    return { applyEndedCue, applySleep, pickNext, resumeWorkStatusAnim, sleepPhase, sleeping, speak };
++    return { applyEndedCue, applySleep, deferStage, pickNext, resumeWorkStatusAnim, sleepPhase, sleeping, speak };
+   };
+ }
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+index 2b95b5e9..b509a35f 100644
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -75,6 +75,7 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+         if (isEventAnim(hub.anims().events, current) || current === workAnimRef.current)
+           hub.ownAnim.stopLoopingFront();
+         workAnimRef.current = null;
++        hub.deferStage(null);
+         hub.bubbles.resetWork();
+         return;
+       }
+@@ -116,6 +117,14 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+       // A-NAS: a step's own clip loops like a single one.
+       const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
+       workAnimRef.current = own;
++      // A-NAS: a clip VNAS asked for plays to its end, as its command is answered by it; the stage's clip
++      // follows it (animation-flow applyEndedCue). The stage switched it away, which answered the command
++      // cancelled, whenever the turn took a step or ended while it played.
++      if (hub.ownAnim.commandClip()) {
++        hub.deferStage({ name, once: terminal || rotating });
++        return;
++      }
++      hub.deferStage(null);
+       card.actions.setOnce(terminal || rotating);
+       card.actions.setAnim(name);
+     };
+diff --git a/client/pet/card/hub.ts b/client/pet/card/hub.ts
+index 40b5c1df..66269a08 100644
+--- a/client/pet/card/hub.ts
++++ b/client/pet/card/hub.ts
+@@ -45,6 +45,11 @@ export interface CardHub {
+   tryWalk(): boolean | string;
+   /** 依据名点播。 */
+   playByName: PlayByName;
++  /**
++   * A-NAS: a stage's clip to play once the clip a command asked for has ended, or null for none (the stage went
++   * idle, or its clip played).
++   */
++  deferStage(stage: { name: string; once: boolean } | null): void;
+   /** 说一句。 */
+   speak: Speak;
+   /** 此刻是否在睡（含入睡/醒来两段过渡）：自动来源据此闭嘴，显式唤醒走菜单或点击。 */
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+index 61a16e32..9e428079 100644
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -284,6 +284,7 @@ export function createCardRuntime(rt: PetRuntime) {
+       ownAnim,
+       // 来自 pets.<id>.anim 的点播是宿主指令，不按「用户点击」判睡觉
+       playByName,
++      deferStage: (stage) => liveRef.current.flow?.deferStage(stage),
+       posFollow: motion.posFollow,
+       speak: (text, image, url, duration, anim) => liveRef.current.flow?.speak(text, image, url, duration, anim),
+       // 睡觉是状态不是指令：自动来源（工作状态/余额/碎碎念）读它决定要不要闭嘴

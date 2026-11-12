@@ -1,0 +1,94 @@
+/*
+ * What VNAS is doing, as a small sign beside the pet's head (petCard.tsx sets the attributes on its
+ * wrapper, which takes no box): an ellipsis while VNAS thinks, works or waits, a check after a turn
+ * that succeeded and a cross after one that failed. Drawn on dsh-pet's root, which drags, walks and
+ * flights move frame by frame, so the sign goes with the pet without a render; the root lets the
+ * pointer through, and so does the sign.
+ *
+ * Under dsh-pet's bubble, which shows VNAS's line for the whole turn: the bubble's bottom is 0.4545 of
+ * the pet's size above the root's bottom (bubble.ts: 100% − 0.108, the root being 9/16 of the size tall)
+ * and its tail reaches 0.017 below that, while a long line makes it wide enough to reach either side of
+ * the head. The sign's top, 0.33 + 1.5 × 0.065 = 0.4275, stays below both, beside the head, which the
+ * clips draw from about 0.44 down. Above the stage (positioned, after the pill in the root's order, so
+ * it would paint over the pill where the hair or an arm crosses it) and below the bubble (z-index 3).
+ */
+.layer[data-companion-work] :global(.dsh-pet-root)::before,
+.layer[data-companion-work] :global(.dsh-pet-root)::after {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.33);
+  height: 1.5em;
+  font:
+    700 calc(var(--dsh-pet-size, 240px) * 0.065) / 1.5em system-ui,
+    sans-serif;
+  pointer-events: none;
+}
+
+/* The pill, behind the head as the pet faces: to the right of it when it faces left. */
+.layer[data-companion-work] :global(.dsh-pet-root)::before {
+  content: "";
+  left: 60%;
+  width: 2.2em;
+  border-radius: 0.75em;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 28%);
+}
+
+.layer[data-companion-work] :global(.dsh-pet-root[data-facing="right"])::before {
+  left: calc(40% - 2.2em);
+}
+
+/* What the pill says, from its left edge. */
+.layer[data-companion-work] :global(.dsh-pet-root)::after {
+  left: calc(60% + 0.6em);
+  width: 1em;
+  overflow: hidden;
+  color: #3a4766;
+  white-space: nowrap;
+}
+
+.layer[data-companion-work] :global(.dsh-pet-root[data-facing="right"])::after {
+  left: calc(40% - 1.6em);
+}
+
+/* VNAS is at it: the ellipsis shows one, two, then three of its dots, by its width. */
+.layer:is(
+    [data-companion-work="thinking"],
+    [data-companion-work="working"],
+    [data-companion-work="result"],
+    [data-companion-work="waiting"]
+  )
+  :global(.dsh-pet-root)::after {
+  content: "…";
+  animation: companion-dots 1.2s steps(3, jump-none) infinite;
+}
+
+.layer[data-companion-work="success"] :global(.dsh-pet-root)::after {
+  content: "✓";
+  color: #1f8a4c;
+}
+
+.layer[data-companion-work="error"] :global(.dsh-pet-root)::after {
+  content: "✕";
+  color: #c23b3b;
+}
+
+/* The companion rests: so does the sign. */
+.layer[data-companion-rest] :global(.dsh-pet-root)::after {
+  animation-play-state: paused;
+}
+
+@keyframes companion-dots {
+  from {
+    width: 0.34em;
+  }
+  to {
+    width: 1em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer[data-companion-work] :global(.dsh-pet-root)::after {
+    animation: none;
+  }
+}

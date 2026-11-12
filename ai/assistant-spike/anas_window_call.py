@@ -14,6 +14,7 @@ SOCKET = "/run/anas-assistant-companion/companion.sock"
 
 NO_DESKTOP = {"status": "no_desktop"}
 BAD_REQUEST = {"status": "rejected", "reason": "bad-request", "message": "参数无法读取"}
+BUSY = {"status": "busy"}
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -30,6 +31,12 @@ class UnixHTTP(http.client.HTTPConnection):
 
 def ask(path: str, route: str, tool: str, args: dict, timeout: float, too_long: dict) -> dict:
     """The product service's answer to one call on route, or what to say without it."""
+    try:
+        body = json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode()
+    except (TypeError, ValueError):
+        # A string with a lone surrogate, which UTF-8 cannot carry: the
+        # product service would not read it either.
+        return BAD_REQUEST
     conn = UnixHTTP(path, timeout)
     try:
         try:
@@ -38,12 +45,22 @@ def ask(path: str, route: str, tool: str, args: dict, timeout: float, too_long: 
             # No socket (a scheduled task's sandbox), or nobody serving it:
             # the call never reached the product service.
             return NO_DESKTOP
+        sent = True
         try:
-            conn.request("POST", route, json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode(),
-                         {"Content-Type": "application/json"})
+            conn.request("POST", route, body, {"Content-Type": "application/json"})
+        except OSError:
+            # The product service closed the connection before taking the
+            # call: over the member's connections it answers busy as it
+            # accepts one, before reading anything, and the answer is still
+            # there to read.
+            sent = False
+        try:
             response = conn.getresponse()
             raw = response.read()
         except (OSError, http.client.HTTPException):
+            if not sent:
+                # Not even a refusal: the call never got there.
+                return BUSY
             # A timeout, or the product service went away (a restart) once the
             # call was on its way: the window may have acted on it.
             return {"status": "timeout"}

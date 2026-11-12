@@ -85,6 +85,8 @@ export function createCardRuntime(rt: PetRuntime) {
     // A-NAS: the page's pause, for the animation chain's callbacks.
     const pausedRef = useRef(paused === true);
     pausedRef.current = paused === true;
+    const settledRef = useRef(props.playbackSettled);
+    settledRef.current = props.playbackSettled;
 
     // DOM 节点：视图挂载后才有值，驱动全部经取值函数读。
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +141,7 @@ export function createCardRuntime(rt: PetRuntime) {
       videoB: () => videoBRef.current,
       workStatusRef,
       paused: () => pausedRef.current,
+      settled: (playbackId) => settledRef.current?.(playbackId) === true,
     });
 
     const motion = useCardMotion({
@@ -224,6 +227,8 @@ export function createCardRuntime(rt: PetRuntime) {
       onFrozen: () => {
         // 光堵随机链不够：它只在动画播完时调用，不暂停会把当前这段播完才停。
         motion.stopMove();
+        // A-NAS: a stage held back behind a command's clip is not played after the freeze (animation-flow).
+        liveRef.current.flow?.deferStage(null);
         // 任务状态气泡：锁一生效就收掉，解冻不补亮。
         bubbles.hideWork();
       },
@@ -284,6 +289,7 @@ export function createCardRuntime(rt: PetRuntime) {
       ownAnim,
       // 来自 pets.<id>.anim 的点播是宿主指令，不按「用户点击」判睡觉
       playByName,
+      deferStage: (stage) => liveRef.current.flow?.deferStage(stage),
       posFollow: motion.posFollow,
       speak: (text, image, url, duration, anim) => liveRef.current.flow?.speak(text, image, url, duration, anim),
       // 睡觉是状态不是指令：自动来源（工作状态/余额/碎碎念）读它决定要不要闭嘴

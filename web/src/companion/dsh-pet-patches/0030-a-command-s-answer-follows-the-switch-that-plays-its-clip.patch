@@ -1,0 +1,124 @@
+A command's answer follows the switch that plays its clip.
+
+A switch kept no command of its own until its clip showed. A command whose
+clip another switch replaced while it loaded was never answered, and its
+caller waited out its whole wait to hear timeout; it is now answered
+cancelled (superseded) at once. A command for the clip the chain was already
+loading was answered playing before the clip showed, and when the clip
+showed the switch, which carried no command, answered the command cancelled
+although the clip then played to its end. The command now takes the loading
+switch over and is answered as that clip goes: playing once it shows, ended
+at its end. A command the switch carried before is cut short by the newer
+one, as when another switch takes over.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+index ec1951f4..eaf5139f 100644
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -36,6 +36,11 @@ interface PendingSwap {
+   anim: string;
+   once: boolean;
+   gen: number;
++  /**
++   * A-NAS: the command this switch plays, if any: its answer follows this switch, and a later command for
++   * the clip while it loads takes the switch over.
++   */
++  playbackId: string | null;
+ }
+ 
+ /** 动画链的依赖：全部用取值函数，避免捕获渲染期的快照。 */
+@@ -151,10 +156,13 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     cueUrl = null;
+     if (next === '') return;
+     if (pending !== null && pending.anim === next && pending.once === nextOnce) {
+-      // 防重命中仍要让点播有回执，避免调用方干等超时。
+-      if (cuePlaybackId !== null) {
+-        playing = cuePlaybackId;
+-        deps.report(cuePlaybackId, 'playing');
++      // A-NAS: the command takes over the switch already loading its clip, and is answered as that clip
++      // goes: playing once it shows and ended at its end. dsh-pet answered playing here, before the clip
++      // showed, and the switch, carrying no command, then answered the command cancelled when it showed.
++      // A command the switch carried is cut short by this one, as when another switch takes over.
++      if (cuePlaybackId !== null && pending.playbackId !== cuePlaybackId) {
++        if (pending.playbackId !== null) deps.report(pending.playbackId, 'cancelled', REASON_SUPERSEDED);
++        pending.playbackId = cuePlaybackId;
+       }
+       return;
+     }
+@@ -162,8 +170,13 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     if (import.meta.env.DEV && isEventAnim(cfg.animations.events, next)) {
+       console.log('[dsh-pet] ' + stamp(cfg.id) + ' switch ' + next + ' once=' + nextOnce);
+     }
++    // A-NAS: a command whose clip is still loading is cut short now, as one that shows is when the next clip
++    // does; it was left to its caller's wait.
++    if (pending?.playbackId != null && pending.playbackId !== cuePlaybackId)
++      deps.report(pending.playbackId, 'cancelled', REASON_SUPERSEDED);
+     const swapGen = (gen += 1);
+-    pending = { anim: next, once: nextOnce, gen: swapGen };
++    const swap: PendingSwap = { anim: next, once: nextOnce, gen: swapGen, playbackId: cuePlaybackId };
++    pending = swap;
+     const targetIndex = front === 0 ? 1 : 0;
+     const el = elementOf(targetIndex);
+     if (el === null) return;
+@@ -175,7 +188,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     // 元素级解码失败只补一条回执，不改播放控制；换源时与 onended 一起清掉。
+     // A-NAS: and releases the switch, whose clip never loads, as a failed fetch does.
+     el.onerror = () => {
+-      if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_DECODE);
++      if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_DECODE);
+       if (pending?.gen === swapGen) releaseFailedSwitch();
+     };
+     // fetch + blob 一次拿全文件，绕开 video 流式加载在 DSH WebServer 上偶发的 stalled。
+@@ -211,7 +224,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       onError: (error) => {
+         if (!mounted) return; // 卸载后的 abort：静默。
+         if (pending?.gen !== swapGen) return; // 已被更新的切换覆盖。
+-        if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_ASSET_LOAD);
++        if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_ASSET_LOAD);
+         console.warn(
+           '[dsh-pet] 素材加载失败 pet=' +
+             cfg.id +
+@@ -231,6 +244,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       if (pending?.gen === swapGen && el.src !== ownUrl) return;
+       el.removeEventListener('loadeddata', onReady);
+       if (pending?.gen !== swapGen) return;
++      // A-NAS: the command the switch plays now, which may have taken it over while it loaded.
++      const command = swap.playbackId;
+       const outgoing = elementOf(front);
+       el.classList.add('is-front');
+       if (outgoing !== null && outgoing !== el) {
+@@ -240,12 +255,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+         outgoing.onerror = null;
+         outgoing.pause();
+         // 被换下的点播若没播完，如实回 cancelled（补的是点击、拖拽这类非点播打断）。
+-        if (playing !== null && playing !== cuePlaybackId) reportOnce(playing, 'cancelled', REASON_SUPERSEDED);
++        if (playing !== null && playing !== command) reportOnce(playing, 'cancelled', REASON_SUPERSEDED);
+       }
+       front = front === 0 ? 1 : 0;
+       pending = null;
+       heldEnd = false;
+-      playing = cuePlaybackId;
++      playing = command;
+       el.style.transform = deps.facing() === 'right' ? 'scaleX(-1)' : '';
+       // A-NAS: a switch that began before the page paused the card and finished loading during the
+       // pause goes in front without playing (autoplay included), or a looping clip would decode for the
+@@ -255,16 +270,16 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       // since a lock lets explicit commands through.
+       if (deps.paused?.() === true) {
+         el.pause();
+-        if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'cancelled', REASON_FROZEN);
++        if (command !== null) reportOnce(command, 'cancelled', REASON_FROZEN);
+         return;
+       }
+       el.play()
+         .then(() => {
+           // 只有 play() 兑现才代表确实开始出画，loadeddata 只代表可解码。
+-          if (cuePlaybackId !== null) deps.report(cuePlaybackId, 'playing');
++          if (command !== null) deps.report(command, 'playing');
+         })
+         .catch(() => {
+-          if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_PLAY_REJECTED);
++          if (command !== null) reportOnce(command, 'failed', REASON_PLAY_REJECTED);
+         });
+       deps.onFrontReady(el);
+     };

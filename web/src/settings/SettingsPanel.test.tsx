@@ -471,6 +471,15 @@ describe("Settings", () => {
     expect(screen.queryByRole("region", { name: "初始化数据卷" })).toBeNull();
   });
 
+  it("credits the desktop companion's makers and licence to members on 概览", async () => {
+    serve();
+    renderSettings(member);
+    expect(await screen.findByText("anas-fake")).toBeTruthy();
+    const credit = screen.getByText("桌面伙伴").closest("p");
+    for (const part of ["大肥鱼", "@上善无形", "@ZipZipPipe", "CC BY-NC-SA 4.0", "github.com/PC2005-cloud/dsh-pet"])
+      expect(credit?.textContent).toContain(part);
+  });
+
   it("opens a member's sign-in records from My account", async () => {
     serve();
     const asked = serveActivity("self");

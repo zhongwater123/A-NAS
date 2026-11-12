@@ -36,9 +36,18 @@ import {
 import { decidePosition, decideThrow, positionLeafData } from "./dsh-pet/host/motion-cue";
 import { findPetInstance, readAllConfig } from "./dsh-pet/host/pet-config";
 import { TERMINAL_STATUSES } from "./dsh-pet/host/playback/status";
+import type { PlaybackRecord } from "./dsh-pet/host/playback/store";
 import { pickSleepNames } from "./dsh-pet/host/sleep";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { COMPANION_PET, companionPaused, companionReady, companionState, isPrompting } from "./workStatus";
+import { clearCenter } from "./stepAside";
+import {
+  COMPANION_PET,
+  COMPANION_SIZE,
+  companionPaused,
+  companionReady,
+  companionState,
+  isPrompting,
+} from "./workStatus";
 
 /** One command: the companion tool VNAS called and its arguments, as the product service checked them. */
 export interface CompanionCommand {
@@ -87,11 +96,16 @@ const BUBBLE_MAX_MS = 60_000;
 const LINE_MAX_MS = 5_000;
 const POWER_MAX = 3;
 /**
- * How long an animation is waited on. Most of dsh-pet's clips run 10.04 s, past its own 10 s wait, so a
- * clip played to its end would be answered as a timeout; 11.5 s lets one end with time to load, and the
- * window still answers within the contract's 12 s.
+ * How long an animation is waited on: 11.5 s at most from the command, which keeps the window's answer within
+ * the contract's 12 s (the product service waits 15 s). Its fetch from the NAS and first frame may take what
+ * leaves the clip ANIM_PLAY_MIN_MS from the start of playback, and the clip has the rest of the 11.5 s, so a
+ * quick fetch leaves it more. The longest of dsh-pet's clips run 10.04 s, about 6.7 s at the card's speed
+ * (petCard.tsx PLAYBACK_RATE), so 7.5 s lets one end with time to spare after the slowest fetch waited for
+ * (commands.test.ts plays it at that speed; a slower card needs a longer wait than the contract leaves).
  */
 const ANIM_WAIT_MS = 11_500;
+const ANIM_PLAY_MIN_MS = 7_500;
+const ANIM_LOAD_MS = ANIM_WAIT_MS - ANIM_PLAY_MIN_MS;
 /**
  * What would not show as the bubble's plain text, as the product service checks it (contract v1.2): control
  * characters but a line break, Unicode's bidi controls (marks, embeddings, overrides and isolates) and the
@@ -166,8 +180,8 @@ function lockBlocked(provided: unknown): CompanionOutcome | null {
 
 /**
  * An animation's end, as dsh-pet's GET /playback/{id}?wait=ended,failed,cancelled reports it, waited on
- * for at most ANIM_WAIT_MS; past that the contract answers failed with reason timeout. A window that
- * goes away (signal) stops waiting and answers nothing.
+ * for at most ANIM_LOAD_MS until the card plays it and for what is left of ANIM_WAIT_MS from then on; past
+ * either the contract answers failed with reason timeout. A window that goes away (signal) stops waiting and answers nothing.
  */
 function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutcome> {
   return new Promise((resolve) => {
@@ -176,18 +190,32 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
       playingFor.delete(playbackId);
       resolve(outcome);
     }
-    const cancel = companionPlayback.wait({
-      playbackId,
-      wait: TERMINAL_STATUSES,
-      timeoutMs: ANIM_WAIT_MS,
-      onWake: (record, matched) =>
-        settle(
-          ok(
-            matched
-              ? { status: record.status, playbackId, ...(record.reason ? { reason: record.reason } : {}) }
-              : { status: "failed", playbackId, reason: "timeout" },
-          ),
+    function answer(record: PlaybackRecord, matched: boolean) {
+      // A wait that ran out settles the animation as answered, so that a clip still loading does not show
+      // after VNAS heard it did not play (the card looks before it shows one, petCard.tsx).
+      if (!matched) companionPlayback.report(playbackId, "failed", "timeout");
+      settle(
+        ok(
+          matched
+            ? { status: record.status, playbackId, ...(record.reason ? { reason: record.reason } : {}) }
+            : { status: "failed", playbackId, reason: "timeout" },
         ),
+      );
+    }
+    const asked = Date.now();
+    let cancel = companionPlayback.wait({
+      playbackId,
+      wait: ["playing", ...TERMINAL_STATUSES],
+      timeoutMs: ANIM_LOAD_MS,
+      onWake: (record, matched) => {
+        if (!matched || record.status !== "playing") return answer(record, matched);
+        cancel = companionPlayback.wait({
+          playbackId,
+          wait: TERMINAL_STATUSES,
+          timeoutMs: ANIM_WAIT_MS - (Date.now() - asked),
+          onWake: answer,
+        });
+      },
     });
     function abort() {
       cancel?.();
@@ -201,8 +229,8 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
 /**
  * Carries out one of VNAS's commands for a conversation and answers it as the contract says: anim once
  * its animation has ended, failed or been cancelled (at most 11.5 s), everything else as soon as it is
- * written. Never takes longer than that, so the window answers well within the product service's 12 s,
- * and always answers: a write the page could not finish (a reader of its state threw) is not-ready.
+ * written. Never takes longer than that, so the window answers within the contract's 12 s (the product
+ * service waits 15 s), and always answers: a write the page could not finish (a reader of its state threw) is not-ready.
  */
 export async function runCompanionCommand(
   sessionId: string,
@@ -258,7 +286,7 @@ async function carryOut(
           ...(d.facing === undefined ? {} : { facing: d.facing }),
         });
       } catch {
-        // The card may never hear of it: the command is answered now rather than at its 11.5 s.
+        // The card may never hear of it: the command is answered now rather than when its wait runs out.
         companionPlayback.report(record.playbackId, "failed", "write-error");
       }
       return outcome;
@@ -307,8 +335,15 @@ async function carryOut(
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
       carry(action);
-      companionState.writePet(d.petId, "position", positionLeafData(d));
-      return ok({ status: "ok", x: d.x, y: d.y });
+      // The companion keeps clear of the window on top (stepAside.ts): where that would cover it, it goes to
+      // where it steps aside to instead, and VNAS hears where that is.
+      const page = { width: window.innerWidth, height: window.innerHeight };
+      const clear = clearCenter({ rx: d.x, ry: d.y }, COMPANION_SIZE, page);
+      const leaf = positionLeafData(d);
+      companionState.writePet(d.petId, "position", clear ? { ...leaf, x: clear.rx, y: clear.ry } : leaf);
+      if (!clear) return ok({ status: "ok", x: d.x, y: d.y });
+      const short = (value: number) => Math.round(value * 1000) / 1000;
+      return ok({ status: "ok", x: short(clear.rx), y: short(clear.ry), stepped_aside: true });
     }
     case "throw": {
       const d = decideThrow({ cfg, requested: COMPANION_PET, angle: args.angle, power: args.power });
@@ -373,7 +408,7 @@ async function carryOut(
 /**
  * The member stopped a conversation's turn here (workStatus.ts stopTurn). An animation one of its commands
  * is still playing stops too: a command the product service sent just before the stop would otherwise play
- * on for up to 10 s after it. The pet goes back to its idle animation, as dsh-pet's card goes on from one it
+ * on to its end, seconds after it. The pet goes back to its idle animation, as dsh-pet's card goes on from one it
  * is told to play, and the card answers the command cancelled (superseded).
  */
 export function stopTurnCommands(sessionId: string): void {

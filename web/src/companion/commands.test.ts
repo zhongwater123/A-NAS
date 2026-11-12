@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { publishFocusedWindow } from "../desktop/focusedWindow";
 import {
   type CompanionCommand,
   type CompanionOutcome,
@@ -8,6 +9,7 @@ import {
   runCompanionCommand,
 } from "./commands";
 import { companionLock, companionPlayback, resetCompanionHost } from "./host";
+import { PLAYBACK_RATE } from "./petCard";
 import {
   companionState,
   reportEvent,
@@ -20,7 +22,10 @@ import {
 
 // The local console's screen saver, up or not.
 const cover = vi.hoisted(() => ({ up: false }));
-vi.mock("../desktop/LocalConsoleScreenSaver", () => ({ localConsoleCovered: () => cover.up }));
+vi.mock("../desktop/LocalConsoleScreenSaver", () => ({
+  localConsoleCovered: () => cover.up,
+  isLocalConsole: () => false,
+}));
 
 // The page without the card: what a command writes is read from the page's state, and the
 // card's receipts are reported to the playback store as petCard.tsx passes them on.
@@ -83,7 +88,7 @@ describe("an animation VNAS asks for", () => {
     });
   });
 
-  it("is answered ended when a clip as long as dsh-pet's own, 10.04 s, has loaded and played to its end", async () => {
+  it("is answered ended when a clip as long as dsh-pet's longest, 10.04 s, has loaded and played to its end", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
@@ -92,24 +97,73 @@ describe("an animation VNAS asks for", () => {
     const id = playing();
     await vi.advanceTimersByTimeAsync(400);
     companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(10_040);
+    // At the card's speed: the wait from the start of playback is sized for it.
+    await vi.advanceTimersByTimeAsync(Math.ceil(10_040 / PLAYBACK_RATE));
     companionPlayback.report(id, "ended");
     await vi.advanceTimersByTimeAsync(0);
     expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
   });
 
-  it("is answered failed with reason timeout after 11.5 s without an end", async () => {
+  it.each([
+    [400, 11_100],
+    [3_000, 8_500],
+    [3_999, 7_501],
+  ])(
+    "is answered failed with reason timeout 11.5 s after it was asked for without an end (playing %i ms on)",
+    async (loading, left) => {
+      vi.useFakeTimers();
+      let outcome: unknown;
+      void run("anim", { name: WAVE }).then((answer) => {
+        outcome = answer;
+      });
+      const id = playing();
+      await vi.advanceTimersByTimeAsync(loading);
+      companionPlayback.report(id, "playing");
+      await vi.advanceTimersByTimeAsync(left - 1);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
+    },
+  );
+
+  it("is answered ended when its clip played to its end after a slow fetch", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
       outcome = answer;
     });
     const id = playing();
+    await vi.advanceTimersByTimeAsync(3_900);
     companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(11_499);
+    await vi.advanceTimersByTimeAsync(Math.ceil(10_040 / PLAYBACK_RATE));
+    companionPlayback.report(id, "ended");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
+  });
+
+  it("is answered failed with reason timeout when the card has not played it 4 s on", async () => {
+    vi.useFakeTimers();
+    let outcome: unknown;
+    void run("anim", { name: WAVE }).then((answer) => {
+      outcome = answer;
+    });
+    const id = playing();
+    await vi.advanceTimersByTimeAsync(3_999);
     expect(outcome).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
+    expect(companionPlayback.waiterCount()).toBe(0);
+    // Settled as answered: the card does not show the clip if it comes after all.
+    expect(companionPlayback.get(id)).toMatchObject({ status: "failed", reason: "timeout" });
+    expect(companionPlayback.report(id, "playing")).toBe("ignored");
+  });
+
+  it("is answered at once when the card fails it before it plays", async () => {
+    const answer = run("anim", { name: WAVE });
+    const id = playing();
+    companionPlayback.report(id, "failed", "asset-load");
+    expect(await answer).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "asset-load" } });
+    expect(companionPlayback.waiterCount()).toBe(0);
   });
 
   it("stops being waited on when the window goes", async () => {
@@ -148,6 +202,29 @@ describe("what VNAS says and where it puts the companion", () => {
     expect(await run("broadcast", { text: " " })).toEqual(refused("bad-request"));
     expect(await run("broadcast", { text: "看", duration: -1 })).toEqual(refused("bad-request"));
     expect(writes()).toBe(before);
+  });
+
+  it("moves it clear of the window on top, and says where it went", async () => {
+    // VNAS's window on top, laid out as it opens on a 1024×768 page (jsdom lays nothing out).
+    const element = document.createElement("section");
+    element.dataset.windowId = "assistant";
+    const laid = { offsetLeft: 260, offsetTop: 54, offsetWidth: 700, offsetHeight: 600 };
+    for (const [name, value] of Object.entries(laid)) Object.defineProperty(element, name, { value });
+    document.body.append(element);
+    publishFocusedWindow({ id: "assistant", x: 260, y: 54, width: 700, height: 600, maximized: false });
+    try {
+      // Its centre at the middle of the page would put its hit area on the window: it goes out to the left.
+      const answer = await run("position", { x: 0.5, y: 0.5, mode: "spring" });
+      const x = Math.round(((260 - 12 - 90 - 75 + 120) / 1024) * 1000) / 1000;
+      expect(answer).toEqual(ok({ x, y: 0.5, stepped_aside: true }));
+      // The leaf is where it steps aside to, exactly; the answer to three places.
+      expect(leaf("position")).toEqual({ x: (260 - 12 - 90 - 75 + 120) / 1024, y: 0.5, mode: "spring" });
+      // Clear of it, it goes where it is asked.
+      expect(await run("position", { x: 0.1, y: 0.5, mode: "instant" })).toEqual(ok({ x: 0.1, y: 0.5 }));
+    } finally {
+      publishFocusedWindow(null);
+      element.remove();
+    }
   });
 
   it("moves it within the page and throws it", async () => {

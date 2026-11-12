@@ -1975,10 +1975,31 @@ commit_animations() {
   pool=$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion commit)
 }
 check "a first install shows no companion animations" test "$(current_animations):$(animation_count)" = :0
+# A release plays the pool its code was vendored with; the checks below stage
+# stand-ins, which only --unpinned installs.
+pinned_pool=$(sed -n 's/^companion_pool=//p' "$installer")
+check "the release pins the pool of the repository's animation manifest" \
+  test "$pinned_pool" = "$(sha256sum < /src/web/src/companion/dsh-pet/animations.sha256 | cut -c 1-16)"
+install -d "$companion_staged/pools"
+cp /src/web/src/companion/dsh-pet/animations.sha256 "$companion_staged/pools/$pinned_pool.sums"
+# Its animations are not in the repository: the install gets as far as them.
+pinned_out=$("$installer" companion "$pinned_pool" "$companion_staged" 2>&1 || true)
+check "the pinned pool needs no --unpinned" grep -q 'is not staged as a regular file' <<<"$pinned_out"
+rm -f "$companion_staged/pools/$pinned_pool.sums"
 stage_animations 待机.webm 东张西望.webm 待机.mov
 animations_a=$pool
+check "a pool the release does not pin is refused" fails "$installer" companion "$animations_a" "$companion_staged"
+check "the refusal installs nothing" test "$(current_animations)" = "" -a ! -e "$companion/pools/$animations_a"
+# The uploader names the pool it computed from its own copy of the manifest.
+cp "$companion_staged/pools/$animations_a.sums" "$companion_staged/pools/.incoming.sums"
+check "staging refuses a manifest that is not the pool the uploader names" \
+  fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit 0123456789abcdef
+check "and files nothing under that name" \
+  test -e "$companion_staged/pools/.incoming.sums" -a ! -e "$companion_staged/pools/0123456789abcdef.sums"
+check "staging files the pool the uploader names" \
+  test "$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion commit "$animations_a")" = "$animations_a"
 kiosk_before=$(kiosk_starts)
-check "staged companion animations install" quiet "$installer" companion "$animations_a" "$companion_staged"
+check "staged companion animations install" quiet "$installer" companion --unpinned "$animations_a" "$companion_staged"
 check "installing them leaves a local console that is not running alone" test "$(kiosk_starts)" = "$kiosk_before"
 check "they become the current pool" test "$(current_animations):$(animation_count)" = "pools/$animations_a:2"
 check "the manifest names the current pool" \
@@ -1987,6 +2008,17 @@ animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张�
 check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
 check "a pool's animations may be kept for good" \
   bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
+# MIT asks for its notice with every copy and the bundle keeps no comments, so
+# the Web UI serves the licenses of the code copied into web/src (make web-build).
+licenses=$(curl -fsS "$api/assets/third-party-licenses.txt" || true)
+check "the Web UI ships dsh-pet's license, naming the commit copied" \
+  grep -Fq "== web/src/companion/dsh-pet: PC2005-cloud/dsh-pet (https://github.com/PC2005-cloud/dsh-pet) commit $(sed -n 's/^PINNED = \"\([0-9a-f]*\)\"$/\1/p' /src/scripts/vendor-dsh-pet.py) ==" <<<"$licenses"
+check "and every MIT notice of the code copied into web/src" \
+  test "$(grep -c '^Permission is hereby granted' <<<"$licenses")" = \
+  "$(find /src/web/src -name LICENSE -not -path '*/node_modules/*' -exec grep -l '^Permission is hereby granted' {} + | wc -l)"
+# Its name has no hash: a browser asks for it again rather than keep an earlier release's notices.
+check "the license list is not kept like the bundle's hashed files" \
+  bash -c "curl -fsSI '$api/assets/third-party-licenses.txt' | grep -Fqi 'cache-control: no-cache'"
 check "a stand-in local console runs for the companion checks" kiosk_stand_in start
 # Two animations may share one file.
 shared_animation=$(new_video)
@@ -1995,18 +2027,18 @@ printf '%s  %s\n' "$shared_animation" 待机.webm "$shared_animation" 东张西�
 commit_animations
 animations_b=$pool
 run=$(kiosk_run)
-check "animations that share a file install" quiet "$installer" companion "$animations_b" "$companion_staged"
+check "animations that share a file install" quiet "$installer" companion --unpinned "$animations_b" "$companion_staged"
 check "the shared file is stored once" \
   test "$(current_animations):$(animation_count):$(stat -c %h "$companion/objects/$shared_animation")" = "pools/$animations_b:2:3"
 check "installing animations restarts the running local console" kiosk_restarted "$run"
 check "a page opened before the switch keeps its pool's animations" test "$(status_of -r 0-1023 "$api$animation")" = 206
 run=$(kiosk_run)
-check "switching back to installed animations needs no staging" quiet "$installer" companion "$animations_a" /nonexistent
+check "switching back to installed animations needs no staging" quiet "$installer" companion --unpinned "$animations_a" /nonexistent
 check "switching back restarts the running local console" kiosk_restarted "$run"
 stage_animations 待机.webm
 printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
 run=$(kiosk_run)
-check "an animation that does not match its hash is refused" fails "$installer" companion "$pool" "$companion_staged"
+check "an animation that does not match its hash is refused" fails "$installer" companion --unpinned "$pool" "$companion_staged"
 check "the refused animations change nothing" \
   test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 check "the refused animations leave the local console running as it was" test "$(kiosk_run)" = "$run"
@@ -2019,7 +2051,7 @@ head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/.inco
 check "staging refuses a manifest without its last newline" \
   fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
 head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/$unterminated.sums"
-check "installing refuses a manifest without its last newline" fails "$installer" companion "$unterminated" "$companion_staged"
+check "installing refuses a manifest without its last newline" fails "$installer" companion --unpinned "$unterminated" "$companion_staged"
 check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$unterminated"
 # The same with a NUL byte where the last newline was: read and command
 # substitution drop it unseen, the pool ID counts it.
@@ -2029,7 +2061,7 @@ cp /tmp/nul-ended.sums "$companion_staged/pools/.incoming.sums"
 check "staging refuses a manifest that ends with a NUL byte" \
   fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
 cp /tmp/nul-ended.sums "$companion_staged/pools/$nul_ended.sums"
-check "installing refuses a manifest that ends with a NUL byte" fails "$installer" companion "$nul_ended" "$companion_staged"
+check "installing refuses a manifest that ends with a NUL byte" fails "$installer" companion --unpinned "$nul_ended" "$companion_staged"
 check "the NUL-ended manifest installs nothing" test ! -e "$companion/pools/$nul_ended"
 # The staging account can swap what it staged for a FIFO or a link between the
 # installer's checks and its copy: root reads regular files only, never waits
@@ -2045,18 +2077,18 @@ stage_animations 待机.webm
 staged_object=$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")
 rm -f "$staged_object"
 mkfifo "$staged_object"
-check "an animation staged as a FIFO is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+check "an animation staged as a FIFO is refused at once" refused_at_once "$installer" companion --unpinned "$pool" "$companion_staged"
 rm -f "$staged_object"
 ln -s /dev/zero "$staged_object"
-check "an animation staged as a link to a device is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+check "an animation staged as a link to a device is refused at once" refused_at_once "$installer" companion --unpinned "$pool" "$companion_staged"
 ln -sfn /dev/zero "$companion_staged/pools/0123456789abcdef.sums"
-check "a manifest staged as a link is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+check "a manifest staged as a link is refused at once" refused_at_once "$installer" companion --unpinned 0123456789abcdef "$companion_staged"
 rm -f "$companion_staged/pools/0123456789abcdef.sums"
 mkfifo "$companion_staged/pools/0123456789abcdef.sums"
-check "a manifest staged as a FIFO is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+check "a manifest staged as a FIFO is refused at once" refused_at_once "$installer" companion --unpinned 0123456789abcdef "$companion_staged"
 rm -f "$companion_staged/pools/0123456789abcdef.sums"
 head -c $(((1 << 20) + 1)) /dev/zero > "$companion_staged/pools/0123456789abcdef.sums"
-check "a manifest larger than a pool's is refused" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+check "a manifest larger than a pool's is refused" refused_at_once "$installer" companion --unpinned 0123456789abcdef "$companion_staged"
 check "the refused stagings change nothing" test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 # --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy
 # serves the domain over HTTPS on the NAS's tunnel address, taking the client's

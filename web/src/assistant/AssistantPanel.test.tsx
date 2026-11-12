@@ -57,6 +57,8 @@ afterEach(() => {
 
 // What the companion would show: the page's GET /state section the VNAS window feeds.
 const shown = () => (companionState.read().sections.workStatus.data as { state?: string } | null)?.state ?? null;
+/** The clip the shown step asks for. */
+const clip = () => (companionState.read().sections.workStatus.data as { anim?: string } | null)?.anim ?? null;
 
 const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
@@ -216,21 +218,47 @@ describe("the VNAS window", () => {
     );
     await emit("message.start");
     expect(shown()).toBe("thinking");
-    await emit("tool.start", {
-      tool_id: "call_1",
-      name: "mcp__desktop__snapshot",
-    });
+    expect(clip()).toBe("工作状态-思考冒泡");
+    // Each step with the clip of what it does: looking at the desktop.
+    await emit("tool.start", { tool_id: "call_1", name: "mcp__desktop__snapshot" });
     expect(shown()).toBe("working");
+    expect(clip()).toBe("东张西望");
     await emit("anas.approval", card("awaiting"));
     expect(shown()).toBe("waiting");
+    expect(clip()).toBe("工作状态-原地踱步张望");
     await emit("anas.approval", card("approved"));
     expect(shown()).toBe("working");
+    expect(clip()).toBe("东张西望");
     await emit("message.complete", { status: "complete" });
     expect(shown()).toBe("success");
+    expect(clip()).toBe("放烟花");
 
     cleanup();
     expect(shown()).toBeNull();
   });
+  it("does not move the companion for a conversation whose prompt from this window did not go in", async () => {
+    await open();
+    // The turn the conversation was running when it opened ends.
+    await emit("message.complete", { status: "complete" });
+    const answer = client.request.getMockImplementation();
+    client.request.mockImplementation(async (method: string) => {
+      if (method === "prompt.submit") throw new Error("busy");
+      return answer?.(method);
+    });
+    try {
+      const user = userEvent.setup();
+      await user.type(screen.getByRole("textbox"), "清理缓存");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+      expect(await screen.findByText("VNAS 暂时没有响应，请稍后再试")).toBeTruthy();
+      expect(client.request).toHaveBeenCalledWith("desktop.attach", expect.objectContaining({ session_id: LIVE }));
+      // A turn in the conversation from another device.
+      await emit("message.start");
+      expect(shown()).toBeNull();
+    } finally {
+      if (answer) client.request.mockImplementation(answer);
+    }
+  });
+
   it("carries out VNAS's commands to the companion and answers each one", async () => {
     await open();
     setCompanionReady(true);

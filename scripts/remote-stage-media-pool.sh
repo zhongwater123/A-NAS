@@ -11,12 +11,13 @@
 #   remote-stage-media-pool.sh companion missing
 #       Prints the hashes in pools/.incoming.sums still to upload as
 #       objects/HASH.incoming.
-#   remote-stage-media-pool.sh companion commit
-#       Checks the uploads, files the manifest under its pool ID and prints it.
+#   remote-stage-media-pool.sh companion commit [POOL_ID]
+#       Checks the uploads, files the manifest under its pool ID and prints it;
+#       refuses a manifest that is not POOL_ID, when given, before taking any.
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 screensavers missing|commit HASH... | companion missing|commit" >&2
+  echo "usage: $0 screensavers missing|commit HASH... | companion missing | companion commit [POOL_ID]" >&2
   exit 2
 }
 [[ $# -ge 2 ]] || usage
@@ -41,7 +42,8 @@ case $kind in
   companion)
     # The pool is the manifest uploaded to pools/.incoming.sums.
     item=animation suffix=''
-    [[ $# -eq 0 ]] || usage
+    [[ $# -eq 0 || ($action == commit && $# -eq 1 && $1 =~ ^[0-9a-f]{16}$) ]] || usage
+    expected=${1:-}
     manifest=$staging/pools/.incoming.sums
     install -d -m 0750 "$staging" "$staging/objects" "$staging/pools"
     [[ -f $manifest ]] || { echo "no manifest uploaded to $manifest" >&2; exit 2; }
@@ -66,6 +68,11 @@ case $kind in
     }
     unique=$(listed | sort -u)
     mapfile -t hashes <<<"$unique"
+    # The pool the uploader computed from its own copy of the manifest.
+    if [[ -n $expected && $(sha256sum < "$manifest" | cut -c 1-16) != "$expected" ]]; then
+      echo "the uploaded manifest is not pool $expected" >&2
+      exit 2
+    fi
     ;;
   *) usage ;;
 esac
