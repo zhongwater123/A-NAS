@@ -27,6 +27,15 @@ import { createWorkStatusBridge } from "./dsh-pet/host/plugin/work-status-bridge
 import { PollStateStore } from "./dsh-pet/host/state";
 import { currentTaskFromTodo, type HostWorkStatusState, WorkStatusStore } from "./dsh-pet/host/work-status";
 
+/**
+ * A turn big enough for fireworks when it ends well, by any one of: this many of VNAS's tools called (not
+ * the companion's own, nor Hermes's bookkeeping), longer than BIG_TURN_MS, a card that waited for the member
+ * (or a question VNAS asked them), or changes submitted. A smaller turn ends with only its check. Initial
+ * values, to be tuned.
+ */
+export const BIG_TURN_TOOLS = 6;
+export const BIG_TURN_MS = 2 * 60 * 1000;
+
 /** dsh-pet session-notify.ts TERMINAL_KEEP_MS: a success or error shows this long, then goes. */
 const TERMINAL_KEEP_MS = 60 * 1000;
 /** dsh-pet's sentinel for status written from outside a session; A-NAS writes none. */
@@ -41,23 +50,37 @@ const bridge = createWorkStatusBridge({ state: companionState, workStatus: store
 const prompting = new Set<string>();
 /** Waiting entries for the member's cards, by card: card id -> entry id. */
 const cards = new Map<string, string>();
-/** The turns this window started, by conversation: since when, and how many of VNAS's tools they called. */
-const turns = new Map<string, { startedAt: number; steps: number }>();
+/**
+ * The turns this window started, by conversation: since when, how many tool calls it made (steps, as a click
+ * tells them), how many of VNAS's own tools (tools), whether something waited for the member, and whether it
+ * submitted changes.
+ */
+interface Turn {
+  startedAt: number;
+  steps: number;
+  tools: number;
+  waited: boolean;
+  submitted: boolean;
+}
+const turns = new Map<string, Turn>();
 const terminalTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let seq = 0;
 
 /**
  * What a stage shows besides its own clip and lines: the clip the step asks for and a line for its bubble.
- * key tells one step from the next: the events of one step keep its line, the next step picks again.
+ * key tells one step from the next: the events of one step keep its line, the next step picks again. No anim
+ * keeps the clip the entry shows: a step done changes only the line.
  */
 export interface Step {
   key: string;
-  anim: string | null;
+  anim?: string | null;
   line: () => string | null;
 }
 
 /** The line each entry shows, with the stage and step it was picked for. */
 const lines = new Map<string, { key: string; task: string | null }>();
+/** The clip each entry shows. */
+const clips = new Map<string, string | null>();
 /** The step each conversation's todo list is at, which its thinking names. */
 const todos = new Map<string, string>();
 let stoppedListener: (() => void) | null = null;
@@ -89,6 +112,7 @@ function scheduleTerminalCleanup(id: string) {
       const state = store.stateOf(id);
       if (state === "success" || state === "error") {
         lines.delete(id);
+        clips.delete(id);
         store.clear(id);
         bridge.publishWorkStatus();
       }
@@ -107,7 +131,9 @@ function set(id: string, state: HostWorkStatusState, step: Step | null) {
   const last = lines.get(id);
   const task = last?.key === key ? last.task : (step?.line() ?? null);
   lines.set(id, { key, task });
-  store.setDetail(id, { task, anim: step?.anim ?? null });
+  const anim = step && step.anim === undefined ? (clips.get(id) ?? null) : (step?.anim ?? null);
+  clips.set(id, anim);
+  store.setDetail(id, { task, anim });
   bridge.publishWorkStatus();
   if (!changed) return;
   if (state === "success" || state === "error") scheduleTerminalCleanup(id);
@@ -117,6 +143,7 @@ function set(id: string, state: HostWorkStatusState, step: Step | null) {
 function clear(id: string) {
   cancelTerminalCleanup(id);
   lines.delete(id);
+  clips.delete(id);
   if (store.clear(id)) bridge.publishWorkStatus();
 }
 
@@ -167,7 +194,9 @@ export function stepOf(
       // VNAS moving the pet: the stage's own clip and lines, so that what it asked for shows.
       if (name.startsWith("mcp__companion__")) return { stage, step: null };
       const call = `${name}\u0000${typeof payload?.tool_id === "string" ? payload.tool_id : ""}`;
-      if (type === "tool.complete") return { stage, step: behaviorStep("step-done", call, "", shared) };
+      // A step done: its line, and the clip of the step goes on until the next step or the turn's end.
+      if (type === "tool.complete")
+        return { stage, step: { key: `done:${call}`, line: () => behaviorLine("step-done", "", shared) } };
       const { behavior, detail } = toolStep(name, payload?.args);
       // clarify waits for the member, as a card does.
       return { stage: behavior === "waiting" ? "waiting" : stage, step: behaviorStep(behavior, call, detail, shared) };
@@ -190,7 +219,7 @@ export function stageOf(type: string, payload?: GatewayPayload): HostWorkStatusS
 /** This window started a turn of the conversation (it attached as its browser and prompts). */
 export function startTurn(sessionId: string): void {
   prompting.add(sessionId);
-  turns.set(sessionId, { startedAt: Date.now(), steps: 0 });
+  turns.set(sessionId, { startedAt: Date.now(), steps: 0, tools: 0, waited: false, submitted: false });
   turnListener?.started();
 }
 
@@ -274,8 +303,17 @@ export function isPrompting(sessionId: string): boolean {
 export function reportEvent(sessionId: string, type: string, payload?: GatewayPayload): void {
   if (!prompting.has(sessionId)) return;
   const turn = turns.get(sessionId);
+  const tool = String(payload?.name ?? "");
   // A step of VNAS's own: not the companion's tools, which only move it.
-  if (turn && type === "tool.start" && !String(payload?.name ?? "").startsWith("mcp__companion__")) turn.steps += 1;
+  if (turn && type === "tool.start" && !tool.startsWith("mcp__companion__")) {
+    turn.steps += 1;
+    if (tool && !tool.startsWith("_")) {
+      turn.tools += 1;
+      const { behavior } = toolStep(tool, payload?.args);
+      if (behavior === "waiting") turn.waited = true;
+      if (behavior === "submit") turn.submitted = true;
+    }
+  }
   if (type === "todo.updated") {
     const current = Array.isArray(payload?.todos) ? currentTaskFromTodo({ data: { todos: payload.todos } }) : null;
     if (current) todos.set(sessionId, current);
@@ -283,7 +321,10 @@ export function reportEvent(sessionId: string, type: string, payload?: GatewayPa
     // A thinking turn names the new step now.
     if (store.stateOf(sessionId) !== "thinking") return;
   }
-  const next = stepOf(type === "todo.updated" ? "message.start" : type, payload, todos.get(sessionId));
+  let next = stepOf(type === "todo.updated" ? "message.start" : type, payload, todos.get(sessionId));
+  // A small turn ends well with only its check: no clip, which the companion shows as the check alone.
+  if (next?.stage === "success" && turn && !bigTurn(turn))
+    next = { stage: "success", step: { key: "success", anim: null, line: () => null } };
   if (type === "message.complete") {
     prompting.delete(sessionId);
     turns.delete(sessionId);
@@ -296,10 +337,20 @@ export function reportEvent(sessionId: string, type: string, payload?: GatewayPa
   else set(sessionId, next.stage, next.step);
 }
 
+/** Whether a turn is big enough for fireworks (BIG_TURN_TOOLS, BIG_TURN_MS). */
+function bigTurn(turn: Turn): boolean {
+  return turn.tools >= BIG_TURN_TOOLS || Date.now() - turn.startedAt > BIG_TURN_MS || turn.waited || turn.submitted;
+}
+
 /** The member's cards: each one awaiting a decision in a turn this window started is a waiting entry. */
 export function reportCards(list: Iterable<{ requestId: string; sessionId: string; status: string }>): void {
   const waiting = new Set<string>();
-  for (const card of list) if (card.status === "awaiting" && prompting.has(card.sessionId)) waiting.add(card.requestId);
+  for (const card of list)
+    if (card.status === "awaiting" && prompting.has(card.sessionId)) {
+      waiting.add(card.requestId);
+      const turn = turns.get(card.sessionId);
+      if (turn) turn.waited = true;
+    }
   for (const [requestId, id] of cards)
     if (!waiting.has(requestId)) {
       cards.delete(requestId);
@@ -322,6 +373,7 @@ export function forgetAll(): void {
   prompting.clear();
   cards.clear();
   lines.clear();
+  clips.clear();
   todos.clear();
   for (const timer of terminalTimers.values()) clearTimeout(timer);
   terminalTimers.clear();
