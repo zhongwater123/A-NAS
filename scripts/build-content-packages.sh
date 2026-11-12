@@ -56,11 +56,12 @@ pinned() {
     printf '%s  %s\n' "$(pin_field "$2" sha256)" "$1" | sha256sum --check --quiet - >/dev/null 2>&1
 }
 
-# package NAME ARCH DEPENDS DESCRIPTION COPYRIGHT: builds the package from
-# $work/NAME, the tree it installs. DEPENDS may go on with more fields of the
-# control file, one per line.
+# package NAME ARCH DEPENDS DESCRIPTION COPYRIGHT [SCRIPTS]: builds the package
+# from $work/NAME, the tree it installs. DEPENDS may go on with more fields of
+# the control file, one per line. SCRIPTS is a directory of maintainer scripts
+# the package runs.
 package() {
-  local name=$1 arch=$2 depends=$3 description=$4 copyright=$5 root=$work/$1
+  local name=$1 arch=$2 depends=$3 description=$4 copyright=$5 scripts=${6:-} root=$work/$1
   local deb=$out/${name}_1_$arch.deb
   install -d -m 0755 "$root/DEBIAN" "$root/usr/share/doc/$name"
   printf '%s\n' "$copyright" >"$root/usr/share/doc/$name/copyright"
@@ -76,6 +77,7 @@ package() {
   } >"$root/DEBIAN/control"
   find "$root" -type d -exec chmod 0755 {} +
   chmod 0644 "$root/DEBIAN/control" "$root/usr/share/doc/$name/copyright"
+  [[ -z "$scripts" ]] || install -m 0755 "$scripts"/* "$root/DEBIAN/"
   # Models and runtimes are mostly compressed already; zstd at its default
   # level costs little time for what it saves.
   dpkg-deb --root-owner-group -Zzstd --build "$root" "$deb.partial" >/dev/null
@@ -180,6 +182,8 @@ fi
 # The assistant trial's Hermes runtime (ai/assistant-spike/runtime.json). Its
 # scripts name /opt/a-nas/assistant-runtimes/spike, so one is installed at a
 # time: each provides, conflicts with and replaces a-nas-assistant-runtime.
+# Its prerm stops what runs on it before apt replaces it; the trial's postinst
+# starts them again (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm).
 pin=$repo/ai/assistant-spike/runtime.json
 name=$(assistant_runtime_package "$repo")
 if ! "$stand_in" && ! have "$name" amd64; then
@@ -201,6 +205,7 @@ Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant tr
  The runtime ai/assistant-spike/runtime.json pins by SHA-256 $sha, in
  /opt/a-nas/assistant-runtimes/spike, for development testing only
  (docs/runbooks/try-ai-assistant-on-experimental-nas.md)." \
-      "Hermes Agent (MIT) with the packages its build installs, each under its own license."
+      "Hermes Agent (MIT) with the packages its build installs, each under its own license." \
+      "$repo/deploy/debian/a-nas-assistant-runtime/DEBIAN"
   fi
 fi
