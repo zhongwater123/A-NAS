@@ -77,6 +77,8 @@ cat > /etc/docker/daemon.json <<'JSON'
 }
 JSON
 dockerd --validate --config-file /etc/docker/daemon.json
+/usr/lib/a-nas-docker-policy/check-address-pool
+systemctl reset-failed docker.socket docker.service
 systemctl restart docker.socket docker.service
 
 docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
@@ -85,7 +87,7 @@ docker info --format '{{json .DefaultAddressPools}}'
 ip route | grep -E 'docker0|br-'
 ```
 
-完成标准：Server 的版本与第 1 步的软件包一致，cgroup 为 2；`DefaultAddressPools` 为 `10.96.64.0/19`；`docker0` 的路由为 `10.96.127.0/24`；没有任何 172.17–172.31 的 Docker 路由。`a-nas` 软件包给 `docker.service` 与 `docker.socket` 加了附加配置：`/etc/docker/daemon.json` 不存在时两者都不启动，所以随软件包装上的 Docker 不会先按默认网段建网桥。已经运行的 Docker 重启时，全部容器短暂中断。
+完成标准：Server 的版本与第 1 步的软件包一致，cgroup 为 2；`DefaultAddressPools` 为 `10.96.64.0/19`；`docker0` 的路由为 `10.96.127.0/24`；没有任何 172.17–172.31 的 Docker 路由。`a-nas-docker-policy` 给服务和套接字加了启动校验：文件缺失、无效、缺少 IPv4 `bip` 或非空的地址池时均拒绝启动；只有日志设置或 `{}` 也不放行。配置正确后先清掉此前失败启动的限流状态，再重启。该保护独立于产品包，回滚产品时保留（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。已经运行的 Docker 重启时，全部容器短暂中断。
 
 已有应用的主机：重启 Docker 不会迁移已存在的应用网络。使用 `network_mode: bridge` 的应用随 `docker0` 迁移，无需处理；新建过网络的应用在应用中心卸载后重新安装（数据保留），或以 root 执行 `docker compose -p a-nas-<id> -f /var/lib/a-nas-container/apps/<id>/docker-compose.yml down`，再以同一参数执行 `up --detach --remove-orphans`。
 

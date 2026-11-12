@@ -102,14 +102,6 @@ systemd-tmpfiles --create a-nas.conf
 "$running" || exit 0
 
 systemctl daemon-reload
-# Docker waits for its address pool in /etc/docker/daemon.json (the package's
-# docker.service.d). One that docker-ce's own postinst started before this
-# package was unpacked stops, and the bridge it made on Docker's default
-# network goes with it.
-if [[ ! -e /etc/docker/daemon.json ]] && systemctl is-active --quiet docker.service docker.socket; then
-  systemctl stop docker.socket docker.service || true
-  ip link delete docker0 2>/dev/null || true
-fi
 # A running Worker and vector index belong to the previous release; the next
 # connection starts this release's. Clients reconnect to this release's
 # FFmpeg worker and its shared admission slots.

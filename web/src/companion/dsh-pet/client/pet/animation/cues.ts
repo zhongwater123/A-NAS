@@ -30,6 +30,8 @@ export interface EndedInput {
   current: string;
   /** 当前工作状态；`undefined` 表示还没收到过。 */
   workState: string | null | undefined;
+  /** A-NAS: the clip the current step asks for; null or missing = one of its stage's. */
+  workAnim?: string | null;
 }
 
 /** 工作状态是否处在「非终态」：终态（success / error）与空闲都不续播档位动画。 */
@@ -44,6 +46,9 @@ const isWorkActive = (state: string | null | undefined): boolean =>
  */
 export function decideEndedCue(input: EndedInput): EndedCue {
   const { animations, current, workState } = input;
+  // A-NAS: a step's own clip, which need not be in the stage's pool, plays on while the stage lasts;
+  // otherwise it would end as a random clip and the random chain would drop the stage.
+  if (isWorkActive(workState) && input.workAnim != null && current === input.workAnim) return { kind: 'work-replay' };
   const isEvent = isEventAnim(animations.events, current);
   if (isEvent && isWorkActive(workState)) {
     // 多候选档位播完轮换到下一候选，长时间状态不单段重复。

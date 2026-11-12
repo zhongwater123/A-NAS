@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-11-11
+更新时间：2026-11-12
 
 ## 目的
 
@@ -86,6 +86,7 @@
 
 ### 应用中心与 Docker
 
+- 软件包切换（#472）：按[部署手册](deploy-a-nas-packages.md)装包后，只读核对 `a-nas-docker-policy` 已安装并在 `apt-mark showmanual` 中，`/usr/lib/a-nas-docker-policy/check-address-pool` 返回 0，Docker 地址池、`docker0` 与切换前一致。不要在正在使用的 NAS 上清空配置或试验默认网段；无效配置与历史包回滚由一次性 systemd 容器验证（[调查](../investigations/2026-11-12-docker-policy-survives-product-rollback.md)）。
 - 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
 - 安装前置检查（#185）：按[容器代理手册](install-container-agent.md#安装预留协议的升级顺序)先更新容器代理、再更新产品服务，然后正常安装一个可丢弃应用。再选两个端口相同的可丢弃应用（例如目录中的 FileDrop 与 pyLoad 都用 8000），装上一个并停止它，然后安装另一个：安装在接受前被拒绝，NAS 上没有新的 `app-<id>` 账号（`id app-<id>` 报错），也没有新建它的共享目录（[调查](../investigations/2026-10-27-app-install-preparation-order.md)）。

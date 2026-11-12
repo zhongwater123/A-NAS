@@ -5,6 +5,7 @@ import type { Disk, Health } from "../api.generated";
 import type { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes } from "../lib/bytes";
+import { CompanionCredit } from "./CompanionCredit";
 import { DeviceTemperatures, diskTemperature } from "./DeviceTemperatures";
 import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
@@ -43,6 +44,7 @@ export function OverviewSection({
       <>
         {header}
         <HostStatePending host={host} />
+        <CompanionCredit />
       </>
     );
   const { system } = snapshot;
@@ -103,6 +105,7 @@ export function OverviewSection({
         </Row>
         <Row label="状态更新于" value={formatTime(snapshot.observedAt)} />
       </Group>
+      <CompanionCredit />
     </>
   );
 }

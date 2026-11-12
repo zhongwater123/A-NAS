@@ -374,6 +374,21 @@ func companionAnimations(directory string) []string {
 	return names
 }
 
+// thirdPartyLicenses is the build's list of the code copied into web/src and
+// its licenses (make web-build). Its name carries no hash, unlike the
+// bundle's, and changes with each upgrade of that code.
+const thirdPartyLicenses = "assets/third-party-licenses.txt"
+
+// assetCacheControl keeps the bundle's hashed files for good; the license
+// list is asked for again each time, so that a browser does not show the
+// notices of an earlier release.
+func assetCacheControl(name string) string {
+	if name == thirdPartyLicenses {
+		return "no-cache"
+	}
+	return "public, max-age=31536000, immutable"
+}
+
 func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	if !fs.ValidPath(name) || !strings.HasPrefix(name, "assets/") {
@@ -385,7 +400,7 @@ func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", assetCacheControl(name))
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}

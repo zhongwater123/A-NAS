@@ -5,7 +5,7 @@
  * 不依赖 React / DOM。
  * @module dsh-pet/src/shared/pickers
  */
-import type { Category, EventSlot, Events, Weights } from './types';
+import type { Animations, Category, EventSlot, Events, Weights } from './types';
 
 /** 从池里等概率抽一个；exclude 避开某个名字（减少连续重复）。 */
 export const pick = <T>(pool: readonly T[], exclude?: T): T => {
@@ -44,6 +44,16 @@ export const poolIncludes = (pool: readonly EventSlot[], anim: string): boolean 
 /** 整个 events 段是否包含某动画名。 */
 export const isEventAnim = (events: Readonly<Events> | undefined, anim: string): boolean =>
   events ? Object.values(events).some((pool) => poolIncludes(pool, anim)) : false;
+
+/** A-NAS: whether any of the pet's pools has the clip: a step's own clip plays only when it does. */
+export const inPools = (animations: Readonly<Animations>, anim: string): boolean =>
+  animations.idle.includes(anim) ||
+  animations.turn.includes(anim) ||
+  animations.drag.includes(anim) ||
+  animations.clicks.includes(anim) ||
+  animations.moves.actions.some((action) => action.name === anim) ||
+  animations.categories.some((category) => category.actions.includes(anim)) ||
+  isEventAnim(animations.events, anim);
 
 /** 工作状态播完（ended）后的续播决策：找到包含 current 的档位，多候选档位则返回档内下一候选
  *  （排除 current，避免连抽），让长时间状态自动轮换；单候选档位或动画不属于该池则返回 null。

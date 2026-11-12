@@ -103,10 +103,10 @@ done
 echo "INFO web search: $(systemctl is-active anas-search.service)"
 # So it is for the parts that their runbooks turn on or off.
 echo "INFO LAN Web entry (Caddy): $(systemctl is-active caddy.service)"
-if [[ -e /etc/docker/daemon.json ]]; then
+if /usr/lib/a-nas-docker-policy/check-address-pool >/dev/null 2>&1; then
   echo "INFO App Center: Docker $(systemctl is-active docker.service), container agent $(systemctl is-active anas-container-agent.service)"
 else
-  echo "INFO App Center: Docker waits for its address pool in /etc/docker/daemon.json (docs/runbooks/install-container-agent.md)"
+  echo "INFO App Center: Docker waits for bip and default-address-pools in /etc/docker/daemon.json (docs/runbooks/install-container-agent.md)"
 fi
 if [[ -e /etc/a-nas/internet.env ]]; then
   echo "INFO internet entry: on (/etc/a-nas/internet.env)"

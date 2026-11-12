@@ -10,10 +10,13 @@ what the host's decisions read from disk, is cut by patches (CUT_IMPORTS). The s
 or if a vendored file imports a package at run time (type-only imports, which the build
 erases, are fine).
 
-Run on the development machine, with a dsh-pet checkout at the pinned commit and its HEVC
-animations for Safari (the assets-mov release, MOV_ZIP below), in a Python that has the
+Run on the development machine, with a clean dsh-pet checkout at the pinned commit and its
+HEVC animations for Safari (the assets-mov release, MOV_ZIP below), in a Python that has the
 development tools of ai/requirements-dev.txt installed (json5 reads dsh-pet's config.jsonc):
     python3 scripts/vendor-dsh-pet.py <dsh-pet checkout> web/src/companion/dsh-pet <assets-mov zip>
+Without the zip, --mov-from <animations.sha256> takes the HEVC animations' lines from that
+manifest instead, unchecked; scripts/check-dsh-pet-vendor.sh uses it to vendor again and compare
+when only the checkout is at hand.
 
 Imports lose their .ts suffix (A-NAS does not import with extensions). Changes A-NAS
 needs are patches in web/src/companion/dsh-pet-patches/, applied in name order.
@@ -89,14 +92,35 @@ CUT_IMPORTS = {
 }
 STATEMENT = re.compile(r"""(?m)^\s*(?:import|export)\s+(type\s+)?[^;]*?\bfrom\s*(['"])([^'"]+)\2""")
 
-upstream, target, mov_zip = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+USAGE = "usage: vendor-dsh-pet.py <dsh-pet checkout> <target> <assets-mov zip> | --mov-from <animations.sha256>"
+if len(sys.argv) == 4:
+    mov_zip, mov_from = Path(sys.argv[3]), None
+elif len(sys.argv) == 5 and sys.argv[3] == "--mov-from":
+    mov_zip, mov_from = None, Path(sys.argv[4])
+else:
+    sys.exit(USAGE)
+upstream, target = Path(sys.argv[1]), Path(sys.argv[2])
 source = upstream / "dsh-pet" / "src"
 patches = target.with_name("dsh-pet-patches")
-commit = subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"],  # noqa: S607  a development tool, git from PATH
-                        capture_output=True, text=True, check=True).stdout.strip()
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(upstream), *args],  # noqa: S607  a development tool, git from PATH
+                          capture_output=True, text=True, check=True).stdout
+
+
+commit = git("rev-parse", "HEAD").strip()
 if commit != PINNED:
     sys.exit(f"dsh-pet checkout is at {commit[:12]}, expected the pinned {PINNED[:12]}")
-if hashlib.sha256(mov_zip.read_bytes()).hexdigest() != MOV_ZIP[1]:
+# The pinned commit is what is copied, not the checkout: a change, a new file, or an ignored
+# file where the script reads would be copied with it as if it were dsh-pet's.
+changed = dict.fromkeys(git("status", "--porcelain", "--untracked-files=all").splitlines()
+                        + git("status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--",
+                              "dsh-pet/src", "dsh-pet/assets/config.jsonc", "dsh-pet/assets/webm",
+                              "LICENSE").splitlines())
+if changed:
+    sys.exit(f"dsh-pet checkout differs from {PINNED[:12]}; vendor from a clean checkout:\n" + "\n".join(changed))
+if mov_zip and hashlib.sha256(mov_zip.read_bytes()).hexdigest() != MOV_ZIP[1]:
     sys.exit(f"{mov_zip} is not the pinned {MOV_ZIP[0]}")
 
 
@@ -159,23 +183,41 @@ animations["events"] = {key: config["animations"]["events"][key] for key in ("wh
                 "workStatusTexts": config["workStatusTexts"]},
                ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
-files_by_name = {path.name: path.read_bytes() for path in (upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")}
-with zipfile.ZipFile(mov_zip) as archive:
-    files_by_name |= {entry.filename: archive.read(entry) for entry in archive.infolist() if not entry.is_dir()}
+hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+          for path in (upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")}
+if mov_zip:
+    with zipfile.ZipFile(mov_zip) as archive:
+        hashes |= {entry.filename: hashlib.sha256(archive.read(entry)).hexdigest()
+                   for entry in archive.infolist() if not entry.is_dir()}
+else:
+    for line in mov_from.read_text(encoding="utf-8").splitlines():
+        hash_, _, name = line.partition("  ")
+        if name.endswith(".mov"):
+            if not re.fullmatch(r"[0-9a-f]{64}", hash_):
+                sys.exit(f"malformed line in {mov_from}: {line!r}")
+            hashes[name] = hash_
 lines = []
-for name in sorted(files_by_name):
+for name in sorted(hashes):
     if not re.fullmatch(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*\.(webm|mov)", name) or name != name.strip():
         sys.exit(f"unexpected animation file name: {name!r}")
-    lines.append(f"{hashlib.sha256(files_by_name[name]).hexdigest()}  {name}\n")
+    lines.append(f"{hashes[name]}  {name}\n")
 manifest = "".join(lines).encode()
 (target / "animations.sha256").write_bytes(manifest)
 pool = hashlib.sha256(manifest).hexdigest()[:16]
 shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
+# Where the copied files live upstream, for the look at upstream changes the README asks for: their
+# directories, a little wider than the files themselves.
+folders = {path.relative_to(source.resolve()).parent for path in files}
+watched = sorted((Path("dsh-pet/src") / folder).as_posix() for folder in folders
+                 if not any(other in folder.parents for other in folders))
 (target / "README.md").write_text(
     "# Vendored dsh-pet pet card, animation and motion\n\n"
     f"Copied from [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) commit `{commit}` "
-    "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`. Do not edit the copied files by hand: "
-    "add a patch to `../dsh-pet-patches/` or change the script, and vendor again.\n\n"
+    "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`, which the Web UI's build ships as "
+    "`assets/third-party-licenses.txt` (`make web-build`). Do not edit the copied files by hand: "
+    "add a patch to `../dsh-pet-patches/` or change the script, and vendor again. "
+    "This README is written by the script too, and `files.sha256` lists every file it wrote with its hash, "
+    "which `make vendor-check` checks without a dsh-pet checkout.\n\n"
     "The animations this code plays are not in Git and are not MIT. The character is the community-made "
     "DeepSeek 大肥鱼, not an official DeepSeek character: the original 溟月 is by "
     "[@上善无形](https://space.bilibili.com/4456176) and the maid design by "
@@ -185,7 +227,44 @@ shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
     "character credits <https://github.com/PC2005-cloud/dsh-pet>, and A-NAS must replace it before any "
     "commercial release.\n\n"
     "Patches applied: " + (", ".join(f"`{name}`" for name in applied) or "none") + ".\n\n"
-    f"`animations.sha256` lists the {len(lines)} animation files of this commit and of `{MOV_ZIP[0]}`; "
-    f"installed, they are companion animation pool `{pool}`.\n",
+    f"`animations.sha256` lists the {len(lines)} animation files of this commit and of `{MOV_ZIP[0]}` "
+    f"(SHA-256 `{MOV_ZIP[1]}`); installed, they are companion animation pool `{pool}`, the pool "
+    "`scripts/install-media-pool.sh` pins. Upstream has since replaced that release asset: the pinned zip "
+    "comes from a kept copy, and the script refuses any other.\n\n"
+    "## No updates\n\n"
+    "1. A-NAS does not follow upstream. A new dsh-pet release or commit sets nothing off.\n"
+    "2. A device never updates it. The code is compiled into the Web desktop that anas-api serves; the "
+    "animations are a pool an administrator installs with `scripts/install-media-pool.sh`; the NAS fetches "
+    "nothing of dsh-pet from the network.\n"
+    "3. Upgrading is a deliberate dependency upgrade, only when upstream fixes a security problem or a bug "
+    "A-NAS needs in the copied files, when a new character or new animations are wanted, or when the "
+    "companion's next version is planned.\n"
+    "4. Dependabot does not see vendored code, so no security alert comes on its own. Before each milestone, "
+    "see whether upstream changed what is copied (an empty output means no):\n\n"
+    "   ```bash\n"
+    f"   git -C <dsh-pet checkout> fetch origin HEAD && git -C <dsh-pet checkout> diff --stat {commit[:12]}..FETCH_HEAD -- \\\n"
+    "     " + " ".join(watched) + " \\\n"
+    "     dsh-pet/assets/config.jsonc dsh-pet/assets/webm LICENSE\n"
+    "   ```\n\n"
+    "## Upgrading\n\n"
+    "1. Set `PINNED` in `scripts/vendor-dsh-pet.py` to the new commit, and `MOV_ZIP` when the HEVC "
+    "animations changed too; keep a copy of that zip, since upstream may replace it.\n"
+    "2. Check the commit out in a clean dsh-pet checkout and run the script; adapt the patches in "
+    "`../dsh-pet-patches/` one by one until they apply and the script passes.\n"
+    "3. The new `animations.sha256` is a new pool: set `companion_pool` in `scripts/install-media-pool.sh` "
+    "to the pool the script prints, and update the install runbook.\n"
+    "4. Run `make vendor-check DSH_PET=<checkout> DSH_PET_MOV_ZIP=<zip>` and `make check`, then try the "
+    "companion in a browser, Safari included.\n"
+    "5. Stage and install the new pool on the NAS (`scripts/deploy-media-pool.ps1 -Kind companion`, then "
+    "`install-media-pool.sh companion`), and have the upgrade reviewed as a dependency upgrade.\n",
     encoding="utf-8", newline="\n")
+# Every file written here with its hash, in byte order as LC_ALL=C sort puts it: the offline part of
+# scripts/check-dsh-pet-vendor.sh, which CI runs without a checkout, sees a file changed by hand.
+written = sorted((path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file()),
+                 key=lambda rel: rel.encode())
+(target / "files.sha256").write_text(
+    "".join(f"{hashlib.sha256((target / rel).read_bytes()).hexdigest()}  {rel}\n" for rel in written),
+    encoding="utf-8", newline="\n")
+if not mov_zip:
+    print(f"HEVC animations not checked: their lines come from {mov_from}, not from the assets-mov zip")
 print(f"vendored {len(files)} files from {commit[:12]} with {len(applied)} patches; animation pool {pool}")
