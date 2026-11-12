@@ -107,10 +107,6 @@ FROM pragma_foreign_key_list(?) ORDER BY id, seq`, name) {
 		for id, key := range keys {
 			constraints = append(constraints, fmt.Sprintf("foreign key %s references %s %s", strings.Join(pairs[id], ", "), key.parent, key.actions))
 		}
-		var statement string
-		if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&statement); err != nil {
-			t.Fatal(err)
-		}
 		constraints = append(constraints, Declared(statement)...)
 		slices.Sort(constraints)
 		for _, c := range constraints {
