@@ -15,6 +15,8 @@
 #   leaves them;
 # - a-nas-assistant-trial, the assistant's trial (ADR 0024), at the version of
 #   a-nas, which it depends on with its Hermes runtime's content package.
+# - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
+#   stay installed when the product rolls back, as Docker itself does.
 #
 # OUT then holds this version's packages alone: those of an earlier build go,
 # so that the system test and make release find the ones just built.
@@ -43,7 +45,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -78,6 +80,18 @@ for package in a-nas-host a-nas-console; do
   chmod 0644 "$work/$package/DEBIAN/control"
   build "$work/$package"
 done
+
+root=$work/a-nas-docker-policy
+install -d "$root/DEBIAN"
+control a-nas-docker-policy '' >"$root/DEBIAN/control"
+chmod 0644 "$root/DEBIAN/control"
+install -m 0755 "$repo/deploy/debian/a-nas-docker-policy/DEBIAN/postinst" "$root/DEBIAN/"
+install -D -m 0755 "$repo/deploy/docker/check_address_pool.py" "$root/usr/lib/a-nas-docker-policy/check-address-pool"
+install -D -m 0644 "$repo/deploy/systemd/docker-address-pool.conf" \
+  "$root/usr/lib/systemd/system/docker.service.d/a-nas-docker-policy.conf"
+install -D -m 0644 "$repo/deploy/systemd/docker-socket-address-pool.conf" \
+  "$root/usr/lib/systemd/system/docker.socket.d/a-nas-docker-policy.conf"
+build "$root"
 
 root=$work/a-nas
 lib=$root/usr/lib/a-nas
@@ -131,11 +145,6 @@ wants sockets.target anas-ai.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path
-# Docker, which a-nas-host depends on, waits for its address pool (ADR 0013).
-for unit in docker.service docker.socket; do
-  install -D -m 0644 "$repo/deploy/systemd/docker-address-pool.conf" "$units/$unit.d/a-nas-address-pool.conf"
-done
-
 # What follows the machine: its settings, and the health check.
 install -m 0755 "$repo/deploy/site/a-nas-generator.sh" "$root/usr/lib/systemd/system-generators/a-nas-generator"
 install -m 0755 "$repo/deploy/site/apply.sh" "$lib/site/apply"

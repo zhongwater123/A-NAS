@@ -46,7 +46,7 @@ commit=$(git -C "$repo" rev-parse --short=12 HEAD)
 
 # The packages the gates passed, at this version.
 products=()
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy; do
   deb=$(find "$build/packages" -maxdepth 1 -name "${package}_${version}_*.deb" -print -quit 2>/dev/null)
   [[ -n "$deb" ]] || { echo "missing $package $version: run make packages" >&2; exit 2; }
   products+=("$deb")

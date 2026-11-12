@@ -78,9 +78,10 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
 6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`，装了助手试用的加 `a-nas-assistant-trial`。
    ```bash
    apt-get update
-   apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本>
+   apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本> a-nas-docker-policy
    ```
    - apt 按 `a-nas` 的依赖装上这一版的内容包；内容没变的不下载。`a-nas` 依赖同一版本的 `a-nas-host`；`a-nas-console` 只在命令写出时才变，装着却不是这一版时 `a-nas-check` 报告 `FAIL`。
+   - 显式写出 `a-nas-docker-policy`，使其保留为手动安装的宿主机保护。它不与产品一起降级；即使回滚到尚不依赖它的历史版本，`apt autoremove` 也不会删掉它。不要为回滚而卸载此包。
    - `a-nas-host` 带上 Caddy、Docker、WireGuard 与 nftables，Caddy 与 Docker 不低于这一版固定的版本，低了 apt 就升级它们；Docker 升级时它与全部容器重启。Caddy 装上即提供局域网入口（[启用局域网 Web 访问](enable-lan-web-access.md)）；Docker 在地址池写好之前不启动，应用中心按[容器代理手册](install-container-agent.md)打开。`a-nas-check` 的 `INFO` 行列出这几项的状态。
    - `--force-confold` 保留 A-NAS 与管理员改过的配置文件，例如 `/etc/caddy/Caddyfile`；没有它时，上游包改了自带的配置文件，apt 会停下来询问。
    - 预期：`preinst` 输出数据库副本的位置（升级时），`postinst` 最后运行 `a-nas-check`，全部 `PASS`。
@@ -147,7 +148,7 @@ git diff deploy/upstream/packages.json
   apt-get install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold a-nas=<旧版本> a-nas-host=<旧版本>
   ```
   - 新版本改过的数据库结构，由旧版本启动时按新版本存下的反向步骤退回（[`internal/sqlitedb/migrate.go`](../../internal/sqlitedb/migrate.go)）。
-  - Docker 与 Caddy 不降级：`a-nas-host` 只要求不低于固定的版本。
+  - Docker、Caddy 与 `a-nas-docker-policy` 不降级：`a-nas-host` 只要求不低于固定的版本。旧包即使没有地址池保护，独立包仍在 Docker 启动前校验配置。
 - 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。
   ```bash
   systemctl stop anas-api anas-photos anas-shares anas-family anas-host-agent

@@ -17,7 +17,7 @@ Experimental NAS 原先使用 Debian 13 自带的 `docker.io` 26.1.5、`docker-c
 - 设备只信任 A-NAS 的签名密钥；上游的签名在更新脚本读取上游源时核对。上游公钥换了时，指纹不符，脚本停止，要人工核对后再改 `packages.json`。
 - 这两个组件的安全更新不由 Debian 安全团队提供，也不会自动到达设备：要更新 `packages.json` 并发布 A-NAS。Cloudsmith 不可用时（2026-10 一度返回 `402`，2026-11-11 构建系统测试镜像时卡住）只影响更新，不影响设备安装。
 - 每台设备都装着 Docker 与 Caddy（下载约 92 MB）。Caddy 一装上局域网入口就开放（[ADR 0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）；Docker 在地址池写好之前不启动（[ADR 0013](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
-- 回滚 A-NAS 不降级 Docker 与 Caddy：依赖只要求不低于固定的版本。软件源保留每个版本，每更新一次多约 92 MB。
+- 回滚 A-NAS 不降级 Docker、Caddy 与 Docker 的地址池保护包 `a-nas-docker-policy`：依赖只要求不低于固定的版本。保护包的生命周期见 [ADR 0013](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)。软件源保留每个版本，每更新一次多约 92 MB。
 - 2026-10-10 的切换卸载了 Debian 的 `docker.io`、`docker-cli`、`docker-compose`、`containerd` 与 `runc`，Docker 与容器中断了几分钟；`/var/lib/docker` 中的镜像、容器与卷保留。Docker 29 新安装默认使用 containerd 镜像存储，从旧版升级则保留原有存储驱动。临时手动安装在 `/usr/local/lib/docker/cli-plugins/` 的 Compose 在切换后删除。
 - 新大版本可能带来行为变化，需要先在开发机和系统测试上验证。
 

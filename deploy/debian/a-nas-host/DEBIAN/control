@@ -4,7 +4,7 @@ Architecture: all
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
-Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64, @UPSTREAM@, nftables, wireguard-tools
+Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64, @UPSTREAM@, nftables, wireguard-tools, a-nas-docker-policy (>= @VERSION@)
 Description: what an A-NAS device needs from Debian and upstream
  The Host Agent, the Product Service and their workers run these commands
  and link these libraries. The a-nas package requires this package at the

@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-12：Docker 的地址池保护必须跨产品回滚保留](2026-11-12-docker-policy-survives-product-rollback.md)
 - [2026-11-09：hwmon 属性截断与异常 SMART 温度](2026-11-09-hwmon-truncation-and-smart-temperature.md)
 - [2026-11-09：音乐扫描刚结束时，状态报告“空闲”却带着扫描前的歌曲数与版本号](2026-11-09-music-status-idle-with-stale-count.md)
 - [2026-11-09：分散任务把未知分配量当成完成，后台测量没有超时](2026-11-09-spread-allocation-observation.md)

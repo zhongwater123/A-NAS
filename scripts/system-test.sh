@@ -10,7 +10,8 @@
 # CAP_SETUID (issue #38).
 #
 # The repository holds three releases: the one under test, the "previous" one
-# (the same programs at a lower version) and a "next" one whose Product
+# (the same programs at a lower version, without the Docker policy dependency,
+# as before that policy existed) and a "next" one whose Product
 # Service has one more database step (internal/accounts/rollbacktest.go). The
 # test installs the previous release, upgrades to this one, and at the end
 # upgrades to the next, rolls back to this one and to the previous, and
@@ -63,6 +64,14 @@ if [[ "${1:-}" != --inside ]]; then
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
+  # The old package boundary predates a-nas-docker-policy. A previous package
+  # made entirely by today's builder would otherwise mask its removal on a
+  # historical rollback. Keep the same programs for the database tests, but
+  # give the previous host package that older dependency contract.
+  legacy_host=$work/legacy-host
+  dpkg-deb --raw-extract "$work/previous/a-nas-host_${version}~previous_all.deb" "$legacy_host"
+  sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
+  dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
@@ -72,7 +81,8 @@ if [[ "${1:-}" != --inside ]]; then
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host}_*.deb "$work"/next/a-nas{,-host}_*.deb \
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
     "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
@@ -258,7 +268,7 @@ sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
 apt_install() {
   apt-get update -qq >"/tmp/$2.log" 2>&1 &&
     apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold \
-      "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
+      "a-nas=$1" "a-nas-host=$1" a-nas-docker-policy >>"/tmp/$2.log" 2>&1
 }
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 for release in "$previous" "$version"; do
@@ -690,6 +700,16 @@ systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
 check "Docker does not start on request before it has its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket'
 install -d /etc/docker
+for config in '{}' '{"log-driver":"json-file"}' '{"bip":"10.96.127.1/24"}' \
+  '{"default-address-pools":[{"base":"10.96.64.0/19","size":24}]}' \
+  '{"bip":"10.96.127.1/24","default-address-pools":[]}' '{'; do
+  printf '%s\n' "$config" >/etc/docker/daemon.json
+  systemctl reset-failed docker.socket docker.service
+  systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+  check "Docker refuses incomplete or malformed address-pool config: $config" \
+    bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+done
+systemctl reset-failed docker.socket docker.service
 printf '{"bip": "10.96.127.1/24", "default-address-pools": [{"base": "10.96.64.0/19", "size": 24}]}\n' >/etc/docker/daemon.json
 check "Docker accepts the runbook's address pool" quiet dockerd --validate --config-file /etc/docker/daemon.json
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
@@ -2262,6 +2282,28 @@ check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+legacy_without_policy() {
+  ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
+}
+policy_stays() {
+  local file
+  for file in /usr/lib/systemd/system/docker.{service,socket}.d/a-nas-docker-policy.conf \
+    /usr/lib/a-nas-docker-policy/check-address-pool; do
+    [[ "$(dpkg-query -S "$file")" == "a-nas-docker-policy: $file" ]] || return 1
+  done
+}
+check "the previous host package has no Docker policy dependency" legacy_without_policy
+check "Docker policy remains independently installed after a historical-layout rollback" policy_stays
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker stays stopped without a pool after rolling back to a pre-policy package" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+printf '{}\n' >/etc/docker/daemon.json
+systemctl reset-failed docker.socket docker.service
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "an empty config cannot bypass the policy after rolling back" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+systemctl reset-failed docker.socket docker.service
+rm /etc/docker/daemon.json
 check "a-nas-check passes on the previous release" quiet a-nas-check
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check

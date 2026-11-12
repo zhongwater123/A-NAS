@@ -22,8 +22,8 @@ packages=systemd,systemd-sysv,dbus,
 # of each alternative, without its version, and not the upstream packages,
 # which a-nas-host's control file names as @UPSTREAM@.
 packages+=$(
-  { sed -n 's/^Depends: //p' "$repo/deploy/debian/a-nas-host/DEBIAN/control"; jq -r '.packages[].depends' "$lock"; } |
-    sed -e 's/([^)]*)//g' -e 's/|[^,]*//g' | tr ',' '\n' | tr -d ' ' | grep -v -e '^$' -e '^@' |
+  { sed -n 's/^Depends: //p' "$repo"/deploy/debian/{a-nas-host,a-nas-docker-policy}/DEBIAN/control; jq -r '.packages[].depends' "$lock"; } |
+    sed -e 's/([^)]*)//g' -e 's/|[^,]*//g' | tr ',' '\n' | tr -d ' ' | grep -v -e '^$' -e '^@' -e '^a-nas-docker-policy$' |
     grep -vxF -f <(jq -r '.packages[].name' "$lock") | sort -u | paste -sd, -
 ),
 # What the AI assistant's trial depends on (ai/assistant-spike): PID 1 in its
