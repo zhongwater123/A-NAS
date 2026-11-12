@@ -244,7 +244,7 @@ if ! grep -q '^ANAS_SMB_INTERFACE=' /etc/a-nas/site.conf 2>/dev/null; then
 fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-downgrades \
-  "a-nas=$VERSION" "a-nas-host=$VERSION" "a-nas-console=$VERSION"
+  "a-nas=$VERSION" "a-nas-host=$VERSION" "a-nas-console=$VERSION" a-nas-docker-policy
 
 a-nas-check
 [[ "$(stat -c '%U:%G %a' /run/a-nas/host-agent.sock)" == "root:a-nas 660" ]]

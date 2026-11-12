@@ -161,6 +161,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 禁用账号会断开它连着的 SMB 会话，之后产品服务启动时的身份同步照常成功。Host Agent 的沙箱让 Samba 命令在标准错误打印告警，root 集成测试碰不到这一点（[调查](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)）；
 - smbd 等 SMB 接口有了 IPv4 地址才启动：在一个暂时没有地址的接口上，smbd 不启动、超时后再试，加上地址后启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）；
 - 产品服务账号与相册服务进不了任何空间，相册上传在专用身份下工作；
+- Docker 与 Caddy 由 apt 从软件源装上，版本与 [`packages.json`](../../deploy/upstream/packages.json) 固定的相同；没有地址池时 Docker 不启动，有了按地址池分配网络，容器代理经它返回固定版本的 Docker 引擎；
 - `anas-site.service` 配置的 Caddy 局域网入口能转发登录与上传，经入口的登录拿不到本机长期会话；
 - 活动记录为经入口的登录记下客户端地址、为本机屏幕登录记下来源；Host Agent 在正式单元的沙箱中以 `journalctl` 读到产品服务与 systemd 关于白名单单元的日志，成员读不到系统日志，白名单外的单元被拒绝（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)）；
 - 重启 Host Agent 后以上行为保持；
@@ -182,8 +183,8 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
-- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），另加系统测试打开的可选功能（Caddy、助手沙箱的工具）与只供测试用的工具。
-- 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
+- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）与 Docker、Caddy 的软件包依赖的 Debian 包，另加助手沙箱的工具与只供测试用的工具；Docker 与 Caddy 本身不在镜像中，由测试从软件源安装。
+- 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包与 `scripts/fetch-upstream-packages.sh` 取得的 Docker、Caddy 软件包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
 - 每条检查在它保护的东西坏掉时都要失败（[#423](https://github.com/zhongwater123/A-NAS/issues/423)）：

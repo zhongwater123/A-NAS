@@ -6,7 +6,7 @@
 # - SearXNG's secret, made once: it signs web search's thumbnail addresses,
 #   and the Product Service reads it to sign them as well (ADR 0030);
 # - the fan sensor drivers that find a chip (docs/specs/device-temperatures.md);
-# - the LAN Web entry's Caddy site, when Caddy is installed (ADR 0012), and the
+# - the LAN Web entry's Caddy site (ADR 0012), and the
 #   internet entry's HTTPS site in it, when /etc/a-nas/internet.env turns the
 #   entry on (ADR 0032), with the entry's tunnel.
 #
@@ -55,16 +55,18 @@ if [[ -e "$internet_env" ]]; then
   elif ! command -v caddy >/dev/null || ! caddy list-modules 2>/dev/null | grep -x 'caddy.listeners.proxy_protocol' >/dev/null; then
     # grep reads the whole list: stopping at the match would leave caddy
     # writing to a closed pipe.
-    fail "the internet entry needs Caddy 2.7 or newer from Caddy's own repository (docs/runbooks/enable-lan-web-access.md)"
+    fail "the internet entry needs Caddy 2.7 or newer, the one A-NAS's repository carries (deploy/upstream/packages.json)"
   elif ! command -v wg >/dev/null || ! command -v wg-quick >/dev/null || ! command -v nft >/dev/null; then
-    fail "the internet entry needs WireGuard and nftables: apt install --no-install-recommends wireguard-tools nftables"
+    fail "the internet entry needs WireGuard and nftables, which a-nas-host depends on: apt-get install --no-install-recommends a-nas-host"
   else
     { read -r internet_host; read -r relay_endpoint; read -r relay_key; read -r relay_address; read -r tunnel_address; } <<<"$entry"
     internet=true
   fi
 fi
 
-# The LAN Web entry is optional: installing Caddy turns it on (ADR 0012).
+# Caddy serves the LAN Web entry (ADR 0012); a-nas-host depends on it. Turning
+# Caddy off (systemctl disable --now caddy) turns the entry off: its site here
+# stays current, and nothing here starts Caddy.
 if command -v caddy >/dev/null; then
   install -d -o root -g root -m 0755 /etc/caddy
   # Keep the administrator's own configuration the first time A-NAS replaces it.

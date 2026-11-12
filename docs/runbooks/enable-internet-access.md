@@ -1,7 +1,7 @@
 # 启用互联网访问
 
 状态：draft（系统测试已验证 NAS 一侧；边缘服务器已按第 2 步准备，NAS 一侧与开放待执行）
-更新时间：2026-11-11
+更新时间：2026-11-12
 
 ## 目的
 
@@ -46,8 +46,8 @@
    - 预期：最后两行是 `edge relay: tunnel <网段>1, NAS <网段>2; HAProxy inactive` 和 `relay public key: <边缘公钥>`。
    - 完成标准：`systemctl is-active a-nas-edge-firewall wg-quick@wg-anas` 均为 `active`，`haproxy` 为 `inactive`；记下 `<边缘公钥>`。
    - 实验 NAS 的边缘服务器已于 2026-11-05 手工完成同样的配置。再执行一次脚本会收敛到同样的状态，并保留原有密钥，最后照样打印公钥。
-3. 在 NAS 上安装互联网入口需要的软件（root）。
-   - 先按[启用局域网 Web 访问](enable-lan-web-access.md)第 2 步从 Caddy 官方源安装 Caddy，替换 Debian 的 2.6.2；再执行 `apt-get install -y --no-install-recommends wireguard-tools nftables`。
+3. 在 NAS 上核对互联网入口需要的软件（root）。
+   - Caddy、WireGuard 与 nftables 都是 `a-nas-host` 的依赖，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)装包时一起装上；Caddy 是 A-NAS 软件源中 Caddy 官方的软件包（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
    - 预期：`caddy list-modules | grep -x caddy.listeners.proxy_protocol` 有输出，`command -v wg wg-quick nft` 都有路径。
    - 完成标准：上面两项都满足；局域网入口仍可访问。
 4. 在 NAS 上写入配置（root）。
