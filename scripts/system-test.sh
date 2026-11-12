@@ -4,8 +4,8 @@
 # disposable Debian 13 container where systemd is PID 1, then checks every
 # entry point that touches the data volume: Web files (File Broker workers), SMB, the photo API, the FFmpeg
 # worker shared by the media center and music, the administrator terminal,
-# the LAN Web entry that Caddy serves on port 80, and the internet entry's
-# HTTPS site. Unlike tests that start the daemons by hand, it runs them under
+# the LAN Web entry that Caddy serves on port 80, the internet entry's
+# HTTPS site, and the App Center's Docker and container agent. Unlike tests that start the daemons by hand, it runs them under
 # the production sandboxes, so it catches a unit that takes the Host Agent's
 # CAP_SETUID (issue #38).
 #
@@ -34,7 +34,9 @@
 # scripts/build-content-packages.sh describes), it installs the real models
 # and runtimes instead; SearXNG then starts without reaching any engine.
 # Qdrant and the text reader's llama-server are always the real ones that
-# scripts/fetch-qdrant.sh and scripts/fetch-llama.sh fetch.
+# scripts/fetch-qdrant.sh and scripts/fetch-llama.sh fetch, and so are Docker
+# and Caddy, which the repository carries as A-NAS's does
+# (scripts/fetch-upstream-packages.sh, ADR 0015).
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -67,9 +69,11 @@ if [[ "${1:-}" != --inside ]]; then
     -o "$work/next-programs/anas-api" ./cmd/anas-api)
   bash "$repo/scripts/build-packages.sh" "$work/next" "$version+next" "$work/next-programs" >/dev/null
   bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$version" "$work/gnupg" >/dev/null
+  upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
+  mapfile -t upstream <<<"$upstream"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
     "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host}_*.deb "$work"/next/a-nas{,-host}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb >/dev/null
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -241,8 +245,9 @@ ln -s /usr/lib/systemd/system/wg-quick@.service /etc/systemd/system/multi-user.t
 systemctl daemon-reload
 
 # apt reads the A-NAS repository alone, as the deploy runbook adds it: the
-# image's Debian and Caddy sources would need the network, and every package
-# A-NAS depends on is installed already.
+# image's Debian sources would need the network, and every Debian package
+# A-NAS depends on is installed already. Docker and Caddy come from the
+# repository.
 install -d /etc/apt/sources.list.d/disabled
 mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
 dpkg -i "$repository"/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_*.deb >/tmp/keyring.log
@@ -252,7 +257,8 @@ sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
 # at VERSION, which may be older; apt's output goes to /tmp/NAME.log.
 apt_install() {
   apt-get update -qq >"/tmp/$2.log" 2>&1 &&
-    apt-get install -y --no-install-recommends --allow-downgrades "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
+    apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold \
+      "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
 }
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 for release in "$previous" "$version"; do
@@ -667,6 +673,49 @@ sharing_smoke() {
   return 1
 }
 check "member sharing works through production service sandboxes" sharing_smoke
+# --- Docker and Caddy (ADR 0015): apt installed them from A-NAS's repository
+# as a-nas-host depends on them, at the versions deploy/upstream/packages.json
+# pins. Docker waits for the address pool the App Center's runbook gives it
+# (ADR 0013), then the container agent reaches it.
+upstream_pinned() {
+  local name pinned
+  while read -r name pinned; do
+    [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+}
+check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "Docker waits for its address pool" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker does not start on request before it has its address pool" \
+  bash -c '! systemctl is-active --quiet docker.service docker.socket'
+install -d /etc/docker
+printf '{"bip": "10.96.127.1/24", "default-address-pools": [{"base": "10.96.64.0/19", "size": 24}]}\n' >/etc/docker/daemon.json
+check "Docker accepts the runbook's address pool" quiet dockerd --validate --config-file /etc/docker/daemon.json
+systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
+check "Docker starts with its address pool" systemctl is-active --quiet docker.service
+check "Docker allocates networks from the pool alone" \
+  test "$(docker info --format '{{json .DefaultAddressPools}}' 2>>"$hidden")" = '[{"Base":"10.96.64.0/19","Size":24}]'
+check "Docker's bridge has the runbook's address" \
+  test "$(ip -4 -o addr show dev docker0 2>>"$hidden" | awk '{print $4}')" = 10.96.127.1/24
+systemctl start anas-container-agent.service >>"$hidden" 2>&1 || true
+# The engine's version, as docker-ce's Debian version 5:29.9.3-1~debian.13~trixie carries it.
+docker_engine=$(jq -r '.packages[] | select(.name == "docker-ce") | .version' /src/deploy/upstream/packages.json |
+  sed -e 's/^[0-9]*://' -e 's/-[^-]*$//')
+agent_snapshot() {
+  for _ in $(seq 1 50); do
+    setpriv --reuid=a-nas --regid=a-nas --init-groups curl -fsS --unix-socket /run/a-nas-container/agent.sock \
+      http://agent/v1/snapshot 2>>"$hidden" | jq -e --arg version "$docker_engine" '.engine.version == $version' >/dev/null && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "the container agent gives the Product Service the pinned Docker engine" agent_snapshot
+# The rest of the test runs as the packages leave a machine whose
+# administrator has not turned the App Center on.
+systemctl stop anas-container-agent.service docker.socket docker.service >>"$hidden" 2>&1 || true
+rm -f /etc/docker/daemon.json
+ip link delete docker0 2>/dev/null || true
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
