@@ -101,6 +101,18 @@ for unit in anas-host-agent.service anas-api.service anas-photos.service anas-sh
 done
 # Stopped is a valid state for web search: the administrator turns it off.
 echo "INFO web search: $(systemctl is-active anas-search.service)"
+# So it is for the parts that their runbooks turn on or off.
+echo "INFO LAN Web entry (Caddy): $(systemctl is-active caddy.service)"
+if [[ -e /etc/docker/daemon.json ]]; then
+  echo "INFO App Center: Docker $(systemctl is-active docker.service), container agent $(systemctl is-active anas-container-agent.service)"
+else
+  echo "INFO App Center: Docker waits for its address pool in /etc/docker/daemon.json (docs/runbooks/install-container-agent.md)"
+fi
+if [[ -e /etc/a-nas/internet.env ]]; then
+  echo "INFO internet entry: on (/etc/a-nas/internet.env)"
+else
+  echo "INFO internet entry: off"
+fi
 
 # A store on the data volume that its service opened before opens again. A
 # service whose database does not open, as when a rollback finds no reverse
