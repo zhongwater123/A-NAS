@@ -89,7 +89,7 @@ export function TerminalSection({
             <h3>终端尚未开启</h3>
             <p>终端让管理员以自己的 Linux 账号在{device}上运行命令。为安全起见它默认关闭，只能由设备的 root 开启：</p>
             <pre className={styles.tmCode} aria-label="开启终端的命令">
-              <code>{"echo ANAS_TERMINAL=enabled >> /etc/a-nas/anas-api.env\nsystemctl restart anas-api"}</code>
+              <code>{"echo ANAS_TERMINAL=enabled >> /etc/a-nas/site.conf\na-nas-site"}</code>
             </pre>
             <button className={styles.setBtn} onClick={checkAgain}>
               重新检查

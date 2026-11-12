@@ -2,22 +2,22 @@
 Description=A-NAS web search (SearXNG)
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/web-search.md
 # The administrator turns web search off in Settings: the Host Agent writes
-# this file and stops the service, and the installer's restart leaves it off.
+# this file and stops the service, and a restart leaves it off.
 ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled
 # The DNS servers join the address allow list before the service starts.
-After=network-online.target anas-search-dns.service
-Wants=network-online.target anas-search-dns.service
+After=network-online.target anas-search-dns.service anas-site.service
+Wants=network-online.target anas-search-dns.service anas-site.service
 
 [Service]
 Type=simple
 User=a-nas-search
 Group=a-nas-search
-# SEARXNG_SECRET, generated once by the installer.
+# SEARXNG_SECRET, made once by anas-site.service.
 EnvironmentFile=/etc/a-nas/search.env
-Environment=SEARXNG_SETTINGS_PATH=/opt/a-nas/current/search/settings.yml
+Environment=SEARXNG_SETTINGS_PATH=/usr/lib/a-nas/search/settings.yml
 # SearXNG, and the release's WSGI entry in front of it (anas_search.py). The
 # runtime is read-only and its bytecode compiled when it was built.
-Environment=PYTHONPATH=/opt/a-nas/current/search/runtime/lib/searxng:/opt/a-nas/current/search
+Environment=PYTHONPATH=/usr/lib/a-nas/search/runtime/lib/searxng:/usr/lib/a-nas/search
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Granian serves SearXNG over HTTP on a socket only the Product Service, a
 # member of the a-nas-search group, reaches; there is no TCP port. Its access
@@ -26,7 +26,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 # hundred for the web tab, and a page of results proxies dozens of
 # thumbnails; each request holds a thread while its engine answers, so a slow
 # engine must not keep the others waiting for one.
-ExecStart=/opt/a-nas/current/search/runtime/bin/granian --interface wsgi --uds /run/a-nas-search/search.sock \
+ExecStart=/usr/lib/a-nas/search/runtime/bin/granian --interface wsgi --uds /run/a-nas-search/search.sock \
   --uds-permissions 0o660 --workers 1 --blocking-threads 160 --no-ws --log-level warning anas_search:application
 RuntimeDirectory=a-nas-search
 RuntimeDirectoryMode=0750

@@ -33,7 +33,7 @@
 
 ## 后果
 
-- 本体多两个系统组：`a-nas-modules`（产品服务）与 `a-nas-module-sessions`（模块）。产品服务的附加组与 Host Agent 的运行目录各多一项，安装器与 `make ops-check` 同步更新。
+- 本体多两个系统组：`a-nas-modules`（产品服务）与 `a-nas-module-sessions`（模块）。产品服务的附加组与 Host Agent 的运行目录各多一项；两个组由 `a-nas` 包的 [sysusers 文件](../../deploy/sysusers.d/a-nas.conf)建，`make ops-check` 同步检查。
 - 产品服务能连接所有模块的套接字。产品服务失陷时，模块的数据随之暴露；这与它能连接相册、分享与家庭服务相同。
 - 模块能列出在用成员（ID、用户名、昵称），用于选择打分人。
 - 模块的程序不在 release 中，部署顺序是：先部署包含登记表与窗口的 A-NAS，再运行模块的安装脚本。模块更新也由它自己的脚本完成；接口变化仍要同时部署 A-NAS。

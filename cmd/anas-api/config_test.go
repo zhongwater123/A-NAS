@@ -198,30 +198,34 @@ func TestConfigNamesEveryProblemInTheSameOrder(t *testing.T) {
 	}
 }
 
-// The installer writes the only environment the Product Service has on a NAS.
-func TestTheInstallersEnvironmentIsAValidNASConfiguration(t *testing.T) {
-	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install-v1.0.1-system-services.sh"))
+// The unit and the site.conf the administrator writes are the only
+// environment the Product Service has on a NAS (ADR 0034).
+func TestTheUnitsEnvironmentIsAValidNASConfiguration(t *testing.T) {
+	unit, err := os.ReadFile(filepath.Join("..", "..", "deploy", "systemd", "system", "anas-api.service"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The file's lines, and the optional lines appended after it.
-	block := regexp.MustCompile(`printf '%s\\n' \\\n((?:  '[^']*' \\\n)*  '[^']*') > /etc/a-nas/anas-api\.env\n`).FindSubmatch(script)
-	if block == nil {
-		t.Fatal("the installer no longer writes /etc/a-nas/anas-api.env in one printf")
-	}
 	environment := map[string]string{}
-	for _, line := range regexp.MustCompile(`'(ANAS_[A-Z_]+)=([^']*)'`).FindAllSubmatch(block[1], -1) {
+	for _, line := range regexp.MustCompile(`(?m)^Environment=(ANAS_[A-Z_]+)=(\S*)$`).FindAllSubmatch(unit, -1) {
 		environment[string(line[1])] = string(line[2])
 	}
-	for _, line := range regexp.MustCompile(`printf '(ANAS_[A-Z_]+)=([^'\\]*)\\n' >> /etc/a-nas/anas-api\.env`).FindAllSubmatch(script, -1) {
+	if !regexp.MustCompile(`(?m)^EnvironmentFile=-/etc/a-nas/site\.conf$`).Match(unit) {
+		t.Fatal("anas-api.service does not read /etc/a-nas/site.conf")
+	}
+	// The settings site.conf's example turns on.
+	site, err := os.ReadFile(filepath.Join("..", "..", "deploy", "site", "site.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range regexp.MustCompile(`(?m)^#(ANAS_(?:TERMINAL|CONTAINERS_MODE))=(\S+)$`).FindAllSubmatch(site, -1) {
 		environment[string(line[1])] = string(line[2])
 	}
 	config, err := loadConfig(environment)
 	if err != nil {
-		t.Fatalf("the installer's environment %v does not load: %v", environment, err)
+		t.Fatalf("the unit's environment %v does not load: %v", environment, err)
 	}
 	if !config.Live() || config.Containers != containersAgent || !config.TerminalEnabled || config.MediaWorker != mediaWorkerSocket {
-		t.Fatalf("the installer's environment %v gives %+v", environment, config)
+		t.Fatalf("the unit's environment %v gives %+v", environment, config)
 	}
 }
 

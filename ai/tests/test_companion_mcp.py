@@ -1,10 +1,13 @@
 """The companion's MCP server answers every call as a result, and passes on only what the model gave.
 
 CompanionToolTests stand in for the MCP SDK, which only the assistant's runtime
-has. SdkPathTests run the server under the real SDK and skip without it. The
-system test with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them,
-and refuses a skip; by hand, use the runtime's Python with its packages
-(ai/assistant-spike/build-runtime.sh):
+has. SdkPathTests run the server under the real SDK and skip without it, unless
+ANAS_COMPANION_MCP_SDK=required, which makes the missing SDK a failure. make
+ai-sdk-test (in make check-steps, so in CI) runs them so, under the SDK
+Hermes's lock pins (ai/assistant-spike/companion-mcp-sdk.txt); the system test
+with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them under the
+runtime itself, and refuses a skip. By hand, with the runtime's Python and its
+packages (ai/assistant-spike/build-runtime.sh):
 
     PYTHONPATH=<runtime venv>/lib/python3.14/site-packages <runtime python> -m unittest tests.test_companion_mcp
 """
@@ -22,7 +25,12 @@ import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "anas_companion_mcp.py"
+SPIKE = Path(__file__).resolve().parents[1] / "assistant-spike"
+SOURCE = SPIKE / "anas_companion_mcp.py"
+# The servers import what they share from their own folder (anas_window_call.py).
+sys.path.insert(0, str(SPIKE))
+SDK = bool(importlib.util.find_spec("mcp") and importlib.util.find_spec("mcp_types"))
+SDK_REQUIRED = os.environ.get("ANAS_COMPANION_MCP_SDK") == "required"
 
 
 class _Server:
@@ -45,15 +53,15 @@ def _module(name, **attributes):
     return module
 
 
-def _exec(name):
-    spec = importlib.util.spec_from_file_location(name, SOURCE)
+def _exec(name, source=SOURCE):
+    spec = importlib.util.spec_from_file_location(name, source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def load():
-    """The server module with stand-ins for the MCP SDK and anyio."""
+def load(name="anas_companion_mcp", source=SOURCE):
+    """A server module with stand-ins for the MCP SDK and anyio."""
     stdio = _module("mcp.server.stdio", stdio_server=None)
     server = _module("mcp.server", Server=_Server, stdio=stdio)
     to_thread = _module("anyio.to_thread", run_sync=lambda function, *args: function(*args))
@@ -61,14 +69,15 @@ def load():
         "mcp": _module("mcp", server=server),
         "mcp.server": server,
         "mcp.server.stdio": stdio,
-        "mcp_types": _module("mcp_types", CallToolResult=_Result, ListToolsResult=_Result, TextContent=_Result, Tool=_Result),
+        "mcp_types": _module("mcp_types", CallToolResult=_Result, ListToolsResult=_Result, TextContent=_Result,
+                             ImageContent=_Result, Tool=_Result),
         "anyio": _module("anyio", to_thread=to_thread, run=None),
         "anyio.to_thread": to_thread,
     }
     saved = {name: sys.modules.get(name) for name in stand_ins}
     sys.modules.update(stand_ins)
     try:
-        return _exec("anas_companion_mcp")
+        return _exec(name, source)
     finally:
         for name, previous in saved.items():
             if previous is None:
@@ -85,16 +94,16 @@ class _Service(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 class _Companion:
-    """A product service on a socket of its own, for the server module given."""
+    """A product service on a socket of its own, for the server module given, which names the socket in attribute."""
 
-    def __init__(self, case, module):
+    def __init__(self, case, module, attribute="COMPANION"):
         self.case = case
         self.module = module
         temporary = tempfile.TemporaryDirectory()
         case.addCleanup(temporary.cleanup)
         self.path = os.path.join(temporary.name, "companion.sock")
-        case.addCleanup(setattr, module, "COMPANION", module.COMPANION)
-        module.COMPANION = self.path
+        case.addCleanup(setattr, module, attribute, getattr(module, attribute))
+        setattr(module, attribute, self.path)
         self.received = []
 
     def serve(self, status, body):
@@ -168,6 +177,26 @@ class CompanionToolTests(unittest.TestCase):
         self.assertIn("睡着了", result.content[0].text)
         self.assertEqual(self.received, [("/call", {"tool": "anim", "args": {"name": "wave", "facing": "left"}})])
 
+    def test_a_quiet_companion_refuses_wake_with_the_windows_words(self):
+        self.serve(200, {"status": "rejected", "reason": "member-quiet",
+                         "message": "成员让伙伴安静了，只有成员能叫醒它"})
+        result = companion.call("wake", {})
+        self.assertAnswered(result, "rejected")
+        self.assertEqual(result.content[0].text, "伙伴没有照做（member-quiet）：成员让伙伴安静了，只有成员能叫醒它。")
+        self.assertIn("member-quiet", companion.TOOLS["wake"][0])
+        self.assertIn("member-quiet", companion.TOOLS["lock"][0])
+
+    def test_a_position_that_stepped_aside_says_where_the_companion_went(self):
+        self.serve(200, {"status": "ok", "x": 0.198, "y": 0.5, "stepped_aside": True})
+        result = companion.call("position", {"x": 0.5, "y": 0.5, "mode": "spring"})
+        self.assertAnswered(result, "ok")
+        self.assertEqual(
+            result.content[0].text,
+            "伙伴没去要求的位置：为了不挡住最上层的窗口（通常是 VNAS 窗口），它停在 x=0.198、y=0.5。",
+        )
+        # Where it was asked to go, nothing more.
+        self.assertEqual(companion.line({"status": "ok", "x": 0.1, "y": 0.5}), "伙伴照做了。")
+
     def test_only_the_given_arguments_are_passed_on(self):
         self.serve(200, {"status": "ok", "x": 0.5, "y": 1})
         result = companion.call("position", {"x": 0.5, "y": 1.5, "mode": "line", "duration": 300, "lock": None,
@@ -195,10 +224,67 @@ class CompanionToolTests(unittest.TestCase):
         # have acted, so the model must not hear that nothing happened.
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
-                self.rfile.readline()
+                # Read the whole call, headers and body, before going away:
+                # http.client writes them separately, and a close between the
+                # two would be a call that never got there (busy).
+                length = 0
+                while (line := self.rfile.readline()) not in (b"\r\n", b""):
+                    name, _, value = line.decode().partition(":")
+                    if name.strip().lower() == "content-length":
+                        length = int(value)
+                self.rfile.read(length)
 
         self.service.listen(Handler)
         self.assertAnswered(companion.call("wake", {}), "timeout")
+
+    def test_a_refusal_before_the_call_was_sent_is_its_answer(self):
+        # Over the member's connections the product service answers busy and
+        # closes as it accepts, before the call goes out: sending it then
+        # fails, and the answer is still there to read.
+        answered = threading.Event()
+        answer = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 42\r\nConnection: close\r\n\r\n' \
+            b'{"reason":"rate-limited","status":"busy"}\n'
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.sendall(answer)
+                self.request.close()
+                answered.set()
+
+        self.service.listen(Handler)
+        connect = companion.anas_window_call.UnixHTTP.connect
+
+        def connect_then_wait(conn):
+            connect(conn)
+            answered.wait(5)
+
+        self.addCleanup(setattr, companion.anas_window_call.UnixHTTP, "connect", connect)
+        companion.anas_window_call.UnixHTTP.connect = connect_then_wait
+        for _ in range(20):
+            answered.clear()
+            result = companion.call("wake", {})
+            self.assertAnswered(result, "busy")
+            self.assertEqual(result.structured_content["reason"], "rate-limited")
+
+    def test_a_service_that_closes_before_the_call_was_sent_is_busy(self):
+        # Nothing to read either: the call did not get there, so trying again is right.
+        closed = threading.Event()
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.close()
+                closed.set()
+
+        self.service.listen(Handler)
+        connect = companion.anas_window_call.UnixHTTP.connect
+
+        def connect_then_wait(conn):
+            connect(conn)
+            closed.wait(5)
+
+        self.addCleanup(setattr, companion.anas_window_call.UnixHTTP, "connect", connect)
+        companion.anas_window_call.UnixHTTP.connect = connect_then_wait
+        self.assertAnswered(companion.call("wake", {}), "busy")
 
     def test_the_schema_is_only_what_the_model_is_shown(self):
         listed = {tool.name: tool.input_schema for tool in companion.tools()}
@@ -211,6 +297,14 @@ class CompanionToolTests(unittest.TestCase):
             for name, property in schema["properties"].items():
                 self.assertIn("type", property, name)
 
+    def test_an_argument_utf8_cannot_carry_is_a_bad_request(self):
+        # A lone surrogate, as JSON's \ud800 decodes: the call never leaves.
+        self.serve(200, {"status": "ok"})
+        result = companion.call("broadcast", {"text": "\ud800"})
+        self.assertAnswered(result, "rejected")
+        self.assertEqual(result.structured_content["reason"], "bad-request")
+        self.assertEqual(self.received, [])
+
     def test_wrong_and_missing_values_reach_the_service_as_given(self):
         self.serve(200, {"status": "rejected", "reason": "bad-request", "message": "mode：应为 instant、spring、line 之一"})
         result = companion.call("position", {"x": 0.5, "y": "0.5", "mode": "teleport", "duration": "soon"})
@@ -220,11 +314,13 @@ class CompanionToolTests(unittest.TestCase):
         self.assertEqual(self.received[1][1]["args"], {"facing": "", "lock": ""})
 
 
-@unittest.skipUnless(importlib.util.find_spec("mcp") and importlib.util.find_spec("mcp_types"), "the MCP SDK is in the assistant's runtime only")
+@unittest.skipUnless(SDK or SDK_REQUIRED, "the MCP SDK is in the assistant's runtime and make ai-sdk-test only")
 class SdkPathTests(unittest.TestCase):
     """The server under the real SDK, called as Hermes's MCP client calls it."""
 
     def setUp(self):
+        if not SDK:
+            self.fail("ANAS_COMPANION_MCP_SDK=required, but the MCP SDK cannot be imported")
         self.module = _exec("anas_companion_mcp_sdk")
         self.service = _Companion(self, self.module)
 
@@ -264,6 +360,14 @@ class SdkPathTests(unittest.TestCase):
         sent = [call["args"] for _, call in self.service.received]
         self.assertEqual(sent, [{}, {}, {"x": 1}, {"power": 1}, {"text": "42"}, {"text": "true"}, {"text": "[1,2]"},
                                 {"text": "null"}, {"text": '{"a":1}'}, {"name": "wave"}])
+
+    def test_an_argument_utf8_cannot_carry_is_a_result(self):
+        # Hermes's client sends JSON, in which "\ud800" is a lone surrogate.
+        self.service.serve(200, {"status": "ok"})
+        _, results = self.calls(("broadcast", {"text": "\ud800"}))
+        self.assertIs(results[0].is_error, False)
+        self.assertEqual(results[0].structured_content["reason"], "bad-request")
+        self.assertEqual(self.service.received, [])
 
 
 if __name__ == "__main__":

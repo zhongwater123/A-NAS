@@ -18,7 +18,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0012：局域网经 Caddy 以明文 HTTP 开放 Web 桌面（HTTPS 前的过渡）](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)
 - [0013：Docker 网络只从 A-NAS 指定的地址池分配](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)
 - [0014：屏保视频是系统盘上的长期媒体，不随 release 发布](0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
-- [0015：Docker 与 Caddy 跟随上游官方软件源，最低能力由代码检查](0015-take-docker-and-caddy-from-their-upstream-repositories.md)
+- [0015：Docker 与 Caddy 用上游官方的软件包，最低能力由代码检查](0015-take-docker-and-caddy-from-their-upstream-repositories.md)
 - [0016：相册 AI 随系统内置安装，设备不联网获取模型](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [0017：影视中心经文件代理读取媒体，FFmpeg 在隔离 Worker 中运行](0017-run-the-media-center-through-the-file-broker.md)（proposed）
 - [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)（proposed）

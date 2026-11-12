@@ -17,7 +17,30 @@ import (
 
 func init() {
 	taskWatchInterval = 20 * time.Millisecond
-	runStartWait = 200 * time.Millisecond
+}
+
+// askedTasks stands in for the File Broker: the tasks it was asked to run
+// now, for the member behind the request's session.
+type askedTasks struct {
+	mu    sync.Mutex
+	asked []string
+	fail  error
+}
+
+func (a *askedTasks) RunTask(ctx context.Context, task string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.fail != nil {
+		return a.fail
+	}
+	a.asked = append(a.asked, accounts.SessionToken(ctx)+" "+task)
+	return nil
+}
+
+func (a *askedTasks) all() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.asked...)
 }
 
 // fakeJob is one of alice's scheduled tasks in the fake Hermes: its latest
@@ -105,19 +128,13 @@ func (f *fakeServe) cron(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && (action == "pause" || action == "resume"):
 		job.state = map[string]string{"pause": "paused", "resume": "scheduled"}[action]
 		_, _ = io.WriteString(w, job.json())
-	case r.Method == http.MethodPost && action == "trigger":
-		if job.running {
-			http.Error(w, `{"detail":"Job is already running or was claimed by another scheduler"}`, http.StatusConflict)
-			return
-		}
-		job.running = true
-		f.mu.Unlock()
-		time.Sleep(f.runTime)
-		f.mu.Lock()
-		job.running, job.state = false, "scheduled"
-		job.runs++
-		job.lastRunAt, job.lastStatus = time.Now().Format(time.RFC3339Nano), "ok"
+	case r.Method == http.MethodGet && action == "":
 		_, _ = io.WriteString(w, job.json())
+	case r.Method == http.MethodPost && action == "trigger":
+		// Hermes's own "run now", which starts a gateway inside the instance
+		// (#469): the Product Service must never ask for it.
+		f.triggered++
+		http.Error(w, `{"detail":"a run was asked of the instance"}`, http.StatusInternalServerError)
 	case r.Method == http.MethodDelete && action == "":
 		f.jobs = removeJob(f.jobs, job)
 		_, _ = io.WriteString(w, `{"ok":true}`)
@@ -220,40 +237,61 @@ func TestTasksShowWhatTheMemberAskedForAndNotHermesInternals(t *testing.T) {
 	}
 }
 
-func TestRunningATaskAnswersOnceTheRunStarted(t *testing.T) {
+func TestATaskRunsNowInARoundOfItsMembersTasksNotInTheInstance(t *testing.T) {
 	h := newHarness(t)
 	job := &fakeJob{id: "a1b2c3d4e5f6", name: "每日小结", state: "paused"}
 	h.serve.addJob(job)
 
+	// The run is asked of the File Broker with the member's session, and
+	// answered as started: its end shows in the task and as a notice.
 	status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", "")
-	if status != http.StatusOK || !strings.Contains(body, `"finished":true`) || !strings.Contains(body, `"lastStatus":"ok"`) {
-		t.Fatalf("a quick run = %d %s", status, body)
+	if status != http.StatusAccepted || strings.TrimSpace(body) != `{"finished":false}` {
+		t.Fatalf("running a paused task = %d %s", status, body)
 	}
-	h.serve.mu.Lock()
-	h.serve.runTime = time.Second
-	h.serve.mu.Unlock()
-	if status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", ""); status != http.StatusAccepted || !strings.Contains(body, `"finished":false`) {
-		t.Fatalf("a long run = %d %s", status, body)
+	if asked := h.tasks.all(); len(asked) != 1 || asked[0] != "alice-session a1b2c3d4e5f6" {
+		t.Fatalf("asked of the File Broker: %v", asked)
 	}
-	// It goes on after the answer, and shows as running.
-	if status, body := h.request(http.MethodGet, "/tasks", ""); status != http.StatusOK || !strings.Contains(body, `"running":true`) {
-		t.Fatalf("tasks while it runs = %d %s", status, body)
-	}
-	if status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", ""); status != http.StatusConflict || !strings.Contains(body, "task_running") {
-		t.Fatalf("running it again = %d %s", status, body)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	// A task that is running, or whose runs are over, is not asked for.
+	for state, code := range map[string]string{"running": "task_running", "completed": "task_finished", "error": "task_finished"} {
 		h.serve.mu.Lock()
-		runs := job.runs
+		job.running, job.state = state == "running", map[bool]string{true: "scheduled", false: state}[state == "running"]
 		h.serve.mu.Unlock()
-		if runs == 2 {
-			break
+		if status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", ""); status != http.StatusConflict || !strings.Contains(body, code) {
+			t.Fatalf("running a %s task = %d %s, want %s", state, status, body, code)
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("the long run did not finish after the answer")
-		}
-		time.Sleep(20 * time.Millisecond)
+	}
+	if status, body := h.request(http.MethodPost, "/tasks/0123456789ab/run", ""); status != http.StatusNotFound || !strings.Contains(body, "task_not_found") {
+		t.Fatalf("running a task that is not hers = %d %s", status, body)
+	}
+	if status, _ := h.request(http.MethodPost, "/tasks/每日小结/run", ""); status != http.StatusBadRequest {
+		t.Fatalf("running a task by name = %d", status)
+	}
+	if asked := h.tasks.all(); len(asked) != 1 {
+		t.Fatalf("asked of the File Broker after refusals: %v", asked)
+	}
+	// A session the File Broker does not accept is the member's to renew.
+	h.serve.mu.Lock()
+	job.running, job.state = false, "scheduled"
+	h.serve.mu.Unlock()
+	h.tasks.fail = ErrSessionRejected
+	if status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", ""); status != http.StatusUnauthorized {
+		t.Fatalf("running with a refused session = %d %s", status, body)
+	}
+	// Never through Hermes's own trigger: the instance would start a gateway.
+	h.serve.mu.Lock()
+	triggered := h.serve.triggered
+	h.serve.mu.Unlock()
+	if triggered != 0 {
+		t.Fatalf("the instance was asked to run a task %d times", triggered)
+	}
+}
+
+func TestWithoutTheFileBrokerNoTaskRunsNow(t *testing.T) {
+	h := newHarness(t)
+	h.serve.addJob(&fakeJob{id: "a1b2c3d4e5f6", name: "每日小结", state: "scheduled"})
+	h.api.options.Tasks = nil
+	if status, body := h.request(http.MethodPost, "/tasks/a1b2c3d4e5f6/run", ""); status != http.StatusServiceUnavailable || !strings.Contains(body, "assistant_unavailable") {
+		t.Fatalf("running a task without the File Broker = %d %s", status, body)
 	}
 }
 
@@ -395,6 +433,24 @@ func TestQuietAnswersAreHermessSilenceMarkers(t *testing.T) {
 	} {
 		if got := quietAnswer(answer); got != quiet {
 			t.Errorf("quietAnswer(%q) = %t, want %t", answer, got, quiet)
+		}
+	}
+}
+
+func TestAStoredIDIsAConversationOrARunOfAScheduledTask(t *testing.T) {
+	for id, want := range map[string]bool{
+		fakeStored:                          true,
+		"cron_a1b2c3d4e5f6_20261020_080001": true,
+		// A run on Hermes's gateway keeps the id the runtime minted.
+		"local-" + strings.Repeat("0a", 32): true,
+		"local-" + strings.Repeat("0a", 31): false,
+		"local-" + strings.Repeat("0A", 32): false,
+		"local-":                            false,
+		"20261015":                          false,
+		"计划":                                false,
+	} {
+		if storedIDPattern.MatchString(id) != want {
+			t.Errorf("stored id %q accepted = %t, want %t", id, !want, want)
 		}
 	}
 }

@@ -10,7 +10,7 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`61744597719c`（主干上 PR #441 的合并提交，未打标签，2026-11-10 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-61744597719c.log`；同日正常重启后复测通过，见 `/var/tmp/a-nas-after-reboot-61744597719c.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。之后合入 main 的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
+- 已部署：`61744597719c`（主干上 PR #441 的合并提交，未打标签，2026-11-10 安装，同日正常重启后复测通过；日志在 NAS 的 `/var/tmp/a-nas-*-61744597719c.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。之后合入 main 的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
   - 宿主机软件包 `a-nas-host` 与 `a-nas-console`，版本 `0~61744597719c`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
   - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `842b388a0f1987f5`；AI Worker 的内存上限为总内存减 2.5 GiB（5150 MiB）。
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
@@ -42,14 +42,15 @@
 - [家庭中心规格中补充的默认规则](../decisions/2026-10-29-family-center-default-rules.md)
 - 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
 - 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
-- 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，实现已合并，实机待启用）与 [ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)（可移除模块）。
+- 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，实现已合并，实机待启用）与 [ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
+- 发布：[软件源放在哪里](../decisions/2026-11-11-update-hosting.md)
 - 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
 
 ## 下一步
 
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成全部验收项，全部通过后才打标签。
 2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对；每完成一节，就从手册中删去这一节。成员分享重启窗口修复 [#400](https://github.com/zhongwater123/A-NAS/pull/400) 已部署，补验重启后的首次创建和保存。
-3. 向量索引：影子比对达标后（53 次全部一致），相册排序改为从索引读，结果与精确扫描相同（[读路径](../architecture/vector-index.md#读路径)，[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md) 已接受），2026-11-10 已部署（#411）；按[手册第 5 步](../runbooks/enable-vector-index.md#步骤)核对。视频分段（#207）与文件分块（#208）的索引设计以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
+3. 向量索引：相册排序从索引读（[读路径](../architecture/vector-index.md#读路径)），2026-11-10 已部署（#411）；按[手册第 5 步](../runbooks/enable-vector-index.md#步骤)核对。视频分段（#207）与文件分块（#208）的索引设计以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；#364 的修复已部署（#402），按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
@@ -58,6 +59,6 @@
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）已部署；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
 11. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：2026-11-10 已部署，动画已装；在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-12. 按 ADR 0034 第 2 步做软件包与签名软件源。
-13. 照片打分：按[手册](../runbooks/install-and-remove-photo-scoring.md)安装并试点。
+12. 用户按[管理发布签名密钥](../runbooks/manage-release-key.md)生成存档密钥；再按[部署手册](../runbooks/deploy-a-nas-packages.md)把实验 NAS 换成软件包（第 4 步删去上游源）。
+13. 照片打分：在第 12 步之后按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
 14. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

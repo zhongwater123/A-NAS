@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -46,6 +48,61 @@ import (
 // middle of a turn), busy when the pairing is ambiguous or a limit is reached,
 // timeout when the window does not answer, and cancelled when the turn ends or
 // the window goes first.
+//
+// The tools that operate the desktop (desktop.go) take the same way: another
+// MCP server in the sandbox, the same socket, the same pairing, and the same
+// window. What differs between the two is in windowTools.
+
+// windowTools is one family of tools that act in the member's VNAS window:
+// the companion's, or those that operate the desktop.
+type windowTools struct {
+	// prefix is how Hermes names the family's tools.
+	prefix string
+	tools  map[string]toolRule
+	// event carries a command to the window, and cancel tells the window that
+	// a command it has not answered is no longer waited for; a family whose
+	// window need not know has none.
+	event, cancel string
+	// receipt is how long a command waits for the window's answer.
+	receipt *time.Duration
+	// call bounds one call of the family's tools on the socket, and result is
+	// what a window may answer one of its commands with.
+	call   int
+	result method
+	// rate is how many commands a member's windows get a minute, and rateEach
+	// caps some tools within it.
+	rate     int
+	rateEach map[string]int
+	// answer turns a window's answer into the tool's result.
+	answer func(ok bool, raw json.RawMessage) map[string]any
+	// refuse says why keys a tool does not take are refused.
+	refuse func(tool string, extra []string) string
+}
+
+// toolRule is a tool's arguments and the ones a call must give.
+type toolRule struct {
+	args     map[string]companionParam
+	required []string
+}
+
+var companionFamily = &windowTools{prefix: companionPrefix, tools: companionTools, event: "anas.companion",
+	receipt: &companionReceipt, call: maxCompanionCall, result: companionResultParams,
+	rate: companionRate, rateEach: companionRateEach, answer: companionAnswer, refuse: extraProblem}
+
+// windowFamilies are the families whose tools' calls are paired.
+var windowFamilies = []*windowTools{companionFamily, desktopFamily}
+
+// windowTool names the family a tool of Hermes's belongs to and the tool
+// within it.
+func windowTool(name string) (*windowTools, string, bool) {
+	for _, family := range windowFamilies {
+		if tool, ok := strings.CutPrefix(name, family.prefix); ok {
+			_, known := family.tools[tool]
+			return family, tool, known
+		}
+	}
+	return nil, "", false
+}
 
 const (
 	// companionPrefix is how Hermes names the companion server's tools.
@@ -53,15 +110,23 @@ const (
 	// mirroredTool starts the ids of the tool.start Hermes makes up on a
 	// subagent's own session, with no arguments.
 	mirroredTool = "submirror:"
-	// maxCompanionCall bounds one call on the socket, and
+	// maxCompanionCall bounds one call of a companion tool on the socket, and
 	// maxCompanionAnswer the window's answer to one command.
 	maxCompanionCall   = 8 << 10
 	maxCompanionAnswer = 4 << 10
 	// maxCompanionStarts bounds the calls one turn may have waiting.
 	maxCompanionStarts = 32
-	// maxCompanionWaiting bounds a member's calls under way on the socket:
-	// Hermes's one, and a few it gave up on that are still settling.
+	// maxCompanionWaiting bounds a member's calls under way on the socket,
+	// the companion server's and the desktop server's together: Hermes's,
+	// and a few it gave up on that are still settling.
 	maxCompanionWaiting = 4
+	// maxCompanionConnections bounds a UID's open connections to the socket,
+	// counted from accept, before any of a request is read: the calls under
+	// way, and a few that are still sending or closing.
+	maxCompanionConnections = 2 * maxCompanionWaiting
+	// maxCompanionHeader bounds a call's headers; the companion server sends
+	// a few hundred bytes of them. net/http allows 4 KiB over it.
+	maxCompanionHeader = 4 << 10
 	// companionRate is how many commands a member's windows get a minute;
 	// companionRateEach caps some tools within it.
 	companionRate = 20
@@ -76,9 +141,16 @@ var (
 	// companionLate is how long a call waits for its tool.start, which comes
 	// on another connection and may arrive after it.
 	companionLate = 1500 * time.Millisecond
-	// companionBody is how long a caller on the socket has to send a call
-	// once its headers came.
-	companionBody = 5 * time.Second
+	// companionHeaders is how long a caller on the socket has to send a
+	// call's headers, and companionBody its body once they came.
+	companionHeaders = 5 * time.Second
+	companionBody    = 5 * time.Second
+	// companionIdle is how long a connection between calls stays open; the
+	// companion server opens one for each call.
+	companionIdle = 5 * time.Second
+	// companionRefusal is how long a connection over its UID's bound is
+	// given to take its refusal.
+	companionRefusal = 100 * time.Millisecond
 	// companionHelper is how long after a subagent started a companion tool
 	// its call may still arrive, and companionStale the same for a turn's own
 	// tool.start: Hermes's 120 s per call (managed-config.yaml), and some. A
@@ -114,9 +186,10 @@ const (
 	companionRejected  = "rejected"
 )
 
-// companionStart is a companion tool's call a turn started.
+// companionStart is a call of a window tool a turn started.
 type companionStart struct {
 	toolID string
+	family *windowTools
 	tool   string
 	// args are the call's arguments in canonical form (companionValues).
 	args string
@@ -131,17 +204,36 @@ type companionStart struct {
 // companionCommand is a command sent to a window and not yet settled.
 type companionCommand struct {
 	id      string
+	family  *windowTools
 	session string
 	browser *upstream
 	event   frame
 	// answer gets the tool's result once; nil for the Product Service's own
 	// release of a lock, whose answer nobody waits for.
 	answer chan map[string]any
+	// way is how far the command got on its way to its window, and overdue
+	// that it was settled while send was writing it: the window is then told
+	// once the command is there (arrived). Under m.mu.
+	way     commandWay
+	overdue bool
 }
 
+// commandWay is how far a command got on its way to its window.
+type commandWay int
+
+const (
+	// commandHeld has not been written: settled now, send drops it.
+	commandHeld commandWay = iota
+	// commandLeaving is being written by send.
+	commandLeaving
+	// commandThere was written to the window.
+	commandThere
+)
+
 type sentCommand struct {
-	at   time.Time
-	tool string
+	at     time.Time
+	family *windowTools
+	tool   string
 }
 
 // send passes the command to its window, unless it was settled first: the
@@ -172,6 +264,9 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 		m.settleLocked(c.id, map[string]any{"status": companionCancelled, "reason": "turn-ended"})
 		waiting = false
 	}
+	if waiting {
+		c.way = commandLeaving
+	}
 	m.mu.Unlock()
 	if !waiting {
 		return
@@ -183,6 +278,32 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 	write, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 	_ = c.browser.toBrowserWithin(write, c.event)
+	c.arrived(m)
+}
+
+// arrived records that the command was written to its window, and tells the
+// window when the command was settled meanwhile: word that a command is no
+// longer waited for never reaches a window before the command, which the
+// window would then carry out for nobody.
+func (c *companionCommand) arrived(m *member) {
+	m.mu.Lock()
+	c.way = commandThere
+	overdue := c.overdue
+	c.overdue = false
+	m.mu.Unlock()
+	if overdue {
+		c.tellGone()
+	}
+}
+
+// tellGone tells the command's window that the command is no longer waited
+// for. On a goroutine of its own: a window that takes no frames must not hold
+// up whoever holds m.mu.
+func (c *companionCommand) tellGone() {
+	if !c.browser.hasWindow() {
+		return
+	}
+	go c.browser.toBrowser(eventFrame(c.family.cancel, c.session, map[string]any{"command_id": c.id}))
 }
 
 // sendRelease sends the Product Service's own release of a lock, which
@@ -200,44 +321,130 @@ type AccountResolver interface {
 	ResolveAccountUID(context.Context, int) (accounts.SessionUser, error)
 }
 
-// CompanionServer serves the companion tools' socket: POST /call, nothing else.
-// The peer's UID says whose assistant called, as on the photo service's socket
-// for assistants.
+// CompanionServer serves the socket of the window tools: POST /call for the
+// companion's, POST /desktop/call for those that operate the desktop, nothing
+// else. The peer's UID says whose assistant called, as on the photo service's
+// socket for assistants.
+//
+// Every process in a member's sandbox can reach the socket, so what one UID
+// holds of the service is bounded: maxCompanionConnections connections, each
+// with at most maxCompanionHeader of headers, read within companionHeaders
+// and, a body the handler does not read included, companionHeaders plus
+// companionBody; an idle one closes after companionIdle. There is no write
+// timeout: a companion call's answer may take companionLate and
+// companionReceipt after its body, and is a few hundred bytes the socket's
+// buffer takes at once; a desktop call's may take desktopReceipt and be up to
+// maxDesktopResult, a picture of the page, which the peer has to read. A peer
+// that does not read holds no more than its UID's maxCompanionWaiting calls
+// and maxCompanionConnections connections.
 func (h *Handler) CompanionServer() *http.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /call", h.companionCallHTTP)
+	mux.HandleFunc("POST /call", h.windowCallHTTP(companionFamily))
+	mux.HandleFunc("POST /desktop/call", h.windowCallHTTP(desktopFamily))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
-	return &http.Server{Handler: mux, ConnContext: withPeerUID,
-		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+	conns := &companionConns{byUID: map[int]int{}, uids: map[net.Conn]int{}}
+	return &http.Server{Handler: mux, ConnContext: withPeerUID, ConnState: conns.track,
+		ReadHeaderTimeout: companionHeaders, ReadTimeout: companionHeaders + companionBody,
+		IdleTimeout: companionIdle, MaxHeaderBytes: maxCompanionHeader,
 		ErrorLog: slog.NewLogLogger(h.logger.Handler(), slog.LevelError)}
+}
+
+// companionConns counts a companion server's open connections by the UID at
+// the other end; -1 stands for a peer whose UID the kernel did not report.
+type companionConns struct {
+	mu    sync.Mutex
+	byUID map[int]int
+	uids  map[net.Conn]int
+}
+
+// companionRefused is the answer of a connection over its UID's bound: what
+// a call over maxCompanionWaiting gets, so the companion server says busy.
+var companionRefused = func() string {
+	body := `{"reason":"rate-limited","status":"busy"}` + "\n"
+	return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + strconv.Itoa(len(body)) +
+		"\r\nConnection: close\r\n\r\n" + body
+}()
+
+// track is the server's ConnState. A connection over its UID's bound is
+// answered and closed as it is accepted, before the server reads anything
+// of it: a caller that opens connections and sends nothing, or sends
+// slowly, holds no more of the service than maxCompanionConnections allow.
+func (c *companionConns) track(conn net.Conn, state http.ConnState) {
+	switch state {
+	case http.StateNew:
+		uid, ok := peerUID(conn)
+		if !ok {
+			uid = -1
+		}
+		c.mu.Lock()
+		over := c.byUID[uid] >= maxCompanionConnections
+		if !over {
+			c.byUID[uid]++
+			c.uids[conn] = uid
+		}
+		c.mu.Unlock()
+		if over {
+			// The connection is new, so its buffer takes the answer at once;
+			// the deadline only keeps the accept loop from waiting on it.
+			_ = conn.SetWriteDeadline(time.Now().Add(companionRefusal))
+			_, _ = io.WriteString(conn, companionRefused)
+			_ = conn.Close()
+		}
+	case http.StateClosed, http.StateHijacked:
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		uid, ok := c.uids[conn]
+		if !ok {
+			return
+		}
+		delete(c.uids, conn)
+		if c.byUID[uid]--; c.byUID[uid] <= 0 {
+			delete(c.byUID, uid)
+		}
+	}
 }
 
 type peerUIDKey struct{}
 
 // withPeerUID records on each connection the UID of the process at the other
-// end, as the kernel reports it.
+// end.
 func withPeerUID(ctx context.Context, conn net.Conn) context.Context {
-	unixConn, ok := conn.(*net.UnixConn)
+	uid, ok := peerUID(conn)
 	if !ok {
 		return ctx
 	}
+	return context.WithValue(ctx, peerUIDKey{}, uid)
+}
+
+// peerUID is the UID of the process at the other end of conn, as the kernel
+// reports it.
+func peerUID(conn net.Conn) (int, bool) {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return 0, false
+	}
 	raw, err := unixConn.SyscallConn()
 	if err != nil {
-		return ctx
+		return 0, false
 	}
 	var cred *unix.Ucred
 	var credErr error
 	if err := raw.Control(func(fd uintptr) {
 		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 	}); err != nil || credErr != nil {
-		return ctx
+		return 0, false
 	}
-	return context.WithValue(ctx, peerUIDKey{}, int(cred.Uid))
+	return int(cred.Uid), true
 }
 
-func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
+// windowCallHTTP takes the calls of one family's tools.
+func (h *Handler) windowCallHTTP(family *windowTools) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { h.companionCallHTTP(w, r, family) }
+}
+
+func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request, family *windowTools) {
 	uid, ok := r.Context().Value(peerUIDKey{}).(int)
 	if !ok || uid <= 0 || h.options.Accounts == nil {
 		// Only assistants, running as members, reach this socket.
@@ -257,7 +464,7 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	body := http.NewResponseController(w)
 	_ = body.SetReadDeadline(time.Now().Add(companionBody))
-	if err := httpjson.Decode(w, r, maxCompanionCall, &call); err != nil {
+	if err := httpjson.Decode(w, r, int64(family.call), &call); err != nil {
 		httpjson.WriteDecodeError(w, err, "invalid_request", "the request body is not valid JSON")
 		return
 	}
@@ -280,7 +487,7 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusForbidden, "assistant_unavailable", "this account has no assistant")
 		return
 	}
-	httpjson.Write(w, http.StatusOK, h.companionCall(r.Context(), user.Username, call.Tool, call.Args))
+	httpjson.Write(w, http.StatusOK, h.companionCall(r.Context(), user.Username, family, call.Tool, call.Args))
 }
 
 // companionCallBegins counts a call of uid's under way, or reports that uid
@@ -310,10 +517,10 @@ func (h *Handler) companionCallEnds(uid int) {
 	}
 }
 
-// companionCall carries out one call of a companion tool for account and
+// companionCall carries out one call of a window tool for account and
 // returns the tool's result.
-func (h *Handler) companionCall(ctx context.Context, account, tool string, raw json.RawMessage) map[string]any {
-	args, canonical, problem := checkCompanion(tool, raw)
+func (h *Handler) companionCall(ctx context.Context, account string, family *windowTools, tool string, raw json.RawMessage) map[string]any {
+	args, canonical, problem := checkCompanion(family, tool, raw)
 	if problem != "" {
 		return map[string]any{"status": companionRejected, "reason": "bad-request", "message": problem}
 	}
@@ -323,7 +530,7 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 	if m == nil {
 		return map[string]any{"status": companionNoDesktop}
 	}
-	start, session, found, ambiguous := m.waitStart(ctx, tool, canonical)
+	start, session, found, ambiguous := m.waitStart(ctx, family, tool, canonical)
 	switch {
 	case ambiguous:
 		return map[string]any{"status": companionBusy}
@@ -337,14 +544,14 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 		// companion server dropped it, Hermes's tool.start still has it.
 		return map[string]any{"status": companionRejected, "reason": "bad-request", "message": start.problem}
 	}
-	c, refusal := m.command(session, tool, args)
+	c, refusal := m.command(session, family, tool, args)
 	if refusal != nil {
 		return refusal
 	}
-	h.logger.Debug("companion command sent", "account", account, "session", session, "tool", tool)
-	// The window has companionReceipt to answer, counted from before the
+	h.logger.Debug("window command sent", "account", account, "session", session, "tool", family.prefix+tool)
+	// The window has the family's receipt to answer, counted from before the
 	// command waits for the window's previous ones to go out.
-	receipt, cancel := context.WithTimeout(ctx, companionReceipt)
+	receipt, cancel := context.WithTimeout(ctx, *family.receipt)
 	defer cancel()
 	c.send(receipt, m)
 	select {
@@ -363,13 +570,13 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 
 // waitStart pairs a call with its tool.start, waiting companionLate for one
 // that has not arrived yet, or for one that makes the pairing ambiguous (pair).
-func (m *member) waitStart(ctx context.Context, tool, args string) (start companionStart, session string, found, ambiguous bool) {
+func (m *member) waitStart(ctx context.Context, family *windowTools, tool, args string) (start companionStart, session string, found, ambiguous bool) {
 	deadline := time.NewTimer(companionLate)
 	defer deadline.Stop()
 	late := false
 	for {
 		m.mu.Lock()
-		start, session, found, ambiguous = m.pair(tool, args, time.Now(), late)
+		start, session, found, ambiguous = m.pair(family, tool, args, time.Now(), late)
 		if found || ambiguous || late {
 			m.mu.Unlock()
 			return start, session, found, ambiguous
@@ -409,8 +616,8 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (start compan
 // Before late, nothing is taken while a subagent of the member runs either: a
 // subagent's call may reach the socket before the subagent.tool that says it
 // made one, as a call may come before its tool.start. Under m.mu.
-func (m *member) pair(tool, args string, now time.Time, late bool) (start companionStart, session string, found, ambiguous bool) {
-	matches := func(c companionStart) bool { return c.tool == tool && c.args == args }
+func (m *member) pair(family *windowTools, tool, args string, now time.Time, late bool) (start companionStart, session string, found, ambiguous bool) {
+	matches := func(c companionStart) bool { return c.family == family && c.tool == tool && c.args == args }
 	stopped := ""
 	for id, s := range m.sessions {
 		s.abandoned = slices.DeleteFunc(s.abandoned, func(c companionStart) bool { return now.Sub(c.at) >= companionAbandoned })
@@ -467,19 +674,19 @@ func (m *member) pair(tool, args string, now time.Time, late bool) (start compan
 // turn. In a turn the member is stopping, pair takes it as the stopped turn's
 // and it is never sent. Under m.mu.
 func (m *member) companionStarted(s *liveSession, toolID, name string, rawArgs json.RawMessage) {
-	tool, ok := strings.CutPrefix(name, companionPrefix)
-	if _, known := companionTools[tool]; !ok || !known || !s.turn || toolID == "" || strings.HasPrefix(toolID, mirroredTool) {
+	family, tool, known := windowTool(name)
+	if !known || !s.turn || toolID == "" || strings.HasPrefix(toolID, mirroredTool) {
 		return
 	}
-	values, extra, ok := companionValues(tool, rawArgs)
+	values, extra, ok := companionValues(family, tool, rawArgs)
 	if !ok || slices.ContainsFunc(s.companion, func(c companionStart) bool { return c.toolID == toolID }) {
 		return
 	}
 	if len(s.companion) == maxCompanionStarts {
 		s.companion = s.companion[1:]
 	}
-	s.companion = append(s.companion, companionStart{toolID: toolID, tool: tool, args: canonicalForm(values),
-		problem: extraProblem(tool, extra), at: time.Now()})
+	s.companion = append(s.companion, companionStart{toolID: toolID, family: family, tool: tool, args: canonicalForm(values),
+		problem: family.refuse(tool, extra), at: time.Now()})
 	m.wake()
 }
 
@@ -536,7 +743,7 @@ func (m *member) subagentEvent(s *liveSession, kind, helper, tool string) {
 	if kind != "subagent.tool" {
 		return
 	}
-	if !strings.HasPrefix(tool, companionPrefix) {
+	if family, _, _ := windowTool(tool); family == nil {
 		delete(s.helpers, helper)
 		return
 	}
@@ -600,7 +807,7 @@ func (m *member) prompted(session string, u *upstream, queued bool) {
 // no desktop unless the conversation's browser is the window that sent its
 // prompt and is still there, cancelled once the member stops the turn, busy
 // over the limits.
-func (m *member) command(session, tool string, args map[string]any) (*companionCommand, map[string]any) {
+func (m *member) command(session string, family *windowTools, tool string, args map[string]any) (*companionCommand, map[string]any) {
 	id, err := newCommandID()
 	if err != nil {
 		return nil, map[string]any{"status": companionNoDesktop}
@@ -625,43 +832,46 @@ func (m *member) command(session, tool string, args map[string]any) (*companionC
 		}
 		delete(m.stall, s.browser)
 	}
-	if !m.admit(tool, now) {
+	if !m.admit(family, tool, now) {
 		return nil, map[string]any{"status": companionBusy, "reason": "rate-limited"}
 	}
-	if tool == "lock" {
+	if family == companionFamily && tool == "lock" {
 		s.lockedBy = s.browser
 	}
-	c := m.register(id, session, s.browser, tool, args, make(chan map[string]any, 1))
+	c := m.register(id, session, s.browser, family, tool, args, make(chan map[string]any, 1))
 	return c, nil
 }
 
 // register keeps a command until it is settled. Under m.mu.
-func (m *member) register(id, session string, browser *upstream, tool string, args map[string]any, answer chan map[string]any) *companionCommand {
-	c := &companionCommand{id: id, session: session, browser: browser, answer: answer,
-		event: eventFrame("anas.companion", session, map[string]any{"command_id": id, "action": tool, "args": args})}
+func (m *member) register(id, session string, browser *upstream, family *windowTools, tool string, args map[string]any,
+	answer chan map[string]any) *companionCommand {
+	c := &companionCommand{id: id, family: family, session: session, browser: browser, answer: answer,
+		event: eventFrame(family.event, session, map[string]any{"command_id": id, "action": tool, "args": args})}
 	m.commands[id] = c
 	return c
 }
 
-// admit counts a command against the member's limits, or reports that it
-// would go over one. Under m.mu.
-func (m *member) admit(tool string, now time.Time) bool {
+// admit counts a command against its family's limits for the member, or
+// reports that it would go over one. Under m.mu.
+func (m *member) admit(family *windowTools, tool string, now time.Time) bool {
 	m.sent = slices.DeleteFunc(m.sent, func(c sentCommand) bool { return now.Sub(c.at) >= companionMinute })
-	if len(m.sent) >= companionRate {
+	all, same := 0, 0
+	for _, c := range m.sent {
+		if c.family != family {
+			continue
+		}
+		all++
+		if c.tool == tool {
+			same++
+		}
+	}
+	if all >= family.rate {
 		return false
 	}
-	if limit, ok := companionRateEach[tool]; ok {
-		same := 0
-		for _, c := range m.sent {
-			if c.tool == tool {
-				same++
-			}
-		}
-		if same >= limit {
-			return false
-		}
+	if limit, ok := family.rateEach[tool]; ok && same >= limit {
+		return false
 	}
-	m.sent = append(m.sent, sentCommand{at: now, tool: tool})
+	m.sent = append(m.sent, sentCommand{at: now, family: family, tool: tool})
 	return true
 }
 
@@ -687,15 +897,37 @@ func (m *member) settle(id string, result map[string]any) {
 	m.settleLocked(id, result)
 }
 
+// settleLocked gives a command a result that is not its window's answer, and
+// tells the window so when the command's family has it told: what the window
+// still holds for the command, such as a card asking the member, is over. A
+// command that never left for its window needs no word, and one that is
+// leaving gets it once it is there (arrived).
 func (m *member) settleLocked(id string, result map[string]any) {
+	c := m.settled(id, result)
+	if c == nil || c.family.cancel == "" {
+		return
+	}
+	switch c.way {
+	case commandLeaving:
+		c.overdue = true
+	case commandThere:
+		c.tellGone()
+	case commandHeld:
+	}
+}
+
+// settled gives a command its result, unless it already has one, and returns
+// the command it settled. Under m.mu.
+func (m *member) settled(id string, result map[string]any) *companionCommand {
 	c, ok := m.commands[id]
 	if !ok {
-		return
+		return nil
 	}
 	delete(m.commands, id)
 	if c.answer != nil {
 		c.answer <- result
 	}
+	return c
 }
 
 // companionTurnEnded settles a turn's commands as cancelled and returns the
@@ -725,7 +957,7 @@ func (m *member) companionTurnEnded(session string, s *liveSession, stopped bool
 	if err != nil {
 		return nil
 	}
-	c := m.register(id, session, browser, "lock_release", map[string]any{"force": true}, nil)
+	c := m.register(id, session, browser, companionFamily, "lock_release", map[string]any{"force": true}, nil)
 	time.AfterFunc(companionReceipt, func() { m.settle(id, nil) })
 	return c
 }
@@ -790,10 +1022,10 @@ func object(maxBytes int) check {
 	}
 }
 
-// companionResult takes a window's answer to a command it was sent: once,
-// and only from the window it went to.
-func (u *upstream) companionResult(f frame) frame {
-	params, err := companionResultParams.check(f.Params)
+// companionResult takes a window's answer to a command of family it was
+// sent: once, and only from the window it went to.
+func (u *upstream) companionResult(f frame, family *windowTools) frame {
+	params, err := family.result.check(f.Params)
 	if err != nil {
 		return rpcError(f.ID, codeInvalidParams, err.Error())
 	}
@@ -812,11 +1044,11 @@ func (u *upstream) companionResult(f frame) frame {
 	// Any answer, even a late one, shows the window is there again.
 	delete(m.stall, u)
 	c := m.commands[id]
-	if c == nil || c.browser != u || c.session != unquote(params["session_id"]) {
+	if c == nil || c.family != family || c.browser != u || c.session != unquote(params["session_id"]) {
 		m.mu.Unlock()
 		return rpcError(f.ID, codeInvalidParams, "no such command waits for this window")
 	}
-	m.settleLocked(id, companionAnswer(ok, answer))
+	m.settled(id, family.answer(ok, answer))
 	m.mu.Unlock()
 	return rpcResult(f.ID, map[string]bool{"accepted": true})
 }
@@ -871,14 +1103,14 @@ func newCommandID() (string, error) {
 // number or boolean, "null" or a blank where an argument is optional (lock:
 // "", as dsh-pet's empty ?lock=) is no argument, and null values and a
 // missing object are no arguments.
-func companionValues(tool string, raw json.RawMessage) (values map[string]any, extra []string, ok bool) {
+func companionValues(family *windowTools, tool string, raw json.RawMessage) (values map[string]any, extra []string, ok bool) {
 	given := map[string]any{}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &given); err != nil || given == nil {
 			return nil, nil, false
 		}
 	}
-	rule := companionTools[tool]
+	rule := family.tools[tool]
 	values = map[string]any{}
 	for key, value := range given {
 		param, known := rule.args[key]
@@ -957,10 +1189,7 @@ func (p companionParam) loosen(value any, optional bool) any {
 
 // companionTools are the tools of the companion contract with their
 // arguments, as dsh-pet's routes take them less pet, surface, url and image.
-var companionTools = map[string]struct {
-	args     map[string]companionParam
-	required []string
-}{
+var companionTools = map[string]toolRule{
 	"anim": {args: map[string]companionParam{"name": textParam(animationName), "facing": textParam(oneOf("left", "right")), "lock": textParam(lockID)},
 		required: []string{"name"}},
 	"broadcast": {args: map[string]companionParam{"text": textParam(bubbleText), "duration": numberParam(number(0, 60000)), "anim": flagParam,
@@ -981,16 +1210,16 @@ var companionTools = map[string]struct {
 // every value in range. It returns the arguments to send, clamped where the
 // contract clamps, and the call's own arguments in canonical form for the
 // pairing, or what is wrong.
-func checkCompanion(tool string, raw json.RawMessage) (map[string]any, string, string) {
-	rule, ok := companionTools[tool]
+func checkCompanion(family *windowTools, tool string, raw json.RawMessage) (map[string]any, string, string) {
+	rule, ok := family.tools[tool]
 	if !ok {
 		return nil, "", fmt.Sprintf("没有这个工具：%s", tool)
 	}
-	values, extra, ok := companionValues(tool, raw)
+	values, extra, ok := companionValues(family, tool, raw)
 	if !ok {
 		return nil, "", "参数必须是一个对象"
 	}
-	if problem := extraProblem(tool, extra); problem != "" {
+	if problem := family.refuse(tool, extra); problem != "" {
 		return nil, "", problem
 	}
 	args := map[string]any{}

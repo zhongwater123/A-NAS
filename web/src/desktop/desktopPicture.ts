@@ -1,7 +1,7 @@
 // The web desktop as a picture, drawn by the page itself rather than asking for
 // screen capture, which browsers allow only over HTTPS while the LAN entry is
-// plain HTTP. 问题反馈 attaches it to a report; VNAS looks at it (Hermes's
-// browser_vision). The renderer loads on first use.
+// plain HTTP. 问题反馈 attaches it to a report; VNAS looks at it (the desktop
+// server's look tool). The renderer loads on first use.
 
 /**
  * Draws what the browser window shows: the desktop with its windows, and the

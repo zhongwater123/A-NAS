@@ -4303,7 +4303,7 @@ export interface paths {
         };
         /**
          * The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
+         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. A window becomes a conversation's browser with desktop.attach ({session_id}), which the product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it has. The companion tools' commands arrive as anas.companion events ({command_id, action, args}), and the commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has not answered is no longer waited for. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
          */
         get: operations["openAssistantGateway"];
         put?: never;
@@ -4339,7 +4339,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4363,7 +4363,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4555,8 +4555,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs
-         * @description 200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification.
+         * Run a task now, in a round of the member's scheduled tasks like one that is due; a paused task is resumed
+         * @description 202 once the run was asked for; it starts within seconds and goes on. The run's end shows in the task and as an assistant_task notification. 409 task_running when it is already running, task_finished when the task has no more runs.
          */
         post: operations["runAssistantTask"];
         delete?: never;
@@ -7575,7 +7575,7 @@ export interface components {
         ScoringAnchorID: number;
         ScoringClaimToken: string;
         ScoringAccountID: string;
-        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
         AssistantTaskID: string;
@@ -16586,7 +16586,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -16612,7 +16612,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -16649,7 +16649,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -16937,20 +16937,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run ended */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        finished: true;
-                        task: components["schemas"]["AssistantTask"];
-                    };
-                };
-            };
-            /** @description The run started and goes on */
+            /** @description The run was asked for and goes on */
             202: {
                 headers: {
                     [name: string]: unknown;

@@ -23,18 +23,7 @@ func OpenStore(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	const schema = `
-CREATE TABLE IF NOT EXISTS settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    torrents INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS pauses (
-    engine TEXT PRIMARY KEY,
-    reason TEXT NOT NULL,
-    strikes INTEGER NOT NULL,
-    until INTEGER NOT NULL
-);`
-	if _, err := db.Exec(schema); err != nil {
+	if err := sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -113,3 +102,23 @@ func (s *Store) replacePauses(ctx context.Context, pauses map[string]Pause) erro
 	}
 	return tx.Commit()
 }
+
+// databaseSchema is web-search.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "web-search.db",
+	Baseline: sqlitedb.Statements(baselineStatements),
+}
+
+const baselineStatements = `
+CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    torrents INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pauses (
+    engine TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    strikes INTEGER NOT NULL,
+    until INTEGER NOT NULL
+);`

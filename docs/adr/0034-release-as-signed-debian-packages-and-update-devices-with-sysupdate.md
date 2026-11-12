@@ -1,13 +1,13 @@
 # 0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新
 
-状态：accepted（2026-11-10，用户在第 3 步的验证之后接受；2026-11-09 提出，2026-11-10 改为 systemd-sysupdate 优先）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
+状态：accepted（2026-11-10，用户在第 3 步的验证之后接受；2026-11-09 提出，2026-11-10 改为 systemd-sysupdate 优先；2026-11-11 第 2 步实施前，用户确认修订决定 1 中的内容包命名、开发版本号、软件源工具、安装逻辑与迁移）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
 
 A-NAS 现在的发布靠脚本与人工维护，Experimental NAS 之外也没有可行的更新方式。我们决定分两层：
 
 - 发布的单位改为 Debian 软件包，放在 A-NAS 签名的软件源中；
 - 卖到家里的设备，以这些软件包构建整机镜像，用 systemd 自带的工具链在两个系统分区之间更新：mkosi、systemd-repart、systemd-boot 与 systemd-sysupdate。
 
-近期的几个 release 仍用发布包过渡（[用发布包暂存 release](../runbooks/stage-a-release-bundle.md)）。
+第 2 步完成前的几个 release 用发布包过渡；发布包已随第 2 步删除，部署见[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)。
 
 ## 背景
 
@@ -63,15 +63,17 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
 1. **发布的单位是 Debian 软件包，放在 A-NAS 签名的软件源中。**
    - 软件包：
      - `a-nas`：产品的二进制、单元、安装逻辑、AI Worker 的代码、网页搜索的配置与容器代理；
-     - 内容包：每个模型与运行环境各一个，例如 `a-nas-model-<名称>`、`a-nas-ai-runtime`、`a-nas-search-runtime`、`a-nas-qdrant`、`a-nas-llama`。内容不变时版本不变，apt 只下载变化了的；
-     - `a-nas-assistant-trial`：助手试用包，`Depends` 同一版本的 `a-nas`，所以两者总是一起更新；
+     - 内容包：每个模型、两个运行环境、Qdrant 与 llama.cpp 各一个。包名带内容的标识（模型与 Qdrant、llama.cpp 取 SHA-256 的前 12 位，运行环境取它的 ID），版本固定为 1，例如 `a-nas-model-dfine-m-obj365-cd832825f883`、`a-nas-ai-runtime-842b388a0f1987f5`。`a-nas` 依赖它固定的这些名字，所以内容不变时 apt 不下载；回滚时旧内容如果还装着，只降产品包。内容仍放在 `/opt/a-nas/<种类>/<标识>`，旧的由 `apt autoremove` 删除（[`scripts/lib/content.sh`](../../scripts/lib/content.sh)）；
+     - `a-nas-assistant-trial`：助手试用包，`Depends` 同一版本的 `a-nas`，所以两者总是一起更新。它的 Hermes 运行环境也是内容包，固定在 [`ai/assistant-spike/runtime.json`](../../ai/assistant-spike/runtime.json)；
      - 已有的 `a-nas-host` 与 `a-nas-console`（ADR 0031），以及装有签名公钥的 `a-nas-archive-keyring`。
-   - 版本：每个 release 打标签，Debian 版本由标签得出，例如 `1.0.1~rc7`、`1.0.2`；两个 release 之间的开发构建写作 `1.0.2~dev<日期>.<序号>+g<提交>`，排在该 release 之前。不再用 `0~<提交>`。
-   - 软件源：由 reprepro 或 aptly 生成，`Release` 以 A-NAS 的密钥签名。宿主机以 deb822 的 `.sources` 文件引用它，`Signed-By` 指向 `a-nas-archive-keyring` 的公钥。签名代替逐个文件交接哈希：不论软件源经谁复制、放在哪里，apt 都会拒绝被改过的文件，暂存账号不再在信任链上。
-   - 安装逻辑：`a-nas` 的维护脚本先调用现有的安装器，再逐步改成声明式的文件，例如 `/usr/lib/systemd/system` 中的单元、`sysusers.d` 与 `tmpfiles.d`。按宿主机而定的配置（SMB 接口、本机屏幕的输出与旋转）放在管理员所有的 `/etc/a-nas/site.conf`，不随软件包覆盖。
-   - 迁移：每次数据库结构的变化都带反向步骤。apt 降级时，新版本的 `prerm` 先把数据库退回旧版本认得的结构；`preinst` 在升级前备份数据库。
-   - 门禁：`make release` 构建全部软件包与签名软件源。系统测试从这个软件源用 apt 安装，并走一遍“上一 release → 本 release → 回滚 → 再升级”。
-   - 命令：升级是 `apt-get update && apt-get install a-nas=<版本>`，回滚是同一条命令加 `--allow-downgrades` 与旧版本号，检查用 `a-nas` 带的只读健康检查命令。它们代替每轮手写的脚本。
+     - `a-nas-host` 依赖的 Docker 与 Caddy：上游官方软件包的副本，按 SHA-256 固定（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)，2026-11-12）。
+     - `a-nas-docker-policy`：Docker 的地址池校验与 systemd 附加配置。`a-nas-host` 要求不低于本 release 的版本，产品回滚时与 Docker 一样保留；安装命令显式选择它，避免旧宿主机包不再依赖它后被 `apt autoremove` 清理（[ADR 0013](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
+   - 版本：每个 release 打标签，Debian 版本由标签得出，例如 `1.0.1~rc7`、`1.0.2`；两个 release 之间的开发构建写作 `1.0.2~dev<日期>.<序号>+g<提交>`，排在该 release 之前；预发布标签之后的开发构建写作 `1.0.1~rc.6+dev<日期>.<序号>+g<提交>`，排在 rc.6 与 rc.7 之间，前一种写法会排在 rc.6 之前。序号是标签之后第一父提交的个数，所以沿主干只增不减。不再用 `0~<提交>`（[`scripts/release-version.sh`](../../scripts/release-version.sh)）。
+   - 软件源：由 aptly 生成，用 Debian 13 的软件包，在系统测试的镜像中运行。aptly 的 Go 模块缺少它嵌入的 `VERSION` 文件，不能用 `go tool` 固定版本；Debian 13 的 reprepro 5.3.1 不认 `Limit`，每个发布只留一个版本。软件源保留每个版本，回滚要用，`Release` 以 A-NAS 的密钥签名（[`scripts/apt-repository.sh`](../../scripts/apt-repository.sh)）。宿主机以 deb822 的 `.sources` 文件引用它，`Signed-By` 指向 `a-nas-archive-keyring` 的公钥。签名代替逐个文件交接哈希：不论软件源经谁复制、放在哪里，apt 都会拒绝被改过的文件，暂存账号不再在信任链上。
+   - 安装逻辑：`a-nas` 的文件只在 `/usr`，程序在 `/usr/lib/a-nas`；单元在 `/usr/lib/systemd/system`，以包内的 `.wants` 链接启用；账号与目录用 `sysusers.d` 与 `tmpfiles.d`。按宿主机而定的配置（SMB 接口、本机屏幕的输出与旋转、终端与应用中心的开关）放在管理员所有的 `/etc/a-nas/site.conf`，不随软件包覆盖；systemd 生成器 `a-nas-generator` 与开机运行的 `anas-site.service` 按它与硬件生成 smbd 等的配置，结果不依赖维护脚本。维护脚本只做 apt 宿主机才需要的事：升级前停下服务并复制数据库、按顺序重启、运行 `a-nas-check`，以及从安装器布局的一次性接管。安装器直接删除，没有经过“维护脚本调用安装器”的过渡：那要先把它改成从 `/usr` 读文件，之后再拆一次。
+   - 迁移：每次数据库结构的变化都带反向步骤。执行一步时，它的反向步骤在同一事务中写进数据库；旧版本启动时发现数据库比自己新，就按新版本留下的反向步骤退回自己认得的结构（[`internal/sqlitedb`](../../internal/sqlitedb/migrate.go)）。`prerm` 不知道旧版本认得哪个结构，systemd-boot 自动退回与换回旧的 system extension 时也不运行维护脚本，所以退回放在程序里。已发布之后的步骤与每个反向步骤按 SQLite 改表结构的做法执行：在连接上关闭外键，使重建被引用的表时 `ON DELETE CASCADE` 不删掉引用它的行，提交前核对没有多出指向不存在行的引用。`preinst` 在升级前复制数据库：系统盘的到 `/var/backups/a-nas`，数据卷上的留在数据卷的 `.a-nas-backups`，各保留最近两份；设备上由更新服务在切换前复制（第 4 步）。
+   - 门禁：`make release` 构建全部软件包与签名软件源，只发布 `make check` 与系统测试通过的那一份。系统测试用同样的脚本做一个签名软件源，从中用 apt 安装，并走一遍“上一 release → 本 release → 回滚 → 再升级”；其中还装一个多了一步数据库迁移的“下一 release”，再回滚，核对数据库按反向步骤退回。
+   - 命令：升级是 `apt-get update && apt-get install a-nas=<版本> a-nas-host=<版本>`（产品的几个包写同一版本，apt 不会自己降级依赖），回滚是同一条命令加 `--allow-downgrades` 与旧版本号，检查用 `a-nas` 带的只读健康检查 `a-nas-check`。它们代替每轮手写的脚本（[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)）。
 2. **家里的设备以整机镜像更新，工具链全部来自 systemd 项目，并且都在 Debian 13 中。**
    - 镜像：mkosi 从 Debian 13 与第 1 条的软件包构建，所以测试机与家里的设备装的是同一批软件包。`a-nas-host`、`a-nas-console` 等依赖装进基础镜像。
    - 分区：systemd-repart 建两个只读的 `/usr` 槽位与一个持久的根分区。`/etc` 与 `/var`（含 `/var/lib/a-nas`）在持久的根分区上，用户数据在数据卷上，切换 `/usr` 槽位不动它们。
@@ -84,7 +86,7 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
 
 ## 实施计划
 
-1. **过渡（本 ADR 之前已做）**：发布包，见[用发布包暂存 release](../runbooks/stage-a-release-bundle.md)，用于近期几个 release。
+1. **过渡（本 ADR 之前已做）**：发布包，用于第 2 步完成前的几个 release，已随第 2 步删除。
 2. **软件包与签名软件源**：在一个 PR 中按步骤分提交完成，内容如下。合并后，部署机只需复制软件源并执行 apt 命令，发布包与 `remote-activate-release.sh`、每轮的 root 脚本以及 `make ops-check` 中核对上传清单的 grep 一并删除。
    - 第 1 条的软件包与 `make release`，布局满足“第 3 步的验证结论”中 system extension 的约束；
    - 版本规则；
@@ -93,6 +95,8 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    - 带反向步骤的迁移；
    - 从软件源安装的系统测试；
    - 部署机的手册。
+
+   2026-11-11 完成：[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)。正式签名密钥与软件源的位置待用户决定（[签名密钥](../decisions/2026-11-11-release-signing-key.md)、[放在哪里](../decisions/2026-11-11-update-hosting.md)）。
 3. **镜像与 systemd-sysupdate 的验证（2026-11-10 完成）**：在虚拟机中用 mkosi 构建镜像，以 Debian 13 的 systemd 257 验证自动退回、断电、数据不变、下载量、产品层做成 system extension，以及是否需要更新的 systemd。结论见下一节，做法与数据见[研究记录](../research/sysupdate-image-verification.md)。
 4. **更新服务与界面**：Host Agent 的更新服务与“设置”中的更新页，另有规格。
 5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。
@@ -131,8 +135,8 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
 ## 后果
 
 - 每个 release 都要打标签，CHANGELOG 按 release 分节。
-- 多了要保管的签名密钥：软件源与 systemd-sysupdate 的 `SHA256SUMS` 都用 GPG 签名，可以共用一套保管、备份与轮换办法，由用户决定，写在决定记录中。
-- 联网的设备需要一个 HTTPS 位置放软件源与更新文件，例如 GitHub Releases 或对象存储，放在哪里另行决定。ADR 0016 不变：模型随软件包、镜像与签名的更新组件发出，设备运行时不联网下载模型。
+- 多了要保管的签名密钥：软件源与 systemd-sysupdate 的 `SHA256SUMS` 都用 GPG 签名，可以共用一套保管、备份与轮换办法，由用户决定（[决定记录](../decisions/2026-11-11-release-signing-key.md)）。
+- 联网的设备需要一个 HTTPS 位置放软件源与更新文件，例如 GitHub Releases 或对象存储，放在哪里另行决定（[决定记录](../decisions/2026-11-11-update-hosting.md)）。ADR 0016 不变：模型随软件包、镜像与签名的更新组件发出，设备运行时不联网下载模型。
 - 开发迭代：测试机加上开发构建的软件源，用 apt 装任意构建；镜像只在发布给设备时构建。
 - 依赖上游的实验组件：systemd-sysupdate 的配置格式可能随 systemd 版本变化，升级设备上的 systemd 时要重跑第 3 步的验证。
 - 每次发布基础镜像，每台设备下载约 750 MiB；产品放在 system extension 中，产品更新只下载它自己。只把设备需要的内核模块放进 initrd，内核镜像可从 136 MiB 降到 50 MiB 左右。
@@ -157,5 +161,5 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
 - [ADR 0016：相册 AI 随系统内置安装](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [ADR 0014：屏保视频不随 release 发布](0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - [设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)（第 3 步）、[验证用的镜像配置与驱动脚本](../../deploy/sysupdate-spike/verify.sh)
-- [用发布包暂存 release](../runbooks/stage-a-release-bundle.md)、[配置并验收 v1.0.1 实验数据卷](../runbooks/provision-v1.0.1-experimental-storage.md)
+- [部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)、[配置并验收 v1.0.1 实验数据卷](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)

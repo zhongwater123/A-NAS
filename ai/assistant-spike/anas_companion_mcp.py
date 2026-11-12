@@ -27,40 +27,24 @@ schema is only what the model is shown; the arguments reach the product
 service as the model wrote them, and it answers a wrong or missing one with
 rejected/bad-request.
 """
-import http.client
-import json
-import socket
-
 import anyio
 import anyio.to_thread
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool
 
-COMPANION = "/run/anas-assistant-companion/companion.sock"
+import anas_window_call
+
+COMPANION = anas_window_call.SOCKET
 # The product service waits for the window up to 15 s, and for the turn's own
 # tool.start 1.5 s before that; Hermes gives up on this server after 120 s,
 # counted from when the call queued behind the server's other calls.
 TIMEOUT = 20
 
-
-class UnixHTTP(http.client.HTTPConnection):
-    def __init__(self, path: str):
-        super().__init__("localhost")
-        self.path = path
-
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.settimeout(TIMEOUT)
-        self.sock.connect(self.path)
-
-
-NO_DESKTOP = {"status": "no_desktop"}
 # The product service reads at most 8 KiB of a call (maxCompanionCall); only a
 # text far over its 200 characters gets there.
 TOO_LONG = {"status": "rejected", "reason": "bad-request",
             "message": "参数太长：text 最多 200 字，name 最多 64 字，lock、lockId 最多 128 字"}
-BAD_REQUEST = {"status": "rejected", "reason": "bad-request", "message": "参数无法读取"}
 
 SAID = {
     "ok": "伙伴照做了。",
@@ -76,44 +60,17 @@ SAID = {
 
 def ask(tool: str, args: dict) -> dict:
     """The product service's answer to one call, or what to say without it."""
-    conn = UnixHTTP(COMPANION)
-    try:
-        try:
-            conn.connect()
-        except OSError:
-            # No socket (a scheduled task's sandbox), or nobody serving it:
-            # the call never reached the product service.
-            return NO_DESKTOP
-        try:
-            conn.request("POST", "/call", json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode(),
-                         {"Content-Type": "application/json"})
-            response = conn.getresponse()
-            raw = response.read()
-        except (OSError, http.client.HTTPException):
-            # A timeout, or the product service went away (a restart) once the
-            # call was on its way: the window may have acted on it.
-            return {"status": "timeout"}
-    finally:
-        conn.close()
-    if response.status == 413:
-        return TOO_LONG
-    if response.status == 400:
-        return BAD_REQUEST
-    if response.status != 200:
-        # The product service does not take this member's calls.
-        return NO_DESKTOP
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return NO_DESKTOP
-    if not isinstance(data, dict) or not isinstance(data.get("status"), str):
-        return NO_DESKTOP
-    return data
+    return anas_window_call.ask(COMPANION, "/call", tool, args, TIMEOUT, TOO_LONG)
 
 
 def line(data: dict) -> str:
     status = data["status"]
     said = SAID.get(status, f"伙伴回答：{status}")
+    # Where the companion went instead of where it was asked to, as the window answers a position: not
+    # "done as asked", which would have the model believe it stands where it said.
+    if status == "ok" and data.get("stepped_aside") is True:
+        return (f"伙伴没去要求的位置：为了不挡住最上层的窗口（通常是 VNAS 窗口），"
+                f"它停在 x={data.get('x')}、y={data.get('y')}。")
     reason = data.get("reason")
     if status in ("cancelled", "failed", "rejected") and reason:
         said += f"（{reason}）"
@@ -145,14 +102,19 @@ TOOLS = {
                   {"text": TEXT, "duration": NUMBER, "anim": FLAG, "lock": TEXT}, ["text"]),
     "bubble_clear": ("收起伙伴的气泡。" + LOCK, {"lock": TEXT}, []),
     "position": ("把伙伴移到屏幕上的某处。x、y：伙伴中心的位置，0–1，左上角为 0；mode：instant 立即到、spring 弹过去、"
-                 "line 直线移动；duration：line 用多少毫秒（0–5000）。结果给出实际到达的 x、y。" + LOCK,
+                 "line 直线移动；duration：line 用多少毫秒（0–5000）。伙伴会让开最上层的窗口：目标会盖住它时，伙伴改去窗口旁最近的"
+                 "空位，结果的 stepped_aside 为 true；窗口太大、旁边放不下时（比如最大化），伙伴停在可用区域的一角，可能仍盖住窗口边上"
+                 "一小块，这时换目标也会落到同一处，不必重试。结果给出实际到达的 x、y。" + LOCK,
                  {"x": NUMBER, "y": NUMBER, "mode": MODE, "duration": NUMBER, "lock": TEXT}, ["x", "y", "mode"]),
-    "throw": ("把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。" + LOCK,
+    "throw": ("把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。落地后如果盖住最上层的窗口，"
+              "伙伴会自己让开。" + LOCK,
               {"angle": NUMBER, "power": NUMBER, "lock": TEXT}, ["angle", "power"]),
     "sleep": ("让伙伴睡觉；它被锁定时不行。", {}, []),
-    "wake": ("叫醒伙伴。", {}, []),
+    "wake": ("叫醒伙伴。成员让伙伴安静时（在设备上让它睡下），只有成员能叫醒它：这时回答 rejected（member-quiet），"
+             "不要重试，也不要劝成员叫醒它。", {}, []),
     "lock": ("锁定伙伴一段时间，期间别人的命令不会打断你；之后的命令都要带上返回的 lockId。成员拖动或点击伙伴会收回锁，"
-             "这一轮对话结束时锁也会释放。lockId：续期时带上原来的；ttl：毫秒，1000–300000，默认 120000。",
+             "这一轮对话结束时锁也会释放。成员让伙伴安静时锁不住，回答 rejected（member-quiet）。lockId：续期时带上原来的；"
+             "ttl：毫秒，1000–300000，默认 120000。",
              {"lockId": TEXT, "ttl": NUMBER}, []),
     "lock_release": ("释放 lock 拿到的锁。lockId：锁的 id。", {"lockId": TEXT}, ["lockId"]),
 }

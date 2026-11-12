@@ -1,11 +1,11 @@
 # 启用网页搜索
 
 状态：draft（系统测试覆盖服务边界；2026-11-03 在实验 NAS 完成第 1–3 步，空闲外发待查明）
-更新时间：2026-11-06
+更新时间：2026-11-11
 
 ## 目的
 
-第一次在 Experimental NAS 上安装带网页搜索的 release（[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[规格](../specs/web-search.md)），并在 NAS 的实际网络下测量各引擎。之后的升级按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)进行即可。
+第一次在 Experimental NAS 上安装带网页搜索的 release（[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[规格](../specs/web-search.md)），并在 NAS 的实际网络下测量各引擎。之后的升级按[部署 A-NAS 软件包](deploy-a-nas-packages.md)进行即可。
 
 成功后：
 
@@ -19,25 +19,24 @@
 - **前提**：
   - 用户已同意部署本版本。
   - 开发机已用 `scripts/build-search-runtime.sh` 构建 [`deploy/search/searxng.json`](../../deploy/search/searxng.json) 固定的运行环境。
-  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过系统测试，其中一次带 `ANAS_SYSTEM_TEST_SEARCH=real`：默认的系统测试用替身代替 SearXNG，只有这一次让真正的 SearXNG 在单元的沙箱中启动，并核对它加载的引擎与插件、空闲时没有 IP 流量、日志中没有错误。
+  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过系统测试，其中一次带 `ANAS_SYSTEM_TEST_CONTENT=<内容库>`：默认的系统测试用替身代替 SearXNG，只有这一次让真正的 SearXNG 在单元的沙箱中启动，并核对它加载的引擎与插件、空闲时没有 IP 流量、日志中没有错误。
 - **风险**：
   - 这是第一个代成员访问外网的内置服务。实验 NAS 的出口是公司网络，公司网络能看到访问了哪些搜索引擎与种子站。
   - 测量时请求太快，引擎会对这个出口返回验证码，并在一段时间内影响所有人（[研究记录](../research/web-search-engines.md)）。测量只按下面的节奏进行。
 - **资源**：运行环境压缩包约 58 MB，按内容只存一份；常驻内存约 100–150 MB，单元上限 512 MiB。
 - **停止条件**（出现任一项立即停止）：
-  - 安装器以退出码 2（缺少网页搜索文件或运行环境清单无效）、3（Python 版本不符，或 `a-nas-search` 账号已存在且有家目录或登录 Shell）或 4（暂存的运行环境与清单不符）结束。
+  - apt 报告依赖无法满足（Python 版本不符）、签名或哈希错误，或 `a-nas-check` 有 `FAIL`（包括 `a-nas-search` 账号有家目录或登录 Shell）。
   - `systemctl status anas-search` 反复重启，或日志出现 `oom-kill`。
 
 ## 步骤
 
-1. 在开发机构建并暂存。
-   - 命令（WSL）：`scripts/build-search-runtime.sh`。
-   - 命令（Windows）：`scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。
-   - 预期：运行环境上传一次，此后暂存时不再上传。
-   - 完成标准：暂存 release 中有 `search/settings.yml`、`search/searxng.json`、`search/runtime.json`、`search/allow-dns.sh`，`search/runtime.tar.gz` 链接到 `apps/a-nas/search-runtimes/`；暂存脚本已核对哈希。
-2. 以 root 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对二进制哈希并运行安装器。
-   - 预期：安装器创建 `a-nas-search` 账号，生成 `/etc/a-nas/search.env`，把运行环境解到 `/opt/a-nas/search-runtimes/<id>`，启用 `anas-search-dns.path` 与 `anas-search.service`，最后输出 `web search: active`。
-   - 网页搜索启动失败不会中止安装：产品自己的服务照常运行，安装器在最后输出 `web search did not start`。这时不继续后面的步骤，按提示用 `journalctl -u anas-search-dns -u anas-search -b` 查原因。
+1. 在开发机构建并发布。
+   - 命令（WSL）：`scripts/build-search-runtime.sh`，把 `build/search-runtime/<id>.tar.gz` 放进内容库的 `search-runtimes/`（[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)），再按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1 步发布。
+   - 预期：`make release` 为运行环境构建一次内容包，此后软件源中已有它，不再构建。
+   - 完成标准：`make release` 输出版本、签名密钥的指纹与 `a-nas-archive-keyring` 的 SHA-256。
+2. 以 root 按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 2–6 步安装。
+   - 预期：`a-nas` 建立 `a-nas-search` 账号，运行环境的内容包放在 `/opt/a-nas/search-runtimes/<id>`，`anas-site.service` 生成 `/etc/a-nas/search.env`；软件包启用 `anas-search-dns.path` 与 `anas-search.service`，`a-nas-check` 输出 `INFO web search: active`。
+   - 网页搜索启动失败不会中止安装：产品自己的服务照常运行，`INFO web search` 一行不是 `active`。这时不继续后面的步骤，用 `journalctl -u anas-search-dns -u anas-search -b` 查原因。
 3. 核对套接字、身份与网络边界。
    - 命令：`stat -c '%a %U %G' /run/a-nas-search /run/a-nas-search/search.sock`。
    - 预期：`750 a-nas-search a-nas-search` 与 `660 a-nas-search a-nas-search`。
@@ -58,7 +57,7 @@
 6. 核对开关。
    - 操作：在“设置 → 网页搜索”中关闭网页搜索。
    - 预期：`systemctl is-active anas-search` 为 `inactive`，`/var/lib/a-nas-host/web-search-disabled` 存在；成员的桌面在一分钟内不再显示“网页搜索”。
-   - 操作：重新运行一次安装器（同一 release 也可以），再执行 `systemctl is-active anas-search`。
+   - 操作：以 root 重新安装当前版本（`apt-get install --reinstall a-nas=<当前版本>`），再执行 `systemctl is-active anas-search`。
    - 预期：仍为 `inactive`。重新打开开关后为 `active`。
 
 ## 多账号节奏与资源验收（#364）
@@ -81,11 +80,11 @@
 ## 回滚或恢复
 
 - **只关闭网页搜索**：在“设置 → 网页搜索”中关闭；或以 root 执行 `touch /var/lib/a-nas-host/web-search-disabled && systemctl stop anas-search`。
-- **回到不带网页搜索的版本**：按实机配置手册切回旧 release，再执行 `systemctl disable --now anas-search.service anas-search-dns.path`，删除 `/etc/systemd/system/anas-search*.service`、`anas-search-dns.path` 后执行 `systemctl daemon-reload`。`/opt/a-nas/search-runtimes`、`/etc/a-nas/search.env` 与 `a-nas-search` 账号不会自动删除，确认不再需要后另行删除。
+- **回到旧版本**：按[部署 A-NAS 软件包的回滚](deploy-a-nas-packages.md#回滚或恢复)进行。软件包的每个版本都带网页搜索，不想用时按上一条关闭。`/etc/a-nas/search.env` 与 `a-nas-search` 账号不会自动删除；新版本的运行环境内容包留到 `apt autoremove`。
 
 ## 关联
 
 - 规格：[网页搜索](../specs/web-search.md)
 - ADR：[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)
-- 代码：[`anas-search.service`](../../deploy/systemd/system/anas-search.service)、[`anas-search-dns.path`](../../deploy/systemd/system/anas-search-dns.path)、[`allow-dns.sh`](../../deploy/search/allow-dns.sh)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[运行环境构建](../../scripts/build-search-runtime.sh)
+- 代码：[`anas-search.service`](../../deploy/systemd/system/anas-search.service)、[`anas-search-dns.path`](../../deploy/systemd/system/anas-search-dns.path)、[`allow-dns.sh`](../../deploy/search/allow-dns.sh)、[`anas-site.service`](../../deploy/site/apply.sh)、[内容包](../../scripts/build-content-packages.sh)、[运行环境构建](../../scripts/build-search-runtime.sh)
 - 研究：[引擎实测](../research/web-search-engines.md)

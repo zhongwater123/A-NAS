@@ -11,7 +11,7 @@
 
 - 权限：NAS 的 root（按项目惯例把命令写成一段脚本，核对哈希后交给 root 运行）；开发机能构建 Go。
 - 目标：实验 NAS（`ssh a-nas-dev` 暂存）。数据卷挂在 `/srv/a-nas/data`，模块存储是其顶层的 Btrfs 子卷 `module-scoring`，共享文件夹是 `/srv/a-nas/data/spaces/shared/照片打分`。
-- 前提：NAS 上的 A-NAS 已包含模块支持（产品服务的模块转发、Host Agent 的模块会话查询与存储，安装器建的 `a-nas-modules`、`a-nas-module-sessions` 组）。没有时安装脚本以退出码 3 停下。
+- 前提：NAS 上的 A-NAS 已换成软件包并包含模块支持（产品服务的模块转发、Host Agent 的模块会话查询与存储，`a-nas` 包经 `systemd-sysusers` 建的 `a-nas-modules`、`a-nas-module-sessions` 组）。没有时安装脚本以退出码 3 停下。
 - 风险：
   - 打分数据只在 `module-scoring` 中。这是[实验 NAS 只放可丢弃数据的例外](../decisions/2026-11-12-photo-scoring.md)，所以打分期间要定期导出。
   - 删除子卷不可撤销，删除前必须已经导出并核对。

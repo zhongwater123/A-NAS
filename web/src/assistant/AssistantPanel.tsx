@@ -46,6 +46,7 @@ import {
   ListChecks,
   LoaderCircle,
   LockKeyhole,
+  type LucideIcon,
   MessageSquarePlus,
   MonitorSmartphone,
   MousePointerClick,
@@ -81,7 +82,15 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 
 import { releaseCommandLocks, runCompanionCommand, stopTurnCommands } from "../companion/commands";
-import { forgetAll, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
+import {
+  forgetAll,
+  type GatewayPayload,
+  reportCards,
+  reportEvent,
+  startTurn,
+  stopTurn,
+  withdrawTurn,
+} from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -111,6 +120,7 @@ import { TasksView } from "./TasksView";
 import { TextHandle } from "./TextHandle";
 import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
 import { linkTextHandles, textHandleOf } from "./textHandles";
+import { friendlyPath, toolLabel } from "./toolLabels";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import { ControlError, type Danger, WebosController } from "./webosControl";
@@ -122,18 +132,8 @@ const SUGGESTIONS = [
 ];
 
 // How long a step VNAS takes on the desktop waits for the member to allow it:
-// Hermes gives the window 30 s to answer a browser command.
+// the product service gives the window 30 s to answer a desktop command.
 const CONTROL_CONFIRM_MS = 25_000;
-// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
-// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
-const CONTROL_CAPABILITIES = [
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_press",
-  "browser_scroll",
-  "browser_screenshot",
-];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -252,7 +252,7 @@ export function AssistantPanel({
         if (type === "sessions.changed" || type === "session.title") void refreshSessions();
         if (type === "sessions.changed" || type === "message.complete") refreshBusy();
         // The companion follows the turns this window started (companion/workStatus.ts).
-        if (session) reportEvent(session, type, event.payload as { name?: unknown; status?: unknown } | undefined);
+        if (session) reportEvent(session, type, event.payload as GatewayPayload | undefined);
       }),
     [gateway.client, keep, refreshBusy, refreshSessions],
   );
@@ -279,11 +279,16 @@ export function AssistantPanel({
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
-  // VNAS operates the WebOS page it is on as Hermes's browser for its live
-  // conversation (Hermes's browser control). A step whose writes delete, move,
-  // share or change settings, and any step in the terminal, Docker or 应用中心,
-  // waits here for the member.
-  const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
+  // VNAS operates the WebOS page it is on for its live conversation: the
+  // commands of A-NAS's `desktop` MCP server come here through the product
+  // service (ADR 0024 decision 8). A step whose writes delete, move, share or
+  // change settings, and any step in the terminal, Docker or 应用中心, waits
+  // here for the member.
+  const [controlAsk, setControlAsk] = useState<{
+    danger: Danger;
+    until: number;
+    answer(allowed: boolean): void;
+  }>();
   const asking = useRef<(allowed: boolean) => void>(undefined);
   // One card at a time: a write that arrives while another card is open waits its turn.
   const cards = useRef(Promise.resolve());
@@ -304,7 +309,11 @@ export function AssistantPanel({
               };
               asking.current = answer;
               timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
-              setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+              setControlAsk({
+                danger,
+                until: Date.now() + CONTROL_CONFIRM_MS,
+                answer,
+              });
             }),
         );
         cards.current = shown.then(() => undefined);
@@ -315,83 +324,106 @@ export function AssistantPanel({
     return installed.install();
   }, []);
   // The window that sends a prompt is the conversation's browser for its turn:
-  // it registers again before every prompt, so the steps and their cards stay
+  // it attaches again before every prompt, so the steps and their cards stay
   // on the device the member is using; a window that only shows the
-  // conversation never registers (#160). These are the live sessions this
-  // connection registered for.
+  // conversation never attaches (#160). These are the live sessions this
+  // connection attached to.
   const controlled = useRef(new Set<string>());
   useLayoutEffect(() => {
     controlled.current.clear();
   }, [gateway.generation]);
   const beforePrompt = useCallback(
     (liveId: string) =>
-      gateway.client
-        .request("browser.controller.register", {
-          session_id: liveId,
-          protocol_version: 1,
-          controller_id: "vnas-window",
-          browser_profile_id: "webos",
-          capabilities: CONTROL_CAPABILITIES,
-        })
-        .then(
-          () => {
-            controlled.current.add(liveId);
-            startTurn(liveId);
-          },
-          () => {
-            controlled.current.delete(liveId);
-          },
-        ),
+      gateway.client.request("desktop.attach", { session_id: liveId }).then(
+        () => {
+          controlled.current.add(liveId);
+          startTurn(liveId);
+        },
+        () => {
+          controlled.current.delete(liveId);
+        },
+      ),
     [gateway.client],
   );
+  // The desktop commands that reached this window are carried out one at a
+  // time, so the steps of two conversations never interleave on the page and a
+  // card always asks about the step under way: `current` is that step, and
+  // `waiting` are the ones that have not had their turn.
+  const steps = useRef({
+    current: "",
+    waiting: new Set<string>(),
+    queue: Promise.resolve(),
+  });
   useEffect(
     () =>
       gateway.client.onEvent((event) => {
         const type = event.type as string;
         const session = typeof event.session_id === "string" ? event.session_id : "";
-        if (type === "browser.controller.cancel") {
-          // Hermes stopped waiting: the step is not taken.
-          asking.current?.(false);
+        const command = (event.payload ?? {}) as {
+          command_id?: unknown;
+          action?: unknown;
+          args?: unknown;
+        };
+        const { command_id: commandId, action } = command;
+        const state = steps.current;
+        if (type === "anas.desktop.cancel") {
+          if (typeof commandId !== "string") return;
+          // The product service stopped waiting for the step: under way, it is
+          // not taken, so the card asking about it closes; still waiting, it
+          // loses its turn.
+          if (state.current === commandId) asking.current?.(false);
+          else state.waiting.delete(commandId);
           return;
         }
-        if (type !== "browser.controller.command" || !controlled.current.has(session)) return;
-        const command = (event.payload ?? {}) as {
-          command_id?: string;
-          action?: string;
-          arguments?: Record<string, unknown>;
-        };
-        if (!command.command_id || !command.action || !controller.current) return;
-        void controller.current
-          .run(command.action, command.arguments ?? {})
-          .then(
+        if (type !== "anas.desktop" || !controlled.current.has(session)) return;
+        if (typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
+        if (!controller.current) return;
+        const args =
+          command.args && typeof command.args === "object" && !Array.isArray(command.args)
+            ? (command.args as Record<string, unknown>)
+            : {};
+        state.waiting.add(commandId);
+        state.queue = state.queue.then(async () => {
+          // Given up on before its turn: nothing is done and nobody waits for an answer.
+          if (!state.waiting.delete(commandId) || !controller.current) return;
+          state.current = commandId;
+          const outcome = await controller.current.run(action, args).then(
             (result) => ({ ok: true, result }),
             (reason) => ({
               ok: false,
-              error: { message: reason instanceof ControlError ? reason.message : "这一步没有完成" },
+              error: {
+                message: reason instanceof ControlError ? reason.message : "这一步没有完成",
+              },
             }),
-          )
-          .then((outcome) =>
-            gateway.client.request("browser.controller.result", {
+          );
+          state.current = "";
+          // Not awaited: the next step does not wait for the answer to arrive.
+          void gateway.client
+            .request("desktop.result", {
               session_id: session,
-              command_id: command.command_id,
+              command_id: commandId,
               ...outcome,
-            }),
-          )
-          .catch(() => undefined);
+            })
+            .catch(() => undefined);
+        });
       }),
     [gateway.client],
   );
   // VNAS's commands to the companion on this device (anas.companion): the product service sends
   // them only to the conversation's browser, and the companion carries out those of a turn this
   // window started (companion/commands.ts). Each is answered once, an animation when it has ended
-  // and at most 10 s on, within the 12 s the service waits; a window that closes stops waiting
+  // and at most 11.5 s on, within the 12 s it has (the service waits 15 s); a window that closes stops waiting
   // and answers nothing, which the service settles.
   useEffect(() => {
     const closed = new AbortController();
     const off = gateway.client.onEvent((event) => {
       if ((event.type as string) !== "anas.companion") return;
       const session = typeof event.session_id === "string" ? event.session_id : "";
-      const command = (event.payload ?? {}) as { command_id?: unknown; action?: unknown; args?: unknown };
+      const command = (event.payload ?? {}) as {
+        command_id?: unknown;
+        action?: unknown;
+        args?: unknown;
+      };
       const { command_id: commandId, action } = command;
       if (!session || typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
       const args =
@@ -402,7 +434,11 @@ export function AssistantPanel({
         .then((outcome) =>
           closed.signal.aborted
             ? undefined
-            : gateway.client.request("companion.result", { session_id: session, command_id: commandId, ...outcome }),
+            : gateway.client.request("companion.result", {
+                session_id: session,
+                command_id: commandId,
+                ...outcome,
+              }),
         )
         .catch(() => undefined);
     });
@@ -412,13 +448,20 @@ export function AssistantPanel({
     };
   }, [gateway.client]);
 
-  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
+  // A prompt that did not go in started no turn here: the companion does not follow the conversation for it.
+  const thread = useAssistantThread(gateway, activeId, {
+    onCreated: setActiveId,
+    onChanged: changed,
+    beforePrompt,
+    promptFailed: withdrawTurn,
+  });
   const { send, cancel: stopReply, liveId } = thread;
-  // A stop counts from this window's request, for the companion too (companion/workStatus.ts).
+  // A stop counts from this window's request, for the companion too (companion/workStatus.ts). Its
+  // commands first: the companion answers the stop after the idle animation they put back.
   const cancel = useCallback(() => {
     if (liveId) {
-      stopTurn(liveId);
       stopTurnCommands(liveId);
+      stopTurn(liveId);
     }
     stopReply();
   }, [liveId, stopReply]);
@@ -485,8 +528,8 @@ export function AssistantPanel({
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
     // As Hermes Desktop does: stop and close the live session before deleting it.
     if (session.id === activeId && thread.liveId) {
-      stopTurn(thread.liveId);
       stopTurnCommands(thread.liveId);
+      stopTurn(thread.liveId);
       await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
       await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
     }
@@ -846,10 +889,20 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
     };
   }
   if (message.role === "user")
-    return { id: message.id, role: "user", content: message.parts.filter((part) => part.type === "text"), createdAt };
+    return {
+      id: message.id,
+      role: "user",
+      content: message.parts.filter((part) => part.type === "text"),
+      createdAt,
+    };
   if (message.role === "system") {
     const text = chatMessageText(message).trim();
-    return { id: message.id, role: "system", content: [{ type: "text", text: TURN_NOTICES[text] ?? text }], createdAt };
+    return {
+      id: message.id,
+      role: "system",
+      content: [{ type: "text", text: TURN_NOTICES[text] ?? text }],
+      createdAt,
+    };
   }
   return {
     id: message.id,
@@ -869,7 +922,7 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
 }
 
 // A step VNAS wants to take on the desktop that deletes, replaces or resets
-// something: the member allows it, or not, before Hermes stops waiting.
+// something: the member allows it, or not, before the product service stops waiting.
 function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(allowed: boolean): void } }) {
   const [left, setLeft] = useState(() => Math.max(0, Math.ceil((ask.until - Date.now()) / 1000)));
   useEffect(() => {
@@ -1386,105 +1439,50 @@ function Reasoning({ text }: { text: string }) {
   );
 }
 
-// A friendlier name, with an icon, for each tool the assistant has.
+// A friendlier name, with an icon, for each tool the assistant has (toolLabels.ts names them).
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  read_file: FileText,
+  search_files: Search,
+  write_file: FilePen,
+  patch: FilePen,
+  mcp__anas__submit_changes: Send,
+  terminal: SquareTerminal,
+  process_manage: SquareTerminal,
+  execute_code: Code,
+  delegate_task: Users,
+  clarify: CircleHelp,
+  mcp__anas__recent_changes: History,
+  mcp__anas__search_photos: Search,
+  mcp__anas__browse_photos: ImageIcon,
+  mcp__anas__photo_details: ImageIcon,
+  mcp__anas__similar_photos: ImageIcon,
+  mcp__anas__look_at_photo: ImageIcon,
+  vision_analyze: ImageIcon,
+  video_analyze: Video,
+  memory: Brain,
+  session_search: FileSearch,
+  skill_view: Wrench,
+  skills_list: Wrench,
+  skill_manage: Wrench,
+  // The desktop server's tools; the browser_* names are Hermes's own browser tools, which conversations
+  // from before the desktop server still hold.
+  mcp__desktop__snapshot: MonitorSmartphone,
+  mcp__desktop__look: Eye,
+  mcp__desktop__click: MousePointerClick,
+  mcp__desktop__type: Keyboard,
+  mcp__desktop__press: Keyboard,
+  mcp__desktop__scroll: MousePointerClick,
+  browser_snapshot: MonitorSmartphone,
+  browser_vision: Eye,
+  browser_click: MousePointerClick,
+  browser_type: Keyboard,
+  browser_press: Keyboard,
+  browser_scroll: MousePointerClick,
+};
+
 function describeTool(name: string, args: Record<string, unknown>): { icon: ReactNode; label: string; detail: string } {
-  const path = typeof args.path === "string" ? friendlyPath(args.path) : "";
-  switch (name) {
-    case "read_file":
-      return { icon: <FileText />, label: "读取", detail: path };
-    case "search_files":
-      return {
-        icon: <Search />,
-        label: "搜索",
-        detail: [typeof args.pattern === "string" ? `“${args.pattern}”` : "", path && `在 ${path}`]
-          .filter(Boolean)
-          .join(" "),
-      };
-    case "write_file":
-      return { icon: <FilePen />, label: "写入草稿", detail: path };
-    case "patch":
-      return { icon: <FilePen />, label: "修改草稿", detail: path };
-    case "mcp__anas__submit_changes":
-      return {
-        icon: <Send />,
-        label: "提交更改",
-        detail: typeof args.summary === "string" ? args.summary : "等你确认",
-      };
-    case "terminal":
-      return {
-        icon: <SquareTerminal />,
-        label: "运行命令",
-        detail: typeof args.command === "string" ? short(args.command) : "",
-      };
-    case "process_manage":
-      return { icon: <SquareTerminal />, label: "管理后台命令", detail: "" };
-    case "execute_code":
-      return { icon: <Code />, label: "运行代码", detail: "" };
-    case "delegate_task":
-      return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
-    case "clarify":
-      return { icon: <CircleHelp />, label: "问你", detail: "" };
-    case "mcp__anas__recent_changes":
-      return { icon: <History />, label: "查看最近的更改", detail: "" };
-    case "mcp__anas__search_photos":
-      return { icon: <Search />, label: "搜索照片", detail: typeof args.query === "string" ? `“${args.query}”` : "" };
-    case "mcp__anas__browse_photos":
-      return { icon: <ImageIcon />, label: "浏览照片", detail: typeof args.month === "string" ? args.month : "" };
-    case "mcp__anas__photo_details":
-      return { icon: <ImageIcon />, label: "查看照片信息", detail: "" };
-    case "mcp__anas__similar_photos":
-      return { icon: <ImageIcon />, label: "找相似的照片", detail: "" };
-    case "mcp__anas__look_at_photo":
-      return { icon: <ImageIcon />, label: "取出照片画面", detail: "" };
-    // A photo's view lands in Hermes's image cache; the question says more than that path.
-    case "vision_analyze":
-      return {
-        icon: <ImageIcon />,
-        label: "看图",
-        detail:
-          typeof args.question === "string" && args.question
-            ? short(args.question)
-            : typeof args.image_url === "string"
-              ? friendlyPath(args.image_url)
-              : "",
-      };
-    case "video_analyze":
-      return {
-        icon: <Video />,
-        label: "看视频",
-        detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "",
-      };
-    case "memory":
-      return { icon: <Brain />, label: "记住", detail: "" };
-    case "session_search":
-      return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
-    case "skill_view":
-    case "skills_list":
-    case "skill_manage":
-      return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
-    case "browser_snapshot":
-      return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
-    case "browser_vision":
-      return {
-        icon: <Eye />,
-        label: "看桌面画面",
-        detail: typeof args.question === "string" ? short(args.question) : "",
-      };
-    case "browser_click":
-      return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
-    case "browser_type":
-      return {
-        icon: <Keyboard />,
-        label: "输入",
-        detail: typeof args.text === "string" ? `“${short(args.text)}”` : "",
-      };
-    case "browser_press":
-      return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };
-    case "browser_scroll":
-      return { icon: <MousePointerClick />, label: "滚动", detail: args.direction === "up" ? "向上" : "向下" };
-    default:
-      return { icon: <Wrench />, label: name, detail: "" };
-  }
+  const Icon = TOOL_ICONS[name] ?? Wrench;
+  return { icon: <Icon />, ...toolLabel(name, args) };
 }
 
 const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, status, isError }) => {
@@ -1815,21 +1813,24 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, img: MarkdownImage, CodeHeader };
-const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = {
+  a: MarkdownLink,
+  img: MarkdownImage,
+  CodeHeader,
+};
+const ASSISTANT_PARTS = {
+  Text: MarkdownText,
+  ChainOfThought: Steps,
+  Empty: Thinking,
+};
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
-const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: SystemNotice };
+const THREAD_COMPONENTS = {
+  UserMessage,
+  AssistantMessage,
+  SystemMessage: SystemNotice,
+};
 
 // Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
-
-function short(text: string) {
-  const line = text.split("\n")[0];
-  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
-}
-
-function friendlyPath(path: string) {
-  return path.replace(/^\/nas\//, "").replace(/^助手\/待确认\//, "草稿/");
-}
 
 function relativeTime(seconds: number) {
   return formatRelativeTime(seconds * 1000, Date.now(), { dateAfterDays: 1 });

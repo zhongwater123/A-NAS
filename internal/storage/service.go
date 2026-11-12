@@ -140,12 +140,15 @@ type Options struct {
 
 type Store struct{ db *sql.DB }
 
-func OpenSQLite(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path, sqlitedb.Options{})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS storage_plans (
+// databaseSchema is storage.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "storage.db",
+	Baseline: sqlitedb.Statements(baselineStatements + activity.IndexStatement),
+}
+
+const baselineStatements = `CREATE TABLE IF NOT EXISTS storage_plans (
     id TEXT PRIMARY KEY,
     document_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -159,7 +162,14 @@ CREATE TABLE IF NOT EXISTS audit_events (
     occurred_at TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
-` + activity.IndexStatement); err != nil {
+`
+
+func OpenSQLite(path string) (*Store, error) {
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
+	if err != nil {
+		return nil, err
+	}
+	if err := sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

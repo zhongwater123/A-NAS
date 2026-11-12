@@ -1,0 +1,17 @@
+#!/bin/bash
+# prerm of the assistant trial's Hermes runtime packages, a-nas-assistant-runtime-*
+# (scripts/build-content-packages.sh). apt replaces the runtime before the trial's
+# postinst runs nas-trial.sh update, so what runs on it stops first: the scheduled
+# tasks' waker, which would start a round on a runtime being replaced, then the
+# assistants, their API, scheduled tasks and curator. update starts them again.
+set -euo pipefail
+
+[[ -d /run/systemd/system ]] || exit 0
+case "${1:-}" in
+  remove | upgrade | deconfigure)
+    systemctl stop anas-assistant-cron-waker.service 2>/dev/null || true
+    systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+      'anas-assistant-curator@*.service' 2>/dev/null || true
+    ;;
+esac
+exit 0

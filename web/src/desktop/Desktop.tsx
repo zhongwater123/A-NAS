@@ -48,6 +48,7 @@ import {
 import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import styles from "./desktop.module.css";
+import { publishFocusedWindow } from "./focusedWindow";
 import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
@@ -220,7 +221,11 @@ export function Desktop({
     ...shortcuts.map((shortcut) => shortcutApp(shortcut, isAdmin ? () => showInDocker(shortcut.id) : undefined)),
   ];
   const visible = windows.filter((window) => window.open && !window.minimized);
-  const focusedID = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)).id : undefined;
+  const focusedWindow = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)) : undefined;
+  const focusedID = focusedWindow?.id;
+  // What floats above the windows, the companion, keeps clear of the one on top (focusedWindow.ts).
+  useEffect(() => publishFocusedWindow(focusedWindow ?? null), [focusedWindow]);
+  useEffect(() => () => publishFocusedWindow(null), []);
   // Windows hidden by "show desktop" come back on the next press, as long as
   // nothing was reopened in between; windows minimized by hand stay down.
   const [revealed, setRevealed] = useState<WindowID[]>([]);
@@ -350,7 +355,7 @@ export function Desktop({
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
         </ShellPart>
         <ShellPart name="companion">
-          <Companion />
+          <Companion onOpenVnas={() => open("assistant")} onOpenTaskRun={showTaskRun} />
         </ShellPart>
         <ShellPart name="family hints">
           <Suspense fallback={null}>

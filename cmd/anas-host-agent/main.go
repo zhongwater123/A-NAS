@@ -84,6 +84,9 @@ type config struct {
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
 	AssistantTokens        string `env:"ANAS_ASSISTANT_TOKEN_DIR" envDefault:"/etc/a-nas-assistant/tokens"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
+	// The scheduled tasks members asked to run now wait here for a round of
+	// their cron unit (ai/assistant-spike/run-requests.sh reads the same place).
+	AssistantRuns string `env:"ANAS_ASSISTANT_RUN_DIR" envDefault:"/run/a-nas/assistant-runs"`
 	// Without the photo service's group the photo service is not installed
 	// and its session lookup is off; the default is the service's user.
 	PhotoSessionGroup  string `env:"ANAS_PHOTO_SESSION_GROUP"`
@@ -117,7 +120,7 @@ func loadConfig(environment map[string]string) (config, error) {
 		c.AssistantChanges = filepath.Join(c.DataMount, "assistant", ".changes")
 	}
 	if c.AssistantSockets == "" {
-		c.AssistantChanges = ""
+		c.AssistantChanges, c.AssistantRuns = "", ""
 	}
 	if c.PhotoSessionGroup == "" {
 		c.PhotoSessionGroup = accountid.PhotoServiceUser
@@ -198,6 +201,7 @@ func run(logger *slog.Logger) error {
 		AssistantSockets: config.AssistantSockets,
 		AssistantTokens:  config.AssistantTokens,
 		AssistantChanges: assistantChanges,
+		AssistantRuns:    config.AssistantRuns,
 		Accounts:         sessions,
 		Scopes:           scopes,
 	})

@@ -64,6 +64,21 @@ check "the assistant's settings are on in the product's services" \
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 check "the executor's assistant socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" /run/a-nas/assistant-changes.sock
+# The companion's socket (#412) reaches the sandbox of a member's conversations only: a
+# scheduled task and the curator run as the same UID but have no window, so their units
+# do not bind it, and outside a bind it is root's alone.
+companion_socket=/run/a-nas-companion-assistant/assistant.sock
+binds() { systemctl show -p BindPaths -p BindReadOnlyPaths --value "$1" || true; }
+check "the companion's socket is out of a member's reach outside the sandbox" \
+  denied alice python3 -c "$unix_connect" "$companion_socket"
+check "a member's assistant binds the companion's socket into its sandbox" \
+  grep -Fq "$companion_socket:/run/anas-assistant-companion/companion.sock" <<<"$(binds anas-assistant@alice.service)"
+for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.service; do
+  check "$unit does not bind the companion's socket" \
+    test -n "$(binds "$unit")" -a "$(grep -cF "$companion_socket" <<<"$(binds "$unit")")" = 0
+done
+check "without the bind, the sandbox's path is the empty mount point" \
+  test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
@@ -286,6 +301,19 @@ if [[ -x "$assistant_python" ]]; then
   # instead of coming back as the SDK's error, which Hermes's circuit breaker counts.
   sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_companion_mcp 2>&1 || true)
   check "the companion's MCP server passes every call on under the runtime's MCP SDK" grep -qx OK <<<"$sdk_out"
+  # The managed policy trusts the companion's server and not the A-NAS one, so a companion
+  # tool runs without a card. approvals-managed.sh checks the same against a hostile member
+  # config, but only in the spike: its unanswered approval waits out the managed
+  # approvals.timeout, a day as installed here (SPIKE_APPROVAL_TIMEOUT sets 20 s there).
+  check "the managed policy has the A-NAS tools ask and the companion's not" \
+    quiet yq -e '.mcp_servers.anas.trust == "untrusted" and .mcp_servers.companion.trust == "full"' /etc/hermes/config.yaml
+  companion_out=$(SERVE_CLIENT_APPROVALS=deny "$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__companion__wake {}' 2>&1 || true)
+  check "a companion tool runs without asking for approval" \
+    test "$(grep -c 'server request:' <<<"$companion_out")" = 0 -a "$(grep -c "mcp__companion__wake" <<<"$companion_out")" -ge 1
+  check "and with no VNAS window it answers that no desktop is in use" grep -qE 'no_desktop|没有在用的桌面' <<<"$companion_out"
+  # The desktop's server likewise, and a picture of the page reaches its client as an image.
+  sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_desktop_mcp 2>&1 || true)
+  check "the desktop's MCP server does too, and returns a picture as an image" grep -qx OK <<<"$sdk_out"
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"
@@ -308,17 +336,18 @@ if [[ -x "$assistant_python" ]]; then
   photo_out=$("$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__anas__search_photos {"query": "photo"}' 2>&1 || true)
   check "Hermes's photo search tool returns it" grep -q photo.png <<<"$photo_out"
   echo "INFO assistant photos: $sandbox_libraries"
+  # Hermes's gateway, which runs her scheduled tasks, serves only a home that is its user's own.
+  check "her Hermes home is her own, closed to everyone else, without an ACL" \
+    test "$(stat -c '%u %a' "$data/assistant/alice/hermes"):$(getfacl -cp "$data/assistant/alice/hermes" 2>/dev/null | grep -cE '^(user|group):[^:]|^mask|^default')" = "$alice_id 700:0"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
-  # Hermes's own login and browser control (decisions 8 to 10): the old session token is
-  # refused, and a logged-in window becomes the browser of its own session only.
-  browser_out=$("$assistant_python" /spike/browser_control.py alice 2>&1 || true)
-  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$browser_out"
-  browser_ok=no
-  grep -q '^PASS browser_snapshot reaches the window' <<<"$browser_out" &&
-    grep -q '^browser control: 0 failed' <<<"$browser_out" && browser_ok=yes
-  check "a logged-in window becomes the browser of its session and answers its commands" test "$browser_ok" = yes
-  grep '^FAIL' <<<"$browser_out" | sed 's/^/INFO assistant browser control: /' || true
+  # Hermes's own login and the desktop tools (decisions 8 to 10): the old session token is
+  # refused, the model is offered the desktop server's tools and none of Hermes's own
+  # browser tools, and a step with no VNAS window behind it says that no desktop is in use.
+  desktop_out=$("$assistant_python" /spike/desktop_control.py alice 2>&1 || true)
+  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$desktop_out"
+  check "her assistant has the desktop tools, and none of Hermes's browser tools" grep -q '^desktop control: 0 failed' <<<"$desktop_out"
+  grep '^FAIL' <<<"$desktop_out" | sed 's/^/INFO assistant desktop tools: /' || true
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
   # The window's way in: the Product Service, then the gate, then alice's instance.
@@ -330,6 +359,20 @@ if [[ -x "$assistant_python" ]]; then
     journalctl -u anas-api -u anas-host-agent --since "$listed_at" -o cat --no-pager | grep -i assistant | tail -n 5 |
       sed 's/^/INFO assistant gate: /' || true
   fi
+  # Renaming and deleting a conversation: Hermes commits such a write only behind its fence,
+  # which the Product Service names (internal/assistantapi/sessionwrite.go).
+  renamed_id=$(jq -r '.sessions[0].id // empty' /tmp/gate-sessions.json 2>/dev/null || true)
+  deleted_id=$(jq -r '.sessions[1].id // empty' /tmp/gate-sessions.json 2>/dev/null || true)
+  check "alice renames a conversation" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' -X PATCH \
+      -d '{"title":"系统测试改名"}' "$api/api/v1/assistant/sessions/$renamed_id")" = 200
+  check "and deletes another" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/sessions/$deleted_id")" = 204
+  # shellcheck disable=SC2016 # $kept and $gone are jq's
+  check "her list has the new title and no longer the deleted conversation" \
+    jq -e --arg kept "$renamed_id" --arg gone "$deleted_id" \
+      '(.sessions | map(select(.id == $kept)) | .[0].title == "系统测试改名") and (.sessions | map(.id) | index($gone) | not)' \
+      <<<"$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/sessions" || true)"
   # The whole chain: Hermes asks to run 提交更改, the Product Service shows the card, alice
   # confirms it from her session, and the Host Agent's executor writes as alice through her
   # confined worker while the assistant waits.
@@ -344,6 +387,19 @@ if [[ -x "$assistant_python" ]]; then
   check "her plan has the confirmed line, written as her" \
     test "$(grep -c 经网关确认 "$data/spaces/private/alice/计划.md" 2>/dev/null):$(owner_uid "$data/spaces/private/alice/计划.md")" = "1:$alice_id"
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate-submit.out | cut -c1-400)"
+  # VNAS operates the desktop (decision 8): a step the model takes leaves her sandbox by the
+  # desktop's MCP server and the Product Service's socket for assistants, reaches the window
+  # that attached as the conversation's browser and sent its prompt, and what the window
+  # answers returns into the turn; a picture of the page returns as an image file.
+  "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice.jar)" \
+    desktop >/tmp/gate-desktop.out 2>&1 || true
+  check "her window attaches as its conversation's browser" grep -qx 'attached True' /tmp/gate-desktop.out
+  check "a snapshot the model asks for reaches her window" grep -qx 'command snapshot {}' /tmp/gate-desktop.out
+  check "and the page her window read returns into the turn" grep -q '^answer: .*button .*相册.*ref=e2' /tmp/gate-desktop.out
+  check "a click carries the control's ref to her window" grep -qx 'command click {"ref": "e2"}' /tmp/gate-desktop.out
+  check "a picture of the page returns as an image for vision_analyze" \
+    bash -c "grep -q '^command look' /tmp/gate-desktop.out && grep -q '^answer: .*vision_analyze.*MEDIA:' /tmp/gate-desktop.out"
+  echo "INFO assistant desktop: $(tr '\n' ';' </tmp/gate-desktop.out | cut -c1-600)"
   gate_session=$(curl -fsS -c /tmp/alice-gate.jar -H 'Content-Type: application/json' \
     -d "{\"username\":\"alice\",\"password\":\"$new_password\"}" "$api/api/v1/session" | jq -r .csrfToken || true)
   "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice-gate.jar)" 90 \
@@ -395,6 +451,10 @@ if [[ -x "$assistant_python" ]]; then
     jq -e '.jobs[0].last_status == "ok"' "$jobs_file"
   check "her assistant itself stayed stopped" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
   echo "INFO assistant tasks: $(jq -c '.jobs[0] | {name, last_status, last_error}' "$jobs_file" 2>/dev/null || true)"
+  # The round's gateway is gone, and with it the last unit that needed her private network.
+  for _ in $(seq 1 30); do [[ "$(systemctl is-active anas-assistant-net@alice.service || true)" == active ]] || break; sleep 2; done
+  check "her assistant's private network stops cleanly once nothing needs it" \
+    test "$(systemctl is-active anas-assistant-net@alice.service || true)" = inactive
   # The system test's last check uses /tmp/alice.jar.
   alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
   tasks=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/tasks" || true)
@@ -405,6 +465,31 @@ if [[ -x "$assistant_python" ]]; then
   for _ in $(seq 1 60); do jq -e 'any(.items[]; .kind == "assistant_task")' <<<"$(notices)" >/dev/null 2>&1 && break; sleep 2; done
   check "signed in, she is told of the run with what it answered" \
     jq -e 'any(.items[]; .kind == "assistant_task" and .task.name == "系统测试任务" and .task.summary == "共享空间今天没有变化")' <<<"$(notices)"
+  # "立即运行" (#469): the task runs in a round of her cron unit, like one that is due, and
+  # never in her instance, where Hermes would start a gateway of its own and leave it. The
+  # task is paused first, so that only her asking runs it; running it resumes it.
+  check "she pauses the task" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X POST "$api/api/v1/assistant/tasks/$task_id/pause")" = 200
+  # A round is a oneshot unit: activating while it runs, never active.
+  round_over() { [[ ! "$(systemctl is-active anas-assistant-cron@alice.service 2>/dev/null || true)" =~ ^(activating|active|deactivating)$ ]]; }
+  for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  for _ in $(seq 1 120); do systemctl is-active --quiet anas-assistant@alice.service && break; sleep 0.5; done
+  ran_before=$(jq -r '.jobs[0].last_run_at // empty' "$jobs_file" 2>/dev/null || true)
+  check "she asks for the task to run now, and is told it started" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X POST "$api/api/v1/assistant/tasks/$task_id/run")" = 202
+  for _ in $(seq 1 60); do
+    [[ "$(jq -r '.jobs[0].last_run_at // empty' "$jobs_file" 2>/dev/null || true)" != "$ran_before" ]] && break
+    sleep 2
+  done
+  # shellcheck disable=SC2016 # $before is jq's
+  check "the task ran, in a round of her scheduled tasks, and is no longer paused" \
+    jq -e --arg before "$ran_before" '.jobs[0] | .last_run_at != $before and .last_status == "ok" and .state == "scheduled"' "$jobs_file"
+  check "her instance is running, and no gateway runs in it" \
+    bash -c "systemctl is-active --quiet anas-assistant@alice.service && ! COLUMNS=400 systemd-cgls --no-pager -l -u anas-assistant@alice.service | grep -q 'gateway run'"
+  for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  check "the round took her request and left none behind" \
+    test -z "$(ls -A /run/a-nas/assistant-runs/alice /run/anas-assistant-run-now/alice 2>/dev/null)"
+  echo "INFO assistant run now: $(journalctl -u anas-assistant-cron@alice.service -o cat --no-pager | grep 'queued to run now' | tail -n 1 || true)"
   check "she deletes the task" \
     test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
 fi

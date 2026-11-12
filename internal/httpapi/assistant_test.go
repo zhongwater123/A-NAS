@@ -77,8 +77,18 @@ func serveAssistantInstance(t *testing.T, dir string) *assistantInstance {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions":
 			_, _ = io.WriteString(w, `{"sessions":[`+session+`,{"id":"20261015_130000_aaaaaa","title":null,"preview":null,"started_at":30,"message_count":2}],"total":2}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/"+assistantStored+"/mutation-snapshot":
+			// The counters Hermes wants named in a write to the conversation.
+			_, _ = io.WriteString(w, `{"session_id":"`+assistantStored+`","exists":true,"runtime_revision":2,"runtime_generation":0}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/"+assistantStored &&
+			(r.URL.Query().Get("expected_revision") != "2" || r.URL.Query().Get("request_id") == ""):
+			http.Error(w, `{"detail":"client_upgrade_required"}`, http.StatusConflict)
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/sessions/"+assistantStored:
 			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"expected_revision":2`) || !strings.Contains(string(body), `"request_id":"`) {
+				http.Error(w, `{"detail":"client_upgrade_required"}`, http.StatusConflict)
+				return
+			}
 			if strings.Contains(string(body), "已有") {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = io.WriteString(w, `{"detail":"Title '已有' is already in use by session 20261015_130000_aaaaaa"}`)
