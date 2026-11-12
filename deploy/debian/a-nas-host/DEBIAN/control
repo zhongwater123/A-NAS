@@ -4,7 +4,7 @@ Architecture: all
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
-Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64, @UPSTREAM@, nftables, wireguard-tools
+Depends: acl, btrfs-progs, parted, smartmontools, samba, iproute2, udev, systemd, python3, ffmpeg, heif-thumbnailer, libheif-plugin-libde265, libegl1, libgles2, libgomp1, libssl3t64, @UPSTREAM@, nftables, wireguard-tools, a-nas-archive-keyring (>= @VERSION@)
 Description: what an A-NAS device needs from Debian and upstream
  The Host Agent, the Product Service and their workers run these commands
  and link these libraries. The a-nas package requires this package at the
@@ -14,4 +14,5 @@ Description: what an A-NAS device needs from Debian and upstream
  upstream packages that A-NAS's repository carries, at least at the versions
  deploy/upstream/packages.json pins for this release (docs/adr/0015). The
  internet entry and the App Center stay off until their runbooks turn them
- on.
+ on. Each release brings the keyring it was signed for, so a revoked or added
+ subkey of the archive key reaches the device with the next upgrade.
