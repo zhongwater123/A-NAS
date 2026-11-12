@@ -116,8 +116,9 @@ const (
 	maxCompanionAnswer = 4 << 10
 	// maxCompanionStarts bounds the calls one turn may have waiting.
 	maxCompanionStarts = 32
-	// maxCompanionWaiting bounds a member's calls under way on the socket:
-	// Hermes's one, and a few it gave up on that are still settling.
+	// maxCompanionWaiting bounds a member's calls under way on the socket,
+	// the companion server's and the desktop server's together: Hermes's,
+	// and a few it gave up on that are still settling.
 	maxCompanionWaiting = 4
 	// maxCompanionConnections bounds a UID's open connections to the socket,
 	// counted from accept, before any of a request is read: the calls under
@@ -330,8 +331,12 @@ type AccountResolver interface {
 // with at most maxCompanionHeader of headers, read within companionHeaders
 // and, a body the handler does not read included, companionHeaders plus
 // companionBody; an idle one closes after companionIdle. There is no write
-// timeout: a call's answer may take companionLate and companionReceipt after
-// its body, and is a few hundred bytes the socket's buffer takes at once.
+// timeout: a companion call's answer may take companionLate and
+// companionReceipt after its body, and is a few hundred bytes the socket's
+// buffer takes at once; a desktop call's may take desktopReceipt and be up to
+// maxDesktopResult, a picture of the page, which the peer has to read. A peer
+// that does not read holds no more than its UID's maxCompanionWaiting calls
+// and maxCompanionConnections connections.
 func (h *Handler) CompanionServer() *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /call", h.windowCallHTTP(companionFamily))
