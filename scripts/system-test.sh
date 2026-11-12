@@ -1164,9 +1164,20 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
-  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
+# The OCR model comes in parts (scripts/split-model.sh), each from its own
+# content package, beside the first one the link names.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+model_parts_installed() {
+  local directory part
+  directory=/opt/a-nas/models/$(jq -r .sha256 "$1")
+  while read -r part; do
+    [[ -f "$directory/$part" ]] || { echo "no $directory/$part" >>"$hidden"; return 1; }
+  done < <(jq -r '(.parts // [])[].file' "$1")
+}
+check "the OCR model's parts are all beside its first" model_parts_installed "$ai/ocr-model.json"
 llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
 check "the package links llama.cpp, only the members its manifest names" \
   test "$(readlink /usr/lib/a-nas/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
