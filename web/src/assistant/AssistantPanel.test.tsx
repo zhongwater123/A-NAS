@@ -4,31 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
 import { resetCompanionCommands } from "../companion/commands";
-import {
-  companionLock,
-  companionPlayback,
-  resetCompanionHost,
-} from "../companion/host";
-import {
-  companionState,
-  resetWorkStatus,
-  setCompanionReady,
-  startTurn,
-} from "../companion/workStatus";
-import {
-  assistantHandlers,
-  assistantSession,
-} from "../test/handlers/assistant";
+import { companionLock, companionPlayback, resetCompanionHost } from "../companion/host";
+import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
+import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
 import type { Approval } from "./api";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
 // are pushed by the test, REST answers come from the test server.
-type Handler = (event: {
-  type: string;
-  session_id?: string;
-  payload?: unknown;
-}) => void;
+type Handler = (event: { type: string; session_id?: string; payload?: unknown }) => void;
 const handlers = new Set<Handler>();
 const client = {
   request: vi.fn(async (method: string): Promise<unknown> => {
@@ -72,9 +56,7 @@ afterEach(() => {
 });
 
 // What the companion would show: the page's GET /state section the VNAS window feeds.
-const shown = () =>
-  (companionState.read().sections.workStatus.data as { state?: string } | null)
-    ?.state ?? null;
+const shown = () => (companionState.read().sections.workStatus.data as { state?: string } | null)?.state ?? null;
 
 const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
@@ -86,16 +68,10 @@ const history: AssistantMessage[] = [
   },
 ];
 
-async function open(
-  approvals: Approval[] = [],
-  stored = history,
-  reply = "相册已经打开。",
-) {
+async function open(approvals: Approval[] = [], stored = history, reply = "相册已经打开。") {
   server.use(
     ...assistantHandlers({
-      sessions: [
-        assistantSession(STORED, { title: "操作桌面", messageCount: 2 }),
-      ],
+      sessions: [assistantSession(STORED, { title: "操作桌面", messageCount: 2 })],
       messages: stored,
       approvals,
     }),
@@ -106,18 +82,12 @@ async function open(
     row.click();
   });
   await screen.findByText(reply);
-  await waitFor(() =>
-    expect(client.request).toHaveBeenCalledWith(
-      "session.resume",
-      expect.anything(),
-    ),
-  );
+  await waitFor(() => expect(client.request).toHaveBeenCalledWith("session.resume", expect.anything()));
 }
 
 const emit = (type: string, payload: unknown = {}) =>
   act(async () => {
-    for (const handler of handlers)
-      handler({ type, session_id: LIVE, payload });
+    for (const handler of handlers) handler({ type, session_id: LIVE, payload });
   });
 
 describe("the VNAS window", () => {
@@ -162,11 +132,7 @@ describe("the VNAS window", () => {
           "This turn did not complete. Some actions may already have run; verify their effects before resending.",
       },
     ];
-    await open(
-      [],
-      stored,
-      "这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。",
-    );
+    await open([], stored, "这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。");
     expect(screen.getByText("相册已经打开。")).toBeTruthy();
     expect(screen.queryByText(/This turn did not complete/)).toBeNull();
     // What ran before the turn failed is still shown.
@@ -196,18 +162,12 @@ describe("the VNAS window", () => {
     } finally {
       spy.mockRestore();
     }
-    expect(
-      crashes.map(String).filter((error) => error.includes("Duplicate key")),
-    ).toEqual([]);
+    expect(crashes.map(String).filter((error) => error.includes("Duplicate key"))).toEqual([]);
     expect(await screen.findByText("看完了。")).toBeTruthy();
   });
 
   it("shows only the cards waiting for the member, and drops one once it is answered", async () => {
-    const card = (
-      requestId: string,
-      status: Approval["status"],
-      text: string,
-    ): Approval => ({
+    const card = (requestId: string, status: Approval["status"], text: string): Approval => ({
       requestId,
       kind: "command",
       sessionId: LIVE,
@@ -228,9 +188,7 @@ describe("the VNAS window", () => {
     // Allowed in another window of the member: the product service tells every window.
     await emit("anas.approval", card("req-3", "approved", "rm -rf 缓存"));
     expect(screen.queryByText("rm -rf 缓存")).toBeNull();
-    expect(
-      screen.queryByRole("region", { name: "本对话中等你确认或回答的事" }),
-    ).toBeNull();
+    expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
   });
 
   it("moves the companion for the turns this window starts, and stops once the window closes", async () => {
@@ -254,10 +212,7 @@ describe("the VNAS window", () => {
     await user.type(screen.getByRole("textbox"), "清理缓存");
     await user.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() =>
-      expect(client.request).toHaveBeenCalledWith(
-        "desktop.attach",
-        expect.objectContaining({ session_id: LIVE }),
-      ),
+      expect(client.request).toHaveBeenCalledWith("desktop.attach", expect.objectContaining({ session_id: LIVE })),
     );
     await emit("message.start");
     expect(shown()).toBe("thinking");
@@ -281,15 +236,8 @@ describe("the VNAS window", () => {
     setCompanionReady(true);
     // The window started this turn (it attaches before every prompt, as the companion test above shows).
     startTurn(LIVE);
-    const results = () =>
-      client.request.mock.calls.filter(
-        ([method]) => method === "companion.result",
-      );
-    const command = (
-      command_id: string,
-      action: string,
-      args: Record<string, unknown>,
-    ) => ({
+    const results = () => client.request.mock.calls.filter(([method]) => method === "companion.result");
+    const command = (command_id: string, action: string, args: Record<string, unknown>) => ({
       command_id,
       action,
       args,
@@ -317,10 +265,7 @@ describe("the VNAS window", () => {
     );
 
     // An animation is answered once it has played to its end.
-    await emit(
-      "anas.companion",
-      command("a".repeat(32), "anim", { name: "点击回应-元气挥手" }),
-    );
+    await emit("anas.companion", command("a".repeat(32), "anim", { name: "点击回应-元气挥手" }));
     const { playbackId } = companionState.read().pets.main.anim.data as {
       playbackId: string;
     };
@@ -359,10 +304,7 @@ describe("the VNAS window", () => {
 
     // A window that closes stops waiting on an animation and answers nothing, and the lock VNAS
     // took goes with it, as the product service can no longer release it.
-    await emit(
-      "anas.companion",
-      command("e".repeat(32), "anim", { name: "点击回应-元气挥手" }),
-    );
+    await emit("anas.companion", command("e".repeat(32), "anim", { name: "点击回应-元气挥手" }));
     await emit("anas.companion", command("f".repeat(32), "lock", {}));
     await waitFor(() => expect(results()).toHaveLength(4));
     expect(companionLock.locked("main")).toBe(true);
@@ -375,20 +317,14 @@ describe("the VNAS window", () => {
 
   it("carries out the desktop server's commands for the turns this window starts", async () => {
     await open();
-    const calls = (name: string) =>
-      client.request.mock.calls.filter(([method]) => method === name).length;
+    const calls = (name: string) => client.request.mock.calls.filter(([method]) => method === name).length;
     const answered = calls("desktop.result");
-    const command = (
-      command_id: string,
-      action: string,
-      args: Record<string, unknown>,
-    ) => ({
+    const command = (command_id: string, action: string, args: Record<string, unknown>) => ({
       command_id,
       action,
       args,
     });
-    const settle = () =>
-      act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
 
     // A window that did not send the turn's prompt is not its browser: the command is not its to run.
     await emit("anas.desktop", command("1".repeat(32), "snapshot", {}));
@@ -418,10 +354,7 @@ describe("the VNAS window", () => {
     );
 
     // What the page cannot do goes back as the tool's error, in words for the model.
-    await emit(
-      "anas.desktop",
-      command("3".repeat(32), "click", { ref: "e999" }),
-    );
+    await emit("anas.desktop", command("3".repeat(32), "click", { ref: "e999" }));
     await waitFor(() =>
       expect(client.request).toHaveBeenCalledWith("desktop.result", {
         session_id: LIVE,
@@ -445,8 +378,7 @@ describe("the VNAS window", () => {
         ["anas.desktop.cancel", { command_id: "5".repeat(32) }],
         ["anas.desktop", command("6".repeat(32), "snapshot", {})],
       ] as const) {
-        for (const handler of handlers)
-          handler({ type, session_id: LIVE, payload });
+        for (const handler of handlers) handler({ type, session_id: LIVE, payload });
       }
     });
     await waitFor(() => expect(calls("desktop.result")).toBe(answered + 4));
