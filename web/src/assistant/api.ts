@@ -85,7 +85,7 @@ export const pauseTask = async (taskId: string) =>
   (await call(client.POST("/api/v1/assistant/tasks/{taskId}/pause", task(taskId)))).task;
 export const resumeTask = async (taskId: string) =>
   (await call(client.POST("/api/v1/assistant/tasks/{taskId}/resume", task(taskId)))).task;
-/** Runs a task now; finished is false when it goes on after the answer. */
+/** Asks for a task to run now; it goes on after the answer, and its end comes as a notice. */
 export const runTask = (taskId: string) => call(client.POST("/api/v1/assistant/tasks/{taskId}/run", task(taskId)));
 export const deleteTask = (taskId: string) => call(client.DELETE("/api/v1/assistant/tasks/{taskId}", task(taskId)));
 
@@ -129,6 +129,8 @@ export function failureText(reason: unknown): string {
       return "这个定时任务已经不在了";
     case "task_running":
       return "这个任务正在运行，等它完成再试";
+    case "task_finished":
+      return "这个任务已经结束，不会再运行";
   }
   return errorText(reason);
 }

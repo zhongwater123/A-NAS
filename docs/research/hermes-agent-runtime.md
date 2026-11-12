@@ -1051,13 +1051,47 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 - 预演查出网络单元每次停下都被记为失败：socat 收到 SIGTERM 后以 143 退出。加了 `SuccessExitStatus=143`，系统测试补了上面那一项。
 - 没有验证的：真实浏览器里的 VNAS 窗口与真实模型；实验 NAS 上一轮定时任务的内存与耗时；运行很久的任务；`nas-trial.sh update` 本身没有在容器里整体预演，预演的是它执行的那几步。
 
+### 2026-11-12 “立即运行”改到定时单元
+
+评审 PR #462 时发现，“立即运行”在 `8fd9f706` 上会在成员的实例里拉起一个常驻的 gateway（[#469](https://github.com/zhongwater123/A-NAS/issues/469)）。上面的升级只为到点运行安排了定时单元，手动运行仍然调用实例的 `POST /api/cron/jobs/<id>/trigger`。
+
+在 spike 沙箱里量到的（脚本化模型，直接调 Hermes 的接口）：
+
+| 操作 | 结果 |
+| --- | --- |
+| 新启动的实例上 `POST …/trigger`（3 次，每次都是新实例） | HTTP 200，11–12.5 秒；模型被调用 1 次，任务却记为 `error`：`Cron admission missing: the owner never admitted this fire` |
+| 之后查看实例单元 | 多出 `hermes gateway run --quiet --idle-exit`（约 290 MB）和它的三个 MCP 服务器；实例 187 → 631 MB，5 分钟后仍在 |
+| gateway 在的时候再 `POST …/trigger` | 0.5 秒，`ok` |
+| gateway 在的时候让一个任务到期，不启动定时单元 | 任务在实例里运行，定时单元一直是 `inactive` |
+| 一个要跑 100 秒的任务在实例里运行时停掉实例 | 命令随实例被杀；下一轮定时单元把它记为 `error: interrupted`，不补跑 |
+| 对话里模型调用 `cronjob_manage` 的 `run` | 同样在实例里拉起 gateway（实例 884 MB），同样记为 `error` |
+
+原因：上游在这条路上自己启动 gateway（`fire_due` → `run_canonical_job` → `connect_gateway()` → `ensure_gateway_runtime(home, idle_exit=True)`）。`--idle-exit` 在成员还有可运行的任务时不算空闲。上游没有“不许启动 gateway”的开关。
+
+做法是让手动运行与到点运行走同一条路，实例里永远不出现 gateway：
+
+- 上游有现成的“排到下一次调度”：`cron.jobs.trigger_job` 把任务标成现在到期，记下被盖掉的那次正常调度并在运行后恢复，暂停的任务随之恢复定时。它只改任务表，不需要 gateway。`hermes serve` 没有接口能调用它，所以由定时单元这一轮在沙箱里以成员身份调用。
+- 请求怎么进沙箱：产品服务的“立即运行”先向实例查这个任务（不存在、正在运行、已经结束的不受理），再请文件代理（[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go)，新操作 `assistant_run`）。文件代理核对成员的在线会话，在 `/run/a-nas/assistant-runs/<账号>/` 里放一个以任务编号命名的空文件（只有 root 能进，每个成员至多 32 个），然后启动成员的定时单元。
+- 定时单元开始前以 root 把等着的请求整个改名到 `/run/anas-assistant-run-now/<账号>`（[`run-requests.sh`](../../ai/assistant-spike/run-requests.sh)，成员只能列出，不能改），结束后删掉。[`cron_round.py`](../../ai/assistant-spike/cron_round.py) 一开始读这个目录，对每个任务编号调用 `trigger_job`，然后照常启动 gateway、交任务、等结束、停 gateway。
+- 一轮正在运行时来的请求留在等待的目录里，由唤醒服务在这一轮结束后启动下一轮（[`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)），不受“没变的任务推迟”的限制。
+- 实例拒绝启动 gateway：[`serve_nondumpable.py`](../../ai/assistant-spike/serve_nondumpable.py) 在启动 `hermes serve` 前把上游的 `spawn_unmanaged_gateway` 换成直接拒绝。产品服务已经不走那条路，这是给模型的 `cronjob_manage run` 兜底的：它不再拉起 gateway，任务不运行，并被记一次 `error`（`Gateway inaccessible: anas_instance_runs_no_gateway`）。系统技能 `anas-scheduled-tasks` 告诉模型不要用 `run`，请成员去点“立即运行”。
+- 接口：`POST /api/v1/assistant/tasks/{id}/run` 只回答 202（已开始），不再有“几秒内跑完就回答 200”；新增 409 `task_finished`。
+
+验证（开发机，运行环境 `ebdfff18…`）：
+
+- 沙箱（[`run-now.sh`](../../ai/assistant-spike/run-now.sh)，请求由脚本照文件代理的写法放进去）：成员不在线时任务在一轮里运行并记为 `ok`，原定的下一次运行时间不变，实例没有被启动；暂停的任务运行后恢复定时；成员在线时实例里没有 gateway，内存不变（约 180 MB）；不是这个成员的任务编号被跳过；模型的 `cronjob_manage run` 不再在实例里留下 gateway。
+- Go 与 Python 的单元测试见[规格](../specs/ai-assistant.md#验收证据)。
+- 系统测试（真实安装器、产品服务、会话闸门与沙箱，合入 #466 之后从软件包安装）：590 项通过、0 项失败。新增 5 项：她暂停任务；点“立即运行”得到“已开始”；任务在定时单元的一轮里运行并恢复定时；她的实例在运行而里面没有 gateway；这一轮取走了请求、没有留下。
+
+没有解决的：模型在对话里不能替成员立即运行任务，只能请成员去点。要让它能做，需要给它一个把任务排进下一轮的工具，并决定这个工具要不要成员确认。
+
 ### 以后怎么升级
 
 A-NAS 依赖 Hermes 的面，按稳定程度排：
 
 1. MCP（`anas`、`companion`、`desktop` 三个服务器）与 OpenAI 兼容的模型网关：标准接口。新功能优先接在这里。
 2. managed scope 的键与工具集名字：工具集核对（[`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)）在升级后新增、改名或删除工具集时失败。
-3. `hermes curator run`、任务表 `cron/jobs.json` 的格式，以及定时任务的一轮（[`cron_round.py`](../../ai/assistant-spike/cron_round.py)）：`hermes gateway run`、`hermes cron tick`、`hermes gateway stop`，加两处上游内部的查询，`hermes_cli.gateway_runtime.discover_gateway_endpoint`（gateway 是否就绪）与 `cron.executions.live_executions`（有没有任务在执行）。2026-11-10 的升级卡在这里；内部查询改了名，这一轮会直接失败，系统测试的定时任务一节随之失败。
+3. `hermes curator run`、任务表 `cron/jobs.json` 的格式，以及定时任务的一轮（[`cron_round.py`](../../ai/assistant-spike/cron_round.py)）：`hermes gateway run`、`hermes cron tick`、`hermes gateway stop`，加两处上游内部的查询，`hermes_cli.gateway_runtime.discover_gateway_endpoint`（gateway 是否就绪）与 `cron.executions.live_executions`（有没有任务在执行）；“立即运行”另用 `cron.jobs.trigger_job`（排到下一次调度），实例的启动脚本另用 `hermes_cli.gateway_runtime_start.spawn_unmanaged_gateway`（换成拒绝，名字没了实例就起不来）。2026-11-10 的升级卡在这里；内部查询改了名，这一轮会直接失败，系统测试的定时任务一节随之失败。
 4. `hermes serve` 的 JSON-RPC 与 REST 中白名单放行的部分，以及 Hermes 自己的登录：这是 Desktop 的后端，上游按自己的需要改，没有兼容承诺。
 5. 复制进前端的 Desktop 聊天层。
 6. 带着的补丁。
@@ -1065,7 +1099,7 @@ A-NAS 依赖 Hermes 的面，按稳定程度排：
 步骤：
 
 1. 改 [`run.sh`](../../ai/assistant-spike/run.sh) 里的提交，`run.sh build`；补丁打不上时先重做补丁。
-2. `run.sh sandbox`：探针里的工具集核对列出要进允许或关闭清单的工具集；再跑 `desktop-control.sh`、`serve-terminal.sh`、`review-whitelist.sh`、`curator.sh`、`memory-skills.sh`、`serve-surface.sh`。`cron.sh` 在 spike 的沙箱里跑不了：唤醒服务要向 Host Agent 核实账号，那里没有，定时任务由系统测试验证。
+2. `run.sh sandbox`：探针里的工具集核对列出要进允许或关闭清单的工具集；再跑 `desktop-control.sh`、`serve-terminal.sh`、`review-whitelist.sh`、`curator.sh`、`memory-skills.sh`、`serve-surface.sh`、`run-now.sh`。`cron.sh` 在 spike 的沙箱里跑不了：唤醒服务要向 Host Agent 核实账号，那里没有，定时任务由系统测试验证。
 3. 用新提交的检出运行 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)，再跑 Web 的类型检查与测试；指向不存在模块的 import 说明要加替身。
 4. `make check`，以及带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 的系统测试：它经真实的产品服务、会话闸门与沙箱走一遍对话、确认卡片、操作桌面、定时任务与登录。它不覆盖对话的改名与删除，这两项要另外试。
 5. 读上游两个提交之间 `website/docs` 的差别，重点是 security、cron、mcp 与 api-server 几页。

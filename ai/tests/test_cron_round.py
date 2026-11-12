@@ -2,18 +2,20 @@
 
 cron_round.py runs inside the assistant's sandbox with Hermes's own modules; here they, the
 clock and the processes are stand-ins, so the round's decisions can be driven: a hand-over that
-shows late, a stop Hermes refuses, a gateway that is somebody else's.
+shows late, a stop Hermes refuses, a gateway that is somebody else's, a task asked to run now.
 """
 
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "cron_round.py"
 PAST = "2020-01-01T00:00:00+00:00"
+JOB = "a1b2c3d4e5f6"
 
 
 class _Found:
@@ -52,7 +54,7 @@ class _World:
 
     def __init__(self, due=True, live=(), foreign=False, ready_after=3.0):
         self.now = 0.0
-        self.jobs = [{"id": "a1", "next_run_at": PAST if due else "2999-01-01T00:00:00+00:00", "last_run_at": None}]
+        self.jobs = [{"id": JOB, "next_run_at": PAST if due else "2999-01-01T00:00:00+00:00", "last_run_at": None}]
         # live: the spans, in seconds after the tick, in which a run of the job is live.
         self.live, self.foreign, self.ready_after = list(live), foreign, ready_after
         self.ticked, self.calls, self.gateway = None, [], None
@@ -60,6 +62,8 @@ class _World:
         self.exits_early = False
         # hangs: the Hermes commands that never return; the round ends them after their time.
         self.hangs = set()
+        # triggered: the jobs queued to run now; finished: the ones Hermes refuses to queue.
+        self.triggered, self.finished = [], set()
 
     # --- what cron_round imports from Hermes
     def load_jobs(self):
@@ -71,7 +75,17 @@ class _World:
         if self.ticked is None:
             return {}
         since = self.now - self.ticked
-        return {"a1": {}} if any(begin <= since < end for begin, end in self.live) else {}
+        return {JOB: {}} if any(begin <= since < end for begin, end in self.live) else {}
+
+    def trigger_job(self, job):
+        """Hermes's "run on the next tick": the job is due now, whatever it was waiting for."""
+        self.triggered.append(job)
+        if job in self.finished:
+            raise ValueError(f"Cannot run: job '{job}' is completed (terminal).")
+        if job != self.jobs[0]["id"]:
+            return None
+        self.jobs[0]["next_run_at"] = PAST
+        return dict(self.jobs[0])
 
     def discover(self, _home, timeout=2.0):
         if self.foreign:
@@ -122,6 +136,7 @@ def load(world):
     }
     stand_ins["cron.executions"].live_executions = world.live_executions
     stand_ins["cron.jobs"].load_jobs = world.load_jobs
+    stand_ins["cron.jobs"].trigger_job = world.trigger_job
     stand_ins["hermes_cli.gateway_runtime"].discover_gateway_endpoint = world.discover
     stand_ins["hermes_constants"].get_hermes_home = lambda: Path("/var/lib/hermes-home")
     saved = {name: sys.modules.get(name) for name in stand_ins}
@@ -217,6 +232,45 @@ class CronRoundTests(unittest.TestCase):
         self.assertEqual([call for call, _ in world.calls], ["gateway run --quiet", "cron tick", "gateway stop"])
         self.assertGreaterEqual(world.said("gateway stop")[0] - world.said("cron tick")[0], self.module.TICK)
         self.assertEqual(world.gateway.signals, [])
+
+    def asked(self, *names):
+        """The round's directory of tasks asked to run now, a file each."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        for name in names:
+            (Path(directory.name) / name).touch()
+        self.module.RUNS = directory.name
+
+    def test_a_task_asked_to_run_now_is_queued_and_run_like_one_that_is_due(self):
+        world = self.round(due=False, live=[(1, 12)])
+        self.asked(JOB)
+        self.assertEqual(self.module.main(), 0)
+        self.assertEqual(world.triggered, [JOB])
+        self.assertEqual([call for call, _ in world.calls], ["gateway run --quiet", "cron tick", "gateway stop"])
+        # Run to its end, as a due job is: not stopped while it is live.
+        self.assertGreaterEqual(world.said("gateway stop")[0] - world.ticked, 11 + self.module.QUIET)
+
+    def test_only_job_ids_are_asked_for_and_what_hermes_refuses_stops_nothing(self):
+        world = self.round(live=[(1, 5)])
+        world.finished = {"0123456789ab"}
+        self.asked("0123456789ab", "ffffffffffff", "not-a-job", "A1B2C3D4E5F6", "a1b2c3d4e5f6.bak")
+        self.assertEqual(self.module.main(), 0)
+        # A one-off that already ran, and a job that is not the member's: neither runs.
+        self.assertEqual(world.triggered, ["0123456789ab", "ffffffffffff"])
+        self.assertEqual(len(world.said("gateway stop")), 1)
+
+    def test_without_its_directory_a_round_asks_for_nothing(self):
+        world = self.round(live=[(1, 5)])
+        self.module.RUNS = str(Path(tempfile.gettempdir()) / "no-such-directory-of-runs")
+        self.assertEqual(self.module.main(), 0)
+        self.assertEqual(world.triggered, [])
+
+    def test_a_task_asked_to_run_now_is_handed_to_a_gateway_that_is_not_the_rounds(self):
+        world = self.round(due=False, live=[(1, 8)], foreign=True)
+        self.asked(JOB)
+        self.assertEqual(self.module.main(), 0)
+        self.assertEqual(world.triggered, [JOB])
+        self.assertEqual([call for call, _ in world.calls], ["cron tick"])
 
     def test_a_gateway_that_is_not_the_rounds_is_used_and_left_running(self):
         world = self.round(live=[(1, 8)], foreign=True)

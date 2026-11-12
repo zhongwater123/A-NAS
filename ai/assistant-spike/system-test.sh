@@ -465,6 +465,31 @@ if [[ -x "$assistant_python" ]]; then
   for _ in $(seq 1 60); do jq -e 'any(.items[]; .kind == "assistant_task")' <<<"$(notices)" >/dev/null 2>&1 && break; sleep 2; done
   check "signed in, she is told of the run with what it answered" \
     jq -e 'any(.items[]; .kind == "assistant_task" and .task.name == "系统测试任务" and .task.summary == "共享空间今天没有变化")' <<<"$(notices)"
+  # "立即运行" (#469): the task runs in a round of her cron unit, like one that is due, and
+  # never in her instance, where Hermes would start a gateway of its own and leave it. The
+  # task is paused first, so that only her asking runs it; running it resumes it.
+  check "she pauses the task" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X POST "$api/api/v1/assistant/tasks/$task_id/pause")" = 200
+  # A round is a oneshot unit: activating while it runs, never active.
+  round_over() { [[ ! "$(systemctl is-active anas-assistant-cron@alice.service 2>/dev/null || true)" =~ ^(activating|active|deactivating)$ ]]; }
+  for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  for _ in $(seq 1 120); do systemctl is-active --quiet anas-assistant@alice.service && break; sleep 0.5; done
+  ran_before=$(jq -r '.jobs[0].last_run_at // empty' "$jobs_file" 2>/dev/null || true)
+  check "she asks for the task to run now, and is told it started" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X POST "$api/api/v1/assistant/tasks/$task_id/run")" = 202
+  for _ in $(seq 1 60); do
+    [[ "$(jq -r '.jobs[0].last_run_at // empty' "$jobs_file" 2>/dev/null || true)" != "$ran_before" ]] && break
+    sleep 2
+  done
+  # shellcheck disable=SC2016 # $before is jq's
+  check "the task ran, in a round of her scheduled tasks, and is no longer paused" \
+    jq -e --arg before "$ran_before" '.jobs[0] | .last_run_at != $before and .last_status == "ok" and .state == "scheduled"' "$jobs_file"
+  check "her instance is running, and no gateway runs in it" \
+    bash -c "systemctl is-active --quiet anas-assistant@alice.service && ! COLUMNS=400 systemd-cgls --no-pager -l -u anas-assistant@alice.service | grep -q 'gateway run'"
+  for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  check "the round took her request and left none behind" \
+    test -z "$(ls -A /run/a-nas/assistant-runs/alice /run/anas-assistant-run-now/alice 2>/dev/null)"
+  echo "INFO assistant run now: $(journalctl -u anas-assistant-cron@alice.service -o cat --no-pager | grep 'queued to run now' | tail -n 1 || true)"
   check "she deletes the task" \
     test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
 fi
