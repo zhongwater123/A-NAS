@@ -73,22 +73,31 @@ export function toolLabel(name: string, args: Record<string, unknown>): { label:
     case "skills_list":
     case "skill_manage":
       return { label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
+    // The desktop server's tools; the browser_* names are Hermes's own browser tools, which
+    // conversations from before the desktop server still hold.
+    case "mcp__desktop__snapshot":
     case "browser_snapshot":
       return { label: "查看桌面", detail: "" };
+    case "mcp__desktop__look":
+      return { label: "看桌面画面", detail: "" };
     case "browser_vision":
       return {
         label: "看桌面画面",
         detail: typeof args.question === "string" ? short(args.question) : "",
       };
+    case "mcp__desktop__click":
     case "browser_click":
       return { label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
+    case "mcp__desktop__type":
     case "browser_type":
       return {
         label: "输入",
         detail: typeof args.text === "string" ? `“${short(args.text)}”` : "",
       };
+    case "mcp__desktop__press":
     case "browser_press":
       return { label: "按键", detail: typeof args.key === "string" ? args.key : "" };
+    case "mcp__desktop__scroll":
     case "browser_scroll":
       return { label: "滚动", detail: args.direction === "up" ? "向上" : "向下" };
     default:

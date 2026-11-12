@@ -1395,6 +1395,9 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:receipt.jpg");
     const panel = await screen.findByRole("region", { name: "照片中的文字" });
+    // VNAS, reading the desktop for the member, skips the panel: it shows in
+    // full what an assistant knows only as handles.
+    expect(panel.getAttribute("data-vnas-private")).toBe("照片上读出的文字");
     expect(within(panel).getByText("小票")).toBeTruthy();
     expect(within(panel).getByText("机器识别")).toBeTruthy();
     expect(within(panel).getByText("某某超市")).toBeTruthy();
@@ -1520,7 +1523,7 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "超市{Enter}");
-    expect(await screen.findByRole("separator", { name: "照片中的文字包含“超市”" })).toBeTruthy();
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
     expect(resultOrder()).toEqual([
       "查看 photo:超市.jpg",
       "divider",
@@ -1552,7 +1555,7 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "小明 超市{Enter}");
-    expect(await screen.findByRole("separator", { name: "照片中的文字包含“超市”" })).toBeTruthy();
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
   });
 
   it("says how far local AI has read the text once the photos are organised", async () => {

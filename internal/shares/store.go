@@ -101,7 +101,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	}
 	s := &Store{db: db, dir: contentDir, options: options, records: map[string]*record{}, running: map[string]running{}, streams: map[string]*contentReader{}, stop: make(chan struct{})}
 	s.fenced = map[string]bool{}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS share_documents(id TEXT PRIMARY KEY, document BLOB NOT NULL)`); err != nil {
+	if err = sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -774,4 +774,12 @@ func (s *Store) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return fmt.Sprintf("shares.Store(%d shares)", len(s.records))
+}
+
+// databaseSchema is the share catalog's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "the share catalog",
+	Baseline: sqlitedb.Statements(`CREATE TABLE IF NOT EXISTS share_documents(id TEXT PRIMARY KEY, document BLOB NOT NULL)`),
 }

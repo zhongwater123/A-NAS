@@ -157,7 +157,6 @@ export function StorageSection({
     <>
       <PageHeader
         title="存储"
-        subtitle="数据卷承载全部文件、相册与共享"
         action={
           <RefreshButton
             label="刷新存储状态"
@@ -191,7 +190,7 @@ export function StorageSection({
           </div>
         )
       ) : noVolume ? (
-        <div className={`${styles.setCard} ${styles.setEmpty}`}>
+        <div className={`${styles.setCard} ${styles.setEmpty}`} data-setting="volume">
           <span className={styles.setEmptyArt}>
             <Database />
           </span>
@@ -224,7 +223,7 @@ export function StorageSection({
           </>
         )
       )}
-      <Group title="磁盘" aside={snapshot ? `${disks.length} 块` : undefined}>
+      <Group title="磁盘" aside={snapshot ? `${disks.length} 块` : undefined} anchor="disks">
         {!snapshot ? (
           <HostStatePending host={host} inline />
         ) : (
@@ -331,7 +330,7 @@ function VolumeCard({
     .filter((id) => !missing.some((disk) => disk.id === id))
     .map((id) => disks.find((disk) => disk.id === id) ?? { id, model: "未检测到的硬盘", capacityBytes: 0 });
   return (
-    <div className={`${styles.setCard} ${styles.volCard}`}>
+    <div className={`${styles.setCard} ${styles.volCard}`} data-setting="volume">
       <div className={styles.volHead}>
         <IconTile tone="storage" icon={Database} size="lg" />
         <div>
@@ -620,7 +619,9 @@ function DiskRow({ disk, member }: { disk: Disk; member: boolean }) {
     data: { label: "数据盘", tone: "accent" as Tone },
     unassigned: { label: "未使用", tone: "neutral" as Tone },
   }[member && disk.role === "unassigned" ? "data" : disk.role];
-  const blocked = !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
+  // Only an unused disk needs a reason why it cannot join the volume; the
+  // system disk and the volume's own disks are in use as they should be.
+  const blocked = spare && !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
   return (
     <div className={styles.setRow}>
       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} size="lg" />

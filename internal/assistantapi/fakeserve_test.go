@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +24,20 @@ const (
 	fakeToken   = "serve-token-alice"
 	fakeRuntime = "0a1b2c3d"
 	fakeStored  = "20261015_120000_abcdef"
+	// fakeGone is a conversation Hermes no longer has, and fakeMoved one whose
+	// counters move once between a snapshot and the write that names them.
+	fakeGone  = "20261015_150000_cccccc"
+	fakeMoved = "20261015_160000_dddddd"
 )
+
+// movedOnce reports true the first time it is asked.
+func (f *fakeServe) movedOnce() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	first := !f.moved
+	f.moved = true
+	return first
+}
 
 // fakeServe stands in for alice's `hermes serve` on <dir>/alice.sock: the
 // REST session routes and /api/ws, with a turn that calls 提交更改 and asks
@@ -43,14 +55,10 @@ type fakeServe struct {
 	conns    int
 	conn     *websocket.Conn
 	// access is the access token of the current login; logins counts them.
-	access string
-	logins int
-	// controller is the connection that registered as the browser; results
-	// are the browser command results it sent.
-	controller *websocket.Conn
-	results    chan string
-	closed     chan struct{}
-	answered   chan string
+	access   string
+	logins   int
+	closed   chan struct{}
+	answered chan string
 	// The learning graph: alice's memories (store, text) and the skills the
 	// assistant made (name, createdBy). system are A-NAS's own skills, from
 	// skills.external_dirs: Hermes shows their text but leaves them out of the
@@ -64,6 +72,8 @@ type fakeServe struct {
 	// stopFirst makes session.interrupt end the turn before its answer, as
 	// Hermes's own turn thread may while the request still runs.
 	stopFirst bool
+	// moved is set once fakeMoved's counters have moved under a write.
+	moved bool
 }
 
 func newFakeServe(t *testing.T) *fakeServe {
@@ -76,7 +86,7 @@ func newFakeServe(t *testing.T) *fakeServe {
 	if err := os.WriteFile(filepath.Join(dir, "alice.token"), []byte(fakeToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8), results: make(chan string, 8),
+	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8),
 		memories: [][2]string{{"memory", "alice 喜欢简短的回答"}, {"profile", "alice 每周日大扫除"}},
 		skills:   [][2]string{{"family-trip", "learn"}, {"anas-photos", "agent"}}, system: []string{"anas-files"}}
 	listener, err := net.Listen("unix", filepath.Join(dir, "alice.sock"))
@@ -122,17 +132,42 @@ func (f *fakeServe) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/sessions":
 		_, _ = io.WriteString(w, `{"sessions":[`+session+`,{"id":"20261015_130000_aaaaaa","title":null,"preview":null,"started_at":30,"message_count":2},
 			{"id":"20261015_140000_bbbbbb","title":"hidden","started_at":40,"message_count":1,"hidden":1}],"total":3}`)
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/mutation-snapshot"):
+		// The counters a write has to name: revision 3, generation 1.
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/sessions/"), "/mutation-snapshot")
+		if id == fakeGone {
+			_, _ = io.WriteString(w, `{"session_id":"`+id+`","exists":false,"runtime_revision":0,"runtime_generation":null}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"session_id":"`+id+`","exists":true,"runtime_revision":3,"runtime_generation":1}`)
 	case r.Method == http.MethodPatch && r.URL.Path == "/api/sessions/"+fakeStored:
 		body, _ := io.ReadAll(r.Body)
+		var fence struct {
+			Request    string `json:"request_id"`
+			Revision   *int   `json:"expected_revision"`
+			Generation *int   `json:"expected_generation"`
+		}
+		_ = json.Unmarshal(body, &fence)
+		if fence.Request == "" || fence.Revision == nil || *fence.Revision != 3 || fence.Generation == nil || *fence.Generation != 1 {
+			http.Error(w, `{"detail":"client_upgrade_required: this app is out of sync"}`, http.StatusConflict)
+			return
+		}
 		if strings.Contains(string(body), "已有") {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"detail":"Title '已有' is already in use by session 20261015_130000_aaaaaa"}`)
 			return
 		}
 		_, _ = io.WriteString(w, `{"ok":true,"title":"周末"}`)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/sessions/") &&
+		(r.URL.Query().Get("request_id") == "" || r.URL.Query().Get("expected_revision") != "3" || r.URL.Query().Get("expected_generation") != "1"):
+		// Hermes commits no write without its fence.
+		http.Error(w, `{"detail":"client_upgrade_required: this app is out of sync"}`, http.StatusConflict)
+	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/"+fakeMoved && f.movedOnce():
+		// A turn ended since the snapshot: the counters it named are stale.
+		http.Error(w, `{"detail":"stale_revision"}`, http.StatusConflict)
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/sessions/20261015_130000_aaaaaa":
 		// A turn is writing to it.
-		http.Error(w, `{"detail":"session has an active writer"}`, http.StatusConflict)
+		http.Error(w, `{"detail":"session_busy"}`, http.StatusConflict)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/sessions/"):
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	case r.URL.Path == "/api/learning/graph" || r.URL.Path == "/api/learning/node":
@@ -307,19 +342,6 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			}
 			f.reply(conn, msg.ID, `{"status":"streaming"}`)
 			go f.turn(conn, params.Text)
-		case "browser.controller.register":
-			f.mu.Lock()
-			f.controller = conn
-			f.mu.Unlock()
-			f.reply(conn, msg.ID, `{"scope":{"session_id":"`+fakeStored+`","controller_id":"vnas-window","capabilities":["browser_snapshot"]}}`)
-		case "browser.controller.result":
-			// The answer goes before the turn hears of the result. Otherwise the
-			// turn's message.complete can come first, and the window's call,
-			// which passes over every frame before its answer, swallows it.
-			f.reply(conn, msg.ID, `{"accepted":true}`)
-			f.results <- string(msg.Params)
-		case "browser.controller.detach":
-			f.reply(conn, msg.ID, `{"detached":true}`)
 		case "session.interrupt":
 			f.mu.Lock()
 			stopFirst := f.stopFirst
@@ -384,36 +406,6 @@ func (f *fakeServe) turn(conn *websocket.Conn, said string) {
 			`","questions":[{"qid":"q1","question":"放到哪个文件夹？","choices":["照片","文档"]},{"qid":"q2","question":"改个名字吗？"}]}`)
 		<-f.answered
 		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
-	case "browse":
-		// browser_snapshot: Hermes sends the command to the connection that
-		// registered as the session's browser, and waits for its result.
-		f.mu.Lock()
-		controller := f.controller
-		f.mu.Unlock()
-		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t4","name":"browser_snapshot","args":{}}`)
-		f.event(controller, "browser.controller.command", fakeRuntime,
-			`{"command_id":"0123456789abcdef0123456789abcdef","action":"browser_snapshot","arguments":{},"controller_id":"vnas-window"}`)
-		select {
-		case result := <-f.results:
-			f.event(conn, "message.complete", fakeRuntime, `{"text":`+strconv.Quote(result)+`,"status":"complete"}`)
-		case <-time.After(5 * time.Second):
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
-		}
-	case "look":
-		// browser_vision on the window's lane: Hermes asks the window for a
-		// screenshot of its page (hermes-patches/0003).
-		f.mu.Lock()
-		controller := f.controller
-		f.mu.Unlock()
-		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t5","name":"browser_vision","args":{"question":"what is open?"}}`)
-		f.event(controller, "browser.controller.command", fakeRuntime,
-			`{"command_id":"fedcba9876543210fedcba9876543210","action":"browser_screenshot","arguments":{"annotate":false},"controller_id":"vnas-window"}`)
-		select {
-		case result := <-f.results:
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"received `+strconv.Itoa(len(result))+` bytes","status":"complete"}`)
-		case <-time.After(5 * time.Second):
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
-		}
 	case "long":
 		f.event(conn, "message.delta", fakeRuntime, `{"text":"thinking…"}`)
 	default:

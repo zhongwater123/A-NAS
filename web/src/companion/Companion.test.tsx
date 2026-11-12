@@ -189,7 +189,7 @@ describe("the companion on the desktop", () => {
     // A turn the VNAS window on this page started: looking at the desktop plays its own clip.
     act(() => {
       startTurn("live0001");
-      reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
+      reportEvent("live0001", "tool.start", { name: "mcp__desktop__snapshot" });
     });
     await plays("东张西望");
     // A step whose clip is not installed plays the stage's.
@@ -1109,7 +1109,7 @@ describe("VNAS's commands, carried out by the card", () => {
     await plays("点击回应-元气挥手");
     await ready(videos);
     fetched = [];
-    act(() => reportEvent(SESSION, "tool.start", { name: "browser_snapshot" }));
+    act(() => reportEvent(SESSION, "tool.start", { name: "mcp__desktop__snapshot" }));
     await settle();
     expect(fetched).toEqual([]);
     expect(outcome).toBeUndefined();
@@ -1158,7 +1158,7 @@ describe("VNAS's commands, carried out by the card", () => {
     await ready(videos);
     // The turn looks at the desktop while the animation plays: its clip waits for the animation's end.
     fetched = [];
-    act(() => reportEvent(SESSION, "tool.start", { name: "browser_snapshot" }));
+    act(() => reportEvent(SESSION, "tool.start", { name: "mcp__desktop__snapshot" }));
     await settle();
     expect(fetched).toEqual([]);
     if (away === "hidden") hide(true);
@@ -1386,7 +1386,7 @@ describe("walking, throwing and resting", () => {
     const { pet, root } = await mount();
     act(() => {
       startTurn("live0001");
-      reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
+      reportEvent("live0001", "tool.start", { name: "mcp__desktop__snapshot" });
     });
     await plays("东张西望");
     fetched = [];

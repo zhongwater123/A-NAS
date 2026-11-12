@@ -1,9 +1,10 @@
-// The VNAS window as Hermes's browser for the WebOS page it lives in (Hermes's
-// browser control, ADR 0024 decision 8): Hermes's own browser tools read the page
-// as a list of controls with refs, or look at a picture of it, and act on them by
-// ref, here, in the member's own browser and session. The VNAS window itself is
-// never part of the page it reads, sees or acts on, and the page is never
-// navigated away.
+// The VNAS window operates the WebOS page it lives in for the assistant (ADR
+// 0024 decision 8): the tools of A-NAS's `desktop` MCP server read the page as
+// a list of controls with refs, or look at a picture of it, and act on them by
+// ref. Their commands come through the product service to the window that sent
+// the turn's prompt and are carried out here, in the member's own browser and
+// session. The VNAS window itself is never part of the page it reads, sees or
+// acts on, and the page is never navigated away.
 //
 // What a control is called is no boundary (#160): the page's writes are. A step
 // VNAS takes holds the writes it causes until the member allows the ones that
@@ -89,7 +90,7 @@ const KEYS = new Set([
   "End",
 ]);
 const EDITING_KEYS = new Set(["Backspace", "Delete"]);
-/** Hermes truncates snapshots over 15000 characters; this stays under. */
+/** The longest snapshot the model is given; the rest is left out with a note. */
 const SNAPSHOT_LIMIT = 14_000;
 /** How long an allowed step in a guarded window covers the further steps in it. */
 const GRANT_MS = 30_000;
@@ -104,7 +105,7 @@ const SHOT_EDGE = 1600;
 /** A screenshot's base64 stays under this; the product service takes up to 5 MiB. */
 const SHOT_LIMIT = 4_000_000;
 
-/** The page as a PNG, for Hermes's browser_vision. */
+/** The page as a PNG, the result of the desktop server's look. */
 export interface Screenshot {
   mime_type: "image/png";
   /** The PNG in base64. */
@@ -177,27 +178,27 @@ export class WebosController {
     return step.answer;
   }
 
-  /** Carries out one of Hermes's browser commands; the result goes back as the tool's result. */
+  /** Carries out one command of the desktop server's tools; the result goes back as the tool's result. */
   async run(action: string, args: Record<string, unknown>): Promise<unknown> {
     switch (action) {
-      case "browser_snapshot":
+      case "snapshot":
         return { snapshot: this.snapshot(args.full === true) };
-      case "browser_click":
+      case "click":
         return this.click(String(args.ref ?? ""));
-      case "browser_type":
+      case "type":
         return this.type(String(args.ref ?? ""), String(args.text ?? ""));
-      case "browser_press":
+      case "press":
         return this.press(String(args.key ?? ""));
-      case "browser_scroll":
+      case "scroll":
         return this.scroll(args.direction === "up" ? "up" : "down");
-      case "browser_screenshot":
+      case "look":
         return this.screenshot(args.annotate === true);
       default:
         throw new ControlError(`VNAS 的窗口不支持 ${action}`);
     }
   }
 
-  /** The page as Hermes's snapshot: one line per window, heading and control; controls carry [ref=eN]. */
+  /** The page as text: one line per window, heading and control; controls carry [ref=eN]. */
   snapshot(full = false): string {
     this.refs.clear();
     const lines: string[] = [];
@@ -210,11 +211,12 @@ export class WebosController {
   }
 
   /**
-   * The page as the member sees it, for Hermes's browser_vision
-   * (hermes-patches/0003): the same picture 问题反馈 attaches
-   * (desktopPicture.ts), as a PNG, without VNAS's own window, toasts and
-   * marks, as the snapshot is. Annotated, every control of a fresh snapshot
-   * carries its ref on the picture, so what VNAS sees it can click.
+   * The page as the member sees it, for the desktop server's look: the same
+   * picture 问题反馈 attaches (desktopPicture.ts), as a PNG, without VNAS's own
+   * window, toasts and marks, as the snapshot is. The tool returns it as an
+   * image, which the assistant passes to Hermes's vision_analyze. Annotated,
+   * every control of a fresh snapshot carries its ref on the picture, so what
+   * VNAS sees it can click.
    */
   async screenshot(annotate = false): Promise<Screenshot> {
     const view = { width: window.innerWidth, height: window.innerHeight };
@@ -298,7 +300,7 @@ export class WebosController {
   private lookup(ref: string): Element {
     const element = this.refs.get(ref.replace(/^@/, ""));
     if (!element || !element.isConnected || !visible(element)) {
-      throw new ControlError(`${ref} 已经不在页面上了，请先用 browser_snapshot 重新查看`);
+      throw new ControlError(`${ref} 已经不在页面上了，请先用 snapshot 重新查看`);
     }
     hidden(element);
     return element;
@@ -420,7 +422,7 @@ export class WebosController {
       throw new ControlError(
         EDITING_KEYS.has(key)
           ? `${key} 只能在输入框里用来删字；要删除或移走内容，请点界面上的按钮`
-          : `不能按 ${given}；可以按 Enter、Escape、Tab、空格、方向键、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`,
+          : `不能按 ${given}；可以按 Enter、Escape、Tab、Space、ArrowUp、ArrowDown、ArrowLeft、ArrowRight、PageUp、PageDown、Home、End，输入框里还能按 Backspace 和 Delete`,
       );
     }
     hidden(target);

@@ -9,3 +9,6 @@ CALL mcp__anas__search_photos {"query": "青岛"}
 CALL mcp__anas__search_photos {"query": "去年夏天"}
 CALL mcp__anas__photo_details {"photo_id": "photo:does-not-exist"}
 approve | CALL mcp__anas__submit_changes {"summary": "删除 secret.txt", "operations": [{"op": "delete", "path": "/nas/个人空间/secret.txt"}]}
+CALL mcp__anas__search_photos {"query": "身份证"}
++CALL mcp__anas__photo_details {"photo_id": "{{photo}}"}
++CALL mcp__anas__look_at_photo {"photo_id": "{{photo}}"}

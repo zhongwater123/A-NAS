@@ -1,59 +1,75 @@
 #!/usr/bin/env bash
-# System test of the multi-user permission model. It installs the built
-# release with the real installer and systemd units into a disposable Debian
-# 13 container where systemd is PID 1, then checks every entry point that
-# touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the FFmpeg worker shared by the media center and music, the
-# administrator terminal, the LAN Web entry that Caddy serves on port 80,
-# and the internet entry's HTTPS site. Unlike tests that start
-# the daemons by hand, it runs them under the production sandboxes, so it
-# catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
+# System test of the multi-user permission model. It installs the release's
+# Debian packages with apt from a signed repository (ADR 0034) into a
+# disposable Debian 13 container where systemd is PID 1, then checks every
+# entry point that touches the data volume: Web files (File Broker workers), SMB, the photo API, the FFmpeg
+# worker shared by the media center and music, the administrator terminal,
+# the LAN Web entry that Caddy serves on port 80, and the internet entry's
+# HTTPS site. Unlike tests that start the daemons by hand, it runs them under
+# the production sandboxes, so it catches a unit that takes the Host Agent's
+# CAP_SETUID (issue #38).
 #
-# Usage: make build-binaries && scripts/build-system-test-image.sh &&
+# The repository holds three releases: the one under test, the "previous" one
+# (the same programs at a lower version) and a "next" one whose Product
+# Service has one more database step (internal/accounts/rollbacktest.go). The
+# test installs the previous release, upgrades to this one, and at the end
+# upgrades to the next, rolls back to this one and to the previous, and
+# upgrades again, as the runbooks' apt commands do. On success it writes
+# build/.system-tested, which names the packages make release may publish.
+#
+# Usage: make packages && scripts/build-system-test-image.sh &&
 #        scripts/system-test.sh [IMAGE]
-# Prints PASS/FAIL lines and exits non-zero on any failure.
+# Needs Docker and Go. Prints PASS/FAIL lines and exits non-zero on any
+# failure.
 #
 # The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
 # Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
 # adds its policy check and a real assistant against a scripted model.
 #
-# Local AI runs on a stand-in model, detector and runtime with the Worker's
-# fake providers. With ANAS_SYSTEM_TEST_AI=real, after
-# scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
-# naming the model and detector files, ANAS_AI_FACES the directory holding
-# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces),
-# ANAS_AI_PETS the one holding the animal model (dinov2-small/, as
-# D:\A-NAS-models\pets) and ANAS_AI_OCR the one holding the text reader's two
-# GGUF files (as D:\A-NAS-models\ocr\qwen3.5-4b), it installs the real
-# runtime and models instead. The text reader's llama-server is always the
-# one scripts/fetch-llama.sh fetches.
+# The content packages (scripts/build-content-packages.sh) are stand-ins:
+# local AI runs on stand-in models and runtime with the Worker's fake
+# providers, and web search on a stand-in for SearXNG
+# (scripts/system-test-search.py). With ANAS_SYSTEM_TEST_CONTENT naming a
+# release content store (D:\A-NAS-releases\content, laid out as
+# scripts/build-content-packages.sh describes), it installs the real models
+# and runtimes instead; SearXNG then starts without reaching any engine.
+# Qdrant and the text reader's llama-server are always the real ones that
+# scripts/fetch-qdrant.sh and scripts/fetch-llama.sh fetch.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
   image=${1:-anas-systemd:trixie}
   repo=$(cd "$(dirname "$0")/.." && pwd)
-  for binary in anas-api anas-host-agent; do
-    [[ -x "$repo/build/$binary" ]] || { echo "missing build/$binary: run make build-binaries" >&2; exit 2; }
-  done
-  qdrant_tarball="$repo/build/qdrant/$(jq -r .sha256 "$repo/deploy/qdrant/qdrant.json")/$(jq -r .file "$repo/deploy/qdrant/qdrant.json")"
-  [[ -f "$qdrant_tarball" ]] || { echo "missing $qdrant_tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
-  llama_tarball="$repo/build/llama/$(jq -r .sha256 "$repo/deploy/llama/llama.json")/$(jq -r .file "$repo/deploy/llama/llama.json")"
-  [[ -f "$llama_tarball" ]] || { echo "missing $llama_tarball: run scripts/fetch-llama.sh" >&2; exit 2; }
-  real_ai=()
-  if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
-    [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
-    [[ -f "${ANAS_AI_MODEL:-}" ]] || { echo "ANAS_AI_MODEL must name the model file" >&2; exit 2; }
-    [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
-    [[ -d "${ANAS_AI_FACES:-}" ]] || { echo "ANAS_AI_FACES must name the face models' directory" >&2; exit 2; }
-    [[ -d "${ANAS_AI_PETS:-}" ]] || { echo "ANAS_AI_PETS must name the animal model's directory" >&2; exit 2; }
-    [[ -d "${ANAS_AI_OCR:-}" ]] || { echo "ANAS_AI_OCR must name the text reader's directory" >&2; exit 2; }
-    real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
-      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro" -v "$ANAS_AI_OCR:/ai-ocr:ro")
+  shopt -s nullglob
+  products=("$repo"/build/packages/a-nas_*.deb)
+  ((${#products[@]} == 1)) || { echo "build/packages needs exactly one a-nas package: run make packages" >&2; exit 2; }
+  real=()
+  if [[ -n "${ANAS_SYSTEM_TEST_CONTENT:-}" ]]; then
+    content=build/content-packages
+    bash "$repo/scripts/build-content-packages.sh" "$repo/$content" "$ANAS_SYSTEM_TEST_CONTENT" >/dev/null
+    real=(-e ANAS_SYSTEM_TEST_AI=real -e ANAS_SYSTEM_TEST_SEARCH=real)
+  else
+    content=build/stand-in-content
+    bash "$repo/scripts/build-content-packages.sh" --stand-in "$repo/$content" "$repo/build" >/dev/null
   fi
-  if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
-    [[ -f "$repo/build/search-runtime.json" ]] || { echo "missing build/search-runtime.json: run scripts/build-search-runtime.sh" >&2; exit 2; }
-    real_ai+=(-e ANAS_SYSTEM_TEST_SEARCH=real)
-  fi
+  # The repository, signed with a key made for this run; GnuPG and aptly
+  # run in the same image (scripts/apt-repository.sh).
+  export IMAGE=$image
+  version=$(dpkg-deb --field "${products[0]}" Version)
+  work=$repo/build/system-test
+  rm -rf -- "$work"
+  trap 'rm -rf -- "$work"' EXIT
+  bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
+  install -d "$work/next-programs"
+  cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
+  (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
+    -o "$work/next-programs/anas-api" ./cmd/anas-api)
+  bash "$repo/scripts/build-packages.sh" "$work/next" "$version+next" "$work/next-programs" >/dev/null
+  bash "$repo/scripts/apt-repository.sh" keyring "$work/keyring" "$version" "$work/gnupg" >/dev/null
+  bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host}_*.deb "$work"/next/a-nas{,-host}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -61,15 +77,20 @@ if [[ "${1:-}" != --inside ]]; then
   fi
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "${assistant[@]}" "$image" >/dev/null
-  trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
+    --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" -e ANAS_SYSTEM_TEST_REPOSITORY=/src/build/system-test/repository \
+    -e "ANAS_SYSTEM_TEST_VERSION=$version" "${real[@]}" "${assistant[@]}" "$image" >/dev/null
+  trap 'docker rm -f "$name" >/dev/null 2>&1; rm -rf -- "$work"' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
     [[ "$state" == running || "$state" == degraded ]] && break
     sleep 1
   done
   status=0
+  rm -f "$repo/build/.system-tested"
   docker exec "$name" bash /src/scripts/system-test.sh --inside || status=$?
+  if ((status == 0)); then
+    (cd "$repo/build/packages" && sha256sum -- *.deb >"$repo/build/.system-tested")
+  fi
   # The container goes with this script, so the logs a failed run gathered
   # come out first; CI uploads them (#318).
   if ((status != 0)); then
@@ -109,161 +130,54 @@ trap diagnose EXIT
 # private mounts, which would hide that.
 mount --make-rshared /
 
-# The models and runtime the releases pin (ADR 0016), staged once as
-# deploy-dev.ps1 stages them. The stand-in runtime is a virtual environment
-# around Debian's Python alone, which the fake providers need.
-ai=/tmp/ai-staged
+# The release under test, the one before it and the next one, in the signed
+# repository the outer script made, with the content packages, real or
+# stand-ins.
+# shellcheck source=lib/content.sh
+. /src/scripts/lib/content.sh
+repository=$ANAS_SYSTEM_TEST_REPOSITORY
+version=$ANAS_SYSTEM_TEST_VERSION
+previous=$version~previous
+next=$version+next
+# Each model role's manifest, as $ai/ROLE.json, for the checks below.
+ai=/tmp/ai-manifests
 install -d "$ai"
+for role in "${ai_roles[@]}"; do
+  cp "/src/deploy/models/${role##*:}.json" "$ai/${role%%:*}.json"
+done
+models_kept=$(for role in "${ai_roles[@]}"; do jq -r .sha256 "/src/deploy/models/${role##*:}.json"; done | sort -u | wc -l)
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
-  cp /src/deploy/models/embeddinggemma-2-740m.json "$ai/model.json"
-  ln -s "/ai-model/$(jq -r .file "$ai/model.json")" "$ai/model.litertlm"
-  cp /src/deploy/models/dfine-m-obj365.json "$ai/detector.json"
-  ln -s "/ai-detector/$(jq -r .file "$ai/detector.json")" "$ai/detector.onnx"
-  cp /src/deploy/models/yunet-2026may.json "$ai/face-detector.json"
-  ln -s "/ai-faces/yunet/$(jq -r .file "$ai/face-detector.json")" "$ai/face-detector.onnx"
-  cp "/src/deploy/models/${ANAS_SYSTEM_TEST_FACE_EMBEDDER:-auraface-v1}.json" "$ai/face-embedder.json"
-  ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
-  cp /src/deploy/models/dinov2-small.json "$ai/animal-embedder.json"
-  ln -s "/ai-pets/dinov2-small/$(jq -r .file "$ai/animal-embedder.json")" "$ai/animal-embedder.onnx"
-  cp /src/deploy/models/qwen3.5-4b-q4_k_m.json "$ai/ocr-model.json"
-  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-model.json")" "$ai/ocr-model.gguf"
-  cp /src/deploy/models/qwen3.5-4b-mmproj-f16.json "$ai/ocr-mmproj.json"
-  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-mmproj.json")" "$ai/ocr-mmproj.gguf"
-  cp /src/build/ai-runtime.json "$ai/runtime.json"
-  ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
   detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
   face_model="$(jq -r .name "$ai/face-detector.json")@$(jq -r .sha256 "$ai/face-detector.json" | cut -c1-12)+"
   animal_model="$(jq -r .name "$ai/animal-embedder.json")@$(jq -r .sha256 "$ai/animal-embedder.json" | cut -c1-12)+"
   ocr_model="$(jq -r .name "$ai/ocr-model.json")@$(jq -r .sha256 "$ai/ocr-model.json" | cut -c1-12)+"
 else
-  head -c 65536 /dev/urandom > "$ai/model.litertlm"
-  printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
-    "$(stat -c %s "$ai/model.litertlm")" "$(sha256sum "$ai/model.litertlm" | cut -d ' ' -f 1)" > "$ai/model.json"
-  head -c 4096 /dev/urandom > "$ai/detector.onnx"
-  printf '{"name":"system-test-detector","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' \
-    "$(stat -c %s "$ai/detector.onnx")" "$(sha256sum "$ai/detector.onnx" | cut -d ' ' -f 1)" > "$ai/detector.json"
+  # The stand-in models are random bytes: the Worker runs its fake providers.
   detector_model=fake-detector
-  for role in face-detector face-embedder animal-embedder; do
-    head -c 2048 /dev/urandom > "$ai/$role.onnx"
-    printf '{"name":"system-test-%s","kind":"sface","file":"system-test.onnx","sizeBytes":%s,"sha256":"%s"}\n' "$role" \
-      "$(stat -c %s "$ai/$role.onnx")" "$(sha256sum "$ai/$role.onnx" | cut -d ' ' -f 1)" > "$ai/$role.json"
-  done
   face_model=fake-faces
   animal_model=fake-animals
-  for role in ocr-model ocr-mmproj; do
-    head -c 2048 /dev/urandom > "$ai/$role.gguf"
-    printf '{"name":"system-test-%s","file":"system-test.gguf","sizeBytes":%s,"memoryBytes":1048576,"sha256":"%s"}\n' "$role" \
-      "$(stat -c %s "$ai/$role.gguf")" "$(sha256sum "$ai/$role.gguf" | cut -d ' ' -f 1)" > "$ai/$role.json"
-  done
   ocr_model=fake-reader
-  install -d "$ai/venv/bin"
-  ln -s /usr/bin/python3 "$ai/venv/bin/python"
-  printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
-    "$(python3 -c 'import platform; print(platform.python_version())')" > "$ai/venv/pyvenv.cfg"
-  tar -C "$ai/venv" -czf "$ai/runtime.tar.gz" .
-  runtime_sha=$(sha256sum "$ai/runtime.tar.gz" | cut -d ' ' -f 1)
-  printf '{"id":"%s","python":"%s","file":"runtime.tar.gz","sizeBytes":%s,"sha256":"%s"}\n' "${runtime_sha:0:16}" \
-    "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
-    "$runtime_sha" > "$ai/runtime.json"
   install -d /etc/systemd/system/anas-ai.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals --fake-reader\n' \
+  printf '[Service]\nExecStart=\nExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals --fake-reader\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
-# Each model role's file is kept once by content: as many as distinct pins.
-models_kept=$(for role in model detector face-detector face-embedder animal-embedder ocr-model ocr-mmproj; do
-  jq -r .sha256 "$ai/$role.json"
-done | sort -u | wc -l)
 # AI starts once the photo library has gone unused for this long, so that the
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
 printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
 
 # Web search (ADR 0030) runs a stand-in for SearXNG under the real unit and its
-# sandbox (scripts/system-test-search.py), in a runtime around Debian's Python.
-# With ANAS_SYSTEM_TEST_SEARCH=real, after scripts/build-search-runtime.sh, it
-# installs the real runtime, which starts SearXNG without reaching any engine.
-search=/tmp/search-staged
-install -d "$search"
-if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
-  cp /src/build/search-runtime.json "$search/runtime.json"
-  ln -s "/src/build/search-runtime/$(jq -r .file "$search/runtime.json")" "$search/runtime.tar.gz"
-else
-  install -d "$search/venv/bin"
-  ln -s /usr/bin/python3 "$search/venv/bin/python"
-  printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
-    "$(python3 -c 'import platform; print(platform.python_version())')" > "$search/venv/pyvenv.cfg"
-  install -m 0644 /src/scripts/system-test-search.py "$search/venv/stand-in.py"
-  tar -C "$search/venv" -czf "$search/runtime.tar.gz" .
-  search_runtime_sha=$(sha256sum "$search/runtime.tar.gz" | cut -d ' ' -f 1)
-  printf '{"id":"%s","python":"%s","file":"runtime.tar.gz","sizeBytes":%s,"sha256":"%s"}\n' "${search_runtime_sha:0:16}" \
-    "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$search/runtime.tar.gz")" \
-    "$search_runtime_sha" > "$search/runtime.json"
+# sandbox (scripts/system-test-search.py), which the stand-in runtime holds.
+# With the real runtime, SearXNG starts without reaching any engine.
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
   install -d /etc/systemd/system/anas-search.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/search/runtime/bin/python /opt/a-nas/current/search/runtime/stand-in.py /run/a-nas-search/search.sock\n' \
+  printf '[Service]\nExecStart=\nExecStart=/usr/lib/a-nas/search/runtime/bin/python /usr/lib/a-nas/search/runtime/stand-in.py /run/a-nas-search/search.sock\n' \
     > /etc/systemd/system/anas-search.service.d/system-test.conf
 fi
 
-# stage DIR: a release as scripts/deploy-dev.ps1 stages it.
-stage() {
-  install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-media-pool.sh /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
-  install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
-  for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
-    install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
-  done
-  install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
-  install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
-  install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
-  install -m 0644 /src/deploy/systemd/system/anas-ffmpeg.socket "$1/anas-ffmpeg-system.socket"
-  install -m 0644 "/src/deploy/systemd/system/anas-ffmpeg@.service" "$1/anas-ffmpeg-system@.service"
-  install -m 0644 /src/deploy/systemd/system/system-anasffmpeg.slice "$1/anas-ffmpeg-system.slice"
-  install -m 0644 /src/deploy/systemd/system/anas-vectors.slice "$1/anas-vectors-system.slice"
-  install -m 0644 "/src/deploy/systemd/system/anas-vectors@.service" "$1/anas-vectors-system@.service"
-  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.socket" "$1/anas-vectors-proxy-system@.socket"
-  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.service" "$1/anas-vectors-proxy-system@.service"
-  install -d "$1/vectors"
-  install -m 0644 /src/deploy/qdrant/qdrant.json /src/deploy/qdrant/config.yaml "$1/vectors/"
-  install -m 0755 /src/deploy/qdrant/start.sh /src/deploy/qdrant/wait-ready.sh "$1/vectors/"
-  ln -s "/src/build/qdrant/$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)/$(jq -r .file /src/deploy/qdrant/qdrant.json)" \
-    "$1/vectors/qdrant.tar.gz"
-  install -d "$1/ai/anas_ai"
-  install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
-  install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
-    "$ai/animal-embedder.json" "$ai/ocr-model.json" "$ai/ocr-mmproj.json" "$ai/runtime.json" /src/deploy/llama/llama.json "$1/ai/"
-  ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
-  ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
-  ln -s "$ai/face-detector.onnx" "$1/ai/face-detector.onnx"
-  ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
-  ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
-  ln -s "$ai/ocr-model.gguf" "$1/ai/ocr-model.gguf"
-  ln -s "$ai/ocr-mmproj.gguf" "$1/ai/ocr-mmproj.gguf"
-  ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
-  ln -s "/src/build/llama/$(jq -r .sha256 /src/deploy/llama/llama.json)/$(jq -r .file /src/deploy/llama/llama.json)" \
-    "$1/ai/llama.tar.gz"
-  for unit in anas-search.service anas-search-dns.service anas-search-dns.path; do
-    install -m 0644 "/src/deploy/systemd/system/$unit" "$1/${unit%%.*}-system.${unit#*.}"
-  done
-  install -m 0644 /src/deploy/sysusers.d/a-nas-search.conf "$1/a-nas-search.sysusers"
-  install -d "$1/search"
-  install -m 0644 /src/deploy/search/settings.yml /src/deploy/search/searxng.json /src/deploy/search/anas_search.py \
-    "$search/runtime.json" "$1/search/"
-  install -m 0755 /src/deploy/search/allow-dns.sh "$1/search/"
-  ln -s "$search/runtime.tar.gz" "$1/search/runtime.tar.gz"
-  install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
-  install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
-  install -m 0644 /src/deploy/caddy/Caddyfile.internet /src/deploy/internet/anas-internet.nft "$1/"
-  install -m 0644 /src/deploy/systemd/system/anas-internet-firewall.service "$1/anas-internet-firewall-system.service"
-  install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
-  install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
-  install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
-  install -m 0644 /src/deploy/sysusers.d/a-nas-kiosk.conf "$1/a-nas-kiosk.sysusers"
-}
-release=/tmp/release
-stage "$release"
-
 # A data volume as storage initialization leaves it, mounted before the
-# installer runs, as on the Experimental NAS. Larger than the 10 GiB reserve;
-# sparse, so it costs little disk.
+# packages install, as on the Experimental NAS. Larger than the 10 GiB
+# reserve; sparse, so it costs little disk.
 truncate --size=64G /var/tmp/data.img
 mkfs.btrfs --quiet /var/tmp/data.img
 install -d /srv/a-nas/data
@@ -303,64 +217,57 @@ cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
 
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
-# The installer runs only on the release's own a-nas-host (ADR 0031): without
-# it, or with another version, it stops before changing anything.
-refused_without_host_package() {
-  local status=0
-  bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/refused.log 2>&1 || status=$?
-  [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install --no-install-recommends --allow-downgrades $release/a-nas-host.deb" /tmp/refused.log
-}
-if ! refused_without_host_package; then
-  tail -n 5 /tmp/refused.log
-  echo "FAIL the installer refuses a release without its host package"
-  exit 1
-fi
-echo "PASS the installer refuses a release without its host package"
-# dpkg, not apt: it fails instead of downloading a dependency the image lacks,
-# and apt 3's --no-download cannot install a local package at all.
-other=/tmp/other-host-package
-dpkg-deb --raw-extract "$release/a-nas-host.deb" "$other"
-sed -i 's/^Version: .*/Version: 0~other/' "$other/DEBIAN/control"
-dpkg-deb --root-owner-group --build "$other" "$other.deb" >/dev/null
-if ! dpkg -i "$other.deb" >/tmp/host-package.log 2>&1 || ! refused_without_host_package; then
-  tail -n 5 /tmp/host-package.log /tmp/refused.log
-  echo "FAIL the installer refuses another version of its host package"
-  exit 1
-fi
-echo "PASS the installer refuses another version of its host package"
-if ! dpkg -i "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
-  tail -n 20 /tmp/host-package.log
-  echo "FAIL the release's host package installs"
-  exit 1
-fi
-echo "PASS the release's host package installs"
-# The runbooks install with apt, which refuses a version that sorts lower
-# unless allowed: commits sort by their hashes, and every commit after a tag
-# sorts before it. Its dependencies are installed now, so apt fetches nothing.
-later=/tmp/later-host-package
-dpkg-deb --raw-extract "$release/a-nas-host.deb" "$later"
-sed -i 's/^Version: .*/Version: 999/' "$later/DEBIAN/control"
-dpkg-deb --root-owner-group --build "$later" "$later.deb" >/dev/null
-if ! dpkg -i "$later.deb" >/tmp/host-package.log 2>&1 ||
-  ! apt-get install -y --no-install-recommends --allow-downgrades "$release/a-nas-host.deb" >>/tmp/host-package.log 2>&1 ||
-  [[ "$(dpkg-query -W -f='${Version}' a-nas-host)" != "$(dpkg-deb --field "$release/a-nas-host.deb" Version)" ]]; then
-  tail -n 20 /tmp/host-package.log
-  echo "FAIL the runbooks' apt command installs the release's host package over one that sorts after it"
-  exit 1
-fi
-echo "PASS the runbooks' apt command installs the release's host package over one that sorts after it"
+# An installation from before the packages, as the Experimental NAS has it
+# (scripts/install-v1.0.1-system-services.sh, removed): a release that
+# /opt/a-nas/current names, units and links in /etc, and the environment files
+# that hold this machine's settings, here the SMB interface. The first install
+# takes over from it (deploy/debian/a-nas/DEBIAN/postinst) and writes
+# site.conf from those files; its checks follow the definitions below.
+install -d /opt/a-nas/releases/system-test-installer /etc/systemd/system/multi-user.target.wants \
+  /etc/systemd/system/sockets.target.wants /etc/systemd/system/smbd.service.d
+ln -s /opt/a-nas/releases/system-test-installer /opt/a-nas/current
+install -d -m 0750 /etc/a-nas
+printf '%s\n' 'ANAS_STATE_DIR=/var/lib/a-nas' "ANAS_SMB_INTERFACE=$iface" > /etc/a-nas/host-agent.env
+printf '%s\n' 'ANAS_HTTP_ADDR=127.0.0.1:8080' 'ANAS_HOSTSTATE_MODE=agent' > /etc/a-nas/anas-api.env
+for unit in anas-host-agent.service anas-api.service anas-search-dns.path anas-vectors-proxy@.socket; do
+  sed 's|/usr/lib/a-nas|/opt/a-nas/current|g' "/src/deploy/systemd/system/$unit" > "/etc/systemd/system/$unit"
+done
+printf '[Service]\nRestart=on-failure\n' > /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf
+ln -s /etc/systemd/system/anas-host-agent.service /etc/systemd/system/multi-user.target.wants/
+ln -s /etc/systemd/system/anas-api.service /etc/systemd/system/multi-user.target.wants/
+ln -s /etc/systemd/system/anas-vectors-proxy@.socket /etc/systemd/system/sockets.target.wants/anas-vectors-proxy@a-nas-photos.socket
+# The installer enabled the internet entry's tunnel when it turned the entry on.
+ln -s /usr/lib/systemd/system/wg-quick@.service /etc/systemd/system/multi-user.target.wants/wg-quick@wg-anas.service
+systemctl daemon-reload
 
+# apt reads the A-NAS repository alone, as the deploy runbook adds it: the
+# image's Debian and Caddy sources would need the network, and every package
+# A-NAS depends on is installed already.
+install -d /etc/apt/sources.list.d/disabled
+mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
+dpkg -i "$repository"/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_*.deb >/tmp/keyring.log
+sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
+  /usr/share/doc/a-nas-archive-keyring/a-nas.sources >/etc/apt/sources.list.d/a-nas.sources
+# apt_install VERSION NAME: the runbook's command for the product's packages
+# at VERSION, which may be older; apt's output goes to /tmp/NAME.log.
+apt_install() {
+  apt-get update -qq >"/tmp/$2.log" 2>&1 &&
+    apt-get install -y --no-install-recommends --allow-downgrades "a-nas=$1" "a-nas-host=$1" >>"/tmp/$2.log" 2>&1
+}
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
-if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/install.log 2>&1; then
-  tail -30 /tmp/install.log
-  echo "FAIL installer"
-  exit 1
-fi
+for release in "$previous" "$version"; do
+  if ! apt_install "$release" "install-$release" || ! a-nas-check >"/tmp/check-$release.log" 2>&1; then
+    tail -n 40 "/tmp/install-$release.log" "/tmp/check-$release.log"
+    echo "FAIL apt installs A-NAS $release from the signed repository"
+    exit 1
+  fi
+  echo "PASS apt installs A-NAS $release from the signed repository"
+done
 
 # Record the volume as storage initialization would have, so the Product
 # Service's volume guard accepts it, then restart it to load the record. It
 # creates its databases before it answers, so wait for that first. The share
-# service restarts after it, as the installer orders them: a restarted Product
+# service restarts after it, as the package orders them: a restarted Product
 # Service gives the share bridge a new generation, and until the share
 # service's next check notices, every new share fails as withdrawn.
 for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
@@ -508,14 +415,99 @@ verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a 
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
 
+# --- The first install took over from the installation before the packages.
+check "the takeover wrote site.conf from the installer's environment files" \
+  test "$(grep -cx "ANAS_SMB_INTERFACE=$iface" /etc/a-nas/site.conf):$(grep -c '^ANAS_HTTP_ADDR=' /etc/a-nas/site.conf)" = 1:0
+check "the takeover moved the installer's units, drop-ins and environment files aside" \
+  test ! -e /etc/systemd/system/anas-host-agent.service -a ! -e /etc/systemd/system/anas-vectors-proxy@.socket \
+  -a ! -e /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf -a ! -e /etc/a-nas/host-agent.env \
+  -a ! -e /opt/a-nas/current -a -f /var/backups/a-nas/installer-layout/etc/systemd/system/anas-host-agent.service \
+  -a -f /var/backups/a-nas/installer-layout/etc/a-nas/anas-api.env
+check "no link the installer made is left in /etc" \
+  test -z "$(find /etc/systemd/system -type l \( -name 'anas-*' -o -name 'wg-quick@wg-anas.service' \) -print)"
+check "the vector index's socket is on after the takeover" \
+  test "$(systemctl is-active anas-vectors-proxy@a-nas-photos.socket)" = active
+
+# reinstall NAME [VERSION]: installs the product's packages at VERSION, this
+# release's unless given, with apt, the runbook's command, which runs their
+# scripts as an upgrade does even over the same version; the content packages
+# stay as they are. Then waits until the restarted Product Service answers and
+# the photo service is ready again. apt's output goes to /tmp/NAME.log.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+reinstall() {
+  local since
+  since=$(date '+%Y-%m-%d %H:%M:%S')
+  if ! apt-get install -y --no-install-recommends --allow-downgrades --reinstall \
+    "a-nas=${2:-$version}" "a-nas-host=${2:-$version}" >"/tmp/$1.log" 2>&1; then
+    echo "  apt failed; the end of /tmp/$1.log:"
+    tail -n 30 "/tmp/$1.log" | sed 's/^/  | /'
+    return 1
+  fi
+  for _ in $(seq 1 150); do
+    curl -fsS "$api/healthz" >/dev/null 2>&1 &&
+      journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
+    sleep 0.2
+  done
+  echo "  apt finished, but the services were not ready within 30 seconds:"
+  curl -sS -o /dev/null -w '  healthz answered %{http_code}\n' "$api/healthz" || true
+  systemctl status --no-pager --lines=10 anas-api anas-photos | sed 's/^/  | /'
+  return 1
+}
+# site_apply NAME: a-nas-site applies site.conf and internet.env, as the
+# runbooks run it; its output goes to /tmp/NAME.log.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+site_apply() {
+  if ! a-nas-site >"/tmp/$1.log" 2>&1; then
+    echo "  a-nas-site failed; the end of /tmp/$1.log:"
+    tail -n 30 "/tmp/$1.log" | sed 's/^/  | /'
+    return 1
+  fi
+  for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && return; sleep 0.2; done
+  return 1
+}
+# product_environment: the Product Service's environment as systemd gives it.
+product_environment() { systemctl show -p Environment --value anas-api | tr ' ' '\n'; }
+
+# --- The release as packaged (ADR 0034): every file as dpkg installed it, and
+# the product's own health check.
+# shellcheck disable=SC2046 # one word per package
+check "dpkg finds every file of the release's packages as packaged" \
+  test -z "$(dpkg --verify a-nas a-nas-host $(content_packages /src) 2>&1)"
+check "a-nas-check finds the installed product working" quiet a-nas-check
+
+# apt takes only what the signed index lists: a package changed on the way and
+# an index changed after signing are refused (#171).
+tampered=/var/tmp/tampered-repository
+this_deb=$(cd "$repository" && find pool -name "a-nas_${version}_amd64.deb")
+install -d "$tampered/$(dirname "$this_deb")"
+cp -r "$repository/dists" "$tampered/"
+cp "$repository/$this_deb" "$tampered/$this_deb"
+printf x >>"$tampered/$this_deb"
+sed -i "s|^URIs: .*|URIs: file:$tampered|" /etc/apt/sources.list.d/a-nas.sources
+apt-get update -qq >/tmp/tampered.log 2>&1 || true
+check "apt refuses a package that differs from the signed index" \
+  fails apt-get install -y --reinstall --no-install-recommends "a-nas=$version"
+sed -i 's/^\(SHA256:\)$/\1\n 0000000000000000000000000000000000000000000000000000000000000000 1 main\/binary-amd64\/Packages/' \
+  "$tampered/dists/dev/InRelease"
+# apt update keeps the index it had and exits 0, so the refusal shows only in
+# its output.
+# shellcheck disable=SC2317,SC2329 # invoked through check
+index_refused() { apt-get update 2>&1 | tee -a "$hidden" | grep -Fq 'OpenPGP signature verification failed'; }
+check "apt refuses an index changed after signing" index_refused
+sed -i "s|^URIs: .*|URIs: file:$repository|" /etc/apt/sources.list.d/a-nas.sources
+apt-get update -qq >/tmp/apt-update.log 2>&1
+rm -rf "$tampered"
+
 # --- The units as installed, with every drop-in, read by Debian 13's systemd
 # as on the NAS (#278): each directive and value, and that each command exists.
 # The image has no Wayland compositor: Cage, which the local console's unit
 # starts, is a stand-in that only has to exist.
 [[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
+# The container agent's unit is left out: it needs Docker, which its runbook
+# installs.
+# shellcheck disable=SC2046 # unit files have no spaces
 check "systemd accepts every installed A-NAS unit" \
-  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/anas*.path \
-  /etc/systemd/system/*anas*.slice
+  verified $(find /usr/lib/systemd/system -maxdepth 1 -name '*anas*' ! -name anas-container-agent.service -type f)
 
 # --- smbd opens its listening sockets only when it starts, and a reload keeps
 # them: under Debian's configuration, before the Host Agent writes A-NAS's, it
@@ -551,23 +543,19 @@ check "the record left the Product Service's directory" test ! -e /var/lib/a-nas
 check "Product Service cannot list the Host Agent's records" denied a-nas ls /var/lib/a-nas-host
 
 # --- The local console (issue #174): an account of its own that cannot log
-# in, starting the launcher of the installed release. The container has no
+# in, starting the launcher the a-nas package installs. The container has no
 # display, so the unit is installed but neither enabled nor started.
 check "the local console runs as its own account" \
   test "$(systemctl show -p User --value anas-kiosk@tty1.service)" = a-nas-kiosk
 check "the local console's account has no home and no login shell" \
   test "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" = /nonexistent:/usr/sbin/nologin
 check "the local console's account has no password" test "$(passwd -S a-nas-kiosk | cut -d ' ' -f 2)" = L
-check "the local console's launcher is the installed release's" \
-  cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
-check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
-# A staging account laid out as anas-dev's on the NAS: its staged releases are
-# its own, and the owner's write shows the directory is writable at all.
+check "the local console's launcher is the package's" \
+  cmp -s /usr/lib/a-nas/kiosk-launcher /src/scripts/run-kiosk.sh
+check "the local console's launcher is root's" test "$(stat -c '%U %a' /usr/lib/a-nas/kiosk-launcher)" = 'root 755'
+check "the local console cannot write the product's files" cannot_create a-nas-kiosk /usr/lib/a-nas/written-by-kiosk
+# The account that copies the release's repository to the NAS, as anas-dev.
 id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
-staging=/home/anas-dev/apps/a-nas/releases
-install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
-check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
-check "the local console cannot write the staged releases" cannot_create a-nas-kiosk "$staging/staged-by-kiosk"
 # lacks_group ACCOUNT GROUP: ACCOUNT's groups can be read, and GROUP is not among them.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 lacks_group() {
@@ -576,7 +564,7 @@ lacks_group() {
   [[ " $groups " != *" $2 "* ]]
 }
 check "the local console is not in the staging account's group" lacks_group a-nas-kiosk anas-dev
-check "the installer leaves the local console disabled" \
+check "the package leaves the local console disabled" \
   test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
@@ -599,15 +587,16 @@ check "accounts have A-NAS UIDs" test "$owner_id" -ge 20100 -a "$alice_id" -ge 2
 # --- smbd listens only on the addresses present when it starts, so it waits
 # for the SMB interface's IPv4 address and tries again until it is there
 # (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
-check "systemd accepts smbd with the installer's drop-in" verified /usr/lib/systemd/system/smbd.service
+check "systemd accepts smbd with a-nas-generator's drop-in" verified /usr/lib/systemd/system/smbd.service
 check "smbd waits for the SMB interface's address" \
   grep -Fq "show dev $iface scope global" <<<"$(systemctl show -p ExecStartPre --value smbd)"
 check "smbd starts again after a failed start" test "$(systemctl show -p Restart --value smbd)" = on-failure
 # The same wait on an interface whose address comes late, as from DHCP at boot.
 late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
 ip link add anas-late0 type veth peer name anas-late1
+install -d /etc/systemd/system/smbd.service.d
 ip link set anas-late0 up
-sed "s/\b$iface\b/anas-late0/g" /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+sed "s/\b$iface\b/anas-late0/g" /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
 systemctl daemon-reload
 systemctl stop smbd
 systemctl start --no-block smbd
@@ -685,7 +674,7 @@ lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that as
     -d "{\"username\":\"$2\",\"password\":\"$3\",\"localConsole\":true}" "$1/api/v1/session"
 }
 check "Caddy serves the LAN entry" systemctl is-active --quiet caddy
-check "installer replaced Caddy's own configuration" grep -Fqx '# Managed by A-NAS.' /etc/caddy/Caddyfile
+check "anas-site.service replaced Caddy's own configuration" grep -Fqx '# Managed by A-NAS.' /etc/caddy/Caddyfile
 check "LAN entry reaches the Product Service" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
 check "local console login lasts until sign-out" \
   test "$(lasting_login "$api" alice "$alice_password" /tmp/console.jar | jq -r .expiresAt)" = 9999-12-31T23:59:59Z
@@ -834,9 +823,8 @@ check "the terminal is off on a new device" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = false
 check "a disabled terminal refuses sessions" terminal_refused "$api" /tmp/owner.jar
 # The runbook step that turns it on.
-printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
-systemctl restart anas-api
-for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/site.conf
+check "a-nas-site applies site.conf" site_apply terminal-on
 check "sharing recovers after the Product Service restarts" shares_ready
 check "sharing can create, save and revoke after the Product Service restarts" \
   sharing_smoke after-api-restart
@@ -1095,21 +1083,21 @@ worker_memory_beside_photos() { # where internal/photoservice/gate.go workerCgro
   [[ "$worker" == "$root/anas.slice/anas-ai.slice/anas-ai.service" && "$held" =~ ^[1-9][0-9]*$ ]] ||
     { echo "the Worker is in '$worker' holding '$held', the photo service in '$photos'" >&2; return 1; }
 }
-check "the installer enables the AI socket" systemctl is-enabled --quiet anas-ai.socket
+check "the package turns the AI socket on" test -L /usr/lib/systemd/system/sockets.target.wants/anas-ai.socket
 check "only the photo service reaches the AI socket" \
   test "$(stat -c '%a %U %G' /run/a-nas-ai/ai.sock)" = "660 root a-nas-photos"
-check "the release links the models and runtime kept once by content" \
-  test "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/model.json")/$(jq -r .file "$ai/model.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/detector.json")/$(jq -r .file "$ai/detector.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
-  -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
+check "the package links the models and runtime of its content packages" \
+  test "$(readlink /usr/lib/a-nas/ai/model.litertlm)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/model.json")/$(jq -r .file "$ai/model.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/detector.json")/$(jq -r .file "$ai/detector.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
-check "the release links llama.cpp kept once by content, only the members its manifest names" \
-  test "$(readlink /opt/a-nas/current/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
+check "the package links llama.cpp, only the members its manifest names" \
+  test "$(readlink /usr/lib/a-nas/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
   -a -x "/opt/a-nas/llama/$llama_sha/llama-server" -a ! -e "/opt/a-nas/llama/$llama_sha/llama-cli" \
   -a "$(stat -c '%U %a' "/opt/a-nas/llama/$llama_sha")" = "root 755"
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
@@ -1207,9 +1195,9 @@ except OSError:
 print("; ".join(leaks) or "contained")
 sys.exit(1 if leaks else 0)
 PY
-sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/runtime/bin/python /usr/local/lib/anas-ai-probe.py|' \
+sed -e 's|^ExecStart=.*|ExecStart=/usr/lib/a-nas/ai/runtime/bin/python /usr/local/lib/anas-ai-probe.py|' \
   -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
-  /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-probe.service
+  /usr/lib/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-probe.service
 systemctl daemon-reload
 check "the probe finds the network and data volume outside the sandbox" \
   finds /usr/local/lib/anas-ai-probe.py 'opened a AF_INET socket' 'listed the data volume'
@@ -1219,34 +1207,20 @@ journalctl -u anas-ai-probe.service -o cat --no-pager | grep -E 'contained|opene
 # The text reader's llama-server, in the Worker's unit, finds the libraries
 # it links; reading with the real model (ANAS_SYSTEM_TEST_AI=real) also loads
 # its CPU backend.
-sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/llama/llama-server --version|' \
+sed -e 's|^ExecStart=.*|ExecStart=/usr/lib/a-nas/ai/llama/llama-server --version|' \
   -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
-  /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-llama-probe.service
+  /usr/lib/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-llama-probe.service
 systemctl daemon-reload
 check "llama-server runs in the Worker's sandbox" systemctl start anas-ai-llama-probe.service
 journalctl -u anas-ai-llama-probe.service -o cat --no-pager | grep -E '^version|error' | tail -n 1 || true
-staged_tampered=/tmp/tampered
-stage "$staged_tampered"
-rm "$staged_tampered/ai/model.litertlm"
-head -c 1024 /dev/urandom > "$staged_tampered/ai/model.litertlm"
-jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
-  "$ai/model.json" > "$staged_tampered/ai/model.json"
-check "a staged model that does not match its manifest is refused" \
-  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
-check "the refused release changes nothing" \
-  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
-staged_tampered=/tmp/tampered-detector
-stage "$staged_tampered"
-rm "$staged_tampered/ai/detector.onnx"
-head -c 1024 /dev/urandom > "$staged_tampered/ai/detector.onnx"
-jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
-  "$ai/detector.json" > "$staged_tampered/ai/detector.json"
-check "a staged detector that does not match its manifest is refused" \
-  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
-check "the refused detector changes nothing" \
-  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
+# dpkg keeps every file's checksum: a content file that changed shows, and its
+# package installed again restores it.
+detector_file=$(readlink /usr/lib/a-nas/ai/detector.onnx)
+detector_package=$(dpkg-query --search "$detector_file" | cut -d: -f1)
+printf x >> "$detector_file"
+check "dpkg finds a model file that changed" bash -c "dpkg --verify '$detector_package' | grep -Fq '$detector_file'"
+apt-get install -y --reinstall "$detector_package" >/tmp/detector-again.log 2>&1 || true
+check "installing its package again restores it" test -z "$(dpkg --verify "$detector_package" 2>&1)"
 
 # --- The vector index (ADR 0028): one Qdrant instance per owning service,
 # reached only through its owner's socket, started on demand in a network
@@ -1319,8 +1293,8 @@ check "only the photo service reaches its vector index" \
   test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
 check "the Product Service account cannot connect to the photo vector index" \
   denied a-nas python3 -c "$unix_connect" /run/a-nas-vectors/a-nas-photos.sock
-check "the release links Qdrant kept once by content" \
-  test "$(readlink /opt/a-nas/current/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
+check "the package links the Qdrant of its content package" \
+  test "$(readlink /usr/lib/a-nas/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
 check "all vector index instances share one memory limit" \
   test "$(systemctl show -p MemoryMax --value anas-vectors.slice)" = 1610612736
 check "connecting starts the vector index and reaches its gRPC server" \
@@ -1433,37 +1407,13 @@ sys.exit(1 if leaks else 0)
 PY
 sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-vectors-probe.py|' \
   -e 's|^Type=.*|Type=oneshot|' -e '/^ExecStartPre=/d' -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded=/d' \
-  "/etc/systemd/system/anas-vectors@.service" > "/etc/systemd/system/anas-vectors-probe@.service"
+  "/usr/lib/systemd/system/anas-vectors@.service" > "/etc/systemd/system/anas-vectors-probe@.service"
 systemctl daemon-reload
 check "the vector index probe finds the network and data volume outside the sandbox" \
   finds /usr/local/lib/anas-vectors-probe.py 'sees interfaces' 'listed /srv/a-nas/data'
 check "the vector index's sandbox has only loopback and cannot read the data volume or product state" \
   systemctl start anas-vectors-probe@a-nas-photos.service
 journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -E 'contained|sees|reached|opened|listed' | tail -n 1 || true
-qdrant_kept=$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)
-staged_tampered=/tmp/tampered-qdrant
-stage "$staged_tampered"
-rm "$staged_tampered/vectors/qdrant.tar.gz"
-head -c 1024 /dev/urandom > "$staged_tampered/vectors/qdrant.tar.gz"
-jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
-  /src/deploy/qdrant/qdrant.json > "$staged_tampered/vectors/qdrant.json"
-check "a staged Qdrant that does not match its manifest is refused" \
-  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
-check "the refused Qdrant changes nothing" \
-  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
-llama_kept=$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)
-staged_tampered=/tmp/tampered-llama
-stage "$staged_tampered"
-rm "$staged_tampered/ai/llama.tar.gz"
-head -c 1024 /dev/urandom > "$staged_tampered/ai/llama.tar.gz"
-jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
-  /src/deploy/llama/llama.json > "$staged_tampered/ai/llama.json"
-check "a staged llama.cpp that does not match its manifest is refused" \
-  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
-check "the refused llama.cpp changes nothing" \
-  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
-  -a "$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)" = "$llama_kept"
 
 # --- Web search (ADR 0030): SearXNG under its own account, reached only by the
 # Product Service through its socket, and able to reach public addresses only.
@@ -1474,7 +1424,7 @@ as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-s
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
-  test "$(readlink /opt/a-nas/current/search/runtime)" = "/opt/a-nas/search-runtimes/$(jq -r .id "$search/runtime.json")"
+  test "$(readlink /usr/lib/a-nas/search/runtime)" = "/opt/a-nas/search-runtimes/$(search_runtime_id /src)"
 check "web search's socket is only its group's" \
   test "$(stat -c '%a %U %G' /run/a-nas-search):$(stat -c '%a %U %G' "$search_socket")" = \
   "750 a-nas-search a-nas-search:660 a-nas-search a-nas-search"
@@ -1638,24 +1588,25 @@ check "an administrator turns web search on" web_search_switch true
 for _ in $(seq 1 40); do systemctl is-active --quiet anas-search && break; sleep 0.5; done
 check "turning it on starts the service" systemctl is-active --quiet anas-search
 # Web search that cannot start fails no upgrade: here its DNS helper fails,
-# the installer warns, and the product's own services run.
-stage /tmp/search-broken
-printf '#!/bin/sh\nexit 1\n' > /tmp/search-broken/search/allow-dns.sh
-# shellcheck disable=SC2317,SC2329 # invoked through check
-search_broken_install() {
-  bash /src/scripts/install-v1.0.1-system-services.sh /tmp/search-broken search-broken "$iface" >/tmp/search-broken.log 2>&1 &&
-    grep -Fq 'web search did not start' /tmp/search-broken.log
-}
-check "an upgrade finishes and warns when web search cannot start" search_broken_install
-for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+# and the product's own services run.
+install -d /etc/systemd/system/anas-search-dns.service.d
+printf '[Service]\nExecStart=\nExecStart=/bin/false\n' > /etc/systemd/system/anas-search-dns.service.d/system-test-broken.conf
+check "an upgrade finishes when web search cannot start" reinstall search-broken
 for unit in anas-host-agent anas-photos anas-api anas-shares; do
   check "the product's services run after that upgrade: $unit" systemctl is-active --quiet "$unit"
 done
+rm /etc/systemd/system/anas-search-dns.service.d/system-test-broken.conf
+systemctl daemon-reload
+# Started over and over while broken, it has hit systemd's start limit.
+systemctl reset-failed anas-search-dns.service anas-search-dns.path
+systemctl restart anas-search-dns.path
+systemctl start anas-search-dns.service
+systemctl restart anas-search.service
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
 # or Product Service state.
-check "the installer enables the FFmpeg worker socket" systemctl is-enabled --quiet anas-ffmpeg.socket
+check "the package turns the FFmpeg worker socket on" test -L /usr/lib/systemd/system/sockets.target.wants/anas-ffmpeg.socket
 check "the Product and Photo Services reach the FFmpeg worker socket" \
   test "$(stat -c '%a %U %G' /run/a-nas-ffmpeg/ffmpeg.sock)" = "660 root a-nas-photos"
 # Photo Service also uses the same descriptor-only worker socket.
@@ -1799,7 +1750,7 @@ print("; ".join(leaks) or "contained")
 sys.exit(1 if leaks else 0)
 PY
 sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-ffmpeg-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
-  -e '/^StandardInput=/d' /etc/systemd/system/anas-ffmpeg@.service > /etc/systemd/system/anas-ffmpeg-probe.service
+  -e '/^StandardInput=/d' /usr/lib/systemd/system/anas-ffmpeg@.service > /etc/systemd/system/anas-ffmpeg-probe.service
 systemctl daemon-reload
 check "the media probe finds the network and data volume outside the sandbox" \
   finds /usr/local/lib/anas-ffmpeg-probe.py 'opened a AF_INET socket' 'listed /srv/a-nas/data'
@@ -1807,79 +1758,27 @@ check "the FFmpeg worker's sandbox has no network, data volume or Product Servic
   systemctl start anas-ffmpeg-probe.service
 journalctl -u anas-ffmpeg-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
 
-# The rollback helper restores the legacy worker layout before the real
-# installer upgrades it again. An optional locally built pre-rename binary
-# proves the old subcommand too; CI always tests both unit layouts.
-worker_installer=/opt/a-nas/current/install-ffmpeg-units.sh
-install -d /tmp/worker-legacy /opt/a-nas/releases/worker-legacy
-for suffix in .socket @.service .slice; do
-  sed -e 's/anas-ffmpeg/anas-media/g' -e 's/a-nas-ffmpeg/a-nas-media/g' \
-    -e 's/anasffmpeg/anasmedia/g' -e 's/ffmpeg.sock/media.sock/g' \
-    "$release/anas-ffmpeg-system$suffix" > "/tmp/worker-legacy/anas-media-system$suffix"
-done
-if [[ -x /src/build/legacy-anas-api ]]; then
-  install -m 0755 /src/build/legacy-anas-api /opt/a-nas/releases/worker-legacy/anas-api
-  sed -i 's/ ffmpeg-worker$/ media-worker/' /tmp/worker-legacy/anas-media-system@.service
-  echo 'legacy worker validation: pre-rename binary'
-else
-  install -m 0755 /src/build/anas-api /opt/a-nas/releases/worker-legacy/anas-api
-  echo 'legacy worker validation: old unit layout, current decoder binary'
-fi
-# Match the Product Service unit's SupplementaryGroups, not the account's
-# login groups: a-nas deliberately has no permanent photo-store membership.
-cat > /tmp/probe-worker.py <<'PY'
-import array, json, socket, struct, sys
-
-with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-    conn.settimeout(15)
-    conn.connect(sys.argv[1])
-    with open('/tmp/heat.mkv', 'rb') as source:
-        body = json.dumps({'op': 'probe', 'stream': 0, 'audioTrack': 0}).encode()
-        assert conn.sendmsg([struct.pack('>I', len(body))],
-                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [source.fileno()]))]) == 4
-        conn.sendall(body)
-        with conn.makefile('rb') as reply:
-            size = struct.unpack('>I', reply.read(4))[0]
-            assert json.loads(reply.read(size))['ok']
-            assert json.load(reply)['streams']
-PY
-check "incomplete rollback stage is rejected before stopping the active socket" \
-  fails "$worker_installer" /tmp/nonexistent-worker-release
-check "failed rollback preflight leaves the new worker working" \
-  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
-systemctl stop anas-api anas-photos anas-shares anas-family
-"$worker_installer" /tmp/worker-legacy
-ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
-systemctl enable --now anas-media.socket
-check "rollback restores a working worker through the legacy unit and release link" \
-  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-media/media.sock
-check "rollback removes the new worker units, socket and tmpfiles configuration" \
-  test ! -e /etc/systemd/system/anas-ffmpeg.socket -a ! -e /etc/systemd/system/anas-ffmpeg@.service \
-  -a ! -e /etc/systemd/system/system-anasffmpeg.slice -a ! -e /run/a-nas-ffmpeg/ffmpeg.sock \
-  -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
-check "rollback restores legacy client environment and eight admission slots" \
-  test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
 # Web search turned off before an upgrade stays off after it.
 touch /var/lib/a-nas-host/web-search-disabled
 systemctl stop anas-search
-stage /tmp/worker-upgrade
-if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
-  cat /tmp/worker-upgrade.log
-  exit 1
-fi
-for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the release's packages install again over themselves" reinstall again
 check "web search turned off stays off across an upgrade" test "$(systemctl is-active anas-search || true)" = inactive
 rm -f /var/lib/a-nas-host/web-search-disabled
 systemctl start anas-search
-check "upgrade restores a working worker through the new unit and release link" \
-  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
-check "upgrade removes legacy worker units, socket and tmpfiles configuration" \
-  test ! -e /etc/systemd/system/anas-media.socket -a ! -e /etc/systemd/system/anas-media@.service \
-  -a ! -e /etc/systemd/system/system-anasmedia.slice -a ! -e /run/a-nas-media/media.sock \
-  -a ! -e /etc/tmpfiles.d/a-nas-media.conf
-check "upgrade restores new client environment and eight admission slots" \
-  test "$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(find /run/a-nas-ffmpeg/slots -type f | wc -l)" = 2:0:8
-check "music decodes through the new worker after upgrading the old layout" bash -c \
+check "the upgrade copied the databases first" \
+  test -n "$(find /var/backups/a-nas -path '*/system-disk/control.db')" -a -n "$(find "$data/.a-nas-backups" -path '*/photos/catalog.db')"
+check "the databases' copies are root's alone" \
+  test "$(stat -c '%U %a' /var/backups/a-nas):$(stat -c '%U %a' "$data/.a-nas-backups")" = 'root 700:root 700'
+# The data volume's copies share the catalog's blocks: reflinked, not
+# written again (btrfs).
+check "the photo catalog's copy stays on the data volume" \
+  test -z "$(find /var/backups/a-nas -name catalog.db)" -a "$(stat -f -c %T "$data/.a-nas-backups")" = btrfs
+# A copy holds no -shm: SQLite rebuilds it from the log, and a stale one must
+# never be restored.
+check "the databases' copies leave out the log's index" \
+  test -z "$(find /var/backups/a-nas "$data/.a-nas-backups" -name '*-shm')"
+check "an upgrade keeps eight FFmpeg admission slots" test "$(find /run/a-nas-ffmpeg/slots -type f | wc -l)" = 8
+check "music decodes through the worker after an upgrade" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
 
 # --- One password for Web and SMB.
@@ -1936,32 +1835,10 @@ check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice
 
 # --- Screen saver videos are long-lived media, not part of a release (ADR 0014).
 pools=/var/lib/a-nas/screensavers
-installer=/opt/a-nas/current/install-media-pool.sh
+installer=/usr/lib/a-nas/install-media-pool.sh
 stager=/tmp/anas-dev # the staging account's home
 staged=$stager/apps/a-nas/screensavers
 uploads=0
-# install_release NAME: the real installer on the release staged in /tmp/NAME,
-# then wait until the restarted Product Service answers and the photo service
-# is ready again.
-# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-install_release() {
-  local since
-  since=$(date '+%Y-%m-%d %H:%M:%S')
-  if ! bash /src/scripts/install-v1.0.1-system-services.sh "/tmp/$1" "$1" "$iface" >"/tmp/$1.log" 2>&1; then
-    echo "  the installer failed; the end of /tmp/$1.log:"
-    tail -n 30 "/tmp/$1.log" | sed 's/^/  | /'
-    return 1
-  fi
-  for _ in $(seq 1 150); do
-    curl -fsS "$api/healthz" >/dev/null 2>&1 &&
-      journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
-    sleep 0.2
-  done
-  echo "  the installer finished, but the services were not ready within 30 seconds:"
-  curl -sS -o /dev/null -w '  healthz answered %{http_code}\n' "$api/healthz" || true
-  systemctl status --no-pager --lines=10 anas-api anas-photos | sed 's/^/  | /'
-  return 1
-}
 pool_size() { curl -fsS "$api/local-console/screensavers" | jq '.videos | length'; }
 current_pool() { readlink "$pools/current" || true; }
 # The local console reads a pool's list only when its page opens, so the media
@@ -2027,15 +1904,14 @@ kiosk_before=$(kiosk_starts)
 check "a staged pool installs" quiet "$installer" screensavers "$pool_a" "$staged"
 check "the install leaves a local console that is not running alone" test "$(kiosk_starts)" = "$kiosk_before"
 check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
-stage /tmp/upgrade
-check "a release installs" install_release upgrade
+model_inode=$(stat -c %i "$(readlink /usr/lib/a-nas/ai/model.litertlm)")
+check "a release installs" reinstall upgrade
 check "the upgrade keeps the operator's terminal opt-in" \
-  test "$(grep -cx 'ANAS_TERMINAL=enabled' /etc/a-nas/anas-api.env):$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = 1:true
+  test "$(grep -cx 'ANAS_TERMINAL=enabled' /etc/a-nas/site.conf):$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = 1:true
 check "the upgrade keeps the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
-check "the upgrade copies neither the models nor the runtime again" \
+check "the upgrade leaves the models and runtimes as their packages installed them" \
   test "$(find /opt/a-nas/models /opt/a-nas/ai-runtimes -mindepth 1 -maxdepth 1 | wc -l)" = "$((models_kept + 1))" \
-  -a "$(readlink /opt/a-nas/current/ai/model.litertlm)" = "$(readlink /opt/a-nas/releases/system-test/ai/model.litertlm)" \
-  -a "$(readlink /opt/a-nas/current/ai/detector.onnx)" = "$(readlink /opt/a-nas/releases/system-test/ai/detector.onnx)"
+  -a "$(stat -c %i "$(readlink /usr/lib/a-nas/ai/model.litertlm)")" = "$model_inode"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "search reaches the upgraded release's Worker" semantic_search 猫
 stage_pool "$v2" "$v3"
@@ -2049,7 +1925,7 @@ check "installing the same pool again changes nothing" quiet "$installer" screen
 check "a stand-in local console runs for the screen saver checks" kiosk_stand_in start
 run=$(kiosk_run)
 check "switching back to an installed pool needs no staging, by the old name too" \
-  quiet /opt/a-nas/current/install-screensavers.sh "$pool_a" /nonexistent
+  quiet /usr/lib/a-nas/install-screensavers.sh "$pool_a" /nonexistent
 check "the media rollback plays the old pool" test "$(current_pool)" = "pools/$pool_a"
 check "the switch restarts the running local console" kiosk_restarted "$run"
 v4=$(new_video)
@@ -2063,22 +1939,8 @@ check "the refused pool leaves the local console running as it was" test "$(kios
 check "the stand-in local console goes away" kiosk_stand_in stop
 cp "$staged/pools/$pool_b.sums" "$staged/pools/0123456789abcdef.sums"
 check "a manifest that is not the named pool is refused" fails "$installer" screensavers 0123456789abcdef "$staged"
-# An installer before issue #49 left a pool named after its release, and no
-# "current".
-legacy=$pools/legacy-release
-install -d -o root -g a-nas -m 0750 "$legacy"
-v5=$(new_video)
-v6=$(new_video)
-install -o root -g a-nas -m 0640 "/tmp/$v5.mp4" "$legacy/screensaver-000.mp4"
-install -o root -g a-nas -m 0640 "/tmp/$v6.mp4" "$legacy/screensaver-001.mp4"
-rm "$pools/current"
-stage /tmp/first-upgrade
-check "the first upgrade from an older installer installs" install_release first-upgrade
-check "it adopts the pool that installer left, by linking" \
-  test "$(pool_size):$(stat -c %h "$legacy/screensaver-000.mp4")" = 2:3
-check "the adopted pool is the current one" grep -q "$v6" "$pools/current/SHA256SUMS"
 check "the Product Service reads the current pool" \
-  grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" /etc/a-nas/anas-api.env
+  grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" <(product_environment)
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
 
@@ -2241,19 +2103,18 @@ printf '%s\n' '# The internet entry (docs/runbooks/enable-internet-access.md).' 
   "ANAS_INTERNET_HOST=$internet_host" 'ANAS_INTERNET_RELAY_ENDPOINT=192.0.2.1:51820' \
   "ANAS_INTERNET_RELAY_PUBLIC_KEY=$(wg genkey | wg pubkey)" 'ANAS_INTERNET_TUNNEL_PREFIX=fd78:1295:a3fe:1::/64' \
   > /etc/a-nas/internet.env
-stage /tmp/internet-on
-check "the installer turns the internet entry on" install_release internet-on
+check "a-nas-site turns the internet entry on" site_apply internet-on
 check "the Product Service has a loopback listener for the internet entry" \
-  bash -c "grep -Fqx 'ANAS_INTERNET_HTTP_ADDR=127.0.0.1:8081' /etc/a-nas/anas-api.env && ss -Hltn 'sport = :8081' | grep -Fq 127.0.0.1:8081"
+  bash -c "systemctl show -p Environment --value anas-api | grep -Fq ANAS_INTERNET_HTTP_ADDR=127.0.0.1:8081 && ss -Hltn 'sport = :8081' | grep -Fq 127.0.0.1:8081"
 check "Caddy serves the domain on the NAS's tunnel address only" \
   bash -c "grep -Fqx '$internet_host {' /etc/caddy/Caddyfile && grep -Fqx '	bind $nas_tunnel' /etc/caddy/Caddyfile"
 check "Caddy takes PROXY headers only from the relay" grep -Fqx "				allow $relay_tunnel/128" /etc/caddy/Caddyfile
 check "the tunnel's only peer is the relay, at one address" \
   bash -c "grep -Fqx 'AllowedIPs = $relay_tunnel/128' /etc/wireguard/wg-anas.conf && grep -Fqx 'Address = $nas_tunnel/64' /etc/wireguard/wg-anas.conf"
 check "the tunnel's key is root's alone" test "$(stat -c '%U %a' /etc/wireguard/wg-anas.key)" = 'root 600'
-check "the installer prints this NAS's tunnel public key" \
-  grep -Fq "this NAS's tunnel public key: $(wg pubkey < /etc/wireguard/wg-anas.key)" /tmp/internet-on.log
-check "the tunnel's firewall unit is accepted by systemd" verified /etc/systemd/system/anas-internet-firewall.service
+check "anas-site.service logs this NAS's tunnel public key" \
+  grep -Fq "this NAS's tunnel public key: $(wg pubkey < /etc/wireguard/wg-anas.key)" <(journalctl -u anas-site -o cat --no-pager)
+check "the tunnel's firewall unit is accepted by systemd" verified /usr/lib/systemd/system/anas-internet-firewall.service
 check "the tunnel's firewall table is loaded" quiet nft list table inet anas_internet
 check "Caddy may bind the tunnel address before the tunnel is up" test "$(sysctl -n net.ipv6.ip_nonlocal_bind)" = 1
 check "the LAN entry still serves plain HTTP" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
@@ -2344,10 +2205,9 @@ check "the internet entry opens no terminal" \
 # Removing the file turns the entry off again; the tunnel's key stays.
 tunnel_key=$(wg pubkey < /etc/wireguard/wg-anas.key)
 rm /etc/a-nas/internet.env
-stage /tmp/internet-off
-check "the installer turns the internet entry off" install_release internet-off
+check "a-nas-site turns the internet entry off" site_apply internet-off
 check "the Product Service no longer listens for the internet" \
-  bash -c "! grep -q '^ANAS_INTERNET_' /etc/a-nas/anas-api.env && ! ss -Hltn 'sport = :8081' | grep -q ."
+  bash -c "! systemctl show -p Environment --value anas-api | grep -q ANAS_INTERNET_ && ! ss -Hltn 'sport = :8081' | grep -q ."
 check "Caddy serves the LAN entry alone again" cmp -s /src/deploy/caddy/Caddyfile /etc/caddy/Caddyfile
 check "the tunnel and its firewall are gone" \
   bash -c "! test -e /etc/wireguard/wg-anas.conf && ! nft list table inet anas_internet >/dev/null 2>&1"
@@ -2355,11 +2215,45 @@ check "the tunnel's key stays for the next time" test "$(wg pubkey < /etc/wiregu
 check "the LAN entry still serves after the internet entry is gone" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
 ip link del anas-relay
 
-# --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
+# --- The AI assistant's sandbox on the package's accounts, spaces and ACLs (#115).
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/system-test.sh
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/disable-system-test.sh
+
+# --- Upgrade, roll back and upgrade again (ADR 0034), with apt from the
+# signed repository. The next release adds a step to control.db; rolling back,
+# this release takes the database back with the Down that step stored.
+# probe_table: control.db's user_version and whether it has the next
+# release's table.
+probe_table() {
+  python3 - <<'PY'
+import sqlite3
+db = sqlite3.connect("file:/var/lib/a-nas/control.db?mode=ro", uri=True)
+version = db.execute("PRAGMA user_version").fetchone()[0]
+probe = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'rollback_probe'").fetchone()[0]
+print(f"{version}:{probe}")
+PY
+}
+check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
+check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the upgrade copied the databases first" \
+  test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
+check "apt rolls back to this release" reinstall rollback-this "$version"
+check "this release took the database back with the newer release's Down" test "$(probe_table)" = 0:0
+check "a-nas-check passes after the rollback" quiet a-nas-check
+login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+check "a-nas-check passes on the previous release" quiet a-nas-check
+check "apt upgrades to this release again" reinstall upgrade-again "$version"
+check "a-nas-check passes after upgrading again" quiet a-nas-check
+login alice "$new_password" /tmp/alice.jar >/dev/null || true
+check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "two copies of the databases stay, under the same names on both disks" \
+  test "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" = \
+  "$(find "$data/.a-nas-backups" -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" \
+  -a "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' | wc -l)" = 2
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

@@ -182,11 +182,10 @@ if ($Kind -eq 'screensavers') {
 }
 Write-Host "The $label pool $pool is staged on $NasHost. Install it as root:"
 if ($Kind -eq 'screensavers') {
-    # Every release since ADR 0014 has this name, including an older one the
-    # product runs or was rolled back to; install-media-pool.sh is newer.
-    Write-Host "  /opt/a-nas/current/install-screensavers.sh $pool"
+    # The a-nas package installs both names (docs/runbooks/operate-local-kiosk.md).
+    Write-Host "  /usr/lib/a-nas/install-screensavers.sh $pool"
 } else {
-    Write-Host "  /opt/a-nas/current/install-media-pool.sh $Kind $pool"
+    Write-Host "  /usr/lib/a-nas/install-media-pool.sh $Kind $pool"
 }
 
 } finally {

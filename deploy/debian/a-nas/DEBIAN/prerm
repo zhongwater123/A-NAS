@@ -1,0 +1,13 @@
+#!/bin/bash
+# prerm of a-nas (ADR 0034). Removing the product stops its units; an upgrade
+# or rollback leaves that to the next release's preinst, which stops the
+# services that write the databases before it copies them.
+set -euo pipefail
+
+if [[ "${1:-}" == remove && -d /run/systemd/system ]]; then
+  systemctl stop 'anas-kiosk@*.service' anas-search.service anas-search-dns.path anas-search-dns.service \
+    anas-api.service anas-photos.service anas-shares.service anas-family.service anas-host-agent.service \
+    anas-ai.socket anas-ai.service anas-ffmpeg.socket 'anas-vectors-proxy@*.socket' 'anas-vectors-proxy@*.service' \
+    'anas-vectors@*.service' anas-container-agent.service anas-internet-firewall.service anas-site.service || true
+fi
+exit 0

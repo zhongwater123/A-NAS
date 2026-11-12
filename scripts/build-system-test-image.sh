@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the Debian 13 image for scripts/system-test.sh: systemd as PID 1 plus
 # what the a-nas-host package depends on (ADR 0031). The system test installs
-# the release's a-nas-host on it with dpkg, which fails when a dependency the
-# package lists is missing. It is assembled with
+# the release's packages on it with apt from a local repository, which fails
+# when a dependency a package lists is missing. GnuPG and aptly in it make
+# that repository (scripts/apt-repository.sh). It is assembled with
 # debootstrap from deb.debian.org, so it works where Docker Hub is not
 # reachable; BUILDER is any local Debian image that can install debootstrap.
 #
@@ -21,7 +22,10 @@ packages+=$(sed -n 's/^Depends: //p' "$repo/deploy/debian/a-nas-host/DEBIAN/cont
 packages+=nftables,wireguard-tools,tini,socat,ripgrep,
 # Only for the tests: SMB and HTTP clients, JSON and YAML edits, HEIC encoding
 # for fixtures, and chattr, which scripts/root-integration-test.sh needs.
-packages+=smbclient,curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,yq,libheif-examples,libheif-plugin-x265,e2fsprogs
+packages+=smbclient,curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,yq,libheif-examples,libheif-plugin-x265,e2fsprogs,
+# The signed apt repository that make release and the system test make
+# (scripts/apt-repository.sh).
+packages+=aptly,gnupg
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

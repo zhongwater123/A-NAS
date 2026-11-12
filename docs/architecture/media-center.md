@@ -94,7 +94,7 @@ anas-api（a-nas）
 
 产品服务（影视中心、音乐、文件预览）、相册服务与分享服务共用同一个 FFmpeg Worker。原先各自限流、互不知道对方，超过 `MaxConnections=8` 的连接被 systemd 接受后立即关闭，调用方读到 EOF 便当作 Worker 不在，后台任务因此永久失败（[#168](https://github.com/zhongwater123/A-NAS/issues/168)，[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 
-- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/ffmpegworker/admission.go)）。槽位是 `/run/a-nas-ffmpeg/slots/0`…`7` 八个文件，由安装器的 tmpfiles 条目创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务都通过主组或 systemd 单元的 `SupplementaryGroups` 获得 `a-nas-photos` 组身份，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
+- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/ffmpegworker/admission.go)）。槽位是 `/run/a-nas-ffmpeg/slots/0`…`7` 八个文件，由 `a-nas` 软件包的 tmpfiles 条目（[`deploy/tmpfiles.d/a-nas.conf`](../../deploy/tmpfiles.d/a-nas.conf)）创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务都通过主组或 systemd 单元的 `SupplementaryGroups` 获得 `a-nas-photos` 组身份，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
 - **优先级**：交互请求（预览、海报、导入时的探测、字幕、实况照片的动态片段）可用全部 8 个；流（视频转换、音乐解码）最多 6 个，始终给交互留 2 个；后台工作（相册缩略图与 AI 输入、影视中心的探测与截图、音乐扫描）最多 2 个。每种优先级取自己范围内编号最高的空槽，把低编号留给其他优先级。后台请求一直等到有空槽或服务停止，不会因为忙而失败；交互等 20 秒、流等 5 秒，仍没有空槽时返回 `ErrBusy`（也是 `ErrUnavailable`，界面照旧提示稍后再试）。本进程放开的槽位立即唤醒等待者，其他进程放开的由轮询发现（交互 50 ms、流 100 ms、后台 1 秒）。调用方用 `WithPriority` 标记后台工作；`stream` 与 `audio` 默认是流，其余默认是交互。
 - **时限从取得槽位起算**：调用方用 `WithTimeout` 给出的时限不包括排队时间，例如 HEIC 解码与视频帧 30 秒、导入时的探测 15 秒、动态片段 45 秒。原先相册的 30 秒包括等待自己仅有的 2 个解码位，而播放中的实况照片整段占着其中一个，前台播放会让后台任务超时。
 - **连接上限与内存**：`anas-ffmpeg.socket` 的 `MaxConnections=16` 高于槽位数，多出的部分留给调用方已放开槽位、仍在退出的 Worker，正常情况下 systemd 不再丢弃连接。所有 Worker 实例在 [`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice) 中共用 `MemoryMax=3G`（每个实例仍为 2G），超出时内核先回收、再结束这个 slice 中的 Worker，而不是设备上的其他进程；slice 位于 `system.slice` 之下而不是后台的 `anas.slice`，因为播放有人在看，`CPUWeight=50`、`IOWeight=50` 让它在争用时让出 CPU 与磁盘。权重只在同级之间比较，所以写在 slice 上，而不是彼此同级的实例上。
@@ -102,8 +102,8 @@ anas-api（a-nas）
 
 ## 关联
 
-- 改名升级与回滚：[Worker 单元安装器](../../scripts/install-ffmpeg-units.sh)、[回滚手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。安装器先停止使用方和旧 Worker，再更换单元、套接字、准入目录与环境变量；旧 release 仍使用 `anas-media` 布局。维护会中断当前播放，完成后重新播放。
+- 改名升级与回滚：安装器时期由 `scripts/install-ffmpeg-units.sh`（已删除）先停止使用方和旧 Worker，再更换单元、套接字、准入目录与环境变量；更早的 release 使用 `anas-media` 布局。软件包的各个版本都只带 `anas-ffmpeg` 的单元，第一次接管安装器时把 `anas-media` 的旧单元移到 `/var/backups/a-nas/installer-layout/`；回滚见[回滚手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。维护会中断当前播放，完成后重新播放。
 - [影视中心规格](../specs/media-center.md)、[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[存储与文件架构](storage-and-files.md)
 - 代码：[`internal/media`](../../internal/media)、[`internal/mediaplay`](../../internal/mediaplay)、[`internal/ffmpegworker`](../../internal/ffmpegworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
-- 部署：[`anas-ffmpeg.socket`](../../deploy/systemd/system/anas-ffmpeg.socket)、[`anas-ffmpeg@.service`](../../deploy/systemd/system/anas-ffmpeg@.service)、[`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 部署：[`anas-ffmpeg.socket`](../../deploy/systemd/system/anas-ffmpeg.socket)、[`anas-ffmpeg@.service`](../../deploy/systemd/system/anas-ffmpeg@.service)、[`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice)、[软件包](../../scripts/build-packages.sh)、[系统测试](../../scripts/system-test.sh)
 - 调查：[FFmpeg Worker 的共享预算与后台任务的永久失败](../investigations/2026-10-21-media-worker-shared-budget.md)

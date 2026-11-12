@@ -216,7 +216,7 @@ export function stageOf(type: string, payload?: GatewayPayload): HostWorkStatusS
   return stepOf(type, payload)?.stage;
 }
 
-/** This window started a turn of the conversation (it registered as its browser and prompts). */
+/** This window started a turn of the conversation (it attached as its browser and prompts). */
 export function startTurn(sessionId: string): void {
   prompting.add(sessionId);
   turns.set(sessionId, { startedAt: Date.now(), steps: 0, tools: 0, waited: false, submitted: false });
