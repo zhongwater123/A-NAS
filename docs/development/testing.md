@@ -150,7 +150,7 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
 
 root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，从签名软件源用 apt 安装 A-NAS 的软件包（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)），再按用户检查：
 
-- 软件包：先装上一 release、再升级到本 release，`a-nas-check` 通过，`dpkg --verify` 没有差异；软件源里被改过的包、签名之后被改过的索引，apt 都拒绝；本机设置从 `site.conf` 经 `a-nas-site` 生效；升级前数据库被复制；
+- 软件包：先装上一 release、再升级到本 release，`a-nas-check` 通过，`dpkg --verify` 没有差异；软件源里被改过的包、签名之后被改过的索引，apt 都拒绝；本机设置从 `site.conf` 经 `a-nas-site` 生效；升级前数据库被复制；升级带上本版本的 `a-nas-archive-keyring`，回滚不降级它；
 - 装好的单元经与 NAS 相同版本的 `systemd-analyze verify` 校验，警告也算失败。`make ops-check` 的 grep 只核对单元中的约定值，不做这项：校验要求单元启动的命令与依赖的单元都存在，开发机与 CI 的检查作业没有它们；
 - Host Agent 保留 `CAP_SETUID`/`CAP_SETGID` 并通过启动自检；
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
@@ -183,7 +183,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）与 Docker、Caddy 的软件包依赖的 Debian 包，另加助手沙箱的工具与只供测试用的工具；Docker 与 Caddy 本身不在镜像中，由测试从软件源安装。
 - 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包与 `scripts/fetch-upstream-packages.sh` 取得的 Docker、Caddy 软件包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
-- CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
+- CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。同一作业还运行 `make release-key-test`：用一次性密钥走一遍存档密钥的生成、两台机器签名、吊销与增加子密钥，由镜像中的 apt 判断接受还是拒绝（[管理发布签名密钥](../runbooks/manage-release-key.md#验证)）。
 - 每条检查在它保护的东西坏掉时都要失败（[#423](https://github.com/zhongwater123/A-NAS/issues/423)）：
   - 一条检查只查一个单元，因为 `systemctl is-active A B` 在任一单元运行时就成功；
   - 拒绝要看到拒绝本身：
