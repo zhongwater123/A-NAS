@@ -11,6 +11,8 @@
 #       docs/runbooks/manage-release-key.md).
 #   apt-repository.sh fingerprint GNUPGHOME
 #       prints the fingerprint of GNUPGHOME's primary key.
+#   apt-repository.sh signing-key GNUPGHOME
+#       prints the fingerprint of the key in GNUPGHOME that signs.
 #   apt-repository.sh keyring OUT VERSION KEY
 #       builds a-nas-archive-keyring at VERSION into OUT: the public key KEY,
 #       a GnuPG home or a key file such as deploy/release/a-nas-archive-key.asc,
@@ -69,6 +71,10 @@ case "${1:-}" in
     [[ $# -eq 2 ]] || { echo "usage: $0 fingerprint GNUPGHOME" >&2; exit 2; }
     fingerprint "$(absolute "$2")"
     ;;
+  signing-key)
+    [[ $# -eq 2 ]] || { echo "usage: $0 signing-key GNUPGHOME" >&2; exit 2; }
+    signing_key "$(absolute "$2")"
+    ;;
   keyring)
     [[ $# -eq 4 ]] || { echo "usage: $0 keyring OUT VERSION KEY" >&2; exit 2; }
     out=$(absolute "$2")
@@ -79,7 +85,8 @@ case "${1:-}" in
     install -d -m 0755 "$root/DEBIAN" "$root/usr/share/keyrings" "$root/usr/share/doc/a-nas-archive-keyring"
     sed "s/@VERSION@/$version/g" "$repo_root/deploy/debian/a-nas-archive-keyring/DEBIAN/control" >"$root/DEBIAN/control"
     public_key "$4" "$root/usr/share/keyrings/a-nas-archive-keyring.pgp"
-    cp "$repo_root/deploy/apt/a-nas.sources" "$root/usr/share/doc/a-nas-archive-keyring/"
+    cp "$repo_root/deploy/apt/a-nas.sources" "$repo_root/deploy/apt/a-nas-github.sources" \
+      "$root/usr/share/doc/a-nas-archive-keyring/"
     printf 'The public key of the A-NAS repository; see https://github.com/zhongwater123/A-NAS\n' \
       >"$root/usr/share/doc/a-nas-archive-keyring/copyright"
     chmod 0644 "$root/DEBIAN/control" "$root/usr/share/keyrings/a-nas-archive-keyring.pgp" \
@@ -191,7 +198,7 @@ case "${1:-}" in
       publish "$dist" "$(IFS=,; echo "${sign[*]}")" "${debs[@]}"
     ;;
   *)
-    sed -n '2,34p' "$0"
+    sed -n '2,36p' "$0"
     exit 2
     ;;
 esac
