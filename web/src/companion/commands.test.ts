@@ -10,6 +10,7 @@ import {
 } from "./commands";
 import { companionLock, companionPlayback, resetCompanionHost } from "./host";
 import { PLAYBACK_RATE } from "./petCard";
+import { setCompanionMode } from "./quiet";
 import {
   companionState,
   reportEvent,
@@ -58,6 +59,7 @@ afterEach(() => {
   resetCompanionCommands();
   setCompanionReady(false);
   setCompanionPaused(false);
+  setCompanionMode("normal");
   cover.up = false;
 });
 
@@ -286,6 +288,19 @@ describe("what VNAS says and where it puts the companion", () => {
 });
 
 describe("sleep", () => {
+  it("cannot wake a companion the member asked to be quiet, nor take its lock", async () => {
+    await run("sleep");
+    setCompanionMode("quiet");
+    const before = writes();
+    expect(await run("wake")).toEqual(refused("member-quiet"));
+    expect(await run("lock")).toEqual(refused("member-quiet"));
+    expect(writes()).toBe(before);
+    expect(leaf("sleep")).toMatchObject({ sleeping: true });
+    // The member wakes it: VNAS may again.
+    setCompanionMode("normal");
+    expect(await run("wake")).toEqual(ok({ sleeping: false, changed: true }));
+  });
+
   it("puts it to sleep with dsh-pet's sleep animations and wakes it, each once", async () => {
     expect(await run("sleep")).toEqual(ok({ sleeping: true, changed: true }));
     expect(leaf("sleep")).toEqual({ sleeping: true, start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" });

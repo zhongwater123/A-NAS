@@ -55,6 +55,7 @@ import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { isTerminalStatus } from "./dsh-pet/host/playback/status";
+import { pickSleepNames } from "./dsh-pet/host/sleep";
 import { DRAG_THRESHOLD, PET_REF_WIDTH, ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { bodyPixelBox } from "./dsh-pet/shared/physics";
 import { pick } from "./dsh-pet/shared/pickers";
@@ -76,6 +77,7 @@ import {
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
 import { companionLock, companionPlayback, companionSleep } from "./host";
+import { memberQuiet, setCompanionMode, useCompanionMode } from "./quiet";
 import { clearBox, withinArea } from "./stepAside";
 import {
   COMPANION_PET,
@@ -257,6 +259,24 @@ function firstRead(state: PollState): { baseline: Record<string, number>; leaves
   return { baseline: flattenCounters(state), leaves };
 }
 
+/**
+ * Quiet on this device since before the companion came (a reload, a new sign-in): it is asleep already,
+ * written to the page's state before the card first reads it. Its sleep starts with the loop, so the card
+ * shows neither its idle clip nor a yawn first.
+ */
+function asleepFromTheStart(animations: Animations): string | null {
+  if (!memberQuiet()) return null;
+  const own = companionState.read().pets[COMPANION_PET];
+  if (own && readSleep(own.sleep)?.sleeping) return null;
+  const names = pickSleepNames(animations);
+  if (!names) return null;
+  companionSleep.enter(COMPANION_PET, { ...names, start: names.loop });
+  return names.loop;
+}
+
+/** The longest the companion waits for its wake-up clip to play before it tells what waited. */
+const WAKE_CLIP_WAIT_MS = 12_000;
+
 /** The lock leaf holds the pet now: a stale one whose time is past does not (as lock-freeze.ts reads it). */
 function lockHeld(leaf: StateLeaf | undefined): boolean {
   const lock = leaf ? readLock(leaf) : null;
@@ -268,7 +288,7 @@ function lockHeld(leaf: StateLeaf | undefined): boolean {
  * idle, and none while the pet sleeps or is locked, as the card then does not follow the stages either.
  * A success or error shows as long as its bubble line (BUBBLE_DURATION_MS), not the 60 s the stage stays.
  */
-function useWorkSign(leaves: Leaves): string | undefined {
+function useWorkSign(leaves: Leaves, quiet: boolean): string | undefined {
   const stage = leaves.workStatus?.state ?? null;
   const tick = leaves.workStatusTick;
   const terminal = stage === "success" || stage === "error";
@@ -288,6 +308,8 @@ function useWorkSign(leaves: Leaves): string | undefined {
     return () => window.clearTimeout(timer);
   }, [lockEnds]);
   if (stage === null || (terminal && over === tick)) return undefined;
+  // Quiet at the member's asking: VNAS at work shows as a still dot, and nothing else does.
+  if (leaves.sleep?.sleeping && quiet) return terminal ? undefined : "quiet";
   if (leaves.sleep?.sleeping || (lockEnds !== 0 && unlocked !== lockEnds)) return undefined;
   return stage;
 }
@@ -303,9 +325,12 @@ interface Away {
 
 const nothingAway = (): Away => ({ ended: null, results: new Map() });
 
-/** Whether the member is away from the companion: it rests, the page is hidden, or the screen saver is up. */
+/**
+ * Whether the member is away from the companion: it rests, the page is hidden, the screen saver is up, or
+ * the member asked it to be quiet (asleep until they wake it).
+ */
 function awayFrom(paused: boolean): boolean {
-  return paused || document.hidden || localConsoleCovered();
+  return paused || document.hidden || localConsoleCovered() || memberQuiet();
 }
 
 /** How long a turn has run, as the companion says it: "1 分 05 秒", or "12 秒" under a minute. */
@@ -439,19 +464,24 @@ function Card({
 }) {
   /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
   const [walkable, setWalkable] = useState(true);
+  const [first] = useState(() => {
+    const opening = asleepFromTheStart(animations);
+    return { ...firstRead(companionState.read()), opening };
+  });
+  const [leaves, setLeaves] = useState(first.leaves);
+  // Asleep from the start: the card's first clip, its idle list's first, is the sleep's loop while it sleeps.
+  const opening = first.opening !== null && leaves.sleep?.sleeping === true ? first.opening : null;
   const cfg = useMemo<RuntimePet>(
     () => ({
       ...pet,
-      animations,
+      animations: opening ? { ...animations, idle: [opening, ...animations.idle] } : animations,
       animationWeights: walkable ? companionWeights : { ...companionWeights, move: 0 },
       ...(pool ? { assetVersion: pool } : {}),
     }),
-    [animations, pool, walkable],
+    [animations, opening, pool, walkable],
   );
   const arena = useRef<PetCardProps["arena"]["current"]>({ slots: {} });
   const clipSpeed = useClipSpeed();
-  const [first] = useState(() => firstRead(companionState.read()));
-  const [leaves, setLeaves] = useState(first.leaves);
   const [paused, setPaused] = useState(() => document.hidden);
   const pausedRef = useRef(paused);
   /**
@@ -478,6 +508,8 @@ function Card({
     return () => window.clearTimeout(timer);
   }, [told]);
   const comeBack = useRef(() => {});
+  /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
+  const wakingUp = useRef(false);
   /** Where the companion was last left, null while it is in its corner. */
   const placed = useRef<Center | null>(null);
   /**
@@ -861,11 +893,14 @@ function Card({
   // nothing asleep or locked. On the screen the family shares, no task's name.
   useEffect(() => {
     comeBack.current = () => {
-      if (document.hidden || localConsoleCovered()) return;
-      // Back during a turn: what waits stays until the turn ends, and is told then.
+      if (document.hidden || localConsoleCovered() || wakingUp.current) return;
+      // Back during a turn: what waits stays until the turn ends, and is told then. Asleep (quiet, or put to
+      // sleep by VNAS) or locked, it stays until the companion is free.
       const state = companionState.read();
       const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
       if (stage !== null && stage !== "success" && stage !== "error") return;
+      const own = state.pets[COMPANION_PET];
+      if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const { ended, results } = away.current;
       away.current = nothingAway();
       const now = Date.now();
@@ -873,8 +908,6 @@ function Card({
       const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
       const outcome = ended && recent(ended.at) ? ended.state : null;
       if (outcome === null && waiting.size === 0) return;
-      const own = state.pets[COMPANION_PET];
-      if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const tell = () => {
         toldAt.current = Date.now();
       };
@@ -935,8 +968,58 @@ function Card({
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.
   const say =
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
-  const sign = useWorkSign(leaves);
+  const quiet = useCompanionMode() === "quiet";
+  const sign = useWorkSign(leaves, quiet);
   const work = told?.sign ?? sign;
+
+  // Quiet at the member's asking (Settings, or Esc on it): it goes to sleep, its sleep's start and loop, and
+  // stays asleep until the member wakes it, by a click or Enter (the card's own wake) or in Settings. VNAS
+  // cannot wake it (commands.ts). Woken, it tells what happened meanwhile, as on a return.
+  const asleep = leaves.sleep?.sleeping === true;
+  useEffect(() => {
+    if (!quiet || asleep) return;
+    const names = pickSleepNames(animations);
+    if (names) companionSleep.enter(COMPANION_PET, names);
+  }, [quiet, asleep, animations]);
+  const wasQuiet = useRef(quiet);
+  const wasAsleep = useRef(asleep);
+  /** It sleeps, or slept, at the member's asking: its waking is their return. */
+  const quietSleep = useRef(false);
+  /** Stops waiting for the wake-up clip. */
+  const stopWaiting = useRef(() => {});
+  useEffect(() => () => stopWaiting.current(), []);
+  useEffect(() => {
+    const [quietBefore, asleepBefore] = [wasQuiet.current, wasAsleep.current];
+    wasQuiet.current = quiet;
+    wasAsleep.current = asleep;
+    if (quiet && asleep) quietSleep.current = true;
+    // As usual again from Settings: it wakes.
+    if (quietBefore && !quiet && asleep) companionSleep.wake(COMPANION_PET);
+    if (!asleepBefore || asleep) return;
+    // Woken by the member while quiet: as usual again.
+    if (quiet) setCompanionMode("normal");
+    if (!quietSleep.current) return;
+    quietSleep.current = false;
+    // It tells once it is up: when the clip it wakes with has played, or could not, not over that clip.
+    stopWaiting.current();
+    wakingUp.current = true;
+    const layer = clipSpeed.current;
+    const up = (event?: Event) => {
+      if (event && !(event.target instanceof HTMLVideoElement)) return;
+      stopWaiting.current();
+      comeBack.current();
+    };
+    const timer = window.setTimeout(up, WAKE_CLIP_WAIT_MS);
+    layer?.addEventListener("ended", up, true);
+    layer?.addEventListener("error", up, true);
+    stopWaiting.current = () => {
+      wakingUp.current = false;
+      window.clearTimeout(timer);
+      layer?.removeEventListener("ended", up, true);
+      layer?.removeEventListener("error", up, true);
+      stopWaiting.current = () => {};
+    };
+  }, [quiet, asleep, clipSpeed]);
 
   // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
   // first that holds: a card of this window's turn waits for the member (the VNAS window comes up with the
@@ -946,6 +1029,7 @@ function Card({
   // response, as the card does. What it says also goes to the screen reader. A drag let go, a sleeping or
   // locked companion are the card's own. On the screen the family shares, no task's name or object.
   const [spoken, setSpoken] = useState("");
+
   const ask = useRef<() => boolean>(() => false);
   useEffect(() => {
     ask.current = () => {
@@ -1007,7 +1091,15 @@ function Card({
       if (ask.current()) event.stopPropagation();
     };
     const key = (event: KeyboardEvent) => {
-      if ((event.key !== "Enter" && event.key !== " ") || event.repeat || !onPet(event)) return;
+      if (event.repeat || !onPet(event)) return;
+      // Esc asks it to be quiet: it yawns and sleeps.
+      if (event.key === "Escape") {
+        event.preventDefault();
+        resume.current();
+        setCompanionMode("quiet");
+        return;
+      }
+      if (event.key !== "Enter" && event.key !== " ") return;
       if (!ask.current()) return;
       event.preventDefault();
       event.stopPropagation();
