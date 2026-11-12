@@ -53,12 +53,9 @@ export function installedAnimations(installed: (name: string) => boolean): Anima
     idle,
     turn: keep(all.turn).filter(random),
     drag: keep(all.drag),
-    // A click plays a click response or any category action. Not the text ones (noMirror): their text
-    // reads backwards when the pet faces right, and only a command turns it to the left for them.
-    clicks: [
-      ...keep(all.clicks),
-      ...categories.filter((category) => !category.noMirror).flatMap((category) => category.actions),
-    ],
+    // A click that has nothing to ask about plays a click response (petCard.tsx asks first); the
+    // category actions are left to the random chain.
+    clicks: keep(all.clicks),
     moves: { ...all.moves, actions: all.moves.actions.filter((action) => installed(action.name)) },
     categories,
     events: {
