@@ -58,6 +58,9 @@ type Options struct {
 	// Notices keeps the notices of scheduled tasks' runs; without it the
 	// member is not told of them.
 	Notices TaskNotices
+	// Tasks has a scheduled task run now; without it the window's "run now"
+	// answers that it is not available.
+	Tasks TaskRunner
 	// Accounts names the member whose assistant called on the companion
 	// socket, from the caller's UID; without it no call is taken.
 	Accounts AccountResolver

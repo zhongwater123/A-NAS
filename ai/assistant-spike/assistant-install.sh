@@ -71,13 +71,16 @@ install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
 # private network, behind the same bridge to the model: Hermes's gateway for as long as the
 # jobs that are due take (assistant-start.sh, channel cron; cron_round.py), started by
 # anas-assistant-cron-waker.service when a job is due, whether the assistant runs or not. A
-# job may take a while; Hermes's own watchdog ends one that stalls. No job has a
+# job may take a while; Hermes's own watchdog ends one that stalls. A task the member asked
+# to run now runs in such a round too (run-requests.sh), never in the instance. No job has a
 # window, so its sandbox has no companion socket and the companion tools answer that no
 # desktop is in use (#412): the Product Service could not tell its calls from those of a
 # conversation, which come from the same UID.
 sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i (spike)#' \
   -e '\#a-nas-companion-assistant#d' \
-  -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron' \
+  -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron ANAS_ASSISTANT_RUNS=/run/anas-assistant-run-now/%i' \
+  -e '/^ExecStart=/i ExecStartPre=+/bin/bash /spike/run-requests.sh take %i' \
+  -e '/^ExecStart=/a ExecStopPost=+/bin/bash /spike/run-requests.sh done %i' \
   -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
   -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
   "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-cron@.service

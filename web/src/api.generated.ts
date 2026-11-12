@@ -4242,8 +4242,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs
-         * @description 200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification.
+         * Run a task now, in a round of the member's scheduled tasks like one that is due; a paused task is resumed
+         * @description 202 once the run was asked for; it starts within seconds and goes on. The run's end shows in the task and as an assistant_task notification. 409 task_running when it is already running, task_finished when the task has no more runs.
          */
         post: operations["runAssistantTask"];
         delete?: never;
@@ -15924,20 +15924,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run ended */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        finished: true;
-                        task: components["schemas"]["AssistantTask"];
-                    };
-                };
-            };
-            /** @description The run started and goes on */
+            /** @description The run was asked for and goes on */
             202: {
                 headers: {
                     [name: string]: unknown;

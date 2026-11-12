@@ -66,9 +66,10 @@ type fakeServe struct {
 	memories [][2]string
 	skills   [][2]string
 	system   []string
-	// Alice's scheduled tasks (tasks_test.go), and how long a run takes.
-	jobs    []*fakeJob
-	runTime time.Duration
+	// Alice's scheduled tasks (tasks_test.go).
+	jobs []*fakeJob
+	// triggered counts the runs asked of the instance itself.
+	triggered int
 	// stopFirst makes session.interrupt end the turn before its answer, as
 	// Hermes's own turn thread may while the request still runs.
 	stopFirst bool

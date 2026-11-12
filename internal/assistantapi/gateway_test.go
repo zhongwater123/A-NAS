@@ -29,6 +29,7 @@ type harness struct {
 	t       *testing.T
 	serve   *fakeServe
 	changes *fakeChanges
+	tasks   *askedTasks
 	server  *httptest.Server
 	api     *Handler
 	marks   int
@@ -39,10 +40,10 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	serve := newFakeServe(t)
-	changes := &fakeChanges{}
+	changes, tasks := &fakeChanges{}, &askedTasks{}
 	api := New(Options{
 		Connector: NewSocketConnector(serve.dir, serve.dir),
-		SocketDir: serve.dir, Changes: changes,
+		SocketDir: serve.dir, Changes: changes, Tasks: tasks,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +51,7 @@ func newHarness(t *testing.T) *harness {
 		api.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
-	return &harness{t: t, serve: serve, changes: changes, server: server, api: api}
+	return &harness{t: t, serve: serve, changes: changes, tasks: tasks, server: server, api: api}
 }
 
 // frameWait bounds the wait for one frame. It only stops a hang: under the
