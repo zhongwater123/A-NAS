@@ -111,6 +111,19 @@ Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 n
 
 另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
 
+## AI Worker 的无模型测试
+
+`make ai-test` 包含协议分帧、文件描述符所有权和真实进程启动测试（[#427](https://github.com/zhongwater123/A-NAS/issues/427)）。协议测试通过真实 `socketpair` 传递描述符，并限制单次读取长度，确保头部与正文重组都会执行多轮；覆盖恰为 1 MiB、超限、截断、非法 JSON 和非对象请求。出错后检查接收端描述符已关闭，成功后检查描述符仍可读取。
+
+几何测试用已知旋转、缩放、平移和镜像点集检查人脸对齐，验证 float32 输入的双精度计算，用精确像素区域检查横向与纵向图片中动物裁剪的边界和留白；只依赖 CI 已安装的 NumPy，不加载模型。启动测试以 `python3 -m anas_ai.worker --fake --socket ...` 启动独立进程，检查 `info`，再通过 `release all` 退出。请求辅助函数有读取超时，响应提前结束时立即失败；无响应、截断头部与正文也有回归测试。
+
+单独复现：
+
+```bash
+cd ai
+python3 -m unittest tests.test_protocol tests.test_provider_geometry tests.test_worker_startup -v
+```
+
 ## Root 集成测试
 
 账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行。
@@ -212,3 +225,4 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)
+- [协议测试](../../ai/tests/test_protocol.py)、[几何测试](../../ai/tests/test_provider_geometry.py)与[启动测试](../../ai/tests/test_worker_startup.py)
