@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"io"
 	"time"
 
@@ -108,6 +109,24 @@ func UprightJPEG(src image.Image, orientation, edge, quality int) ([]byte, int, 
 		return nil, 0, 0, err
 	}
 	return buffer.Bytes(), bounds.Dx(), bounds.Dy(), nil
+}
+
+// FullJPEG encodes an image at its own size as a JPEG of the given quality,
+// in its stored orientation, which callers apply when they show it. Like
+// UprightJPEG it writes none of the original's metadata. An opaque image is
+// encoded as it is, without the copies scaling and turning would make, so
+// that a large photo fits a small memory limit; one with transparency is
+// first flattened on white.
+func FullJPEG(src image.Image, quality int) ([]byte, error) {
+	if opaque, ok := src.(interface{ Opaque() bool }); !ok || !opaque.Opaque() {
+		bounds := src.Bounds()
+		src = imaging.Overlay(imaging.New(bounds.Dx(), bounds.Dy(), color.White), src, image.Point{}, 1)
+	}
+	var buffer bytes.Buffer
+	if err := jpeg.Encode(&buffer, src, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 // Orient applies an EXIF orientation; imaging rotates counter-clockwise.

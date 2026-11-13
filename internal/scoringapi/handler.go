@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ func New(store *scoring.Store, directory Directory, version string, logger *slog
 		"GET /batches/{batchId}/anchors/{anchorId}/image": h.anchorImage,
 		"POST /batches/{batchId}/claims":                  h.claim,
 		"GET /claims/{token}/image":                       h.claimImage,
+		"GET /claims/{token}/full":                        h.claimFull,
 		"GET /claims/{token}/thumbnail":                   h.claimThumbnail,
 		"GET /batches/{batchId}/recent":                   h.recent,
 		"PUT /claims/{token}/rating":                      h.rate,
@@ -75,17 +77,18 @@ func New(store *scoring.Store, directory Directory, version string, logger *slog
 		h.mux.HandleFunc(method+" "+PathPrefix+path, h.withUser(serve))
 	}
 	for pattern, serve := range map[string]route{
-		"GET /sources":                  h.sources,
-		"GET /batches":                  h.batches,
-		"POST /batches":                 h.createBatch,
-		"PATCH /batches/{batchId}":      h.updateBatch,
-		"DELETE /batches/{batchId}":     h.deleteBatch,
-		"GET /batches/{batchId}/stats":  h.stats,
-		"GET /batches/{batchId}/cover":  h.cover,
-		"GET /batches/{batchId}/export": h.export,
-		"GET /raters":                   h.raters,
-		"PUT /raters/{accountId}":       h.addRater,
-		"DELETE /raters/{accountId}":    h.removeRater,
+		"GET /sources":                          h.sources,
+		"GET /batches":                          h.batches,
+		"POST /batches":                         h.createBatch,
+		"PATCH /batches/{batchId}":              h.updateBatch,
+		"DELETE /batches/{batchId}":             h.deleteBatch,
+		"GET /batches/{batchId}/stats":          h.stats,
+		"GET /batches/{batchId}/cover":          h.cover,
+		"GET /batches/{batchId}/export":         h.export,
+		"GET /batches/{batchId}/export/summary": h.exportSummary,
+		"GET /raters":                           h.raters,
+		"PUT /raters/{accountId}":               h.addRater,
+		"DELETE /raters/{accountId}":            h.removeRater,
 	} {
 		method, path, _ := strings.Cut(pattern, " ")
 		h.admin.HandleFunc(method+" "+AdminPrefix+path, h.withUser(h.administrator(serve)))
@@ -165,14 +168,30 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "batch_importing", "the batch is still importing")
 	case errors.Is(err, scoring.ErrInUse):
 		httpjson.WriteError(w, http.StatusConflict, "batch_in_use", "the batch already has ratings")
+	case errors.Is(err, scoring.ErrOriginalChanged):
+		httpjson.WriteError(w, http.StatusGone, "original_changed", "the original is gone or no longer the imported photo")
 	default:
 		httpjson.WriteInternal(w, r, h.logger, err)
 	}
 }
 
+type dimension struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func dimensionsBody(ids []string) []dimension {
+	body := make([]dimension, len(ids))
+	for i, id := range ids {
+		body[i] = dimension{ID: id, Name: scoring.DimensionName(id)}
+	}
+	return body
+}
+
 type me struct {
-	Admin bool `json:"admin"`
-	Rater bool `json:"rater"`
+	Admin      bool        `json:"admin"`
+	Rater      bool        `json:"rater"`
+	Dimensions []dimension `json:"dimensions"`
 }
 
 func (h *handler) me(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -181,16 +200,21 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request, user accounts.User)
 		h.fail(w, r, err)
 		return
 	}
+	catalogue := make([]dimension, len(scoring.Dimensions))
+	for i, d := range scoring.Dimensions {
+		catalogue[i] = dimension{ID: d.ID, Name: d.Name}
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpjson.Write(w, http.StatusOK, me{Admin: user.ActiveAdministrator(), Rater: rater})
+	httpjson.Write(w, http.StatusOK, me{Admin: user.ActiveAdministrator(), Rater: rater, Dimensions: catalogue})
 }
 
 type raterBatch struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Rubric   string `json:"rubric"`
-	Rated    int    `json:"rated"`
-	Finished bool   `json:"finished"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Rubric     string      `json:"rubric"`
+	Dimensions []dimension `json:"dimensions"`
+	Rated      int         `json:"rated"`
+	Finished   bool        `json:"finished"`
 }
 
 func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -201,7 +225,10 @@ func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user acco
 	}
 	items := make([]raterBatch, 0, len(batches))
 	for _, batch := range batches {
-		items = append(items, raterBatch{ID: batch.ID, Name: batch.Name, Rubric: batch.Rubric, Rated: batch.Rated, Finished: batch.Finished})
+		items = append(items, raterBatch{
+			ID: batch.ID, Name: batch.Name, Rubric: batch.Rubric, Dimensions: dimensionsBody(batch.Dimensions),
+			Rated: batch.Rated, Finished: batch.Finished,
+		})
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -295,10 +322,20 @@ func hundredthsOf(score float64) (int, bool) {
 }
 
 type recentScore struct {
-	Token  string  `json:"token"`
-	Score  float64 `json:"score"`
-	Width  int     `json:"width"`
-	Height int     `json:"height"`
+	Token  string             `json:"token"`
+	Score  float64            `json:"score"`
+	Scores map[string]float64 `json:"scores"`
+	Width  int                `json:"width"`
+	Height int                `json:"height"`
+}
+
+// pointsOf turns a rating's other dimensions into points.
+func pointsOf(scores map[string]int) map[string]float64 {
+	body := make(map[string]float64, len(scores))
+	for dimension, value := range scores {
+		body[dimension] = points(value)
+	}
+	return body
 }
 
 func (h *handler) recent(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -309,7 +346,9 @@ func (h *handler) recent(w http.ResponseWriter, r *http.Request, user accounts.U
 	}
 	items := make([]recentScore, 0, len(recent))
 	for _, score := range recent {
-		items = append(items, recentScore{Token: score.Token, Score: points(score.Score), Width: score.Width, Height: score.Height})
+		items = append(items, recentScore{
+			Token: score.Token, Score: points(score.Score), Scores: pointsOf(score.Scores), Width: score.Width, Height: score.Height,
+		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
@@ -343,6 +382,18 @@ func (h *handler) claimImage(w http.ResponseWriter, r *http.Request, user accoun
 	h.serveJPEG(w, r, file, true)
 }
 
+// claimFull answers the photo at its full size for judging sharpness, with
+// the orientation the page turns it by.
+func (h *handler) claimFull(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	view, err := h.store.ClaimFull(r.Context(), r.PathValue("token"), user.ID)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.Header().Set("X-Image-Orientation", strconv.Itoa(view.Orientation))
+	h.serveJPEG(w, r, view.Name, true)
+}
+
 // serveJPEG answers a preview or thumbnail. One that is the same bytes for
 // as long as its token or anchor exists is immutable, and the browser may
 // keep it.
@@ -374,13 +425,14 @@ type size struct {
 }
 
 type ratingRequest struct {
-	Submission string   `json:"submission"`
-	Kind       string   `json:"kind"`
-	Score      *float64 `json:"score,omitempty"`
-	ViewMs     int      `json:"viewMs"`
-	Viewport   *size    `json:"viewport,omitempty"`
-	Display    *size    `json:"display,omitempty"`
-	PixelRatio float64  `json:"pixelRatio,omitempty"`
+	Submission string             `json:"submission"`
+	Kind       string             `json:"kind"`
+	Score      *float64           `json:"score,omitempty"`
+	Scores     map[string]float64 `json:"scores,omitempty"`
+	ViewMs     int                `json:"viewMs"`
+	Viewport   *size              `json:"viewport,omitempty"`
+	Display    *size              `json:"display,omitempty"`
+	PixelRatio float64            `json:"pixelRatio,omitempty"`
 }
 
 func (h *handler) rate(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -398,6 +450,17 @@ func (h *handler) rate(w http.ResponseWriter, r *http.Request, user accounts.Use
 			return
 		}
 		submission.Score = &hundredths
+	}
+	if len(request.Scores) > 0 {
+		submission.Scores = make(map[string]int, len(request.Scores))
+		for dimension, score := range request.Scores {
+			hundredths, ok := hundredthsOf(score)
+			if !ok {
+				h.fail(w, r, fmt.Errorf("%w: a score is 0 to 5 with at most two decimals", scoring.ErrInvalid))
+				return
+			}
+			submission.Scores[dimension] = hundredths
+		}
 	}
 	if request.Viewport != nil {
 		submission.ViewportWidth, submission.ViewportHeight = request.Viewport.Width, request.Viewport.Height
@@ -433,32 +496,51 @@ func (h *handler) sources(w http.ResponseWriter, r *http.Request, _ accounts.Use
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
+type skippedReason struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+}
+
 type batch struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Source    string    `json:"source"`
-	Required  int       `json:"required"`
-	Rubric    string    `json:"rubric"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"createdAt"`
-	Import    struct {
-		Files    int `json:"files"`
-		Imported int `json:"imported"`
-		Skipped  int `json:"skipped"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Source     string      `json:"source"`
+	Required   int         `json:"required"`
+	Rubric     string      `json:"rubric"`
+	Dimensions []dimension `json:"dimensions"`
+	State      string      `json:"state"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	Import     struct {
+		Files     int             `json:"files"`
+		Imported  int             `json:"imported"`
+		Skipped   int             `json:"skipped"`
+		SkippedBy []skippedReason `json:"skippedBy"`
 	} `json:"import"`
 	Photos   int `json:"photos"`
 	Anchors  int `json:"anchors"`
 	Complete int `json:"complete"`
 	Started  int `json:"started"`
 	Flagged  int `json:"flagged"`
+	Answers  int `json:"answers"`
 }
 
 func batchBody(b scoring.Batch) batch {
 	body := batch{
-		ID: b.ID, Name: b.Name, Source: b.Source, Required: b.Required, Rubric: b.Rubric, State: b.State,
-		CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started, Flagged: b.Flagged,
+		ID: b.ID, Name: b.Name, Source: b.Source, Required: b.Required, Rubric: b.Rubric, Dimensions: dimensionsBody(b.Dimensions),
+		State: b.State, CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started,
+		Flagged: b.Flagged, Answers: b.Answers,
 	}
 	body.Import.Files, body.Import.Imported, body.Import.Skipped = b.Files, b.Imported, b.Skipped
+	body.Import.SkippedBy = []skippedReason{}
+	for reason, count := range b.SkippedBy {
+		body.Import.SkippedBy = append(body.Import.SkippedBy, skippedReason{Reason: reason, Count: count})
+	}
+	slices.SortFunc(body.Import.SkippedBy, func(a, b skippedReason) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+		return strings.Compare(a.Reason, b.Reason)
+	})
 	return body
 }
 
@@ -478,16 +560,17 @@ func (h *handler) batches(w http.ResponseWriter, r *http.Request, _ accounts.Use
 
 func (h *handler) createBatch(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var request struct {
-		Name     string `json:"name"`
-		Source   string `json:"source"`
-		Required int    `json:"required"`
-		Rubric   string `json:"rubric"`
+		Name       string   `json:"name"`
+		Source     string   `json:"source"`
+		Required   int      `json:"required"`
+		Rubric     string   `json:"rubric"`
+		Dimensions []string `json:"dimensions,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	created, err := h.store.CreateBatch(r.Context(), user.ID, scoring.BatchInput{
-		Name: request.Name, Source: request.Source, Required: request.Required, Rubric: request.Rubric,
+		Name: request.Name, Source: request.Source, Required: request.Required, Rubric: request.Rubric, Dimensions: request.Dimensions,
 	})
 	if err != nil {
 		h.fail(w, r, err)
@@ -498,16 +581,17 @@ func (h *handler) createBatch(w http.ResponseWriter, r *http.Request, user accou
 
 func (h *handler) updateBatch(w http.ResponseWriter, r *http.Request, _ accounts.User) {
 	var request struct {
-		Name     *string `json:"name,omitempty"`
-		Rubric   *string `json:"rubric,omitempty"`
-		Required *int    `json:"required,omitempty"`
-		State    *string `json:"state,omitempty"`
+		Name       *string  `json:"name,omitempty"`
+		Rubric     *string  `json:"rubric,omitempty"`
+		Required   *int     `json:"required,omitempty"`
+		Dimensions []string `json:"dimensions,omitempty"`
+		State      *string  `json:"state,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	updated, err := h.store.UpdateBatch(r.Context(), r.PathValue("batchId"), scoring.BatchPatch{
-		Name: request.Name, Rubric: request.Rubric, Required: request.Required, State: request.State,
+		Name: request.Name, Rubric: request.Rubric, Required: request.Required, Dimensions: request.Dimensions, State: request.State,
 	})
 	if err != nil {
 		h.fail(w, r, err)
@@ -550,22 +634,27 @@ func personOf(id string, people map[string]accounts.Profile) person {
 	return person{ID: id, Username: profile.Username, Nickname: profile.Nickname, AvatarVersion: profile.AvatarVersion}
 }
 
+type dimensionStats struct {
+	Dimension         string   `json:"dimension"`
+	Mean              float64  `json:"mean"`
+	StandardDeviation float64  `json:"standardDeviation"`
+	Agreement         *float64 `json:"agreement"`
+	AgreementPhotos   int      `json:"agreementPhotos"`
+	RepeatDifference  *float64 `json:"repeatDifference"`
+	LongestRun        int      `json:"longestRun"`
+}
+
 type raterStats struct {
-	Rater             person    `json:"rater"`
-	Active            bool      `json:"active"`
-	Scores            int       `json:"scores"`
-	Skips             int       `json:"skips"`
-	Flags             int       `json:"flags"`
-	Repeats           int       `json:"repeats"`
-	MedianViewMs      int       `json:"medianViewMs"`
-	Mean              float64   `json:"mean"`
-	StandardDeviation float64   `json:"standardDeviation"`
-	Agreement         *float64  `json:"agreement"`
-	AgreementPhotos   int       `json:"agreementPhotos"`
-	RepeatDifference  *float64  `json:"repeatDifference"`
-	FastShare         float64   `json:"fastShare"`
-	LongestRun        int       `json:"longestRun"`
-	LastAt            time.Time `json:"lastAt"`
+	Rater        person           `json:"rater"`
+	Active       bool             `json:"active"`
+	Scores       int              `json:"scores"`
+	Skips        int              `json:"skips"`
+	Flags        int              `json:"flags"`
+	Repeats      int              `json:"repeats"`
+	MedianViewMs int              `json:"medianViewMs"`
+	FastShare    float64          `json:"fastShare"`
+	LastAt       time.Time        `json:"lastAt"`
+	Dimensions   []dimensionStats `json:"dimensions"`
 }
 
 func (h *handler) stats(w http.ResponseWriter, r *http.Request, _ accounts.User) {
@@ -582,14 +671,44 @@ func (h *handler) stats(w http.ResponseWriter, r *http.Request, _ accounts.User)
 	items := make([]raterStats, 0, len(stats))
 	for _, st := range stats {
 		_, active := people[st.Rater]
+		dimensions := make([]dimensionStats, 0, len(st.Dimensions))
+		for _, d := range st.Dimensions {
+			dimensions = append(dimensions, dimensionStats{
+				Dimension: d.Dimension, Mean: d.Mean, StandardDeviation: d.StandardDeviation, Agreement: d.Agreement,
+				AgreementPhotos: d.AgreementPhotos, RepeatDifference: d.RepeatDifference, LongestRun: d.LongestRun,
+			})
+		}
 		items = append(items, raterStats{
 			Rater: personOf(st.Rater, people), Active: active, Scores: st.Scores, Skips: st.Skips, Flags: st.Flags, Repeats: st.Repeats,
-			MedianViewMs: st.MedianViewMilliseconds, Mean: st.Mean, StandardDeviation: st.StandardDeviation,
-			Agreement: st.Agreement, AgreementPhotos: st.AgreementPhotos, RepeatDifference: st.RepeatDifference,
-			FastShare: st.FastShare, LongestRun: st.LongestRun, LastAt: st.LastAt.UTC(),
+			MedianViewMs: st.MedianViewMilliseconds, FastShare: st.FastShare, LastAt: st.LastAt.UTC(), Dimensions: dimensions,
 		})
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// listParameter reads a query parameter of comma-separated values.
+func listParameter(r *http.Request, name string) []string {
+	var values []string
+	for _, joined := range r.URL.Query()[name] {
+		for value := range strings.SplitSeq(joined, ",") {
+			if value = strings.TrimSpace(value); value != "" {
+				values = append(values, value)
+			}
+		}
+	}
+	return values
+}
+
+func (h *handler) exportSummary(w http.ResponseWriter, r *http.Request, _ accounts.User) {
+	summary, err := h.store.ExportSummary(r.Context(), r.PathValue("batchId"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpjson.Write(w, http.StatusOK, map[string]int{
+		"scores": summary.Scores, "skips": summary.Skips, "superseded": summary.Superseded, "repeats": summary.Repeats,
+	})
 }
 
 // export renders the zip into the store's staging folder first, since the
@@ -600,6 +719,9 @@ func (h *handler) export(w http.ResponseWriter, r *http.Request, _ accounts.User
 	if err != nil {
 		h.fail(w, r, err)
 		return
+	}
+	options := scoring.ExportOptions{
+		Format: r.URL.Query().Get("format"), Fields: listParameter(r, "fields"), Include: listParameter(r, "include"),
 	}
 	profiles, err := h.people(r.Context())
 	if err != nil {
@@ -619,7 +741,7 @@ func (h *handler) export(w http.ResponseWriter, r *http.Request, _ accounts.User
 		_ = file.Close()
 		_ = os.Remove(file.Name())
 	}()
-	if err := h.store.Export(r.Context(), id, file, people, h.version); err != nil {
+	if err := h.store.Export(r.Context(), id, options, file, people, h.version); err != nil {
 		h.fail(w, r, err)
 		return
 	}
