@@ -119,6 +119,7 @@ push() {
 # databases with the running product's preinst, switch, then the new
 # product's postinst and a-nas-check.
 apply_product() {
+  # shellcheck disable=SC2016 # the guest expands these
   g 'set -e; old=$(. /usr/lib/extension-release.d/extension-release.a-nas-product && echo "$A_NAS_VERSION")
     /usr/lib/a-nas/release/preinst upgrade "$old"
     '"$1"'
@@ -158,7 +159,7 @@ boot_id=$(g cat /proc/sys/kernel/random/boot_id)
 
 # --- 1002: a new product, applied without a restart, then left again.
 push 1002 product os
-for role in $(cd "$T/stage-1002" && ls -d content-* | sed 's/^content-//'); do push 1002 "content-$role"; done
+for dir in "$T"/stage-1002/content-*; do push 1002 "$(basename "$dir")"; done
 check "unchanged content is not taken again" not_taken_again --component=content-model-detector
 check "an unchanged base is not taken again" not_taken_again
 first_product=$(product)
