@@ -345,6 +345,11 @@ func run(logger *slog.Logger) error {
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
 	defer closeAtExit(logger, "account directory", uids)
+	moduleRegistry, closeModules, err := configuredModules(background, config, uids, logger)
+	if err != nil {
+		return err
+	}
+	defer closeModules()
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
@@ -356,6 +361,7 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
+		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
 		FilePreviews: previewService,

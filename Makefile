@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release build build-binaries packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -222,7 +222,9 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
+	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-search.service
 	grep -Fqx 'ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled' deploy/systemd/system/anas-search.service
@@ -230,7 +232,7 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
@@ -406,6 +408,16 @@ build-binaries: web-build
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-scoring ./cmd/anas-scoring
+
+# The photo scoring module (ADR 0037) staged for its install script; it is not
+# part of the release (docs/runbooks/install-and-remove-photo-scoring.md).
+scoring-module:
+	mkdir -p $(BUILD_DIR)/modules/scoring
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/modules/scoring/anas-scoring ./cmd/anas-scoring
+	install -m 0644 deploy/modules/scoring/anas-module-scoring.service deploy/modules/scoring/anas-module-scoring.socket \
+		deploy/modules/scoring/scoring.json $(BUILD_DIR)/modules/scoring/
+	install -m 0755 scripts/modules/scoring/install.sh scripts/modules/scoring/remove.sh $(BUILD_DIR)/modules/scoring/
 
 # The product's Debian packages at the product version (ADR 0034), in
 # build/packages; needs dpkg-deb and jq.

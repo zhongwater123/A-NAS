@@ -10,6 +10,8 @@ import { FamilyGlyph } from "../family/FamilyGlyph";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
 import { displayName } from "../people/people";
 import { PhotosGlyph } from "../photos/PhotosGlyph";
+import { ScoringGlyph } from "../scoring/ScoringGlyph";
+import type { ScoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
@@ -29,6 +31,7 @@ const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => m
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
 const MusicPanel = lazyCode(() => import("../music/MusicPanel").then((module) => module.MusicPanel));
 const PhotosPanel = lazyCode(() => import("../photos/PhotosPanel").then((module) => module.PhotosPanel));
+const ScoringPanel = lazyCode(() => import("../scoring/ScoringPanel").then((module) => module.ScoringPanel));
 const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
 const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
 const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
@@ -68,6 +71,9 @@ export interface WindowContext {
   assistantReady: boolean;
   // Web search shows only while an administrator leaves it on (ADR 0030).
   webSearchEnabled: boolean;
+  // 照片打分 shows only where its module is installed, to its administrators
+  // and the raters they chose (ADR 0037).
+  scoring: ScoringAccess;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -290,6 +296,18 @@ const definitions = {
         onIntentHandled={(handled) => intentHandled("family", handled)}
       />
     ),
+  },
+  scoring: {
+    title: "照片打分",
+    icon: ScoringGlyph,
+    tone: "scoring",
+    bounds: { x: 180, y: 40, width: 1180, height: 760 },
+    launcher: {
+      id: "scoring",
+      keywords: "打分 评分 美学 照片 风景 标注 score rating",
+      visible: ({ scoring }) => scoring.admin || scoring.rater,
+    },
+    render: ({ session, scoring }) => <ScoringPanel userId={session.user.id} access={scoring} />,
   },
   assistant: {
     title: "VNAS",

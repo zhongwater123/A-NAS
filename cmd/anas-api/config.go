@@ -82,6 +82,9 @@ type Config struct {
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
+	// ModuleSocketDir holds the API sockets of installed removable modules
+	// (ADR 0037).
+	ModuleSocketDir string `env:"ANAS_MODULE_SOCKET_DIR" envDefault:"/run/a-nas-modules"`
 	// MediaWorker is socket, local (FFmpeg in this process, development
 	// only) or disabled; it defaults to socket on a NAS and local otherwise.
 	MediaWorker string `env:"ANAS_FFMPEG_WORKER"`
@@ -225,7 +228,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
+		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
 		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir}, {"ANAS_WEB_SEARCH_SOCKET", &c.WebSearch.Socket},

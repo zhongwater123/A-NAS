@@ -17,7 +17,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
+	"github.com/zhongwater123/A-NAS/internal/scoringapi"
 	"github.com/zhongwater123/A-NAS/internal/websearch"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -63,6 +65,7 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
 		Shares: unreached, Family: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
+		Modules:   []modules.Module{{ID: scoringapi.ID, Mounts: scoringapi.Mounts(), Handler: unreached}},
 		WebSearch: websearchapi.New(nil, websearch.Release{}, nil),
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

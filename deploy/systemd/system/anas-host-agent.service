@@ -30,7 +30,7 @@ RestartSec=2s
 TimeoutStopSec=20s
 # Separate session directories preserve the photo, share and family socket
 # group permissions.
-RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions
+RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions
 RuntimeDirectoryMode=0750
 # The Host Agent's records (spaces, identities, viewing grants, app
 # identities, data-volume operations) live where only root can open them.
