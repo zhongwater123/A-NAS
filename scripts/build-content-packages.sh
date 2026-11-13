@@ -52,11 +52,13 @@ export SOURCE_DATE_EPOCH
 work=$(mktemp -d "${ANAS_CONTENT_WORK:-/var/tmp}/a-nas-content.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
-# pinned FILE MANIFEST: FILE is the one MANIFEST pins by size and SHA-256.
-pinned() {
-  [[ -f "$1" && "$(stat -c %s "$1")" == "$(pin_field "$2" sizeBytes)" ]] &&
-    printf '%s  %s\n' "$(pin_field "$2" sha256)" "$1" | sha256sum --check --quiet - >/dev/null 2>&1
+# pinned_file FILE SIZE SHA256: FILE has this size and SHA-256.
+pinned_file() {
+  [[ -f "$1" && "$(stat -c %s "$1")" == "$2" ]] &&
+    printf '%s  %s\n' "$3" "$1" | sha256sum --check --quiet - >/dev/null 2>&1
 }
+# pinned FILE MANIFEST: FILE is the one MANIFEST pins by size and SHA-256.
+pinned() { pinned_file "$1" "$(pin_field "$2" sizeBytes)" "$(pin_field "$2" sha256)"; }
 
 # package NAME ARCH DEPENDS DESCRIPTION COPYRIGHT [SCRIPTS]: builds the package
 # from $work/NAME, the tree it installs. DEPENDS may go on with more fields of
@@ -94,27 +96,31 @@ have() {
     [[ -n "${ANAS_CONTENT_REPOSITORY:-}" && -f "$ANAS_CONTENT_REPOSITORY/pool/main/a/$1/${1}_1_$2.deb" ]]
 }
 
-# Models (ADR 0016).
+# Models (ADR 0016): a package for the model's file, or for each of its parts
+# (scripts/lib/content.sh model_files).
 for role in "${ai_roles[@]}"; do
   manifest=$repo/deploy/models/${role##*:}.json
-  name=$(model_package "$manifest")
-  have "$name" all && continue
   sha=$(pin_field "$manifest" sha256)
-  file=$(pin_field "$manifest" file)
-  target=$work/$name/opt/a-nas/models/$sha
-  install -d "$target"
-  if "$stand_in"; then
-    head -c 4096 /dev/urandom >"$target/$file"
-  else
-    source=$content/models/$sha/$file
-    pinned "$source" "$manifest" || { echo "missing or not as pinned: $source ($manifest)" >&2; exit 2; }
-    cp -- "$source" "$target/$file"
-  fi
-  chmod 0644 "$target/$file"
-  package "$name" all '' "$(pin_field "$manifest" name) for A-NAS's local AI
- The model file deploy/models/${role##*:}.json pins by SHA-256 $sha,
+  while IFS=$'\t' read -r -u 3 name file size file_sha; do
+    have "$name" all && continue
+    target=$work/$name/opt/a-nas/models/$sha
+    install -d "$target"
+    if "$stand_in"; then
+      head -c 4096 /dev/urandom >"$target/$file"
+    else
+      source=$content/models/$sha/$file
+      pinned_file "$source" "$size" "$file_sha" ||
+        { echo "missing or not as pinned: $source ($manifest; scripts/split-model.sh makes the parts)" >&2; exit 2; }
+      cp -- "$source" "$target/$file"
+    fi
+    chmod 0644 "$target/$file"
+    what="The model file deploy/models/${role##*:}.json pins by SHA-256 $sha"
+    [[ "$file_sha" == "$sha" ]] || what="$file, a part of the model file deploy/models/${role##*:}.json pins by SHA-256 $sha,"
+    package "$name" all '' "$(pin_field "$manifest" name) for A-NAS's local AI
+ $what
  in /opt/a-nas/models/$sha.$("$stand_in" && printf '\n .\n A stand-in with random content for the system test.')" \
-    "$(jq -r '"Source: \(.source // .weights // "see the manifest")\nLicense: \(.license // "see the manifest")"' "$manifest")"
+      "$(jq -r '"Source: \(.source // .weights // "see the manifest")\nLicense: \(.license // "see the manifest")"' "$manifest")"
+  done 3< <(model_files "$manifest")
 done
 
 # runtime NAME KIND ID STAND_IN_SCRIPT: a Python runtime, unpacked where the

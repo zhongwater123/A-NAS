@@ -374,7 +374,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 
 - **发布物**：
   - llama-server 按清单随发布交付，和 Qdrant 一样按内容存一份；
-  - 两个模型文件作为新的模型角色（`ocr-model:gguf`、`ocr-mmproj:gguf`），由安装器链接为 `ai/ocr-model.gguf` 与 `ai/ocr-mmproj.gguf`；
+  - 两个模型文件作为新的模型角色（`ocr-model:gguf`、`ocr-mmproj:gguf`），由安装器链接为 `ai/ocr-model.gguf` 与 `ai/ocr-mmproj.gguf`；2026-11-12 起语言模型切成两份（GitHub 的发布文件不能超过 2 GiB），`ai/ocr-model.gguf` 指向第一份，Worker 逐份核对后让 llama-server 从第一份读起（[软件源放在哪里](../decisions/2026-11-11-update-hosting.md)）；
   - `anas-ai.service` 增加对应参数。
 - **体积**：首次安装多出约 3 GB。之后按内容去重，升级时不重复拷贝。
 - **系统测试**：

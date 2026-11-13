@@ -43,7 +43,6 @@
 - 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
 - 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
 - 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，实现已合并，实机待启用）与 [ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
-- 发布：[软件源放在哪里](../decisions/2026-11-11-update-hosting.md)
 - 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
 
 ## 下一步
@@ -59,6 +58,6 @@
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）已部署；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
 11. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：2026-11-10 已部署，动画已装；在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-12. 用户按[管理发布签名密钥](../runbooks/manage-release-key.md)生成存档密钥；再按[部署手册](../runbooks/deploy-a-nas-packages.md)把实验 NAS 换成软件包（第 4 步删去上游源）。
+12. 用户按[管理发布签名密钥](../runbooks/manage-release-key.md)生成存档密钥，在 GitHub 建公开仓库 `A-NAS-dist`；再按[部署手册](../runbooks/deploy-a-nas-packages.md)把实验 NAS 换成软件包（第 4 步删去上游源）。
 13. 照片打分：在第 12 步之后按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
 14. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

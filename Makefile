@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test release build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -381,6 +381,15 @@ system-test: packages
 # (docs/runbooks/manage-release-key.md); needs Docker.
 release-key-test:
 	scripts/test-release-key.sh $(SYSTEM_TEST_IMAGE)
+
+# Publishes the distribution CHANNEL (release or dev) of the signed repository
+# REPO on GitHub, where devices take it from (scripts/publish-github.sh,
+# docs/runbooks/deploy-a-nas-packages.md); needs gh signed in with access to
+# GITHUB_REPO and this machine's subkey of the archive key.
+GITHUB_REPO ?= zhongwater123/A-NAS-dist
+publish:
+	@test -n "$(CHANNEL)" || { echo "make publish needs CHANNEL, release or dev" >&2; exit 2; }
+	IMAGE=$(SYSTEM_TEST_IMAGE) GITHUB_REPO=$(GITHUB_REPO) scripts/publish-github.sh $(REPO) $(CHANNEL)
 
 # A release (ADR 0034): the packages make check and make system-test passed at
 # this commit, with the content packages from CONTENT, in the signed apt

@@ -11,7 +11,10 @@
 # - alpha's subkey is revoked: alpha's machine may no longer sign, a device
 #   still on the old keyring takes beta's repository and with it the new
 #   keyring, and with the new keyring apt refuses what alpha signs;
-# - a subkey added for a third machine signs, and the revocation stays.
+# - a subkey added for a third machine signs, and the revocation stays;
+# - the flat form for GitHub (scripts/publish-github.sh) names packages by
+#   their SHA-256, keeps the newest versions it is told to, and apt installs
+#   from it over HTTP.
 #
 # Usage: scripts/test-release-key.sh [IMAGE]
 set -uo pipefail
@@ -131,6 +134,36 @@ keyring 4
 copy two three
 check "gamma publishes" publish gamma three "$work/debs/a-nas-archive-keyring_4_all.deb"
 check "apt with the newest keyring accepts gamma" accepts three "$work/keyring-4.pgp"
+
+echo "== the flat form for GitHub"
+publish_github=$repo/scripts/publish-github.sh
+check "beta builds the flat form of the repository" as beta "$publish_github" flat "$work/flat" "$work/two" dev "$work/beta"
+check "its packages are named by their SHA-256" bash -c "cd '$work/flat' && for deb in *.deb; do
+  test \"\${deb%.deb}\" = \"\$(sha256sum \"\$deb\" | cut -d ' ' -f 1)\" || exit 1; done"
+check "it has every version" test "$(sed -n 's/^Version: //p' "$work/flat/Packages" | sort | paste -sd ' ' -)" = "1 2 3"
+# installs_from FLAT KEYRING VERSION: apt in a fresh container, over HTTP
+# from FLAT, trusting KEYRING, installs the keyring package at VERSION, the
+# newest there.
+installs_from() {
+  local out
+  out=$(docker run --rm -v "$work/$1:/flat:ro" -v "$2:/keyring.pgp:ro" "$IMAGE" bash -c '
+    set -e
+    rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
+    install -D -m 0644 /keyring.pgp /etc/apt/keyrings/a-nas.pgp
+    (cd /flat && exec python3 -m http.server --bind 127.0.0.1 8000 >/dev/null 2>&1) &
+    for _ in $(seq 1 50); do python3 -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/InRelease\")" 2>/dev/null && break; sleep 0.1; done
+    printf "Types: deb\nURIs: http://127.0.0.1:8000/\nSuites: ./\nSigned-By: /etc/apt/keyrings/a-nas.pgp\n" \
+      >/etc/apt/sources.list.d/a-nas.sources
+    apt-get -o APT::Sandbox::User=root update 2>&1
+    apt-get -o APT::Sandbox::User=root install -y --no-install-recommends a-nas-archive-keyring 2>&1
+    dpkg-query -W -f "installed \${Version}\n" a-nas-archive-keyring' 2>&1)
+  echo "$out"
+  grep -qx "installed $3" <<<"$out"
+}
+check "apt installs from it over HTTP" installs_from flat "$work/keyring-4.pgp" 3
+check "dev keeps the newest versions it is told to" as beta "$publish_github" flat "$work/flat-2" "$work/two" dev "$work/beta" 2
+check "the older ones are left out" test "$(sed -n 's/^Version: //p' "$work/flat-2/Packages" | sort | paste -sd ' ' -)" = "2 3"
+check "a test key may not publish where devices look" bash -c "! ANAS_RELEASE_TEST_KEY=1 TAG=apt-dev '$publish_github' '$work/two' dev"
 
 echo "release key test failures=$failures"
 ((failures == 0))
