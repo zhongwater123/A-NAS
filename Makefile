@@ -35,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -404,6 +404,24 @@ REPO ?= $(BUILD_DIR)/apt
 release:
 	@test -n "$(CONTENT)" || { echo "make release needs CONTENT, the release content store (scripts/build-content-packages.sh)" >&2; exit 2; }
 	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/release.sh $(REPO) $(CONTENT)
+
+# The device image of the release make release published to REPO from this
+# commit (scripts/build-image.sh, docs/runbooks/build-device-image.md): the
+# update files in UPDATES and the disk of a new device, signed with the key
+# make release signs with (ANAS_RELEASE_TEST_KEY=1 for the test key). The
+# update files are numbered by the commit's place on main, so the commit must
+# be on main. Needs Docker; on WSL set WORK to an .img path on a Windows drive.
+UPDATES ?= $(BUILD_DIR)/updates
+image:
+	@git merge-base --is-ancestor HEAD origin/main || { echo "make image builds commits on main: fetch, or check out main" >&2; exit 2; }
+	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/build-image.sh $(REPO) $(VERSION) $$(git rev-list --count --first-parent HEAD) $(UPDATES) \
+		$$(if [ -n "$$ANAS_RELEASE_TEST_KEY" ]; then echo "$$HOME/.local/share/a-nas/release-test-key"; else echo "$${ANAS_RELEASE_GNUPGHOME:-$$HOME/.local/share/a-nas/release-key}"; fi)
+
+# Builds images of this commit's packages and updates a VM with them as a
+# device is updated (scripts/image-test.sh); needs Docker, /dev/kvm, Go and
+# about 40 GB in IMAGE_TEST_DIR.
+image-test: packages
+	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/image-test.sh
 
 build: web-build build-binaries
 

@@ -1,0 +1,23 @@
+# The image's /usr, written into the free slot; the UKI comes last, so that a
+# UKI is in the ESP only once its /usr partition carries the version's label.
+# The update files are where a push leaves them (scripts/build-image.sh),
+# read as file:// so that systemd-sysupdate checks them against the signed
+# SHA256SUMS as it does a download.
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=url-file
+Path=file:///var/lib/a-nas-updates/os/
+MatchPattern=a-nas_@v.usr.raw.xz
+
+[Target]
+Type=partition
+# Not Path=auto: systemd-sysupdate 257 looks for the disk behind /usr, which a
+# merged system extension makes an overlayfs without one (fixed in 258).
+# a-nas-system-disk.service links the disk here.
+Path=/run/a-nas-system-disk
+MatchPattern=a-nas_@v
+MatchPartitionType=usr
+PartitionFlags=0
+ReadOnly=1

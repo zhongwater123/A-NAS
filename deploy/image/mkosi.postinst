@@ -1,0 +1,18 @@
+#!/bin/bash
+# mkosi runs this after the packages are installed, with the image at
+# $BUILDROOT. Units are turned on by links in /usr: /etc is on the persistent
+# root and stays as the first image left it.
+set -euo pipefail
+root=$BUILDROOT
+units=$root/usr/lib/systemd/system
+mkdir -p "$units/sysinit.target.wants" "$units/boot-complete.target.requires" "$units/multi-user.target.wants"
+ln -sf ../systemd-sysext.service "$units/sysinit.target.wants/"
+ln -sf ../a-nas-sysext-ready.service "$units/sysinit.target.wants/"
+ln -sf ../a-nas-system-disk.service "$units/sysinit.target.wants/"
+ln -sf ../a-nas-health.service "$units/boot-complete.target.requires/"
+ln -sf ../systemd-networkd.service "$units/multi-user.target.wants/"
+# systemd-sysupdate checks the update files' SHA256SUMS against the keys
+# that sign the A-NAS repository, which a-nas-archive-keyring carries; a
+# subkey added or revoked comes with the next image.
+ln -sf ../../share/keyrings/a-nas-archive-keyring.pgp "$root/usr/lib/systemd/import-pubring.gpg"
+test -s "$root/usr/share/keyrings/a-nas-archive-keyring.pgp"

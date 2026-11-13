@@ -1,0 +1,7 @@
+# systemd-sysupdate's own timers: after systemd-boot goes back, systemd 257
+# still takes the version that failed for the newest installed one, and its
+# reboot timer would restart the device into it again and again. The product's
+# update service decides when to check, install and restart instead.
+disable systemd-sysupdate.timer
+disable systemd-sysupdate-reboot.timer
+enable a-nas-sysext-ready.service

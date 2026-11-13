@@ -87,3 +87,17 @@ content_packages() {
   qdrant_package "$1"
   llama_package "$1"
 }
+
+# content_roles REPO: one line per kind of content a release pins: the role,
+# then its packages. A device that runs the A-NAS image updates each role as
+# a system extension of its own (scripts/build-image.sh).
+content_roles() {
+  local role
+  for role in "${ai_roles[@]}"; do
+    echo "model-${role%%:*} $(model_files "$1/deploy/models/${role##*:}.json" | cut -f 1 | paste -sd ' ' -)"
+  done
+  echo "ai-runtime a-nas-ai-runtime-$(ai_runtime_id "$1")"
+  echo "search-runtime a-nas-search-runtime-$(search_runtime_id "$1")"
+  echo "qdrant $(qdrant_package "$1")"
+  echo "llama $(llama_package "$1")"
+}

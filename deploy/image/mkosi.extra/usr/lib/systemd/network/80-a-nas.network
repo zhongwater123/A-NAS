@@ -1,0 +1,6 @@
+# Wired network by DHCP; the SMB interface and the LAN entry follow site.conf.
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=yes

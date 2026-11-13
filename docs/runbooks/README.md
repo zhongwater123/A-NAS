@@ -13,6 +13,7 @@
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
 - [部署 A-NAS 软件包](deploy-a-nas-packages.md)（draft；签名软件源、apt 升级与回滚，系统测试已验证）
 - [管理发布签名密钥](manage-release-key.md)（draft；存档密钥的生成、两台开发机的子密钥、换机、增加与吊销，一次性密钥已验证）
+- [构建与安装设备镜像](build-device-image.md)（draft；整盘镜像与更新文件、写到新设备的系统盘、手动更新与回滚，虚拟机测试）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 - [启用相册本地 AI](enable-photo-ai.md)（verified；2026-10-10 部署 `6833c7637f73`）

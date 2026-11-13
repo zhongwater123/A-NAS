@@ -31,6 +31,11 @@
 #   apt-repository.sh signed-by REPO KEY
 #       succeeds when REPO has no distribution yet or each one is signed by a
 #       key of KEY, a GnuPG home or a key file.
+#   apt-repository.sh sums DIR GNUPGHOME
+#       writes DIR/SHA256SUMS for the files in DIR and signs it with the key
+#       that publish signs with, as SHA256SUMS.gpg beside it: what
+#       systemd-sysupdate checks a device image's update files against
+#       (scripts/build-image.sh).
 #
 # GnuPG and aptly run in the Debian 13 image (scripts/lib/signing.sh), so
 # nothing needs installing here.
@@ -197,8 +202,29 @@ case "${1:-}" in
       echo "$dist: $("${aptly[@]}" repo show "$dist" | sed -n "s/^Number of packages: //p") package versions"' \
       publish "$dist" "$(IFS=,; echo "${sign[*]}")" "${debs[@]}"
     ;;
+  sums)
+    [[ $# -eq 3 ]] || { echo "usage: $0 sums DIR GNUPGHOME" >&2; exit 2; }
+    dir=$(absolute "$2")
+    gnupg=$(absolute "$3")
+    key=$(signing_key "$gnupg") || { echo "no key in $gnupg can sign (apt-repository.sh key, release-key.sh install)" >&2; exit 2; }
+    secret=() passphrase_option=()
+    if [[ -n "${ANAS_RELEASE_PASSPHRASE_FILE:-}" ]]; then
+      ask_passphrase
+      secret=(--passphrase)
+      passphrase_option=(--pinentry-mode loopback --passphrase-file /secret/passphrase)
+    fi
+    # shellcheck disable=SC2016 # the script expands its variables in the image
+    in_image "${secret[@]}" "$gnupg:/gnupg" "$dir:/dir" -- bash -c '
+      set -euo pipefail
+      key=$1
+      shift
+      cd /dir
+      find . -maxdepth 1 -type f ! -name "SHA256SUMS*" -printf "%P\n" | LC_ALL=C sort | xargs -r sha256sum >SHA256SUMS
+      gpg --batch --yes "$@" --local-user "$key!" --detach-sign --output SHA256SUMS.gpg SHA256SUMS' \
+      sums "$key" "${passphrase_option[@]}"
+    ;;
   *)
-    sed -n '2,36p' "$0"
+    sed -n '2,41p' "$0"
     exit 2
     ;;
 esac
