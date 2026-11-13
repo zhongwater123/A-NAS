@@ -85,7 +85,13 @@ def main():
     mapped = {c: CARD_SCORE[cards[c]["answer"]["highlight"]] for c in ids}
     beat_mapped = [mapped[b.split("/")[0]] for b in beats]
     card_best = [ORDER[3 - max(by_card[c])] for c in ids]
+    # The same score read from its digit's probabilities (card["score"]["highlight_p"], 1-5), which #392 kept
+    # for ranking within a video: the integer squashes most cards onto 3 or 4.
+    weighted = {c: cards[c]["score"]["highlight_p"] for c in ids}
     out["described"] = {
+        "card_weighted_vs_card_best": rank_stats(card_user, [weighted[c] for c in ids]),
+        "card_weighted_vs_beats": rank_stats(user.tolist(), [weighted[b.split("/")[0]] for b in beats]),
+        "card_weighted_auc_best_card": round(float(roc_auc_score([u == 3 for u in card_user], [weighted[c] for c in ids])), 3),
         "card_score_vs_card_best": rank_stats(card_user, card_4b),
         "card_score_mapped": {
             "model": {NAME[k]: int(v) for k, v in Counter(mapped.values()).items()},
