@@ -508,6 +508,15 @@ func TestARollbackWhoseCheckFailsTooIsRecordedAsFailed(t *testing.T) {
 	if record := state.Records[0]; record.Kind != RecordFailed || record.Problem == nil || record.Problem.Code != ProblemRollback {
 		t.Fatalf("record = %+v, want a failed rollback", record)
 	}
+	// The warning stays while 1 fails its check, and goes once it passes,
+	// as after a repair by the runbook.
+	if state = run(t, service, RequestCheck); state.Phase != PhaseRolledBack || state.Problem.Code != ProblemRollback {
+		t.Fatalf("a check while 1 still fails = %+v", state)
+	}
+	host.checkFails["1"] = false
+	if state = run(t, service, RequestCheck); state.Phase != PhaseUpToDate || state.Problem != nil {
+		t.Fatalf("a check once 1 passes = %+v, want up to date", state)
+	}
 }
 
 func TestRevertGoesToTheVersionBeforeAndLeavesTheOtherOut(t *testing.T) {

@@ -221,8 +221,10 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 	if !newer {
 		state.Candidate, state.DownloadBytes, state.DownloadedBytes = "", 0, 0
 		// A rollback stays on the page, with its reason, until a newer
-		// version replaces it.
-		if state.Phase != PhaseRolledBack {
+		// version replaces it; one that left the device failing its check,
+		// until the check passes again, as after a repair by the runbook.
+		if state.Phase != PhaseRolledBack ||
+			(state.Problem != nil && state.Problem.Code == ProblemRollback && s.healthCheck(ctx) == nil) {
 			state.Phase, state.Problem = PhaseUpToDate, nil
 		}
 		return nil
