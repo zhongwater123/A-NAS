@@ -20,6 +20,11 @@
 # Read-only photos (#113), with SPIKE_PHOTOS=1 given to sandbox: photos-socket.sh,
 # "scenarios calls-photos.txt", photos-vision.sh; with a real model, "scenarios
 # scenarios-photos.txt" and photos-vision.sh.
+# SPIKE_PHOTO_MODELS=~/A-NAS-models (and SPIKE_PHOTO_IMPORT=<photo dir>) with SPIKE_PHOTOS=1
+# searches with the real EmbeddingGemma 2; the photo tests expect the stand-in.
+# SPIKE_VIDEOS and SPIKE_VIDEO_FILES with those also give anas_mcp.py the video moment tools (#322);
+# SPIKE_VISION=<chat completions URL of a local vision model, as the container reaches it> has
+# them look at the frames before a cut (montage/look.py).
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -91,7 +96,22 @@ case "${1:-}" in
       mkdir -p "$bin"
       (cd "$here/../.." && CGO_ENABLED=1 go build -trimpath -tags osusergo,netgo,sqlite_omit_load_extension \
         -ldflags '-linkmode external -extldflags -static' -o "$bin/photos-spike" ./ai/assistant-spike/photos-spike)
-      key_mount+=(-v "$bin:/spike-photos:ro")
+      key_mount+=(-v "$bin:/spike-photos:ro" -v "$here/..:/spike-ai:ro")
+      # SPIKE_PHOTO_MODELS=<dir>, laid out like the development machines' model directory,
+      # gives the photo service the real AI Worker with EmbeddingGemma 2 instead of the colour
+      # stand-in; SPIKE_PHOTO_IMPORT=<dir> then also uploads that directory's photos for alice.
+      if [[ -n "${SPIKE_PHOTO_MODELS:-}" ]]; then
+        mkdir -p "$work/pip-cache"
+        key_mount+=(-v "$(cd "$SPIKE_PHOTO_MODELS" && pwd):/spike-models:ro"
+          -v "$here/../../deploy/models:/spike-manifests:ro" -v "$work/pip-cache:/root/.cache/pip")
+        [[ -z "${SPIKE_PHOTO_IMPORT:-}" ]] || key_mount+=(-v "$(cd "$SPIKE_PHOTO_IMPORT" && pwd):/spike-import:ro")
+        # SPIKE_VIDEOS=<the model's directory of an eval.video_moments set, after its index step>
+        # with SPIKE_VIDEO_FILES=<the set's videos> adds the video moment tools (#322).
+        if [[ -n "${SPIKE_VIDEOS:-}" ]]; then
+          key_mount+=(-v "$(cd "$SPIKE_VIDEOS" && pwd):/spike-video-index:ro"
+            -v "$(cd "${SPIKE_VIDEO_FILES:?set SPIKE_VIDEO_FILES}" && pwd):/spike-video-files:ro")
+        fi
+      fi
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
@@ -103,7 +123,7 @@ case "${1:-}" in
     done
     # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
     docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
-      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" -e SPIKE_VISION="${SPIKE_VISION:-}" \
       "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'

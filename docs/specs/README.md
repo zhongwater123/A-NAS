@@ -39,6 +39,7 @@
 - [日志](logs.md)（implemented）
 - [容量与大小的显示单位](size-units.md)（implemented）
 - [AI 助手](ai-assistant.md)（implemented）
+- [照片与视频剪辑成片](photo-to-video.md)（draft；助手 MCP 工具：照片拼接与视频片段剪辑，原型沙箱中验收）
 - [网页搜索](web-search.md)（implemented）
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [照片打分](photo-scoring.md)（draft；可移除模块，实验 NAS 待安装）

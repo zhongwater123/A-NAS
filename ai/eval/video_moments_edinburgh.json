@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "about": "A long walk for the montage experiments of #322 (docs/research/video-moment-retrieval.md), kept apart from the pilot set: no queries, so it only takes the frames and embed steps, and only the layout the pilot recommends.",
+  "layouts": ["2s1f"],
+  "videos": {
+    "07": {
+      "file": "07_edinburgh_walk.webm",
+      "sha256": "b0f6010d8cdbbc6758706ac6f3a12d767d5a603e4c839d7878944f94fac040a3",
+      "duration": 4020.321
+    }
+  },
+  "queries": []
+}

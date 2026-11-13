@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "about": "#326: landmark instructions on the Paris film (video_moments_paris.json), labelled by card from each card's three key frames before any version ran; the film's shots run 20-40 s, so a card is one picture and its seconds are the label's. On: the Eiffel Tower close or as the subject (day 651-696 and 1001-1030, dusk and night 861-927 and 1030-1100), Versailles from the air (252-385), Notre-Dame (439-466), Sacré-Cœur (538-599), the Arc de Triomphe down an avenue (822-861), the Louvre pyramid (599-616) and the Concorde fountains (616-651). Not on, on purpose: a miniature Arc de Triomphe in a park (385-402) and the Paris Las Vegas hotel's Eiffel Tower (800-822), both copies; the tower tiny on the skyline (0-6, 186-214, 945-982); Sacré-Cœur small on its hill from the air (69-108); the Seine's bridges and the Conciergerie (466-538) and the Tuileries wheel (402-439), landmarks only loosely. 大本钟 is not in the film.",
+  "instructions": [
+    {"id": "landmarks", "text": "巴黎的地标建筑", "seconds": 60, "topic": ["巴黎的地标建筑"],
+     "onTopic": [["08", 252.0, 385.14], ["08", 439.34, 466.34], ["08", 537.91, 695.91], ["08", 822.01, 926.81], ["08", 1000.81, 1099.66]]},
+    {"id": "eiffel", "text": "埃菲尔铁塔", "seconds": 20, "topic": ["埃菲尔铁塔"],
+     "onTopic": [["08", 650.91, 695.91], ["08", 860.81, 926.81], ["08", 1000.81, 1099.66]]},
+    {"id": "eiffel-night", "text": "夜晚的埃菲尔铁塔", "seconds": 20, "topic": ["埃菲尔铁塔"], "when": [["夜晚", "白天"]],
+     "onTopic": [["08", 860.81, 926.81], ["08", 1030.01, 1099.66]]},
+    {"id": "arc", "text": "凯旋门", "seconds": 15, "topic": ["凯旋门"],
+     "onTopic": [["08", 822.01, 860.81]]},
+    {"id": "churches", "text": "巴黎的教堂", "seconds": 20, "topic": ["教堂"],
+     "onTopic": [["08", 439.34, 466.34], ["08", 537.91, 599.34]]},
+    {"id": "big-ben", "text": "大本钟", "seconds": 15, "topic": ["大本钟"],
+     "onTopic": []}
+  ]
+}

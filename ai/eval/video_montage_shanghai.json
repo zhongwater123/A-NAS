@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "about": "#350: the Shanghai 24-hour vlog cut by 剪法20 (eval.video_plan) with the instruction and length of 方案 B's run on it (timeline.json), its seconds a ceiling.",
+  "instructions": [
+    {
+      "id": "case-shanghai",
+      "text": "按时间顺序讲完博主在上海的这一天，保留说话的关键片段",
+      "seconds": 90,
+      "style": "旅行"
+    }
+  ]
+}

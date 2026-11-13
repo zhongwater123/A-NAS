@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "about": "#322: the montage instructions on the pilot set (video_moments.json). topic is what the picture shows, condition what it cannot (a place, which picks videos) and when what each window must be rather than its opposite (night, not day), both given by hand for the version with no model. onTopic lists the seconds that fit the instruction, from the pilot's labelled moments, written before the rule and model versions ran. 01 56-60 s (a vegetable stall) is not food here, nor the fan before the cut at 32.87 s; 05 (a canal inside a mall) is not a lake.",
+  "instructions": [
+    {"id": "food", "text": "美食", "seconds": 20, "topic": ["美食"],
+     "onTopic": [["01", 27, 28], ["01", 32.87, 40], ["01", 43, 46], ["01", 48, 53], ["02", 111, 116]]},
+    {"id": "sg-food", "text": "新加坡的美食", "seconds": 20, "condition": ["新加坡"], "topic": ["美食"],
+     "onTopic": [["01", 27, 28], ["01", 32.87, 40], ["01", 43, 46], ["01", 48, 53]]},
+    {"id": "lake-boats", "text": "湖上的小船", "seconds": 15, "topic": ["湖上的小船"],
+     "onTopic": [["02", 24, 59], ["02", 120, 151]]},
+    {"id": "aurora", "text": "北极光", "seconds": 15, "topic": ["北极光"],
+     "onTopic": [["03", 0, 124]]},
+    {"id": "city-night", "text": "城市夜景", "seconds": 15, "topic": ["城市"], "when": [["夜晚", "白天"]],
+     "onTopic": [["01", 162, 176], ["04", 0, 17]]},
+    {"id": "surfing", "text": "海滩上的冲浪者", "seconds": 15, "topic": ["海滩上的冲浪者"], "onTopic": []}
+  ]
+}

@@ -16,3 +16,10 @@
 - [网页搜索的引擎实测](web-search-engines.md)（开发机完成；332 个引擎全部接入，各分类的用时与回答情况；百度与夸克受第一次错误测量影响；实验 NAS 待测）
 - [设备镜像与 systemd-sysupdate 的验证](sysupdate-image-verification.md)（完成；ADR 0034 第 3 步，Debian 13 的 systemd 257 在 QEMU 中实测）
 - [Qdrant 检索特性试验（1.20.0）](qdrant-retrieval-features.md)（完成；开发机试验，视频片段、文件块与照片各用哪些特性，照片何时可切换）
+- [视频剪辑 baseline：时间窗抽帧与 EmbeddingGemma 2](video-moment-retrieval.md)（试点完成；MediaPipe Python 不能多帧一次编码，试点建议每 2 秒 1 帧；基线成片已逐段排查；正式评估集待采集）
+- [CutClaw：音乐同步的长视频智能剪辑](video-editing-cutclaw.md)（论文与代码精读；指令驱动剪辑的抽帧与片段定位）
+- [FilmAgent：多智能体协作的虚拟影片制作](video-editing-filmagent.md)（论文与代码精读；剪辑计划的生成与审校）
+- [自动剪辑前沿调研（2026-11）](video-editing-frontier-2026.md)（完成；25 项论文与项目，按评测约束筛选，CPU 耗时与许可证多项待核）
+- [剪辑第四版消融实验与优化方向](video-montage-ablation-v4.md)（开发机完成；三个测试用例、四种剪法的成片与程序指标，以及按成片问题排的优化方向）
+- [剪辑第六版：按音乐剪辑与云端两步规划](video-montage-v6.md)（开发机完成；三组旅行素材、三首歌，副歌识别、规划顺序与补位的实验，以及当前最好的成片）
+- [剪辑第七版：挑一版与精修的网页原型](video-montage-v7.md)（开发机原型完成，剪辑实验收尾；三版里挑一版、按音乐槽换镜头、锁定后重洗，进度与重剪是模拟的）

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "about": "#350: the sources of test case case-10 (video-edit-testset-v1) for the fourth version's ablation, one set per case as the eval gives each case only its own sources; no queries, so only the frames, embed, index, describe and measure steps.",
+  "layouts": [
+    "2s1f"
+  ],
+  "videos": {
+    "01": {
+      "file": "case-10-1.webm",
+      "sha256": "9460e0ee36f60463367ba240c76399e4e981818a8e6e14c96fbe4f36641ec5bf",
+      "duration": 950.081
+    },
+    "02": {
+      "file": "case-10-2.webm",
+      "sha256": "6b105bdece8ef36b78f3001427d2ea0aa1c5e58cba8c22f8706affa360ab6be6",
+      "duration": 1099.661
+    }
+  },
+  "queries": []
+}
