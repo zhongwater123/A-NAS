@@ -2038,6 +2038,319 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The removable modules installed on this device (ADR 0037); a window of a module not listed is not shown */
+        get: operations["listModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the caller administers photo scoring and whether an administrator chose them as a rater */
+        get: operations["getScoringMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The open batches for a rater, each with only the rater's own count of answers */
+        get: operations["listScoringBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A batch's reference photos with their scores, lowest first, for raters and administrators */
+        get: operations["listScoringAnchors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/anchors/{anchorId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The preview of a reference photo */
+        get: operations["getScoringAnchorImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rater's own latest twelve scores in the batch, oldest first, for the ruler; skips and marks are left out */
+        get: operations["listScoringRecent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The photos the rater holds in the batch, oldest first, topped up to three; each is held for ten minutes */
+        post: operations["claimScoringPhotos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The preview behind one of the caller's own claims, answered or not */
+        get: operations["getScoringClaimImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims */
+        get: operations["getScoringClaimThumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Answer a claim: a score, a skip or a mark. The same submission again is harmless; a new answer replaces only the rater's latest (rating_locked) */
+        put: operations["rateScoringPhoto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The folders in the Shared folder 照片打分 that can become a batch */
+        get: operations["listScoringSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every batch with its import progress and coverage, newest first */
+        get: operations["listScoringAdminBatches"];
+        put?: never;
+        /** Start importing a folder as a new batch */
+        post: operations["createScoringBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a batch nobody answered yet (batch_in_use otherwise) */
+        delete: operations["deleteScoringBatch"];
+        options?: never;
+        head?: never;
+        /** Rename a batch, change its guide or number of raters, or close and reopen it */
+        patch: operations["updateScoringBatch"];
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Each rater's counts, timing, spread, agreement with the others and consistency on repeated photos */
+        get: operations["getScoringStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A small JPEG, at most 320 px on its longer side, of the photo that stands for the batch: the first in its random order, anchors excluded */
+        get: operations["getScoringBatchCover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A zip of manifest.json, images.jsonl, ratings.jsonl (every answer, including replaced ones) and raters.jsonl */
+        get: operations["exportScoringBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/raters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every active account and whether it is a rater */
+        get: operations["listScoringRaters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/raters/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose an active account as a rater */
+        put: operations["addScoringRater"];
+        post?: never;
+        /** Stop an account rating; its answers stay */
+        delete: operations["removeScoringRater"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/photos/libraries": {
         parameters: {
             query?: never;
@@ -5826,6 +6139,151 @@ export interface components {
             vaccines: components["schemas"]["FamilyVaccineCatalog"];
             growthStandard: string;
         };
+        ScoringMe: {
+            /** @description The caller is an A-NAS administrator and so administers photo scoring. */
+            admin: boolean;
+            /** @description An administrator chose the caller as a rater. */
+            rater: boolean;
+        };
+        ScoringRaterBatch: {
+            id: string;
+            name: string;
+            /** @description The administrator's scoring guide. */
+            rubric: string;
+            /** @description The caller's own answers in the batch, skips and marks included. */
+            rated: number;
+            /** @description No photo of the batch is left for the caller. */
+            finished: boolean;
+        };
+        ScoringAnchor: {
+            id: number;
+            /** @description The reference score, 0 to 5 with at most two decimals. */
+            score: number;
+            width: number;
+            height: number;
+        };
+        ScoringRecentScore: {
+            /** @description The claim the score answered; its thumbnail and preview are the rater's own. */
+            token: string;
+            score: number;
+            /** @description The preview's width, for the thumbnail's proportions. */
+            width: number;
+            height: number;
+        };
+        ScoringClaim: {
+            /** @description All the rater learns about the photo; it is neither the content hash nor the file name. */
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description The preview's width; its longer side is at most 2048. */
+            width: number;
+            height: number;
+        };
+        ScoringClaims: {
+            items: components["schemas"]["ScoringClaim"][];
+            /** @description Nothing is held and nothing is left for the caller, or the batch is closed. */
+            finished: boolean;
+        };
+        ScoringSize: {
+            width: number;
+            height: number;
+        };
+        ScoringRatingInput: {
+            /** @description Chosen by the page for each answer; retrying the same answer sends the same value. */
+            submission: string;
+            /**
+             * @description skip: cannot judge; flag: something is wrong with the photo.
+             * @enum {string}
+             */
+            kind: "score" | "skip" | "flag";
+            /** @description Only with kind score: 0 to 5 with at most two decimals; more decimals are refused (validation_failed). */
+            score?: number;
+            /** @description From the photo appearing to the answer. */
+            viewMs: number;
+            viewport?: components["schemas"]["ScoringSize"];
+            display?: components["schemas"]["ScoringSize"];
+            pixelRatio?: number;
+        };
+        ScoringBatch: {
+            id: string;
+            name: string;
+            /** @description The folder in 照片打分 the batch was imported from. */
+            source: string;
+            /** @description How many raters each photo needs. */
+            required: number;
+            rubric: string;
+            /** @enum {string} */
+            state: "importing" | "open" | "closed";
+            /** Format: date-time */
+            createdAt: string;
+            import: {
+                /** @description Files found in the folder; 0 until it was scanned. */
+                files: number;
+                imported: number;
+                /** @description Unsupported, unreadable or undecodable files, and anchors without a score in their name. */
+                skipped: number;
+            };
+            /** @description Distinct photos to score, anchors excluded. */
+            photos: number;
+            anchors: number;
+            /** @description Photos with the required number of scores. */
+            complete: number;
+            /** @description Photos with some scores but not all. */
+            started: number;
+            /** @description Photos a rater marked as having a problem. */
+            flagged: number;
+        };
+        ScoringBatchInput: {
+            name: string;
+            source: string;
+            required: number;
+            rubric: string;
+        };
+        ScoringBatchPatch: {
+            name?: string;
+            rubric?: string;
+            required?: number;
+            /** @enum {string} */
+            state?: "open" | "closed";
+        };
+        ScoringPerson: {
+            id: string;
+            /** @description Missing once the account is no longer active. */
+            username?: string;
+            nickname?: string;
+            avatarVersion?: string;
+        };
+        ScoringRaterEntry: {
+            id: string;
+            username: string;
+            nickname?: string;
+            avatarVersion?: string;
+            rater: boolean;
+        };
+        ScoringRaterStats: {
+            rater: components["schemas"]["ScoringPerson"];
+            /** @description The account is still active. */
+            active: boolean;
+            scores: number;
+            skips: number;
+            flags: number;
+            /** @description Answers to photos shown again to check consistency. */
+            repeats: number;
+            medianViewMs: number;
+            mean: number;
+            standardDeviation: number;
+            /** @description Correlation with the other raters' mean on the same photos; null below 20 such photos. */
+            agreement: number | null;
+            agreementPhotos: number;
+            /** @description Mean absolute difference between a repeat and the current score of that photo; null without repeats. */
+            repeatDifference: number | null;
+            /** @description Share of scores given within a second. */
+            fastShare: number;
+            /** @description Longest run of the same score in a row. */
+            longestRun: number;
+            /** Format: date-time */
+            lastAt: string;
+        };
         PhotoLibrary: {
             id: string;
             /** @enum {string} */
@@ -7113,6 +7571,10 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
+        ScoringBatchID: string;
+        ScoringAnchorID: number;
+        ScoringClaimToken: string;
+        ScoringAccountID: string;
         /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
@@ -7266,6 +7728,20 @@ export type FamilyVaccineSchedule = components['schemas']['FamilyVaccineSchedule
 export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
 export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
+export type ScoringMe = components['schemas']['ScoringMe'];
+export type ScoringRaterBatch = components['schemas']['ScoringRaterBatch'];
+export type ScoringAnchor = components['schemas']['ScoringAnchor'];
+export type ScoringRecentScore = components['schemas']['ScoringRecentScore'];
+export type ScoringClaim = components['schemas']['ScoringClaim'];
+export type ScoringClaims = components['schemas']['ScoringClaims'];
+export type ScoringSize = components['schemas']['ScoringSize'];
+export type ScoringRatingInput = components['schemas']['ScoringRatingInput'];
+export type ScoringBatch = components['schemas']['ScoringBatch'];
+export type ScoringBatchInput = components['schemas']['ScoringBatchInput'];
+export type ScoringBatchPatch = components['schemas']['ScoringBatchPatch'];
+export type ScoringPerson = components['schemas']['ScoringPerson'];
+export type ScoringRaterEntry = components['schemas']['ScoringRaterEntry'];
+export type ScoringRaterStats = components['schemas']['ScoringRaterStats'];
 export type PhotoLibrary = components['schemas']['PhotoLibrary'];
 export type PhotoDirectory = components['schemas']['PhotoDirectory'];
 export type PhotoAsset = components['schemas']['PhotoAsset'];
@@ -7390,6 +7866,10 @@ export type ParameterFamilyBabyId = components['parameters']['FamilyBabyID'];
 export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID'];
 export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
 export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
+export type ParameterScoringBatchId = components['parameters']['ScoringBatchID'];
+export type ParameterScoringAnchorId = components['parameters']['ScoringAnchorID'];
+export type ParameterScoringClaimToken = components['parameters']['ScoringClaimToken'];
+export type ParameterScoringAccountId = components['parameters']['ScoringAccountID'];
 export type ParameterAssistantSessionId = components['parameters']['AssistantSessionID'];
 export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID'];
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
@@ -11422,6 +11902,539 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    listModules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The installed modules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            id: string;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    getScoringMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringMe"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listScoringBatches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open batches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterBatch"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    listScoringAnchors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reference photos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringAnchor"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringAnchorImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+                anchorId: components["parameters"]["ScoringAnchorID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listScoringRecent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest scores */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRecentScore"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    claimScoringPhotos: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The held photos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringClaims"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringClaimImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringClaimThumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    rateScoringPhoto: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringRatingInput"];
+            };
+        };
+        responses: {
+            /** @description How many photos of the batch the rater answered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        rated: number;
+                    };
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    listScoringSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The folders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            name: string;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listScoringAdminBatches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The batches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringBatch"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    createScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringBatchInput"];
+            };
+        };
+        responses: {
+            /** @description The new batch */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringBatch"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    deleteScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    updateScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringBatchPatch"];
+            };
+        };
+        responses: {
+            /** @description The batch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringBatch"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getScoringStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The raters' statistics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterStats"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringBatchCover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    exportScoringBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listScoringRaters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterEntry"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    addScoringRater: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Chosen */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    removeScoringRater: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
         };
     };
     listPhotoLibraries: {

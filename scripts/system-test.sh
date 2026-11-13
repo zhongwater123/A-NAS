@@ -46,6 +46,8 @@ if [[ "${1:-}" != --inside ]]; then
   shopt -s nullglob
   products=("$repo"/build/packages/a-nas_*.deb)
   ((${#products[@]} == 1)) || { echo "build/packages needs exactly one a-nas package: run make packages" >&2; exit 2; }
+  # The photo scoring module is not in the packages; its own script installs it (ADR 0037).
+  [[ -x "$repo/build/anas-scoring" ]] || { echo "missing build/anas-scoring: run make build-binaries" >&2; exit 2; }
   real=()
   if [[ -n "${ANAS_SYSTEM_TEST_CONTENT:-}" ]]; then
     content=build/content-packages
@@ -1134,6 +1136,71 @@ check "member founds the family through the family service" \
   test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
     -d '{"role":"妈妈"}' "$api/api/v1/family/join")" = 200
 
+# --- Photo scoring, a removable module (ADR 0037): its own scripts install
+# and remove it; it reads only the Shared folder 照片打分, and only read-only,
+# and the Product Service forwards its API with the session token alone.
+install -d /var/tmp/scoring-module
+install -m 0755 /src/build/anas-scoring /src/scripts/modules/scoring/install.sh /src/scripts/modules/scoring/remove.sh /var/tmp/scoring-module/
+install -m 0644 /src/deploy/modules/scoring/anas-module-scoring.service /src/deploy/modules/scoring/anas-module-scoring.socket \
+  /src/deploy/modules/scoring/scoring.json /var/tmp/scoring-module/
+check "photo scoring is not installed before its script runs" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/me")" = 404
+check "photo scoring's install script installs it" quiet bash /var/tmp/scoring-module/install.sh /var/tmp/scoring-module
+check "photo scoring's installed units pass systemd-analyze verify" \
+  verified /etc/systemd/system/anas-module-scoring.service /etc/systemd/system/anas-module-scoring.socket
+check "the module store belongs to the module alone" \
+  test "$(stat -c '%a %U' "$data/module-scoring")" = "700 a-nas-scoring"
+check "Product Service account cannot list the module store" denied a-nas ls "$data/module-scoring"
+check "the module's socket is the Product Service's alone" \
+  test "$(stat -c '%a %U %G' /run/a-nas-modules/scoring.sock)" = "660 a-nas-scoring a-nas-modules"
+check "the desktop lists photo scoring as installed" \
+  bash -c "curl -fsS -b /tmp/alice.jar '$api/api/v1/modules' | jq -e '.items == [{\"id\":\"scoring\"}]' >/dev/null"
+check "a member nobody chose gets no batches" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/batches")" = 403
+check "a member cannot reach the module's administration" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/admin/batches")" = 403
+install -d "$data/spaces/shared/照片打分/第一批"
+cp /tmp/photo.png "$data/spaces/shared/照片打分/第一批/a.png"
+scoring_batch=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d '{"name":"第一批","source":"第一批","required":1,"rubric":""}' "$api/api/v1/modules/scoring/admin/batches" | jq -r .id || true)
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+scoring_open() {
+  for _ in $(seq 1 30); do
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/modules/scoring/admin/batches" | jq -e '.items[0].state == "open" and .items[0].photos == 1' >/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+check "the module imports a folder of 照片打分 as a batch" scoring_open
+check "an administrator chooses a member as rater" \
+  test "$(status_of -X PUT -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/modules/scoring/admin/raters/$alice_user")" = 204
+scoring_claim=$(curl -fsS -b /tmp/alice.jar -X POST -H "X-CSRF-Token: $alice_csrf" \
+  "$api/api/v1/modules/scoring/batches/$scoring_batch/claims" | jq -r '.items[0].token' || true)
+check "the rater sees the photo handed to her" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/claims/$scoring_claim/image")" = 200
+check "the rater scores it" test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{"submission":"system-test-0001","kind":"score","score":3.47,"viewMs":1200}' \
+  "$api/api/v1/modules/scoring/claims/$scoring_claim/rating")" = 200
+scoring_pid=$(systemctl show -p MainPID --value anas-module-scoring)
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+module_sees() { nsenter -t "$scoring_pid" -m ls -A "$1" | tr '\n' ' '; }
+check "the module sees nothing of the data volume but its store and 照片打分" \
+  test "$(module_sees "$data")/$(module_sees "$data/spaces/shared")" = "module-scoring spaces /照片打分 "
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+module_writes() {
+  nsenter -t "$scoring_pid" -m setpriv --reuid=a-nas-scoring --regid=a-nas-scoring \
+  --groups="$(getent group a-nas-users | cut -d: -f3)" touch "$data/spaces/shared/照片打分/written-by-the-module"
+}
+check "the module cannot write in 照片打分" fails module_writes
+check "photo scoring's remove script removes it" quiet bash /var/tmp/scoring-module/remove.sh
+check "removed: units, program and account are gone" \
+  bash -c '! systemctl cat anas-module-scoring.service >/dev/null 2>&1 && [[ ! -e /opt/a-nas/modules/scoring && ! -e /etc/a-nas/modules/scoring.json ]] && ! getent passwd a-nas-scoring >/dev/null'
+check "removed: the API says photo scoring is not installed" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/me")" = 404
+check "removed: the store stays until the runbook deletes it" test -d "$data/module-scoring"
+check "removed: the photos stay in the Shared space" test -f "$data/spaces/shared/照片打分/第一批/a.png"
+check "the runbook's deletion of the store succeeds" quiet btrfs subvolume delete "$data/module-scoring"
+
 # --- Local AI is built in (ADR 0016): started on demand, without network or
 # data volume.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -1164,9 +1231,20 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
-  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
+# The OCR model comes in parts (scripts/split-model.sh), each from its own
+# content package, beside the first one the link names.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+model_parts_installed() {
+  local directory part
+  directory=/opt/a-nas/models/$(jq -r .sha256 "$1")
+  while read -r part; do
+    [[ -f "$directory/$part" ]] || { echo "no $directory/$part" >>"$hidden"; return 1; }
+  done < <(jq -r '(.parts // [])[].file' "$1")
+}
+check "the OCR model's parts are all beside its first" model_parts_installed "$ai/ocr-model.json"
 llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
 check "the package links llama.cpp, only the members its manifest names" \
   test "$(readlink /usr/lib/a-nas/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \

@@ -34,8 +34,9 @@ packages+=tini,socat,ripgrep,
 # for fixtures, and chattr, which scripts/root-integration-test.sh needs.
 packages+=smbclient,curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,yq,libheif-examples,libheif-plugin-x265,e2fsprogs,
 # The signed apt repository that make release and the system test make
-# (scripts/apt-repository.sh).
-packages+=aptly,gnupg
+# (scripts/apt-repository.sh), and its flat form on GitHub, whose index
+# apt-ftparchive makes (scripts/publish-github.sh).
+packages+=aptly,gnupg,apt-utils
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
