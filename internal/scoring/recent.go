@@ -19,8 +19,9 @@ import (
 // thumbnail at its score for reference.
 type RecentScore struct {
 	Token string
-	// Score is in hundredths.
+	// Score is overall in hundredths, Scores the batch's other dimensions.
 	Score         int
+	Scores        map[string]int
 	Width, Height int
 }
 
@@ -36,17 +37,42 @@ func (s *Store) RecentScores(ctx context.Context, batchID, rater string) ([]Rece
 		return nil, err
 	}
 	recent := []RecentScore{}
-	err := each(ctx, s.db, `SELECT r.claim_token, r.score, c.preview_width, c.preview_height
+	byRating := map[int64]*RecentScore{}
+	var ids []int64
+	err := each(ctx, s.db, `SELECT r.id, r.claim_token, r.score, c.preview_width, c.preview_height
 		FROM ratings r JOIN items i ON i.id = r.item_id JOIN contents c ON c.sha256 = i.sha256
 		WHERE r.batch_id = ? AND r.rater = ? AND r.kind = 'score' AND r.superseded_at IS NULL
 		ORDER BY r.id DESC LIMIT ?`, []any{batchID, rater, Recent}, func(rows *sql.Rows) error {
-		var score RecentScore
-		if err := rows.Scan(&score.Token, &score.Score, &score.Width, &score.Height); err != nil {
+		var id int64
+		score := RecentScore{Scores: map[string]int{}}
+		if err := rows.Scan(&id, &score.Token, &score.Score, &score.Width, &score.Height); err != nil {
 			return err
 		}
+		ids = append(ids, id)
 		recent = append(recent, score)
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	for i, id := range ids {
+		byRating[id] = &recent[i]
+	}
+	if len(ids) > 0 {
+		err = each(ctx, s.db, `SELECT s.rating_id, s.dimension, s.score FROM rating_scores s JOIN ratings r ON r.id = s.rating_id
+			WHERE r.batch_id = ? AND r.rater = ? AND s.rating_id >= ?`, []any{batchID, rater, slices.Min(ids)}, func(rows *sql.Rows) error {
+			var id int64
+			var dimension string
+			var value int
+			if err := rows.Scan(&id, &dimension, &value); err != nil {
+				return err
+			}
+			if score := byRating[id]; score != nil {
+				score.Scores[dimension] = value
+			}
+			return nil
+		})
+	}
 	slices.Reverse(recent)
 	return recent, err
 }

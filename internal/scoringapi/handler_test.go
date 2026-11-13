@@ -99,7 +99,8 @@ func setup(t *testing.T) api {
 			t.Fatal(err)
 		}
 	}
-	store, err := scoring.Open(t.TempDir(), scoring.Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	// The test photos are small; any size will do.
+	store, err := scoring.Open(t.TempDir(), scoring.Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), MinLongEdge: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,30 +126,46 @@ type batchList struct {
 	} `json:"items"`
 }
 
+// createOpen makes a batch of the test folder and waits for its import.
+func (a api) createOpen(body map[string]any) string {
+	a.t.Helper()
+	created := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches", body)
+	if created.Code != http.StatusCreated {
+		a.t.Fatalf("create: %d %s", created.Code, created.Body)
+	}
+	batch := decode[struct{ ID string }](a.t, created).ID
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		batches := decode[batchList](a.t, a.call("admin-token", http.MethodGet, scoringapi.AdminPrefix+"/batches", nil))
+		for _, item := range batches.Items {
+			if item.ID == batch && item.State == "open" {
+				return batch
+			}
+		}
+		if time.Now().After(deadline) {
+			a.t.Fatalf("import did not finish: %+v", batches)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+type meBody struct {
+	Admin      bool `json:"admin"`
+	Rater      bool `json:"rater"`
+	Dimensions []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"dimensions"`
+}
+
 func TestRatersSeeOnlyTheirOwnWorkAndAdministratorsSeeEveryone(t *testing.T) {
 	a := setup(t)
 	if code := a.call("", http.MethodGet, scoringapi.PathPrefix+"/me", nil).Code; code != http.StatusUnauthorized {
 		t.Fatalf("without a session: %d", code)
 	}
-	created := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
-		map[string]any{"name": "第一批", "source": "第一批", "required": 2, "rubric": "看构图"})
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", created.Code, created.Body)
-	}
-	batch := decode[struct{ ID string }](t, created).ID
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		batches := decode[batchList](t, a.call("admin-token", http.MethodGet, scoringapi.AdminPrefix+"/batches", nil))
-		if len(batches.Items) == 1 && batches.Items[0].State == "open" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("import did not finish: %+v", batches)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if me := decode[map[string]bool](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/me", nil)); me["rater"] || me["admin"] {
-		t.Fatalf("alice before being chosen: %v", me)
+	batch := a.createOpen(map[string]any{"name": "第一批", "source": "第一批", "required": 2, "rubric": "看构图"})
+	if me := decode[meBody](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/me", nil)); me.Rater || me.Admin || len(me.Dimensions) != 6 {
+		t.Fatalf("alice before being chosen: %+v", me)
 	}
 	if code := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil).Code; code != http.StatusForbidden {
 		t.Fatalf("batches for a member not chosen: %d", code)
@@ -237,5 +254,60 @@ func TestRatersSeeOnlyTheirOwnWorkAndAdministratorsSeeEveryone(t *testing.T) {
 	}
 	if code := a.call("admin-token", http.MethodDelete, scoringapi.AdminPrefix+"/batches/"+batch, nil).Code; code != http.StatusConflict {
 		t.Fatalf("deleting a rated batch: %d", code)
+	}
+}
+
+func TestDimensionsTheFullViewAndTheExportsColumns(t *testing.T) {
+	a := setup(t)
+	batch := a.createOpen(map[string]any{"name": "清晰", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"sharpness", "overall"}})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	batches := decode[struct {
+		Items []struct {
+			Dimensions []struct{ ID string } `json:"dimensions"`
+		} `json:"items"`
+	}](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil))
+	if len(batches.Items) != 1 || len(batches.Items[0].Dimensions) != 2 || batches.Items[0].Dimensions[1].ID != "sharpness" {
+		t.Fatalf("alice's batches: %+v", batches)
+	}
+	claims := decode[struct {
+		Items []struct{ Token string } `json:"items"`
+	}](t, a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil))
+	token := claims.Items[0].Token
+	path := scoringapi.PathPrefix + "/claims/" + token
+	without := map[string]any{"submission": "alice-dim-01", "kind": "score", "score": 3.2, "viewMs": 2000}
+	if code := a.call("alice-token", http.MethodPut, path+"/rating", without).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("an answer without sharpness: %d", code)
+	}
+	with := map[string]any{"submission": "alice-dim-02", "kind": "score", "score": 3.2, "scores": map[string]float64{"sharpness": 2.45}, "viewMs": 2000}
+	if rated := a.call("alice-token", http.MethodPut, path+"/rating", with); rated.Code != http.StatusOK {
+		t.Fatalf("an answer with sharpness: %d %s", rated.Code, rated.Body)
+	}
+	recent := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches/"+batch+"/recent", nil)
+	if !strings.Contains(recent.Body.String(), `"scores":{"sharpness":2.45}`) {
+		t.Fatalf("recent: %s", recent.Body)
+	}
+	full := a.call("alice-token", http.MethodGet, path+"/full", nil)
+	if full.Code != http.StatusOK || full.Header().Get("Content-Type") != "image/jpeg" || full.Header().Get("X-Image-Orientation") != "1" {
+		t.Fatalf("full view: %d %v", full.Code, full.Header())
+	}
+	if code := a.call("bob-token", http.MethodGet, path+"/full", nil).Code; code != http.StatusNotFound {
+		t.Fatalf("bob's full view of alice's photo: %d", code)
+	}
+	patch := a.call("admin-token", http.MethodPatch, scoringapi.AdminPrefix+"/batches/"+batch, map[string]any{"dimensions": []string{"overall"}})
+	if patch.Code != http.StatusConflict {
+		t.Fatalf("changing an answered batch's dimensions: %d %s", patch.Code, patch.Body)
+	}
+	export := scoringapi.AdminPrefix + "/batches/" + batch + "/export"
+	if code := a.call("admin-token", http.MethodGet, export+"?fields=composition", nil).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("exporting a dimension the batch does not score: %d", code)
+	}
+	if got := a.call("admin-token", http.MethodGet, export+"?format=jsonl&fields=sharpness,duration&include=skips", nil); got.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", got.Code, got.Body)
+	}
+	summary := a.call("admin-token", http.MethodGet, export+"/summary", nil)
+	if summary.Code != http.StatusOK || decode[map[string]int](t, summary)["scores"] != 1 {
+		t.Fatalf("summary: %d %s", summary.Code, summary.Body)
 	}
 }

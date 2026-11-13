@@ -1,7 +1,7 @@
 # 安装与移除照片打分
 
 状态：draft
-更新时间：2026-11-12
+更新时间：2026-11-13
 
 ## 目的
 
@@ -35,8 +35,8 @@
 
 ### 导出（打分期间定期做，移除前必须做）
 
-1. 管理员在“照片打分 → 批次”中逐个打开批次，点“导出”，把 zip 存到 NAS 以外的地方。
-2. 核对：zip 中有 `manifest.json`、`images.jsonl`、`ratings.jsonl`、`raters.jsonl`；`manifest.json` 中每个文件的行数与 SHA-256 与文件一致（`sha256sum`、`wc -l`）。
+1. 管理员在“照片打分 → 批次”中逐个打开批次，点“导出”。移除前留存用的导出选 JSON Lines，勾上全部记录种类（跳过与标记、被撤销的旧分数、重复检查）与全部字段，这样留下的是完整记录；平时给训练侧的导出按需选。把 zip 存到 NAS 以外的地方。
+2. 核对：zip 中有 `manifest.json` 与 `ratings.jsonl`（或 `ratings.csv`）；`manifest.json` 的 `file.sha256` 与表一致（`sha256sum`），`rows.count` 等于 JSON Lines 的行数（`wc -l`）或 CSV 去掉表头后的记录数，`rows.include` 列出全部三种记录。
 
 ### 移除
 
