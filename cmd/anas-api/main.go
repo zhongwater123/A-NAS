@@ -354,7 +354,7 @@ func run(logger *slog.Logger) error {
 	}
 	defer closeModules()
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
-	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations, version),
+	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations),
 		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
@@ -665,9 +665,10 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 }
 
 // configuredSystemUpdate reaches the system update service through the Host
-// Agent on a NAS (docs/specs/system-update.md); development has one in
-// memory, with a newer version than its own waiting to be installed.
-func configuredSystemUpdate(config Config, operations productOperations, version string) systemupdate.Updater {
+// Agent on a NAS (docs/specs/system-update.md). Development has one in
+// memory with two development builds numbered as scripts/release-version.sh
+// numbers them, the newer waiting to be installed.
+func configuredSystemUpdate(config Config, operations productOperations) systemupdate.Updater {
 	if config.Live() {
 		updater, ok := operations.(systemupdate.Updater)
 		if !ok {
@@ -675,7 +676,8 @@ func configuredSystemUpdate(config Config, operations productOperations, version
 		}
 		return updater
 	}
-	return systemupdate.NewMemory(version, version+"+next", 4*time.Second)
+	return systemupdate.NewMemory("1.0.1~rc.6+dev20261112.79+g83bb9db1c0de",
+		"1.0.1~rc.6+dev20261113.80+g4e842653a1b2", 4*time.Second)
 }
 
 // updateWork names what an install waits for: a storage plan that runs or a

@@ -19,8 +19,13 @@ func (e *Executor) updateStore() updater.Store {
 }
 
 // updateRunning reports whether a run of the service is in progress: a
-// oneshot unit is activating until its run ends.
+// oneshot unit is activating until its run ends. A request it has not taken
+// yet counts: the unit is starting, which systemctl start --no-block does
+// not wait for, and a read just after the request must not show it idle.
 func (e *Executor) updateRunning(ctx context.Context) (bool, error) {
+	if e.updateStore().RequestWaiting(e.now()) {
+		return true, nil
+	}
 	output, err := e.runner.Output(ctx, "systemctl", []string{"show", "--property=ActiveState", "--value", updateUnit}, "")
 	if err != nil {
 		return false, commandError("read the system update service's state", err, output)

@@ -3,10 +3,12 @@ Description=A-NAS system update: take a push, check, download
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
 
 [Timer]
-# Soon after boot, which also finishes an install a power cut stopped, then
+# Two minutes after the timer starts: soon after boot, which also finishes an
+# install a power cut stopped, or after the package's postinst starts it,
+# which OnBootSec would run at once, in the middle of that installation. Then
 # hourly: a push is taken within the hour, and the check proper runs once a
 # day unless a push brought something (internal/systemupdate).
-OnBootSec=2min
+OnActiveSec=2min
 OnUnitInactiveSec=1h
 RandomizedDelaySec=10min
 Persistent=false

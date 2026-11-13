@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
@@ -73,6 +74,14 @@ func (s Store) TakeRequest() (Request, error) {
 		return Request{}, err
 	}
 	return request, nil
+}
+
+// RequestWaiting reports whether a request was left within the last
+// minute and no run has taken it yet: the unit that takes it is starting.
+// An older one waits for a run that did not start, which the next run takes.
+func (s Store) RequestWaiting(now time.Time) bool {
+	info, err := os.Stat(s.path("request.json"))
+	return err == nil && now.Sub(info.ModTime()) < time.Minute
 }
 
 func (s Store) read(name string, into any) error {

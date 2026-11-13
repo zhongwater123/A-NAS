@@ -170,6 +170,10 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 		return nil
 	}
 	state.Problem = nil
+	// The page offers to go back only while the source still has the version.
+	if state.Previous != "" && !s.available(ctx, state.Previous) {
+		state.Previous = ""
+	}
 	candidate, err := s.candidate(ctx)
 	if err != nil {
 		return err
@@ -320,10 +324,11 @@ func (s *Service) releaseArguments(ctx context.Context, version string) []string
 }
 
 // aptInstall is the deploy runbook's install command (step 6) for the
-// release's packages.
+// release's packages. It waits for an apt the administrator runs by hand
+// rather than failing on its lock.
 func aptInstall(packages []string, extra ...string) []string {
 	arguments := []string{"install", "-y", "--no-install-recommends", "--allow-downgrades",
-		"-o", "Dpkg::Options::=--force-confold"}
+		"-o", "Dpkg::Options::=--force-confold", "-o", "DPkg::Lock::Timeout=600"}
 	arguments = append(arguments, extra...)
 	return append(arguments, packages...)
 }
@@ -464,6 +469,9 @@ func (s *Service) goBack(ctx context.Context, state *State, cause *Problem) erro
 	}
 	state.Reject(failed)
 	state.Problem = cause
+	// A service of the failed version that kept failing has used up its
+	// start limit, and the version before's postinst could not restart it.
+	_, _ = s.Commands.Run(ctx, "systemctl", "reset-failed")
 	if problem := s.installVersion(ctx, state.From); problem != nil {
 		state.Phase = PhaseRolledBack
 		state.Problem = &Problem{Code: ProblemRollback, Detail: cause.Detail + "\n" + problem.Detail}
@@ -486,7 +494,11 @@ func (s *Service) goBack(ctx context.Context, state *State, cause *Problem) erro
 // the administrator asked; the version left is not installed automatically
 // again.
 func (s *Service) revert(ctx context.Context, state *State, by string) error {
-	if state.Phase.Busy() || state.Previous == "" || !s.available(ctx, state.Previous) {
+	if state.Phase.Busy() || state.Previous == "" {
+		return nil
+	}
+	if !s.available(ctx, state.Previous) {
+		state.Previous = ""
 		return nil
 	}
 	state.Phase, state.Target, state.From, state.By = PhaseRollingBack, state.Previous, state.Current, by

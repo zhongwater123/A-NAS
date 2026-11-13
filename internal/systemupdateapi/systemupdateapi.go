@@ -125,7 +125,11 @@ func (a *API) act(w http.ResponseWriter, r *http.Request, session accounts.Sessi
 	if request.Action == systemupdate.RequestRevert {
 		version = status.Previous
 	}
-	a.record(r.Context(), session.User.ID, "system.update."+request.Action, "", map[string]string{"version": version})
+	// A check is not recorded: the page asks for one whenever the last is an
+	// hour old, and what a check finds is recorded when it fails.
+	if request.Action != systemupdate.RequestCheck {
+		a.record(r.Context(), session.User.ID, "system.update."+request.Action, "", map[string]string{"version": version})
+	}
 	a.logger.InfoContext(r.Context(), "system update requested", "by", session.User.Username, "action", request.Action)
 	httpjson.Write(w, http.StatusAccepted, a.document(r.Context(), status))
 }
@@ -190,9 +194,6 @@ func (a *API) record(ctx context.Context, actorID, action, resourceID string, de
 func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
 	for i := len(status.Records) - 1; i >= 0; i-- {
 		record := status.Records[i]
-		if record.Kind == systemupdate.RecordDownloaded {
-			continue
-		}
 		detail := map[string]string{"version": record.Version, "from": record.From, "by": record.By}
 		if record.Problem != nil {
 			detail["problem"] = record.Problem.Code

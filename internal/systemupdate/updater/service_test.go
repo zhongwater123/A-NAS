@@ -74,7 +74,7 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 			return nil, nil
 		}
 		for _, argument := range args {
-			if name, version, ok := strings.Cut(argument, "="); ok && !strings.HasPrefix(argument, "Dpkg") {
+			if name, version, ok := strings.Cut(argument, "="); ok && !strings.Contains(argument, "::") {
 				if h.installFails[version] {
 					return []byte("E: Sub-process /usr/bin/dpkg returned an error code (1)"), errors.New("exit status 100")
 				}
@@ -312,6 +312,20 @@ func TestRevertGoesToTheVersionBeforeAndLeavesTheOtherOut(t *testing.T) {
 	}
 	if !slices.Contains(state.Rejected, "2") || state.Records[0].Kind != RecordReverted || state.Records[0].By != "owner" {
 		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestAPreviousVersionTheSourceDroppedIsNotOffered(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	if state := run(t, service, RequestInstall); state.Previous != "1" {
+		t.Fatalf("previous = %q, want 1", state.Previous)
+	}
+	// A later push holds 2 and 3 alone.
+	host.versions = []string{"2", "3"}
+	if state := run(t, service, RequestCheck); state.Previous != "" || state.Candidate != "3" {
+		t.Fatalf("state = %+v, want no previous and 3 offered", state)
 	}
 }
 

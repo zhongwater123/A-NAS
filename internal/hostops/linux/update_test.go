@@ -28,6 +28,13 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	if err != nil || !status.Running {
 		t.Fatalf("RequestSystemUpdate() = %+v, %v", status, err)
 	}
+	// The unit has not started yet: a read and a second request see the run.
+	if status, err := executor.SystemUpdate(ctx); err != nil || !status.Running {
+		t.Fatalf("a read before the unit started = %+v, %v; want running", status, err)
+	}
+	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestCheck, By: "owner"}); !errors.Is(err, systemupdate.ErrBusy) {
+		t.Fatalf("a request before the unit started = %v, want ErrBusy", err)
+	}
 	request, err := store.TakeRequest()
 	if err != nil || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
 		t.Fatalf("the request left for the service = %+v, %v", request, err)
