@@ -72,3 +72,20 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 		t.Fatal("an empty install window was saved")
 	}
 }
+
+func TestAReadAsARunEndsShowsWhatTheRunLeft(t *testing.T) {
+	root := t.TempDir()
+	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
+	runner := &systemdRunner{activeState: "inactive"}
+	// The run saves its state and exits while systemd is asked about it.
+	runner.onShow = func() {
+		if err := store.Save(systemupdate.State{Phase: systemupdate.PhaseReady, Current: "1", Candidate: "2"}); err != nil {
+			t.Error(err)
+		}
+	}
+	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	status, err := executor.SystemUpdate(context.Background())
+	if err != nil || status.Running || status.Phase != systemupdate.PhaseReady || status.Candidate != "2" {
+		t.Fatalf("SystemUpdate() = %+v, %v; want the state the run left, not the one before it", status, err)
+	}
+}

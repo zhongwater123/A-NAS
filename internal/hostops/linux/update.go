@@ -37,14 +37,19 @@ func (e *Executor) updateRunning(ctx context.Context) (bool, error) {
 // SystemUpdate reads the state the service left. A state that says an install
 // is under way while no run is in progress was left by a run that stopped;
 // the service is started to finish it.
+//
+// Whether a run is in progress is asked first: a run saves its state before
+// it ends, so a run seen ended has left its state for the read that follows.
+// Read the other way round, a run ending in between showed its old state as
+// settled.
 func (e *Executor) SystemUpdate(ctx context.Context) (systemupdate.Status, error) {
 	e.updateMu.Lock()
 	defer e.updateMu.Unlock()
-	state, err := e.updateStore().Load()
+	running, err := e.updateRunning(ctx)
 	if err != nil {
 		return systemupdate.Status{}, err
 	}
-	running, err := e.updateRunning(ctx)
+	state, err := e.updateStore().Load()
 	if err != nil {
 		return systemupdate.Status{}, err
 	}
