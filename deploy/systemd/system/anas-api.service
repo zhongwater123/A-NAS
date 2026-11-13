@@ -9,8 +9,9 @@ Type=simple
 User=a-nas
 Group=a-nas
 # Reaches the photo service's API socket; the photo store itself stays
-# private to a-nas-photos (ADR 0011). Web search's socket likewise (ADR 0030).
-SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search
+# private to a-nas-photos (ADR 0011). Web search's socket likewise (ADR 0030),
+# and installed removable modules' sockets (ADR 0037).
+SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules
 Environment=ANAS_HTTP_ADDR=127.0.0.1:8080
 Environment=ANAS_HOSTSTATE_MODE=agent
 Environment=ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock

@@ -88,6 +88,52 @@ class LlamaReaderTest(unittest.TestCase):
             prompt = json.load(file)["body"]["messages"][0]["content"][1]["text"]
         self.assertEqual(prompt, providers.OCR_FIELDS_PROMPT + json.dumps(schema, ensure_ascii=False))
 
+    def test_a_model_in_parts_is_checked_part_by_part_and_read_from_the_first(self):
+        # As the content packages install it: the parts in one directory,
+        # the role's link pointing at the first.
+        store = os.path.join(self.directory, "store")
+        os.mkdir(store)
+        parts = []
+        for index, content in enumerate((b"first half", b"second half"), start=1):
+            name = f"model-{index:05d}-of-00002.gguf"
+            with open(os.path.join(store, name), "wb") as file:
+                file.write(content)
+            parts.append({"file": name, "sizeBytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+        reader = self.reader()
+        link = os.path.join(self.directory, "model.gguf")
+        os.remove(link)
+        os.symlink(os.path.join(store, parts[0]["file"]), link)
+        manifest = os.path.join(self.directory, "model.gguf.json")
+        with open(manifest, encoding="utf-8") as file:
+            pinned = json.load(file)
+        pinned["parts"] = parts
+        with open(manifest, "w", encoding="utf-8") as file:
+            json.dump(pinned, file)
+        reader = providers.LlamaReader([sys.executable, STAND_IN], link, manifest,
+                                       os.path.join(self.directory, "mmproj.gguf"),
+                                       os.path.join(self.directory, "mmproj.gguf.json"),
+                                       os.path.join(self.directory, "llama.json"), threads=2)
+        self.addCleanup(reader.release)
+        reader.read(b"jpeg", "text", None, reader.run_options())
+        with open(self.record, encoding="utf-8") as file:
+            argv = json.load(file)["argv"]
+        self.assertEqual(argv[argv.index("-m") + 1], os.path.join(os.path.realpath(store), parts[0]["file"]))
+        reader.release()
+        # A changed second part is caught before the next start.
+        with open(os.path.join(store, parts[1]["file"]), "wb") as file:
+            file.write(b"second HALF")
+        reader = providers.LlamaReader([sys.executable, STAND_IN], link, manifest,
+                                       os.path.join(self.directory, "mmproj.gguf"),
+                                       os.path.join(self.directory, "mmproj.gguf.json"),
+                                       os.path.join(self.directory, "llama.json"), threads=2)
+        self.addCleanup(reader.release)
+        with self.assertRaises(providers.Unavailable):
+            reader.read(b"jpeg", "text", None, reader.run_options())
+
+    def test_a_part_that_is_not_a_plain_file_name_is_refused(self):
+        with self.assertRaises(providers.Unavailable):
+            providers.model_parts("/x/model.gguf", {"parts": [{"file": "../etc/passwd"}]})
+
     def test_the_server_runs_until_released(self):
         reader = self.reader()
         reader.read(b"jpeg", "text", None, reader.run_options())
