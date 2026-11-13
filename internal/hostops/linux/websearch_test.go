@@ -18,11 +18,13 @@ type systemdRunner struct {
 	commands    []string
 	// onShow runs as systemctl show answers, as a unit that changes then.
 	onShow func()
+	// runErr fails every command Run runs.
+	runErr error
 }
 
 func (r *systemdRunner) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {
 	r.commands = append(r.commands, strings.Join(append([]string{name}, args...), " "))
-	return nil, nil
+	return nil, r.runErr
 }
 
 func (r *systemdRunner) Output(_ context.Context, name string, args []string, _ string) ([]byte, error) {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/systemupdate"
@@ -35,9 +36,9 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestCheck, By: "owner"}); !errors.Is(err, systemupdate.ErrBusy) {
 		t.Fatalf("a request before the unit started = %v, want ErrBusy", err)
 	}
-	request, err := store.TakeRequest()
-	if err != nil || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
-		t.Fatalf("the request left for the service = %+v, %v", request, err)
+	request, ok, err := store.TakeRequest(time.Now().Add(-time.Minute))
+	if err != nil || !ok || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
+		t.Fatalf("the request left for the service = %+v, %v, %v", request, ok, err)
 	}
 	if !slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
 		t.Fatalf("the service was not started: %v", runner.commands)
@@ -70,6 +71,24 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	}
 	if _, err := executor.SetSystemUpdateSettings(ctx, systemupdate.Settings{WindowStart: "02:00", WindowEnd: "02:00"}); err == nil {
 		t.Fatal("an empty install window was saved")
+	}
+}
+
+func TestARequestWhoseUnitDidNotStartIsNotLeft(t *testing.T) {
+	root := t.TempDir()
+	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
+	runner := &systemdRunner{activeState: "inactive", runErr: errors.New("Failed to start anas-update.service")}
+	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	ctx := context.Background()
+	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}); err == nil {
+		t.Fatal("RequestSystemUpdate() succeeded although the unit did not start")
+	}
+	// The administrator was told it failed: no later run carries it out.
+	if _, ok, err := store.TakeRequest(time.Time{}); ok || err != nil {
+		t.Fatalf("the failed request was left for a later run: %v, %v", ok, err)
+	}
+	if status, err := executor.SystemUpdate(ctx); err != nil || status.Running {
+		t.Fatalf("SystemUpdate() = %+v, %v; want idle", status, err)
 	}
 }
 

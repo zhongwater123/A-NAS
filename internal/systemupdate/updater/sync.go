@@ -14,24 +14,29 @@ import (
 	"time"
 )
 
-// SyncResult says what Sync copied.
+// SyncResult says what Sync copied and removed.
 type SyncResult struct {
-	Files int
-	Bytes int64
+	Files   int
+	Bytes   int64
+	Removed int
 }
 
-// Sync copies the repository a development machine pushed into staging, the
-// staging account's directory, into local, the directory apt reads as the
-// file: source (docs/specs/system-update.md#开发机推送了新版本).
+// Sync makes local, the directory apt reads as the file: source, a copy of
+// the repository a development machine pushed into staging, the staging
+// account's directory (docs/specs/system-update.md#开发机推送了新版本).
 //
 // staging belongs to an account that is not trusted, so Sync reads it
 // through os.Root, which no link can lead out of; it takes only regular
 // files under dists and pool, opens none that could block, and executes
 // nothing. A file local has at the same size and modification time is not
-// copied again. Packages go first and the index last, so apt never reads an
-// index that names a file not there yet; apt then checks every file against
-// the archive key's signature.
-func Sync(staging, local string) (SyncResult, error) {
+// copied again. room, when set, is asked first whether the system disk has
+// the bytes the copy needs, so that a push of new models cannot fill it.
+// Packages go first and the index after them, so apt never reads an index
+// that names a file not there yet; apt then checks every file against the
+// archive key's signature. Last, the files the push no longer has go, so
+// that releases do not pile up on the system disk: the index the push
+// brought names none of them.
+func Sync(staging, local string, room func(need int64) error) (SyncResult, error) {
 	var result SyncResult
 	root, err := os.OpenRoot(staging)
 	if err != nil {
@@ -39,6 +44,7 @@ func Sync(staging, local string) (SyncResult, error) {
 	}
 	defer func() { _ = root.Close() }()
 	var files []string
+	var need int64
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -53,8 +59,12 @@ func Sync(staging, local string) (SyncResult, error) {
 			}
 			return nil
 		}
-		if entry.Type().IsRegular() {
-			files = append(files, name)
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		files = append(files, name)
+		if info, err := entry.Info(); err == nil && !have(filepath.Join(local, filepath.FromSlash(name)), info) {
+			need += info.Size()
 		}
 		return nil
 	})
@@ -63,6 +73,11 @@ func Sync(staging, local string) (SyncResult, error) {
 	}
 	if !slices.ContainsFunc(files, func(name string) bool { return strings.HasPrefix(name, "dists/") }) {
 		return result, errors.New("the pushed repository has no dists directory")
+	}
+	if room != nil && need > 0 {
+		if err := room(need); err != nil {
+			return result, err
+		}
 	}
 	slices.SortStableFunc(files, func(a, b string) int { return syncOrder(a) - syncOrder(b) })
 	for _, name := range files {
@@ -75,7 +90,57 @@ func Sync(staging, local string) (SyncResult, error) {
 			result.Bytes += size
 		}
 	}
-	return result, nil
+	result.Removed, err = prune(local, files)
+	return result, err
+}
+
+// have reports whether target is a regular file of the size and
+// modification time a pushed file has, which Sync does not copy again.
+func have(target string, info fs.FileInfo) bool {
+	got, err := os.Lstat(target)
+	return err == nil && got.Mode().IsRegular() && got.Size() == info.Size() && got.ModTime().Equal(info.ModTime())
+}
+
+// prune removes from local's dists and pool the files that are not among
+// pushed, and the directories that leaves empty.
+func prune(local string, pushed []string) (int, error) {
+	keep := make(map[string]bool, len(pushed))
+	for _, name := range pushed {
+		keep[name] = true
+	}
+	removed := 0
+	var directories []string
+	for _, top := range []string{"dists", "pool"} {
+		err := filepath.WalkDir(filepath.Join(local, top), func(path string, entry fs.DirEntry, err error) error {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				directories = append(directories, path)
+				return nil
+			}
+			name, err := filepath.Rel(local, path)
+			if err != nil || keep[filepath.ToSlash(name)] {
+				return err
+			}
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("remove %s, which the push no longer has: %w", name, err)
+			}
+			removed++
+			return nil
+		})
+		if err != nil {
+			return removed, err
+		}
+	}
+	// Deepest first; a directory that still holds files stays.
+	for _, directory := range slices.Backward(directories) {
+		_ = os.Remove(directory)
+	}
+	return removed, nil
 }
 
 // syncOrder puts packages first, then the indexes, then the signed Release
@@ -107,8 +172,7 @@ func syncFile(root *os.Root, name, target string) (bool, int64, error) {
 	if !info.Mode().IsRegular() {
 		return false, 0, fmt.Errorf("%s in the pushed repository is not a regular file", name)
 	}
-	if have, err := os.Lstat(target); err == nil && have.Mode().IsRegular() &&
-		have.Size() == info.Size() && have.ModTime().Equal(info.ModTime()) {
+	if have(target, info) {
 		return false, 0, nil
 	}
 	//nolint:gosec // apt reads the local repository as _apt, as the runbook installs it

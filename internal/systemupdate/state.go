@@ -37,7 +37,8 @@ const (
 	// the version before; apt is installing that one.
 	PhaseRollingBack Phase = "rolling-back"
 	// PhaseRolledBack: the check of the new version failed and the device
-	// is back on the version before it.
+	// is back on the version before it. It stays, with its problem, until a
+	// newer version is offered or an administrator goes back.
 	PhaseRolledBack Phase = "rolled-back"
 	// PhaseCheckFailed: the source could not be read, or its signature was
 	// wrong.
@@ -113,6 +114,20 @@ func (s Settings) InWindow(now time.Time) bool {
 	return minute >= from || minute < to
 }
 
+// WindowOpened is when the window that now falls in opened: today's start,
+// or yesterday's for a window that runs past midnight.
+func (s Settings) WindowOpened(now time.Time) time.Time {
+	start, err := time.Parse("15:04", s.WindowStart)
+	if err != nil {
+		return now
+	}
+	opened := time.Date(now.Year(), now.Month(), now.Day(), start.Hour(), start.Minute(), 0, 0, now.Location())
+	if opened.After(now) {
+		opened = opened.AddDate(0, 0, -1)
+	}
+	return opened
+}
+
 // Record is one line of the page's history.
 type Record struct {
 	At      time.Time `json:"at"`
@@ -167,12 +182,17 @@ type State struct {
 	From      string    `json:"from,omitempty"`
 	By        string    `json:"by,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
+	// Reverting marks a rolling-back phase that an administrator's "back to
+	// the version before" started, not the rollback of a failed install: a
+	// run that a power cut stops in it finishes going to Target.
+	Reverting bool `json:"reverting,omitempty"`
 	// BackupName is the database copy the a-nas package's preinst made
 	// before the install in progress, <time>-<From>.
 	BackupName string   `json:"backupName,omitempty"`
 	Problem    *Problem `json:"problem,omitempty"`
-	// Rejected are versions that failed their check or that an
-	// administrator went back from: never installed automatically again.
+	// Rejected are versions that failed their check, or an install that
+	// changed the device, and versions an administrator went back from: not
+	// offered again.
 	Rejected []string `json:"rejected,omitempty"`
 	Records  []Record `json:"records,omitempty"`
 	Settings Settings `json:"settings"`
