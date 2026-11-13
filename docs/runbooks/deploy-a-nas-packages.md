@@ -41,6 +41,14 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    make release REPO=/mnt/d/A-NAS-releases/apt CONTENT=/mnt/d/A-NAS-releases/content
    ```
    - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与助手试用的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
+   - 内容库缺运行环境时，从私有仓库 [A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets) 的“运行环境与源码包”中取，每个文件一个 Release，标签为 `sha256-<文件的 SHA-256>`，说明里有拉取命令。助手试用的运行环境例如：
+     ```bash
+     sha=$(jq -r .sha256 ai/assistant-spike/runtime.json)
+     gh release download "sha256-$sha" --repo zhongwater123/A-NAS-assets --dir "<内容库>/assistant-runtimes/$sha"
+     ```
+     - 助手试用的 Hermes 运行环境重新构建会改变哈希，只能取 [`runtime.json`](../../ai/assistant-spike/runtime.json) 固定的这一份；重新构建并改了固定值后，新的那份也照此上传。
+     - AI Worker 与网页搜索的运行环境以 `ai-runtime-<ID>`、`search-runtime-<ID>` 为标题，放进 `ai-runtimes/`、`search-runtimes/`；`make release` 缺包时报出的路径里有当前的 ID。没有这个 ID 的 Release 时用 `scripts/build-ai-runtime.sh`、`scripts/build-search-runtime.sh` 构建。2026-11-13 存有 `842b388a0f1987f5` 与 `2f4816f6ce334c0c`。
+     - SearXNG 源码包也存了一份（`searxng-1cd13d98d`），因为 GitHub 为提交生成的压缩包不保证逐字节不变。`scripts/build-search-runtime.sh` 下载到的哈希与 [`searxng.json`](../../deploy/search/searxng.json) 对不上时，把这份放到 `build/search-source/<SHA-256>/searxng.tar.gz` 再运行。
    - `make release` 要存档密钥的口令（[管理发布签名密钥](manage-release-key.md)第 6 步）。
    - 预期：最后三行是 `A-NAS <版本> (<提交>) is in …`、签名密钥的指纹（主密钥与本机的子密钥）与 `a-nas-archive-keyring` 的 SHA-256。
    - 完成标准：把版本、指纹与哈希交给部署的人。打了 release 标签的提交进 `release` 与 `dev`，其他提交只进 `dev`。
@@ -193,3 +201,4 @@ git diff deploy/upstream/packages.json
 - 运行手册：[管理发布签名密钥](manage-release-key.md)
 - 代码：[`make release`](../../scripts/release.sh)、[软件源](../../scripts/apt-repository.sh)、[软件包](../../scripts/build-packages.sh)、[内容包](../../scripts/build-content-packages.sh)、[Docker 与 Caddy 的固定版本](../../deploy/upstream/packages.json)（[更新](../../scripts/update-upstream-packages.sh)、[下载](../../scripts/fetch-upstream-packages.sh)）、[`a-nas` 的维护脚本](../../deploy/debian/a-nas/DEBIAN/postinst)、[`a-nas-check`](../../deploy/site/a-nas-check.sh)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)、[系统测试](../../scripts/system-test.sh)
 - 研究：[设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)（软件包布局的约束）
+- 存档：私有仓库 [A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets)（内容库中的模型、运行环境与 SearXNG 源码包）
