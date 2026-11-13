@@ -89,6 +89,7 @@ import {
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
+  turnInFlight,
   turnUnderWay,
   waitingConversation,
 } from "./workStatus";
@@ -526,8 +527,16 @@ function Card({
   }, [told]);
   /** Tells what waited (below); listed once the notices it read again for that have come. */
   const comeBack = useRef<(listed?: boolean) => void>(() => {});
-  /** The latest refresh of the notices a return asked for (comeBack). */
-  const refreshing = useRef(0);
+  /** A refresh of the notices a return asked for is under way (comeBack). */
+  const refreshing = useRef(false);
+  /** The card is on the page: a refresh that comes back after it left tells nobody. */
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
   const wakingUp = useRef(false);
   /** Where the companion was last left, null while it is in its corner. */
@@ -958,11 +967,12 @@ function Card({
       if (document.hidden || localConsoleCovered() || wakingUp.current) return;
       // The list read again comes back late: the member may have gone again meanwhile. What waits waits.
       if (listed && awayFrom(pausedRef.current)) return;
-      // Back during a turn: what waits stays until the turn ends, and is told then. Asleep (quiet, or put to
-      // sleep by VNAS) or locked, it stays until the companion is free.
+      // Back during a turn: what waits stays until the turn ends, and is told then. A turn of this window counts
+      // from its prompt, before its first stage too. Asleep (quiet, or put to sleep by VNAS) or locked, it stays
+      // until the companion is free.
       const state = companionState.read();
       const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
-      if (stage !== null && stage !== "success" && stage !== "error") return;
+      if (turnInFlight() || (stage !== null && stage !== "success" && stage !== "error")) return;
       const own = state.pets[COMPANION_PET];
       if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const { ended, results } = away.current;
@@ -976,11 +986,14 @@ function Card({
       }
       // A new result waits, unless an error comes first: the list is read again, as another device may have
       // read the result, and what to tell is decided when it comes, by how things are then (above). Nothing is
-      // taken until it is told; a refresh that a later one overtook is left.
+      // taken until it is told. One read at a time: input meanwhile asks for no other, the one under way
+      // decides. A card the page let go of meanwhile (hidden) tells nobody.
       if (outcome !== "error" && waiting.size > 0 && !listed) {
-        const asked = ++refreshing.current;
+        if (refreshing.current) return;
+        refreshing.current = true;
         void loadTaskNotices().finally(() => {
-          if (refreshing.current === asked) comeBack.current(true);
+          refreshing.current = false;
+          if (mounted.current) comeBack.current(true);
         });
         return;
       }

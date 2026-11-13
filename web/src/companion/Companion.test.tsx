@@ -502,14 +502,18 @@ describe("the companion on the desktop", () => {
       expect(fetched).not.toContain(WAVE);
     });
 
+    /** How many times the notices were asked for since holdList. */
+    let asked = 0;
     /** The notices read again from now on come back only once released, as a slow NAS answers. */
     const holdList = () => {
+      asked = 0;
       let release = () => {};
       const held = new Promise<void>((resolve) => {
         release = resolve;
       });
       server.use(
         http.get("/api/v1/notifications", async ({ response }) => {
+          asked += 1;
           await held;
           return response(200).json({ items });
         }),
@@ -519,6 +523,59 @@ describe("the companion on the desktop", () => {
         await settle();
       };
     };
+
+    it("asks for the list once on a return, however the member moves meanwhile", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      const release = holdList();
+      hide(false);
+      await settle();
+      for (let i = 0; i < 5; i++) fireEvent.pointerMove(window);
+      await settle();
+      expect(asked).toBe(1);
+      await release();
+      await plays(WAVE);
+      expect(asked).toBe(1);
+    });
+
+    it("does not wave between the member's prompt and the turn's first step, and tells the result at its end", async () => {
+      await arrive([IDLE, "工作状态-思考冒泡", WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      const release = holdList();
+      hide(false);
+      await settle();
+      // Prompted: the turn is this window's, though VNAS has not started thinking yet.
+      act(() => startTurn("live0001"));
+      await release();
+      expect(fetched).not.toContain(WAVE);
+      expect(screen.queryByText(/有新结果/)).toBeNull();
+      act(() => reportEvent("live0001", "message.start"));
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await plays(WAVE);
+    });
+
+    it("tells nobody when the list comes back after the member hid the companion", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      const release = holdList();
+      hide(false);
+      await settle();
+      const said = () => companionState.read().pets.main.say;
+      const before = said();
+      act(() => setCompanionMode("hidden"));
+      await waitFor(() => expect(screen.queryByLabelText("大肥鱼")).toBeNull());
+      await release();
+      expect(said()).toBe(before);
+    });
 
     it("keeps a result whose list came back after the member had gone again, and waves when they are back", async () => {
       await arrive([IDLE, WAVE]);

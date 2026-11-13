@@ -282,11 +282,21 @@ export function cardWaiting(): boolean {
 
 /**
  * The conversation, as stored, of the card that has waited longest for the member in a turn this window
- * started; null when it is not known (a conversation not stored yet), undefined when no card waits.
+ * started, of those whose conversation is known; null when none is (conversations not stored yet), undefined
+ * when no card waits.
  */
 export function waitingConversation(): string | null | undefined {
-  for (const card of cards.values()) return card.conversation;
-  return undefined;
+  if (cards.size === 0) return undefined;
+  for (const card of cards.values()) if (card.conversation) return card.conversation;
+  return null;
+}
+
+/**
+ * Whether a turn this window started has not ended yet: from its prompt on, before its first stage too
+ * (thinking comes with message.start, seconds later), until its message.complete, stop or withdrawal.
+ */
+export function turnInFlight(): boolean {
+  return prompting.size > 0;
 }
 
 /**
