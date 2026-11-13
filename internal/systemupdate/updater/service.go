@@ -149,8 +149,7 @@ func (s *Service) syncStaging(state *State) (bool, error) {
 	})
 	if err != nil {
 		problem := &Problem{Code: ProblemStaging, Detail: err.Error()}
-		var space *spaceError
-		if errors.As(err, &space) {
+		if space, ok := errors.AsType[*spaceError](err); ok {
 			problem = &Problem{Code: ProblemDiskSpace, Detail: strconv.FormatInt(space.missing, 10)}
 		}
 		s.checkFailed(state, problem)

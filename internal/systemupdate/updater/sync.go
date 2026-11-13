@@ -102,8 +102,17 @@ func have(target string, info fs.FileInfo) bool {
 }
 
 // prune removes from local's dists and pool the files that are not among
-// pushed, and the directories that leaves empty.
+// pushed, and the directories that leaves empty. It works through os.Root,
+// as Sync reads staging, so that no link in local leads a removal out of it.
 func prune(local string, pushed []string) (int, error) {
+	root, err := os.OpenRoot(local)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = root.Close() }()
 	keep := make(map[string]bool, len(pushed))
 	for _, name := range pushed {
 		keep[name] = true
@@ -111,7 +120,7 @@ func prune(local string, pushed []string) (int, error) {
 	removed := 0
 	var directories []string
 	for _, top := range []string{"dists", "pool"} {
-		err := filepath.WalkDir(filepath.Join(local, top), func(path string, entry fs.DirEntry, err error) error {
+		err := fs.WalkDir(root.FS(), top, func(name string, entry fs.DirEntry, err error) error {
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
@@ -119,14 +128,13 @@ func prune(local string, pushed []string) (int, error) {
 				return err
 			}
 			if entry.IsDir() {
-				directories = append(directories, path)
+				directories = append(directories, name)
 				return nil
 			}
-			name, err := filepath.Rel(local, path)
-			if err != nil || keep[filepath.ToSlash(name)] {
-				return err
+			if keep[name] {
+				return nil
 			}
-			if err := os.Remove(path); err != nil {
+			if err := root.Remove(name); err != nil {
 				return fmt.Errorf("remove %s, which the push no longer has: %w", name, err)
 			}
 			removed++
@@ -138,7 +146,7 @@ func prune(local string, pushed []string) (int, error) {
 	}
 	// Deepest first; a directory that still holds files stays.
 	for _, directory := range slices.Backward(directories) {
-		_ = os.Remove(directory)
+		_ = root.Remove(directory)
 	}
 	return removed, nil
 }
