@@ -1,7 +1,7 @@
 # 部署 A-NAS 软件包
 
 状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；尚未在 Experimental NAS 上执行）
-更新时间：2026-11-12
+更新时间：2026-11-13
 
 ## 目的
 
@@ -85,6 +85,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    editor /etc/a-nas/site.conf
    ```
    - 至少写 `ANAS_SMB_INTERFACE=<网卡>`。可写的键与说明见 `/usr/share/a-nas/site.conf.example`（装包后才有，内容同 [`deploy/site/site.conf`](../../deploy/site/site.conf)）。
+   - 由开发机推送新版本的机器另写 `ANAS_UPDATE_STAGING=/home/anas-dev/apps/a-nas/repository`（第 2 步的暂存目录）：之后的版本由“设置 → 系统更新”取用推送、安装，见下面“以后的版本”。已装好的机器随时可以加上这一行，系统更新每次运行时读取，不用运行 `a-nas-site`。
 6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`，装了助手试用的加 `a-nas-assistant-trial`。
    ```bash
    apt-get update
@@ -102,6 +103,16 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    a-nas-site
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
+
+## 以后的版本：设置 → 系统更新
+
+装上带系统更新的版本（[规格](../specs/system-update.md)）、`site.conf` 写了 `ANAS_UPDATE_STAGING` 之后，以后的版本只做第 1、2 步：
+
+- 更新服务约每小时把暂存目录中的软件源同步到 `/var/local/a-nas-repository`，代替第 3 步；管理员也可以在页面上点“检查更新”立即同步。
+- 管理员在“设置 → 系统更新”中点“安装”，代替第 6 步：更新服务执行同一条 apt 命令、运行 `a-nas-check`，不通过时按“回滚或恢复”的第一条命令退回原版本；“回到上一版本”也是那条命令。
+- 结果在页面的记录与“日志 → 活动记录”的“系统”类别中；更新服务自己的输出在 `journalctl -u anas-update`，状态在 `/var/lib/a-nas-update/state.json`。
+- 手工的 apt 命令仍然可用，是更新服务出问题时的退路。页面显示“正在安装”时不要手工运行 apt：更新服务的 apt 会等手工的 apt 结束，手工的 apt 却会因锁而失败。
+- 页面显示“回到原版本时出错”时，按“回滚或恢复”手工处理。
 
 ## 由安装器装好的 NAS 第一次换成软件包
 
@@ -189,7 +200,8 @@ git diff deploy/upstream/packages.json
 ## 关联
 
 - ADR：[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)、[0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)
-- 决定记录：[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)、[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)
+- 决定记录：[发布用的签名密钥](../decisions/2026-11-11-release-signing-key.md)、[近期以局域网推送发布](../decisions/2026-11-13-release-by-lan-push.md)、[软件源与更新文件放在哪里](../decisions/2026-11-11-update-hosting.md)（已被取代）
+- 规格：[系统更新](../specs/system-update.md)
 - 运行手册：[管理发布签名密钥](manage-release-key.md)
 - 代码：[`make release`](../../scripts/release.sh)、[软件源](../../scripts/apt-repository.sh)、[软件包](../../scripts/build-packages.sh)、[内容包](../../scripts/build-content-packages.sh)、[Docker 与 Caddy 的固定版本](../../deploy/upstream/packages.json)（[更新](../../scripts/update-upstream-packages.sh)、[下载](../../scripts/fetch-upstream-packages.sh)）、[`a-nas` 的维护脚本](../../deploy/debian/a-nas/DEBIAN/postinst)、[`a-nas-check`](../../deploy/site/a-nas-check.sh)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)、[系统测试](../../scripts/system-test.sh)
 - 研究：[设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)（软件包布局的约束）
