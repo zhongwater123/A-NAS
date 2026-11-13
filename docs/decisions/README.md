@@ -81,6 +81,7 @@
 - [2026-11-11：软件源与更新文件放在哪里](2026-11-11-update-hosting.md)
 - [2026-11-12：系统更新的默认做法](2026-11-12-system-update-defaults.md)
 - [2026-11-13：近期以局域网推送发布，GitHub 作备选](2026-11-13-release-by-lan-push.md)
+- [2026-11-13：设备镜像的更新来源、装机方式与 Secure Boot](2026-11-13-device-image-defaults.md)
 
 ### 照片打分
 
