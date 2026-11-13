@@ -4,21 +4,27 @@ import type { HostStateResponse, LocalDisplay, Wallpaper, WallpaperStyleChange }
 import { healthyState } from "../fixtures";
 import { apiError, http } from "../server";
 import { type StorageOptions, storageHandlers } from "./storage";
+import { type SystemUpdateOptions, systemUpdateHandlers } from "./systemupdate";
 
 export interface SettingsOptions extends StorageOptions {
   hostState?: HostStateResponse;
+  systemUpdate?: SystemUpdateOptions;
 }
 
 // settingsHandlers answers what Settings reads whatever section it shows: the
-// host state the desktop shares with every window, and the data volumes,
-// with the rest of the storage section. sent is what storageHandlers records.
+// host state the desktop shares with every window, the data volumes, with the
+// rest of the storage section, and the system update an administrator's
+// sidebar marks. sent is what storageHandlers records, update what
+// systemUpdateHandlers does.
 export function settingsHandlers(options: SettingsOptions = {}) {
   const storage = storageHandlers(options);
+  const update = systemUpdateHandlers(options.systemUpdate);
   const handlers = [
     http.get("/api/v1/host-state", ({ response }) => response(200).json(options.hostState ?? healthyState)),
     ...storage.handlers,
+    ...update.handlers,
   ];
-  return { sent: storage.sent, handlers };
+  return { sent: storage.sent, update: update.sent, handlers };
 }
 
 // terminalHandlers answers 终端 with whether the device's root turned the

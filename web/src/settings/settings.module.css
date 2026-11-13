@@ -2226,6 +2226,16 @@
   box-shadow: 0 0 0 3px rgba(47, 191, 113, 0.18);
 }
 
+/* A new version is marked beside 系统更新. */
+.set-nav-mark {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--set-accent);
+  box-shadow: 0 0 0 3px var(--set-accent-soft);
+}
 @keyframes tm-pulse {
   50% {
     opacity: 0.35;
@@ -3476,6 +3486,9 @@ button.ov-fact:hover .ov-fact-head svg {
 }
 .health-icon.danger {
   color: var(--set-danger);
+}
+.health-icon.accent {
+  color: var(--set-accent);
 }
 
 /* 设备温度: the sensors sit two to a line; each shows a reading and a bar up
@@ -4872,4 +4885,206 @@ a.set-btn {
   font-size: 12px;
   line-height: 1.6;
   color: var(--set-muted);
+}
+
+/* 系统更新: a card says where the update stands, with its one next step and
+   progress; under it the versions, the automatic update and what happened. */
+.upd-hero {
+  --upd-tone: var(--set-accent);
+  --upd-soft: var(--set-accent-soft);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px 16px;
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--set-card);
+  box-shadow:
+    0 0 0 1px rgba(20, 30, 45, 0.045),
+    0 1px 2px rgba(20, 30, 45, 0.04);
+}
+.upd-hero.success {
+  --upd-tone: var(--set-success);
+  --upd-soft: var(--set-success-soft);
+}
+.upd-hero.warning {
+  --upd-tone: var(--set-warning);
+  --upd-soft: var(--set-warning-soft);
+}
+.upd-hero.danger {
+  --upd-tone: var(--set-danger);
+  --upd-soft: var(--set-danger-soft);
+}
+.upd-mark {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--upd-tone);
+  background: var(--upd-soft);
+}
+.upd-mark svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2;
+}
+.upd-text {
+  min-width: min(100%, 220px);
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  padding-top: 2px;
+}
+.upd-text h3 {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+.upd-text p {
+  color: var(--set-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.upd-text p.upd-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--set-warning);
+}
+.upd-note svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 2px;
+}
+.upd-action {
+  min-width: 96px;
+  min-height: 36px;
+  flex: none;
+  margin-top: 4px;
+}
+.upd-bar {
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--set-fill-strong);
+}
+.upd-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--upd-tone);
+  transition: width 0.4s var(--set-ease);
+}
+/* An install cannot be measured: a short bar sweeps across. */
+.upd-bar.indeterminate i {
+  width: 32%;
+  animation: upd-sweep 1.5s ease-in-out infinite;
+}
+@keyframes upd-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upd-bar.indeterminate i {
+    width: 100%;
+    opacity: 0.45;
+    animation: none;
+  }
+}
+.upd-why {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.upd-why summary {
+  width: fit-content;
+  color: var(--set-accent);
+  cursor: pointer;
+}
+.upd-why pre {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 9px;
+  color: var(--set-text);
+  background: var(--set-fill);
+  font:
+    12px / 1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.upd-version {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--set-text);
+}
+.upd-version .set-mono {
+  color: var(--set-muted);
+}
+.upd-window {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--set-muted);
+}
+.set-input.upd-time {
+  width: 104px;
+  height: 34px;
+  padding: 0 10px;
+  font-variant-numeric: tabular-nums;
+}
+.set-row-text > small.upd-invalid {
+  color: var(--set-danger);
+}
+.upd-record {
+  align-items: flex-start;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.upd-record-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 2px;
+  color: var(--set-faint);
+}
+.upd-record-icon.success {
+  color: var(--set-success);
+}
+.upd-record-icon.warning {
+  color: #ec8510;
+}
+.upd-record-icon.danger {
+  color: var(--set-danger);
+}
+.set-banner.upd-reload {
+  align-items: center;
+}
+.set-banner.upd-reload .set-btn {
+  flex: none;
+  min-height: 32px;
+}
+button.set-row-command:disabled {
+  color: var(--set-faint);
+  cursor: default;
+}
+button.set-row-command:disabled:hover {
+  background: transparent;
 }
