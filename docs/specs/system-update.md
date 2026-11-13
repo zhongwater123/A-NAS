@@ -101,7 +101,7 @@
 
 - Given：软件包设备在安装 X 的过程中断电。
 - When：重新开机。
-- Then：更新服务在开机时发现上次的安装没有完成，先让 dpkg 把中断的安装做完（`dpkg --configure -a`），再运行检查，按“安装后的检查与自动回退”处理。镜像设备写分区时断电，下次启动仍是 Y，空闲分区里写了一半的内容被丢弃，下次下载重新写（ADR 0034 第 3 步已验证）。
+- Then：更新服务在开机时发现上次的安装没有完成，先让 dpkg 把中断的安装做完（`dpkg --configure -a`）：X 装好了就运行检查，按“安装后的检查与自动回退”处理；dpkg 解包到一半的包装不完，就回到 Y，apt 重新安装 Y 的包（`--reinstall`，解包到一半的包在 dpkg 中还记着 Y 的版本，不重新安装 apt 会当它已经装好）。回到 Y 之后检查仍不通过，记录为“没有完成”，页面显示“回到原版本时出错”。镜像设备写分区时断电，下次启动仍是 Y，空闲分区里写了一半的内容被丢弃，下次下载重新写（ADR 0034 第 3 步已验证）。
 
 ### 软件源不可达或签名不对
 
@@ -129,7 +129,7 @@
 
 ## 验收证据
 
-- 单元测试（[更新服务](../../internal/systemupdate/updater/service_test.go)）：推送同步只取暂存目录中的普通文件；检查找到推送来的新版本；网络软件源按设置下载；没有推送时一天检查一次；签名不对时检查失败；安装通过、安装失败与检查失败后的回退；断电后完成或回退；回到上一版本；软件源不再有的上一版本不再提供；空间不够时不下载；跨午夜的安装时段。Host Agent 只留下请求、启动单元，请求未被取走时算作运行中（[执行器](../../internal/hostops/linux/update_test.go)、[root 代理](../../internal/hoststate/agent/rootagent/update_test.go)）。
+- 单元测试（[更新服务](../../internal/systemupdate/updater/service_test.go)）：推送同步只取暂存目录中的普通文件；检查找到推送来的新版本；网络软件源按设置下载；没有推送时一天检查一次；签名不对时检查失败；安装通过、安装失败与检查失败后的回退；断电后完成或回退，解包到一半的包重新安装；回退后检查仍不通过时记为没有完成；回到上一版本；软件源不再有的上一版本不再提供；空间不够时不下载；跨午夜的安装时段。Host Agent 只留下请求、启动单元，请求未被取走时算作运行中（[执行器](../../internal/hostops/linux/update_test.go)、[root 代理](../../internal/hoststate/agent/rootagent/update_test.go)）。
 - 接口测试（[`systemupdate_test.go`](../../internal/httpapi/systemupdate_test.go)，按契约核对）：成员 `403`；存储或应用在忙时安装返回 `409 update_waiting`，运行中返回 `409 update_busy`；安装、回到上一版本与设置；请求与结果各记一次活动记录。
 - 系统测试（软件包设备，[`system-test.sh`](../../scripts/system-test.sh) 的系统更新一节）：签名软件源中有上一 release、本 release 与下一 release，暂存目录就是这个软件源：
   - 经产品接口检查，同步推送，找到下一 release；安装，`a-nas-check` 通过，数据库多出下一 release 的一步；

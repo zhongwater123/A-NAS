@@ -21,15 +21,18 @@ type fakeHost struct {
 	updateErr    error
 	checkFails   map[string]bool // a-nas versions whose a-nas-check fails
 	installFails map[string]bool // versions apt fails to install
-	uris         string
-	content      []string // installed content packages
-	removed      []string
-	calls        []string
+	// halfInstalled are packages a cut left half installed, at the version
+	// in installed; apt rewrites one only when told --reinstall.
+	halfInstalled map[string]bool
+	uris          string
+	content       []string // installed content packages
+	removed       []string
+	calls         []string
 }
 
 func newFakeHost() *fakeHost {
 	return &fakeHost{installed: map[string]string{"a-nas": "1", "a-nas-host": "1"}, versions: []string{"1", "2"},
-		checkFails: map[string]bool{}, installFails: map[string]bool{}}
+		checkFails: map[string]bool{}, installFails: map[string]bool{}, halfInstalled: map[string]bool{}}
 }
 
 func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -44,6 +47,9 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 			return []byte(strings.Join(lines, "\n")), nil
 		}
 		if version, ok := h.installed[args[2]]; ok {
+			if h.halfInstalled[args[2]] {
+				return []byte("half-installed " + version), nil
+			}
 			return []byte("installed " + version), nil
 		}
 		return nil, errors.New("not installed")
@@ -78,7 +84,11 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 				if h.installFails[version] {
 					return []byte("E: Sub-process /usr/bin/dpkg returned an error code (1)"), errors.New("exit status 100")
 				}
+				if h.installed[name] == version && !slices.Contains(args, "--reinstall") {
+					continue // apt: already the newest version
+				}
 				h.installed[name] = version
+				delete(h.halfInstalled, name)
 			}
 		}
 		return nil, nil
@@ -298,6 +308,38 @@ func TestBootGoesBackWhenTheInterruptedInstallDidNotLand(t *testing.T) {
 	state = run(t, service, RequestBoot)
 	if state.Phase != PhaseRolledBack || host.installed["a-nas"] != "1" {
 		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestBootRewritesWhatACutLeftHalfInstalled(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	state := State{Phase: PhaseInstalling, Current: "1", Target: "2", From: "1", Settings: DefaultSettings()}
+	if err := service.Store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	// dpkg was unpacking a-nas when the run was killed; it still records 1.
+	host.halfInstalled["a-nas"] = true
+	state = run(t, service, RequestBoot)
+	if host.halfInstalled["a-nas"] || host.installed["a-nas"] != "1" {
+		t.Fatalf("a-nas is %s, half installed %v; want 1 rewritten", host.installed["a-nas"], host.halfInstalled["a-nas"])
+	}
+	if state.Phase != PhaseRolledBack || state.Current != "1" || state.Records[0].Kind != RecordRolledBack {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestARollbackWhoseCheckFailsTooIsRecordedAsFailed(t *testing.T) {
+	host := newFakeHost()
+	host.checkFails["1"], host.checkFails["2"] = true, true
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	state := run(t, service, RequestInstall)
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback {
+		t.Fatalf("state = %+v, want the rollback's problem", state)
+	}
+	if record := state.Records[0]; record.Kind != RecordFailed || record.Problem == nil || record.Problem.Code != ProblemRollback {
+		t.Fatalf("record = %+v, want a failed rollback", record)
 	}
 }
 

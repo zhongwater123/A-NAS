@@ -415,8 +415,11 @@ func (s *Service) install(ctx context.Context, state *State, by string) error {
 }
 
 // installVersion installs the release at version and reports what went wrong.
+// --reinstall: a run cut short while dpkg unpacked a package leaves it half
+// installed at the version dpkg still records, which apt takes for installed
+// when the way back asks for that version.
 func (s *Service) installVersion(ctx context.Context, version string) *Problem {
-	output, err := s.Commands.Run(ctx, "apt-get", aptInstall(s.releaseArguments(ctx, version))...)
+	output, err := s.Commands.Run(ctx, "apt-get", aptInstall(s.releaseArguments(ctx, version), "--reinstall")...)
 	if err != nil {
 		// A package left half done must not stop the next apt command.
 		_, _ = s.Commands.Run(ctx, "dpkg", "--configure", "-a")
@@ -469,6 +472,10 @@ func (s *Service) goBack(ctx context.Context, state *State, cause *Problem) erro
 	}
 	state.Reject(failed)
 	state.Problem = cause
+	// An install cut short before its check has not looked for the copy yet.
+	if state.BackupName == "" {
+		state.BackupName = s.backupOf(state.From, state.StartedAt)
+	}
 	// A service of the failed version that kept failing has used up its
 	// start limit, and the version before's postinst could not restart it.
 	_, _ = s.Commands.Run(ctx, "systemctl", "reset-failed")
@@ -478,12 +485,20 @@ func (s *Service) goBack(ctx context.Context, state *State, cause *Problem) erro
 		state.Record(Record{At: s.now(), Kind: RecordFailed, Version: failed, From: state.From, By: state.By, Problem: state.Problem})
 		return nil
 	}
+	kind := RecordRolledBack
 	if problem := s.healthCheck(ctx); problem != nil {
 		if restored := s.restoreDatabases(ctx, state.BackupName); restored != nil || s.healthCheck(ctx) != nil {
+			// Back on the version before, which fails its check too: the
+			// record says so, as the page does.
 			state.Problem = &Problem{Code: ProblemRollback, Detail: cause.Detail + "\n" + problem.Detail}
+			kind = RecordFailed
 		}
 	}
-	state.Record(Record{At: s.now(), Kind: RecordRolledBack, Version: failed, From: state.From, By: state.By, Problem: cause})
+	recorded := cause
+	if kind == RecordFailed {
+		recorded = state.Problem
+	}
+	state.Record(Record{At: s.now(), Kind: kind, Version: failed, From: state.From, By: state.By, Problem: recorded})
 	state.Current, state.Phase = state.From, PhaseRolledBack
 	state.Candidate, state.DownloadBytes, state.DownloadedBytes = "", 0, 0
 	state.Target, state.From, state.By = "", "", ""
