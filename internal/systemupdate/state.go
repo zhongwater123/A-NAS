@@ -38,7 +38,10 @@ const (
 	PhaseRollingBack Phase = "rolling-back"
 	// PhaseRolledBack: the check of the new version failed and the device
 	// is back on the version before it. It stays, with its problem, until a
-	// newer version is offered or an administrator goes back.
+	// newer version is offered or an administrator goes back. With
+	// ProblemRollback, going back went wrong, after a failed install or a
+	// failed "back to the version before", and it also goes once a-nas-check
+	// passes again.
 	PhaseRolledBack Phase = "rolled-back"
 	// PhaseCheckFailed: the source could not be read, or its signature was
 	// wrong.
@@ -186,6 +189,10 @@ type State struct {
 	// the version before" started, not the rollback of a failed install: a
 	// run that a power cut stops in it finishes going to Target.
 	Reverting bool `json:"reverting,omitempty"`
+	// DpkgBefore sums what dpkg recorded of every package before the install
+	// or revert in progress: one that fails or is cut with dpkg recording
+	// the same changed nothing, and is not undone.
+	DpkgBefore string `json:"dpkgBefore,omitempty"`
 	// BackupName is the database copy the a-nas package's preinst made
 	// before the install in progress, <time>-<From>.
 	BackupName string   `json:"backupName,omitempty"`

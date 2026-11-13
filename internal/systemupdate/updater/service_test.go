@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -47,6 +48,21 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 	h.calls = append(h.calls, strings.TrimSpace(name+" "+strings.Join(args, " ")))
 	switch name {
 	case "dpkg-query":
+		if strings.HasPrefix(args[1], "--showformat=${db:Status-Status} ${binary:Package}") {
+			// Every package dpkg knows, in its order.
+			var lines []string
+			for _, name := range slices.Sorted(maps.Keys(h.installed)) {
+				status := "installed"
+				if h.halfInstalled[name] {
+					status = "half-installed"
+				}
+				lines = append(lines, status+" "+name+":amd64 "+h.installed[name]+"\n")
+			}
+			for _, name := range h.content {
+				lines = append(lines, "installed "+name+":amd64 1\n")
+			}
+			return []byte(strings.Join(lines, "")), nil
+		}
 		if strings.HasPrefix(args[1], "--showformat=${db:Status-Status} ${Package}") {
 			var lines []string
 			for _, name := range h.content {
@@ -62,9 +78,6 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 		}
 		return nil, errors.New("not installed")
 	case "dpkg":
-		if args[0] == "--audit" && len(h.halfInstalled) > 0 {
-			return []byte("The following packages are only half installed, due to problems during\ninstallation."), nil
-		}
 		if args[0] == "--compare-versions" {
 			if args[1] > args[3] {
 				return nil, nil
@@ -336,6 +349,28 @@ func TestAnInstallThatChangedNothingIsOfferedAgain(t *testing.T) {
 	}
 }
 
+func TestAnInstallThatChangedADependencyGoesBack(t *testing.T) {
+	host := newFakeHost()
+	host.installed["a-nas-docker-policy"] = "1"
+	// apt upgraded and configured a dependency of 2, then failed before the
+	// release's own packages; dpkg --configure -a has nothing left to do.
+	host.onInstall = func(version string) {
+		if version == "2" {
+			host.installed["a-nas-docker-policy"] = "2"
+		}
+	}
+	host.installFails["2"] = true
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	state := run(t, service, RequestInstall)
+	if state.Phase != PhaseRolledBack || !slices.Contains(state.Rejected, "2") || state.DpkgBefore != "" {
+		t.Fatalf("state = %+v, want back on 1 and 2 not offered again", state)
+	}
+	if !host.ran("a-nas-check") {
+		t.Fatal("the device was not checked after an install that changed it")
+	}
+}
+
 func TestBootFinishesAnInterruptedInstall(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
@@ -372,7 +407,8 @@ func TestBootOffersAnInstallThatChangedNothingAgain(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
 	// The power went before apt changed anything.
-	state := State{Phase: PhaseInstalling, Current: "1", Candidate: "2", Target: "2", From: "1", By: "owner", Settings: DefaultSettings()}
+	state := State{Phase: PhaseInstalling, Current: "1", Candidate: "2", Target: "2", From: "1", By: "owner", Settings: DefaultSettings(),
+		DpkgBefore: service.dpkgDigest(context.Background())}
 	if err := service.Store.Save(state); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +421,8 @@ func TestBootOffersAnInstallThatChangedNothingAgain(t *testing.T) {
 func TestAnInstallCutWhileADependencyUnpackedGoesBack(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
-	state := State{Phase: PhaseInstalling, Current: "1", Target: "2", From: "1", Settings: DefaultSettings()}
+	state := State{Phase: PhaseInstalling, Current: "1", Target: "2", From: "1", Settings: DefaultSettings(),
+		DpkgBefore: service.dpkgDigest(context.Background())}
 	if err := service.Store.Save(state); err != nil {
 		t.Fatal(err)
 	}
@@ -533,6 +570,46 @@ func TestRevertGoesToTheVersionBeforeAndLeavesTheOtherOut(t *testing.T) {
 	}
 }
 
+func TestARevertWhoseWayBackFailsTheCheckIsShownUntilItPasses(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	run(t, service, RequestInstall)
+	// 1 breaks while dpkg unpacks it; 2, back in place, fails its check.
+	host.brokenInstalls["1"] = true
+	host.checkFails["2"] = true
+	state := run(t, service, RequestRevert)
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback || state.Current != "2" {
+		t.Fatalf("state = %+v, want the way back shown as gone wrong", state)
+	}
+	if record := state.Records[0]; record.Kind != RecordFailed || record.Version != "1" || record.Problem.Code != ProblemRollback {
+		t.Fatalf("record = %+v", record)
+	}
+	if state = run(t, service, RequestCheck); state.Phase != PhaseRolledBack || state.Problem.Code != ProblemRollback {
+		t.Fatalf("a check while 2 still fails = %+v, want the warning kept", state)
+	}
+	host.checkFails["2"] = false
+	if state = run(t, service, RequestCheck); state.Phase != PhaseUpToDate || state.Problem != nil {
+		t.Fatalf("a check once 2 passes = %+v, want up to date", state)
+	}
+}
+
+func TestARevertWhoseWayBackFailsToInstallStaysShown(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	run(t, service, RequestInstall)
+	host.brokenInstalls["1"], host.brokenInstalls["2"] = true, true
+	state := run(t, service, RequestRevert)
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback || state.Previous != "1" {
+		t.Fatalf("state = %+v, want the way back shown as gone wrong, and 1 still offered", state)
+	}
+	// a-nas is half installed: the check cannot read it, and the warning stays.
+	if state = run(t, service, RequestCheck); state.Phase != PhaseRolledBack || state.Problem.Code != ProblemRollback {
+		t.Fatalf("a check of the half-installed device = %+v", state)
+	}
+}
+
 func TestAPreviousVersionTheSourceDroppedIsNotOffered(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
@@ -606,6 +683,30 @@ func TestAPushTheSystemDiskHasNoRoomForIsNotTaken(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(service.Local, "pool/main/a/a-nas/a-nas_2_amd64.deb")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the push was copied without room for it: %v", err)
+	}
+}
+
+func TestAPushNotTakenLeavesTheVersionReadyToInstall(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	service.Staging = filepath.Join(t.TempDir(), "repository")
+	writeFile(t, filepath.Join(service.Staging, "pool/main/a/a-nas/a-nas_2_amd64.deb"), "package")
+	writeFile(t, filepath.Join(service.Staging, "dists/dev/InRelease"), "signed")
+	// Room for the release and an install, not for the model pushed next.
+	service.FreeBytes = func(string) (int64, error) { return spaceMargin + 50, nil }
+	if state := run(t, service, RequestCheck); state.Phase != PhaseReady || state.Candidate != "2" {
+		t.Fatalf("state = %+v, want 2 ready", state)
+	}
+	writeFile(t, filepath.Join(service.Staging, "pool/main/a/a-nas-model-v3/a-nas-model-v3_1_all.deb"), strings.Repeat("m", 100))
+	state := run(t, service, RequestTick)
+	if state.Phase != PhaseReady || state.Candidate != "2" || state.Problem != nil {
+		t.Fatalf("state = %+v, want 2 still ready", state)
+	}
+	if record := state.Records[0]; record.Kind != RecordCheckFailed || record.Problem.Code != ProblemDiskSpace {
+		t.Fatalf("record = %+v, want the push held for space", record)
+	}
+	if state = run(t, service, RequestInstall); state.Phase != PhaseUpToDate || state.Current != "2" {
+		t.Fatalf("the install = %+v", state)
 	}
 }
 
@@ -761,6 +862,54 @@ func TestSyncAsksForRoomBeforeItCopies(t *testing.T) {
 	}
 	if _, err := os.Stat(local); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("copied without room")
+	}
+}
+
+func TestSyncCountsTheRoomThePushFrees(t *testing.T) {
+	directory := t.TempDir()
+	staging, local := filepath.Join(directory, "staging"), filepath.Join(directory, "local")
+	oldModel, newModel := "pool/main/a/a-nas-model-v1/a-nas-model-v1_1_all.deb", "pool/main/a/a-nas-model-v2/a-nas-model-v2_1_all.deb"
+	writeFile(t, filepath.Join(staging, "dists/dev/InRelease"), "signed 1")
+	writeFile(t, filepath.Join(staging, oldModel), strings.Repeat("1", 40))
+	if _, err := Sync(staging, local, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The next push replaces the model.
+	if err := os.Remove(filepath.Join(staging, oldModel)); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(staging, newModel), strings.Repeat("2", 50))
+	writeFile(t, filepath.Join(staging, "dists/dev/InRelease"), "signed, the second push") // 23 bytes
+	full := errors.New("no room")
+	// The push needs 73 bytes, 33 once the old model is gone.
+	var asked []int64
+	room := func(budget int64) func(int64) error {
+		return func(need int64) error {
+			asked = append(asked, need)
+			if need > budget {
+				return full
+			}
+			return nil
+		}
+	}
+	if _, err := Sync(staging, local, room(30)); !errors.Is(err, full) {
+		t.Fatalf("Sync() with too little room even without the old model = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(local, oldModel)); err != nil {
+		t.Fatal("a push refused for room removed the old model")
+	}
+	asked = nil
+	result, err := Sync(staging, local, room(40))
+	if err != nil || result.Files != 2 || result.Removed != 1 {
+		t.Fatalf("Sync() = %+v, %v; want the new model in the old one's place", result, err)
+	}
+	if want := []int64{73, 33}; !slices.Equal(asked, want) {
+		t.Fatalf("asked for %v bytes, want %v", asked, want)
+	}
+	for name, want := range map[string]bool{newModel: true, oldModel: false, "pool/main/a/a-nas-model-v1": false} {
+		if _, err := os.Stat(filepath.Join(local, name)); (err == nil) != want {
+			t.Errorf("%s in the local source: %v, want %v", name, err == nil, want)
+		}
 	}
 }
 

@@ -2560,8 +2560,8 @@ systemctl daemon-reload
 
 # An install whose run is killed while dpkg works, as a power cut stops it.
 # The next run, here the one the timer starts after boot, finishes it, goes
-# back, or, when dpkg had only begun on a dependency, offers it again; either
-# way dpkg is whole and the check passes.
+# back, or, when dpkg had not yet changed what it records of any package,
+# offers it again; either way dpkg is whole and the check passes.
 rm /var/lib/a-nas-update/state.json
 update_ask check >/dev/null
 update_settled >/dev/null || true

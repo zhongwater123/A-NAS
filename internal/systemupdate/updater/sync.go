@@ -36,6 +36,11 @@ type SyncResult struct {
 // archive key's signature. Last, the files the push no longer has go, so
 // that releases do not pile up on the system disk: the index the push
 // brought names none of them.
+//
+// A push that has room only once those files are gone, as one that
+// replaces a model, removes them before it copies. Until the copy ends, the
+// index local had may then name a file that is gone; apt refuses to install
+// from it before it changes anything, and the next sync finishes the copy.
 func Sync(staging, local string, room func(need int64) error) (SyncResult, error) {
 	var result SyncResult
 	root, err := os.OpenRoot(staging)
@@ -74,10 +79,21 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 	if !slices.ContainsFunc(files, func(name string) bool { return strings.HasPrefix(name, "dists/") }) {
 		return result, errors.New("the pushed repository has no dists directory")
 	}
-	if room != nil && need > 0 {
-		if err := room(need); err != nil {
+	gone, freed, err := stale(local, files)
+	if err != nil {
+		return result, err
+	}
+	pruned := false
+	if room != nil && need > 0 && room(need) != nil {
+		// Room only once the files the push no longer has are gone, as
+		// for a push that replaces a model: they go first.
+		if err := room(need - freed); err != nil {
 			return result, err
 		}
+		if result.Removed, err = prune(local, gone); err != nil {
+			return result, err
+		}
+		pruned = true
 	}
 	slices.SortStableFunc(files, func(a, b string) int { return syncOrder(a) - syncOrder(b) })
 	for _, name := range files {
@@ -90,7 +106,9 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 			result.Bytes += size
 		}
 	}
-	result.Removed, err = prune(local, files)
+	if !pruned {
+		result.Removed, err = prune(local, gone)
+	}
 	return result, err
 }
 
@@ -101,24 +119,24 @@ func have(target string, info fs.FileInfo) bool {
 	return err == nil && got.Mode().IsRegular() && got.Size() == info.Size() && got.ModTime().Equal(info.ModTime())
 }
 
-// prune removes from local's dists and pool the files that are not among
-// pushed, and the directories that leaves empty. It works through os.Root,
-// as Sync reads staging, so that no link in local leads a removal out of it.
-func prune(local string, pushed []string) (int, error) {
+// stale lists the files under local's dists and pool that are not among
+// pushed, and the bytes they hold. It reads local through os.Root, as Sync
+// reads staging, so that no link in local leads it, or prune after it, out.
+func stale(local string, pushed []string) ([]string, int64, error) {
 	root, err := os.OpenRoot(local)
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	defer func() { _ = root.Close() }()
 	keep := make(map[string]bool, len(pushed))
 	for _, name := range pushed {
 		keep[name] = true
 	}
-	removed := 0
-	var directories []string
+	var names []string
+	var size int64
 	for _, top := range []string{"dists", "pool"} {
 		err := fs.WalkDir(root.FS(), top, func(name string, entry fs.DirEntry, err error) error {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -127,22 +145,48 @@ func prune(local string, pushed []string) (int, error) {
 			if err != nil {
 				return err
 			}
-			if entry.IsDir() {
-				directories = append(directories, name)
+			if entry.IsDir() || keep[name] {
 				return nil
 			}
-			if keep[name] {
-				return nil
+			names = append(names, name)
+			if info, err := entry.Info(); err == nil {
+				size += info.Size()
 			}
-			if err := root.Remove(name); err != nil {
-				return fmt.Errorf("remove %s, which the push no longer has: %w", name, err)
-			}
-			removed++
 			return nil
 		})
 		if err != nil {
-			return removed, err
+			return nil, 0, fmt.Errorf("read the local repository: %w", err)
 		}
+	}
+	return names, size, nil
+}
+
+// prune removes the files stale found from local, and the directories under
+// dists and pool that leaves empty, through os.Root.
+func prune(local string, names []string) (int, error) {
+	if len(names) == 0 {
+		return 0, nil
+	}
+	root, err := os.OpenRoot(local)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = root.Close() }()
+	removed := 0
+	for _, name := range names {
+		if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, fmt.Errorf("remove %s, which the push no longer has: %w", name, err)
+		}
+		removed++
+	}
+	var directories []string
+	for _, top := range []string{"dists", "pool"} {
+		_ = fs.WalkDir(root.FS(), top, func(name string, entry fs.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				directories = append(directories, name)
+			}
+			return nil
+		})
 	}
 	// Deepest first; a directory that still holds files stays.
 	for _, directory := range slices.Backward(directories) {
