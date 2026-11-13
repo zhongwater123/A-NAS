@@ -77,7 +77,7 @@ import {
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { memberQuiet, setCompanionMode, useCompanionMode } from "./quiet";
+import { memberQuiet, memberSleep, setCompanionMode, setMemberSleep, useCompanionMode } from "./quiet";
 import { clearBox, withinArea } from "./stepAside";
 import {
   COMPANION_PET,
@@ -90,6 +90,7 @@ import {
   setCompanionReady,
   subscribeCompanionState,
   turnUnderWay,
+  waitingConversation,
 } from "./workStatus";
 
 // As dsh-pet's own page builds its card (client/pet.ts): React handed in, the styles put in once.
@@ -265,9 +266,18 @@ function firstRead(state: PollState): { baseline: Record<string, number>; leaves
  * shows neither its idle clip nor a yawn first.
  */
 function asleepFromTheStart(animations: Animations): string | null {
-  if (!memberQuiet()) return null;
   const own = companionState.read().pets[COMPANION_PET];
-  if (own && readSleep(own.sleep)?.sleeping) return null;
+  const sleeping = own !== undefined && readSleep(own.sleep)?.sleeping === true;
+  if (!memberQuiet()) {
+    // As usual again after hidden, which took the card off the page while the member's sleep went on
+    // (quiet.ts memberSleep): it comes awake, as from quiet. A sleep VNAS asked for goes on.
+    if (memberSleep()) {
+      setMemberSleep(false);
+      if (sleeping) companionSleep.wake(COMPANION_PET);
+    }
+    return null;
+  }
+  if (sleeping) return null;
   const names = pickSleepNames(animations);
   if (!names) return null;
   companionSleep.enter(COMPANION_PET, { ...names, start: names.loop });
@@ -514,7 +524,10 @@ function Card({
     const timer = window.setTimeout(() => setTold(null), BUBBLE_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [told]);
-  const comeBack = useRef(() => {});
+  /** Tells what waited (below); listed once the notices it read again for that have come. */
+  const comeBack = useRef<(listed?: boolean) => void>(() => {});
+  /** The latest refresh of the notices a return asked for (comeBack). */
+  const refreshing = useRef(0);
   /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
   const wakingUp = useRef(false);
   /** Where the companion was last left, null while it is in its corner. */
@@ -941,8 +954,10 @@ function Card({
   // well (only its check, no fireworks again). Nothing during a turn, which keeps it for the turn's end;
   // nothing asleep or locked. On the screen the family shares, no task's name.
   useEffect(() => {
-    comeBack.current = () => {
+    comeBack.current = (listed = false) => {
       if (document.hidden || localConsoleCovered() || wakingUp.current) return;
+      // The list read again comes back late: the member may have gone again meanwhile. What waits waits.
+      if (listed && awayFrom(pausedRef.current)) return;
       // Back during a turn: what waits stays until the turn ends, and is told then. Asleep (quiet, or put to
       // sleep by VNAS) or locked, it stays until the companion is free.
       const state = companionState.read();
@@ -951,12 +966,25 @@ function Card({
       const own = state.pets[COMPANION_PET];
       if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const { ended, results } = away.current;
-      away.current = nothingAway();
       const now = Date.now();
       const recent = (at: number) => now - at < AWAY_KEEP_MS;
       const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
       const outcome = ended && recent(ended.at) ? ended.state : null;
-      if (outcome === null && waiting.size === 0) return;
+      if (outcome === null && waiting.size === 0) {
+        away.current = nothingAway();
+        return;
+      }
+      // A new result waits, unless an error comes first: the list is read again, as another device may have
+      // read the result, and what to tell is decided when it comes, by how things are then (above). Nothing is
+      // taken until it is told; a refresh that a later one overtook is left.
+      if (outcome !== "error" && waiting.size > 0 && !listed) {
+        const asked = ++refreshing.current;
+        void loadTaskNotices().finally(() => {
+          if (refreshing.current === asked) comeBack.current(true);
+        });
+        return;
+      }
+      away.current = nothingAway();
       const tell = () => {
         toldAt.current = Date.now();
       };
@@ -975,24 +1003,18 @@ function Card({
         tell();
         setTold({ sign: "success", at: now });
       };
-      if (waiting.size === 0) {
+      const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
+      if (unread.length === 0) {
         done();
         return;
       }
-      void loadTaskNotices().finally(() => {
-        const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
-        if (unread.length === 0) {
-          done();
-          return;
-        }
-        tell();
-        const task = unread.at(-1)?.task?.name;
-        const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
-        companionState.writePet(COMPANION_PET, "say", { text, anim: false });
-        const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
-        if (responses.length > 0)
-          companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
-      });
+      tell();
+      const task = unread.at(-1)?.task?.name;
+      const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
+      companionState.writePet(COMPANION_PET, "say", { text, anim: false });
+      const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
+      if (responses.length > 0)
+        companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
     };
   }, [animations]);
 
@@ -1041,9 +1063,18 @@ function Card({
     const [quietBefore, asleepBefore] = [wasQuiet.current, wasAsleep.current];
     wasQuiet.current = quiet;
     wasAsleep.current = asleep;
-    if (quiet && asleep) quietSleep.current = true;
+    // The sleep is the member's while it sleeps quiet: kept past this card, which hidden takes off the page
+    // (asleepFromTheStart wakes the next one).
+    if (quiet && asleep) {
+      quietSleep.current = true;
+      setMemberSleep(true);
+    }
+    if (!asleep) setMemberSleep(false);
     // As usual again from Settings: it wakes.
-    if (quietBefore && !quiet && asleep) companionSleep.wake(COMPANION_PET);
+    if (quietBefore && !quiet && asleep) {
+      setMemberSleep(false);
+      companionSleep.wake(COMPANION_PET);
+    }
     if (!asleepBefore || asleep) return;
     // Woken by the member while quiet: as usual again.
     if (quiet) setCompanionMode("normal");
@@ -1091,14 +1122,24 @@ function Card({
       };
       if (cardWaiting()) {
         say("等你确认");
-        openers.onOpenVnas?.();
-        window.setTimeout(
-          () =>
+        // The window opens the card's conversation, from another one or from its memory or tasks, at the
+        // cards (AssistantPanel). The focus stays on the companion, not on the card's buttons: an Enter that
+        // asked it must not answer the card.
+        const conversation = waitingConversation();
+        const focused = document.activeElement;
+        openers.onOpenVnas?.(conversation ? { conversation } : undefined);
+        window.setTimeout(() => {
+          if (!conversation)
             document
               .querySelector('[data-window-id="assistant"] [aria-label="本对话中等你确认或回答的事"]')
-              ?.scrollIntoView({ block: "nearest" }),
-          0,
-        );
+              ?.scrollIntoView({ block: "nearest" });
+          if (
+            focused instanceof HTMLElement &&
+            focused !== document.activeElement &&
+            clipSpeed.current?.contains(focused)
+          )
+            focused.focus({ preventScroll: true });
+        }, 0);
         return true;
       }
       const unread = currentTaskNotices().at(-1);
@@ -1122,7 +1163,7 @@ function Card({
       }
       return false;
     };
-  }, [openers, work]);
+  }, [clipSpeed, openers, work]);
   useEffect(() => {
     const layer = clipSpeed.current;
     if (!layer) return;

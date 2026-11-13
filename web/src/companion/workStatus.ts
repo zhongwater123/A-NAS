@@ -48,8 +48,11 @@ const bridge = createWorkStatusBridge({ state: companionState, workStatus: store
 
 /** Live conversations whose turn this window started and has not seen end. */
 const prompting = new Set<string>();
-/** Waiting entries for the member's cards, by card: card id -> entry id. */
-const cards = new Map<string, string>();
+/**
+ * Waiting entries for the member's cards, by card: card id -> entry id, and the conversation as stored that
+ * the card belongs to (null while it is not known). In the order they came.
+ */
+const cards = new Map<string, { id: string; conversation: string | null }>();
 /**
  * The turns this window started, by conversation: since when, how many tool calls it made (steps, as a click
  * tells them), how many of VNAS's own tools (tools), whether something waited for the member, and whether it
@@ -278,6 +281,15 @@ export function cardWaiting(): boolean {
 }
 
 /**
+ * The conversation, as stored, of the card that has waited longest for the member in a turn this window
+ * started; null when it is not known (a conversation not stored yet), undefined when no card waits.
+ */
+export function waitingConversation(): string | null | undefined {
+  for (const card of cards.values()) return card.conversation;
+  return undefined;
+}
+
+/**
  * The newest turn of this window under way (not ended, no card waiting in it): how many of VNAS's tools it
  * called, since when, and the line its stage shows now; null when none is.
  */
@@ -343,25 +355,32 @@ function bigTurn(turn: Turn): boolean {
 }
 
 /** The member's cards: each one awaiting a decision in a turn this window started is a waiting entry. */
-export function reportCards(list: Iterable<{ requestId: string; sessionId: string; status: string }>): void {
-  const waiting = new Set<string>();
+export function reportCards(
+  list: Iterable<{ requestId: string; sessionId: string; status: string; storedSessionId?: string | null }>,
+): void {
+  const waiting = new Map<string, string | null>();
   for (const card of list)
     if (card.status === "awaiting" && prompting.has(card.sessionId)) {
-      waiting.add(card.requestId);
+      waiting.set(card.requestId, card.storedSessionId || null);
       const turn = turns.get(card.sessionId);
       if (turn) turn.waited = true;
     }
-  for (const [requestId, id] of cards)
+  for (const [requestId, card] of cards)
     if (!waiting.has(requestId)) {
       cards.delete(requestId);
-      clear(id);
+      clear(card.id);
     }
-  for (const requestId of waiting)
-    if (!cards.has(requestId)) {
-      const id = `card:${requestId}`;
-      cards.set(requestId, id);
-      set(id, "waiting", behaviorStep("waiting", "card"));
+  for (const [requestId, conversation] of waiting) {
+    const known = cards.get(requestId);
+    if (known) {
+      // A conversation stored after its card came.
+      known.conversation ??= conversation;
+      continue;
     }
+    const id = `card:${requestId}`;
+    cards.set(requestId, { id, conversation });
+    set(id, "waiting", behaviorStep("waiting", "card"));
+  }
 }
 
 /**

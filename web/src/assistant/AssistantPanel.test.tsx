@@ -1,13 +1,14 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
 import { resetCompanionCommands } from "../companion/commands";
 import { companionLock, companionPlayback, resetCompanionHost } from "../companion/host";
 import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
-import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
-import { server } from "../test/server";
+import { assistantHandlers, assistantSession, noticesHandlers, tasksHandlers } from "../test/handlers/assistant";
+import { http, server } from "../test/server";
 import type { Approval } from "./api";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
@@ -191,6 +192,57 @@ describe("the VNAS window", () => {
     await emit("anas.approval", card("req-3", "approved", "rm -rf 缓存"));
     expect(screen.queryByText("rm -rf 缓存")).toBeNull();
     expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
+  });
+
+  it("opens the conversation whose card waits, at its cards, from another conversation, the memory or the tasks", async () => {
+    const OTHER = "20261021_100000_bbbbbb";
+    const card: Approval = {
+      requestId: "req-7",
+      kind: "command",
+      // Its turn ran in a window of its own: here only the conversation tells where it is.
+      sessionId: "live0002",
+      storedSessionId: STORED,
+      status: "awaiting",
+      createdAt: Date.now() / 1000,
+      command: { text: "rm -rf 缓存" },
+    };
+    server.use(
+      ...assistantHandlers({
+        sessions: [
+          assistantSession(STORED, { title: "操作桌面", messageCount: 2 }),
+          assistantSession(OTHER, { title: "整理相册", messageCount: 2 }),
+        ],
+        messages: history,
+        approvals: [card],
+      }),
+      // The memory and the tasks, whose pages it leaves: what they hold does not matter here.
+      ...tasksHandlers([]),
+      ...noticesHandlers().handlers,
+      http.get("/api/v1/assistant/memory", () => HttpResponse.error()),
+    );
+    Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    try {
+      const view = render(<AssistantPanel username="admin" />);
+      const user = userEvent.setup();
+      const from: [string, () => Promise<void>][] = [
+        ["another conversation", () => user.click(screen.getByText("整理相册"))],
+        ["the memory", () => user.click(screen.getByRole("button", { name: /记忆/ }))],
+        ["the tasks", () => user.click(screen.getByRole("button", { name: /定时任务/ }))],
+      ];
+      await screen.findByText("整理相册");
+      for (const [where, go] of from) {
+        await go();
+        expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" }), where).toBeNull();
+        scrolled.mockClear();
+        view.rerender(<AssistantPanel username="admin" intent={{ conversationId: STORED }} />);
+        const cards = await screen.findByRole("region", { name: "本对话中等你确认或回答的事" });
+        expect(within(cards).getByText("rm -rf 缓存"), where).toBeTruthy();
+        await waitFor(() => expect(scrolled.mock.contexts, where).toContain(cards));
+      }
+    } finally {
+      scrolled.mockRestore();
+    }
   });
 
   it("moves the companion for the turns this window starts, and stops once the window closes", async () => {
