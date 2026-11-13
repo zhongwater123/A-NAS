@@ -250,7 +250,8 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
         progress: null,
       };
     case "rolled-back": {
-      const record = status.records[0];
+      // The rollback's record; failed checks since then may be newer.
+      const record = status.records.find((record) => record.kind === "rolled-back" || record.kind === "failed");
       if (problem?.code === "rollback")
         return {
           tone: "danger",
