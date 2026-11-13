@@ -1,6 +1,7 @@
 import {
   Activity,
   ChevronDown,
+  CircleFadingArrowUp,
   Download,
   FolderOpen,
   HardDrive,
@@ -64,10 +65,13 @@ const categoryIcons: Record<ActivityCategory | "other", LucideIcon> = {
   storage: HardDrive,
   photo: Images,
   family: Activity,
+  system: CircleFadingArrowUp,
   other: Activity,
 };
 
 const categoryOrder: ActivityCategory[] = ["session", "account", "file", "storage", "photo", "family"];
+// 系统 holds what administrators alone see, such as system updates.
+const adminCategoryOrder: ActivityCategory[] = [...categoryOrder, "system"];
 
 const pageSize = 50;
 
@@ -78,6 +82,7 @@ const unavailableLabels: Record<ActivityCategory, string> = {
   storage: "存储",
   photo: "相册",
   family: "家庭中心",
+  system: "系统",
 };
 
 interface LogState {
@@ -245,7 +250,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
       <div className={styles.lgToolbar}>
         <div className={styles.lgToolbarRow}>
           <div className={styles.lgChips} role="radiogroup" aria-label="记录类别">
-            {[undefined, ...categoryOrder].map((category) => {
+            {[undefined, ...(isAdmin ? adminCategoryOrder : categoryOrder)].map((category) => {
               const active = filters.category === category;
               return (
                 <button

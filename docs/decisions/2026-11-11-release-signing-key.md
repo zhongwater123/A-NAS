@@ -1,7 +1,7 @@
 # 发布用的签名密钥由谁、怎样保管
 
 状态：decided（2026-11-12，用户）
-更新时间：2026-11-12
+更新时间：2026-11-13
 
 ## 问题
 
@@ -34,6 +34,18 @@ A-NAS 的软件源以 GPG 签名（[ADR 0034](../adr/0034-release-as-signed-debi
 - **测试密钥**：只签开发机自己的测试软件源。`make release` 不会用另一把密钥签已有的软件源，所以第一个正式 release 写进新的软件源，测试密钥签的 `D:\A-NAS-releases\apt` 在用户确认后删除。
 
 一台开发机丢失或泄露时，另一台用主密钥的备份吊销它的子密钥，并发布新的 keyring；设备随下一次更新收到，不用重装。步骤见[管理发布签名密钥](../runbooks/manage-release-key.md)。
+
+## 密钥
+
+用户 2026-11-13 在开发机 B 上自己输入口令生成（`release-key.sh create`），公钥在 [`deploy/release/a-nas-archive-key.asc`](../../deploy/release/a-nas-archive-key.asc)。核对公钥文件、`release-key.sh show` 与设备上 `gpg --show-keys /usr/share/keyrings/a-nas-archive-keyring.pgp` 的输出，都应是这三个指纹：
+
+| 密钥 | 指纹 |
+|---|---|
+| 主密钥 | `4050 4736 B765 9C8B 653A  6BB4 95EE EC56 48E3 CEB3` |
+| 子密钥 `dev-b`（开发机 B） | `B2AC 0AAF B2C4 1BAF D8FB  CD90 8532 DC79 E59D 27F4` |
+| 子密钥 `dev-a`（开发机 A） | `5E43 D25B 8C55 FB72 D07C  0E06 0174 29E7 C858 0F15` |
+
+开发机 B 已装上 `dev-b`；主密钥的备份在开发机 B 的 `~/.local/share/a-nas/archive-key-backup`，复制到开发机 A 与 U 盘见手册第 3 步。
 
 ## 关联
 
