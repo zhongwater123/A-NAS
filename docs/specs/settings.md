@@ -1,7 +1,7 @@
 # 设置
 
 状态：implemented
-更新时间：2026-11-11
+更新时间：2026-11-13
 
 ## 目标
 
@@ -10,7 +10,7 @@
 ## 非目标
 
 - 设置窗口组织各分区；分区涉及的产品 API、角色规则和审计由各自规格定义，权限由服务端执行。
-- 不实现网络、SMB、安全或系统更新等新设置项，侧栏也不为它们留位置。日志分区的行为见[日志](logs.md)。
+- 不实现网络、SMB 或安全等新设置项，侧栏也不为它们留位置。日志分区的行为见[日志](logs.md)。
 - 不提供存储计划的查询或恢复接口；刷新页面后未执行的计划仍按十分钟过期，见[基础存储与共享](basic-storage-and-sharing.md#数据卷初始化)。未执行的计划可以在向导中取消，见[硬盘用途与数据卷冗余](disk-roles-and-redundancy.md#边界与失败)。
 - 不改变状态栏、强制改密页和账号通知；状态栏不作为设置入口。
 - 设备实时用量、短时趋势和服务与进程监控由[任务管理器](task-manager.md)定义。
@@ -20,15 +20,16 @@
 | 分区 | 成员 | 管理员 | 内容 |
 |---|---|---|---|
 | 我的账号 | 可用 | 可用 | 头像、昵称与账号名（见[头像与昵称](account-profile.md)）、角色（状态不正常时一并显示）、修改密码（同步 SMB 凭据）、本次登录方式与有效期、登录记录、退出登录 |
-| 概览 | 可用 | 可用 | 页首是设备本身：一幅按非系统盘数量画出盘位的设备图（盘位指示灯随该盘健康变色）、设备名和系统健康；数据来源为模拟时标出。其下并排三项数字：存储空间（可用空间与用量条，整块点击进入“存储”）、最高温度（处理器、显卡与硬盘中最高的一项及其来源）、已运行时间与开机时间。再往下是需要处理什么（有问题时逐项列出原因、处理办法与“在存储中查看”，见[系统健康](system-health.md)；没有问题时不单列）和细节（温度与风扇，见[设备温度与风扇](device-temperatures.md)；产品版本、操作系统、架构、系统盘空间、可复制的设备标识与状态更新时间） |
+| 概览 | 可用 | 可用 | 页首是设备本身：一幅按非系统盘数量画出盘位的设备图（盘位指示灯随该盘健康变色）、设备名和系统健康；数据来源为模拟时标出。其下并排三项数字：存储空间（可用空间与用量条，整块点击进入“存储”）、最高温度（处理器、显卡与硬盘中最高的一项及其来源）、已运行时间与开机时间。再往下是需要处理什么（有问题时逐项列出原因、处理办法与“在存储中查看”，见[系统健康](system-health.md)；没有问题时不单列）（管理员另见“有新版本”一项，点开进入“系统更新”，侧栏的“系统更新”同时带一个标记）和细节（温度与风扇，见[设备温度与风扇](device-temperatures.md)；产品版本、操作系统、架构、系统盘空间、可复制的设备标识与状态更新时间） |
 | 任务管理器 | 只读 | 只读 | 设备运行状态（总览、CPU、GPU、NPU、内存、网络、硬盘）与服务、进程资源用量，见[任务管理器](task-manager.md) |
 | 存储 | 只读 | 可用 | 数据卷状态、冗余方式、容量与转换进度、磁盘列表；尚无数据卷时管理员可初始化数据卷，有未使用的硬盘时可设置它的用途（见[硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)） |
+| 系统更新 | 不显示 | 可用 | 更新状态与一个下一步操作、版本、自动下载与自动安装、最近 10 条记录、回到上一版本，见[系统更新](system-update.md) |
 | 个性化 | 不显示 | 可用 | 全体账号共用的桌面壁纸与样式、本机屏幕的息屏时长，见[个性化](personalization.md) |
 | 用户与权限 | 不显示 | 可用 | 账号列表、添加成员；每个成员的“更多操作”菜单提供重置密码、只读查看个人空间或私有图库、禁用 |
 | 日志 | 只看自己的活动 | 可用 | 活动记录与系统日志，见[日志](logs.md) |
 | 终端 | 不显示 | 可用 | 以管理员本人 Linux 账号运行的设备 Shell，见[Web 桌面终端](web-terminal.md) |
 
-侧栏从上到下是搜索框、当前账号（头像与昵称，进入“我的账号”）和分区列表，顺序是概览、存储、任务管理器、用户与权限、个性化、网页搜索、日志、终端，各项间距相同；窄窗口下它们按设备、家庭、诊断分成三张卡片。每项带线条图标，当前分区以白色底块标出、图标变为强调色。侧栏是透出桌面壁纸的磨砂玻璃，并向上延伸到标题栏左侧；内容区不透明。
+侧栏从上到下是搜索框、当前账号（头像与昵称，进入“我的账号”）和分区列表，顺序是概览、存储、系统更新、任务管理器、用户与权限、个性化、网页搜索、日志、终端，各项间距相同；窄窗口下它们按设备、家庭、诊断分成三张卡片。每项带线条图标，当前分区以白色底块标出、图标变为强调色。侧栏是透出桌面壁纸的磨砂玻璃，并向上延伸到标题栏左侧；内容区不透明。
 
 内容区一次显示一个分区：标题在滚动时留在顶部并缩小，其下是居中的分组卡片，宽窗口下不无限拉伸；“终端”例外，深色终端占满内容区的宽度和高度。标题下不写说明文字。能点开的设置是整行可点的行，修改在设置窗口内的对话框中完成，结果以窗口底部的提示显示。
 
@@ -64,7 +65,7 @@
 
 - Given：成员登录。
 - When：打开设置。
-- Then：侧栏只有“我的账号”“概览”“任务管理器”“存储”“日志”和规划中项目；“存储”显示数据卷与磁盘但没有初始化入口；“日志”只有自己的活动记录；“个性化”“用户与权限”和“终端”不出现。管理员看到全部分区。
+- Then：侧栏只有“我的账号”“概览”“任务管理器”“存储”“日志”和规划中项目；“存储”显示数据卷与磁盘但没有初始化入口；“日志”只有自己的活动记录；“系统更新”“个性化”“用户与权限”和“终端”不出现。管理员看到全部分区。
 
 ### 概览保留设备状态的读取语义
 
@@ -114,13 +115,13 @@
 
 ## 验收证据
 
-- React 行为测试：[设置测试](../../web/src/settings/SettingsPanel.test.tsx) 与[桌面测试](../../web/src/App.test.tsx) 覆盖单一入口、头像跳转、成员自助改密、从“我的账号”打开登录记录、角色可见分区、终端分区跨分区与最小化保留 Shell、概览加载/失联/重试、存储状态与“已用空间未知”、初始化向导与计划跨分区和关窗保留、菜单与对话框中的重置密码、只读查看和禁用确认，以及添加成员时的账号名与密码规则检查；规则本身见 [`accountRules.test.ts`](../../web/src/auth/accountRules.test.ts)。
+- React 行为测试：[设置测试](../../web/src/settings/SettingsPanel.test.tsx) 与[桌面测试](../../web/src/App.test.tsx) 覆盖单一入口、头像跳转、成员自助改密、从“我的账号”打开登录记录、角色可见分区、终端分区跨分区与最小化保留 Shell、概览加载/失联/重试、概览与侧栏的新版本提示、存储状态与“已用空间未知”、初始化向导与计划跨分区和关窗保留、菜单与对话框中的重置密码、只读查看和禁用确认，以及添加成员时的账号名与密码规则检查；规则本身见 [`accountRules.test.ts`](../../web/src/auth/accountRules.test.ts)。
 - 本地门禁：`make check`。
 
 ## 关联
 
-- 规格：[头像与昵称](account-profile.md)、[个性化](personalization.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)
+- 规格：[头像与昵称](account-profile.md)、[个性化](personalization.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)、[系统健康](system-health.md)、[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[日志](logs.md)、[Web 桌面终端](web-terminal.md)、[系统更新](system-update.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[设置窗口](../../web/src/settings/SettingsPanel.tsx)、[设置搜索](../../web/src/settings/search.ts)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[我的账号](../../web/src/settings/AccountSection.tsx)、[概览](../../web/src/settings/OverviewSection.tsx)、[用户与权限](../../web/src/settings/UsersSection.tsx)、[日志分区](../../web/src/settings/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)
-- 测试：[设置测试](../../web/src/settings/SettingsPanel.test.tsx)、[桌面测试](../../web/src/App.test.tsx)
+- 代码：[设置窗口](../../web/src/settings/SettingsPanel.tsx)、[设置搜索](../../web/src/settings/search.ts)、[设置分区的共用部件](../../web/src/settings/parts.tsx)、[我的账号](../../web/src/settings/AccountSection.tsx)、[概览](../../web/src/settings/OverviewSection.tsx)、[用户与权限](../../web/src/settings/UsersSection.tsx)、[日志分区](../../web/src/settings/logs/LogsSection.tsx)、[终端分区](../../web/src/settings/TerminalSection.tsx)、[个性化分区](../../web/src/settings/PersonalizationSection.tsx)、[系统更新分区](../../web/src/settings/SystemUpdateSection.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)
+- 测试：[设置测试](../../web/src/settings/SettingsPanel.test.tsx)、[桌面测试](../../web/src/App.test.tsx)、[系统更新测试](../../web/src/settings/SystemUpdateSection.test.tsx)

@@ -1,4 +1,5 @@
 import { calendarDate, calendarDays, relativeUnit } from "../../lib/time";
+import { byText, isProblemCode, problemText, versionLabel } from "../../systemupdate/texts";
 import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./api";
 
 // A sentence is plain text with emphasised names in it.
@@ -18,6 +19,7 @@ export const categoryInfo: Record<ActivityCategory | "other", { label: string; t
   storage: { label: "存储", tone: "storage" },
   photo: { label: "相册", tone: "photo" },
   family: { label: "家庭中心", tone: "account" },
+  system: { label: "系统", tone: "storage" },
   other: { label: "其他", tone: "other" },
 };
 
@@ -211,6 +213,66 @@ const familyActions: Record<string, string> = {
   "family.vaccine_plan_changed": "修改了接种计划",
 };
 
+// describeSystemUpdate: an administrator's request, such as
+// system.update.install, or an outcome the update service recorded, such as
+// system.update.result.updated, whose actor is the system and whose detail
+// says who started it.
+function describeSystemUpdate(action: string, actor: Part, raw?: string): Described {
+  let detail: Record<string, unknown> = {};
+  try {
+    const value: unknown = raw?.startsWith("{") ? JSON.parse(raw) : undefined;
+    if (value && typeof value === "object") detail = value as Record<string, unknown>;
+  } catch {
+    // An unreadable detail reads as an empty one.
+  }
+  const text = (key: string) => (typeof detail[key] === "string" ? detail[key] : "");
+  const version = name(versionLabel(text("version")));
+  const from = name(versionLabel(text("from")));
+  const code = text("problem");
+  const problem = isProblemCode(code) ? problemText({ code }) : "";
+  const meta = [problem, byText(text("by"))].filter(Boolean);
+  // The version an operation started from; the first install has none.
+  const fromParts = (verb: string): Part[] => (text("from") ? ["将 A-NAS 从", from, verb] : [`将 A-NAS ${verb}`]);
+  switch (action) {
+    case "download":
+      return { parts: [actor, "开始下载 A-NAS", version], meta: [] };
+    case "install":
+      return { parts: [actor, "开始安装 A-NAS", version], meta: [] };
+    case "revert":
+      return { parts: [actor, "开始回到 A-NAS", version], meta: [] };
+    case "settings":
+      return {
+        parts: [actor, "修改了系统更新设置"],
+        meta: [
+          detail.autoDownload === true ? "自动下载" : "不自动下载",
+          detail.autoInstall === true ? `自动安装 ${text("windowStart")}–${text("windowEnd")}` : "不自动安装",
+        ],
+      };
+    case "result.downloaded":
+      return { parts: [actor, "下载了 A-NAS", version], meta };
+    case "result.updated":
+      return { parts: [actor, ...fromParts("更新到"), version], meta, tone: "success" };
+    case "result.rolled-back":
+      return {
+        parts: [
+          actor,
+          "安装 A-NAS",
+          version,
+          ...(text("from") ? ["后检查没有通过，已回到", from] : ["后检查没有通过，已回到原版本"]),
+        ],
+        meta,
+        tone: "warning",
+      };
+    case "result.reverted":
+      return { parts: [actor, ...fromParts("回到"), version], meta };
+    case "result.check-failed":
+      return { parts: [actor, "检查系统更新失败"], meta, tone: "warning" };
+    case "result.failed":
+      return { parts: [actor, "安装 A-NAS", version, "没有完成"], meta, tone: "danger" };
+  }
+  return { parts: [actor, "执行了", name(`system.update.${action}`)], meta: [] };
+}
+
 // describeActivity turns an event into a sentence for the activity log.
 export function describeActivity(event: ActivityEvent, viewerId: string): Described {
   const actor = actorOf(event, viewerId);
@@ -223,6 +285,8 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       detail.expiresAt ? `${formatDateTime(detail.expiresAt)} 自动结束` : "",
     ].filter(Boolean);
   if (familyActions[event.action]) return { parts: [actor, familyActions[event.action]], meta: [] };
+  if (event.action.startsWith("system.update."))
+    return describeSystemUpdate(event.action.slice("system.update.".length), actor, event.detail);
   switch (event.action) {
     case "session.signed_in":
       return { parts: [actor, "登录了"], meta: [originLabel(event.detail)].filter(Boolean) as string[] };

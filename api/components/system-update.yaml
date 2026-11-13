@@ -1,0 +1,71 @@
+schemas:
+  SystemUpdatePhase:
+    type: string
+    description: >-
+      Where an update stands: up-to-date; available (newer, to download from a network source); downloading;
+      ready (on the device, a push or a download); installing (apt, then a-nas-check); rolling-back; rolled-back
+      (the check of the new version failed); check-failed (the source could not be read or its signature was
+      wrong).
+    enum: [up-to-date, available, downloading, ready, installing, rolling-back, rolled-back, check-failed]
+  SystemUpdateProblem:
+    type: object
+    additionalProperties: false
+    required: [code]
+    properties:
+      code:
+        type: string
+        enum: [unreachable, signature, disk_space, download, install, check, rollback, staging, not_installed]
+      detail: { type: string, description: "What apt or a-nas-check said; for disk_space, the bytes still missing." }
+  SystemUpdateRecord:
+    type: object
+    additionalProperties: false
+    required: [at, kind, by]
+    properties:
+      at: { type: string, format: date-time }
+      kind: { type: string, enum: [updated, rolled-back, reverted, check-failed, downloaded, failed] }
+      version: { type: string }
+      from: { type: string }
+      by: { type: string, description: "The administrator who asked, or automatic." }
+      problem: { $ref: "#/schemas/SystemUpdateProblem" }
+  SystemUpdateSettings:
+    type: object
+    additionalProperties: false
+    required: [autoDownload, autoInstall, windowStart, windowEnd]
+    properties:
+      autoDownload: { type: boolean }
+      autoInstall: { type: boolean }
+      windowStart: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: Local time of day an automatic install may start from. }
+      windowEnd: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: "Local time of day it may start until; before windowStart, the window runs past midnight." }
+  SystemUpdateAction:
+    type: object
+    additionalProperties: false
+    required: [action]
+    properties:
+      action: { type: string, enum: [check, download, install, revert] }
+  SystemUpdateStatus:
+    type: object
+    additionalProperties: false
+    required: [phase, running, downloadBytes, downloadedBytes, suites, records, settings, waiting]
+    properties:
+      phase: { $ref: "#/schemas/SystemUpdatePhase" }
+      running: { type: boolean, description: An operation is in progress. }
+      current: { type: string, description: The installed version of a-nas. }
+      previous: { type: string, description: "The version before the last install that passed its check, which revert installs." }
+      candidate: { type: string, description: The newest version the source offers that is newer and was not rolled back or left. }
+      downloadBytes: { type: integer, format: int64, description: What installing the candidate downloads; 0 for a pushed local source. }
+      downloadedBytes: { type: integer, format: int64 }
+      suites: { type: array, items: { type: string }, description: "The distributions the device follows, such as release and dev." }
+      checkedAt: { type: string, format: date-time }
+      installedAt: { type: string, format: date-time }
+      target: { type: string, description: The version an operation in progress installs. }
+      startedAt: { type: string, format: date-time }
+      problem: { $ref: "#/schemas/SystemUpdateProblem" }
+      records:
+        type: array
+        description: The last ten outcomes, newest first.
+        items: { $ref: "#/schemas/SystemUpdateRecord" }
+      settings: { $ref: "#/schemas/SystemUpdateSettings" }
+      waiting:
+        type: array
+        description: What an install waits for now.
+        items: { type: string, enum: [storage, apps] }

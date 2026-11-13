@@ -16,6 +16,8 @@ import (
 type systemdRunner struct {
 	activeState string
 	commands    []string
+	// onShow runs as systemctl show answers, as a unit that changes then.
+	onShow func()
 }
 
 func (r *systemdRunner) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {
@@ -25,6 +27,9 @@ func (r *systemdRunner) Run(_ context.Context, name string, args []string, _ str
 
 func (r *systemdRunner) Output(_ context.Context, name string, args []string, _ string) ([]byte, error) {
 	if name == "systemctl" && len(args) > 0 && args[0] == "show" {
+		if r.onShow != nil {
+			r.onShow()
+		}
 		return []byte(r.activeState + "\n"), nil
 	}
 	return r.Run(context.Background(), name, args, "")

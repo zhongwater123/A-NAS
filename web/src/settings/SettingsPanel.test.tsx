@@ -8,9 +8,11 @@ import { setSession } from "../api/client";
 import type { ActivityPage, Disk, FileEntry, Session, Space, Volume } from "../api.generated";
 import { companionMode, setCompanionMode } from "../companion/quiet";
 import { useHostState } from "../desktop/useHostState";
+import { resetSystemUpdate } from "../systemupdate/status";
 import { healthyState, session as signIn } from "../test/fixtures";
 import { type SettingsOptions, settingsHandlers, terminalHandlers } from "../test/handlers/settings";
 import { disk, storagePlan, volume } from "../test/handlers/storage";
+import { nextVersion, systemUpdateStatus } from "../test/handlers/systemupdate";
 import { accountHandlers, alice, membersHandlers } from "../test/handlers/users";
 import { apiError, http, pathOf, server } from "../test/server";
 import { SettingsPanel, type SettingsSection, useStoragePlan } from "./SettingsPanel";
@@ -170,6 +172,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setSession();
+  resetSystemUpdate();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -608,6 +611,20 @@ describe("Settings", () => {
     expect(await screen.findByText("运行正常")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "需要处理" })).toBeNull();
     expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
+  });
+
+  it("lists a new version for administrators, marks 系统更新 and leads there", async () => {
+    serve({ systemUpdate: { status: systemUpdateStatus({ phase: "ready", candidate: nextVersion }) } });
+    const user = userEvent.setup();
+    renderSettings();
+    const notice = await screen.findByRole("button", { name: /有新版本 1\.0\.1-rc\.6 开发版 4e842653/ });
+    expect(within(screen.getByRole("region", { name: "需要处理" })).getByText("1 项")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
+    const update = within(sections()).getByRole("button", { name: /系统更新/ });
+    expect(within(update).getByText("有新版本")).toBeTruthy();
+    await user.click(notice);
+    expect(update.getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByRole("heading", { name: "1.0.1-rc.6 开发版 4e842653 可以安装" })).toBeTruthy();
   });
 
   it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {

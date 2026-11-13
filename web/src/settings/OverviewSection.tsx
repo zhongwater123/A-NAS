@@ -1,10 +1,12 @@
-import { ChevronRight, Copy } from "lucide-react";
+import { ChevronRight, CircleFadingArrowUp, Copy } from "lucide-react";
 import { useId } from "react";
 
-import type { Disk, Health } from "../api.generated";
+import type { Disk, Health, SystemUpdateStatus } from "../api.generated";
 import type { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes } from "../lib/bytes";
+import { hasNewVersion } from "../systemupdate/status";
+import { versionLabel } from "../systemupdate/texts";
 import { CompanionCredit } from "./CompanionCredit";
 import { DeviceTemperatures, diskTemperature } from "./DeviceTemperatures";
 import { describeFinding } from "./health";
@@ -22,12 +24,17 @@ export function OverviewSection({
   host,
   volumes,
   isAdmin,
+  update,
   onOpenStorage,
+  onOpenUpdate,
 }: {
   host: HostStateView;
   volumes: VolumesView;
   isAdmin: boolean;
+  // update is the system update's state, read for administrators alone.
+  update?: SystemUpdateStatus;
   onOpenStorage: () => void;
+  onOpenUpdate: () => void;
 }) {
   const { snapshot } = host;
   const { toast } = useSettingsKit();
@@ -82,7 +89,12 @@ export function OverviewSection({
         <Warmest snapshot={snapshot} />
         <Uptime seconds={system.uptimeSeconds} observedAt={snapshot.observedAt} />
       </div>
-      <HealthFindings snapshot={snapshot} onOpenStorage={onOpenStorage} />
+      <HealthFindings
+        snapshot={snapshot}
+        update={hasNewVersion(update) ? update : undefined}
+        onOpenStorage={onOpenStorage}
+        onOpenUpdate={onOpenUpdate}
+      />
       <DeviceTemperatures snapshot={snapshot} />
       <Group title="关于本机" anchor="about">
         <Row label="产品版本" value={snapshot.productVersion} />
@@ -248,13 +260,34 @@ function Uptime({ seconds, observedAt }: { seconds: number; observedAt: string }
 }
 
 // HealthFindings lists what makes the system rated as it is, each with what
-// to do about it (docs/specs/system-health.md). A healthy device shows none:
-// the status line above already says so.
-function HealthFindings({ snapshot, onOpenStorage }: { snapshot: HostState; onOpenStorage: () => void }) {
-  const findings = snapshot.system.healthFindings;
-  if (snapshot.system.health === "unknown" || findings.length === 0) return null;
+// to do about it (docs/specs/system-health.md), and a new version of A-NAS
+// for administrators (docs/specs/system-update.md). A healthy device shows
+// no findings: the status line above already says so.
+function HealthFindings({
+  snapshot,
+  update,
+  onOpenStorage,
+  onOpenUpdate,
+}: {
+  snapshot: HostState;
+  update?: SystemUpdateStatus;
+  onOpenStorage: () => void;
+  onOpenUpdate: () => void;
+}) {
+  const findings = snapshot.system.health === "unknown" ? [] : snapshot.system.healthFindings;
+  const count = findings.length + (update ? 1 : 0);
+  if (count === 0) return null;
   return (
-    <Group title="需要处理" aside={`${findings.length} 项`}>
+    <Group title="需要处理" aside={`${count} 项`}>
+      {update?.candidate && (
+        <Row
+          icon={<CircleFadingArrowUp className={`${styles.healthIcon} ${styles.accent}`} aria-hidden="true" />}
+          label={<strong>有新版本 {versionLabel(update.candidate)}</strong>}
+          detail={update.phase === "ready" ? "可以安装" : "可以下载"}
+          anchor="new-version"
+          onClick={onOpenUpdate}
+        />
+      )}
       {findings.map((finding, index) => {
         const described = describeFinding(finding, snapshot.disks);
         const critical = finding.severity === "critical";
@@ -277,9 +310,11 @@ function HealthFindings({ snapshot, onOpenStorage }: { snapshot: HostState; onOp
           </div>
         );
       })}
-      <button className={`${styles.setRow} ${styles.setRowCommand}`} onClick={onOpenStorage}>
-        在存储中查看磁盘与数据卷
-      </button>
+      {findings.length > 0 && (
+        <button className={`${styles.setRow} ${styles.setRowCommand}`} onClick={onOpenStorage}>
+          在存储中查看磁盘与数据卷
+        </button>
+      )}
     </Group>
   );
 }
