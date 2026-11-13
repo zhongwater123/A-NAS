@@ -177,7 +177,7 @@ ops-check:
 	grep -Eqx 'u a-nas-kiosk - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-kiosk.conf
 	! grep -rFq /home/anas-dev deploy/systemd/system deploy/site deploy/debian deploy/tmpfiles.d deploy/sysusers.d
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/a-nas-update /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api' deploy/systemd/system/anas-api.service
 	grep -Fqx 'Environment=ANAS_HOST_AGENT_GROUP=a-nas' deploy/systemd/system/anas-host-agent.service
@@ -185,6 +185,10 @@ ops-check:
 	grep -Fqx 'Environment=ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' deploy/systemd/system/anas-api.service
 	grep -Fqx 'EnvironmentFile=-/etc/a-nas/site.conf' deploy/systemd/system/anas-api.service
 	grep -Fqx '#ANAS_CONTAINERS_MODE=agent' deploy/site/site.conf
+	@# The system update runs as its own unit, which the timer and the Host Agent start (docs/specs/system-update.md).
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent update' deploy/systemd/system/anas-update.service
+	grep -Fqx 'wants timers.target anas-update.timer' scripts/build-packages.sh
+	grep -Fqx 'd /var/lib/a-nas-update 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	@# a-nas-host depends on the upstream packages that A-NAS's repository carries (ADR 0015).

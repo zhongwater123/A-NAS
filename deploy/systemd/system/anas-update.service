@@ -1,0 +1,24 @@
+[Unit]
+Description=A-NAS system update
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
+# Installing a release restarts the Host Agent and the Product Service, so the
+# update runs in a unit of its own (docs/specs/system-update.md#边界与失败).
+# The Host Agent starts it with a request, the timer without one; a run that
+# finds an install a power cut or reboot stopped finishes it first.
+After=network-online.target local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/a-nas/anas-host-agent update
+# ANAS_UPDATE_STAGING: the directory a development machine pushes the signed
+# repository into (docs/decisions/2026-11-13-release-by-lan-push.md).
+EnvironmentFile=-/etc/a-nas/site.conf
+StateDirectory=a-nas-update
+StateDirectoryMode=0700
+# apt and dpkg write /usr, /etc and /var, so the unit is not confined; it runs
+# no program from the pushed repository, only apt, dpkg and a-nas-check.
+Environment=LC_ALL=C DEBIAN_FRONTEND=noninteractive
+Nice=10
+IOSchedulingClass=idle
+# An install of new models copies gigabytes.
+TimeoutStartSec=2h

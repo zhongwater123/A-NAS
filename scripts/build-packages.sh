@@ -145,6 +145,7 @@ wants sockets.target anas-ai.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path
+wants timers.target anas-update.timer
 # What follows the machine: its settings, and the health check.
 install -m 0755 "$repo/deploy/site/a-nas-generator.sh" "$root/usr/lib/systemd/system-generators/a-nas-generator"
 install -m 0755 "$repo/deploy/site/apply.sh" "$lib/site/apply"

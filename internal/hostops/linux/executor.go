@@ -142,6 +142,9 @@ type Executor struct {
 	// webSearchMu orders changes to the web search switch, so its file and
 	// the service's start or stop always match the last request.
 	webSearchMu sync.Mutex
+	// updateMu orders the system update service's request and settings
+	// files with the check that no run is in progress.
+	updateMu sync.Mutex
 	// operations is the journal of data-volume operations by plan ID.
 	operationsMu    sync.Mutex
 	operations      map[string]*volumeOperation

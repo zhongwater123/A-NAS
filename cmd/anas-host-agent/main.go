@@ -29,9 +29,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/systemdscope"
 	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate/updater"
 )
 
 var version = "dev"
+
+// updateArgument runs one system update instead of the agent.
+const updateArgument = "update"
 
 func main() {
 	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
@@ -44,6 +48,14 @@ func main() {
 	if len(os.Args) >= 4 && os.Args[1] == rootbroker.ShellGateArgument {
 		if err := rootbroker.RunShellGate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS terminal:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// One run of anas-update.service (docs/specs/system-update.md).
+	if len(os.Args) == 2 && os.Args[1] == updateArgument {
+		if err := updater.Main(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS system update:", err)
 			os.Exit(1)
 		}
 		return
@@ -172,7 +184,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, ReconcileFailed: reconcileFailed.Load,
+		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, ReconcileFailed: reconcileFailed.Load,
 		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped,
 	}, logger)
 	mux := http.NewServeMux()

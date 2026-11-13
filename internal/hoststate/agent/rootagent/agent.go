@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate"
 	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
@@ -37,6 +38,8 @@ type handler struct {
 	snapshots   filesystem.SnapshotBackend
 	systemLogs  systemlog.Reader
 	webSearch   websearchswitch.Switch
+	// systemUpdate is the system update service (docs/specs/system-update.md).
+	systemUpdate systemupdate.Updater
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
 	// restoring reports a data volume that ran without a disk and has not
@@ -58,6 +61,8 @@ type Services struct {
 	SystemLogs systemlog.Reader
 	// WebSearch is the administrator's switch of web search (ADR 0030).
 	WebSearch websearchswitch.Switch
+	// SystemUpdate starts the system update service and reads its state.
+	SystemUpdate systemupdate.Updater
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool
@@ -80,8 +85,9 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed,
-		restoring: services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, systemUpdate: services.SystemUpdate,
+		reconcileFailed: services.ReconcileFailed,
+		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
 	}
 }
 
@@ -132,6 +138,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == wire.WebSearchPath {
 		h.handleWebSearch(w, r)
+		return
+	}
+	if r.URL.Path == wire.SystemUpdatePath || r.URL.Path == wire.SystemUpdateSettingsPath {
+		h.handleSystemUpdate(w, r)
 		return
 	}
 	if r.URL.Path == wire.SystemLogsPath {
