@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-10
+更新时间：2026-11-13
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -205,10 +205,29 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 
+## GitHub 安全自动化
+
+Dependabot 的 npm 更新已覆盖 `web/` 与接口工具，分组与排除规则以[配置文件](../../.github/dependabot.yml)为准。govulncheck 已由 `make vuln-check` 随 PR 和主干检查运行，并与 pip-audit、npm audit 一起在[每周工作流](../../.github/workflows/vuln.yml)中复查新公告；actionlint 已属于 `make ops-check`，版本由 `tools/actionlint/go.mod` 固定。
+
+[Security 工作流](../../.github/workflows/security.yml)补充 Gitleaks 与 zizmor，在 PR、合入 `main`、每周一 UTC 02:23（北京时间 10:23）及手动触发时运行。Gitleaks 扫描完整检出历史和全部已获取引用，凭据值 100% 脱敏，保留位置和指纹；zizmor 离线扫描所有工作流，解析失败也使作业失败。同一作业先用仓库固定版本的 actionlint 检查语法与表达式。
+
+新工作流只授予 `contents: read`，所有工作流检出均不保留 Git 凭据，不需要新增 Secret 或 Gitleaks Action 许可证。CLI 版本固定在工作流安装命令中，需人工维护。Gitleaks 的历史告警由 [#483](https://github.com/zhongwater123/A-NAS/issues/483) 跟踪；检查如实失败，不整体豁免，也不自动合并依赖 PR。是否将新作业加入必需检查须另行配置规则集。
+
+安装工作流指定版本的 CLI 后，在仓库根目录复现：
+
+```bash
+go tool -modfile=tools/actionlint/go.mod actionlint .github/workflows/*.yml
+zizmor --offline --strict-collection .github/workflows
+gitleaks git --log-opts="--all" --redact=100 --no-banner --verbose .
+```
+
+历史扫描不包含未提交的工作区改动。真实凭据先撤销或轮换，再按 issue 逐项核对；删除当前文件中的值不会清除历史命中。周跑与手动运行须先让工作流进入默认分支。
+
 ## 关联
 
 - [Makefile](../../Makefile)
 - [CI 工作流](../../.github/workflows/ci.yml)
+- [安全工作流](../../.github/workflows/security.yml)
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)

@@ -1,0 +1,74 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Install Gitleaks CLI
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+      # Full history includes the findings tracked by #483. Keep failures
+      # visible until each finding has been assessed; redact every secret.
+      - name: Scan Git history with redacted output
+        run: gitleaks git --log-opts="--all" --redact=100 --no-banner --verbose .
+
+  workflows:
+    name: Workflow lint and security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Install zizmor
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zizmor"
+          "$RUNNER_TEMP/zizmor/bin/pip" install --disable-pip-version-check zizmor==1.32.0
+
+      - name: Check workflow syntax and expressions
+        run: go tool -modfile=tools/actionlint/go.mod actionlint .github/workflows/*.yml
+
+      - name: Check workflow security
+        run: '"$RUNNER_TEMP/zizmor/bin/zizmor" --offline --strict-collection .github/workflows'

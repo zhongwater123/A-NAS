@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-11-12
+更新时间：2026-11-13
 
 本页是目录：只记当前事实、阻塞、待用户决定的事与下一步，每条一两行，细节在链接的文档中。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，决定的经过见[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)。本页以前的内容由 Git 保存：`git log -p docs/status/CURRENT.md`。
 
@@ -22,6 +22,8 @@
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
 
 ## 阻塞与外部条件
+
+- GitHub 安全自动化：补齐 Gitleaks、zizmor，复用主干已有的 npm Dependabot、govulncheck 与 actionlint（[检查范围](../development/testing.md#github-安全自动化)）；历史凭据告警按 [#483](https://github.com/zhongwater123/A-NAS/issues/483) 逐项核对，安全扫描保留真实失败结果。
 
 - Samba 凭据在本人于“设置 → 我的账号”改密后重建：2026-11-04 核对（`pdbedit -L`），16 个账号只差 `admin`。
 - 办公网段（Wi-Fi 与有线 10.24.x）到 NAS 的 TCP 445 不通、80 正常，拦截在公司网络或电脑的安全策略：SMB 从 NAS 所在的 172.18.45.0/24 测试，或请 IT 放行。
