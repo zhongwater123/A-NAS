@@ -23,7 +23,7 @@
 
 ## 阻塞与外部条件
 
-- GitHub 安全自动化：补齐 Gitleaks、zizmor，复用主干已有的 npm Dependabot、govulncheck 与 actionlint（[检查范围](../development/testing.md#github-安全自动化)）；历史凭据告警按 [#483](https://github.com/zhongwater123/A-NAS/issues/483) 逐项核对，安全扫描保留真实失败结果。
+- 安全扫描：Gitleaks 历史告警按 [#483](https://github.com/zhongwater123/A-NAS/issues/483) 核对。
 
 - Samba 凭据在本人于“设置 → 我的账号”改密后重建：2026-11-04 核对（`pdbedit -L`），16 个账号只差 `admin`。
 - 办公网段（Wi-Fi 与有线 10.24.x）到 NAS 的 TCP 445 不通、80 正常，拦截在公司网络或电脑的安全策略：SMB 从 NAS 所在的 172.18.45.0/24 测试，或请 IT 放行。
