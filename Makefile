@@ -5,11 +5,17 @@ SYSTEM_TEST_IMAGE ?= anas-systemd:trixie
 SHELLCHECK_VERSION = 0.11.0
 # Every tracked shell script; in a copy without .git, every *.sh file.
 SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
+# The a-nas package's scripts, which have no .sh to be found by.
+MAINTAINER_SCRIPTS = $(wildcard deploy/debian/*/DEBIAN/preinst deploy/debian/*/DEBIAN/postinst deploy/debian/*/DEBIAN/prerm deploy/debian/*/DEBIAN/postrm)
 NPM ?= npm
 RUFF ?= ruff
 PIP_AUDIT ?= pip-audit
 BUILD_DIR ?= build
-VERSION ?= dev
+# The product's Debian version, from the commit and its release tag (ADR 0034),
+# worked out once: every target of one make run builds the same version.
+ifndef VERSION
+VERSION := $(shell scripts/release-version.sh)
+endif
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
 # The contract's generators have a package of their own: openapi-typescript
 # needs TypeScript 5's compiler API, and the Web client is on TypeScript 7.
@@ -29,7 +35,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries host-packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -85,8 +91,28 @@ web-lint: web-install
 web-test: web-install
 	cd web && $(NPM) test
 
+# The build ships the licenses of the code copied into web/src (each LICENSE
+# there, beside the README that names its source) as
+# assets/third-party-licenses.txt: the bundle keeps no comments. Code copied
+# in (a README.md with a "Copied from [" line) without an MIT LICENSE beside
+# it fails the build.
+THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
+
 web-build: web-install
 	cd web && $(NPM) run build
+	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
+		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
+			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \
+	done
+	@licenses="$$(find web/src -name LICENSE -not -path '*/node_modules/*' | LC_ALL=C sort)"; \
+	{ echo 'Code copied into the A-NAS Web UI from other projects, and its licenses.'; \
+	for license in $$licenses; do \
+		folder="$${license%/LICENSE}"; \
+		from="$$(sed -n 's/^Copied from \[\([^]]*\)\](\([^)]*\)) commit `\([0-9a-f]*\)`.*/\1 (\2) commit \3/p' "$$folder/README.md" 2>/dev/null)"; \
+		printf '\n== %s: %s ==\n\n' "$$folder" "$${from:-see its README.md}"; cat "$$license"; \
+	done; } > $(THIRD_PARTY_LICENSES); \
+	test "$$(grep -c '^Permission is hereby granted' $(THIRD_PARTY_LICENSES))" -eq "$$(grep -l '^Permission is hereby granted' $$licenses | wc -l)" -a -n "$$licenses" || \
+		{ echo "$(THIRD_PARTY_LICENSES) lacks a license of web/src" >&2; exit 1; }
 
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
@@ -112,11 +138,18 @@ docs-check:
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
-# $(call deploy_paths_carry,FRAGMENT): both deploy paths, deploy-dev.ps1 and
-# remote-activate-release.sh, carry FRAGMENT. Each script is checked on its
-# own: one grep over both passes when either does (#423).
-deploy_paths_carry = for script in scripts/deploy-dev.ps1 scripts/remote-activate-release.sh; do \
-	grep -Fq -- '$(1)' "$$script" || { echo "$$script lacks $(1)" >&2; exit 1; }; done
+# dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).
+# Offline: the pool its manifest makes is the one install-media-pool.sh pins and
+# its README is current. With DSH_PET naming a dsh-pet checkout at the pinned
+# commit, it vendors again and requires no difference; DSH_PET_MOV_ZIP, the
+# pinned assets-mov zip, checks the Safari animations too. CI has neither, and
+# the check says what it skipped.
+DSH_PET ?=
+DSH_PET_MOV_ZIP ?=
+VENDOR_PYTHON ?= python3
+
+vendor-check:
+	PYTHON=$(VENDOR_PYTHON) scripts/check-dsh-pet-vendor.sh $(DSH_PET) $(DSH_PET_MOV_ZIP)
 
 # Shell scripts, the GitHub workflows (actionlint), units and installer
 # conventions, Dependabot's groups (tools/depcheck keeps 0.x web packages out
@@ -124,89 +157,86 @@ deploy_paths_carry = for script in scripts/deploy-dev.ps1 scripts/remote-activat
 # out what ai/requirements.excludes names, which a lock regenerated without
 # --excludes (Dependabot's) would not.
 ops-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
-	shellcheck $(SHELL_SCRIPTS)
+	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS)
 	$(ACTIONLINT) .github/workflows/*.yml
-	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
+	@for script in $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
+	@# Release versions sort as ADR 0034 says: candidates, development builds and releases in order.
+	bash scripts/release-version.sh --check
+	@# A control character in a deploy script, such as the BEL a "\a" became in deploy-dev.ps1, breaks a path without a syntax error.
+	! grep -rIlP '[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]' scripts deploy Makefile .github
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
-	grep -Fqx 'ConditionPathExists=/opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
-	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ConditionPathExists=/usr/lib/a-nas/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /usr/lib/a-nas/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
 	grep -Fqx 'User=a-nas-kiosk' deploy/systemd/system/anas-kiosk@.service
-	grep -Fqx 'EnvironmentFile=-/etc/a-nas/kiosk.env' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'EnvironmentFile=-/etc/a-nas/site.conf' deploy/systemd/system/anas-kiosk@.service
 	grep -Eqx 'u a-nas-kiosk - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-kiosk.conf
-	$(call deploy_paths_carry,a-nas-kiosk.sysusers.incoming)
-	! grep -rFq /home/anas-dev deploy/systemd/system scripts/install-v1.0.1-system-services.sh
-	grep -Fqx 'ReadWritePaths=%h/.config/a-nas/state' deploy/systemd/user/anas-api.service
-	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
-	$(call deploy_paths_carry,stage-only)
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-host-agent' deploy/systemd/system/anas-host-agent.service
+	! grep -rFq /home/anas-dev deploy/systemd/system deploy/site deploy/debian deploy/tmpfiles.d deploy/sysusers.d
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'User=a-nas' deploy/systemd/system/anas-api.service
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api' deploy/systemd/system/anas-api.service
-	grep -Fq 'ANAS_HOST_AGENT_GROUP=a-nas' scripts/install-v1.0.1-system-services.sh
-	grep -Fq 'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' scripts/install-v1.0.1-system-services.sh
-	grep -Fq '[[ -S /run/a-nas-container/agent.sock ]]' scripts/install-v1.0.1-system-services.sh
-	grep -Fq "printf 'ANAS_CONTAINERS_MODE=agent\\n' >> /etc/a-nas/anas-api.env" scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api' deploy/systemd/system/anas-api.service
+	grep -Fqx 'Environment=ANAS_HOST_AGENT_GROUP=a-nas' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'Environment=ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'Environment=ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' deploy/systemd/system/anas-api.service
+	grep -Fqx 'EnvironmentFile=-/etc/a-nas/site.conf' deploy/systemd/system/anas-api.service
+	grep -Fqx '#ANAS_CONTAINERS_MODE=agent' deploy/site/site.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
-	grep -Fq 'dpkg-deb --field "$$source_release/a-nas-host.deb" Version' scripts/install-v1.0.1-system-services.sh
-	grep -Fq '"$$SOURCE_RELEASE/a-nas-host.deb"' scripts/provision-v1.0.1-rc.sh
+	@# a-nas-host depends on the upstream packages that A-NAS's repository carries (ADR 0015).
+	grep -Eq '^Depends: (.*, )?@UPSTREAM@(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
+	grep -Eq '^Depends: a-nas-host \(= @VERSION@\), ' deploy/debian/a-nas/DEBIAN/control
+	grep -Fq '"a-nas=$$VERSION" "a-nas-host=$$VERSION"' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
-	grep -Fq '/etc/chromium/policies/managed/a-nas.json' scripts/install-v1.0.1-system-services.sh
-	$(call deploy_paths_carry,a-nas-chromium-policy.json.incoming)
-	grep -Fq "'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current'" scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'L+ /etc/chromium/policies/managed/a-nas.json - - - - /usr/share/a-nas/chromium-policy.json' deploy/tmpfiles.d/a-nas.conf
+	grep -Fqx 'Environment=ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' deploy/systemd/system/anas-api.service
 	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/config.go
-	$(call deploy_paths_carry,install-screensavers.sh.incoming)
-	grep -Fq '"$$source_release/install-screensavers.sh" "$$temporary/install-screensavers.sh"' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"$$repo/scripts/install-media-pool.sh" "$$repo/scripts/install-screensavers.sh" "$$lib/"' scripts/build-packages.sh
 	grep -Fq '"/var/lib/a-nas/companion/current"' cmd/anas-api/config.go
-	$(call deploy_paths_carry,install-media-pool.sh.incoming)
-	grep -Fq '"$$source_release/install-media-pool.sh" "$$temporary/install-media-pool.sh"' scripts/install-v1.0.1-system-services.sh
-	grep -Fq '"$$target/install-media-pool.sh" screensavers --import' scripts/install-v1.0.1-system-services.sh
 	grep -Fq '/install-media-pool.sh" screensavers "$$@"' scripts/install-screensavers.sh
 	grep -Fqx 'if systemctl is-active --quiet anas-kiosk@tty1.service; then' scripts/install-media-pool.sh
-	! grep -Eq 'screensaver_[0-9a-z]*_sha256|ScreensaverVideo' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
+	! grep -Eq 'screensaver_[0-9a-z]*_sha256|ScreensaverVideo' scripts/deploy-dev.ps1 scripts/build-packages.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
-	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
+	! grep -rEq 'setup.?code|setup_code' deploy/debian deploy/site scripts/provision-v1.0.1-rc.sh
 	grep -Fqx 'User=anas-container' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'SupplementaryGroups=docker' deploy/systemd/system/anas-container-agent.service
-	grep -Fqx 'ExecStart=/usr/local/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-container-agent' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'KillMode=mixed' deploy/systemd/system/anas-container-agent.service
 	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
-	$(call deploy_paths_carry,anas-shares-system.service.incoming)
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api share-service' deploy/systemd/system/anas-shares.service
 	grep -Fqx 'User=a-nas-family' deploy/systemd/system/anas-family.service
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api family-service' deploy/systemd/system/anas-family.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api family-service' deploy/systemd/system/anas-family.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-family.service
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
-	$(call deploy_paths_carry,anas-family-system.service.incoming)
-	grep -Fq 'ANAS_FAMILY_SESSION_GROUP=a-nas-family' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
+	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
 	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-search.service
 	grep -Fqx 'ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled' deploy/systemd/system/anas-search.service
 	grep -Fqx 'IPAddressDeny=localhost link-local multicast' deploy/systemd/system/anas-search.service
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
-	$(call deploy_paths_carry,a-nas-search.sysusers.incoming)
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'install -d -o root -g root -m 0700 /var/lib/a-nas-host' scripts/install-v1.0.1-system-services.sh
-	grep -Fq 'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' scripts/install-v1.0.1-system-services.sh
-	$(call deploy_paths_carry,anas-photos-system.service.incoming)
+	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
+	grep -Fqx 'Environment=ANAS_PHOTO_SESSION_GROUP=a-nas-photos' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
@@ -215,38 +245,30 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-ai.service
-	$(call deploy_paths_carry,anas-ai-system.service.incoming)
-	$(call deploy_paths_carry,ai-worker.tar.incoming)
-	$(call deploy_paths_carry,ai-detector.json.incoming)
-	$(call deploy_paths_carry,ai-face-detector.json.incoming)
-	$(call deploy_paths_carry,ai-face-embedder.json.incoming)
-	$(call deploy_paths_carry,ai-animal-embedder.json.incoming)
-	grep -Fq -- '--detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json' deploy/systemd/system/anas-ai.service
-	grep -Fq -- '--face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
-	grep -Fq -- '--animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
-	$(call deploy_paths_carry,ai-ocr-model.json.incoming)
-	$(call deploy_paths_carry,ai-ocr-mmproj.json.incoming)
-	$(call deploy_paths_carry,ai-llama.json.incoming)
-	grep -Fq -- '--ocr-server /opt/a-nas/current/ai/llama/llama-server --ocr-runtime-manifest /opt/a-nas/current/ai/llama.json --ocr-model /opt/a-nas/current/ai/ocr-model.gguf --ocr-model-manifest /opt/a-nas/current/ai/ocr-model.json --ocr-mmproj /opt/a-nas/current/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /opt/a-nas/current/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
-	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf)' scripts/install-v1.0.1-system-services.sh
+	grep -Fq -- '--detector /usr/lib/a-nas/ai/detector.onnx --detector-manifest /usr/lib/a-nas/ai/detector.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	@# Every model role the AI Worker's unit names is one the package links (scripts/lib/content.sh).
+	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do \
+		grep -Eq "^  $${role}:" scripts/lib/content.sh && grep -Fq "/usr/lib/a-nas/ai/$${role%%:*}.$${role#*:} " deploy/systemd/system/anas-ai.service || { echo "model role $$role" >&2; exit 1; }; done
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
-	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'echo "CPUQuota=' deploy/site/a-nas-generator.sh
 	! grep -Eq '^Memory(High|Max)=' deploy/systemd/system/anas-ai.service
-	grep -Fq 'anas-ai.service.d/memory-reserve.conf' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'echo "MemoryMax=' deploy/site/a-nas-generator.sh
 	grep -Fqx 'MemorySwapMax=0' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'OOMScoreAdjust=500' deploy/systemd/system/anas-ai.service
 	jq -e 'all(.[]; .memoryBytes | type == "number" and . > 0)' -s deploy/models/*.json >/dev/null
 	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
-	$(call deploy_paths_carry,anas-system.slice.incoming)
-	grep -Fq '/etc/systemd/system/anas.slice' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'install -m 0644 "$$repo"/deploy/systemd/system/* "$$units/"' scripts/build-packages.sh
 	grep -Fqx 'User=a-nas-vec-%i' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'StopWhenUnneeded=yes' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'Slice=anas-vectors.slice' deploy/systemd/system/anas-vectors@.service
 	grep -Fq -- '--disable-telemetry' deploy/qdrant/start.sh
-	grep -Fqx 'ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/vectors/start.sh %S/a-nas-vectors/%i /usr/lib/a-nas' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'LimitNOFILE=65536' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'MemoryMax=1536M' deploy/systemd/system/anas-vectors.slice
 	grep -Fqx 'StartLimitIntervalSec=0' deploy/systemd/system/anas-vectors-proxy@.service
@@ -258,37 +280,29 @@ ops-check:
 	grep -Fqx 'telemetry_disabled: true' deploy/qdrant/config.yaml
 	grep -Fqx '  enable_static_content: false' deploy/qdrant/config.yaml
 	grep -Fqx '  host: 127.0.0.1' deploy/qdrant/config.yaml
-	grep -Fq 'systemctl enable anas-vectors-proxy@a-nas-photos.socket' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket' scripts/build-packages.sh
 	grep -Fqx 'Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock' deploy/systemd/system/anas-photos.service
-	$(call deploy_paths_carry,anas-vectors-system@.service.incoming)
-	$(call deploy_paths_carry,anas-vectors-system.slice.incoming)
-	$(call deploy_paths_carry,vectors-start.sh.incoming)
-	$(call deploy_paths_carry,vectors-qdrant.json.incoming)
 	grep -Fqx 'ListenStream=/run/a-nas-ffmpeg/ffmpeg.sock' deploy/systemd/system/anas-ffmpeg.socket
 	grep -Fq '"/run/a-nas-ffmpeg/ffmpeg.sock"' cmd/anas-api/config.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-ffmpeg.socket
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ffmpeg.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ffmpeg.socket
-	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api ffmpeg-worker' deploy/systemd/system/anas-ffmpeg@.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api ffmpeg-worker' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'StandardInput=socket' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'StandardOutput=journal' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fq 'InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas' deploy/systemd/system/anas-ffmpeg@.service
-	$(call deploy_paths_carry,anas-ffmpeg-system@.service.incoming)
-	$(call deploy_paths_carry,anas-ffmpeg-system.slice.incoming)
-	grep -Fq 'install-ffmpeg-units.sh' scripts/install-v1.0.1-system-services.sh
-	$(call deploy_paths_carry,install-ffmpeg-units.sh)
 	grep -Fqx 'Slice=system-anasffmpeg.slice' deploy/systemd/system/anas-ffmpeg@.service
 	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/system-anasffmpeg.slice
 	grep -Fqx 'MaxConnections=16' deploy/systemd/system/anas-ffmpeg.socket
 	grep -Fq '"/run/a-nas-ffmpeg/slots"' cmd/anas-api/config.go
 	grep -Fqx 'const Slots = 8' internal/ffmpegworker/admission.go
-	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-ffmpeg-units.sh
+	test "$$(grep -c '^f /run/a-nas-ffmpeg/slots/[0-7] 0440 root a-nas-photos -$$' deploy/tmpfiles.d/a-nas.conf)" = 8
 	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
-		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant-spike/companion-mcp-sdk.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
@@ -327,20 +341,65 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
+	$(RUFF) check --config ai/ruff.toml deploy/docker
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
 ai-test:
 	cd ai && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .
 
+# The companion's MCP server under the real MCP SDK (ai/tests/test_companion_mcp.py),
+# which make ai-test has not got and the assistant's runtime is not built here
+# for: a virtual environment of its own with the SDK Hermes's lock pins
+# (ai/assistant-spike/companion-mcp-sdk.txt). Without the SDK it fails.
+AI_SDK_VENV ?= $(BUILD_DIR)/companion-mcp-sdk
+AI_SDK_STAMP = $(AI_SDK_VENV)/.installed
+
+$(AI_SDK_STAMP): ai/assistant-spike/companion-mcp-sdk.txt
+	rm -rf $(AI_SDK_VENV)
+	python3 -m venv $(AI_SDK_VENV)
+	$(AI_SDK_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
+		-r ai/assistant-spike/companion-mcp-sdk.txt
+	@touch $(AI_SDK_STAMP)
+
+ai-sdk-test: $(AI_SDK_STAMP)
+	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp
+
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
 
-# Installs the release into a disposable Debian 13 systemd container; needs
-# Docker and the image from scripts/build-system-test-image.sh.
-system-test: build-binaries host-packages
+# Installs the release with apt from a signed repository into a disposable
+# Debian 13 systemd container, then upgrades, rolls back and upgrades again;
+# needs Docker, Go and the image from scripts/build-system-test-image.sh.
+system-test: packages
 	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
+
+# The A-NAS archive key's procedures with a throwaway key: two machines sign
+# one repository, one subkey is revoked, another is added, and apt in the
+# system test's image accepts and refuses as a device would
+# (docs/runbooks/manage-release-key.md); needs Docker.
+release-key-test:
+	scripts/test-release-key.sh $(SYSTEM_TEST_IMAGE)
+
+# Publishes the distribution CHANNEL (release or dev) of the signed repository
+# REPO on GitHub, where devices take it from (scripts/publish-github.sh,
+# docs/runbooks/deploy-a-nas-packages.md); needs gh signed in with access to
+# GITHUB_REPO and this machine's subkey of the archive key.
+GITHUB_REPO ?= zhongwater123/A-NAS-dist
+publish:
+	@test -n "$(CHANNEL)" || { echo "make publish needs CHANNEL, release or dev" >&2; exit 2; }
+	IMAGE=$(SYSTEM_TEST_IMAGE) GITHUB_REPO=$(GITHUB_REPO) scripts/publish-github.sh $(REPO) $(CHANNEL)
+
+# A release (ADR 0034): the packages make check and make system-test passed at
+# this commit, with the content packages from CONTENT, in the signed apt
+# repository REPO (scripts/release.sh), signed with this machine's subkey of
+# the A-NAS archive key, whose passphrase it asks for. GnuPG and aptly run in
+# the system test's image.
+REPO ?= $(BUILD_DIR)/apt
+release:
+	@test -n "$(CONTENT)" || { echo "make release needs CONTENT, the release content store (scripts/build-content-packages.sh)" >&2; exit 2; }
+	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/release.sh $(REPO) $(CONTENT)
 
 build: web-build build-binaries
 
@@ -349,11 +408,21 @@ build-binaries: web-build
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-scoring ./cmd/anas-scoring
 
-# The Debian packages a host installs before the release (ADR 0031), at the
-# product version; needs dpkg-deb.
-host-packages:
-	scripts/build-host-packages.sh $(BUILD_DIR) $(VERSION)
+# The photo scoring module (ADR 0037) staged for its install script; it is not
+# part of the release (docs/runbooks/install-and-remove-photo-scoring.md).
+scoring-module:
+	mkdir -p $(BUILD_DIR)/modules/scoring
+	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/modules/scoring/anas-scoring ./cmd/anas-scoring
+	install -m 0644 deploy/modules/scoring/anas-module-scoring.service deploy/modules/scoring/anas-module-scoring.socket \
+		deploy/modules/scoring/scoring.json $(BUILD_DIR)/modules/scoring/
+	install -m 0755 scripts/modules/scoring/install.sh scripts/modules/scoring/remove.sh $(BUILD_DIR)/modules/scoring/
+
+# The product's Debian packages at the product version (ADR 0034), in
+# build/packages; needs dpkg-deb and jq.
+packages: build-binaries
+	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)
@@ -364,8 +433,10 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries host-packages
+check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
 
 clean:
-	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(BUILD_DIR)/a-nas-host.deb $(BUILD_DIR)/a-nas-console.deb $(VALIDATION_MANIFEST)
+	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
+	rm -rf $(BUILD_DIR)/packages
+	rm -rf $(AI_SDK_VENV)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete

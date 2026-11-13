@@ -49,5 +49,15 @@ function subscribe(listener: () => void) {
 
 export const useTaskNotices = () => useSyncExternalStore(subscribe, () => notices);
 
+/** For tests: nothing listed yet. */
+export function resetTaskNotices(): void {
+  notices = [];
+  loaded = false;
+  changed();
+}
+
+/** The notices as last listed, for a decision taken right after loadTaskNotices. */
+export const currentTaskNotices = (): readonly Notification[] => notices;
+
 /** Whether the notices have been listed once: until then, no notices says nothing about what there is. */
 export const taskNoticesLoaded = () => loaded;

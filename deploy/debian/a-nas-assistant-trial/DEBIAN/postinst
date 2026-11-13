@@ -1,0 +1,16 @@
+#!/bin/bash
+# postinst of a-nas-assistant-trial (ADR 0034). A trial set up on this
+# machine takes this version's scripts, units and runtime; otherwise the
+# runbook sets it up once the model's key is written. The trial writes to
+# /etc and the data volume, so it is not a system extension.
+set -euo pipefail
+
+[[ "${1:-}" == configure && -d /run/systemd/system ]] || exit 0
+trial=/opt/a-nas/assistant-trial/spike
+if [[ "$(readlink /spike 2>/dev/null)" == "$trial" && -d /etc/a-nas-assistant ]]; then
+  bash "$trial/nas-trial.sh" update ||
+    echo "a-nas-assistant-trial: the update failed; see the FAIL lines (docs/runbooks/try-ai-assistant-on-experimental-nas.md)" >&2
+else
+  echo "a-nas-assistant-trial: not set up here; write the key, then run $trial/nas-trial.sh install (docs/runbooks/try-ai-assistant-on-experimental-nas.md)"
+fi
+exit 0

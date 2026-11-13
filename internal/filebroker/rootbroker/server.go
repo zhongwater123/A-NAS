@@ -83,6 +83,13 @@ type Config struct {
 	// AssistantChanges holds what the executor of the assistants' changes
 	// keeps, readable by root alone; empty turns the executor off.
 	AssistantChanges string
+	// AssistantRuns holds, for each member, the scheduled tasks they asked to
+	// run now and no round has taken yet, a file each in <username>; root's
+	// alone. Empty turns running a task now off.
+	AssistantRuns string
+	// StartAssistantRound starts a round of the member's scheduled tasks.
+	// The default starts the member's cron unit without waiting for it.
+	StartAssistantRound func(ctx context.Context, username string) error
 	// Accounts names the account behind an assistant's UID.
 	Accounts AccountResolver
 	// Scopes moves each file worker and terminal shell out of the Host
@@ -190,6 +197,9 @@ func NewServer(config Config) (*Server, error) {
 	if config.TerminalRecheck <= 0 {
 		config.TerminalRecheck = 30 * time.Second
 	}
+	if config.StartAssistantRound == nil {
+		config.StartAssistantRound = startAssistantRound
+	}
 	if config.LookupUID == nil {
 		config.LookupUID = func(username string) (int, error) {
 			account, err := user.Lookup(username)
@@ -268,6 +278,11 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	case wire.OpAssistant:
 		s.serveAssistant(conn, req)
+		return
+	case wire.OpAssistantRun:
+		if err := wire.WriteMessage(conn, s.serveAssistantRun(req), nil); err != nil {
+			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
+		}
 		return
 	case wire.OpChangePrepare, wire.OpChangeDecide, wire.OpChangeGet:
 		result := s.serveChange(req)

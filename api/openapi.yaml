@@ -132,6 +132,24 @@ paths:
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
+  /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
+  /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
+  /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }
+  /api/v1/modules/scoring/batches/{batchId}/anchors: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1anchors" }
+  /api/v1/modules/scoring/batches/{batchId}/anchors/{anchorId}/image: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1anchors~1{anchorId}~1image" }
+  /api/v1/modules/scoring/batches/{batchId}/recent: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1recent" }
+  /api/v1/modules/scoring/batches/{batchId}/claims: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1claims" }
+  /api/v1/modules/scoring/claims/{token}/image: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1image" }
+  /api/v1/modules/scoring/claims/{token}/thumbnail: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1thumbnail" }
+  /api/v1/modules/scoring/claims/{token}/rating: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1rating" }
+  /api/v1/modules/scoring/admin/sources: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1sources" }
+  /api/v1/modules/scoring/admin/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches" }
+  /api/v1/modules/scoring/admin/batches/{batchId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}" }
+  /api/v1/modules/scoring/admin/batches/{batchId}/stats: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1stats" }
+  /api/v1/modules/scoring/admin/batches/{batchId}/cover: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1cover" }
+  /api/v1/modules/scoring/admin/batches/{batchId}/export: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1export" }
+  /api/v1/modules/scoring/admin/raters: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters" }
+  /api/v1/modules/scoring/admin/raters/{accountId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters~1{accountId}" }
   /api/v1/photos/libraries: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1libraries" }
   /api/v1/photos/ai: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1ai" }
   /api/v1/photos/search: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1search" }
@@ -175,6 +193,7 @@ paths:
   /api/v1/photos/assets/{assetId}/text: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text" }
   /api/v1/photos/assets/{assetId}/text/fields/{field}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1fields~1{field}" }
   /api/v1/photos/assets/{assetId}/text/changes: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1text~1changes" }
+  /api/v1/photos/text-handles/{handle}: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1text-handles~1{handle}" }
   /api/v1/photos/assets/{assetId}/motion: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion" }
   /api/v1/photos/assets/{assetId}/motion/play: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1motion~1play" }
   /api/v1/photos/assets/{assetId}/download: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1assets~1{assetId}~1download" }
@@ -280,6 +299,7 @@ components:
     PhotoPersonID: { $ref: "components/photos.yaml#/parameters/PhotoPersonID" }
     PhotoOccurrenceID: { $ref: "components/photos.yaml#/parameters/PhotoOccurrenceID" }
     PhotoTextField: { $ref: "components/photos.yaml#/parameters/PhotoTextField" }
+    PhotoTextHandle: { $ref: "components/photos.yaml#/parameters/PhotoTextHandle" }
     MediaLibraryID: { $ref: "components/media.yaml#/parameters/MediaLibraryID" }
     MediaVideoID: { $ref: "components/media.yaml#/parameters/MediaVideoID" }
     MediaTitleID: { $ref: "components/media.yaml#/parameters/MediaTitleID" }
@@ -294,6 +314,10 @@ components:
     FamilyRecordID: { $ref: "components/family.yaml#/parameters/FamilyRecordID" }
     FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
     FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
+    ScoringBatchID: { $ref: "components/scoring.yaml#/parameters/ScoringBatchID" }
+    ScoringAnchorID: { $ref: "components/scoring.yaml#/parameters/ScoringAnchorID" }
+    ScoringClaimToken: { $ref: "components/scoring.yaml#/parameters/ScoringClaimToken" }
+    ScoringAccountID: { $ref: "components/scoring.yaml#/parameters/ScoringAccountID" }
     AssistantSessionID: { $ref: "components/assistant.yaml#/parameters/AssistantSessionID" }
     AssistantTaskID: { $ref: "components/assistant.yaml#/parameters/AssistantTaskID" }
     AssistantMemoryID: { $ref: "components/assistant.yaml#/parameters/AssistantMemoryID" }
@@ -450,6 +474,20 @@ components:
     FamilyTimelineEntry: { $ref: "components/family.yaml#/schemas/FamilyTimelineEntry" }
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
+    ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
+    ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }
+    ScoringAnchor: { $ref: "components/scoring.yaml#/schemas/ScoringAnchor" }
+    ScoringRecentScore: { $ref: "components/scoring.yaml#/schemas/ScoringRecentScore" }
+    ScoringClaim: { $ref: "components/scoring.yaml#/schemas/ScoringClaim" }
+    ScoringClaims: { $ref: "components/scoring.yaml#/schemas/ScoringClaims" }
+    ScoringSize: { $ref: "components/scoring.yaml#/schemas/ScoringSize" }
+    ScoringRatingInput: { $ref: "components/scoring.yaml#/schemas/ScoringRatingInput" }
+    ScoringBatch: { $ref: "components/scoring.yaml#/schemas/ScoringBatch" }
+    ScoringBatchInput: { $ref: "components/scoring.yaml#/schemas/ScoringBatchInput" }
+    ScoringBatchPatch: { $ref: "components/scoring.yaml#/schemas/ScoringBatchPatch" }
+    ScoringPerson: { $ref: "components/scoring.yaml#/schemas/ScoringPerson" }
+    ScoringRaterEntry: { $ref: "components/scoring.yaml#/schemas/ScoringRaterEntry" }
+    ScoringRaterStats: { $ref: "components/scoring.yaml#/schemas/ScoringRaterStats" }
     PhotoLibrary: { $ref: "components/photos.yaml#/schemas/PhotoLibrary" }
     PhotoDirectory: { $ref: "components/photos.yaml#/schemas/PhotoDirectory" }
     PhotoAsset: { $ref: "components/photos.yaml#/schemas/PhotoAsset" }
@@ -465,6 +503,7 @@ components:
     PhotoText: { $ref: "components/photos.yaml#/schemas/PhotoText" }
     PhotoTextCorrectionRequest: { $ref: "components/photos.yaml#/schemas/PhotoTextCorrectionRequest" }
     PhotoTextChange: { $ref: "components/photos.yaml#/schemas/PhotoTextChange" }
+    PhotoTextHandleValue: { $ref: "components/photos.yaml#/schemas/PhotoTextHandleValue" }
     PhotoSimilarResults: { $ref: "components/photos.yaml#/schemas/PhotoSimilarResults" }
     PhotoImageSearch: { $ref: "components/photos.yaml#/schemas/PhotoImageSearch" }
     PhotoAIStatus: { $ref: "components/photos.yaml#/schemas/PhotoAIStatus" }

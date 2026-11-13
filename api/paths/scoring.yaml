@@ -1,0 +1,210 @@
+# Photo scoring, a removable module (docs/specs/photo-scoring.md, ADR 0037).
+# The Product Service forwards these to the module, which answers
+# module_not_installed (404) while it is not installed and module_unavailable
+# (503) while it is installed but not running.
+/api/v1/modules/scoring/me:
+  get:
+    operationId: getScoringMe
+    summary: "Whether the caller administers photo scoring and whether an administrator chose them as a rater"
+    responses:
+      "200": { description: The caller's roles, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringMe" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/batches:
+  get:
+    operationId: listScoringBatches
+    summary: "The open batches for a rater, each with only the rater's own count of answers"
+    responses:
+      "200":
+        description: The open batches
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringRaterBatch" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/batches/{batchId}/anchors:
+  get:
+    operationId: listScoringAnchors
+    summary: "A batch's reference photos with their scores, lowest first, for raters and administrators"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+    responses:
+      "200":
+        description: The reference photos
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringAnchor" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/batches/{batchId}/anchors/{anchorId}/image:
+  get:
+    operationId: getScoringAnchorImage
+    summary: The preview of a reference photo
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }, { $ref: "../components/scoring.yaml#/parameters/ScoringAnchorID" }]
+    responses:
+      "200": { description: The preview, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/batches/{batchId}/recent:
+  get:
+    operationId: listScoringRecent
+    summary: "The rater's own latest twelve scores in the batch, oldest first, for the ruler; skips and marks are left out"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+    responses:
+      "200":
+        description: The latest scores
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 12, items: { $ref: "../components/scoring.yaml#/schemas/ScoringRecentScore" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/batches/{batchId}/claims:
+  post:
+    operationId: claimScoringPhotos
+    summary: "The photos the rater holds in the batch, oldest first, topped up to three; each is held for ten minutes"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The held photos, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringClaims" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/claims/{token}/image:
+  get:
+    operationId: getScoringClaimImage
+    summary: "The preview behind one of the caller's own claims, answered or not"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
+    responses:
+      "200": { description: The preview, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/claims/{token}/thumbnail:
+  get:
+    operationId: getScoringClaimThumbnail
+    summary: "A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
+    responses:
+      "200": { description: The thumbnail, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/claims/{token}/rating:
+  put:
+    operationId: rateScoringPhoto
+    summary: "Answer a claim: a score, a skip or a mark. The same submission again is harmless; a new answer replaces only the rater's latest (rating_locked)"
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringRatingInput" } } } }
+    responses:
+      "200":
+        description: How many photos of the batch the rater answered
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [rated], properties: { rated: { type: integer, minimum: 0 } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/sources:
+  get:
+    operationId: listScoringSources
+    summary: "The folders in the Shared folder 照片打分 that can become a batch"
+    x-anas-posture: admin
+    responses:
+      "200":
+        description: The folders
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string } } } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches:
+  get:
+    operationId: listScoringAdminBatches
+    summary: Every batch with its import progress and coverage, newest first
+    x-anas-posture: admin
+    responses:
+      "200":
+        description: The batches
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringBatch" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createScoringBatch
+    summary: Start importing a folder as a new batch
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringBatchInput" } } } }
+    responses:
+      "201": { description: The new batch, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringBatch" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches/{batchId}:
+  parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+  patch:
+    operationId: updateScoringBatch
+    summary: "Rename a batch, change its guide or number of raters, or close and reopen it"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringBatchPatch" } } } }
+    responses:
+      "200": { description: The batch, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringBatch" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteScoringBatch
+    summary: "Delete a batch nobody answered yet (batch_in_use otherwise)"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches/{batchId}/stats:
+  get:
+    operationId: getScoringStats
+    summary: "Each rater's counts, timing, spread, agreement with the others and consistency on repeated photos"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+    responses:
+      "200":
+        description: The raters' statistics
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringRaterStats" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches/{batchId}/cover:
+  get:
+    operationId: getScoringBatchCover
+    summary: "A small JPEG, at most 320 px on its longer side, of the photo that stands for the batch: the first in its random order, anchors excluded"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+    responses:
+      "200": { description: The thumbnail, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches/{batchId}/export:
+  get:
+    operationId: exportScoringBatch
+    summary: "A zip of manifest.json, images.jsonl, ratings.jsonl (every answer, including replaced ones) and raters.jsonl"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
+    responses:
+      "200": { description: The export, content: { application/zip: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/raters:
+  get:
+    operationId: listScoringRaters
+    summary: Every active account and whether it is a rater
+    x-anas-posture: admin
+    responses:
+      "200":
+        description: The accounts
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringRaterEntry" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/raters/{accountId}:
+  parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringAccountID" }]
+  put:
+    operationId: addScoringRater
+    summary: Choose an active account as a rater
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Chosen }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: removeScoringRater
+    summary: "Stop an account rating; its answers stay"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Removed }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }

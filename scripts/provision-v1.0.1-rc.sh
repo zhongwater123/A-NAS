@@ -183,7 +183,7 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=6
+TOTAL_STAGES=5
 : "$RED"
 
 banner "A-NAS v1.0.1 RC provisioning"
@@ -191,22 +191,22 @@ banner "A-NAS v1.0.1 RC provisioning"
 stage "Verify the release, network, and experimental disk"
 [[ $EUID -eq 0 ]] || { warn "run this wizard as root"; exit 1; }
 
-SOURCE_RELEASE=${SOURCE_RELEASE:-}
-RELEASE_ID=${RELEASE_ID:-}
+# The release comes from the A-NAS apt repository, which
+# docs/runbooks/deploy-a-nas-packages.md adds (its steps 2-4).
+VERSION=${VERSION:-}
 SMB_INTERFACE=${SMB_INTERFACE:-}
 EXPECTED_DISK_WWN=${EXPECTED_DISK_WWN:-}
 EXPECTED_DISK_SERIAL=${EXPECTED_DISK_SERIAL:-}
 EXPECTED_DISK_SIZE_BYTES=${EXPECTED_DISK_SIZE_BYTES:-500107862016}
 
-[[ -n "$SOURCE_RELEASE" ]] || ask SOURCE_RELEASE "Source release path:"
-[[ -n "$RELEASE_ID" ]] || ask RELEASE_ID "Immutable root release ID:"
+[[ -n "$VERSION" ]] || ask VERSION "A-NAS version to install (apt-cache policy a-nas):"
 [[ -n "$SMB_INTERFACE" ]] || ask SMB_INTERFACE "Trusted LAN interface:"
 [[ -n "$EXPECTED_DISK_WWN" ]] || ask EXPECTED_DISK_WWN "Expected experimental disk WWN:"
 [[ -n "$EXPECTED_DISK_SERIAL" ]] || ask EXPECTED_DISK_SERIAL "Expected experimental disk serial:"
 
-SOURCE_RELEASE=$(readlink -f -- "$SOURCE_RELEASE")
-[[ -d "$SOURCE_RELEASE" ]] || { warn "source release is missing"; exit 1; }
-[[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]] || { warn "release ID is invalid"; exit 1; }
+[[ "$VERSION" =~ ^[0-9][A-Za-z0-9.+~]*$ ]] || { warn "version is invalid"; exit 1; }
+[[ -f /etc/apt/sources.list.d/a-nas.sources ]] ||
+  { warn "add the A-NAS repository first (docs/runbooks/deploy-a-nas-packages.md)"; exit 1; }
 [[ "$SMB_INTERFACE" =~ ^[A-Za-z0-9_.:-]+$ ]] || { warn "SMB interface is invalid"; exit 1; }
 ip link show dev "$SMB_INTERFACE" >/dev/null
 
@@ -228,52 +228,25 @@ if swapon --noheadings --raw --show=NAME | grep -Fxq "$resolved_disk"; then
   exit 1
 fi
 
-say "Source release: $SOURCE_RELEASE"
-say "Root release ID: $RELEASE_ID"
+say "A-NAS version: $VERSION"
 say "SMB interface: $SMB_INTERFACE"
 say "Disk: $resolved_disk, WWN $actual_wwn, serial $actual_serial, size $actual_size"
 wipefs --no-act "$resolved_disk" || true
 confirm "Do these values match the intended RC and disposable experimental disk?" || exit 1
 
-stage "Install host dependencies"
-warn "This installs the release's a-nas-host and a-nas-console packages (ADR 0031) and what they depend on: Btrfs, partitioning, SMART, Samba, FFmpeg, local AI libraries and the local console's Chromium."
-confirm "Install the required Debian packages now?" || exit 1
+stage "Install the A-NAS packages"
+warn "This installs a-nas, a-nas-host and a-nas-console $VERSION (ADR 0034) and what they depend on: Btrfs, partitioning, SMART, Samba, FFmpeg, local AI libraries and the local console's Chromium."
+confirm "Install the A-NAS packages now?" || exit 1
+# This machine's settings: the SMB interface, unless already set.
+install -d -m 0750 /etc/a-nas
+if ! grep -q '^ANAS_SMB_INTERFACE=' /etc/a-nas/site.conf 2>/dev/null; then
+  printf 'ANAS_SMB_INTERFACE=%s\n' "$SMB_INTERFACE" >> /etc/a-nas/site.conf
+fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-downgrades \
-  "$SOURCE_RELEASE/a-nas-host.deb" "$SOURCE_RELEASE/a-nas-console.deb"
+  "a-nas=$VERSION" "a-nas-host=$VERSION" "a-nas-console=$VERSION" a-nas-docker-policy
 
-stage "Install root-owned A-NAS system services"
-anas_uid=$(id -u anas-dev)
-runtime_dir="/run/user/$anas_uid"
-if [[ -S "$runtime_dir/bus" ]]; then
-  runuser -u anas-dev -- env \
-    XDG_RUNTIME_DIR="$runtime_dir" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
-    systemctl --user disable --now anas-api.service anas-host-agent.service
-else
-  warn "anas-dev user bus is absent; verify no process still owns 127.0.0.1:8080"
-fi
-if ss -ltnp | grep -q '127\.0\.0\.1:8080'; then
-  warn "port 127.0.0.1:8080 is still occupied"
-  ss -ltnp | grep '127\.0\.0\.1:8080' || true
-  exit 1
-fi
-
-target_release="/opt/a-nas/releases/$RELEASE_ID"
-if [[ -e "$target_release" ]]; then
-  [[ "$(readlink -f /opt/a-nas/current 2>/dev/null || true)" == "$target_release" ]] || {
-    warn "target release already exists but is not current"
-    exit 1
-  }
-  say "Root release is already installed; continuing verification."
-else
-  "$SOURCE_RELEASE/install-v1.0.1-system-services.sh" \
-    "$SOURCE_RELEASE" "$RELEASE_ID" "$SMB_INTERFACE"
-fi
-
-systemctl is-active --quiet anas-host-agent.service
-systemctl is-active --quiet anas-api.service
-[[ "$(readlink -f /opt/a-nas/current)" == "$target_release" ]]
+a-nas-check
 [[ "$(stat -c '%U:%G %a' /run/a-nas/host-agent.sock)" == "root:a-nas 660" ]]
 ss -ltnp | grep '127\.0\.0\.1:8080'
 say "System services are active and the Product Service remains loopback-only."
@@ -326,11 +299,11 @@ for unit in smbd.service anas-host-agent.service anas-api.service; do
 done
 
 evidence_dir=/var/lib/a-nas/acceptance
-evidence_file="$evidence_dir/$RELEASE_ID.txt"
+evidence_file="$evidence_dir/$VERSION.txt"
 install -d -o root -g a-nas -m 0750 "$evidence_dir"
 {
   date -Is
-  printf 'release=%s\n' "$(readlink -f /opt/a-nas/current)"
+  printf 'release=a-nas %s\n' "$(dpkg-query -W -f='${Version}' a-nas)"
   timedatectl status
   timedatectl timesync-status || true
   lsblk -e7 -o NAME,PATH,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,RM,HOTPLUG,FSTYPE,UUID,MOUNTPOINTS

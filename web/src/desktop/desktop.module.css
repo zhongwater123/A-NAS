@@ -834,6 +834,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-files {
   background: linear-gradient(155deg, #48ceff, #3174ed);
 }
+/* 照片打分: an amber tile, in its title bar too. */
+.icon-scoring,
+.app-window-scoring .window-app-icon {
+  background: linear-gradient(155deg, #ffbe55, #e8642c);
+}
 .icon-trash,
 .icon-settings {
   background: linear-gradient(155deg, #c9cdd3, #777e89);
@@ -1470,11 +1475,18 @@ button.net-rates {
   background: #f3f5f8;
   container: transferwindow / inline-size;
 }
+/* 照片打分 */
+.window-content-scoring {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg);
+  container: scoringwindow / inline-size;
+}
 /* 回收站 */
 .window-content-trash {
   position: relative;
   overflow: hidden;
-  background: #f4f6f9;
+  background: var(--color-bg);
   container: trashwindow / inline-size;
 }
 /* Docker */
@@ -1490,9 +1502,27 @@ button.net-rates {
   container: storewindow / inline-size;
 }
 /* 设置 */
+/* The window is frosted glass over the wallpaper. The sidebar shows it, up
+   through the title bar's left part; the page and the title bar above it are
+   one opaque surface (--set-bg in settings.module.css). */
+.app-window.app-window-settings {
+  background: rgba(236, 240, 247, 0.84);
+  backdrop-filter: blur(44px) saturate(180%);
+  container: settingswindow / inline-size;
+}
+.app-window-settings .window-titlebar {
+  border-bottom: 0;
+  background: linear-gradient(90deg, transparent 247px, rgba(20, 30, 45, 0.09) 247px 248px, #f4f5f8 248px);
+}
 .window-content-settings {
   overflow: hidden;
-  container: settingswindow / inline-size;
+  background: transparent;
+}
+/* A narrow settings window has no sidebar beside the page. */
+@container settingswindow (max-width: 640px) {
+  .app-window-settings .window-titlebar {
+    background: #f4f5f8;
+  }
 }
 /* 相册 */
 /* The page scrolls inside the window so the viewer can cover the window. */

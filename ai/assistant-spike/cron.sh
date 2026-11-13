@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Scheduled tasks (Hermes's cronjob; user decision, 2026-10-20) in the assistant's sandbox, with
 # the fake model. The member schedules jobs in a conversation with Hermes's own tool; when one is
-# due, anas-assistant-cron-waker starts anas-assistant-cron@<member>, Hermes's own
-# `hermes cron tick` in the member's sandbox, with the assistant stopped. A step that needs the
+# due, anas-assistant-cron-waker starts anas-assistant-cron@<member>, Hermes's gateway for one
+# round in the member's sandbox (cron_round.py), with the assistant stopped. A step that needs the
 # member's approval is refused (approvals.cron_mode: deny), so a job changes nothing outside the
 # assistant's folder. Runs as root in a spike container.
 set -uo pipefail

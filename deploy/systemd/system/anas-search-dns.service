@@ -8,4 +8,4 @@ Before=anas-search.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/a-nas/current/search/allow-dns.sh
+ExecStart=/usr/lib/a-nas/search/allow-dns.sh

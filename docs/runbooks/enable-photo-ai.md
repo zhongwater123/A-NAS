@@ -1,11 +1,11 @@
 # 启用相册本地 AI
 
 状态：verified（2026-10-10 在 Experimental NAS 首次部署 `6833c7637f73`）
-更新时间：2026-10-28
+更新时间：2026-11-11
 
 ## 目的
 
-第一次在 Experimental NAS 上安装带本地 AI 的 release（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。本地 AI 随每个 release 安装，之后的升级按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)进行即可，不再需要单独操作。成功后：
+第一次在 Experimental NAS 上安装带本地 AI 的 release（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。本地 AI 随每个版本安装，之后的升级按[部署 A-NAS 软件包](deploy-a-nas-packages.md)进行即可，不再需要单独操作。成功后：
 
 - `anas-ai.socket` 已启用；第一次搜索或后台整理时，systemd 按需启动 Worker。
 - 相册可以用中文按意思搜索，结果分为“最接近”与“相关度较低”两段；AI 聚合页列出本地 AI 有把握的照片组（照片详情不显示 AI 标签）。
@@ -25,26 +25,25 @@
   - 已有照片在相册空闲 5 分钟后开始整理，每张约 0.6 秒 CPU 时间（开发机 4 核实测；i3-12100 待测）。
 - **隐私**：Worker 在自己的网络命名空间中只有回环接口，也打不开网络套接字，读不到数据卷。系统测试已证明这些，部署后再做一次只读核对。
 - **停止条件**（出现任一项立即停止）：
-  - 安装器以退出码 2 结束（release 缺少 AI 文件或清单无效）、3（缺少 `python3` 或库，或 Python 版本与运行环境不符）或 4（暂存的模型或运行环境与清单不符）。
-  - `anas-ai.socket` 未启用，或套接字不是 `root:a-nas-photos 0660`。
+  - apt 报告依赖无法满足（缺少 `python3` 3.13 或库）、签名或哈希错误，或 `a-nas-check` 有 `FAIL`。
+  - `anas-ai.socket` 不是 `active`，或套接字不是 `root:a-nas-photos 0660`。
   - Worker 以 root 运行，或它的网络命名空间里除 `lo` 外还有别的网卡。
 
 ## 步骤
 
-1. 在开发机构建运行环境并暂存。
-   - 命令（WSL）：`scripts/build-ai-runtime.sh`，再按[本地环境](../development/testing.md#系统测试)运行门禁与两次系统测试。
-   - 命令（Windows）：`scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。
-   - 预期：输出“The NAS already holds embeddinggemma-2-740m.litertlm.”（模型已于 2026-10-10 按哈希暂存）；运行环境压缩包只在第一次上传，约 163 MB。脚本最后输出 API 与 Host Agent 的 SHA-256。
-   - 完成标准：暂存的 release 中 `ai/model.litertlm` 与 `ai/runtime.tar.gz` 都是指向暂存区的链接，暂存脚本已核对两者的哈希。
-2. 以 root 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对二进制哈希、运行安装器并切换本地控制台链接。
-   - 预期：安装器第一次把模型与运行环境复制到 `/opt/a-nas/models/<SHA-256>/` 与 `/opt/a-nas/ai-runtimes/<ID>/`，复制后核对哈希，约 10 秒；最后的 `systemctl status` 含 `anas-ai.socket`，状态为 `active (listening)`。
-   - 完成标准：安装器正常结束；`systemctl is-enabled anas-ai.socket` 输出 `enabled`。
+1. 在开发机构建运行环境并发布。
+   - 命令（WSL）：`scripts/build-ai-runtime.sh`，把 `build/ai-runtime/<ID>.tar.gz` 放进内容库的 `ai-runtimes/`、模型放进 `models/<SHA-256>/`（[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)），再按[本地环境](../development/testing.md#系统测试)运行门禁与两次系统测试，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1 步发布。
+   - 预期：`make release` 只为软件源中还没有的模型与运行环境构建内容包。
+   - 完成标准：`make release` 输出版本、签名密钥的指纹与 `a-nas-archive-keyring` 的 SHA-256。
+2. 以 root 按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 2–6 步安装。
+   - 预期：apt 装上模型与运行环境的内容包，文件在 `/opt/a-nas/models/<SHA-256>/` 与 `/opt/a-nas/ai-runtimes/<ID>/`；`postinst` 重启 `anas-ai.socket`，最后的 `a-nas-check` 含 `PASS anas-ai.socket is active`。
+   - 完成标准：`a-nas-check` 全部 `PASS`。
 
 ## 验证
 
 - **套接字与链接**：
   - `stat -c '%a %U:%G' /run/a-nas-ai/ai.sock` 输出 `660 root:a-nas-photos`。
-  - `readlink /opt/a-nas/current/ai/model.litertlm /opt/a-nas/current/ai/runtime` 分别指向 `/opt/a-nas/models/e7a8a2204b91…/embeddinggemma-2-740m.litertlm` 与 `/opt/a-nas/ai-runtimes/<ID>`，ID 与开发机的 `build/ai-runtime.json` 一致。
+  - `readlink /usr/lib/a-nas/ai/model.litertlm /usr/lib/a-nas/ai/runtime` 分别指向 `/opt/a-nas/models/e7a8a2204b91…/embeddinggemma-2-740m.litertlm` 与 `/opt/a-nas/ai-runtimes/<ID>`，ID 与开发机的 `build/ai-runtime.json` 一致。
 - **按需启动**：在相册中搜索“猫”。第一次约需 10 秒（核对模型哈希并加载模型）。界面在 AI 不可用时也不提示，因此以 Worker 的状态为准：
   - `systemctl is-active anas-ai.service` 输出 `active`。
   - `journalctl -u anas-ai -b --no-pager` 含 `serving embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2 (768 dimensions)`，没有 `model unavailable`。
@@ -71,8 +70,8 @@
 ## 回滚或恢复
 
 - **只停用 AI**：`systemctl disable --now anas-ai.socket anas-ai.service`。相册照常可用，搜索只按名称与用户标签匹配，侧栏不再显示整理进度。恢复：`systemctl enable --now anas-ai.socket`。
-- **回到不含 AI 的旧 release**：按[实机配置手册](provision-v1.0.1-experimental-storage.md#回滚)恢复，并执行上一条停用 AI；旧 release 没有 `ai/` 目录，否则每次连接都会启动失败。
-- **模型与运行环境**：回滚不删除 `/opt/a-nas/models` 与 `/opt/a-nas/ai-runtimes`，重新升级时直接复用。删除前先确认没有 release 引用：`find /opt/a-nas/releases -lname '/opt/a-nas/models/*' -o -lname '/opt/a-nas/ai-runtimes/*'`，再另行确认。
+- **回到旧版本**：按[部署 A-NAS 软件包的回滚](deploy-a-nas-packages.md#回滚或恢复)进行。软件包的每个版本都带本地 AI，单元与 Worker 一起退回，不需要另外停用 AI。
+- **模型与运行环境**：回滚不卸载它们的内容包（`/opt/a-nas/models`、`/opt/a-nas/ai-runtimes`），重新升级时直接复用。不再被依赖的内容包留到 `apt autoremove`；删除前先用 `apt-get autoremove --dry-run` 列出要删的包，再另行确认。
 - **派生数据**：向量保存在相册 Catalog 中，停用 AI 不删除它们，也不影响照片与用户元数据。
 
 ## 关联
@@ -80,6 +79,6 @@
 - 规格：[相册](../specs/photo-library.md)
 - ADR：[0016 AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0011 相册服务身份](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 架构：[相册本地 AI（M2）](../architecture/photo-ai.md#模型与运行环境的交付)
-- 代码：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket)、[`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[运行环境构建](../../scripts/build-ai-runtime.sh)、[暂存](../../scripts/deploy-dev.ps1)
+- 代码：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket)、[`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)、[软件包](../../scripts/build-packages.sh)、[内容包](../../scripts/build-content-packages.sh)、[运行环境构建](../../scripts/build-ai-runtime.sh)
 - 测试：[系统测试](../../scripts/system-test.sh)
 - 调查：不涉及

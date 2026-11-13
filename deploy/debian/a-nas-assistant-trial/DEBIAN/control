@@ -1,0 +1,14 @@
+Package: a-nas-assistant-trial
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: admin
+Priority: optional
+Depends: a-nas (= @VERSION@), @CONTENT@, socat, ripgrep, tini
+Description: the A-NAS assistant trial, for development testing only
+ The scripts and units of the AI assistant's trial on the Experimental NAS
+ (docs/runbooks/try-ai-assistant-on-experimental-nas.md), with a cloud
+ model. It depends on a-nas at its own version, so the two always update
+ together. nas-trial.sh install sets the trial up once the model's key is
+ written; each upgrade then runs nas-trial.sh update. The formal assistant
+ is the Host Agent's (docs/adr/0024).

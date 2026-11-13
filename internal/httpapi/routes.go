@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -57,6 +58,8 @@ func (h *productHandler) table() []apiroute.Route {
 
 		{Method: get, Pattern: "/api/v1/terminal", Posture: admin, Handler: h.handleTerminal},
 		{Method: get, Pattern: "/api/v1/terminal/session", Posture: admin, Handler: h.handleTerminal},
+
+		{Method: get, Pattern: modules.PathPrefix, Posture: session, Handler: serve(modules.List(h.Modules))},
 	}
 	logger := h.Logger
 	// The task manager needs a reader that also observes tasks, as the Host
@@ -120,6 +123,13 @@ func (h *productHandler) mounts() []apiroute.Route {
 	if h.Transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
 			mount(prefix, apiroute.Session, withUser(h.Transfers), transfersapi.Endpoints())
+		}
+	}
+	// A module confirms the session itself, like the photo service, so it
+	// gets only the token.
+	for _, module := range h.Modules {
+		for _, part := range module.Mounts {
+			mount(part.Prefix, part.Posture, serve(module.Handler), part.Endpoints)
 		}
 	}
 	return routes

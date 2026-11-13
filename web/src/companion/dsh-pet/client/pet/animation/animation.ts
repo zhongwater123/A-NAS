@@ -27,6 +27,12 @@ const REASON_FROZEN = 'frozen';
 
 /** 资源超时（ms）：DSH WebServer 偶发 stalled，超时就丢弃本次换源。 */
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
+/**
+ * A-NAS: the wait after a clip that did not play before the chain tries again (clipFailed), doubled for every
+ * clip in a row that did not play, up to the cap, so that a NAS out of reach is not asked again and again.
+ */
+const FAILED_CLIP_WAIT_MS = 1_000;
+const FAILED_CLIP_WAIT_MAX_MS = 30_000;
 
 /** 日志时间戳：与其余宠物日志同一格式，便于对照同一次事件。 */
 const stamp = (petId: string): string => new Date().toTimeString().slice(0, 8) + ' pet=' + petId;
@@ -36,6 +42,15 @@ interface PendingSwap {
   anim: string;
   once: boolean;
   gen: number;
+  /**
+   * A-NAS: the command this switch plays, if any: its answer follows this switch, and a later command for
+   * the clip while it loads takes the switch over.
+   */
+  playbackId: string | null;
+  /** A-NAS: whether this switch is the one more try at a clip that did not play. */
+  retry: boolean;
+  /** A-NAS: whether a command started this switch, rather than taking over one that loaded its clip anyway. */
+  commanded: boolean;
 }
 
 /** 动画链的依赖：全部用取值函数，避免捕获渲染期的快照。 */
@@ -45,7 +60,7 @@ export interface OwnAnimationDeps {
   /** A/B 双缓冲的 B 元素。 */
   videoB: () => HTMLVideoElement | null;
   /** 该宠物的成品配置：素材根、id 与动画池都从它取。 */
-  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations };
+  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations; stepReplayMs?: number };
   /** 当前动画名。 */
   currentAnim: () => string;
   /** 工作状态叶子；未启用联动时为空。 */
@@ -66,6 +81,11 @@ export interface OwnAnimationDeps {
   initiallyFrozen: boolean;
   /** A-NAS: whether the page has paused the card (see onReady below); a lock alone does not. */
   paused?: () => boolean;
+  /**
+   * A-NAS: whether a command was answered before its clip showed, as when its caller stopped waiting for the
+   * clip to start (the page's VNAS window, commands.ts). Such a clip does not show (lapsed below).
+   */
+  settled?: (playbackId: string) => boolean;
   /** 素材加载器；缺省用带超时的默认实现。 */
   loader?: AssetLoader;
 }
@@ -88,6 +108,8 @@ export interface OwnAnimation {
   frontVideo: () => HTMLVideoElement | null;
   /** 正在播的点播编号；自播动画为 `null`。 */
   playingPlayback: () => string | null;
+  /** A-NAS: whether a command's clip is loading or playing. */
+  commandClip: () => boolean;
   /** 卸载清理：中断在途请求、释放 blob，之后不可再用。 */
   dispose: () => void;
 }
@@ -116,11 +138,58 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   const loader = deps.loader ?? createAssetLoader(ASSET_FETCH_TIMEOUT_MS);
   /** 挂载标志：卸载后迟到的加载结果直接丢弃。 */
   let mounted = true;
+  /** A-NAS: the clips in a row that did not play, and the wait after the last of them (clipFailed). */
+  let failures = 0;
+  let failedWait: ReturnType<typeof setTimeout> | undefined;
+  /** A-NAS: the clip whose wait ended while the card was frozen, waited for again as the freeze ends. */
+  let heldFailure: PendingSwap | null = null;
 
   const slotOf = (index: number): 'a' | 'b' => (index === 0 ? 'a' : 'b');
   const elementOf = (index: number): HTMLVideoElement | null => (index === 0 ? deps.videoA() : deps.videoB());
 
   const frontVideo = (): HTMLVideoElement | null => elementOf(front);
+
+  /**
+   * A-NAS: a switch whose clip will not play: its fetch failed, timed out or got an HTTP error, it did not
+   * decode, or the browser would not play it. dsh-pet read its clips from disk, where this hardly happens,
+   * and its chain only goes on at a clip's end, so the pet stayed as it was: asleep for good when the clip it
+   * wakes with did not come (sleep's loop never ends), or still on a clip that had ended. After a wait
+   * (FAILED_CLIP_WAIT_MS) the chain fetches the clip once more, unless it was a command's, which is answered
+   * already; if that fails too, it goes on as if the clip had ended, from where the card is: the end held back
+   * while it loaded, a looping clip in front, or one that stopped. A clip in front that still plays goes on at
+   * its own end. A later switch or a drag leaves it to them. A wait that ends while the card is frozen
+   * neither fetches nor goes on, which would be an automatic clip under a lock or a fetch while the page is
+   * paused; it starts again as the freeze ends (setFrozen), for whatever the card's resume does not replace.
+   */
+  const clipFailed = (swap: PendingSwap): void => {
+    if (pending?.gen === swap.gen) pending = null;
+    failures += 1;
+    waitAfterFailure(swap);
+  };
+
+  /** A-NAS: the wait after a clip that did not play (clipFailed); held while the card is frozen. */
+  const waitAfterFailure = (swap: PendingSwap): void => {
+    clearTimeout(failedWait);
+    heldFailure = null;
+    failedWait = setTimeout(
+      () => {
+        failedWait = undefined;
+        if (!mounted || gen !== swap.gen) return;
+        if (frozen) {
+          heldFailure = swap;
+          return;
+        }
+        if (swap.playbackId === null && !swap.retry) {
+          start(swap.anim, swap.once, null, true);
+          return;
+        }
+        const el = frontVideo();
+        if ((el !== null && !el.paused && !el.loop) || deps.isDragging()) return;
+        deps.onEnded(nextCue());
+      },
+      Math.min(FAILED_CLIP_WAIT_MS * 2 ** (failures - 1), FAILED_CLIP_WAIT_MAX_MS),
+    );
+  };
 
   /** 上报并清掉「正在播」的编号；`keep` 为真时不清（同一编号继续播）。 */
   const reportOnce = (playbackId: string, status: ReportableStatus, reason?: string): void => {
@@ -128,7 +197,27 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     deps.report(playbackId, status, reason);
   };
 
-  const switchTo = (next: string, nextOnce: boolean, cuePlaybackId: string | null): void => {
+  /**
+   * A-NAS: a switch whose command was answered while its clip loaded (deps.settled): the clip does not show,
+   * so that the pet does what the answer says. A switch the command took over, which was loading the clip
+   * anyway, goes on without it. One the command started is dropped, and the chain goes on from the clip in
+   * front as after a command's clip that did not play (clipFailed), without the wait.
+   */
+  const lapsed = (swap: PendingSwap): boolean => {
+    if (swap.playbackId === null || deps.settled?.(swap.playbackId) !== true) return false;
+    if (!swap.commanded) {
+      swap.playbackId = null;
+      return false;
+    }
+    if (pending?.gen === swap.gen) pending = null;
+    const el = frontVideo();
+    if (frozen || (el !== null && !el.paused && !el.loop) || deps.isDragging()) return true;
+    deps.onEnded(nextCue());
+    return true;
+  };
+
+  /** A-NAS: switchTo, or with `retry` the one more try at a clip that did not play (clipFailed). */
+  const start = (next: string, nextOnce: boolean, cuePlaybackId: string | null, retry: boolean): void => {
     // 一次性消费点播编号：清空会再跑一趟 effect，那一趟落入防重分支。
     if (cuePlaybackId !== null) deps.clearCuePlayback();
     // url 交接位同样一次性取走，且必须早于任何 return：否则防重分支提前返回时，
@@ -138,10 +227,13 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     cueUrl = null;
     if (next === '') return;
     if (pending !== null && pending.anim === next && pending.once === nextOnce) {
-      // 防重命中仍要让点播有回执，避免调用方干等超时。
-      if (cuePlaybackId !== null) {
-        playing = cuePlaybackId;
-        deps.report(cuePlaybackId, 'playing');
+      // A-NAS: the command takes over the switch already loading its clip, and is answered as that clip
+      // goes: playing once it shows and ended at its end. dsh-pet answered playing here, before the clip
+      // showed, and the switch, carrying no command, then answered the command cancelled when it showed.
+      // A command the switch carried is cut short by this one, as when another switch takes over.
+      if (cuePlaybackId !== null && pending.playbackId !== cuePlaybackId) {
+        if (pending.playbackId !== null) deps.report(pending.playbackId, 'cancelled', REASON_SUPERSEDED);
+        pending.playbackId = cuePlaybackId;
       }
       return;
     }
@@ -149,8 +241,24 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     if (import.meta.env.DEV && isEventAnim(cfg.animations.events, next)) {
       console.log('[dsh-pet] ' + stamp(cfg.id) + ' switch ' + next + ' once=' + nextOnce);
     }
+    // A-NAS: a command whose clip is still loading is cut short now, as one that shows is when the next clip
+    // does; it was left to its caller's wait.
+    if (pending?.playbackId != null && pending.playbackId !== cuePlaybackId)
+      deps.report(pending.playbackId, 'cancelled', REASON_SUPERSEDED);
     const swapGen = (gen += 1);
-    pending = { anim: next, once: nextOnce, gen: swapGen };
+    const swap: PendingSwap = {
+      anim: next,
+      once: nextOnce,
+      gen: swapGen,
+      playbackId: cuePlaybackId,
+      retry,
+      commanded: cuePlaybackId !== null,
+    };
+    pending = swap;
+    // A-NAS: a switch takes over from the wait after a clip that did not play.
+    clearTimeout(failedWait);
+    failedWait = undefined;
+    heldFailure = null;
     const targetIndex = front === 0 ? 1 : 0;
     const el = elementOf(targetIndex);
     if (el === null) return;
@@ -159,8 +267,18 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     el.autoplay = true;
     el.playsInline = true;
     el.onended = nextOnce ? (event: Event) => deps.onEnded(handleEnded(event)) : null;
+    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
+    // one an earlier switch to the same element put in.
+    let ownUrl: string | null = null;
     // 元素级解码失败只补一条回执，不改播放控制；换源时与 onended 一起清掉。
-    el.onerror = cuePlaybackId === null ? null : () => reportOnce(cuePlaybackId, 'failed', REASON_DECODE);
+    // A-NAS: and the chain goes on without the clip, still loading or in front (clipFailed). An error of the
+    // clip an earlier switch put in the element, still loading when this switch took the element over, is not
+    // this switch's: its own clip goes in once fetched, as onReady skips the earlier clip's first frame.
+    el.onerror = () => {
+      if (pending?.gen === swapGen && el.src !== ownUrl) return;
+      if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_DECODE);
+      if (pending?.gen === swapGen || (gen === swapGen && el.classList.contains('is-front'))) clipFailed(swap);
+    };
     // fetch + blob 一次拿全文件，绕开 video 流式加载在 DSH WebServer 上偶发的 stalled。
     const assetUrl = animationAssetUrl({
       cueUrl: url,
@@ -170,9 +288,6 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       ext: thumbExt(),
       assetVersion: cfg.assetVersion,
     });
-    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
-    // one an earlier switch to the same element put in.
-    let ownUrl: string | null = null;
     loader.load(assetUrl, {
       onObjectUrl: (objectUrl) => {
         if (!mounted) {
@@ -181,6 +296,11 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
         }
         if (pending?.gen !== swapGen) {
           loader.release(objectUrl); // 已被更新的切换覆盖：本次加载作废。
+          return;
+        }
+        // A-NAS: a command answered while its clip was fetched: the clip does not go in.
+        if (lapsed(swap)) {
+          loader.release(objectUrl);
           return;
         }
         const slot = slotOf(targetIndex);
@@ -194,8 +314,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       onError: (error) => {
         if (!mounted) return; // 卸载后的 abort：静默。
         if (pending?.gen !== swapGen) return; // 已被更新的切换覆盖。
-        pending = null; // 释放挂起的换源，避免后续点击困在防重循环里。
-        if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_ASSET_LOAD);
+        if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_ASSET_LOAD);
         console.warn(
           '[dsh-pet] 素材加载失败 pet=' +
             cfg.id +
@@ -205,6 +324,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
             (error instanceof Error ? error.message : String(error)) +
             '（已释放本次切换）',
         );
+        // 释放挂起的换源，避免后续点击困在防重循环里。
+        // A-NAS: and the chain goes on without the clip (clipFailed).
+        clipFailed(swap);
       },
     });
     const onReady = (): void => {
@@ -213,6 +335,13 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (pending?.gen === swapGen && el.src !== ownUrl) return;
       el.removeEventListener('loadeddata', onReady);
       if (pending?.gen !== swapGen) return;
+      // A-NAS: nor one answered while it decoded.
+      if (lapsed(swap)) {
+        el.pause();
+        return;
+      }
+      // A-NAS: the command the switch plays now, which may have taken it over while it loaded.
+      const command = swap.playbackId;
       const outgoing = elementOf(front);
       el.classList.add('is-front');
       if (outgoing !== null && outgoing !== el) {
@@ -222,11 +351,11 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
         outgoing.onerror = null;
         outgoing.pause();
         // 被换下的点播若没播完，如实回 cancelled（补的是点击、拖拽这类非点播打断）。
-        if (playing !== null && playing !== cuePlaybackId) reportOnce(playing, 'cancelled', REASON_SUPERSEDED);
+        if (playing !== null && playing !== command) reportOnce(playing, 'cancelled', REASON_SUPERSEDED);
       }
       front = front === 0 ? 1 : 0;
       pending = null;
-      playing = cuePlaybackId;
+      playing = command;
       el.style.transform = deps.facing() === 'right' ? 'scaleX(-1)' : '';
       // A-NAS: a switch that began before the page paused the card and finished loading during the
       // pause goes in front without playing (autoplay included), or a looping clip would decode for the
@@ -236,16 +365,21 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       // since a lock lets explicit commands through.
       if (deps.paused?.() === true) {
         el.pause();
-        if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'cancelled', REASON_FROZEN);
+        if (command !== null) reportOnce(command, 'cancelled', REASON_FROZEN);
         return;
       }
       el.play()
         .then(() => {
           // 只有 play() 兑现才代表确实开始出画，loadeddata 只代表可解码。
-          if (cuePlaybackId !== null) deps.report(cuePlaybackId, 'playing');
+          if (command !== null) deps.report(command, 'playing');
+          // A-NAS: a clip played: the next one that does not is tried again after the shortest wait.
+          if (gen === swapGen) failures = 0;
         })
         .catch(() => {
-          if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_PLAY_REJECTED);
+          if (command !== null) reportOnce(command, 'failed', REASON_PLAY_REJECTED);
+          // A-NAS: a clip that will not play holds its first frame: the chain goes on without it, unless a
+          // freeze paused it meanwhile or a later switch took over.
+          if (mounted && gen === swapGen && !frozen) clipFailed(swap);
         });
       deps.onFrontReady(el);
     };
@@ -265,10 +399,24 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     if (deps.isDragging()) return { kind: 'ignore' };
     // 冻结时不推进：下面每条分支都会按当前工作状态换源，effect 的门禁拦不住。
     if (frozen) return { kind: 'ignore' };
+    // A-NAS: while a switch loads, the clip in front is on its way out, and moving the chain on its end would
+    // replace the switch's clip before it shows (the curtsy asked for as a turn stops, when the step's clip
+    // ends as it loads). The switch's clip takes over once loaded; if it fails, the chain goes on from this
+    // end, which left the clip in front stopped (clipFailed).
+    if (pending !== null) return { kind: 'ignore' };
+    return nextCue();
+  };
+
+  /** A-NAS: what comes after the current clip, as dsh-pet decided it at a clip's end (handleEnded). */
+  const nextCue = (): EndedCue => {
     const cue = decideEndedCue({
       animations: deps.cfg().animations,
       current: deps.currentAnim(),
       workState: deps.workStatus()?.state,
+      // A-NAS: the clip the step asks for.
+      workAnim: deps.workStatus()?.anim ?? null,
+      // A-NAS: which holds its last frame when the page asks for that.
+      holdSteps: deps.cfg().stepReplayMs !== undefined,
     });
     const petId = deps.cfg().id;
     // A-NAS: dsh-pet's trace lines only in a development build.
@@ -284,6 +432,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     return cue;
   };
 
+  const switchTo = (next: string, nextOnce: boolean, cuePlaybackId: string | null): void =>
+    start(next, nextOnce, cuePlaybackId, false);
+
   return {
     switchTo,
     handleEnded,
@@ -292,6 +443,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (el === null) return;
       el.loop = false;
       el.onended = (event: Event) => deps.onEnded(handleEnded(event));
+      // A-NAS: a step's clip held at its last frame (work-hold) has ended already and ends no more: the chain
+      // goes on from it now, as at its end.
+      if (el.ended && pending === null)
+        queueMicrotask(() => {
+          if (frontVideo() === el && el.ended && pending === null) deps.onEnded(handleEnded());
+        });
     },
     setCueUrl: (url) => {
       cueUrl = url;
@@ -305,13 +462,19 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
         if (playing !== null) reportOnce(playing, 'cancelled', REASON_FROZEN);
         return { kind: 'frozen' };
       }
+      // A-NAS: the wait held by the freeze starts again; a clip the card's resume picks takes over from it.
+      const held = heldFailure;
+      heldFailure = null;
+      if (held !== null && gen === held.gen) waitAfterFailure(held);
       return { kind: 'resumed' };
     },
     isFrozen: () => frozen,
     frontVideo,
     playingPlayback: () => playing,
+    commandClip: () => playing !== null || (pending !== null && pending.playbackId !== null),
     dispose: () => {
       mounted = false;
+      clearTimeout(failedWait);
       loader.abortAll();
       if (blobUrl.a !== null) loader.release(blobUrl.a);
       if (blobUrl.b !== null) loader.release(blobUrl.b);

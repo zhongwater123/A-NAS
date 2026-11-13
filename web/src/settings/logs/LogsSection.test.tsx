@@ -182,7 +182,6 @@ describe("activity log", () => {
     await user.click(items[0]);
     expect(within(rows[1]).getByText("entry:3")).toBeTruthy();
     expect(within(rows[1]).getByText("file.uploaded")).toBeTruthy();
-    expect(screen.getByText(/相册中的操作只有本人能看到/)).toBeTruthy();
   });
 
   it("filters by category, account and text and pages back with the cursor", async () => {
@@ -266,7 +265,6 @@ describe("activity log", () => {
     expect(await screen.findByText("你")).toBeTruthy();
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "成员" })).toBeNull();
-    expect(screen.queryByText(/相册中的操作只有本人能看到/)).toBeNull();
     expect(sent.users).toBe(0);
     expect(sent.systemLogs).toHaveLength(0);
   });

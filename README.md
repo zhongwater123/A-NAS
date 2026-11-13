@@ -71,11 +71,11 @@ build/anas-host-agent
 build/anas-container-agent
 ```
 
-修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/testing.md#系统测试)：`make system-test`。
+修改服务单元、软件包、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/testing.md#系统测试)：`make system-test`。
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 
-启动带内嵌 Web 桌面和确定性 Fake Adapter 的本地产品服务。`ANAS_HOSTSTATE_MODE` 没有默认值：开发时写 `fake`，NAS 上由安装器写 `agent`，不设置时服务拒绝启动：
+启动带内嵌 Web 桌面和确定性 Fake Adapter 的本地产品服务。`ANAS_HOSTSTATE_MODE` 没有默认值：开发时写 `fake`，NAS 上由 `anas-api.service` 设为 `agent`，不设置时服务拒绝启动：
 
 ```bash
 make web-build
@@ -96,7 +96,7 @@ ANAS_HOSTSTATE_MODE=fake ANAS_TERMINAL=enabled go run ./cmd/anas-api
 
 ## 部署
 
-实验 NAS 上的系统服务由 root 运行 release 自带的安装器安装：开发机构建并校验 release，经 `scripts/deploy-dev.ps1 -StageOnly` 以 `anas-dev` 暂存到 NAS，再由设备所有者以 root 安装。安装、回滚、破坏性磁盘计划与实机验收见[实机配置手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)，其余操作见[运行手册索引](docs/runbooks/README.md)；从开发机经限定的 SSH 隧道远程浏览见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md#远程浏览与验证)。
+A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](docs/adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)）：开发机跑完门禁与系统测试后用 `make release` 把软件包放进软件源，部署机把软件源复制到 NAS，设备所有者以 root 用 apt 安装、升级与回滚，用 `a-nas-check` 检查，见[部署 A-NAS 软件包](docs/runbooks/deploy-a-nas-packages.md)。破坏性磁盘计划与实机验收见[实机配置手册](docs/runbooks/provision-v1.0.1-experimental-storage.md)，其余操作见[运行手册索引](docs/runbooks/README.md)；从开发机经限定的 SSH 隧道远程浏览见 [Web 预览运行手册](docs/runbooks/deploy-web-preview-to-experimental-nas.md#远程浏览与验证)。
 
 ## 项目文档
 

@@ -1,11 +1,11 @@
 # 安装 Docker 与容器代理
 
-状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证，2026-10-10 在该机完成到官方源的迁移）
-更新时间：2026-10-27
+状态：verified（2026-10-08 已在 Experimental NAS 验证，2026-10-10 在该机换用 Docker 官方的软件包）；2026-11-12 起 Docker 随 `a-nas-host` 从 A-NAS 软件源安装，第 1 步改为核对，新写法尚未在实机执行
+更新时间：2026-11-12
 
 ## 目的
 
-在 Experimental NAS 上从 Docker 官方 apt 源安装 Docker Engine 与 Compose 插件（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)），再安装 A-NAS 容器代理，使桌面“Docker”和“应用中心”以实时模式运行。产品服务只能访问容器代理的类型化 Unix socket，不能直接访问等同 root 权限的 `docker.sock`。
+Docker Engine 与 Compose 插件是 Docker 官方的软件包，随 `a-nas-host` 从 A-NAS 的签名软件源装上（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)），但在网络地址池写好之前不启动（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。本手册写地址池、启动 Docker，再启用 A-NAS 容器代理，使桌面“Docker”和“应用中心”以实时模式运行。产品服务只能访问容器代理的类型化 Unix socket，不能直接访问等同 root 权限的 `docker.sock`。
 
 ## 前提与停止条件
 
@@ -14,10 +14,10 @@
 更新后在“设置 → 概览”核对系统盘占用，安装计划应在空间不足时拒绝。重装后以 `docker inspect --format '{{json .HostConfig.LogConfig}}' <已确认的应用容器>` 核对 `json-file`、`max-size=10m`、`max-file=3`。若显示“卸载未完成”，先检查任务输出和 Docker 状态，再重试卸载；不要删除代理的清理记录。历史上已孤立且无法归属应用的卷或镜像不自动清理。回退旧代理不会撤销已建容器的日志限制；不要在有未完成清理任务时回退。
 
 - 必须在主机名为 `a-nas-dev` 的 Debian 13 amd64 Experimental NAS 上以 root 执行；先按 [SSH 手册](bootstrap-experimental-nas-ssh.md)核对主机指纹。
-- `/opt/a-nas/current` 必须指向已验证的 release（本地控制台也从它启动，[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)）；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
+- 必须已按[部署 A-NAS 软件包](deploy-a-nas-packages.md)装好已验证的版本，`a-nas-check` 全部 `PASS`；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
 - 当前架构的产品服务身份是系统账号 `a-nas`。不得沿用 ADR 0008 以前的用户级预览步骤给 `anas-dev` 授权，也不得把 `a-nas`、`anas-dev` 或 Kiosk 账号加入 `docker` 组。
 - Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Compose 低于 2.30 或 Engine API 低于 1.45（应用中心会拒绝安装，见[应用中心规格](../specs/app-center.md)）、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
-- 升级前备份 `/etc/a-nas/anas-api.env`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
+- 改动前备份 `/etc/a-nas/site.conf`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
 
 ## 安装预留协议的升级顺序
 
@@ -25,84 +25,40 @@
 
 ## 安装
 
-### 1. 预检并安装 Docker
+### 1. 预检并核对 Docker
 
 ```bash
 test "$(id -u)" -eq 0
 test "$(hostname)" = a-nas-dev
-system_release=$(readlink -f /opt/a-nas/current)
-test "$(dirname "$system_release")" = /opt/a-nas/releases
+a-nas-check
 findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
 ! id -nG anas-dev | tr ' ' '\n' | grep -Fx docker
 
 test ! -e /root/a-nas-container-agent-backup
 install -d -o root -g root -m 0700 /root/a-nas-container-agent-backup
-install -o root -g root -m 0600 \
-  /etc/a-nas/anas-api.env \
-  /root/a-nas-container-agent-backup/anas-api.env
+cp -p /etc/a-nas/site.conf /root/a-nas-container-agent-backup/site.conf
 
-apt-get update
-apt-get install -y ca-certificates curl
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-cat > /etc/apt/sources.list.d/docker.sources <<'SOURCES'
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: trixie
-Components: stable
-Signed-By: /etc/apt/keyrings/docker.asc
-SOURCES
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
-systemctl enable --now docker.service
-
-systemctl is-active --quiet docker.service
-docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
-docker info --format 'cgroup={{.CgroupVersion}} driver={{.Driver}}'
+apt-cache policy docker-ce docker-compose-plugin
 docker compose version
+systemctl is-active docker.service
 ```
 
-完成标准：Docker Client 与 Server 都可用，Server 为官方源当前的主版本，Compose 不低于 2.30，cgroup 为 2。Debian 自带的 `docker.io` 与 `docker-compose` 不再使用：它们停留在 26.1 与 2.26.1，后者会让应用拿到整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。已经装了 Debian 包的主机按[迁移步骤](#从-debian-dockerio-迁移到官方软件源)处理。
+完成标准：`docker-ce` 与 `docker-compose-plugin` 已安装，来源是 A-NAS 软件源，版本不低于 [`packages.json`](../../deploy/upstream/packages.json) 固定的；Compose 不低于 2.30；没有地址池时 Docker 为 `inactive`（`a-nas-check` 也显示 Docker 在等地址池）。Debian 自带的 `docker.io` 与 `docker-compose` 不再使用：它们停留在 26.1 与 2.26.1，后者会让应用拿到整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。
 
 ### 从 Debian docker.io 迁移到官方软件源
 
-2026-10-10 之前按本手册安装的主机使用 Debian 的 `docker.io`、`docker-cli`、`docker-compose`、`containerd` 与 `runc`。按 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 换成官方包：卸载 Debian 包不会删除 `/var/lib/docker`、`/etc/docker/daemon.json` 或应用数据，镜像、容器、卷与地址池都会保留；设置了重启策略的应用容器在 Docker 重新启动后自动恢复。迁移期间 Docker 与全部容器中断几分钟。
+2026-10-10 之前按本手册安装的主机使用 Debian 的 `docker.io`、`docker-cli`、`docker-compose`、`containerd` 与 `runc`。官方包声明与其中四个冲突，装 `a-nas-host` 时 apt 先卸载它们，再装 A-NAS 软件源中的官方包；`docker-compose` 与 `docker-compose-plugin` 装同一个文件，却没有声明冲突，要先手动卸载。卸载 Debian 包不会删除 `/var/lib/docker`、`/etc/docker/daemon.json` 或应用数据，镜像、容器、卷与地址池都会保留；设置了重启策略的应用容器在 Docker 重新启动后自动恢复。迁移期间 Docker 与全部容器中断几分钟。装包前记下存储驱动、地址池与运行中的容器，并停下容器代理：
 
 ```bash
-test "$(hostname)" = a-nas-dev
-docker info --format 'driver={{.Driver}} pools={{json .DefaultAddressPools}}'   # 记下存储驱动与地址池
-docker ps --format '{{.Names}}'                                                 # 记下运行中的容器
-
-systemctl stop anas-container-agent.service
-apt-get remove -y docker.io docker-cli docker-compose containerd runc
-apt-get update
-apt-get install -y ca-certificates curl
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-cat > /etc/apt/sources.list.d/docker.sources <<'SOURCES'
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: trixie
-Components: stable
-Signed-By: /etc/apt/keyrings/docker.asc
-SOURCES
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
-rm -f /usr/local/lib/docker/cli-plugins/docker-compose   # 临时手动安装的 Compose，改由 apt 管理
-
-docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
-docker compose version
 docker info --format 'driver={{.Driver}} pools={{json .DefaultAddressPools}}'
-systemctl start anas-container-agent.service
-systemctl is-active docker.service anas-container-agent.service
-docker ps --format '{{.Names}}\t{{.Status}}'
+docker ps --format '{{.Names}}'
+systemctl stop anas-container-agent.service
+apt-get remove -y docker-compose
 ```
 
-完成标准：Server 为官方源当前的主版本，Compose 不低于 2.30；存储驱动与地址池和迁移前一致；迁移前运行的容器重新运行；`runuser -u anas-container -- env DOCKER_CONFIG=/var/lib/a-nas-container/docker-config docker compose version` 报告同一个 Compose。任一不符时停止，按[回滚](#回滚或恢复)恢复 Debian 包。
+按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 6 步装包，确认 apt 列出的要删除的包只有 `docker.io`、`docker-cli`、`containerd`、`runc` 与依赖它们的包。之后删除临时手动安装的 Compose（`rm -f /usr/local/lib/docker/cli-plugins/docker-compose`），启动容器代理，并核对：存储驱动与地址池和迁移前一致；迁移前运行的容器重新运行；`runuser -u anas-container -- env DOCKER_CONFIG=/var/lib/a-nas-container/docker-config docker compose version` 报告 A-NAS 软件源中的 Compose。
 
-2026-10-10 Experimental NAS 迁移后为 Docker 29.9.0（API 1.56）与 Compose v5.6.0；存储驱动仍为 `overlay2`，地址池不变，Immich 与 OpenList 随 Docker 启动恢复。
+2026-10-10 Experimental NAS 按当时的写法（添加 Docker 的官方源）迁移，得到 Docker 29.9.0（API 1.56）与 Compose v5.6.0；存储驱动仍为 `overlay2`，地址池不变，Immich 与 OpenList 随 Docker 启动恢复。换成 A-NAS 软件包时删除那个源，见[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 4 步。
 
 ### 2. 配置 Docker 网络地址池
 
@@ -121,63 +77,46 @@ cat > /etc/docker/daemon.json <<'JSON'
 }
 JSON
 dockerd --validate --config-file /etc/docker/daemon.json
-systemctl restart docker.service
+/usr/lib/a-nas-docker-policy/check-address-pool
+systemctl reset-failed docker.socket docker.service
+systemctl restart docker.socket docker.service
 
+docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
+docker info --format 'cgroup={{.CgroupVersion}} driver={{.Driver}}'
 docker info --format '{{json .DefaultAddressPools}}'
 ip route | grep -E 'docker0|br-'
 ```
 
-完成标准：`DefaultAddressPools` 为 `10.96.64.0/19`；`docker0` 的路由为 `10.96.127.0/24`；没有任何 172.17–172.31 的 Docker 路由。重启 Docker 会让全部容器短暂中断。
+完成标准：Server 的版本与第 1 步的软件包一致，cgroup 为 2；`DefaultAddressPools` 为 `10.96.64.0/19`；`docker0` 的路由为 `10.96.127.0/24`；没有任何 172.17–172.31 的 Docker 路由。`a-nas-docker-policy` 给服务和套接字加了启动校验：文件缺失、无效、缺少 IPv4 `bip` 或非空的地址池时均拒绝启动；只有日志设置或 `{}` 也不放行。配置正确后先清掉此前失败启动的限流状态，再重启。该保护独立于产品包，回滚产品时保留（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。已经运行的 Docker 重启时，全部容器短暂中断。
 
 已有应用的主机：重启 Docker 不会迁移已存在的应用网络。使用 `network_mode: bridge` 的应用随 `docker0` 迁移，无需处理；新建过网络的应用在应用中心卸载后重新安装（数据保留），或以 root 执行 `docker compose -p a-nas-<id> -f /var/lib/a-nas-container/apps/<id>/docker-compose.yml down`，再以同一参数执行 `up --detach --remove-orphans`。
 
-### 3. 创建最小权限身份
+### 3. 核对最小权限身份
+
+`anas-container` 账号与 `a-nas` 在 `anas-container` 组中的成员身份由 `a-nas` 软件包的 sysusers 配置建立（[`deploy/sysusers.d/a-nas.conf`](../../deploy/sysusers.d/a-nas.conf)），不再手工创建。代理经单元的 `SupplementaryGroups=docker` 取得 `docker` 组。
 
 ```bash
-getent group anas-container >/dev/null || groupadd --system anas-container
-if ! id anas-container >/dev/null 2>&1; then
-  useradd --system --gid anas-container \
-    --home-dir /nonexistent --shell /usr/sbin/nologin anas-container
-fi
-
-usermod -aG docker anas-container
-usermod -aG anas-container a-nas
-
 id anas-container
 id a-nas
 id anas-dev
 ```
 
-完成标准：只有 `anas-container` 是 `docker` 组成员；`a-nas` 只新增 `anas-container` 组以连接类型化代理；`anas-dev` 不属于 `docker` 或 `anas-container`。
+完成标准：`anas-container` 存在；`a-nas` 只新增 `anas-container` 组以连接类型化代理，不属于 `docker`；`anas-dev` 不属于 `docker` 或 `anas-container`。
 
 ### 4. 安装不可变代理制品
 
-开发机必须先从要部署的提交运行 `make build-binaries VERSION=<GIT_SHA>`，上传 `anas-container-agent` 与匹配的 systemd 单元到同一个不可变 source release，并核对发布清单中的 SHA-256。随后在 NAS 上执行：
+代理的程序 `/usr/lib/a-nas/anas-container-agent` 与单元随 `a-nas` 软件包安装，由软件源的签名核对，但不随软件包启用。以 root 启用：
 
 ```bash
-source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
-agent_sha=<64 位 SHA-256>
-
-printf '%s  %s\n' "$agent_sha" "$source_release/anas-container-agent" |
-  sha256sum --check
-
-install -D -o root -g root -m 0755 \
-  "$source_release/anas-container-agent" \
-  /usr/local/lib/a-nas/anas-container-agent
-install -o root -g root -m 0644 \
-  "$source_release/anas-container-agent.service" \
-  /etc/systemd/system/anas-container-agent.service
-
-systemctl daemon-reload
 systemctl enable --now anas-container-agent.service
 systemctl is-active --quiet anas-container-agent.service
 stat -c '%a %U:%G %n' \
   /run/a-nas-container \
   /run/a-nas-container/agent.sock \
-  /usr/local/lib/a-nas/anas-container-agent
+  /usr/lib/a-nas/anas-container-agent
 ```
 
-替换已在运行的代理时，`enable --now` 不会重启它，改用 `systemctl restart anas-container-agent.service`。自 [#176](https://github.com/zhongwater123/A-NAS/issues/176) 起，代理自己从宿主机账号库读取应用账号 `app-<id>`，与产品服务之间的请求格式不变（产品服务照旧发送 UID/GID，新代理只在账号创建前用它显示计划），所以代理与产品服务可以按任意顺序更新。先在应用中心确认没有正在进行的安装：停止代理会取消安装并用 `compose down` 回滚，应用显示“容器代理停止，安装被中断，已回滚”，需要重新安装；正在进行的卸载会照常完成（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
+软件包升级换掉代理的程序后，`postinst` 不重启正在运行的代理，`enable --now` 也不会重启它；要让新程序生效，执行 `systemctl restart anas-container-agent.service`。自 [#176](https://github.com/zhongwater123/A-NAS/issues/176) 起，代理自己从宿主机账号库读取应用账号 `app-<id>`，与产品服务之间的请求格式不变（产品服务照旧发送 UID/GID，新代理只在账号创建前用它显示计划），所以代理与产品服务可以按任意顺序更新。先在应用中心确认没有正在进行的安装：停止代理会取消安装并用 `compose down` 回滚，应用显示“容器代理停止，安装被中断，已回滚”，需要重新安装；正在进行的卸载会照常完成（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
 
 完成标准：运行目录为 `750 anas-container:anas-container`，socket 为 `660 anas-container:anas-container`，二进制为 `755 root:root`。应用数据根为 `/srv/a-nas/data/apps`，共享根为 `/srv/a-nas/data/spaces/shared`；只有挂载点改变时才通过 `/etc/a-nas/container-agent.env` 修改，并且两个根仍须位于同一数据卷。
 
@@ -193,29 +132,24 @@ timeout 45s runuser -u a-nas -- python3 - --agent-only < "$probe"
 
 ### 5. 启用产品能力
 
-不要改写环境文件中的其他键。先删除旧能力键，再追加唯一的实时模式配置：
+不要改写 `/etc/a-nas/site.conf` 中的其他键。先删除旧能力键，再追加唯一的实时模式配置，然后应用本机设置：
 
 ```bash
-env_file=/etc/a-nas/anas-api.env
-temporary=$(mktemp /etc/a-nas/anas-api.env.XXXXXX)
-grep -v '^ANAS_CONTAINERS_MODE=' "$env_file" > "$temporary"
-printf 'ANAS_CONTAINERS_MODE=agent\n' >> "$temporary"
-install -o root -g a-nas -m 0640 "$temporary" "$env_file"
-rm -f -- "$temporary"
-
-systemctl restart anas-api.service
+sed -i '/^ANAS_CONTAINERS_MODE=/d' /etc/a-nas/site.conf
+echo ANAS_CONTAINERS_MODE=agent >> /etc/a-nas/site.conf
+a-nas-site
 systemctl is-active --quiet anas-api.service
 journalctl -u anas-api.service -b --no-pager -n 50
 ```
 
-`scripts/install-v1.0.1-system-services.sh` 在后续升级时只会在 `/run/a-nas-container/agent.sock` 存在时保留该能力键；代理缺失时继续 fail closed。
+`a-nas-site` 重启 Host Agent 与产品服务，最后运行 `a-nas-check`。软件包从不改写已有的 `site.conf`，升级后该能力键保留。
 
 ## 验证
 
 ```bash
 systemctl is-active docker.service anas-container-agent.service anas-api.service
 systemctl is-enabled docker.service anas-container-agent.service
-grep -Fqx 'ANAS_CONTAINERS_MODE=agent' /etc/a-nas/anas-api.env
+grep -Fqx 'ANAS_CONTAINERS_MODE=agent' /etc/a-nas/site.conf
 runuser -u a-nas -- test -r /run/a-nas-container/agent.sock
 ! runuser -u a-nas -- test -r /var/run/docker.sock
 ! runuser -u anas-dev -- test -r /var/run/docker.sock
@@ -256,21 +190,19 @@ docker version --format 'server={{.Server.Version}} api={{.Server.APIVersion}}'
 
 ```bash
 systemctl disable --now anas-container-agent.service
-install -o root -g a-nas -m 0640 \
-  /root/a-nas-container-agent-backup/anas-api.env \
-  /etc/a-nas/anas-api.env
-systemctl restart anas-api.service
+cp -p /root/a-nas-container-agent-backup/site.conf /etc/a-nas/site.conf
+a-nas-site
 ```
 
-如需撤销授权，执行 `gpasswd -d a-nas anas-container` 后重启 `anas-api.service`。移除 Docker 会影响全部容器与镜像，必须另行确认；不要把 `apt-get purge` 或 `/var/lib/docker` 删除放进常规回滚。
+`a-nas` 属于 `anas-container` 组由软件包的 sysusers 配置决定，`systemd-sysusers` 开机时会重新加上，不要用 `gpasswd -d` 撤销；代理停用后它的运行目录与 socket 随之删除，这个组不再通向任何东西。移除 Docker 会影响全部容器与镜像，必须另行确认；不要把 `apt-get purge` 或 `/var/lib/docker` 删除放进常规回滚。
 
-迁移到官方软件源后需要退回 Debian 包时，先停止容器代理，再执行 `apt-get remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin`、删除 `/etc/apt/sources.list.d/docker.sources`，然后 `apt-get update && apt-get install -y docker.io docker-cli docker-compose containerd runc`。Debian 的 Compose 2.26.1 会让应用拿到整个卷，应用中心会拒绝安装，因此退回只用于排障。
+Docker 是 `a-nas-host` 的依赖，不能单独卸载，也不再退回 Debian 的 `docker.io`（它的 Compose 2.26.1 会让应用拿到整个卷）。连 Docker 一起停用时，在停用代理之后执行 `systemctl disable --now docker.socket docker.service`；软件包升级不会重新启用它。
 
 ## 关联
 
 - 规格：[容器管理](../specs/container-management.md)、[应用中心](../specs/app-center.md)
 - ADR：[0009 Docker Engine 与专用容器代理](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)
 - 调查：[Experimental NAS 容器能力保持禁用](../investigations/2026-10-08-experimental-nas-containers-disabled.md)
-- 实现：[`deploy/systemd/system/anas-container-agent.service`](../../deploy/systemd/system/anas-container-agent.service)、[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- 实现：[`deploy/systemd/system/anas-container-agent.service`](../../deploy/systemd/system/anas-container-agent.service)、[`deploy/sysusers.d/a-nas.conf`](../../deploy/sysusers.d/a-nas.conf)、[`a-nas-site`](../../deploy/site/a-nas-site.sh)
 - 探针与验证：[`verify-container-deployment.py`](../../scripts/verify-container-deployment.py)、[`check-container-deployment-probes.py`](../../scripts/check-container-deployment-probes.py)
 - 协议来源：[`containers/agent`](../../internal/containers/agent/agent.go)、[`appstore/agent`](../../internal/appstore/agent/agent.go)、[`webui`](../../internal/webui/handler.go)

@@ -345,6 +345,11 @@ func run(logger *slog.Logger) error {
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
 	defer closeAtExit(logger, "account directory", uids)
+	moduleRegistry, closeModules, err := configuredModules(background, config, uids, logger)
+	if err != nil {
+		return err
+	}
+	defer closeModules()
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
@@ -356,6 +361,7 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
+		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
 		FilePreviews: previewService,
@@ -714,8 +720,9 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // directory it answers assistant_unavailable and the desktop keeps the
 // assistant as planned. On a NAS every connection to a member's instance goes
 // through the File Broker, the session gate (decision 10), which also
-// executes the assistant's changes; development dials the sockets directly
-// with their tokens and may name the spike's change broker. The account store
+// executes the assistant's changes and has a scheduled task run now;
+// development dials the sockets directly with their tokens, may name the
+// spike's change broker, and cannot run a task now. The account store
 // keeps the notices of the members' scheduled tasks, and uids names the member
 // behind a companion tool's call. Its background work ends with background.
 func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices,
@@ -727,6 +734,9 @@ func assistantAPI(background context.Context, config AssistantConfig, logger *sl
 		options.Connector = gatedAssistant{broker}
 	default:
 		options.Connector = assistantapi.NewSocketConnector(config.SocketDir, config.TokenDir)
+	}
+	if broker != nil && config.SocketDir != "" {
+		options.Tasks = roundTasks{broker}
 	}
 	switch {
 	case broker != nil:
@@ -773,6 +783,18 @@ func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 	}
 	change.Raw = raw
 	return change, nil
+}
+
+// roundTasks has a member's scheduled task run now through the File Broker,
+// which checks the session itself and starts a round of the member's tasks.
+type roundTasks struct{ broker *filebroker.Client }
+
+func (t roundTasks) RunTask(ctx context.Context, task string) error {
+	err := t.broker.RunAssistantTask(ctx, task)
+	if errors.Is(err, files.ErrForbidden) {
+		return assistantapi.ErrSessionRejected
+	}
+	return err
 }
 
 // gatedAssistant reaches a member's assistant through the File Broker, which

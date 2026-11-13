@@ -16,6 +16,11 @@ export type RuntimePet = Pet & {
   physics: PhysicsParams;
   /** A-NAS: the installed animation pool, which the animation URLs carry (see animation/assets.ts). */
   assetVersion?: string;
+  /**
+   * A-NAS: a step's own clip plays once and holds its last frame, and plays again after this many ms while
+   * the step lasts; without it the clip loops, as dsh-pet's stage clips do.
+   */
+  stepReplayMs?: number;
 };
 
 /** 注入的 react 能力：由模块工厂提供，本目录不直接 import react 运行时。 */

@@ -1,0 +1,17 @@
+[Unit]
+Description=A-NAS photo scoring module API socket
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/photo-scoring.md
+
+[Socket]
+# Only the Product Service, in a-nas-modules, connects (ADR 0037). systemd
+# creates the socket as root, so the module needs no part in that group, and
+# removes it when the socket stops: no socket means not installed.
+ListenStream=/run/a-nas-modules/scoring.sock
+SocketUser=a-nas-scoring
+SocketGroup=a-nas-modules
+SocketMode=0660
+DirectoryMode=0755
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target
