@@ -3,7 +3,7 @@
 > 状态：开发机完成（三组旅行素材、三首歌；成片已人工观看；未装进 `montage.case`，未在 x86 容器里跑）  
 > 更新日期：2026-11-11  
 > 适用范围：[#405](https://github.com/zhongwater123/A-NAS/issues/405) 第五版之后的第六版，实验脚本与用法在 [`ai/eval/montage_v5/`](../../ai/eval/montage_v5/README.md)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)  
-> 关联：[CutClaw 调研](video-editing-cutclaw.md)、[剪辑第四版消融实验](video-montage-ablation-v4.md)、[照片与视频成片规格](../specs/photo-to-video.md)
+> 关联：[第七版：挑一版与精修的网页原型](video-montage-v7.md)、[CutClaw 调研](video-editing-cutclaw.md)、[剪辑第四版消融实验](video-montage-ablation-v4.md)、[照片与视频成片规格](../specs/photo-to-video.md)
 
 第五版全程用本机 Qwen3.5-4B 规划。卡片超过 150 张时，4B 只从目录前面挑卡片，新西兰 6 段里有 5 段来自前 46 张。第六版换了两件事：成片按一首歌的段落和小节来剪（CutClaw 的做法），规划改用云端 Claude Opus；卡片描述、画质检查和渲染仍在本机。
 
@@ -144,6 +144,7 @@
 4. **单个关键帧的遮挡**：被标为遮挡的关键帧所在的节拍还会被用上。
 5. **描述**：景别判断约 71% 正确，新提示词只用在品杰的素材上；部分描述超过 30 字，或带上“时间、地点、标签”字样（pj-039、pj-043、pj-093）；大疆画面右上角的水印没有处理。
 6. **装进产品**：第六版还只在实验脚本里，没有装进 `montage.case`，也没在 x86、3.4 GiB 的容器里跑过；规划依赖云端模型，需要按 [#341](https://github.com/zhongwater123/A-NAS/issues/341) 声明外部调用。
+7. **用户怎么挑、怎么改**：第七版做了网页原型（一次给三版、按音乐槽换镜头、锁定后重洗），见[剪辑第七版](video-montage-v7.md)。
 
 ## 关联
 

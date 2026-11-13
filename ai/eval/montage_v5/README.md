@@ -30,6 +30,7 @@
 | `windows.py` | 读视频索引（窗口与画面向量） |
 | `tools/orient.py` | 带 180° 旋转标记的视频，让 4B 判断方向 |
 | `tools/compare_page.py` | 几条成片同步对比播放的网页 |
+| `prototype/` | 第七版：挑一版与精修的网页原型（`build.py` 生成数据、`search.py` 向量搜索、`index.html`），见[剪辑第七版](../../../docs/research/video-montage-v7.md) |
 
 ## 环境
 
