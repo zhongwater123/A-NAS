@@ -48,8 +48,9 @@ export interface WindowIntentPayloads {
   family: { babyId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
-  // A toast of a scheduled task opens its run in VNAS, or the tasks.
-  assistant: { sessionId?: string; title?: string };
+  // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
+  // cards that wait for the member.
+  assistant: { sessionId?: string; title?: string; conversationId?: string };
 }
 // The intents waiting for their windows. Every request is a new object, so a
 // window sees a request for the place it already shows. The window hands back

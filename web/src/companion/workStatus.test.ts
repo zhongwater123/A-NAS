@@ -15,6 +15,8 @@ import {
   stageOf,
   startTurn,
   stopTurn,
+  turnInFlight,
+  waitingConversation,
 } from "./workStatus";
 
 const leaf = () => companionState.read().sections.workStatus;
@@ -259,6 +261,36 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
     expect(shown()).toBe("working");
     reportCards([{ requestId: "r2", sessionId: "elsewhere", status: "awaiting" }]);
     expect(shown()).toBe("working");
+  });
+
+  it("knows the conversation a waiting card is in: the longest-waiting card's whose conversation is known", () => {
+    startTurn("s1");
+    startTurn("s2");
+    expect(waitingConversation()).toBeUndefined();
+    reportCards([{ requestId: "r1", sessionId: "s1", status: "awaiting" }]);
+    expect(waitingConversation()).toBeNull();
+    reportCards([
+      { requestId: "r1", sessionId: "s1", status: "awaiting" },
+      { requestId: "r2", sessionId: "s2", status: "awaiting", storedSessionId: "conv-b" },
+    ]);
+    expect(waitingConversation()).toBe("conv-b");
+    // The first card's conversation, once stored, comes first: it has waited longest.
+    reportCards([
+      { requestId: "r1", sessionId: "s1", status: "awaiting", storedSessionId: "conv-a" },
+      { requestId: "r2", sessionId: "s2", status: "awaiting", storedSessionId: "conv-b" },
+    ]);
+    expect(waitingConversation()).toBe("conv-a");
+    reportCards([]);
+    expect(waitingConversation()).toBeUndefined();
+  });
+
+  it("counts a turn of this window from its prompt, before its first stage, until it ends", () => {
+    expect(turnInFlight()).toBe(false);
+    startTurn("s1");
+    expect(turnInFlight()).toBe(true);
+    expect(shown()).toBeNull();
+    reportEvent("s1", "message.complete", { status: "complete" });
+    expect(turnInFlight()).toBe(false);
   });
 
   it("goes back to idle when the window loses its connection, cards included", () => {

@@ -28,6 +28,21 @@ export function memberQuiet(): boolean {
   return mode === "quiet";
 }
 
+/**
+ * The companion sleeps at the member's asking: it went to sleep, or was asleep, while quiet. Kept here rather
+ * than in the card, which hidden takes off the page while the sleep goes on (host.ts), so that back to normal
+ * from hidden wakes it as from quiet. Its waking ends it.
+ */
+let memberSlept = false;
+
+export function memberSleep(): boolean {
+  return memberSlept;
+}
+
+export function setMemberSleep(slept: boolean): void {
+  memberSlept = slept;
+}
+
 export function setCompanionMode(next: CompanionMode): void {
   if (next === mode) return;
   mode = next;
@@ -52,5 +67,6 @@ export const useCompanionMode = () => useSyncExternalStore(subscribe, companionM
 /** For tests: as this device stores it now. */
 export function resetCompanionMode(): void {
   mode = stored();
+  memberSlept = false;
   for (const listener of listeners) listener();
 }

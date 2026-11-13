@@ -152,9 +152,12 @@ export function AssistantPanel({
 }: {
   username: string;
   onShowPhoto?(assetId: string): void;
-  /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
-  intent?: { sessionId?: string; title?: string };
-  onIntentHandled?(handled: { sessionId?: string; title?: string }): void;
+  /**
+   * What the desktop asks the window to show: a run of a scheduled task, or the tasks; or, for the companion,
+   * a conversation at the cards that wait for the member.
+   */
+  intent?: { sessionId?: string; title?: string; conversationId?: string };
+  onIntentHandled?(handled: { sessionId?: string; title?: string; conversationId?: string }): void;
 }) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
@@ -495,14 +498,22 @@ export function AssistantPanel({
     sentPlan.current = planned;
     sendPlan(planned.text);
   }, [planned]);
-  // A toast on the desktop opens a run, or the tasks.
+  // A toast on the desktop opens a run, or the tasks. The companion opens the conversation whose card waits
+  // for the member, from another conversation or from the memory or the tasks, at its cards (toCards).
   const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  const [toCards, setToCards] = useState<{ conversation: string }>();
   if (intentBefore !== intent) {
     setIntentBefore(intent);
-    if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
+    if (intent?.conversationId) {
+      setActiveId(intent.conversationId);
+      setView("chat");
+      setToCards({ conversation: intent.conversationId });
+    } else if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
     else if (intent) setView("tasks");
-  }
-  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string }) => onIntentHandled?.(handled));
+  } else if (toCards && (activeId !== toCards.conversation || view !== "chat")) setToCards(undefined);
+  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string; conversationId?: string }) =>
+    onIntentHandled?.(handled),
+  );
   useEffect(() => {
     if (!intent) return;
     if (intent.sessionId) readRun(intent.sessionId);
@@ -583,13 +594,22 @@ export function AssistantPanel({
     )
     .filter((approval) => approval.status === "awaiting" || approval.status === "deciding")
     .sort((a, b) => a.createdAt - b.createdAt);
+  // Opened at a conversation's cards: they come into view once they show, once for each opening, without taking
+  // the focus. Another conversation or page opened meanwhile drops it (above).
+  const cardsSection = useRef<HTMLElement>(null);
+  const shownCards = useRef<{ conversation: string }>(undefined);
+  useEffect(() => {
+    if (toCards === undefined || shownCards.current === toCards || here.length === 0) return;
+    shownCards.current = toCards;
+    cardsSection.current?.scrollIntoView({ block: "nearest" });
+  }, [toCards, here.length]);
   const unreachable = !gateway.ready && gateway.problem;
   const runOpen = Boolean(run && run.id === activeId && !active);
   const dock = (
     <>
       {controlAsk && <ControlCard ask={controlAsk} />}
       {here.length > 0 && (
-        <section className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
+        <section ref={cardsSection} className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
           {here.map((approval) =>
             approval.kind === "command" ? (
               <CommandCard

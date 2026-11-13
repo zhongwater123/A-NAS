@@ -355,7 +355,12 @@ export function Desktop({
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
         </ShellPart>
         <ShellPart name="companion">
-          <Companion onOpenVnas={() => open("assistant")} onOpenTaskRun={showTaskRun} />
+          <Companion
+            onOpenVnas={(atCards) =>
+              atCards ? open("assistant", { conversationId: atCards.conversation }) : open("assistant")
+            }
+            onOpenTaskRun={showTaskRun}
+          />
         </ShellPart>
         <ShellPart name="family hints">
           <Suspense fallback={null}>
