@@ -2,27 +2,35 @@
 // rating stage, the outbox that delivers answers in order, and how numbers
 // are shown.
 import { APIError } from "../api/client";
-import type { ScoringBatch, ScoringRatingInput } from "../api.generated";
+import type { operations, ScoringBatch, ScoringExportField, ScoringRatingInput } from "../api.generated";
 
 // Scores are whole hundredths in the page, 0 to maxScore, as in the module;
 // only the API speaks points with two decimals.
 export const maxScore = 500;
 
+// overall is 总分, which every batch scores first.
+export const overall = "overall";
+// sharpness is the 打分项 judged on the photo at its full size.
+export const sharpness = "sharpness";
+
 export type StageAction =
   | { kind: "set"; score: number }
   | { kind: "nudge"; by: number }
+  | { kind: "item"; by: -1 | 1 }
   | { kind: "confirm" }
   | { kind: "skip" }
   | { kind: "flag" }
   | { kind: "undo" }
+  | { kind: "zoom" }
   | { kind: "guide" }
   | { kind: "cancel" };
 
 // stageAction reads a key of the rating stage: 0–5 move to that whole
-// score, ← and → by 0.1 and with Shift by 0.01, Enter confirms, S skips
-// (cannot judge), X marks a problem, Backspace goes back to the last photo,
-// ? shows the guide and Escape leaves what is open. A key with Ctrl, Alt
-// or the command key is the browser's.
+// score, ← and → by 0.1 and with Shift by 0.01, ↑ and ↓ to the 打分项 before
+// and after, Enter confirms, S skips (cannot judge), X marks a problem,
+// Backspace goes back to the last photo, Z shows the photo at 100% while
+// held, ? shows the guide and Escape leaves what is open. A key with Ctrl,
+// Alt or the command key is the browser's.
 export function stageAction(
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey">,
 ): StageAction | undefined {
@@ -34,8 +42,15 @@ export function stageAction(
       return { kind: "nudge", by: event.shiftKey ? 1 : 10 };
     case "ArrowLeft":
       return { kind: "nudge", by: event.shiftKey ? -1 : -10 };
+    case "ArrowUp":
+      return { kind: "item", by: -1 };
+    case "ArrowDown":
+      return { kind: "item", by: 1 };
     case "Enter":
       return { kind: "confirm" };
+    case "z":
+    case "Z":
+      return { kind: "zoom" };
     case "s":
     case "S":
       return { kind: "skip" };
@@ -65,6 +80,128 @@ export function parseScore(text: string): number | undefined {
   const hundredths = Math.round(Number(trimmed) * 100);
   return hundredths <= maxScore ? hundredths : undefined;
 }
+
+// Stopwatch counts how long a photo is looked at: running from when it
+// appears, standing still while the page is hidden or a sheet covers it.
+// Times are performance.now() milliseconds.
+export class Stopwatch {
+  private spent = 0;
+  private since: number | undefined;
+
+  start(now: number, running: boolean) {
+    this.spent = 0;
+    this.since = running ? now : undefined;
+  }
+
+  pause(now: number) {
+    if (this.since === undefined) return;
+    this.spent += now - this.since;
+    this.since = undefined;
+  }
+
+  resume(now: number) {
+    this.since ??= now;
+  }
+
+  elapsed(now: number): number {
+    return this.spent + (this.since === undefined ? 0 : now - this.since);
+  }
+}
+
+// orientationMatrix is the CSS matrix(a, b, c, d, e, f), with the transform
+// origin at the top left, that turns a picture stored width by height in
+// EXIF orientation 1 to 8 upright, as browsers do for <img>; the photo at
+// 100% comes in its stored orientation.
+export function orientationMatrix(
+  orientation: number,
+  width: number,
+  height: number,
+): [number, number, number, number, number, number] {
+  switch (orientation) {
+    case 2:
+      return [-1, 0, 0, 1, width, 0];
+    case 3:
+      return [-1, 0, 0, -1, width, height];
+    case 4:
+      return [1, 0, 0, -1, 0, height];
+    case 5:
+      return [0, 1, 1, 0, 0, 0];
+    case 6:
+      return [0, 1, -1, 0, height, 0];
+    case 7:
+      return [0, -1, -1, 0, height, width];
+    case 8:
+      return [0, -1, 1, 0, 0, width];
+    default:
+      return [1, 0, 0, 1, 0, 0];
+  }
+}
+
+// uprightSize is the size of a picture stored width by height once turned
+// upright: orientations 5 to 8 swap the sides.
+export const uprightSize = (orientation: number, width: number, height: number) =>
+  orientation >= 5 ? { width: height, height: width } : { width, height };
+
+// The export's columns beside image_id, image_path and rater, which every
+// export has, in the groups the dialog shows them; the 打分项 are a group of
+// their own, from the batch.
+export type ExportField = ScoringExportField;
+type ExportQuery = NonNullable<operations["exportScoringBatch"]["parameters"]["query"]>;
+// Each field names the columns it adds, as the contract describes them.
+export const exportRequired = ["image_id", "image_path", "rater"];
+export const exportGroups: { label: string; fields: { field: ExportField; label: string; columns: string[] }[] }[] = [
+  {
+    label: "打分人",
+    fields: [
+      { field: "nickname", label: "昵称", columns: ["nickname"] },
+      { field: "rater_id", label: "账号 ID", columns: ["rater_id"] },
+    ],
+  },
+  { label: "图片", fields: [{ field: "image_size", label: "原图宽高", columns: ["image_width", "image_height"] }] },
+  {
+    label: "时间",
+    fields: [
+      { field: "duration", label: "单图耗时", columns: ["duration_s"] },
+      { field: "submitted_at", label: "提交时间", columns: ["submitted_at"] },
+    ],
+  },
+  {
+    label: "记录",
+    fields: [
+      { field: "kind", label: "类型", columns: ["kind", "repeat", "superseded"] },
+      { field: "links", label: "撤销与重复的关联", columns: ["rating_id", "replaces", "repeat_of"] },
+    ],
+  },
+  {
+    label: "显示",
+    fields: [
+      { field: "viewport", label: "打分区尺寸", columns: ["viewport_width", "viewport_height"] },
+      { field: "display", label: "照片显示尺寸", columns: ["display_width", "display_height"] },
+      { field: "pixel_ratio", label: "设备像素比", columns: ["pixel_ratio"] },
+    ],
+  },
+];
+// The export's order of fields: who, the photo, the 打分项, then the rest.
+export function exportColumns(fields: ExportField[], dimensions: string[]): string[] {
+  const columns = [...exportRequired];
+  const named = exportGroups.flatMap((group) => group.fields);
+  const add = (field: ExportField) => {
+    if (fields.includes(field)) columns.push(...(named.find((entry) => entry.field === field)?.columns ?? []));
+  };
+  for (const field of ["nickname", "rater_id", "image_size"] as const) add(field);
+  for (const dimension of dimensions) if (fields.includes(dimension as ExportField)) columns.push(dimension);
+  for (const field of ["duration", "submitted_at", "kind", "links", "viewport", "display", "pixel_ratio"] as const)
+    add(field);
+  return columns;
+}
+// A new export starts with these, beside every 打分项.
+export const exportDefaults: ExportField[] = ["nickname", "duration", "submitted_at"];
+export type ExportInclude = NonNullable<ExportQuery["include"]>[number];
+export const exportIncludes: { include: ExportInclude; label: string }[] = [
+  { include: "skips", label: "跳过与标记" },
+  { include: "superseded", label: "被撤销的旧分数" },
+  { include: "repeats", label: "重复检查" },
+];
 
 export interface Placed {
   // Where the photo sits, from 0 to 1 along the ruler, and its width in px.
