@@ -81,6 +81,8 @@ func (e *Executor) RequestSystemUpdate(ctx context.Context, request systemupdate
 		return systemupdate.Status{}, fmt.Errorf("leave the system update request: %w", err)
 	}
 	if output, err := e.runner.Run(ctx, "systemctl", []string{"start", "--no-block", updateUnit}, ""); err != nil {
+		// The administrator is told it failed: no later run may carry it out.
+		_ = store.DropRequest()
 		return systemupdate.Status{}, commandError("start the system update", err, output)
 	}
 	state, err := store.Load()

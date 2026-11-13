@@ -2553,14 +2553,15 @@ check "dpkg is back on this release, and the database with it" test "$(a_nas_ver
 check "a-nas-check passes after the rollback" quiet a-nas-check
 update_ask check >/dev/null
 state=$(update_settled || true)
-check "a check does not offer the release rolled back again" \
-  test "$(jq -r '"\(.phase)|\(.candidate // "")"' <<<"$state")" = "up-to-date|"
+check "a check does not offer the release rolled back again, and the rollback stays on the page" \
+  test "$(jq -r '"\(.phase)|\(.candidate // "")|\(.problem.code)"' <<<"$state")" = "rolled-back||check"
 rm -r /etc/systemd/system/anas-site.service.d /usr/local/sbin/system-test-refuse-next
 systemctl daemon-reload
 
 # An install whose run is killed while dpkg works, as a power cut stops it.
-# The next run, here the one the timer starts after boot, finishes it or goes
-# back; either way dpkg is whole and the check passes.
+# The next run, here the one the timer starts after boot, finishes it, goes
+# back, or, when dpkg had not yet changed what it records of any package,
+# offers it again; either way dpkg is whole and the check passes.
 rm /var/lib/a-nas-update/state.json
 update_ask check >/dev/null
 update_settled >/dev/null || true
@@ -2585,9 +2586,10 @@ finished_or_back() {
   local got
   got=$(jq -r '"\(.phase)|\(.current)|\(.records[0].kind)"' <<<"$state")
   echo "settled as $got" >>"$hidden"
-  [[ "$got" == "up-to-date|$next|updated" || "$got" == "rolled-back|$version|rolled-back" ]]
+  [[ "$got" == "up-to-date|$next|updated" || "$got" == "rolled-back|$version|rolled-back" ||
+    "$got" == "ready|$version|failed" ]]
 }
-check "the next run finished the install or went back" finished_or_back
+check "the next run finished the install, went back, or offers it again" finished_or_back
 check "dpkg has nothing left half done" test -z "$(dpkg --audit 2>&1)"
 check "a-nas-check passes after the run that finished the install" quiet a-nas-check
 check "the activity log has the administrator's requests and the update's outcomes" \

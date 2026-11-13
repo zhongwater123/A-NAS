@@ -99,7 +99,8 @@ web-test: web-install
 THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
 
 web-build: web-install
-	cd web && $(NPM) run build
+	@# The page compares the version it was built at with the installed one (docs/specs/system-update.md).
+	cd web && VITE_ANAS_VERSION='$(VERSION)' $(NPM) run build
 	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
 		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
 			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \

@@ -130,6 +130,13 @@ describe("Settings → 系统更新", () => {
         phase: "rolled-back",
         problem,
         records: [
+          // A check that failed since leaves the rollback on the page.
+          {
+            at: new Date().toISOString(),
+            kind: "check-failed",
+            by: "automatic",
+            problem: { code: "unreachable" },
+          },
           {
             at: new Date().toISOString(),
             kind: "rolled-back",
