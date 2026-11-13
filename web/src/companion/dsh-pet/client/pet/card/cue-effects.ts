@@ -116,16 +116,18 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       // 循环语义：终态播一遍；非终态单候选无限循环，多候选播一遍后由播完判定轮换。
       // A-NAS: a step's own clip loops like a single one.
       const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
+      // A-NAS: or plays once and holds its last frame, when the page asks for that (stepReplayMs).
+      const holding = own !== null && !terminal && cfg.stepReplayMs !== undefined;
       workAnimRef.current = own;
       // A-NAS: a clip VNAS asked for plays to its end, as its command is answered by it; the stage's clip
       // follows it (animation-flow applyEndedCue). The stage switched it away, which answered the command
       // cancelled, whenever the turn took a step or ended while it played.
       if (hub.ownAnim.commandClip()) {
-        hub.deferStage({ name, once: terminal || rotating });
+        hub.deferStage({ name, once: terminal || rotating || holding });
         return;
       }
       hub.deferStage(null);
-      card.actions.setOnce(terminal || rotating);
+      card.actions.setOnce(terminal || rotating || holding);
       card.actions.setAnim(name);
     };
 
