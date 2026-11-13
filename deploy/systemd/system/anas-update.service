@@ -6,6 +6,10 @@ Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system
 # The Host Agent starts it with a request, the timer without one; a run that
 # finds an install a power cut or reboot stopped finishes it first.
 After=network-online.target local-fs.target
+# Each request starts a run, as often as administrators ask; systemd's
+# default limit of five starts in ten seconds would drop a request, which
+# the Host Agent has already answered as taken.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
