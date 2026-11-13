@@ -102,6 +102,28 @@ def verify_file(model_path, manifest, stopped=None):
         raise Unavailable(f"model file {model_path} does not match the manifest's SHA-256")
 
 
+def model_parts(model_path, manifest):
+    """The files a model is read from, each with what pins it.
+
+    That is model_path itself, unless the manifest lists parts: a model that
+    llama.cpp's gguf-split cut in two so that each package of it stays under
+    GitHub's 2 GiB limit for a file (docs/decisions/2026-11-11-update-hosting.md).
+    The parts are then in the directory model_path's links lead to, first
+    part first: llama.cpp opens the first and finds the others by its name.
+    """
+    parts = manifest.get("parts")
+    if not parts:
+        return ((model_path, manifest),)
+    directory = os.path.dirname(os.path.realpath(model_path))
+    files = []
+    for part in parts:
+        name = part.get("file")
+        if not isinstance(name, str) or not name or os.path.basename(name) != name:
+            raise Unavailable(f"the manifest of {model_path} lists a part without a plain file name")
+        files.append((os.path.join(directory, name), part))
+    return tuple(files)
+
+
 # The LiteRT package carries image signatures of 70 and 140 soft tokens.
 # 70 is about three times faster on a 4-core CPU with similar zero-shot
 # results in the first trial; the benchmark decides between them.
@@ -855,7 +877,9 @@ class LlamaReader:
         except (OSError, ValueError, KeyError) as error:
             raise Unavailable(f"the llama.cpp manifest {runtime_manifest}: {error}") from error
         self._server = list(server)
-        self._files = ((model_path, model), (mmproj_path, mmproj))
+        model_files = model_parts(model_path, model)
+        self._files = (*model_files, (mmproj_path, mmproj))
+        self._model_file, self._mmproj_file = model_files[0][0], mmproj_path
         self._cache_dir = cache_dir
         self._verified = False
         self._process = None
@@ -990,9 +1014,8 @@ class LlamaReader:
             self._verified = True
         self._directory = tempfile.mkdtemp(prefix="anas-ocr-")
         self._log = open(os.path.join(self._directory, "server.log"), "wb")  # noqa: SIM115  closed by release()
-        (model, _), (mmproj, _) = self._files
         self._process = subprocess.Popen(
-            [*self._server, "-m", model, "--mmproj", mmproj, "--host", self._socket(),
+            [*self._server, "-m", self._model_file, "--mmproj", self._mmproj_file, "--host", self._socket(),
              "-c", str(OCR_CONTEXT), "-np", "1", "-t", str(self.threads), "-tb", str(self.threads),
              "--jinja", "--no-webui", "--cache-ram", "0", "--ctx-checkpoints", "0",
              "--image-max-tokens", str(OCR_IMAGE_TOKENS),
