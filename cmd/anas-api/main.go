@@ -33,6 +33,7 @@ import (
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
@@ -53,6 +54,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate"
+	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -351,6 +354,8 @@ func run(logger *slog.Logger) error {
 	}
 	defer closeModules()
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
+	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations, version),
+		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
@@ -372,6 +377,7 @@ func run(logger *slog.Logger) error {
 		AssistantKeeper: assistant,
 		SystemLogs:      systemLogs,
 		WebSearch:       websearchapi.New(webSearch, websearch.NewRelease(config.WebSearch.Release), logger),
+		SystemUpdate:    systemUpdate,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -393,6 +399,8 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { mediaService.Run(background); return nil })
 	// Its last flush of transfer progress lands before transfers.db closes.
 	tasks.Go(func() error { transferService.Run(background); return nil })
+	// Installs by itself in the window the administrator chose.
+	tasks.Go(func() error { systemUpdate.Run(background, 5*time.Minute); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
 			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil, photoservice.VectorCheckInterval)
@@ -654,6 +662,55 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 		options.Secret = secret
 	}
 	return websearch.New(options), nil
+}
+
+// configuredSystemUpdate reaches the system update service through the Host
+// Agent on a NAS (docs/specs/system-update.md); development has one in
+// memory, with a newer version than its own waiting to be installed.
+func configuredSystemUpdate(config Config, operations productOperations, version string) systemupdate.Updater {
+	if config.Live() {
+		updater, ok := operations.(systemupdate.Updater)
+		if !ok {
+			return nil
+		}
+		return updater
+	}
+	return systemupdate.NewMemory(version, version+"+next", 4*time.Second)
+}
+
+// updateWork names what an install waits for: a storage plan that runs or a
+// conversion of the data volume, and an app that installs or uninstalls.
+func updateWork(storageService *storage.Service, apps appstore.Store) systemupdateapi.Work {
+	return func(ctx context.Context) []string {
+		var waiting []string
+		storageBusy := false
+		for _, plan := range storageService.UnfinishedPlans() {
+			if plan.State == storage.PlanStateRunning {
+				storageBusy = true
+			}
+		}
+		if volumes, err := storageService.ListVolumes(ctx); err == nil {
+			for _, volume := range volumes {
+				if volume.Conversion != nil && volume.Conversion.State == datavolume.ConversionRunning {
+					storageBusy = true
+				}
+			}
+		}
+		if storageBusy {
+			waiting = append(waiting, "storage")
+		}
+		if apps != nil {
+			if statuses, err := apps.Apps(ctx); err == nil {
+				for _, app := range statuses {
+					if app.Job != nil && app.Job.State == appstore.JobRunning {
+						waiting = append(waiting, "apps")
+						break
+					}
+				}
+			}
+		}
+		return waiting
+	}
 }
 
 // configuredServices reaches the host through the Host Agent on a NAS, and

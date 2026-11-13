@@ -1853,6 +1853,85 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/system/update:
+    get:
+      operationId: getSystemUpdate
+      x-anas-posture: admin
+      summary: The system update service's state (设置 → 系统更新, docs/specs/system-update.md)
+      description: Administrators only. The service runs as root apart from the Product Service, which an install restarts; the page reads this while an operation runs and again once the Product Service answers after an install. Outcomes the service recorded are written to the activity record as they are read.
+      responses:
+        '200':
+          description: The state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/system/update/actions:
+    post:
+      operationId: requestSystemUpdate
+      x-anas-posture: admin
+      summary: Check for, download, install, or go back from a version
+      description: Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before); update_waiting for install and revert while a storage plan or conversion runs or an app installs or uninstalls.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemUpdateAction'
+      responses:
+        '202':
+          description: The service took the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/system/update/settings:
+    put:
+      operationId: updateSystemUpdateSettings
+      x-anas-posture: admin
+      summary: Download by itself, install by itself, and the install window
+      description: Administrators only, from the local desktop (docs/decisions/2026-11-12-system-update-defaults.md).
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemUpdateSettings'
+      responses:
+        '200':
+          description: The state with the new settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/transfers:
     get:
       operationId: listTransfers
@@ -10346,6 +10425,7 @@ components:
         - storage
         - photo
         - family
+        - system
     ActivityAccount:
       type: object
       additionalProperties: false
@@ -10384,6 +10464,7 @@ components:
             - storage
             - photo
             - family
+            - system
             - other
         action:
           type: string
@@ -10928,6 +11009,170 @@ components:
         source:
           type: boolean
           description: This release can hand out SearXNG's source (getWebSearchSource).
+    SystemUpdatePhase:
+      type: string
+      description: 'Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check); rolling-back; rolled-back (the check of the new version failed); check-failed (the source could not be read or its signature was wrong).'
+      enum:
+        - up-to-date
+        - available
+        - downloading
+        - ready
+        - installing
+        - rolling-back
+        - rolled-back
+        - check-failed
+    SystemUpdateProblem:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          enum:
+            - unreachable
+            - signature
+            - disk_space
+            - download
+            - install
+            - check
+            - rollback
+            - staging
+            - not_installed
+        detail:
+          type: string
+          description: What apt or a-nas-check said; for disk_space, the bytes still missing.
+    SystemUpdateRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - at
+        - kind
+        - by
+      properties:
+        at:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum:
+            - updated
+            - rolled-back
+            - reverted
+            - check-failed
+            - downloaded
+            - failed
+        version:
+          type: string
+        from:
+          type: string
+        by:
+          type: string
+          description: The administrator who asked, or automatic.
+        problem:
+          $ref: '#/components/schemas/SystemUpdateProblem'
+    SystemUpdateSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - autoDownload
+        - autoInstall
+        - windowStart
+        - windowEnd
+      properties:
+        autoDownload:
+          type: boolean
+        autoInstall:
+          type: boolean
+        windowStart:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          description: Local time of day an automatic install may start from.
+        windowEnd:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          description: Local time of day it may start until; before windowStart, the window runs past midnight.
+    SystemUpdateAction:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum:
+            - check
+            - download
+            - install
+            - revert
+    SystemUpdateStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - phase
+        - running
+        - downloadBytes
+        - downloadedBytes
+        - suites
+        - records
+        - settings
+        - waiting
+      properties:
+        phase:
+          $ref: '#/components/schemas/SystemUpdatePhase'
+        running:
+          type: boolean
+          description: An operation is in progress.
+        current:
+          type: string
+          description: The installed version of a-nas.
+        previous:
+          type: string
+          description: The version before the last install that passed its check, which revert installs.
+        candidate:
+          type: string
+          description: The newest version the source offers that is newer and was not rolled back or left.
+        downloadBytes:
+          type: integer
+          format: int64
+          description: What installing the candidate downloads; 0 for a pushed local source.
+        downloadedBytes:
+          type: integer
+          format: int64
+        suites:
+          type: array
+          items:
+            type: string
+          description: The distributions the device follows, such as release and dev.
+        checkedAt:
+          type: string
+          format: date-time
+        installedAt:
+          type: string
+          format: date-time
+        target:
+          type: string
+          description: The version an operation in progress installs.
+        startedAt:
+          type: string
+          format: date-time
+        problem:
+          $ref: '#/components/schemas/SystemUpdateProblem'
+        records:
+          type: array
+          description: The last ten outcomes, newest first.
+          items:
+            $ref: '#/components/schemas/SystemUpdateRecord'
+        settings:
+          $ref: '#/components/schemas/SystemUpdateSettings'
+        waiting:
+          type: array
+          description: What an install waits for now.
+          items:
+            type: string
+            enum:
+              - storage
+              - apps
     Transfer:
       type: object
       additionalProperties: false

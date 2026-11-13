@@ -81,6 +81,9 @@ paths:
   /api/v1/web-search/license: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license" }
   /api/v1/web-search/license/text: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license~1text" }
   /api/v1/web-search/source: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1source" }
+  /api/v1/system/update: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update" }
+  /api/v1/system/update/actions: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update~1actions" }
+  /api/v1/system/update/settings: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update~1settings" }
   /api/v1/transfers: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers" }
   /api/v1/transfers/downloads: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1downloads" }
   /api/v1/transfers/{transferId}: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1{transferId}" }
@@ -432,6 +435,12 @@ components:
     WebSearchFound: { $ref: "components/web-search.yaml#/schemas/WebSearchFound" }
     WebSearchPackage: { $ref: "components/web-search.yaml#/schemas/WebSearchPackage" }
     WebSearchLicense: { $ref: "components/web-search.yaml#/schemas/WebSearchLicense" }
+    SystemUpdatePhase: { $ref: "components/system-update.yaml#/schemas/SystemUpdatePhase" }
+    SystemUpdateProblem: { $ref: "components/system-update.yaml#/schemas/SystemUpdateProblem" }
+    SystemUpdateRecord: { $ref: "components/system-update.yaml#/schemas/SystemUpdateRecord" }
+    SystemUpdateSettings: { $ref: "components/system-update.yaml#/schemas/SystemUpdateSettings" }
+    SystemUpdateAction: { $ref: "components/system-update.yaml#/schemas/SystemUpdateAction" }
+    SystemUpdateStatus: { $ref: "components/system-update.yaml#/schemas/SystemUpdateStatus" }
     Transfer: { $ref: "components/transfers.yaml#/schemas/Transfer" }
     TransferLocation: { $ref: "components/transfers.yaml#/schemas/TransferLocation" }
     TransferFailure: { $ref: "components/transfers.yaml#/schemas/TransferFailure" }

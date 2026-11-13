@@ -1101,6 +1101,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The system update service's state (设置 → 系统更新, docs/specs/system-update.md)
+         * @description Administrators only. The service runs as root apart from the Product Service, which an install restarts; the page reads this while an operation runs and again once the Product Service answers after an install. Outcomes the service recorded are written to the activity record as they are read.
+         */
+        get: operations["getSystemUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/update/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check for, download, install, or go back from a version
+         * @description Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before); update_waiting for install and revert while a storage plan or conversion runs or an app installs or uninstalls.
+         */
+        post: operations["requestSystemUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/update/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Download by itself, install by itself, and the install window
+         * @description Administrators only, from the local desktop (docs/decisions/2026-11-12-system-update-defaults.md).
+         */
+        put: operations["updateSystemUpdateSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/transfers": {
         parameters: {
             query?: never;
@@ -5415,7 +5475,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "system";
         ActivityAccount: {
             id: string;
             username: string;
@@ -5427,7 +5487,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "system" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -5657,6 +5717,74 @@ export interface components {
             packages: components["schemas"]["WebSearchPackage"][];
             /** @description This release can hand out SearXNG's source (getWebSearchSource). */
             source: boolean;
+        };
+        /**
+         * @description Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check); rolling-back; rolled-back (the check of the new version failed); check-failed (the source could not be read or its signature was wrong).
+         * @enum {string}
+         */
+        SystemUpdatePhase: "up-to-date" | "available" | "downloading" | "ready" | "installing" | "rolling-back" | "rolled-back" | "check-failed";
+        SystemUpdateProblem: {
+            /** @enum {string} */
+            code: "unreachable" | "signature" | "disk_space" | "download" | "install" | "check" | "rollback" | "staging" | "not_installed";
+            /** @description What apt or a-nas-check said; for disk_space, the bytes still missing. */
+            detail?: string;
+        };
+        SystemUpdateRecord: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "updated" | "rolled-back" | "reverted" | "check-failed" | "downloaded" | "failed";
+            version?: string;
+            from?: string;
+            /** @description The administrator who asked, or automatic. */
+            by: string;
+            problem?: components["schemas"]["SystemUpdateProblem"];
+        };
+        SystemUpdateSettings: {
+            autoDownload: boolean;
+            autoInstall: boolean;
+            /** @description Local time of day an automatic install may start from. */
+            windowStart: string;
+            /** @description Local time of day it may start until; before windowStart, the window runs past midnight. */
+            windowEnd: string;
+        };
+        SystemUpdateAction: {
+            /** @enum {string} */
+            action: "check" | "download" | "install" | "revert";
+        };
+        SystemUpdateStatus: {
+            phase: components["schemas"]["SystemUpdatePhase"];
+            /** @description An operation is in progress. */
+            running: boolean;
+            /** @description The installed version of a-nas. */
+            current?: string;
+            /** @description The version before the last install that passed its check, which revert installs. */
+            previous?: string;
+            /** @description The newest version the source offers that is newer and was not rolled back or left. */
+            candidate?: string;
+            /**
+             * Format: int64
+             * @description What installing the candidate downloads; 0 for a pushed local source.
+             */
+            downloadBytes: number;
+            /** Format: int64 */
+            downloadedBytes: number;
+            /** @description The distributions the device follows, such as release and dev. */
+            suites: string[];
+            /** Format: date-time */
+            checkedAt?: string;
+            /** Format: date-time */
+            installedAt?: string;
+            /** @description The version an operation in progress installs. */
+            target?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            problem?: components["schemas"]["SystemUpdateProblem"];
+            /** @description The last ten outcomes, newest first. */
+            records: components["schemas"]["SystemUpdateRecord"][];
+            settings: components["schemas"]["SystemUpdateSettings"];
+            /** @description What an install waits for now. */
+            waiting: ("storage" | "apps")[];
         };
         Transfer: {
             id: string;
@@ -7686,6 +7814,12 @@ export type WebSearchUpdate = components['schemas']['WebSearchUpdate'];
 export type WebSearchFound = components['schemas']['WebSearchFound'];
 export type WebSearchPackage = components['schemas']['WebSearchPackage'];
 export type WebSearchLicense = components['schemas']['WebSearchLicense'];
+export type SystemUpdatePhase = components['schemas']['SystemUpdatePhase'];
+export type SystemUpdateProblem = components['schemas']['SystemUpdateProblem'];
+export type SystemUpdateRecord = components['schemas']['SystemUpdateRecord'];
+export type SystemUpdateSettings = components['schemas']['SystemUpdateSettings'];
+export type SystemUpdateAction = components['schemas']['SystemUpdateAction'];
+export type SystemUpdateStatus = components['schemas']['SystemUpdateStatus'];
 export type Transfer = components['schemas']['Transfer'];
 export type TransferLocation = components['schemas']['TransferLocation'];
 export type TransferFailure = components['schemas']['TransferFailure'];
@@ -9995,6 +10129,90 @@ export interface operations {
             };
             401: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    getSystemUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    requestSystemUpdate: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemUpdateAction"];
+            };
+        };
+        responses: {
+            /** @description The service took the request */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateSystemUpdateSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemUpdateSettings"];
+            };
+        };
+        responses: {
+            /** @description The state with the new settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listTransfers: {
