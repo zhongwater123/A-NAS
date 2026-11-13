@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>精彩度标注</title>
+<style>
+:root {
+  --bg: #111214; --panel: #1a1b1f; --line: #2a2c31; --text: #e8e8ea; --dim: #9a9ca3;
+  --l1: #6b7280; --l2: #3b82f6; --l3: #f59e0b; --lx: #ef4444; --focus: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; display: grid; grid-template-rows: auto 1fr; }
+header { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.progress { display: flex; align-items: center; gap: 10px; color: var(--dim); }
+.bar { width: 160px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; }
+.counts span { margin-right: 10px; }
+.save { margin-left: auto; color: var(--dim); font-size: 13px; }
+.save.bad { color: var(--lx); }
+main { display: grid; grid-template-columns: minmax(420px, 1.15fr) 1fr; min-height: 0; }
+.stage { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; border-right: 1px solid var(--line); }
+.screen { position: relative; background: #000; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; }
+.screen video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.screen video.flip { transform: rotate(180deg); }
+.screen .mode { position: absolute; left: 10px; top: 8px; font-size: 12px; background: rgba(0,0,0,.6); padding: 2px 8px; border-radius: 10px; }
+.screen .tick { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--focus); opacity: .7; width: 0; }
+.where { color: var(--dim); font-size: 13px; }
+.what { font-size: 16px; }
+.what b { font-weight: 600; margin-right: 6px; color: var(--dim); }
+.process { color: var(--dim); font-size: 13px; }
+.levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.levels button { text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; cursor: pointer; font: inherit; }
+.levels button kbd { float: right; color: var(--dim); }
+.levels button small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
+.levels button.on { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
+.levels button[data-v="1"] { color: #c7cbd3; } .levels button[data-v="2"] { color: #8fb7ff; }
+.levels button[data-v="3"] { color: #ffc65c; } .levels button[data-v="x"] { color: #ff8a8a; }
+.levels button small, .levels button kbd { color: var(--dim); }
+.keys { color: var(--dim); font-size: 12px; }
+.keys kbd, .levels kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.opts { display: flex; gap: 16px; color: var(--dim); font-size: 13px; }
+.list { overflow: auto; padding: 8px 12px 40px; min-height: 0; }
+.card { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.card.done .head { color: var(--dim); }
+.head { font-size: 13px; margin-bottom: 6px; display: flex; gap: 8px; }
+.head .id { font-variant-numeric: tabular-nums; color: var(--dim); }
+.beats { display: flex; flex-wrap: wrap; gap: 6px; }
+.beat { position: relative; width: 112px; height: 63px; border-radius: 4px; overflow: hidden; cursor: pointer; background: #000; border: 2px solid transparent; padding: 0; }
+.beat img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.beat.cur { border-color: var(--focus); }
+.beat .tag { position: absolute; right: 3px; bottom: 3px; min-width: 18px; padding: 0 4px; border-radius: 3px; font-size: 12px; font-weight: 700; color: #000; text-align: center; }
+.tag.v1 { background: var(--l1); color: #fff; } .tag.v2 { background: var(--l2); color: #fff; }
+.tag.v3 { background: var(--l3); } .tag.vx { background: var(--lx); color: #fff; }
+.beat.unset::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .stage { border-right: 0; border-bottom: 1px solid var(--line); }
+  .levels { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>精彩度标注 · <span id="footage"></span></h1>
+  <div class="progress"><div class="bar" id="bar"></div><span id="done"></span></div>
+  <div class="counts" id="counts"></div>
+  <div class="save" id="save">读取中…</div>
+</header>
+<main>
+  <section class="stage">
+    <div class="screen">
+      <video id="video" muted playsinline preload="auto"></video>
+      <span class="mode" id="mode"></span>
+      <i class="tick" id="tick"></i>
+    </div>
+    <div class="where" id="where"></div>
+    <div class="what" id="what"></div>
+    <div class="process" id="process"></div>
+    <div class="levels" id="levels">
+      <button data-v="3"><kbd>3</kbd>精彩<small>值得放在开场或副歌</small></button>
+      <button data-v="2"><kbd>2</kbd>可用<small>好看，但不突出</small></button>
+      <button data-v="1"><kbd>1</kbd>平淡<small>交代、过渡或普通记录</small></button>
+      <button data-v="x"><kbd>X</kbd>有问题<small>遮挡、模糊、抖动等，不该用</small></button>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="skip" checked> 标完跳到下一个未标的</label>
+      <label><input type="checkbox" id="sound"> 声音</label>
+    </div>
+    <div class="keys">
+      <kbd>←</kbd><kbd>→</kbd> 上/下一个节拍　<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 上/下一张卡片　<kbd>空格</kbd> 从头播　<kbd>C</kbd> 播整张卡片/只播节拍　<kbd>0</kbd> 清除　<kbd>M</kbd> 声音
+    </div>
+  </section>
+  <section class="list" id="list"></section>
+</main>
+<script src="data.js"></script>
+<script>
+"use strict";
+const DATA = window.LABEL;
+const CASE = DATA.case;
+const LOCAL = `highlight:${CASE}`;
+const SHORTEST = 1.5;                       // seconds: a beat shorter than this plays on into the next
+const SCALE = { "3": "精彩", "2": "可用", "1": "平淡", "x": "有问题" };
+
+const beats = [];                           // flat, in shooting order: {beat, card, ci, bi}
+DATA.cards.forEach((card, ci) => card.beats.forEach((beat, bi) => beats.push({ beat, card, ci, bi })));
+const byId = new Map(beats.map((b, i) => [b.beat.id, i]));
+
+let labels = {};
+let cur = 0;
+let whole = false;                          // play the whole card instead of the beat
+const $ = id => document.getElementById(id);
+const video = $("video");
+
+function readLocal() {
+  try { return JSON.parse(localStorage.getItem(LOCAL) || "{}"); } catch { return {}; }
+}
+function writeLocal() {
+  try { localStorage.setItem(LOCAL, JSON.stringify({ labels, cur })); } catch { /* private window: the server still keeps them */ }
+}
+
+let saveTimer = null;
+function save() {
+  writeLocal();
+  $("save").textContent = "保存中…";
+  $("save").classList.remove("bad");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const r = await fetch("labels", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ case: CASE, scale: SCALE, updated: new Date().toISOString(), labels }) });
+      if (!r.ok) throw new Error(r.status);
+      $("save").textContent = `已保存 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+    } catch {
+      $("save").textContent = "没存到服务器，只存在这个浏览器里";
+      $("save").classList.add("bad");
+    }
+  }, 400);
+}
+
+function range(item) {
+  const { beat, card } = item;
+  if (whole) return { a: card.start, b: card.end };
+  return { a: beat.start, b: Math.min(card.end, Math.max(beat.end, beat.start + SHORTEST)) };
+}
+
+function play(fromStart = true) {
+  const item = beats[cur];
+  const src = item.card.file;
+  const { a } = range(item);
+  video.classList.toggle("flip", !!item.card.flip);
+  if (video.getAttribute("src") !== src) {
+    video.setAttribute("src", src);
+    video.onloadedmetadata = () => { video.currentTime = range(beats[cur]).a; video.play().catch(() => {}); };
+  } else if (fromStart) {
+    video.currentTime = a;
+    video.play().catch(() => {});
+  }
+  $("mode").textContent = whole ? "整张卡片" : "节拍";
+}
+video.ontimeupdate = () => {
+  const { a, b } = range(beats[cur]);
+  $("tick").style.width = `${Math.max(0, Math.min(1, (video.currentTime - a) / (b - a))) * 100}%`;
+  if (video.currentTime >= b - 0.04 || video.currentTime < a - 0.5) video.currentTime = a;
+};
+
+function show() {
+  const { beat, card, ci, bi } = beats[cur];
+  $("where").textContent = `卡片 ${card.id}（${ci + 1}/${DATA.cards.length}）· 节拍 ${bi + 1}/${card.beats.length} · ${card.scene}`
+    + `${card.upright ? " · 竖拍" : ""} · 节拍 ${(beat.end - beat.start).toFixed(1)} 秒`;
+  $("what").innerHTML = "";
+  const size = document.createElement("b");
+  size.textContent = beat.size;
+  $("what").append(size, beat.what);
+  $("process").textContent = "整张卡片：" + card.process.join(" → ");
+  for (const b of $("levels").children) b.classList.toggle("on", labels[beat.id] === b.dataset.v);
+  document.querySelectorAll(".beat.cur").forEach(e => e.classList.remove("cur"));
+  const el = document.querySelector(`.beat[data-id="${CSS.escape(beat.id)}"]`);
+  if (el) {
+    el.classList.add("cur");
+    el.scrollIntoView({ block: "nearest" });        // a smooth scroll is cut short by lazy thumbnails loading on the way
+  }
+  play();
+  writeLocal();
+}
+
+function paint(id) {
+  const el = document.querySelector(`.beat[data-id="${CSS.escape(id)}"]`);
+  if (!el) return;
+  const v = labels[id];
+  el.classList.toggle("unset", !v);
+  el.querySelector(".tag").className = v ? `tag v${v}` : "tag";
+  el.querySelector(".tag").textContent = v ? v.toUpperCase() : "";
+  const card = el.closest(".card");
+  card.classList.toggle("done", [...card.querySelectorAll(".beat")].every(b => labels[b.dataset.id]));
+}
+
+function tally() {
+  const n = beats.length;
+  const count = { "3": 0, "2": 0, "1": 0, "x": 0 };
+  for (const v of Object.values(labels)) if (v in count) count[v] += 1;
+  const done = Object.keys(labels).filter(id => byId.has(id)).length;
+  $("done").textContent = `已标 ${done} / ${n}`;
+  $("bar").innerHTML = ["3", "2", "1", "x"].map(v => `<i style="width:${count[v] / n * 100}%;background:var(--l${v})"></i>`).join("");
+  $("counts").innerHTML = ["3", "2", "1", "x"].map(v => `<span>${SCALE[v]} ${count[v]}</span>`).join("");
+}
+
+function go(i) {
+  cur = Math.max(0, Math.min(beats.length - 1, i));
+  whole = false;
+  show();
+}
+function nextUnset(from) {
+  for (let k = 1; k <= beats.length; k += 1) {
+    const i = (from + k) % beats.length;
+    if (!labels[beats[i].beat.id]) return i;
+  }
+  return Math.min(from + 1, beats.length - 1);
+}
+
+function mark(v) {
+  const id = beats[cur].beat.id;
+  if (v) labels[id] = v; else delete labels[id];
+  paint(id);
+  tally();
+  save();
+  if (v) go($("skip").checked ? nextUnset(cur) : cur + 1);
+  else show();
+}
+
+function build() {
+  const list = $("list");
+  for (const card of DATA.cards) {
+    const box = document.createElement("div");
+    box.className = "card";
+    const head = document.createElement("div");
+    head.className = "head";
+    const id = document.createElement("span");
+    id.className = "id";
+    id.textContent = card.id;
+    const scene = document.createElement("span");
+    scene.textContent = card.scene + (card.upright ? " · 竖拍" : "");
+    head.append(id, scene);
+    const row = document.createElement("div");
+    row.className = "beats";
+    for (const beat of card.beats) {
+      const b = document.createElement("button");
+      b.className = "beat unset";
+      b.dataset.id = beat.id;
+      b.title = `${beat.size} ${beat.what}`;
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.src = beat.frame;
+      img.alt = "";
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      b.append(img, tag);
+      b.onclick = () => go(byId.get(beat.id));
+      row.append(b);
+    }
+    box.append(head, row);
+    list.append(box);
+  }
+}
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (k === "1" || k === "2" || k === "3" || k === "x") mark(k);
+  else if (k === "0" || k === "backspace") mark(null);
+  else if (k === "arrowright" || k === "arrowleft") {
+    const step = k === "arrowright" ? 1 : -1;
+    if (e.shiftKey) {
+      const ci = Math.max(0, Math.min(DATA.cards.length - 1, beats[cur].ci + step));
+      go(beats.findIndex(b => b.ci === ci));
+    } else go(cur + step);
+  } else if (k === " ") play(true);
+  else if (k === "c") { whole = !whole; play(true); }
+  else if (k === "m") { $("sound").checked = !$("sound").checked; video.muted = !$("sound").checked; }
+  else return;
+  e.preventDefault();
+});
+for (const b of $("levels").children) b.onclick = () => mark(b.dataset.v);
+$("sound").onchange = () => { video.muted = !$("sound").checked; };
+
+async function start() {
+  $("footage").textContent = DATA.footage;
+  build();
+  const local = readLocal();
+  let server = {};
+  try {
+    const r = await fetch("labels", { cache: "no-store" });
+    if (r.ok) server = (await r.json()).labels || {};
+    $("save").textContent = "已连上保存服务";
+  } catch {
+    $("save").textContent = "连不上保存服务，只存在这个浏览器里";
+    $("save").classList.add("bad");
+  }
+  // The server's file is the record; marks only this browser has (the server was down) are added to it.
+  labels = { ...(local.labels || {}), ...server };
+  for (const id of Object.keys(labels)) paint(id);
+  tally();
+  if (Object.keys(labels).length > Object.keys(server).length) save();
+  cur = Number.isInteger(local.cur) && local.cur < beats.length ? local.cur : 0;
+  show();
+}
+start();
+</script>
+</body>
+</html>

@@ -31,6 +31,7 @@
 | `tools/orient.py` | 带 180° 旋转标记的视频，让 4B 判断方向 |
 | `tools/compare_page.py` | 几条成片同步对比播放的网页 |
 | `prototype/` | 第七版：挑一版与精修的网页原型（`build.py` 生成数据、`search.py` 向量搜索、`index.html`），见[剪辑第七版](../../../docs/research/video-montage-v7.md) |
+| `highlight/` | 精彩度标注：品杰每个节拍由人标“精彩、可用、平淡、有问题”，用来试精彩度对规划有没有帮助（`build.py` 生成数据、`server.py` 保存标注、`index.html`），见下面的“精彩度标注”和[精彩度试验](../../../docs/research/video-montage-highlight.md) |
 
 ## 环境
 
@@ -100,6 +101,69 @@ python tools/compare_page.py 品杰对比.html pj music-Forester-Symphony.json "
 ```
 
 新加一组素材：在 `cut.py` 的 `CASES` 里加一行（组名、索引名、剪辑要求、目标秒数、体裁、文件名），然后按上面的顺序跑。
+
+## 精彩度标注
+
+试验人工标的精彩度对规划有没有帮助：先由人给品杰的 432 个节拍（第二步可选的全部节拍，116 张可用卡片）逐个标档，再拿标注加进两步规划，和不加的剪法对比。
+
+| 档 | 含义 |
+|---|---|
+| 3 精彩 | 值得放在开场或副歌 |
+| 2 可用 | 好看，但不突出 |
+| 1 平淡 | 交代、过渡或普通记录 |
+| X 有问题 | 遮挡、模糊、抖动等，不该用 |
+
+页面按拍摄时间列出卡片和节拍，左边循环播放当前节拍（短于 1.5 秒的播到 1.5 秒，`C` 换成播整张卡片），显示景别、4B 的节拍描述和整张卡片的过程；不显示 4B 打的精彩度和亮点，免得先入为主。`rotation.json` 里旋转标记写错的视频（品杰 085）在页面里翻正。
+
+标注由 `server.py` 存在站点文件夹的 `labels-pj.json`（每次整份替换，上一份留作 `.bak`），键是 `<卡片>/<节拍>`，和 `shots-*.json` 里的节拍编号相同；浏览器本地也存一份，保存服务没开时页面会提示，下次连上时补存。
+
+生成数据（站点文件夹在仓库外，`ANAS_MONTAGE_HIGHLIGHT`，默认 `~/A-NAS-datasets/剪辑对比/精彩度标注（2026-11-13）/`）：
+
+```bash
+cd highlight && python3 build.py
+```
+
+保存服务（anas 虚拟机，端口 8768 只对本机开放）：
+
+```bash
+R="$HOME/code/A-NAS/.claude/worktrees/montage-highlight"; P="$HOME/A-NAS-datasets/剪辑对比/精彩度标注（2026-11-13）"
+docker --context colima-anas run -d --name highlight-labels -p 127.0.0.1:8768:8768 \
+  -v "$R/ai/eval/montage_v5/highlight:/app:ro" -v "$P:/site" -e PYTHONDONTWRITEBYTECODE=1 anas-ai-dev:trixie \
+  /opt/anas-ai/bin/python /app/server.py --labels /site/labels-pj.json --port 8768
+```
+
+页面（端口 8767，只对本机开放；`--proxy` 把 `labels` 转给保存服务），打开 <http://127.0.0.1:8767>：
+
+```bash
+cd "$HOME/A-NAS-datasets/剪辑对比/精彩度标注（2026-11-13）" && npx --yes http-server@14.1.1 -p 8767 -a 127.0.0.1 -c-1 --proxy http://127.0.0.1:8768
+```
+
+停止：`docker --context colima-anas rm -f highlight-labels`，页面服务按 Ctrl+C。
+
+带标注剪辑（`CUT_LABELS`，其余开关照旧；`CUT_WIDE=1` 只用横拍卡片），再统计各剪法用了多少精彩、平淡、有问题的节拍，并写一个按标注给镜头着色的对比页（在 `paths.CUTS` 里，和成片放在一起）：
+
+```bash
+CUT_WIDE=1 CUT_LABELS="$C/labels-pj.json" CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-symphony-label-1 python3 cut.py pj
+```
+
+```bash
+cd highlight && python3 report.py labels-pj.json 精彩度对比.html "精彩度试验：品杰 × Symphony" 对照:-symphony-wide-1=wide-1 加精彩度:-symphony-label-1=label-1
+```
+
+`$C` 是 `paths.CUTS`；`report.py` 的标注路径相对它。
+
+模型打的精彩度和人标比：`rate_4b.py` 让 4B 只按四档给每个节拍打分（只发关键帧，要先启动 4B），`agree.py` 算一致程度（要 SciPy 与 scikit-learn，在 anas 虚拟机的 `anas-ai-dev:trixie` 镜像里跑）：
+
+```bash
+cd highlight && python3 rate_4b.py http://127.0.0.1:8094 "$P/4b-pj.jsonl"
+```
+
+```bash
+docker --context colima-anas run --rm -v "$R/ai/eval/montage_v5/highlight:/app:ro" -v "$P:/site" -v "$HOME/A-NAS-datasets/剪辑对比/第五版:/cards:ro" \
+  anas-ai-dev:trixie /opt/anas-ai/bin/python /app/agree.py /site/labels-pj.json /site/4b-pj.jsonl /cards/cards-pj.json /site/agree-pj.json
+```
+
+结果见[精彩度试验](../../../docs/research/video-montage-highlight.md)。
 
 ## 人工复核
 

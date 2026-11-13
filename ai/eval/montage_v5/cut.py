@@ -12,6 +12,7 @@
           的卡片补；配上歌曲的选段渲染（cut_to_music）。
 
 开关：CUT_ORDER=free 不要求拍摄时间顺序，并要求同一地点的画面连续排列；CUT_TAG 给每次剪辑的文件命名；
+CUT_LABELS=<labels-pj.json> 把人标的节拍精彩度（highlight/）写进两步规划；CUT_WIDE=1 只用横拍的卡片；
 CUT_QUALITY=0 不按画质过滤；CUT_CLAUDE、CUT_CLAUDE_MODEL 指定 Claude Code 命令行和模型。
 """
 
@@ -50,6 +51,36 @@ ORDER_ASKS = (("开头、中间、结尾按拍摄时间先后安排；", ""), ("
               # places, its helicopter flight broken by roads, sheep and lakes.
               ("- 每部分的画面个数不超过", "- 同一地点的画面连续排列：切到别的地点后，不再切回之前用过的地点。比如开头是雪山，"
                "中间切到别的地方，之后又切回雪山，画面就不连贯了；\n- 每部分的画面个数不超过"))
+
+# The user's marks on each beat (highlight/, CUT_LABELS=labels-<case>.json): 3 精彩, 2 可用, 1 平淡, x 有问题.
+# Step one sees each card's best mark, step two each beat's. 2026-11-13, a test of whether marks a person
+# trusts help the plan: the 4B's own card score (it ranked the cards that set up a place under the story's)
+# and its highlight beats (#416) had been taken out.
+LABELS_FILE = os.environ.get("CUT_LABELS", "")
+LABELS = read_json(LABELS_FILE)["labels"] if LABELS_FILE else {}
+MARK = {"3": "精彩", "2": "可用", "1": "平淡", "x": "有问题"}
+CARD_MARKS = ("每行：卡片 id {where}起始时间 时长 | 场景 | 过程（这张卡片里依次发生的事）",
+              "每行：卡片 id {where}起始时间 时长 | 场景 | 过程（这张卡片里依次发生的事） | 精彩度\n"
+              "精彩度是人看过画面后标的，按卡片里最好的节拍算：精彩是有值得放在开场或高潮段的画面（括号里是精彩节拍的个数），"
+              "可用是好看但不突出，平淡是交代、过渡或普通记录，有问题是画面有遮挡、模糊、抖动，不能用。")
+PICK_MARKS = ("- 不要用片头片尾字幕、黑场或纯文字画面。",
+              "- 不要用片头片尾字幕、黑场或纯文字画面；\n"
+              "- 精彩度：开场和高潮段优先用标为精彩的卡片，精彩的卡片优先选用；衔接、交代和过渡照样可以用平淡的卡片；不要用有问题的卡片。")
+SHOTS_MARKS = ("- 这几张卡片里如果有更合适、更精彩的节拍，按需挑选，这一条优先级其次；",
+               "- 这几张卡片里如果有更合适、更精彩的节拍，按需挑选；节拍后面【】里是人看过画面后标的精彩度（精彩、可用、平淡、有问题）："
+               "符合画面要求的节拍里优先挑精彩的，其次可用；不要挑有问题的。这一条优先级其次；")
+
+
+def card_mark(cid, beats):
+    """A card's best mark for step one: 精彩 with its count, 可用, 平淡, or 有问题 when every beat is."""
+    marks = [LABELS.get(f"{cid}/{n}") for n in range(1, beats + 1)]
+    if "3" in marks:
+        return f"精彩（{marks.count('3')}）"
+    for v in ("2", "1"):
+        if v in marks:
+            return MARK[v]
+    return MARK["x"] if marks and all(m == "x" for m in marks) else ""
+
 
 # Both steps on Claude, through the Claude Code CLI with no tools, settings or MCP servers: it sees the
 # prompt alone. (The local 4B, planning 152-187 cards, took 5 of 6 New Zealand parts from the first 46.)
@@ -150,10 +181,23 @@ def poor(case):
     return out
 
 
+# 2026-11-13 (the user): the 精彩度 test cut without the phone's upright shots, both arms, since 品杰's GPT cut
+# had none and ours set them on a blurred background. Upright is read from the key frame as played.
+WIDE = os.environ.get("CUT_WIDE") == "1"
+
+
+def upright(card):
+    from PIL import Image
+
+    width, height = Image.open(card["frames"][0]).size
+    return height > width
+
+
 def usable_cards(case):
     bad = poor(case)
     return [c for c in load(case) if c["id"] not in bad
-            and not any(a - 0.01 <= c["start"] < b - 0.01 for a, b in LEFT_OUT.get((case, c["video"]), []))]
+            and not any(a - 0.01 <= c["start"] < b - 0.01 for a, b in LEFT_OUT.get((case, c["video"]), []))
+            and not (WIDE and upright(c))]
 
 
 # Step one: 方案 B's outline request on our cards, the join rules first so that the plan is made with
@@ -299,7 +343,8 @@ def pick(case):
     for c in cards:
         where = f"视频{int(c['video'])} " if many else ""
         lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {c['answer'].get('scene', '')} | "
-                     + " → ".join(c["answer"]["process"]))
+                     + " → ".join(c["answer"]["process"])
+                     + (f" | {card_mark(c['id'], len(c['answer']['beats']))}" if LABELS else ""))
     many_parts = len(m["parts"])
     user = PICK.format(instruction=instruction, total_min=sum(c["end"] - c["start"] for c in cards) / 60, n=len(cards),
                        where="所在视频 " if many else "", catalog="\n".join(lines), music=music_note(m),
@@ -309,6 +354,11 @@ def pick(case):
         for a, b in ORDER_ASKS:
             if a not in user:
                 raise ValueError(f"CUT_ORDER: the prompt no longer says {a}")
+            user = user.replace(a, b)
+    if LABELS:
+        for a, b in (CARD_MARKS[0].format(where="所在视频 " if many else ""), CARD_MARKS[1].format(where="所在视频 " if many else "")), PICK_MARKS:
+            if a not in user:
+                raise ValueError(f"CUT_LABELS: the prompt no longer says {a}")
             user = user.replace(a, b)
     ids = [c["id"] for c in cards]
     # 2026-11-09 (the user): the opening and the ending each with a reason, written before the parts.
@@ -325,7 +375,8 @@ def pick(case):
                                   "items": {"type": "string", "enum": ids}}}}}}}}}}
     answer, cost = ask_claude(PICK_SYSTEM, user, schema)
     # The order is the model's own; no program sorting after it.
-    out = {"system": PICK_SYSTEM, "user": user, "answer": answer, "cost": cost, "descriptions": described(case), "music": MUSIC}
+    out = {"system": PICK_SYSTEM, "user": user, "answer": answer, "cost": cost, "descriptions": described(case), "music": MUSIC,
+           "labels": LABELS_FILE, "wide": WIDE}
     write_json(out, path)
     print(case, "pick", cost, "段数", len(answer["parts"]), flush=True)
     return out
@@ -363,7 +414,8 @@ def shots(case):
                 # mirror the picture asked for.
                 for (j, _start, length), b in zip(units(c, CAP), a["beats"], strict=True):
                     ids.append(f"{cid}/{j}")
-                    lines.append(f"      {cid}/{j} {b['shot_size']} {length:.0f}秒 {b['what']}")
+                    mark = MARK.get(LABELS.get(f"{cid}/{j}", ""), "")
+                    lines.append(f"      {cid}/{j} {b['shot_size']} {length:.0f}秒 {b['what']}" + (f"【{mark}】" if mark else ""))
             need = min(len(ids), shots_here + 1)
             items.append({"type": "object", "required": ["beats", "shows", "link"], "properties": {
                 "beats": {"type": "array", "minItems": max(1, need), "maxItems": max(1, min(len(ids), need + 4)),
@@ -374,6 +426,10 @@ def shots(case):
     user = (f"指令：{instruction}\n成片时长：约 {target} 秒\n体裁：{style}{rules}\n大纲：{picked['design']}\n"
             "段落和画面：\n" + "\n".join(lines))
     system = SHOTS_SYSTEM.format(target=target)
+    if LABELS:
+        if SHOTS_MARKS[0] not in system:
+            raise ValueError(f"CUT_LABELS: step two no longer says {SHOTS_MARKS[0]}")
+        system = system.replace(*SHOTS_MARKS)
     # The CLI's strict schemas have no prefixItems: each part and picture becomes a named field (段落1,
     # 画面1, ...), so each picture keeps its own beats to choose from, and the answer is turned back.
     named = {"type": "object", "required": ["parts", "unmet"], "properties": {
@@ -387,6 +443,7 @@ def shots(case):
            "parts": [{"pictures": [answer["parts"][f"段落{n}"][f"画面{k}"] for k in range(1, len(items) + 1)]}
                      for n, items in enumerate(part_items, 1)]}
     out = {"system": system, "user": user, "raw": raw, "seconds": seconds, "cap": CAP, "cost": cost, "step2": "claude",
+           "labels": LABELS_FILE, "wide": WIDE,
            "descriptions": described(case), "slots": slots, "music": MUSIC,
            "answer": {"parts": [{"name": p["name"], "summary": p["summary"], "pictures": r["pictures"]}
                                 for p, r in zip(picked["parts"], raw["parts"], strict=True)],
