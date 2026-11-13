@@ -1,0 +1,14 @@
+# The product (the a-nas package) as a system extension, updated without a
+# restart. Its versions are kept outside the directory systemd-sysext reads,
+# and only the current one is linked there.
+[Source]
+Type=url-file
+Path=file:///var/lib/a-nas-updates/product/
+MatchPattern=a-nas-product_@v.raw
+
+[Target]
+Type=regular-file
+Path=/var/lib/a-nas-sysext
+MatchPattern=a-nas-product_@v.raw
+CurrentSymlink=/var/lib/extensions/a-nas-product.raw
+InstancesMax=2

@@ -20,31 +20,57 @@ fail() {
 }
 
 # The product and the Debian packages it runs on are one release (ADR 0031).
-product=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas 2>/dev/null)
-host=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-host 2>/dev/null)
-# a-nas's postinst runs this check while dpkg still calls a-nas half-configured.
-if [[ "${DPKG_MAINTSCRIPT_PACKAGE:-}" == a-nas && "$product" == half-configured\ * ]]; then
-  product="installed ${product#half-configured }"
-fi
-if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
-  pass "a-nas and a-nas-host ${product#installed }"
+# On a machine that apt installs, dpkg says which.
+package_versions() {
+  local product host console
+  product=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas 2>/dev/null)
+  host=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-host 2>/dev/null)
+  # a-nas's postinst runs this check while dpkg still calls a-nas half-configured.
+  if [[ "${DPKG_MAINTSCRIPT_PACKAGE:-}" == a-nas && "$product" == half-configured\ * ]]; then
+    product="installed ${product#half-configured }"
+  fi
+  if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
+    pass "a-nas and a-nas-host ${product#installed }"
+  else
+    fail "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
+  fi
+  # A local console's a-nas-console declares what its screen needs from Debian
+  # for the same release; apt changes it only when the command names it. In the
+  # middle of one apt run it may be unpacked and not yet configured.
+  console=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-console 2>/dev/null)
+  case "${console%% *}" in
+    '' | not-installed | config-files) ;;
+    *)
+      if [[ "${console#* }" == "${product#* }" ]]; then
+        pass "a-nas-console ${console#* }"
+      else
+        fail "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
+      fi
+      ;;
+  esac
+}
+# On a device that runs the A-NAS image (ADR 0034 decision 2) the product is
+# a system extension over the image's /usr, and dpkg's records on the
+# persistent root stay as the first image left them: the image's and the
+# extension's release files say which.
+image_versions() {
+  local base product release=/usr/lib/extension-release.d/extension-release.a-nas-product
+  # shellcheck disable=SC1091 # the image's own release file
+  base=$(. /usr/lib/os-release && echo "${IMAGE_VERSION:-}")
+  if [[ -f "$release" ]]; then
+    # shellcheck disable=SC1090 # the extension's release file
+    product=$(. "$release" && echo "${A_NAS_VERSION:-}")
+    pass "a-nas ${product:-of unknown version} on the A-NAS image $base"
+  else
+    fail "the A-NAS image $base has no product merged: see systemd-sysext status and journalctl -u systemd-sysext"
+  fi
+}
+# shellcheck disable=SC1091 # mkosi quotes the values; read the file as systemd does
+if [[ "$(. /usr/lib/os-release 2>/dev/null && echo "${IMAGE_ID:-}")" == a-nas ]]; then
+  image_versions
 else
-  fail "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
+  package_versions
 fi
-# A local console's a-nas-console declares what its screen needs from Debian
-# for the same release; apt changes it only when the command names it. In the
-# middle of one apt run it may be unpacked and not yet configured.
-console=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-console 2>/dev/null)
-case "${console%% *}" in
-  '' | not-installed | config-files) ;;
-  *)
-    if [[ "${console#* }" == "${product#* }" ]]; then
-      pass "a-nas-console ${console#* }"
-    else
-      fail "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
-    fi
-    ;;
-esac
 
 # Accounts that own data keep fixed IDs (ADR 0011); the others cannot log in.
 for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do

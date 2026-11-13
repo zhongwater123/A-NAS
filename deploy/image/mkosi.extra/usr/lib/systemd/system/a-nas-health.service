@@ -1,0 +1,17 @@
+# The boot health check of an image version: a-nas-check, from the product's
+# extension. Only a boot that systemd-boot counts is assessed, a new version's
+# first boots: a failure reboots, so the next try, or the version before,
+# starts without anyone at the device. A blessed boot is not assessed, so a
+# check that fails later never reboots a device in a loop; the update service
+# reports it.
+[Unit]
+Description=A-NAS boot health check
+ConditionPathExists=/sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+After=multi-user.target
+Before=boot-complete.target
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/a-nas-check
