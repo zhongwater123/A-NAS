@@ -226,9 +226,10 @@ describe("the VNAS window", () => {
     await emit("anas.approval", card("awaiting"));
     expect(shown()).toBe("waiting");
     expect(clip()).toBe("工作状态-原地踱步张望");
+    // Answered at the same step: the turn goes on with the card's clip, not the step's again from the start.
     await emit("anas.approval", card("approved"));
     expect(shown()).toBe("working");
-    expect(clip()).toBe("东张西望");
+    expect(clip()).toBe("工作状态-原地踱步张望");
     await emit("message.complete", { status: "complete" });
     expect(shown()).toBe("success");
     expect(clip()).toBe("放烟花");
