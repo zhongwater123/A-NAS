@@ -281,6 +281,12 @@ function asleepFromTheStart(animations: Animations): string | null {
  */
 export const STEP_MIN_MS = 1500;
 
+/**
+ * A step's clip plays once and holds its closing pose, its last frame, then plays again after this long while
+ * the step lasts (patch 0039), rather than start over at every end. Initial value, to be tuned.
+ */
+export const STEP_REPLAY_MS = 8000;
+
 /** The longest the companion waits for its wake-up clip to play before it tells what waited. */
 const WAKE_CLIP_WAIT_MS = 12_000;
 
@@ -483,6 +489,7 @@ function Card({
       ...pet,
       animations: opening ? { ...animations, idle: [opening, ...animations.idle] } : animations,
       animationWeights: walkable ? companionWeights : { ...companionWeights, move: 0 },
+      stepReplayMs: STEP_REPLAY_MS,
       ...(pool ? { assetVersion: pool } : {}),
     }),
     [animations, opening, pool, walkable],

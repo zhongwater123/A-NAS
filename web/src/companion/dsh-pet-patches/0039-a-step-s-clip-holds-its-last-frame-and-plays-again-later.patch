@@ -1,0 +1,190 @@
+A step's clip holds its last frame, and plays again later.
+
+A step's own clip looped for as long as the step lasted, so a long step played
+the same gesture from the start over and over. With stepReplayMs set (the page
+sets it), the clip plays once and holds its last frame, its closing pose, and
+plays again after stepReplayMs if the same step still asks for it and nothing
+else has played since. A frozen or sleeping card skips that replay; when the
+freeze ends on the same step, held at its end, the wait starts again. A clip held
+at its end has no end to come, so when the stage stops it the chain goes on from
+it at once. Without stepReplayMs the clip loops as before.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -60,7 +60,7 @@ export interface OwnAnimationDeps {
+   /** A/B 双缓冲的 B 元素。 */
+   videoB: () => HTMLVideoElement | null;
+   /** 该宠物的成品配置：素材根、id 与动画池都从它取。 */
+-  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations };
++  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations; stepReplayMs?: number };
+   /** 当前动画名。 */
+   currentAnim: () => string;
+   /** 工作状态叶子；未启用联动时为空。 */
+@@ -415,6 +415,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       workState: deps.workStatus()?.state,
+       // A-NAS: the clip the step asks for.
+       workAnim: deps.workStatus()?.anim ?? null,
++      // A-NAS: which holds its last frame when the page asks for that.
++      holdSteps: deps.cfg().stepReplayMs !== undefined,
+     });
+     const petId = deps.cfg().id;
+     // A-NAS: dsh-pet's trace lines only in a development build.
+@@ -441,6 +443,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       if (el === null) return;
+       el.loop = false;
+       el.onended = (event: Event) => deps.onEnded(handleEnded(event));
++      // A-NAS: a step's clip held at its last frame (work-hold) has ended already and ends no more: the chain
++      // goes on from it now, as at its end.
++      if (el.ended && pending === null)
++        queueMicrotask(() => {
++          if (frontVideo() === el && el.ended && pending === null) deps.onEnded(handleEnded());
++        });
+     },
+     setCueUrl: (url) => {
+       cueUrl = url;
+diff --git a/client/pet/animation/cues.ts b/client/pet/animation/cues.ts
+--- a/client/pet/animation/cues.ts
++++ b/client/pet/animation/cues.ts
+@@ -14,6 +14,8 @@ export type EndedCue =
+   | { kind: 'ignore' }
+   | { kind: 'work-rotate'; anim: string }
+   | { kind: 'work-replay' }
++  // A-NAS: a step's own clip has played once: it holds its last frame until it plays again.
++  | { kind: 'work-hold' }
+   | { kind: 'event-done' }
+   | { kind: 'turn' }
+   | { kind: 'interaction-done' }
+@@ -32,6 +34,8 @@ export interface EndedInput {
+   workState: string | null | undefined;
+   /** A-NAS: the clip the current step asks for; null or missing = one of its stage's. */
+   workAnim?: string | null;
++  /** A-NAS: whether a step's own clip holds its last frame at its end rather than play on. */
++  holdSteps?: boolean;
+ }
+ 
+ /** 工作状态是否处在「非终态」：终态（success / error）与空闲都不续播档位动画。 */
+@@ -48,7 +52,8 @@ export function decideEndedCue(input: EndedInput): EndedCue {
+   const { animations, current, workState } = input;
+   // A-NAS: a step's own clip, which need not be in the stage's pool, plays on while the stage lasts;
+   // otherwise it would end as a random clip and the random chain would drop the stage.
+-  if (isWorkActive(workState) && input.workAnim != null && current === input.workAnim) return { kind: 'work-replay' };
++  if (isWorkActive(workState) && input.workAnim != null && current === input.workAnim)
++    return input.holdSteps === true ? { kind: 'work-hold' } : { kind: 'work-replay' };
+   const isEvent = isEventAnim(animations.events, current);
+   if (isEvent && isWorkActive(workState)) {
+     // 多候选档位播完轮换到下一候选，长时间状态不单段重复。
+diff --git a/client/pet/card/animation-flow.ts b/client/pet/card/animation-flow.ts
+--- a/client/pet/card/animation-flow.ts
++++ b/client/pet/card/animation-flow.ts
+@@ -75,6 +75,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+     // stage effect skips the ticks of a frozen or sleeping card, so a turn that ended meanwhile would
+     // otherwise leave a step's looping clip to play at the next end, after the turn.
+     const deferredRef = useRef<{ name: string; once: boolean } | null>(null);
++    // A-NAS: the wait of a step's clip held at its last frame (work-hold), and which hold it is.
++    const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | undefined; hold: number }>({
++      timer: undefined,
++      hold: 0,
++    });
+     const deferStage = (stage: { name: string; once: boolean } | null): void => {
+       deferredRef.current = stage;
+     };
+@@ -89,6 +94,29 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       if (state.sleeping) deferredRef.current = null;
+       sleep().apply(state);
+     };
++    /**
++     * A-NAS: the step's clip in front, held at its last frame, plays again after stepReplayMs, if the same step
++     * still asks for it and nothing has played since; a frozen or sleeping card skips it, and its resume
++     * (resumeWorkStatusAnim) starts the wait again.
++     */
++    const holdThenReplay = (): void => {
++      const card = hub.card;
++      const clip = card.animRef.current;
++      const front = hub.ownAnim.frontVideo();
++      const hold = (holdRef.current.hold += 1);
++      clearTimeout(holdRef.current.timer);
++      holdRef.current.timer = setTimeout(() => {
++        if (holdRef.current.hold !== hold) return;
++        const ws = workStatusRef.current;
++        const active = ws?.state != null && ws.state !== 'success' && ws.state !== 'error';
++        if (!active || ws?.anim !== clip || card.animRef.current !== clip) return;
++        if (hub.ownAnim.isFrozen() || sleeping() || front === null || !front.ended) return;
++        if (hub.ownAnim.frontVideo() !== front) return;
++        card.actions.setOnce(true);
++        card.actions.bumpSeq();
++      }, hub.cfg().stepReplayMs ?? 0);
++    };
++
+     /** 非终态工作状态回到档位循环；冻结、空闲与终态都返回 false。 */
+     const resumeWorkStatusAnim = (): boolean => {
+       const card = hub.card;
+@@ -109,7 +137,15 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
+       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
+-      card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
++      // A-NAS: a step's own clip plays once and holds its last frame, when the page asks for that.
++      card.actions.setOnce(
++        own === null ? Array.isArray(slot) && slot.length > 1 : hub.cfg().stepReplayMs !== undefined,
++      );
++      // A-NAS: back on the step whose clip is in front, held at its end (the replay due meanwhile was skipped):
++      // it plays again after stepReplayMs from now.
++      const held = hub.ownAnim.frontVideo()?.ended === true;
++      if (own !== null && name === card.animRef.current && hub.cfg().stepReplayMs !== undefined && held)
++        holdThenReplay();
+       card.actions.setAnim(name);
+       return true;
+     };
+@@ -176,6 +212,12 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+         card.actions.bumpSeq();
+         return;
+       }
++      // A-NAS: a step's own clip has played once: it holds its last frame (an ended video shows it) and
++      // plays again later (holdThenReplay).
++      if (cue.kind === 'work-hold') {
++        holdThenReplay();
++        return;
++      }
+       if (cue.kind === 'event-done') {
+         // 事件动画抢占播完后立即恢复档位循环，否则长事件期间会误入随机链。
+         if (resumeWorkStatusAnim()) return;
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -116,16 +116,18 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+       // 循环语义：终态播一遍；非终态单候选无限循环，多候选播一遍后由播完判定轮换。
+       // A-NAS: a step's own clip loops like a single one.
+       const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
++      // A-NAS: or plays once and holds its last frame, when the page asks for that (stepReplayMs).
++      const holding = own !== null && !terminal && cfg.stepReplayMs !== undefined;
+       workAnimRef.current = own;
+       // A-NAS: a clip VNAS asked for plays to its end, as its command is answered by it; the stage's clip
+       // follows it (animation-flow applyEndedCue). The stage switched it away, which answered the command
+       // cancelled, whenever the turn took a step or ended while it played.
+       if (hub.ownAnim.commandClip()) {
+-        hub.deferStage({ name, once: terminal || rotating });
++        hub.deferStage({ name, once: terminal || rotating || holding });
+         return;
+       }
+       hub.deferStage(null);
+-      card.actions.setOnce(terminal || rotating);
++      card.actions.setOnce(terminal || rotating || holding);
+       card.actions.setAnim(name);
+     };
+ 
+diff --git a/client/pet/types.ts b/client/pet/types.ts
+--- a/client/pet/types.ts
++++ b/client/pet/types.ts
+@@ -16,6 +16,11 @@ export type RuntimePet = Pet & {
+   physics: PhysicsParams;
+   /** A-NAS: the installed animation pool, which the animation URLs carry (see animation/assets.ts). */
+   assetVersion?: string;
++  /**
++   * A-NAS: a step's own clip plays once and holds its last frame, and plays again after this many ms while
++   * the step lasts; without it the clip loops, as dsh-pet's stage clips do.
++   */
++  stepReplayMs?: number;
+ };
+ 
+ /** 注入的 react 能力：由模块工厂提供，本目录不直接 import react 运行时。 */

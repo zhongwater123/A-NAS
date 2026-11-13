@@ -86,6 +86,9 @@ type BatchInput struct {
 	Source   string
 	Required int
 	Rubric   string
+	// Dimensions are the 打分项 to score, overall among them; none is
+	// overall alone.
+	Dimensions []string
 }
 
 const (
@@ -106,24 +109,31 @@ func (input *BatchInput) normalize() error {
 	case utf8.RuneCountInString(input.Rubric) > maxRubricRunes:
 		return invalid("the scoring guide has at most %d characters", maxRubricRunes)
 	}
-	return nil
+	dimensions, err := normalizeDimensions(input.Dimensions)
+	input.Dimensions = dimensions
+	return err
 }
 
 // Batch is a batch as administrators see it.
 type Batch struct {
-	ID        string
-	Name      string
-	Source    string
-	Required  int
-	Rubric    string
-	State     string
-	CreatedBy string
-	CreatedAt time.Time
+	ID         string
+	Name       string
+	Source     string
+	Required   int
+	Rubric     string
+	Dimensions []string
+	State      string
+	CreatedBy  string
+	CreatedAt  time.Time
 	// Import counts the files found in the source and how far preview
 	// rendering is; Files is 0 until the folder was scanned.
 	Files, Imported, Skipped int
+	// SkippedBy counts the skipped files by reason.
+	SkippedBy map[string]int
 	// Photos excludes anchors; Complete have Required raters, Started some.
 	Photos, Anchors, Complete, Started, Flagged int
+	// Answers counts every answer; with one, the dimensions are fixed.
+	Answers int
 }
 
 // CreateBatch starts importing input.Source as a new batch.
@@ -135,8 +145,9 @@ func (s *Store) CreateBatch(ctx context.Context, by string, input BatchInput) (B
 		return Batch{}, invalid("folder %q is not in the scoring folder", input.Source)
 	}
 	id := "b" + randomToken(6)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO batches (id, name, source, required, rubric, state, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, 'importing', ?, ?)`, id, input.Name, input.Source, input.Required, input.Rubric, by, s.timestamp())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO batches (id, name, source, required, rubric, dimensions, state, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'importing', ?, ?)`, id, input.Name, input.Source, input.Required, input.Rubric,
+		joinDimensions(input.Dimensions), by, s.timestamp())
 	if err != nil {
 		return Batch{}, err
 	}
@@ -149,6 +160,9 @@ type BatchPatch struct {
 	Name     *string
 	Rubric   *string
 	Required *int
+	// Dimensions change only while the batch has no answer: an answer
+	// scores the dimensions there were.
+	Dimensions []string
 	// State is "open" or "closed"; a batch that is importing opens itself.
 	State *string
 }
@@ -159,7 +173,7 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 	if err != nil {
 		return Batch{}, err
 	}
-	input := BatchInput{Name: current.Name, Source: current.Source, Required: current.Required, Rubric: current.Rubric}
+	input := BatchInput{Name: current.Name, Source: current.Source, Required: current.Required, Rubric: current.Rubric, Dimensions: current.Dimensions}
 	if patch.Name != nil {
 		input.Name = *patch.Name
 	}
@@ -169,8 +183,14 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 	if patch.Required != nil {
 		input.Required = *patch.Required
 	}
+	if patch.Dimensions != nil {
+		input.Dimensions = patch.Dimensions
+	}
 	if err := input.normalize(); err != nil {
 		return Batch{}, err
+	}
+	if !slices.Equal(input.Dimensions, current.Dimensions) && current.Answers > 0 {
+		return Batch{}, ErrInUse
 	}
 	state := current.State
 	if patch.State != nil {
@@ -182,10 +202,16 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 		}
 		state = *patch.State
 	}
-	_, err = s.db.ExecContext(ctx, "UPDATE batches SET name = ?, rubric = ?, required = ?, state = ? WHERE id = ?",
-		input.Name, input.Rubric, input.Required, state, id)
+	// The answer check and the change are one statement, so that a first
+	// answer cannot slip in between and score dimensions that are gone.
+	result, err := s.db.ExecContext(ctx, `UPDATE batches SET name = ?, rubric = ?, required = ?, state = ?, dimensions = ?
+		WHERE id = ? AND (dimensions = ? OR NOT EXISTS (SELECT 1 FROM ratings WHERE batch_id = ?))`,
+		input.Name, input.Rubric, input.Required, state, joinDimensions(input.Dimensions), id, joinDimensions(input.Dimensions), id)
 	if err != nil {
 		return Batch{}, err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+		return Batch{}, errors.Join(err, ErrInUse)
 	}
 	return s.Batch(ctx, id)
 }
@@ -238,7 +264,8 @@ func (s *Store) DeleteBatch(ctx context.Context, id string) error {
 	return nil
 }
 
-const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.state, b.created_by, b.created_at,
+const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.dimensions, b.state, b.created_by, b.created_at,
+	(SELECT count(*) FROM ratings r WHERE r.batch_id = b.id),
 	(SELECT count(*) FROM import_files f WHERE f.batch_id = b.id),
 	(SELECT count(*) FROM import_files f WHERE f.batch_id = b.id AND f.status = 'done'),
 	(SELECT count(*) FROM import_files f WHERE f.batch_id = b.id AND f.status = 'skipped'),
@@ -250,14 +277,36 @@ const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.state, b.c
 
 func scanBatch(row interface{ Scan(...any) error }) (Batch, error) {
 	var batch Batch
-	var created string
-	err := row.Scan(&batch.ID, &batch.Name, &batch.Source, &batch.Required, &batch.Rubric, &batch.State, &batch.CreatedBy, &created,
-		&batch.Files, &batch.Imported, &batch.Skipped, &batch.Photos, &batch.Anchors, &batch.Complete, &batch.Started, &batch.Flagged)
+	var created, dimensions string
+	err := row.Scan(&batch.ID, &batch.Name, &batch.Source, &batch.Required, &batch.Rubric, &dimensions, &batch.State, &batch.CreatedBy, &created,
+		&batch.Answers, &batch.Files, &batch.Imported, &batch.Skipped, &batch.Photos, &batch.Anchors, &batch.Complete, &batch.Started, &batch.Flagged)
 	if err != nil {
 		return Batch{}, err
 	}
 	batch.CreatedAt, _ = time.Parse(sqlitedb.TimeLayout, created)
+	batch.Dimensions = splitDimensions(dimensions)
+	batch.SkippedBy = map[string]int{}
 	return batch, nil
+}
+
+// skippedBy fills in the batches' skipped files by reason.
+func (s *Store) skippedBy(ctx context.Context, batches []Batch) error {
+	byID := make(map[string]*Batch, len(batches))
+	for i := range batches {
+		byID[batches[i].ID] = &batches[i]
+	}
+	return each(ctx, s.db, `SELECT batch_id, coalesce(reason, ''), count(*) FROM import_files WHERE status = 'skipped'
+		GROUP BY batch_id, reason`, nil, func(rows *sql.Rows) error {
+		var id, reason string
+		var count int
+		if err := rows.Scan(&id, &reason, &count); err != nil {
+			return err
+		}
+		if batch := byID[id]; batch != nil {
+			batch.SkippedBy[reason] = count
+		}
+		return nil
+	})
 }
 
 // Batch returns one batch.
@@ -266,7 +315,12 @@ func (s *Store) Batch(ctx context.Context, id string) (Batch, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return Batch{}, ErrNotFound
 	}
-	return batch, err
+	if err != nil {
+		return Batch{}, err
+	}
+	batches := []Batch{batch}
+	err = s.skippedBy(ctx, batches)
+	return batches[0], err
 }
 
 // Batches lists every batch, newest first.
@@ -284,14 +338,20 @@ func (s *Store) Batches(ctx context.Context) ([]Batch, error) {
 		}
 		batches = append(batches, batch)
 	}
-	return batches, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// The single connection is free again only once the rows are closed.
+	_ = rows.Close()
+	return batches, s.skippedBy(ctx, batches)
 }
 
 // RaterBatch is an open batch as a rater sees it: nothing about others.
 type RaterBatch struct {
-	ID     string
-	Name   string
-	Rubric string
+	ID         string
+	Name       string
+	Rubric     string
+	Dimensions []string
 	// Rated counts the rater's own ratings, including skips and marks.
 	Rated int
 	// Finished is set when no photo of the batch is left for this rater.
@@ -308,13 +368,15 @@ func (s *Store) OpenBatches(ctx context.Context, rater string) ([]RaterBatch, er
 		required int
 	}
 	var batches []open
-	err := each(ctx, s.db, `SELECT b.id, b.name, b.rubric, b.required,
+	err := each(ctx, s.db, `SELECT b.id, b.name, b.rubric, b.dimensions, b.required,
 		(SELECT count(*) FROM ratings r WHERE r.batch_id = b.id AND r.rater = ? AND r.superseded_at IS NULL)
 		FROM batches b WHERE b.state = 'open' ORDER BY b.created_at DESC, b.id`, []any{rater}, func(rows *sql.Rows) error {
 		var batch open
-		if err := rows.Scan(&batch.ID, &batch.Name, &batch.Rubric, &batch.required, &batch.Rated); err != nil {
+		var dimensions string
+		if err := rows.Scan(&batch.ID, &batch.Name, &batch.Rubric, &dimensions, &batch.required, &batch.Rated); err != nil {
 			return err
 		}
+		batch.Dimensions = splitDimensions(dimensions)
 		batches = append(batches, batch)
 		return nil
 	})

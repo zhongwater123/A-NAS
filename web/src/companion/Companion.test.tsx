@@ -9,7 +9,7 @@ import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
-import { STEP_MIN_MS } from "./petCard";
+import { STEP_MIN_MS, STEP_REPLAY_MS } from "./petCard";
 import { companionMode, resetCompanionMode, setCompanionMode } from "./quiet";
 import {
   companionReady,
@@ -304,16 +304,17 @@ describe("the companion on the desktop", () => {
     });
     await plays("写代码");
     await ready(videos);
-    // Paused, the pet does not follow the next step; back, it plays that step's clip on and on.
+    // Paused, the pet does not follow the next step; back, it plays that step's clip (once: it holds its
+    // closing pose at its end, and plays again later).
     hide(true);
     act(() => reportEvent("live0001", "tool.start", { name: "search_files", tool_id: "c2" }));
     hide(false);
     await plays("照镜子");
     await ready(videos);
-    expect(front(videos).loop).toBe(true);
+    expect(front(videos).loop).toBe(false);
     // The turn ends without a success or an error: the clip plays to its end, then idle.
     act(() => reportEvent("live0001", "message.complete", { status: "interrupted" }));
-    await waitFor(() => expect(front(videos).loop).toBe(false));
+    await settle();
     fetched = [];
     act(() => fireEvent(front(videos), new Event("ended")));
     await plays(IDLE);
@@ -728,6 +729,88 @@ describe("what VNAS asks of the companion", () => {
       expect(fetched).toEqual([]);
     });
 
+    it(`holds a step's closing pose at its clip's end, and plays it again ${STEP_REPLAY_MS} ms later`, async () => {
+      serve([IDLE, "写代码"]);
+      const { videos } = await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      const shown = front(videos);
+      expect(shown.loop).toBe(false);
+      const asked = vi.spyOn(globalThis, "fetch");
+      const replays = () =>
+        asked.mock.calls.filter(([url]) =>
+          decodeURIComponent(String(url instanceof Request ? url.url : url)).includes("写代码"),
+        ).length;
+      // An ended video shows its last frame (jsdom plays none).
+      Object.defineProperty(shown, "ended", { configurable: true, get: () => true });
+      vi.useFakeTimers({ shouldClearNativeTimers: true });
+      try {
+        act(() => fireEvent(shown, new Event("ended")));
+        act(() => vi.advanceTimersByTime(STEP_REPLAY_MS - 1));
+        expect(replays()).toBe(0);
+        act(() => vi.advanceTimersByTime(1));
+        expect(replays()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it(`plays a held step again ${STEP_REPLAY_MS} ms after a rest that skipped its replay`, async () => {
+      serve([IDLE, "写代码"]);
+      const { videos } = await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      const shown = front(videos);
+      const asked = vi.spyOn(globalThis, "fetch");
+      const replays = () =>
+        asked.mock.calls.filter(([url]) =>
+          decodeURIComponent(String(url instanceof Request ? url.url : url)).includes("写代码"),
+        ).length;
+      Object.defineProperty(shown, "ended", { configurable: true, get: () => true });
+      vi.useFakeTimers({ shouldClearNativeTimers: true });
+      try {
+        act(() => fireEvent(shown, new Event("ended")));
+        // The page rests (hidden) while the replay falls due: it is skipped.
+        hide(true);
+        act(() => vi.advanceTimersByTime(STEP_REPLAY_MS));
+        expect(replays()).toBe(0);
+        // Back: the wait starts again.
+        hide(false);
+        act(() => vi.advanceTimersByTime(STEP_REPLAY_MS - 1));
+        expect(replays()).toBe(0);
+        act(() => vi.advanceTimersByTime(1));
+        expect(replays()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("goes back to idle when a small turn ends with a step's clip held at its end", async () => {
+      serve([IDLE, "写代码"]);
+      const { videos } = await mount();
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+      });
+      await plays("写代码");
+      await ready(videos);
+      const shown = front(videos);
+      Object.defineProperty(shown, "ended", { configurable: true, get: () => true });
+      act(() => fireEvent(shown, new Event("ended")));
+      fetched = [];
+      act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+      await plays(IDLE);
+      expect(fetched).toEqual([IDLE]);
+    });
+
     it("ends a small turn with its check alone, the step's clip played out", async () => {
       serve([IDLE, "写代码", "放烟花", "工作状态-雀跃庆祝"]);
       const { root, videos } = await mount();
@@ -760,7 +843,7 @@ describe("what VNAS asks of the companion", () => {
       const shown = performance.now();
       fetched = [];
       act(() => {
-        reportEvent("live0001", "tool.start", { name: "browser_snapshot", tool_id: "c2" });
+        reportEvent("live0001", "tool.start", { name: "mcp__desktop__snapshot", tool_id: "c2" });
         reportEvent("live0001", "tool.start", { name: "mcp__anas__submit_changes", tool_id: "c3" });
       });
       await settle();

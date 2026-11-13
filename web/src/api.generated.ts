@@ -2234,6 +2234,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/modules/scoring/claims/{token}/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The photo behind one of the caller's own claims at its full size, for judging sharpness: only in batches that score sharpness
+         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+         */
+        get: operations["getScoringClaimFull"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules/scoring/claims/{token}/thumbnail": {
         parameters: {
             query?: never;
@@ -2319,7 +2339,7 @@ export interface paths {
         delete: operations["deleteScoringBatch"];
         options?: never;
         head?: never;
-        /** Rename a batch, change its guide or number of raters, or close and reopen it */
+        /** Rename a batch, change its guide, number of raters or, before its first answer, 打分项, or close and reopen it */
         patch: operations["updateScoringBatch"];
         trace?: never;
     };
@@ -2364,8 +2384,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A zip of manifest.json, images.jsonl, ratings.jsonl (every answer, including replaced ones) and raters.jsonl */
+        /** A zip of one table, ratings.csv or ratings.jsonl, with a row per answer (a photo and a rater), and manifest.json describing the batch, the rows and every column */
         get: operations["exportScoringBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/export/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many rows an export has: current scores, and those each include adds */
+        get: operations["getScoringExportSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6272,12 +6309,15 @@ export interface components {
             admin: boolean;
             /** @description An administrator chose the caller as a rater. */
             rater: boolean;
+            /** @description Every 打分项 a batch can choose, in order. */
+            dimensions: components["schemas"]["ScoringDimensions"];
         };
         ScoringRaterBatch: {
             id: string;
             name: string;
             /** @description The administrator's scoring guide. */
             rubric: string;
+            dimensions: components["schemas"]["ScoringDimensions"];
             /** @description The caller's own answers in the batch, skips and marks included. */
             rated: number;
             /** @description No photo of the batch is left for the caller. */
@@ -6293,7 +6333,9 @@ export interface components {
         ScoringRecentScore: {
             /** @description The claim the score answered; its thumbnail and preview are the rater's own. */
             token: string;
+            /** @description The overall score. */
             score: number;
+            scores: components["schemas"]["ScoringScores"];
             /** @description The preview's width, for the thumbnail's proportions. */
             width: number;
             height: number;
@@ -6324,9 +6366,11 @@ export interface components {
              * @enum {string}
              */
             kind: "score" | "skip" | "flag";
-            /** @description Only with kind score: 0 to 5 with at most two decimals; more decimals are refused (validation_failed). */
+            /** @description Only with kind score: overall, 0 to 5 with at most two decimals; more decimals are refused (validation_failed). */
             score?: number;
-            /** @description From the photo appearing to the answer. */
+            /** @description Only with kind score: exactly the batch's 打分项 other than overall (validation_failed otherwise). */
+            scores?: components["schemas"]["ScoringScores"];
+            /** @description How long the photo was looked at before the answer: from it appearing, without the time the page was hidden or the scoring guide open. */
             viewMs: number;
             viewport?: components["schemas"]["ScoringSize"];
             display?: components["schemas"]["ScoringSize"];
@@ -6340,6 +6384,7 @@ export interface components {
             /** @description How many raters each photo needs. */
             required: number;
             rubric: string;
+            dimensions: components["schemas"]["ScoringDimensions"];
             /** @enum {string} */
             state: "importing" | "open" | "closed";
             /** Format: date-time */
@@ -6348,8 +6393,13 @@ export interface components {
                 /** @description Files found in the folder; 0 until it was scanned. */
                 files: number;
                 imported: number;
-                /** @description Unsupported, unreadable or undecodable files, and anchors without a score in their name. */
                 skipped: number;
+                /** @description The skipped files by reason, most first: too_small (a photo to score whose longer side is under 2400 pixels), unsupported_type, undecodable, too_large, unreadable, missing, not_a_file, anchor_name (an anchor without a score in its name). */
+                skippedBy: {
+                    /** @enum {string} */
+                    reason: "too_small" | "unsupported_type" | "undecodable" | "too_large" | "unreadable" | "missing" | "not_a_file" | "anchor_name";
+                    count: number;
+                }[];
             };
             /** @description Distinct photos to score, anchors excluded. */
             photos: number;
@@ -6360,17 +6410,23 @@ export interface components {
             started: number;
             /** @description Photos a rater marked as having a problem. */
             flagged: number;
+            /** @description Answers of every kind; once there is one, the batch's 打分项 can no longer change. */
+            answers: number;
         };
         ScoringBatchInput: {
             name: string;
             source: string;
             required: number;
             rubric: string;
+            /** @description Only overall when left out. */
+            dimensions?: components["schemas"]["ScoringDimensionChoice"];
         };
         ScoringBatchPatch: {
             name?: string;
             rubric?: string;
             required?: number;
+            /** @description Refused with batch_in_use once the batch has an answer. */
+            dimensions?: components["schemas"]["ScoringDimensionChoice"];
             /** @enum {string} */
             state?: "open" | "closed";
         };
@@ -6397,20 +6453,14 @@ export interface components {
             flags: number;
             /** @description Answers to photos shown again to check consistency. */
             repeats: number;
+            /** @description Over the scored photos, each with every 打分项. */
             medianViewMs: number;
-            mean: number;
-            standardDeviation: number;
-            /** @description Correlation with the other raters' mean on the same photos; null below 20 such photos. */
-            agreement: number | null;
-            agreementPhotos: number;
-            /** @description Mean absolute difference between a repeat and the current score of that photo; null without repeats. */
-            repeatDifference: number | null;
-            /** @description Share of scores given within a second. */
+            /** @description Share of scored photos answered within a second. */
             fastShare: number;
-            /** @description Longest run of the same score in a row. */
-            longestRun: number;
             /** Format: date-time */
             lastAt: string;
+            /** @description One per 打分项 of the batch, in its order. */
+            dimensions: components["schemas"]["ScoringDimensionStats"][];
         };
         PhotoLibrary: {
             id: string;
@@ -7545,6 +7595,55 @@ export interface components {
         FamilyAssetIDs: {
             assetIds: string[];
         };
+        /**
+         * @description What a photo is scored on (打分项): overall (总分) in every batch, then the others a batch chose, always in this order.
+         * @enum {string}
+         */
+        ScoringDimensionID: "overall" | "composition" | "light_color" | "sharpness" | "narrative" | "preference";
+        ScoringDimension: {
+            id: components["schemas"]["ScoringDimensionID"];
+            /** @description The name raters see, such as 构图. */
+            name: string;
+        };
+        /** @description A batch's 打分项 in the order raters score them; the first is always overall. */
+        ScoringDimensions: components["schemas"]["ScoringDimension"][];
+        /** @description Scores on a batch's 打分项 other than overall, 0 to 5 with at most two decimals; overall stays in score. */
+        ScoringScores: {
+            composition?: number;
+            light_color?: number;
+            sharpness?: number;
+            narrative?: number;
+            preference?: number;
+        };
+        /** @description The 打分项 to score; it must include overall, and the batch keeps the catalogue's order. */
+        ScoringDimensionChoice: components["schemas"]["ScoringDimensionID"][];
+        ScoringDimensionStats: {
+            dimension: components["schemas"]["ScoringDimensionID"];
+            mean: number;
+            standardDeviation: number;
+            /** @description Correlation with the other raters' mean on the same photos; null below 20 such photos. */
+            agreement: number | null;
+            agreementPhotos: number;
+            /** @description Mean absolute difference between a repeat and the current score of that photo; null without repeats. */
+            repeatDifference: number | null;
+            /** @description Longest run of the same score in a row. */
+            longestRun: number;
+        };
+        /**
+         * @description A choice of columns beside image_id, image_path and rater, which every export has: image_size is image_width and image_height; each 打分项 is its own column in points; duration is duration_s, the seconds spent on the photo (a current answer adds the time of the answer it replaced); kind is kind, repeat and superseded; links is rating_id, replaces and repeat_of; viewport and display are a width and a height each.
+         * @enum {string}
+         */
+        ScoringExportField: "nickname" | "rater_id" | "image_size" | "overall" | "composition" | "light_color" | "sharpness" | "narrative" | "preference" | "duration" | "submitted_at" | "kind" | "links" | "viewport" | "display" | "pixel_ratio";
+        ScoringExportSummary: {
+            /** @description Current scores of photos handed out the first time: the rows of every export. */
+            scores: number;
+            /** @description Current skips and marks; rows with include skips. */
+            skips: number;
+            /** @description Answers a later one replaced; rows with include superseded. */
+            superseded: number;
+            /** @description Current answers to photos shown again; rows with include repeats. */
+            repeats: number;
+        };
     };
     responses: {
         /** @description Product operation error. */
@@ -7957,6 +8056,14 @@ export type MissingDisk = components['schemas']['MissingDisk'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
+export type ScoringDimension = components['schemas']['ScoringDimension'];
+export type ScoringDimensions = components['schemas']['ScoringDimensions'];
+export type ScoringScores = components['schemas']['ScoringScores'];
+export type ScoringDimensionChoice = components['schemas']['ScoringDimensionChoice'];
+export type ScoringDimensionStats = components['schemas']['ScoringDimensionStats'];
+export type ScoringExportField = components['schemas']['ScoringExportField'];
+export type ScoringExportSummary = components['schemas']['ScoringExportSummary'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];
@@ -12317,6 +12424,32 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
+    getScoringClaimFull: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo at full size */
+            200: {
+                headers: {
+                    /** @description The EXIF orientation, 1 to 8, to apply for display. */
+                    "X-Image-Orientation"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            410: components["responses"]["ProductError"];
+        };
+    };
     getScoringClaimThumbnail: {
         parameters: {
             query?: never;
@@ -12563,7 +12696,14 @@ export interface operations {
     };
     exportScoringBatch: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description csv (UTF-8 with a byte order mark, for spreadsheets; the default) or jsonl. */
+                format?: "csv" | "jsonl";
+                /** @description Columns beside image_id, image_path and rater, comma-separated; a 打分项 the batch does not score is refused (validation_failed). */
+                fields?: components["schemas"]["ScoringExportField"][];
+                /** @description Rows beside current scores, comma-separated: skips (skips and marks), superseded (answers replaced later), repeats (answers to photos shown again). */
+                include?: ("skips" | "superseded" | "repeats")[];
+            };
             header?: never;
             path: {
                 batchId: components["parameters"]["ScoringBatchID"];
@@ -12579,6 +12719,31 @@ export interface operations {
                 };
                 content: {
                     "application/zip": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getScoringExportSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringExportSummary"];
                 };
             };
             403: components["responses"]["ProductError"];
