@@ -9,7 +9,7 @@ import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
-import { STEP_MIN_MS } from "./petCard";
+import { REFRESH_STALE_MS, STEP_MIN_MS } from "./petCard";
 import { companionMode, resetCompanionMode, setCompanionMode } from "./quiet";
 import {
   companionReady,
@@ -539,6 +539,32 @@ describe("the companion on the desktop", () => {
       await release();
       await plays(WAVE);
       expect(asked).toBe(1);
+    });
+
+    it("reads the list anew once a read has hung for 15 s, and waves once", async () => {
+      await arrive([IDLE, WAVE]);
+      hide(true);
+      items = [notice("n-2")];
+      await act(() => loadTaskNotices());
+      await settle();
+      const release = holdList();
+      hide(false);
+      await settle();
+      fireEvent.pointerMove(window);
+      await settle();
+      expect(asked).toBe(1);
+      // The NAS never answers that one: past REFRESH_STALE_MS, the next input reads the list again.
+      const now = performance.now.bind(performance);
+      vi.spyOn(performance, "now").mockImplementation(() => now() + REFRESH_STALE_MS + 1);
+      fireEvent.pointerMove(window);
+      await settle();
+      expect(asked).toBe(2);
+      // Both come back: the hung one decides nothing, the new one waves, once.
+      fetched = [];
+      await release();
+      await plays(WAVE);
+      expect(fetched.filter((name) => name === WAVE)).toHaveLength(1);
+      expect(screen.getAllByText("整理照片 有新结果")).toHaveLength(1);
     });
 
     it("does not wave between the member's prompt and the turn's first step, and tells the result at its end", async () => {

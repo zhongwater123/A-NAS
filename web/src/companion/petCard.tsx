@@ -335,6 +335,9 @@ function useWorkSign(leaves: Leaves, quiet: boolean): string | undefined {
 /** How long what happened while the member was away waits to be told when they come back. */
 const AWAY_KEEP_MS = 12 * 60 * 60 * 1000;
 
+/** How long a return's read of the notices may take before another return reads them anew (comeBack). */
+export const REFRESH_STALE_MS = 15_000;
+
 /** What happened while the member was away: how a turn ended, and new results by their notice's id. */
 interface Away {
   ended: { state: "success" | "error"; at: number } | null;
@@ -528,7 +531,7 @@ function Card({
   /** Tells what waited (below); listed once the notices it read again for that have come. */
   const comeBack = useRef<(listed?: boolean) => void>(() => {});
   /** A refresh of the notices a return asked for is under way (comeBack). */
-  const refreshing = useRef(false);
+  const refreshing = useRef<{ at: number } | null>(null);
   /** The card is on the page: a refresh that comes back after it left tells nobody. */
   const mounted = useRef(false);
   useEffect(() => {
@@ -987,12 +990,16 @@ function Card({
       // A new result waits, unless an error comes first: the list is read again, as another device may have
       // read the result, and what to tell is decided when it comes, by how things are then (above). Nothing is
       // taken until it is told. One read at a time: input meanwhile asks for no other, the one under way
-      // decides. A card the page let go of meanwhile (hidden) tells nobody.
+      // decides; one that has not come back in REFRESH_STALE_MS (a NAS that never answers) gives way to a new
+      // one, and decides nothing if it comes after all. A card the page let go of meanwhile (hidden) tells nobody.
       if (outcome !== "error" && waiting.size > 0 && !listed) {
-        if (refreshing.current) return;
-        refreshing.current = true;
+        const under = refreshing.current;
+        if (under && performance.now() - under.at < REFRESH_STALE_MS) return;
+        const read = { at: performance.now() };
+        refreshing.current = read;
         void loadTaskNotices().finally(() => {
-          refreshing.current = false;
+          if (refreshing.current !== read) return;
+          refreshing.current = null;
           if (mounted.current) comeBack.current(true);
         });
         return;
