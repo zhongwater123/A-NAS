@@ -58,5 +58,5 @@ func freeBytes(path string) (int64, error) {
 	if err := syscall.Statfs(path, &stats); err != nil {
 		return 0, err
 	}
-	return int64(stats.Bavail) * int64(stats.Bsize), nil //nolint:gosec // block counts fit int64
+	return int64(stats.Bavail) * int64(stats.Bsize), nil
 }

@@ -111,6 +111,7 @@ func syncFile(root *os.Root, name, target string) (bool, int64, error) {
 		have.Size() == info.Size() && have.ModTime().Equal(info.ModTime()) {
 		return false, 0, nil
 	}
+	//nolint:gosec // apt reads the local repository as _apt, as the runbook installs it
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return false, 0, err
 	}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -196,8 +197,7 @@ const systemActor = "system"
 // mirror writes the outcomes the service recorded to the activity record;
 // each record's time names it, so writing it again changes nothing.
 func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
-	for i := len(status.Records) - 1; i >= 0; i-- {
-		record := status.Records[i]
+	for _, record := range slices.Backward(status.Records) {
 		detail := map[string]string{"version": record.Version, "from": record.From, "by": record.By}
 		if record.Problem != nil {
 			detail["problem"] = record.Problem.Code

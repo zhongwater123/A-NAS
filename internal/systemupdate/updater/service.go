@@ -243,7 +243,7 @@ func (s *Service) suites() []string {
 	var suites []string
 	for line := range strings.Lines(string(data)) {
 		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "Suites:"); ok {
-			for _, suite := range strings.Fields(value) {
+			for suite := range strings.FieldsSeq(value) {
 				if suite == "./" {
 					continue
 				}
