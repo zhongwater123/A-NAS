@@ -231,9 +231,9 @@ function describeSystemUpdate(action: string, actor: Part, raw?: string): Descri
   const code = text("problem");
   const problem = isProblemCode(code) ? problemText({ code }) : "";
   const meta = [problem, byText(text("by"))].filter(Boolean);
+  // The version an operation started from; the first install has none.
+  const fromParts = (verb: string): Part[] => (text("from") ? ["将 A-NAS 从", from, verb] : [`将 A-NAS ${verb}`]);
   switch (action) {
-    case "check":
-      return { parts: [actor, "检查了系统更新"], meta: [] };
     case "download":
       return { parts: [actor, "开始下载 A-NAS", version], meta: [] };
     case "install":
@@ -251,11 +251,20 @@ function describeSystemUpdate(action: string, actor: Part, raw?: string): Descri
     case "result.downloaded":
       return { parts: [actor, "下载了 A-NAS", version], meta };
     case "result.updated":
-      return { parts: [actor, "将 A-NAS 从", from, "更新到", version], meta, tone: "success" };
+      return { parts: [actor, ...fromParts("更新到"), version], meta, tone: "success" };
     case "result.rolled-back":
-      return { parts: [actor, "安装 A-NAS", version, "后检查没有通过，已回到", from], meta, tone: "warning" };
+      return {
+        parts: [
+          actor,
+          "安装 A-NAS",
+          version,
+          ...(text("from") ? ["后检查没有通过，已回到", from] : ["后检查没有通过，已回到原版本"]),
+        ],
+        meta,
+        tone: "warning",
+      };
     case "result.reverted":
-      return { parts: [actor, "将 A-NAS 从", from, "回到", version], meta };
+      return { parts: [actor, ...fromParts("回到"), version], meta };
     case "result.check-failed":
       return { parts: [actor, "检查系统更新失败"], meta, tone: "warning" };
     case "result.failed":

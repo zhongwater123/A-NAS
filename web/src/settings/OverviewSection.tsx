@@ -283,7 +283,7 @@ function HealthFindings({
         <Row
           icon={<CircleFadingArrowUp className={`${styles.healthIcon} ${styles.accent}`} aria-hidden="true" />}
           label={<strong>有新版本 {versionLabel(update.candidate)}</strong>}
-          detail={update.phase === "ready" ? "已下载，可以安装" : "可以下载"}
+          detail={update.phase === "ready" ? "可以安装" : "可以下载"}
           anchor="new-version"
           onClick={onOpenUpdate}
         />

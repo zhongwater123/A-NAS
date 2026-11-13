@@ -189,6 +189,10 @@ func (a *API) record(ctx context.Context, actorID, action, resourceID string, de
 	}
 }
 
+// systemActor is the actor the activity log shows as 系统 and filters as 系统任务
+// (internal/activityapi); who started an operation is in the detail.
+const systemActor = "system"
+
 // mirror writes the outcomes the service recorded to the activity record;
 // each record's time names it, so writing it again changes nothing.
 func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
@@ -198,7 +202,8 @@ func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
 		if record.Problem != nil {
 			detail["problem"] = record.Problem.Code
 		}
-		a.record(ctx, "", "system.update.result."+record.Kind, record.At.UTC().Format(time.RFC3339Nano)+" "+record.Kind, detail)
+		a.record(ctx, systemActor, "system.update.result."+record.Kind,
+			record.At.UTC().Format(time.RFC3339Nano)+" "+record.Kind, detail)
 	}
 }
 

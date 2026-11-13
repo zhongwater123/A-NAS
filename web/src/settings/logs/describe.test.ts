@@ -249,6 +249,17 @@ describe("activity sentences", () => {
     );
     expect(back.meta).toEqual(["安装后的检查没有通过", "自动"]);
     expect(back.tone).toBe("warning");
+    // The first install a device recorded started from no version.
+    expect(
+      sentence(
+        event({
+          category: "system",
+          action: "system.update.result.updated",
+          system: true,
+          detail: JSON.stringify({ version: before, by: "owner" }),
+        }),
+      ),
+    ).toBe("系统 将 A-NAS 更新到 1.0.1-rc.6 开发版 83bb9db1");
     const settings = describeActivity(
       event({
         category: "system",

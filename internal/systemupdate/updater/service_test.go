@@ -180,7 +180,7 @@ func TestANetworkSourceDownloadsWhenTheSettingsSaySo(t *testing.T) {
 	if state.Phase != PhaseReady || state.DownloadBytes != 45000000 {
 		t.Fatalf("state = %+v, want downloaded", state)
 	}
-	if !host.ran("apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold --download-only a-nas=2 a-nas-host=2") {
+	if !host.ran("apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=600 --download-only a-nas=2 a-nas-host=2") {
 		t.Fatalf("no download: %v", host.calls)
 	}
 }

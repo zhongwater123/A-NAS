@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,10 @@ func TestSystemUpdateFollowsTheContractForAdministratorsAlone(t *testing.T) {
 	actions := map[string]int{}
 	for _, item := range asAdmin.activity("?category=system").Items {
 		actions[item.Action]++
+		// Outcomes are the system's, requests the administrator's.
+		if outcome := strings.HasPrefix(item.Action, "system.update.result."); item.System != outcome {
+			t.Errorf("%s: system = %v", item.Action, item.System)
+		}
 	}
 	for action, want := range map[string]int{
 		"system.update.install": 1, "system.update.revert": 1, "system.update.settings": 1,
