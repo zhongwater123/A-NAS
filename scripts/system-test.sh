@@ -1166,26 +1166,42 @@ check "a member nobody chose gets no batches" \
 check "a member cannot reach the module's administration" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/admin/batches")" = 403
 install -d "$data/spaces/shared/照片打分/第一批"
-cp /tmp/photo.png "$data/spaces/shared/照片打分/第一批/a.png"
+# A photo to score has a longer side of at least 2400 pixels; the small one
+# is skipped.
+python3 - "$data/spaces/shared/照片打分/第一批/a.png" <<'PY'
+import struct, sys, zlib
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+width, height = 2400, 1600
+row = bytes(value for x in range(width) for value in (x % 256, (x * 3) % 256, 96))
+png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+png += chunk(b"IDAT", zlib.compress(b"".join(b"\x00" + row for _ in range(height)))) + chunk(b"IEND", b"")
+open(sys.argv[1], "wb").write(png)
+PY
+cp /tmp/photo.png "$data/spaces/shared/照片打分/第一批/small.png"
 scoring_batch=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
-  -d '{"name":"第一批","source":"第一批","required":1,"rubric":""}' "$api/api/v1/modules/scoring/admin/batches" | jq -r .id || true)
+  -d '{"name":"第一批","source":"第一批","required":1,"rubric":"","dimensions":["overall","sharpness"]}' \
+  "$api/api/v1/modules/scoring/admin/batches" | jq -r .id || true)
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 scoring_open() {
   for _ in $(seq 1 30); do
-    curl -fsS -b /tmp/owner.jar "$api/api/v1/modules/scoring/admin/batches" | jq -e '.items[0].state == "open" and .items[0].photos == 1' >/dev/null && return 0
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/modules/scoring/admin/batches" |
+      jq -e '.items[0].state == "open" and .items[0].photos == 1 and .items[0].import.skippedBy == [{"reason":"too_small","count":1}]' >/dev/null && return 0
     sleep 1
   done
   return 1
 }
-check "the module imports a folder of 照片打分 as a batch" scoring_open
+check "the module imports a folder of 照片打分 as a batch, skipping a photo too small to score" scoring_open
 check "an administrator chooses a member as rater" \
   test "$(status_of -X PUT -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/modules/scoring/admin/raters/$alice_user")" = 204
 scoring_claim=$(curl -fsS -b /tmp/alice.jar -X POST -H "X-CSRF-Token: $alice_csrf" \
   "$api/api/v1/modules/scoring/batches/$scoring_batch/claims" | jq -r '.items[0].token' || true)
 check "the rater sees the photo handed to her" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/claims/$scoring_claim/image")" = 200
-check "the rater scores it" test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
-  -H 'Content-Type: application/json' -d '{"submission":"system-test-0001","kind":"score","score":3.47,"viewMs":1200}' \
+check "the rater sees it at full size, read again from the original" \
+  test "$(curl -fsS -o /dev/null -w '%{http_code} %{content_type}' -b /tmp/alice.jar "$api/api/v1/modules/scoring/claims/$scoring_claim/full")" = "200 image/jpeg"
+check "the rater scores it on every 打分项" test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{"submission":"system-test-0001","kind":"score","score":3.47,"scores":{"sharpness":2.5},"viewMs":1200}' \
   "$api/api/v1/modules/scoring/claims/$scoring_claim/rating")" = 200
 scoring_pid=$(systemctl show -p MainPID --value anas-module-scoring)
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)

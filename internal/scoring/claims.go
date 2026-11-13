@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -195,10 +196,13 @@ type Submission struct {
 	// same answer harmless.
 	ID string
 	// Kind is "score", "skip" (cannot judge) or "flag" (something is wrong
-	// with the photo); only a score has Score, in hundredths, 0 to MaxScore.
-	Kind  string
-	Score *int
-	// ViewMilliseconds is from the photo appearing to the answer.
+	// with the photo); only a score has Score, overall in hundredths, 0 to
+	// MaxScore, and Scores, the batch's other dimensions alike.
+	Kind   string
+	Score  *int
+	Scores map[string]int
+	// ViewMilliseconds is how long the page showed the photo before the
+	// answer, without the time it was hidden or showed the scoring guide.
 	ViewMilliseconds int
 	// Viewport and Display are the window's and the shown photo's CSS
 	// sizes, PixelRatio the device's.
@@ -215,7 +219,7 @@ func (submission Submission) validate() error {
 		return invalid("submission id must have 8 to 64 letters, digits or dashes")
 	case submission.Kind == "score" && (submission.Score == nil || *submission.Score < 0 || *submission.Score > MaxScore):
 		return invalid("a score is 0 to 5")
-	case submission.Kind != "score" && (submission.Kind != "skip" && submission.Kind != "flag" || submission.Score != nil):
+	case submission.Kind != "score" && (submission.Kind != "skip" && submission.Kind != "flag" || submission.Score != nil || len(submission.Scores) > 0):
 		return invalid("kind must be score, skip or flag; only a score has a value")
 	case submission.ViewMilliseconds < 0 || submission.ViewMilliseconds > 24*60*60*1000:
 		return invalid("view time is out of range")
@@ -225,7 +229,38 @@ func (submission Submission) validate() error {
 	case submission.PixelRatio < 0 || submission.PixelRatio > 16:
 		return invalid("pixel ratio is out of range")
 	}
+	for dimension, score := range submission.Scores {
+		if score < 0 || score > MaxScore {
+			return invalid("a score of %s is 0 to 5", dimension)
+		}
+	}
 	return nil
+}
+
+// scoresDimensions checks that a score answers exactly the batch's
+// dimensions besides overall, which is in Score.
+func (submission Submission) scoresDimensions(dimensions []string) error {
+	if submission.Kind != "score" {
+		return nil
+	}
+	extra := extraDimensions(dimensions)
+	if len(submission.Scores) != len(extra) {
+		return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
+	}
+	for _, dimension := range extra {
+		if _, ok := submission.Scores[dimension]; !ok {
+			return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
+		}
+	}
+	return nil
+}
+
+func dimensionNames(ids []string) []string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = DimensionName(id)
+	}
+	return names
 }
 
 // Result tells the rater how many photos of the batch they answered.
@@ -246,10 +281,10 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 	var result Result
 	err := s.within(ctx, func(tx *sql.Tx) error {
 		var item int64
-		var batchID string
+		var batchID, dimensions string
 		var repeatOf sql.NullInt64
-		err := tx.QueryRowContext(ctx, "SELECT item_id, batch_id, repeat_of FROM claims WHERE token = ? AND rater = ?",
-			token, rater).Scan(&item, &batchID, &repeatOf)
+		err := tx.QueryRowContext(ctx, `SELECT c.item_id, c.batch_id, c.repeat_of, b.dimensions FROM claims c JOIN batches b ON b.id = c.batch_id
+			WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&item, &batchID, &repeatOf, &dimensions)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -273,6 +308,9 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 		}
 		if ok, err := raterIn(ctx, tx, rater); err != nil || !ok {
 			return errors.Join(err, ErrNotRater)
+		}
+		if err := submission.scoresDimensions(splitDimensions(dimensions)); err != nil {
+			return err
 		}
 		var previous sql.NullInt64
 		err = tx.QueryRowContext(ctx, "SELECT id FROM ratings WHERE claim_token = ? AND superseded_at IS NULL", token).Scan(&previous)
@@ -316,13 +354,23 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 		if repeatOf.Valid {
 			repeat = repeatOf.Int64
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO ratings (claim_token, submission, item_id, batch_id, rater, kind, score, repeat_of, replaces,
+		inserted, err := tx.ExecContext(ctx, `INSERT INTO ratings (claim_token, submission, item_id, batch_id, rater, kind, score, repeat_of, replaces,
 			view_ms, viewport_width, viewport_height, display_width, display_height, pixel_ratio, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			token, submission.ID, item, batchID, rater, submission.Kind, score, repeat, replaces, submission.ViewMilliseconds,
 			submission.ViewportWidth, submission.ViewportHeight, submission.DisplayWidth, submission.DisplayHeight, submission.PixelRatio, stamp)
 		if err != nil {
 			return err
+		}
+		rating, err := inserted.LastInsertId()
+		if err != nil {
+			return err
+		}
+		for dimension, value := range submission.Scores {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO rating_scores (rating_id, dimension, score) VALUES (?, ?, ?)",
+				rating, dimension, value); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE claims SET submitted = 1 WHERE token = ?", token); err != nil {
 			return err

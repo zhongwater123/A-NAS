@@ -67,6 +67,20 @@
     responses:
       "200": { description: The preview, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/claims/{token}/full:
+  get:
+    operationId: getScoringClaimFull
+    summary: "The photo behind one of the caller's own claims at its full size, for judging sharpness: only in batches that score sharpness"
+    description: "Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported."
+    parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
+    responses:
+      "200":
+        description: The photo at full size
+        headers:
+          X-Image-Orientation: { description: "The EXIF orientation, 1 to 8, to apply for display.", schema: { type: integer, minimum: 1, maximum: 8 } }
+        content: { image/jpeg: { schema: { type: string, format: binary } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "410": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/claims/{token}/thumbnail:
   get:
     operationId: getScoringClaimThumbnail
@@ -126,7 +140,7 @@
   parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
   patch:
     operationId: updateScoringBatch
-    summary: "Rename a batch, change its guide or number of raters, or close and reopen it"
+    summary: "Rename a batch, change its guide, number of raters or, before its first answer, 打分项, or close and reopen it"
     x-anas-posture: admin
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringBatchPatch" } } } }
@@ -172,11 +186,36 @@
 /api/v1/modules/scoring/admin/batches/{batchId}/export:
   get:
     operationId: exportScoringBatch
-    summary: "A zip of manifest.json, images.jsonl, ratings.jsonl (every answer, including replaced ones) and raters.jsonl"
+    summary: "A zip of one table, ratings.csv or ratings.jsonl, with a row per answer (a photo and a rater), and manifest.json describing the batch, the rows and every column"
+    x-anas-posture: admin
+    parameters:
+      - { $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }
+      - { name: format, in: query, description: "csv (UTF-8 with a byte order mark, for spreadsheets; the default) or jsonl.", schema: { type: string, enum: [csv, jsonl] } }
+      - name: fields
+        in: query
+        style: form
+        explode: false
+        description: "Columns beside image_id, image_path and rater, comma-separated; a 打分项 the batch does not score is refused (validation_failed)."
+        schema: { type: array, uniqueItems: true, items: { $ref: "../components/scoring.yaml#/schemas/ScoringExportField" } }
+      - name: include
+        in: query
+        style: form
+        explode: false
+        description: "Rows beside current scores, comma-separated: skips (skips and marks), superseded (answers replaced later), repeats (answers to photos shown again)."
+        schema: { type: array, uniqueItems: true, items: { type: string, enum: [skips, superseded, repeats] } }
+    responses:
+      "200": { description: The export, content: { application/zip: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/batches/{batchId}/export/summary:
+  get:
+    operationId: getScoringExportSummary
+    summary: "How many rows an export has: current scores, and those each include adds"
     x-anas-posture: admin
     parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
     responses:
-      "200": { description: The export, content: { application/zip: { schema: { type: string, format: binary } } } }
+      "200": { description: The counts, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringExportSummary" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/admin/raters:

@@ -3,12 +3,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
+import { sharpness } from "./model";
 import styles from "./scoring.module.css";
 
 // GuideContent is what raters see before scoring a batch and whenever they
-// look again: the administrator's scoring guide and the reference photos,
-// lowest score first, each with its score.
-export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | "rubric"> }) {
+// look again: the administrator's scoring guide, the batch's 打分项, how to
+// score, and the reference photos, lowest score first, each with its score.
+export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | "rubric" | "dimensions"> }) {
+  const several = batch.dimensions.length > 1;
+  const zoomable = batch.dimensions.some((dimension) => dimension.id === sharpness);
   const [anchors, setAnchors] = useState<ScoringAnchor[]>();
   const [failure, setFailure] = useState("");
   useEffect(() => {
@@ -30,6 +33,15 @@ export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | 
           <p className={styles.scMuted}>管理员没有写打分标准。</p>
         )}
       </section>
+      {several && (
+        <section>
+          <h3>打分项</h3>
+          <p className={styles.scRubric}>
+            每张照片依次打 {batch.dimensions.length} 项：
+            {batch.dimensions.map((dimension) => dimension.name).join("、")}。
+          </p>
+        </section>
+      )}
       <section>
         <h3>怎样打分</h3>
         <ul className={styles.scKeys}>
@@ -37,9 +49,28 @@ export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | 
           <li>
             <kbd>←</kbd> <kbd>→</kbd> 每次 0.1，按住 <kbd>Shift</kbd> 每次 0.01，<kbd>0</kbd>–<kbd>5</kbd> 跳到整数分
           </li>
-          <li>
-            <kbd>Enter</kbd> 或“确定”提交，下一张随即出现
-          </li>
+          {several ? (
+            <>
+              <li>
+                在数轴上点选或拖动后松开，自动进入下一项；用键盘时按 <kbd>Enter</kbd> 进入下一项
+              </li>
+              <li>
+                <kbd>↑</kbd> <kbd>↓</kbd> 或点上方的项回到已打的项
+              </li>
+              <li>
+                最后一项按 <kbd>Enter</kbd> 或“确定”提交，下一张随即出现
+              </li>
+            </>
+          ) : (
+            <li>
+              <kbd>Enter</kbd> 或“确定”提交，下一张随即出现
+            </li>
+          )}
+          {zoomable && (
+            <li>
+              按住 <kbd>Z</kbd> 看照片的 100% 局部，移动鼠标换位置，松开恢复
+            </li>
+          )}
           <li>数轴上方是你最近打过分的 12 张照片；鼠标停在一张上，它会并排放到正在打分的照片旁边</li>
           <li>
             <kbd>S</kbd> 无法判断，<kbd>X</kbd> 图片有问题，都不计分

@@ -143,6 +143,7 @@ paths:
   /api/v1/modules/scoring/batches/{batchId}/recent: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1recent" }
   /api/v1/modules/scoring/batches/{batchId}/claims: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1claims" }
   /api/v1/modules/scoring/claims/{token}/image: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1image" }
+  /api/v1/modules/scoring/claims/{token}/full: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1full" }
   /api/v1/modules/scoring/claims/{token}/thumbnail: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1thumbnail" }
   /api/v1/modules/scoring/claims/{token}/rating: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1rating" }
   /api/v1/modules/scoring/admin/sources: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1sources" }
@@ -151,6 +152,7 @@ paths:
   /api/v1/modules/scoring/admin/batches/{batchId}/stats: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1stats" }
   /api/v1/modules/scoring/admin/batches/{batchId}/cover: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1cover" }
   /api/v1/modules/scoring/admin/batches/{batchId}/export: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1export" }
+  /api/v1/modules/scoring/admin/batches/{batchId}/export/summary: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1export~1summary" }
   /api/v1/modules/scoring/admin/raters: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters" }
   /api/v1/modules/scoring/admin/raters/{accountId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters~1{accountId}" }
   /api/v1/photos/libraries: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1libraries" }

@@ -18,6 +18,7 @@ import type {
 } from "../../api.generated";
 import { healthyState, metricsState, session as sessionFixture } from "../fixtures";
 import { http, server } from "../server";
+import { scoringCatalogue } from "./scoring";
 import { webSearchStatus } from "./websearch";
 
 export const session = sessionFixture();
@@ -35,7 +36,7 @@ export interface ShellOptions {
   // Web search is off unless a test turns it on, so its icon is in no other test's way.
   webSearch?: WebSearchStatus;
   // Photo scoring is installed only when a test says what the account may do.
-  scoring?: ScoringMe;
+  scoring?: Pick<ScoringMe, "admin" | "rater">;
 }
 
 export function shellHandlers(options: ShellOptions = {}) {
@@ -59,7 +60,7 @@ export function shellHandlers(options: ShellOptions = {}) {
       response(200).json({ items: options.scoring ? [{ id: "scoring" }] : [] }),
     ),
     http.get("/api/v1/modules/scoring/me", ({ response }) =>
-      response(200).json(options.scoring ?? { admin: false, rater: false }),
+      response(200).json({ ...(options.scoring ?? { admin: false, rater: false }), dimensions: scoringCatalogue }),
     ),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),
