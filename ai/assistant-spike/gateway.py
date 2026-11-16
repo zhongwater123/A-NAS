@@ -17,11 +17,15 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 SOCK, LOG, UPSTREAM, KEY_FILE = sys.argv[1:5]
-# HOST or HOST/PREFIX: Alibaba Cloud Model Studio serves the OpenAI API under
-# /compatible-mode (dashscope.aliyuncs.com/compatible-mode), so Hermes's /v1/... goes
-# to /compatible-mode/v1/...; a bare host keeps the path as Hermes sent it.
-UPSTREAM_HOST, _, _prefix = UPSTREAM.partition("/")
+# [http://]HOST[/PREFIX], HTTPS unless it says http://. Alibaba Cloud Model Studio
+# serves the OpenAI API under /compatible-mode (dashscope.aliyuncs.com/compatible-mode),
+# so Hermes's /v1/... goes to /compatible-mode/v1/...; a bare host keeps the path as
+# Hermes sent it. Plain http carries the key in the clear: only for a relay on a
+# network the owner trusts.
+_plain = UPSTREAM.startswith("http://")
+UPSTREAM_HOST, _, _prefix = UPSTREAM.removeprefix("http://").removeprefix("https://").partition("/")
 UPSTREAM_PREFIX = "/" + _prefix.strip("/") if _prefix.strip("/") else ""
+CONNECTION = http.client.HTTPConnection if _plain else http.client.HTTPSConnection
 KEY = Path(KEY_FILE).read_text(encoding="utf-8-sig").strip()  # utf-8-sig: a key saved by Notepad may carry a BOM
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
 
@@ -46,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        upstream = http.client.HTTPSConnection(UPSTREAM_HOST, timeout=300)
+        upstream = CONNECTION(UPSTREAM_HOST, timeout=300)
         headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
         upstream.request(method, UPSTREAM_PREFIX + self.path, body=body or None, headers=headers)
         resp = upstream.getresponse()
