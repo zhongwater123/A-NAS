@@ -141,8 +141,9 @@ func (s *Service) recordSignOut(ctx context.Context, userID string, localConsole
 	_ = s.appendAudit(ctx, userID, "session.signed_out", "user", userID, sessionDetail{Via: origin.Via, Address: origin.Address}.String())
 }
 
-// ActivityCategories are the activity log categories the account audit holds.
-var ActivityCategories = []activity.Category{activity.CategorySession, activity.CategoryAccount}
+// ActivityCategories are the activity log categories the account audit
+// holds: system events, such as a system update, are written here too.
+var ActivityCategories = []activity.Category{activity.CategorySession, activity.CategoryAccount, activity.CategorySystem}
 
 // Activity returns a page of account and sign-in events. Members only ever
 // see what they did and what was done to their account or private space,

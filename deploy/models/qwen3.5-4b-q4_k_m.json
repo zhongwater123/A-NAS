@@ -13,5 +13,18 @@
   "memoryBytes": 2952790016,
   "memoryNote": "With the vision encoder's 768 MiB, 3.5 GiB: above the anonymous memory llama-server b11655 held while reading on the Experimental NAS with the model mapped, at most 3,494 MiB over 12 pages and 2,957 MiB in the Worker (2026-10-30, docs/research/photo-ocr-model-evaluation.md). The mapped file's page cache is left out: the kernel can reclaim it.",
   "sha256": "11f3d20f112de728b20f28a42f7d9ad437848033d1b5c51f3410ecca35c4c9d5",
-  "license": "Apache-2.0: deploy/models/qwen3.5-4b.LICENSE is the LICENSE of the source at the revision above (https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/LICENSE)."
+  "license": "Apache-2.0: deploy/models/qwen3.5-4b.LICENSE is the LICENSE of the source at the revision above (https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/LICENSE).",
+  "split": "llama-gguf-split --split --split-max-size 1800M from llama.cpp b11655 (deploy/llama/llama.json); scripts/split-model.sh",
+  "parts": [
+    {
+      "file": "Qwen3.5-4B-Q4_K_M-00001-of-00002.gguf",
+      "sizeBytes": 1803654304,
+      "sha256": "81cb563dfa10caf59cefaa5c51c0bac4a0cfbd478631fa8f2c1675484d117774"
+    },
+    {
+      "file": "Qwen3.5-4B-Q4_K_M-00002-of-00002.gguf",
+      "sizeBytes": 979792768,
+      "sha256": "35fd9258e0af57b591520307c0160d44e0991e840dca5ab46fe13d7ad4df8f96"
+    }
+  ]
 }

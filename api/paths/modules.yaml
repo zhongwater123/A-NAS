@@ -1,0 +1,17 @@
+/api/v1/modules:
+  get:
+    operationId: listModules
+    summary: "The removable modules installed on this device (ADR 0037); a window of a module not listed is not shown"
+    responses:
+      "200":
+        description: The installed modules
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items: { type: object, additionalProperties: false, required: [id], properties: { id: { type: string, pattern: "^[a-z][a-z0-9]{1,30}$" } } }

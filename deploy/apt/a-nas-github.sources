@@ -1,0 +1,14 @@
+# /etc/apt/sources.list.d/a-nas.sources: the A-NAS repository on GitHub, in
+# apt's flat form (docs/decisions/2026-11-11-update-hosting.md,
+# docs/runbooks/deploy-a-nas-packages.md). apt checks every file against the
+# A-NAS archive key, so GitHub only stores them. A device follows release; a
+# test machine also follows dev: keep the second entry for it, or drop it.
+Types: deb
+URIs: https://github.com/zhongwater123/A-NAS-dist/releases/download/apt-release/
+Suites: ./
+Signed-By: /usr/share/keyrings/a-nas-archive-keyring.pgp
+
+Types: deb
+URIs: https://github.com/zhongwater123/A-NAS-dist/releases/download/apt-dev/
+Suites: ./
+Signed-By: /usr/share/keyrings/a-nas-archive-keyring.pgp

@@ -43,6 +43,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（proposed；修订 0012 的“只适用于可信内网”）
 - [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
 - [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
+- [0037：可移除模块以独立服务接入，A-NAS 只提供登录、转发与存储](0037-plug-removable-modules-in-as-separate-services.md)（proposed）
 
 ## 格式
 

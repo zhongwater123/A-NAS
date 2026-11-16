@@ -1,7 +1,7 @@
 schemas:
   ActivityCategory:
     type: string
-    enum: [session, account, file, storage, photo, family]
+    enum: [session, account, file, storage, photo, family, system]
   ActivityAccount:
     type: object
     additionalProperties: false
@@ -17,7 +17,7 @@ schemas:
     properties:
       id: { type: string }
       occurredAt: { type: string, format: date-time }
-      category: { type: string, enum: [session, account, file, storage, photo, family, other] }
+      category: { type: string, enum: [session, account, file, storage, photo, family, system, other] }
       action: { type: string, description: "Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded." }
       actor: { $ref: "#/schemas/ActivityAccount" }
       system: { type: boolean, description: The device did this on its own. }

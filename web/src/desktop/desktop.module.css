@@ -834,6 +834,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-files {
   background: linear-gradient(155deg, #48ceff, #3174ed);
 }
+/* 照片打分: an amber tile, in its title bar too. */
+.icon-scoring,
+.app-window-scoring .window-app-icon {
+  background: linear-gradient(155deg, #ffbe55, #e8642c);
+}
 .icon-trash,
 .icon-settings {
   background: linear-gradient(155deg, #c9cdd3, #777e89);
@@ -1469,6 +1474,13 @@ button.net-rates {
   overflow: hidden;
   background: #f3f5f8;
   container: transferwindow / inline-size;
+}
+/* 照片打分 */
+.window-content-scoring {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg);
+  container: scoringwindow / inline-size;
 }
 /* 回收站 */
 .window-content-trash {

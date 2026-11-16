@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { AppShortcut, Transfer } from "./api.generated";
 import { focusedWindow } from "./desktop/focusedWindow";
+import { resetSystemUpdate } from "./systemupdate/status";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
 import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
@@ -141,6 +142,7 @@ beforeEach(() => {
 afterEach(() => {
   transferStore.reset();
   resetWebSearch();
+  resetSystemUpdate();
   tus.uploads.length = 0;
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -740,6 +742,19 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     await screen.findAllByRole("button", { name: "打开相册" });
     expect(screen.queryByRole("button", { name: "打开网页搜索" })).not.toBeInTheDocument();
+  });
+
+  it("shows 照片打分 only where its module is installed, to the accounts it lets in", async () => {
+    serveDesktop({ scoring: { admin: false, rater: true } });
+    serveWindows();
+    const { unmount } = render(<App />);
+    expect((await screen.findAllByRole("button", { name: "打开照片打分" })).length).toBeGreaterThan(0);
+    unmount();
+
+    serveDesktop({ scoring: { admin: false, rater: false } });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
   });
 
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {

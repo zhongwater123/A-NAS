@@ -19,10 +19,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
+	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -57,6 +59,11 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
+	// Modules are the removable modules the Product Service knows (ADR
+	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
+	// its mounts and finds the caller behind the session token itself.
+	// GET /api/v1/modules lists those installed now.
+	Modules []modules.Module
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through accounts.WithUser; the session token stays in the context
 	// for the File Broker.
@@ -84,6 +91,9 @@ type ProductDependencies struct {
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
 	WebSearch *websearchapi.API
+	// SystemUpdate serves Settings → 系统更新 (docs/specs/system-update.md);
+	// nil leaves its routes out.
+	SystemUpdate *systemupdateapi.API
 	// Personalization keeps the device-wide 个性化 settings and wallpaper;
 	// nil answers personalization_unavailable.
 	Personalization *personalization.Store

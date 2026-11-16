@@ -32,6 +32,8 @@ const VALIDATED = [
   "listAppShortcuts",
   "getAssistantStatus",
   "getWebSearch",
+  "listModules",
+  "getScoringMe",
   "listShareNotifications",
   "listMemberShares",
   "getMemberShare",

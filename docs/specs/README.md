@@ -28,6 +28,7 @@
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented）
+- [系统更新](system-update.md)（软件包设备 implemented；镜像设备 draft）
 - [设备温度与风扇](device-temperatures.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
@@ -41,6 +42,7 @@
 - [AI 助手](ai-assistant.md)（implemented）
 - [网页搜索](web-search.md)（implemented）
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
+- [照片打分](photo-scoring.md)（draft；可移除模块，实验 NAS 待安装）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。

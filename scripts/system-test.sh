@@ -46,6 +46,8 @@ if [[ "${1:-}" != --inside ]]; then
   shopt -s nullglob
   products=("$repo"/build/packages/a-nas_*.deb)
   ((${#products[@]} == 1)) || { echo "build/packages needs exactly one a-nas package: run make packages" >&2; exit 2; }
+  # The photo scoring module is not in the packages; its own script installs it (ADR 0037).
+  [[ -x "$repo/build/anas-scoring" ]] || { echo "missing build/anas-scoring: run make build-binaries" >&2; exit 2; }
   real=()
   if [[ -n "${ANAS_SYSTEM_TEST_CONTENT:-}" ]]; then
     content=build/content-packages
@@ -263,6 +265,12 @@ systemctl daemon-reload
 # repository.
 install -d /etc/apt/sources.list.d/disabled
 mv /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/disabled/ 2>/dev/null || true
+# The package starts the system update timer, whose runs would use apt
+# beside the test's own; the test drives the update service through the
+# Product Service instead (below), so the timer's first run comes after it.
+install -d /etc/systemd/system/anas-update.timer.d
+printf '[Timer]\nOnActiveSec=\nOnActiveSec=12h\nOnUnitInactiveSec=\nOnUnitInactiveSec=12h\n' \
+  >/etc/systemd/system/anas-update.timer.d/system-test.conf
 dpkg -i "$repository/pool/main/a/a-nas-archive-keyring/a-nas-archive-keyring_${version}_all.deb" >/tmp/keyring.log
 sed -e "s|^URIs: .*|URIs: file:$repository|" -e 's|^Suites: .*|Suites: dev|' \
   /usr/share/doc/a-nas-archive-keyring/a-nas.sources >/etc/apt/sources.list.d/a-nas.sources
@@ -1134,6 +1142,87 @@ check "member founds the family through the family service" \
   test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
     -d '{"role":"妈妈"}' "$api/api/v1/family/join")" = 200
 
+# --- Photo scoring, a removable module (ADR 0037): its own scripts install
+# and remove it; it reads only the Shared folder 照片打分, and only read-only,
+# and the Product Service forwards its API with the session token alone.
+install -d /var/tmp/scoring-module
+install -m 0755 /src/build/anas-scoring /src/scripts/modules/scoring/install.sh /src/scripts/modules/scoring/remove.sh /var/tmp/scoring-module/
+install -m 0644 /src/deploy/modules/scoring/anas-module-scoring.service /src/deploy/modules/scoring/anas-module-scoring.socket \
+  /src/deploy/modules/scoring/scoring.json /var/tmp/scoring-module/
+check "photo scoring is not installed before its script runs" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/me")" = 404
+check "photo scoring's install script installs it" quiet bash /var/tmp/scoring-module/install.sh /var/tmp/scoring-module
+check "photo scoring's installed units pass systemd-analyze verify" \
+  verified /etc/systemd/system/anas-module-scoring.service /etc/systemd/system/anas-module-scoring.socket
+check "the module store belongs to the module alone" \
+  test "$(stat -c '%a %U' "$data/module-scoring")" = "700 a-nas-scoring"
+check "Product Service account cannot list the module store" denied a-nas ls "$data/module-scoring"
+check "the module's socket is the Product Service's alone" \
+  test "$(stat -c '%a %U %G' /run/a-nas-modules/scoring.sock)" = "660 a-nas-scoring a-nas-modules"
+check "the desktop lists photo scoring as installed" \
+  bash -c "curl -fsS -b /tmp/alice.jar '$api/api/v1/modules' | jq -e '.items == [{\"id\":\"scoring\"}]' >/dev/null"
+check "a member nobody chose gets no batches" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/batches")" = 403
+check "a member cannot reach the module's administration" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/admin/batches")" = 403
+install -d "$data/spaces/shared/照片打分/第一批"
+# A photo to score has a longer side of at least 2400 pixels; the small one
+# is skipped.
+python3 - "$data/spaces/shared/照片打分/第一批/a.png" <<'PY'
+import struct, sys, zlib
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+width, height = 2400, 1600
+row = bytes(value for x in range(width) for value in (x % 256, (x * 3) % 256, 96))
+png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+png += chunk(b"IDAT", zlib.compress(b"".join(b"\x00" + row for _ in range(height)))) + chunk(b"IEND", b"")
+open(sys.argv[1], "wb").write(png)
+PY
+cp /tmp/photo.png "$data/spaces/shared/照片打分/第一批/small.png"
+scoring_batch=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d '{"name":"第一批","source":"第一批","required":1,"rubric":"","dimensions":["overall","sharpness"]}' \
+  "$api/api/v1/modules/scoring/admin/batches" | jq -r .id || true)
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+scoring_open() {
+  for _ in $(seq 1 30); do
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/modules/scoring/admin/batches" |
+      jq -e '.items[0].state == "open" and .items[0].photos == 1 and .items[0].import.skippedBy == [{"reason":"too_small","count":1}]' >/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+check "the module imports a folder of 照片打分 as a batch, skipping a photo too small to score" scoring_open
+check "an administrator chooses a member as rater" \
+  test "$(status_of -X PUT -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/modules/scoring/admin/raters/$alice_user")" = 204
+scoring_claim=$(curl -fsS -b /tmp/alice.jar -X POST -H "X-CSRF-Token: $alice_csrf" \
+  "$api/api/v1/modules/scoring/batches/$scoring_batch/claims" | jq -r '.items[0].token' || true)
+check "the rater sees the photo handed to her" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/claims/$scoring_claim/image")" = 200
+check "the rater sees it at full size, read again from the original" \
+  test "$(curl -fsS -o /dev/null -w '%{http_code} %{content_type}' -b /tmp/alice.jar "$api/api/v1/modules/scoring/claims/$scoring_claim/full")" = "200 image/jpeg"
+check "the rater scores it on every 打分项" test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{"submission":"system-test-0001","kind":"score","score":3.47,"scores":{"sharpness":2.5},"viewMs":1200}' \
+  "$api/api/v1/modules/scoring/claims/$scoring_claim/rating")" = 200
+scoring_pid=$(systemctl show -p MainPID --value anas-module-scoring)
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+module_sees() { nsenter -t "$scoring_pid" -m ls -A "$1" | tr '\n' ' '; }
+check "the module sees nothing of the data volume but its store and 照片打分" \
+  test "$(module_sees "$data")/$(module_sees "$data/spaces/shared")" = "module-scoring spaces /照片打分 "
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+module_writes() {
+  nsenter -t "$scoring_pid" -m setpriv --reuid=a-nas-scoring --regid=a-nas-scoring \
+  --groups="$(getent group a-nas-users | cut -d: -f3)" touch "$data/spaces/shared/照片打分/written-by-the-module"
+}
+check "the module cannot write in 照片打分" fails module_writes
+check "photo scoring's remove script removes it" quiet bash /var/tmp/scoring-module/remove.sh
+check "removed: units, program and account are gone" \
+  bash -c '! systemctl cat anas-module-scoring.service >/dev/null 2>&1 && [[ ! -e /opt/a-nas/modules/scoring && ! -e /etc/a-nas/modules/scoring.json ]] && ! getent passwd a-nas-scoring >/dev/null'
+check "removed: the API says photo scoring is not installed" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/modules/scoring/me")" = 404
+check "removed: the store stays until the runbook deletes it" test -d "$data/module-scoring"
+check "removed: the photos stay in the Shared space" test -f "$data/spaces/shared/照片打分/第一批/a.png"
+check "the runbook's deletion of the store succeeds" quiet btrfs subvolume delete "$data/module-scoring"
+
 # --- Local AI is built in (ADR 0016): started on demand, without network or
 # data volume.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -1164,9 +1253,20 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
-  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
+# The OCR model comes in parts (scripts/split-model.sh), each from its own
+# content package, beside the first one the link names.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+model_parts_installed() {
+  local directory part
+  directory=/opt/a-nas/models/$(jq -r .sha256 "$1")
+  while read -r part; do
+    [[ -f "$directory/$part" ]] || { echo "no $directory/$part" >>"$hidden"; return 1; }
+  done < <(jq -r '(.parts // [])[].file' "$1")
+}
+check "the OCR model's parts are all beside its first" model_parts_installed "$ai/ocr-model.json"
 llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
 check "the package links llama.cpp, only the members its manifest names" \
   test "$(readlink /usr/lib/a-nas/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
@@ -2350,6 +2450,156 @@ check "two copies of the databases stay, under the same names on both disks" \
   test "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" = \
   "$(find "$data/.a-nas-backups" -mindepth 1 -maxdepth 1 -name '2*' -printf '%f\n' | sort | paste -sd ' ')" \
   -a "$(find /var/backups/a-nas -mindepth 1 -maxdepth 1 -name '2*' | wc -l)" = 2
+
+# --- The system update service (docs/specs/system-update.md), driven through
+# the Product Service as 设置 → 系统更新 drives it. A development machine's
+# push lands in the staging directory site.conf names, here the signed
+# repository itself; the service takes it into the local repository apt now
+# reads. It installs the next release and goes back, rolls back a release
+# whose check fails, and finishes an install a killed run left.
+check "the package started the system update timer" systemctl is-active --quiet anas-update.timer
+staging=/home/system-test-staging
+install -d "$staging"
+mount --bind "$repository" "$staging"
+printf 'ANAS_UPDATE_STAGING=%s\n' "$staging" >>/etc/a-nas/site.conf
+sed -i 's|^URIs: .*|URIs: file:/var/local/a-nas-repository|' /etc/apt/sources.list.d/a-nas.sources
+update_jar=/tmp/owner-update.jar
+update_csrf=$(login owner "$owner_password" "$update_jar" || true)
+alice_update_csrf=$(login alice "$new_password" /tmp/alice-update.jar || true)
+update_state() { curl -fsS -b "$update_jar" "$api/api/v1/system/update"; }
+# update_ask ACTION: asks for ACTION as the page does; prints the HTTP status.
+update_ask() {
+  status_of -b "$update_jar" -H "X-CSRF-Token: $update_csrf" -H 'Content-Type: application/json' \
+    -d "{\"action\":\"$1\"}" "$api/api/v1/system/update/actions"
+}
+# update_settled: waits until no run is in progress, reading on through the
+# Product Service's restart an install brings, and prints the state.
+update_settled() {
+  local state=""
+  for _ in $(seq 1 900); do
+    if state=$(update_state 2>/dev/null) &&
+      jq -e '(.running or (.phase | IN("downloading", "installing", "rolling-back"))) | not' <<<"$state" >/dev/null; then
+      printf '%s\n' "$state"
+      return
+    fi
+    sleep 0.4
+  done
+  echo "  the system update did not settle; the last state read: $state" >&2
+  return 1
+}
+# update_logged ACTION...: the activity log's 系统 category has each action.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+update_logged() {
+  local actions action
+  actions=$(curl -fsS -b "$update_jar" "$api/api/v1/activity?category=system" | jq -r '.items[].action') || return 1
+  for action in "$@"; do
+    grep -qx "$action" <<<"$actions" || { echo "no $action in: $actions" >>"$hidden"; return 1; }
+  done
+}
+a_nas_version() { dpkg-query -W -f='${Version}' a-nas; }
+
+check "members cannot read the system update" \
+  test "$(status_of -b /tmp/alice-update.jar "$api/api/v1/system/update")" = 403
+check "members cannot ask for an install" \
+  test "$(status_of -b /tmp/alice-update.jar -H "X-CSRF-Token: $alice_update_csrf" -H 'Content-Type: application/json' \
+    -d '{"action":"install"}' "$api/api/v1/system/update/actions")" = 403
+
+check "an administrator asks for a check" test "$(update_ask check)" = 202
+state=$(update_settled || true)
+check "the check took the push into the local repository" test -s /var/local/a-nas-repository/dists/dev/InRelease
+check "the check offers the next release, ready to install from the push" \
+  test "$(jq -r '"\(.phase)|\(.candidate)|\(.current)|\(.downloadBytes)"' <<<"$state")" = "ready|$next|$version|0"
+check "an administrator asks for the install" test "$(update_ask install)" = 202
+check "a second request waits for the run in progress" test "$(update_ask check)" = 409
+state=$(update_settled || true)
+check "the update service installed the next release, which passed its check" \
+  test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
+  "up-to-date|$next|$version|updated|owner"
+check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:1:1"
+check "a-nas-check passes after the update" quiet a-nas-check
+check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
+state=$(update_settled || true)
+check "the update service went back, and the database with it" \
+  test "$(jq -r '"\(.phase)|\(.current)|\(.previous // "")|\(.records[0].kind)"' <<<"$state"):$(a_nas_version):$(probe_table)" = \
+  "up-to-date|$version||reverted:$version:0:0"
+check "a-nas-check passes after going back" quiet a-nas-check
+update_ask check >/dev/null
+state=$(update_settled || true)
+check "a check does not offer the release left behind again" \
+  test "$(jq -r '"\(.phase)|\(.candidate // "")"' <<<"$state")" = "up-to-date|"
+
+# A release whose check fails: on the next release anas-site.service refuses
+# to start, which its postinst lets pass and a-nas-check reports. The state
+# starts anew, as on a device that never ran an update, since the release
+# just left is not offered again.
+rm /var/lib/a-nas-update/state.json
+cat >/usr/local/sbin/system-test-refuse-next <<EOF
+#!/bin/sh
+[ "\$(dpkg-query -W -f='\${Version}' a-nas)" != "$next" ]
+EOF
+chmod 0755 /usr/local/sbin/system-test-refuse-next
+install -d /etc/systemd/system/anas-site.service.d
+printf '[Service]\nExecStartPre=+/usr/local/sbin/system-test-refuse-next\n' >/etc/systemd/system/anas-site.service.d/system-test.conf
+systemctl daemon-reload
+update_ask check >/dev/null
+update_settled >/dev/null || true
+check "an administrator installs a release whose check fails" test "$(update_ask install)" = 202
+state=$(update_settled || true)
+check "the update service rolled back when the check failed" \
+  test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
+  "rolled-back|$version|check|rolled-back|$next"
+check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
+check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:0:0"
+check "a-nas-check passes after the rollback" quiet a-nas-check
+update_ask check >/dev/null
+state=$(update_settled || true)
+check "a check does not offer the release rolled back again" \
+  test "$(jq -r '"\(.phase)|\(.candidate // "")"' <<<"$state")" = "up-to-date|"
+rm -r /etc/systemd/system/anas-site.service.d /usr/local/sbin/system-test-refuse-next
+systemctl daemon-reload
+
+# An install whose run is killed while dpkg works, as a power cut stops it.
+# The next run, here the one the timer starts after boot, finishes it or goes
+# back; either way dpkg is whole and the check passes.
+rm /var/lib/a-nas-update/state.json
+update_ask check >/dev/null
+update_settled >/dev/null || true
+check "an administrator asks for an install that will be cut short" test "$(update_ask install)" = 202
+caught=false
+for _ in $(seq 1 1200); do
+  if pgrep -x dpkg >/dev/null; then
+    systemctl kill --signal=KILL anas-update.service
+    caught=true
+    break
+  fi
+  sleep 0.05
+done
+check "the test stopped the install while dpkg worked" test "$caught" = true
+for _ in $(seq 1 100); do systemctl is-active --quiet anas-update.service || break; sleep 0.1; done
+check "the run cut short left the install in progress" \
+  test "$(jq -r .phase /var/lib/a-nas-update/state.json 2>/dev/null)" = installing
+systemctl start --no-block anas-update.service
+state=$(update_settled || true)
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+finished_or_back() {
+  local got
+  got=$(jq -r '"\(.phase)|\(.current)|\(.records[0].kind)"' <<<"$state")
+  echo "settled as $got" >>"$hidden"
+  [[ "$got" == "up-to-date|$next|updated" || "$got" == "rolled-back|$version|rolled-back" ]]
+}
+check "the next run finished the install or went back" finished_or_back
+check "dpkg has nothing left half done" test -z "$(dpkg --audit 2>&1)"
+check "a-nas-check passes after the run that finished the install" quiet a-nas-check
+check "the activity log has the administrator's requests and the update's outcomes" \
+  update_logged system.update.install system.update.revert system.update.result.updated \
+  system.update.result.reverted system.update.result.rolled-back
+check "members see none of it in their activity" \
+  test "$(curl -fsS -b /tmp/alice-update.jar "$api/api/v1/activity?category=system" | jq '.items | length')" = 0
+# The rest of the run is on this release, from the repository it began with.
+umount "$staging"
+if [[ "$(a_nas_version)" != "$version" ]]; then
+  check "apt returns to this release after the update service's runs" reinstall update-end "$version"
+fi
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

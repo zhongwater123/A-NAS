@@ -37,6 +37,23 @@ model_package() {
   echo "a-nas-model-$(package_name "$(pin_field "$1" name)")-$(pin_field "$1" sha256 | cut -c1-12)"
 }
 
+# model_files MANIFEST: one line per package of a model, PACKAGE FILE SIZE
+# SHA256 separated by tabs. A model the manifest lists in parts, which
+# llama.cpp's gguf-split cut so that each package stays under GitHub's 2 GiB
+# limit for a file (scripts/split-model.sh), has a package for each part; all
+# of them install into the model's directory.
+model_files() {
+  jq -r --arg base "$(model_package "$1")" '
+    if (.parts // []) == [] then [$base, .file, .sizeBytes, .sha256] | @tsv
+    else .parts | to_entries[] | ["\($base)-part\(.key + 1)", .value.file, .value.sizeBytes, .value.sha256] | @tsv
+    end' "$1"
+}
+
+# model_link_file MANIFEST: the file in the model's directory that the AI
+# Worker's link points at: the model's file, or its first part, from which
+# llama.cpp finds the others.
+model_link_file() { jq -r '(.parts // [])[0].file // .file' "$1"; }
+
 # ai_runtime_id REPO: the AI Worker's runtime, named by its lock and Python.
 ai_runtime_id() {
   { cat "$1/ai/requirements.txt"; printf 'python=%s\n' "$TARGET_PYTHON"; } | sha256sum | cut -c1-16
@@ -63,7 +80,7 @@ assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant
 content_packages() {
   local role
   for role in "${ai_roles[@]}"; do
-    model_package "$1/deploy/models/${role##*:}.json"
+    model_files "$1/deploy/models/${role##*:}.json" | cut -f 1
   done
   echo "a-nas-ai-runtime-$(ai_runtime_id "$1")"
   echo "a-nas-search-runtime-$(search_runtime_id "$1")"

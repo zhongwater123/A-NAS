@@ -132,6 +132,10 @@ done
 systemctl restart anas-search-dns.path || true
 systemctl start anas-search-dns.service || true
 systemctl restart anas-search.service || true
+# The system update timer: without a reboot, it first runs two minutes after
+# it starts here, never in the middle of this installation
+# (docs/specs/system-update.md). Started from an update, it is running already.
+systemctl start anas-update.timer || true
 
 /usr/sbin/a-nas-check ||
   echo "a-nas: a-nas-check failed; roll back if it does not pass (docs/runbooks/deploy-a-nas-packages.md)" >&2

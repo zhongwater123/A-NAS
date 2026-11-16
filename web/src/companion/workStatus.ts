@@ -49,10 +49,11 @@ const bridge = createWorkStatusBridge({ state: companionState, workStatus: store
 /** Live conversations whose turn this window started and has not seen end. */
 const prompting = new Set<string>();
 /**
- * Waiting entries for the member's cards, by card: card id -> entry id, and the conversation as stored that
- * the card belongs to (null while it is not known). In the order they came.
+ * Waiting entries for the member's cards, by card: the entry, its turn's conversation (live), the step that
+ * turn was at when the card came, and the conversation as stored that the card belongs to (null while it is
+ * not known). In the order they came.
  */
-const cards = new Map<string, { id: string; conversation: string | null }>();
+const cards = new Map<string, { id: string; sessionId: string; step: string | null; conversation: string | null }>();
 /**
  * The turns this window started, by conversation: since when, how many tool calls it made (steps, as a click
  * tells them), how many of VNAS's own tools (tools), whether something waited for the member, and whether it
@@ -368,19 +369,20 @@ function bigTurn(turn: Turn): boolean {
 export function reportCards(
   list: Iterable<{ requestId: string; sessionId: string; status: string; storedSessionId?: string | null }>,
 ): void {
-  const waiting = new Map<string, string | null>();
+  const waiting = new Map<string, { sessionId: string; conversation: string | null }>();
   for (const card of list)
     if (card.status === "awaiting" && prompting.has(card.sessionId)) {
-      waiting.set(card.requestId, card.storedSessionId || null);
+      waiting.set(card.requestId, { sessionId: card.sessionId, conversation: card.storedSessionId || null });
       const turn = turns.get(card.sessionId);
       if (turn) turn.waited = true;
     }
   for (const [requestId, card] of cards)
     if (!waiting.has(requestId)) {
       cards.delete(requestId);
+      keepCardClip(card.sessionId, card.step);
       clear(card.id);
     }
-  for (const [requestId, conversation] of waiting) {
+  for (const [requestId, { sessionId, conversation }] of waiting) {
     const known = cards.get(requestId);
     if (known) {
       // A conversation stored after its card came.
@@ -388,9 +390,32 @@ export function reportCards(
       continue;
     }
     const id = `card:${requestId}`;
-    cards.set(requestId, { id, conversation });
+    cards.set(requestId, { id, sessionId, step: stepCall(lines.get(sessionId)?.key), conversation });
     set(id, "waiting", behaviorStep("waiting", "card"));
   }
+}
+
+/**
+ * The step a line was picked for, whatever its stage and whether it is done: the tool call a step done names
+ * is its step's (stepOf's keys). The card's answer and the call's end come in either order.
+ */
+function stepCall(key: string | undefined): string | null {
+  if (key === undefined) return null;
+  return key.slice(key.indexOf("\u0000") + 1).replace(/^done:/, "");
+}
+
+/**
+ * A card answered while its turn is still at the step it was at when the card came: the turn goes on showing
+ * the card's clip, held in its closing pose, with the step's line, rather than play the step's clip again from
+ * the start. A step that came meanwhile shows its own.
+ */
+function keepCardClip(sessionId: string, step: string | null) {
+  const stage = store.stateOf(sessionId);
+  if (!prompting.has(sessionId) || stage === null || stage === undefined) return;
+  if (stage === "success" || stage === "error" || stepCall(lines.get(sessionId)?.key) !== step) return;
+  const anim = BEHAVIORS.waiting.clip;
+  clips.set(sessionId, anim);
+  store.setDetail(sessionId, { task: lines.get(sessionId)?.task ?? null, anim });
 }
 
 /**

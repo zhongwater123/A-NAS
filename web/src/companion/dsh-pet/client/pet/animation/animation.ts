@@ -60,7 +60,7 @@ export interface OwnAnimationDeps {
   /** A/B 双缓冲的 B 元素。 */
   videoB: () => HTMLVideoElement | null;
   /** 该宠物的成品配置：素材根、id 与动画池都从它取。 */
-  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations };
+  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations; stepReplayMs?: number };
   /** 当前动画名。 */
   currentAnim: () => string;
   /** 工作状态叶子；未启用联动时为空。 */
@@ -415,6 +415,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       workState: deps.workStatus()?.state,
       // A-NAS: the clip the step asks for.
       workAnim: deps.workStatus()?.anim ?? null,
+      // A-NAS: which holds its last frame when the page asks for that.
+      holdSteps: deps.cfg().stepReplayMs !== undefined,
     });
     const petId = deps.cfg().id;
     // A-NAS: dsh-pet's trace lines only in a development build.
@@ -441,6 +443,12 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (el === null) return;
       el.loop = false;
       el.onended = (event: Event) => deps.onEnded(handleEnded(event));
+      // A-NAS: a step's clip held at its last frame (work-hold) has ended already and ends no more: the chain
+      // goes on from it now, as at its end.
+      if (el.ended && pending === null)
+        queueMicrotask(() => {
+          if (frontVideo() === el && el.ended && pending === null) deps.onEnded(handleEnded());
+        });
     },
     setCueUrl: (url) => {
       cueUrl = url;

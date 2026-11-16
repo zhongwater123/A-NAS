@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate"
 )
 
 const requestTimeout = 3 * time.Second
@@ -340,6 +341,9 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		}
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == wire.SnapshotNotFoundCode {
 			return filesystem.ErrNotFound
+		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == wire.UpdateBusyCode {
+			return systemupdate.ErrBusy
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
