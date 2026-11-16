@@ -23,23 +23,28 @@ const baseline = 132;
 const loupe = 60;
 // Thumbnails within this many hundredths of the needle light up.
 const nearby = 25;
+// A numeral this close to the pointer's reading gives way to it.
+const covered = 32;
 const tenths = Array.from({ length: 51 }, (_, i) => i);
 
 export const thumbWidth = (mark: Pick<Mark, "width" | "height">) =>
   Math.min(thumbMaxWidth, (thumbHeight * mark.width) / Math.max(1, mark.height));
 
-// Ruler is the score from 0 to 5 in hundredths, drawn as a fine scale: dragged
-// or clicked with the pointer, moved with the keys the stage reads. Ticks near
-// the needle grow as under a loupe. Above the scale the rater's own latest
-// scores stand as whole thumbnails at their scores, in up to three lanes;
-// those near the needle light up, and hovering one asks the stage to set it
-// beside the photo being scored. Releasing the pointer after picking a value
-// tells the stage, which may move on to the next 打分项.
+// Ruler is the score from 0 to 5 in hundredths, drawn as a fine scale:
+// dragged or clicked with the pointer, moved with the keys the stage reads.
+// Ticks near the needle grow as under a loupe. While nothing is set, the dot
+// follows the pointer over the scale; once set, a faint line shows where a
+// click would land. The pointer's reading takes the numerals' row below the
+// baseline, where no thumbnail covers it. A pale dot marks the last photo's
+// score. Above the scale the rater's own latest scores stand as whole
+// thumbnails at their scores, in up to three lanes; the one under the pointer
+// or set beside the photo comes to the front and the others step back.
+// Releasing the pointer after a pick tells the stage, which moves on.
 export function Ruler({
   value,
   label,
   marks,
-  latest,
+  last,
   active,
   arriving,
   onChange,
@@ -47,10 +52,10 @@ export function Ruler({
   onCompare,
   rulerRef,
 }: {
-  value: number;
+  value: number | undefined;
   label: string;
   marks: Mark[];
-  latest?: string;
+  last?: number;
   active?: string;
   arriving?: string;
   onChange: (hundredths: number) => void;
@@ -61,20 +66,27 @@ export function Ruler({
   const { width } = useSize(rulerRef);
   const [dragging, setDragging] = useState(false);
   const [hover, setHover] = useState<number>();
+  const [hoveredThumb, setHoveredThumb] = useState<string>();
   const dragged = useRef(false);
   const at = (hundredths: number) => `${(hundredths / maxScore) * 100}%`;
   const valueAt = (clientX: number) => {
     const box = rulerRef.current?.getBoundingClientRect();
-    if (!box || box.width === 0) return value;
+    if (!box || box.width === 0) return value ?? hover ?? 0;
     return clampScore(((clientX - box.left) / box.width) * maxScore);
   };
   const placed = lanes(
     marks.map((mark) => ({ at: mark.score / maxScore, width: thumbWidth(mark) })),
     width,
   );
+  const set = value !== undefined;
+  // The reading below the scale: the value while dragging, else the pointer.
+  const reading = dragging ? value : hover;
+  const peek = hoveredThumb !== undefined || active !== undefined;
 
+  const onThumb = (event: PointerEvent<HTMLDivElement>) =>
+    (event.target as HTMLElement).closest(`.${styles.scThumb}`) !== null;
   const down = (event: PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest(`.${styles.scThumb}`)) return;
+    if (onThumb(event)) return;
     dragged.current = true;
     setDragging(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -83,7 +95,7 @@ export function Ruler({
   };
   const move = (event: PointerEvent<HTMLDivElement>) => {
     if (dragged.current) onChange(valueAt(event.clientX));
-    else if ((event.target as HTMLElement).closest(`.${styles.scThumb}`)) setHover(undefined);
+    else if (onThumb(event)) setHover(undefined);
     else setHover(valueAt(event.clientX));
   };
   const cancel = () => {
@@ -99,14 +111,14 @@ export function Ruler({
   return (
     <div
       ref={rulerRef}
-      className={`${styles.scRuler}${dragging ? ` ${styles.dragging}` : ""}`}
+      className={[styles.scRuler, dragging && styles.dragging, peek && styles.peek].filter(Boolean).join(" ")}
       role="slider"
       tabIndex={0}
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={5}
-      aria-valuenow={value / 100}
-      aria-valuetext={formatScore(value)}
+      aria-valuenow={set ? value / 100 : undefined}
+      aria-valuetext={set ? formatScore(value) : "未打分"}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
@@ -117,7 +129,7 @@ export function Ruler({
       {tenths.map((tenth) => {
         const whole = tenth % 10 === 0;
         const half = tenth % 5 === 0;
-        const near = Math.max(0, 1 - Math.abs(tenth * 10 - value) / loupe);
+        const near = set ? Math.max(0, 1 - Math.abs(tenth * 10 - value) / loupe) : 0;
         const height = (whole ? 13 : half ? 9 : 5) * (1 + 0.8 * near);
         const opacity = (whole ? 0.5 : half ? 0.32 : 0.18) + 0.5 * near;
         return (
@@ -128,21 +140,23 @@ export function Ruler({
           />
         );
       })}
-      {[0, 1, 2, 3, 4, 5].map((point) => (
-        <div
-          key={point}
-          className={`${styles.scNum}${Math.abs(value - point * 100) < 30 ? ` ${styles.near}` : ""}`}
-          style={{ insetInlineStart: at(point * 100) }}
-        >
-          {point}
-        </div>
-      ))}
+      {[0, 1, 2, 3, 4, 5].map((point) => {
+        const classes = [
+          styles.scNum,
+          set && Math.abs(value - point * 100) < 30 && styles.near,
+          reading !== undefined && Math.abs(reading - point * 100) < covered && styles.covered,
+        ];
+        return (
+          <div key={point} className={classes.filter(Boolean).join(" ")} style={{ insetInlineStart: at(point * 100) }}>
+            {point}
+          </div>
+        );
+      })}
       {marks.map((mark, index) => {
         const top = laneTops[placed[index]];
         const classes = [
           styles.scThumb,
-          Math.abs(mark.score - value) <= nearby && styles.near,
-          mark.token === latest && styles.latest,
+          set && Math.abs(mark.score - value) <= nearby && styles.near,
           mark.token === active && styles.active,
           mark.token === arriving && styles.arriving,
         ]
@@ -155,8 +169,14 @@ export function Ruler({
               className={classes}
               data-token={mark.token}
               style={{ insetInlineStart: at(mark.score), top }}
-              onPointerEnter={() => onCompare(mark)}
-              onPointerLeave={() => onCompare(undefined)}
+              onPointerEnter={() => {
+                setHoveredThumb(mark.token);
+                onCompare(mark);
+              }}
+              onPointerLeave={() => {
+                setHoveredThumb((current) => (current === mark.token ? undefined : current));
+                onCompare(undefined);
+              }}
             >
               <img
                 src={claimThumbnailURL(mark.token)}
@@ -169,14 +189,37 @@ export function Ruler({
           </Fragment>
         );
       })}
-      <div className={styles.scNeedle} style={{ insetInlineStart: at(value) }} />
-      <div className={styles.scKnob} style={{ insetInlineStart: at(value) }} />
-      <div className={styles.scTag} style={{ insetInlineStart: at(value) }} aria-hidden="true">
-        {formatScore(value)}
-      </div>
-      {hover !== undefined && !dragging && (
-        <div className={styles.scGhost} style={{ insetInlineStart: at(hover) }} aria-hidden="true">
-          <span>{formatScore(hover)}</span>
+      {last !== undefined && (
+        <div
+          className={styles.scLastDot}
+          style={{ insetInlineStart: at(last) }}
+          title={`上一张 ${formatScore(last)}`}
+          aria-hidden="true"
+        />
+      )}
+      {set && hover !== undefined && !dragging && (
+        <div className={styles.scHoverLine} style={{ insetInlineStart: at(hover) }} aria-hidden="true" />
+      )}
+      {set && (
+        <>
+          <div className={styles.scNeedle} style={{ insetInlineStart: at(value) }} />
+          <div className={styles.scKnob} style={{ insetInlineStart: at(value) }} />
+        </>
+      )}
+      {!set && hover !== undefined && (
+        <div
+          className={`${styles.scKnob} ${styles.follow}`}
+          style={{ insetInlineStart: at(hover) }}
+          aria-hidden="true"
+        />
+      )}
+      {reading !== undefined && (
+        <div
+          className={`${styles.scReadingChip}${dragging ? ` ${styles.set}` : ""}`}
+          style={{ insetInlineStart: at(reading) }}
+          aria-hidden="true"
+        >
+          {formatScore(reading)}
         </div>
       )}
     </div>

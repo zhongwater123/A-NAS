@@ -15,7 +15,7 @@ type Dimension struct {
 // own score, so that batches of overall alone read as they always did.
 const Overall = "overall"
 
-// Sharpness is the 打分项 that lets raters see a photo at its full size.
+// Sharpness is 清晰度.
 const Sharpness = "sharpness"
 
 // Dimensions lists every 打分项 in the order raters score them. Their IDs

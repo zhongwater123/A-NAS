@@ -6,6 +6,9 @@ Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system
 # The path unit starts it when the Host Agent leaves a request; the timer
 # starts it for periodic checks. An interrupted install is finished first.
 After=network-online.target local-fs.target
+# apt cannot write the /usr of a device that runs the A-NAS image, which
+# systemd-sysupdate updates (docs/runbooks/build-device-image.md).
+ConditionOSRelease=IMAGE_ID!=a-nas
 # Each request starts a run, as often as administrators ask; systemd's
 # default limit of five starts in ten seconds would drop a request, which
 # the Host Agent has already answered as taken.
