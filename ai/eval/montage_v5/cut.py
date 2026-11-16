@@ -252,6 +252,7 @@ SHOTS_SYSTEM = """你是剪辑师。大纲定好了段落和每个段落要的�
 挑节拍时，按优先级从高到低：
 - 画面后面的描述只是大纲给的方向，大纲并没有深入了解画面细节，不用死守；你要自己保证画面内部的叙事性或画面连贯性，这一条优先级最高；
 - 这几张卡片里如果有更合适、更精彩的节拍，按需挑选，这一条优先级其次；
+- 同一个视频的镜头连着最多 {run} 个，其中中景、近景、特写连着最多 2 个，免得同一件事的小画面（车里、机舱里、滑车上）一连好几个；
 - 相邻镜头景别要有变化，同一主体不要用相同景别接着出现；新地方先远景或全景，再到近处和细节；换地点、换时间用动作、方向、相似的形状或空镜过渡，这一条优先级最后。
 unmet：大纲要的、节拍里找不到的画面，没有就写空数组。"""
 STYLE_RULES = {"旅行": "按时间或路线走；开头用一个能交代地点的全景；中间每处地方挑最有代表性的画面，远景、人和细节穿插；"
@@ -411,7 +412,7 @@ def shots(case):
                     continue
                 c = cards[cid]
                 a = c["answer"]
-                lines.append(f"    卡片 {cid}（{clock(c['start'])}–{clock(c['end'])}，{a.get('scene', '')}）：{a['summary']}")
+                lines.append(f"    卡片 {cid}（视频{int(c['video'])} {clock(c['start'])}–{clock(c['end'])}，{a.get('scene', '')}）：{a['summary']}")
                 # #416 (2026-11-09): no 【亮点】 marks; two marked faces in the car came before the rear-view
                 # mirror the picture asked for.
                 for (j, _start, length), b in zip(units(c, CAP), a["beats"], strict=True):
@@ -427,7 +428,7 @@ def shots(case):
     rules = f"\n剪法：{STYLE_RULES[style]}" if STYLE_RULES.get(style) else ""
     user = (f"指令：{instruction}\n成片时长：约 {target} 秒\n体裁：{style}{rules}\n大纲：{picked['design']}\n"
             "段落和画面：\n" + "\n".join(lines))
-    system = SHOTS_SYSTEM.format(target=target)
+    system = SHOTS_SYSTEM.format(target=target, run=RUN if not LABELS else f"{RUN} 个（标了精彩的视频；其他视频 {RUN_PLAIN} 个）")
     if LABELS:
         if SHOTS_MARKS[0] not in system:
             raise ValueError(f"CUT_LABELS: step two no longer says {SHOTS_MARKS[0]}")
@@ -458,6 +459,26 @@ def shots(case):
 
 PIECE_LEAST = 1.5    # seconds: no shot of a music cut shorter, the slots' and the fills'
 NEAR = 6            # cards either side in shooting order a short slot may be filled from
+# 2026-11-16 (the user): no long runs from one video. The kart ride (pj-058 to pj-060, one video cut into
+# three cards) gave four shots in a row, the plane's cabin two small ones. A video gives at most RUN shots
+# in a row, SMALL_RUN of them 中景, 近景 or 特写; with the user's marks (CUT_LABELS), a video with no beat
+# marked 精彩 at most RUN_PLAIN. Step two is told; the fill passes over a beat that would break a run while
+# another of the picture's beats can take the slot. Counted by video, not card: one ride is several cards.
+RUN, RUN_PLAIN, SMALL_RUN = 3, 2, 2
+SMALL = {"中景", "近景", "特写"}
+
+
+def breaks_run(clips, video, size, best):
+    """Whether one more shot from video (shot size size) after clips would be one too many in a row.
+    clips: (video, shot size) of the shots so far; best: the videos the user marked a beat 精彩 in."""
+    run = small = 0
+    for v, z in reversed(clips):
+        if v != video:
+            break
+        run += 1
+        small += small == run - 1 and z in SMALL
+    limit = RUN if not LABELS or video in best else RUN_PLAIN
+    return run >= limit or (size in SMALL and small >= SMALL_RUN)
 SLOW_MOST = 2.5      # times: the ending shot drawn out at most this much to fill its slot
 # Sources tagged upside down over upright pixels (rotation.json beside the cards), turned back in every render of this
 # module, narrative or music: set once here, not per cut, so no cut can miss them.
@@ -507,6 +528,10 @@ def cut_to_music(case):
         near.sort(key=lambda cid: -float(picture(cid) @ like))
         return [f"{cid}/{n}" for cid in near for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
 
+    def size(cid, j):
+        return cards[cid]["answer"]["beats"][int(j) - 1]["shot_size"]
+
+    best = {cards[b.rsplit("/", 1)[0]]["video"] for b, mark in LABELS.items() if mark == "3" and b.rsplit("/", 1)[0] in cards}
     clips, taken, short = [], [], []
     many = len(planned["answer"]["parts"])
     for p, (part, step1, slots_p) in enumerate(zip(planned["answer"]["parts"], picked["parts"], planned["slots"], strict=True), 1):
@@ -534,7 +559,11 @@ def cut_to_music(case):
             order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
             for a, b in reversed(slots) if ending else slots:
                 need, first = round(b * fps) - round(a * fps), True
-                for beat in order:
+                # The ending's slots are filled last to first and reordered after: no run is counted there.
+                so_far = [(x["video"], size(x["card"], x["beats"][0])) for x in clips]
+                fits = [] if ending else [bt for bt in order if not breaks_run(
+                    so_far, cards[bt.rsplit("/", 1)[0]]["video"], size(*bt.rsplit("/", 1)), best)]
+                for beat in fits + [bt for bt in order if bt not in fits]:
                     if need <= 0:
                         break
                     cid, j = beat.rsplit("/", 1)

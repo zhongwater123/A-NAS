@@ -42,6 +42,18 @@ class BeatsTest(unittest.TestCase):
         self.assertEqual(got[2], (3, 28.0, 2.0))      # the last beat starts earlier to run SHORTEST
 
 
+class RunTest(unittest.TestCase):
+    def test_one_video_gives_at_most_three_shots_in_a_row_two_of_them_small(self):
+        kart = [("054", "远景"), ("054", "中景"), ("054", "近景")]       # pj-058 to pj-060, one ride
+        self.assertTrue(cut.breaks_run(kart, "054", "远景", set()))       # a fourth from the ride
+        self.assertTrue(cut.breaks_run(kart, "054", "中景", set()))
+        self.assertFalse(cut.breaks_run(kart, "056", "中景", set()))      # another video starts its own run
+        self.assertTrue(cut.breaks_run(kart[1:], "054", "特写", set()))   # a third small one
+        self.assertFalse(cut.breaks_run(kart[1:], "054", "全景", set()))
+        self.assertFalse(cut.breaks_run([("054", "中景"), ("054", "远景")], "054", "近景", set()))  # small ones apart
+        self.assertFalse(cut.breaks_run([], "054", "特写", set()))
+
+
 class OrderTest(unittest.TestCase):
     def test_every_shooting_order_ask_is_in_step_ones_prompt(self):
         text = cut.PICK + cut.music_note(SONG)
