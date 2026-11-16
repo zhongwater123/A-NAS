@@ -46,7 +46,8 @@ export async function loadInstalledAnimations(): Promise<CompanionManifest> {
  * overview where the device's health is (petCard.tsx).
  */
 export interface CompanionOpeners {
-  onOpenVnas?: () => void;
+  /** Opens the VNAS window: at a conversation's cards that wait for the member, when one is given. */
+  onOpenVnas?: (atCards?: { conversation: string }) => void;
   onOpenTaskRun?: (run: AssistantTaskNotice) => void;
   onOpenHealth?: () => void;
 }

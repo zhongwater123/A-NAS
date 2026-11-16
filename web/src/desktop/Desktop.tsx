@@ -358,7 +358,9 @@ export function Desktop({
         <ShellPart name="companion">
           <Companion
             trouble={deviceTrouble(host.snapshot, host.disconnected)}
-            onOpenVnas={() => open("assistant")}
+            onOpenVnas={(atCards) =>
+              atCards ? open("assistant", { conversationId: atCards.conversation }) : open("assistant")
+            }
             onOpenTaskRun={showTaskRun}
             onOpenHealth={() => openSettings("overview")}
           />
