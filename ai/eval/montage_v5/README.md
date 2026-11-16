@@ -31,7 +31,7 @@
 | `tools/orient.py` | 带 180° 旋转标记的视频，让 4B 判断方向 |
 | `tools/compare_page.py` | 几条成片同步对比播放的网页 |
 | `tools/log_page.py` | 剪辑日志页：每条成片带音乐段落、第一步大纲、逐个镜头（关键帧、节拍、第一步要的画面、第二步的意图）和两步的完整输入 |
-| `prototype/` | 第七版：挑一版与精修的网页原型（`build.py` 生成数据、`search.py` 向量搜索、`index.html`），见[剪辑第七版](../../../docs/research/video-montage-v7.md) |
+| `prototype/` | 第七版：挑一版与精修的网页原型（`build.py` 生成数据、`search.py` 向量搜索；页面 `index.html` 2026-11-16 移到 [`montage_v8/web/`](../../montage_v8/web/index.html)，和上传服务一起），见[剪辑第七版](../../../docs/research/video-montage-v7.md) |
 | `highlight/` | 精彩度标注：品杰每个节拍由人标“精彩、可用、平淡、有问题”，用来试精彩度对规划有没有帮助（`build.py` 生成数据、`server.py` 保存标注、`index.html`），见下面的“精彩度标注”和[精彩度试验](../../../docs/research/video-montage-highlight.md) |
 
 ## 环境

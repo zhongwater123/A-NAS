@@ -11,7 +11,7 @@
 | 适配层 | `adapters/` | FFmpeg、OpenAI 兼容的视觉服务、Claude（命令行或 API）、allin1 或预算好的音乐、文件存储 | 按平台 |
 | 编排层 | `pipeline.py` | 切卡片 → 量画质 → 描述 → 第一步 → 第二步 → 填槽 → 渲染，结果可复用 | 领域层和端口 |
 | 配置 | `profiles/` | `mac-dev`、`x86-nas`、`rk3588` 各一份；`cases.toml` 是各组素材 | |
-| 入口 | `__main__.py`、`doctor.py`、`golden.py` | 命令行、平台自检、和第六版比对 | |
+| 入口层 | `service/`、`web/`、`__main__.py`、`doctor.py`、`golden.py` | 网页服务和网页（上传）、命令行、平台自检、和第六版比对 | 编排层；网页服务另要 `requirements-web.txt` |
 
 领域层不许做输入输出：Ruff 的 TID251 禁止它引用 `subprocess`、`os`、`requests`、`PIL` 等（`ai/ruff.toml`）；`tests/test_montage_v8.py` 还检查它只引用标准库、NumPy 和它自己。
 
@@ -55,6 +55,34 @@ python3 -m montage_v8 golden pj --tag=-symphony-label-1 --music Forester-Symphon
 - **请求**：两步规划的 system、user、schema 和第六版当前代码逐字相同（四种剪法）；卡片描述的请求也相同。
 - **音乐槽**：三首歌用自己算的响度重算，和原来的 `music-*.json` 相同。
 - **成片**：用已有规划重新渲染品杰一条，抽 5 帧和第六版成片像素相同，耗时 62 秒。
+
+## 网页与上传
+
+`service/` 是入口层：一个网页服务（Starlette + Uvicorn），提供第七版的网页（页面已移到 [`web/index.html`](web/index.html)），并接收浏览器上传的视频。剪辑还没接到网页上，三版成片仍是第七版的示例。
+
+- **上传**：网页“添加视频”或把视频、文件夹拖进素材框后，逐个上传。
+  - 存放位置：这台机器的 `<原片目录>/uploads/<文件夹名>/<文件名>`。原片目录来自平台配置的 `paths.videos`，Mac 上是 `~/A-NAS-datasets/videos/uploads/`。
+  - 传输方式：请求体就是文件本身，边收边写到隐藏的临时文件，收全了才改成正式名字。中途断了不会留下半个文件。
+  - 文件时间：保留文件原来的修改时间。
+  - 重名：同名、同大小的不再存一次；同名、不同大小的另起名字。
+  - 限制：只收 MOV、MP4、M4V、MTS、AVI、MKV，文件名和文件夹名去掉路径符号，写不到 uploads 以外；存完磁盘至少要留 1 GiB。
+- **已上传的视频**：打开网页时按文件夹列出，标着“已上传到这台机器”，可以播放和拖动。
+- **还不能续传**：传了一半断掉要整个重传。要支持大文件续传，换成 tus 协议（A-NAS 的上传已经在用）。
+- **没有登录**：服务默认只对本机开放。用 `--host 0.0.0.0` 对局域网开放后，同一局域网里任何人都能上传，只在可信的网络里这样用。
+
+装依赖（只需一次，开发机和板子相同）：
+
+```bash
+python3 -m venv --system-site-packages ~/.venvs/montage-v8 && ~/.venvs/montage-v8/bin/pip install -r montage_v8/requirements-web.txt
+```
+
+启动（在 `ai/` 目录下）。`--site` 是第七版 `build.py` 搭的网站目录，里面有示例成片和关键帧；`--proxy` 是第七版的向量搜索服务，没开就不填，只有搜索不能用：
+
+```bash
+~/.venvs/montage-v8/bin/python -m montage_v8 serve --site "$HOME/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）" --host 0.0.0.0 --port 8765 --proxy http://127.0.0.1:8766
+```
+
+别的电脑打开 `http://<这台机器的局域网地址>:8765/`。板子上加 `--profile rk3588`，上传就存到板子的原片目录。
 
 ## 板子到了之后（RK3588）
 

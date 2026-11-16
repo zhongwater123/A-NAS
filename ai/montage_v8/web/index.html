@@ -138,6 +138,10 @@ h2 { font-size: 17px; margin: 0; }
 .vt .vm span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vt .up, .vt .new { position: absolute; top: 6px; left: 6px; font-size: 10px; padding: 0 6px; border-radius: 999px; background: rgba(0,0,0,.55); color: var(--warn); }
 .vt .new { color: var(--tone); }
+.vt .ul { position: absolute; left: 6px; right: 6px; bottom: 26px; font-size: 10px; padding: 1px 6px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; text-align: center; overflow: hidden; }
+.vt .ul i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--tone); opacity: .45; }
+.vt .ul span { position: relative; }
+.vt .ul.ok { color: #9be7a8; } .vt .ul.bad { color: #ffb4b4; }
 .vt.on { outline-color: var(--tone); }
 .vt.on .ck { background: var(--tone-grad); border-color: transparent; }
 .vt.on .ck svg { visibility: visible; }
@@ -652,8 +656,15 @@ function route() {
     Promise.all([...document.querySelectorAll("#app img")].filter(i => i.getBoundingClientRect().top < innerHeight).slice(0, 16)
       .map(i => i.decode().catch(() => {}))),
     new Promise(r => setTimeout(r, 250))]);
-  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches)
-    document.startViewTransition(() => { draw(); return settle(); });
+  // a hidden page (a background tab) has its transition aborted before the callback runs, which left it empty
+  if (document.startViewTransition && document.visibilityState === "visible" && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+  {
+    let drawn = false;
+    const t = document.startViewTransition(() => { drawn = true; draw(); return settle(); });
+    const fallback = () => { if (!drawn) { drawn = true; draw(); } };
+    t.ready.catch(fallback); t.updateCallbackDone.catch(fallback); t.finished.catch(() => {});
+    setTimeout(fallback, 400);                       // the pane was hidden as the page loaded: no promise settles either
+  }
   else draw();
 }
 window.addEventListener("hashchange", route);
@@ -676,12 +687,14 @@ const NAS = D.folders.map(f => ({ id: f.id, name: f.name, path: f.path, items: f
 const nasKeys = new Set(NAS.flatMap(g => g.items.map(i => i.key)));
 let picked = new Set(store.get("picked", NAS.find(g => g.id === "pj").items.map(i => i.key)));   // the films are cut from this folder
 let opened = new Set(store.get("opened", []));        // folders shown open
-let added = [];                                       // groups added on this page, like the NAS ones; gone on reload
-const groups = () => [...NAS, ...added];
+let added = [];                                       // groups added on this page, like the NAS ones; uploaded as they are added
+let saved = [];                                       // groups already uploaded to the machine serving this page (/api/uploads)
+let canUpload = null;                                 // whether this page is served by the 第八版 service (null: not asked yet)
+const groups = () => [...NAS, ...saved, ...added];
 const onIn = items => items.filter(i => picked.has(i.key));
 const footageSummary = () => {
   const folders = NAS.map(g => ({ name: g.name, n: onIn(g.items).length })).filter(x => x.n);
-  const nas = folders.reduce((s, x) => s + x.n, 0), mine = added.reduce((s, g) => s + onIn(g.items).length, 0);
+  const nas = folders.reduce((s, x) => s + x.n, 0), mine = [...saved, ...added].reduce((s, g) => s + onIn(g.items).length, 0);
   const seconds = groups().reduce((s, g) => s + onIn(g.items).reduce((t, i) => t + i.seconds, 0), 0);
   return { count: nas + mine, nas, mine, seconds, folders };
 };
@@ -703,6 +716,45 @@ const runsOf = items => {                              // stretches of the same 
   });
   return runs;
 };
+
+// ---------- uploading to the serving machine ----------
+// one video at a time, as the file itself in a PUT (no form encoding); the tile shows its progress
+const queue = [];
+let sending = false;
+function ulBadge(it) {
+  const u = it.up; if (!u) return "";
+  if (u.state === "ok") return `<span class="ul ok"><span>${u.existed ? "已在这台机器上" : "已保存"}</span></span>`;
+  if (u.state === "bad") return `<span class="ul bad" title="${esc(u.error || "")}"><span>上传失败</span></span>`;
+  if (u.state === "wait") return `<span class="ul"><span>等待上传</span></span>`;
+  return `<span class="ul"><i style="width:${u.pct}%"></i><span>上传 ${u.pct}%</span></span>`;
+}
+function redrawBadge(it) {
+  const tile = document.querySelector(`.vt[data-key="${CSS.escape(it.key)}"]`); if (!tile) return;
+  tile.querySelector(".ul")?.remove();
+  tile.insertAdjacentHTML("beforeend", ulBadge(it));
+}
+function pump() {
+  if (sending || !queue.length) return;
+  sending = true;
+  const it = queue.shift();
+  it.up = { state: "send", pct: 0 };
+  redrawBadge(it);
+  const xhr = new XMLHttpRequest();
+  xhr.open("PUT", `api/uploads?group=${encodeURIComponent(it.group)}&name=${encodeURIComponent(it.name)}&modified=${it.file.lastModified}`);
+  xhr.upload.onprogress = e => { if (e.lengthComputable) { it.up.pct = Math.floor(e.loaded / e.total * 100); redrawBadge(it); } };
+  const finish = (ok, body) => {
+    it.up = ok ? { state: "ok", existed: body.existed, saved: body.saved } : { state: "bad", error: body.error || "连接断了" };
+    redrawBadge(it);
+    if (!ok) toast(`${it.name} 上传失败：${it.up.error}`);
+    else if (!queue.length) toast("上传完了，视频已保存在这台机器上");
+    sending = false;
+    pump();
+  };
+  xhr.onload = () => { let body = {}; try { body = JSON.parse(xhr.responseText); } catch {} finish(xhr.status === 200, body); };
+  xhr.onerror = () => finish(false, {});
+  xhr.send(it.file);
+}
+addEventListener("beforeunload", e => { if (sending || queue.length) { e.preventDefault(); e.returnValue = ""; } });
 
 function uploadPage() {
   const setup = getSetup();
@@ -730,7 +782,7 @@ function uploadPage() {
             <p>NAS 里的视频按文件夹列出。点文件夹展开，里面按拍摄时间排好、按天分开。</p>
             <p>文件夹前的圆圈勾选整个文件夹，日期那一行勾选那一天；点一下视频勾选或取消，按住 Shift 点可以连选一段。只剪勾选的视频。</p>
             <p>点 ＋ 添加这台电脑上的视频，也可以把视频或整个文件夹拖进这个框，一个文件夹成为一组。</p>
-            <p class="faint">原型是模拟的：添加的文件不会离开这台电脑，三版成片仍用“新西兰 · 品杰手机”里的示例素材剪。</p>
+            <p class="faint">添加的视频会上传到运行这个网站的机器上保存（Mac 或 RK3588 板子，原片目录下的 uploads 文件夹），下次打开还在。剪辑还没接上：三版成片仍用“新西兰 · 品杰手机”里的示例素材剪。</p>
           </div>
         </span>
       </div>
@@ -757,7 +809,7 @@ function uploadPage() {
     <button class="vt ${picked.has(it.key) ? "on" : ""}" data-key="${esc(it.key)}" title="${esc(it.name)}">
       ${it.pic}<span class="ck">${ICON.check}</span>
       <span class="vm"><span>${esc(it.at ? it.at.slice(11, 16) : it.name)}</span><span class="len">${it.seconds ? clock(it.seconds) : ""}</span></span>
-      ${it.upright ? '<span class="up">竖</span>' : ""}${it.fresh ? '<span class="new">新加</span>' : ""}
+      ${it.upright ? '<span class="up">竖</span>' : ""}${it.fresh ? '<span class="new">新加</span>' : ""}${ulBadge(it)}
     </button>`;
   const bodyHTML = g => `<div class="vscroll"><div class="vgrid">${runsOf(g.items).map(r => `
       <button class="day" data-run="${r.a}-${r.b}"><span class="tick ${tri(onIn(g.items.slice(r.a, r.b)).length, r.b - r.a)}">${ICON.check}<i></i></span>
@@ -845,32 +897,36 @@ function uploadPage() {
     if (!fresh.length) return toast(name ? `“${name}”里没有可以用的视频` : "没有可以用的视频，支持 MOV、MP4");
     let g = name ? null : added.find(x => x.loose);
     if (!g) {
-      g = { id: `+${added.length}`, name: name || "新加的视频", path: "这台电脑", loose: !name, items: [] };
+      g = { id: `+${added.length}`, name: name || "新加的视频", path: "这台电脑", loose: !name, items: [],
+            server: name || `新加的视频 ${localIso(Date.now()).slice(0, 10)}` };
       added.push(g);
     }
     const items = fresh.map((file, n) => {
       const url = URL.createObjectURL(file);
       return { key: `${g.id}/${g.items.length + n}`, name: file.name, seconds: 0, at: localIso(file.lastModified), fresh: true, url,
+        file, group: g.server, up: canUpload === false ? null : { state: "wait" },
         pic: `<video src="${url}#t=0.5" muted preload="metadata"></video><span class="vicon">${ICON.film}</span>` };
     });
     g.items.push(...items);
     items.forEach(i => picked.add(i.key));
     opened.add(g.id);
     drawFolders();
-    toast(`添加了 ${items.length} 段视频${name ? `（${name}）` : ""}`);
-    items.forEach(it => {                              // fill in each length once the browser has read it
-      const v = document.createElement("video");
-      v.preload = "metadata";
-      v.onloadedmetadata = () => {
-        it.seconds = v.duration || 0;
-        const len = document.querySelector(`.vt[data-key="${CSS.escape(it.key)}"] .len`);
-        if (len && it.seconds) len.textContent = clock(it.seconds);
-        const sub = fold(g.id)?.querySelector(".fname small");
-        if (sub) sub.innerHTML = subOf(g);
-        drawCount();
-      };
-      v.src = it.url;
-    });
+    toast(`添加了 ${items.length} 段视频${name ? `（${name}）` : ""}${canUpload ? "，正在上传" : canUpload === false ? "（这个地址不能上传，只在本页预览）" : ""}`);
+    if (canUpload !== false) { queue.push(...items); pump(); }
+    items.forEach(it => lengthOf(it, g));
+  }
+  function lengthOf(it, g) {                           // fill in a video's length once the browser has read it
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => {
+      it.seconds = v.duration || 0;
+      const len = document.querySelector(`.vt[data-key="${CSS.escape(it.key)}"] .len`);
+      if (len && it.seconds) len.textContent = clock(it.seconds);
+      const sub = fold(g.id)?.querySelector(".fname small");
+      if (sub) sub.innerHTML = subOf(g);
+      drawCount();
+    };
+    v.src = it.url;
   }
   async function filesOf(entry) {
     if (entry.isFile) return [await new Promise((res, rej) => entry.file(res, rej))];
@@ -909,6 +965,19 @@ function uploadPage() {
     }
     if (loose.length) addGroup(null, loose);
   };
+
+  // the videos already on the serving machine, as folders; asked once a visit
+  if (canUpload === null) {
+    fetch("api/uploads").then(r => r.ok ? r.json() : Promise.reject(r.status)).then(d => {
+      canUpload = true;
+      saved = d.groups.map(g => ({ id: `=${g.name}`, name: g.name, path: "已上传到这台机器", items: g.files.map(f => {
+        const url = `uploads/${encodeURIComponent(g.name)}/${encodeURIComponent(f.name)}`;
+        return { key: `=${g.name}/${f.name}`, name: f.name, seconds: 0, at: localIso(f.modified), url, up: { state: "ok" },
+          pic: `<video src="${url}#t=0.5" muted preload="metadata"></video><span class="vicon">${ICON.film}</span>` };
+      }) }));
+      if ($("#folders")) { drawFolders(); saved.forEach(g => g.items.forEach(it => lengthOf(it, g))); }
+    }).catch(() => { canUpload = false; });
+  }
 
   $("#go").onclick = () => {
     const f = footageSummary();

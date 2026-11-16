@@ -232,5 +232,66 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(got["properties"]["a"]["items"]["additionalProperties"])
 
 
+class UploadNamesTest(unittest.TestCase):
+    def test_names_stay_inside_the_uploads_folder_and_only_videos_are_taken(self):
+        import tempfile
+
+        from montage_v8.service.uploads import UploadError, Uploads
+
+        with tempfile.TemporaryDirectory() as d:
+            up = Uploads(Path(d))
+            path, existed = up.target("../../etc", "../../x.mp4", 10)
+            self.assertEqual(path, Path(d) / "etc" / "x.mp4")
+            self.assertFalse(existed)
+            for group, name in (("a", "x.sh"), ("..", "x.mp4"), ("a", "")):
+                with self.assertRaises(UploadError):
+                    up.target(group, name, 10)
+
+    def test_the_same_file_again_is_not_kept_twice_and_a_different_one_gets_a_new_name(self):
+        import tempfile
+
+        from montage_v8.service.uploads import Uploads
+
+        with tempfile.TemporaryDirectory() as d:
+            up = Uploads(Path(d))
+            (Path(d) / "湖").mkdir()
+            (Path(d) / "湖" / "a.MOV").write_bytes(b"12345")
+            self.assertEqual(up.target("湖", "a.MOV", 5), (Path(d) / "湖" / "a.MOV", True))
+            self.assertEqual(up.target("湖", "a.MOV", 6), (Path(d) / "湖" / "a (2).MOV", False))
+            self.assertEqual(up.listing(), [{"name": "湖", "files": [
+                {"name": "a.MOV", "size": 5, "modified": up.listing()[0]["files"][0]["modified"]}]}])
+
+
+try:
+    import starlette  # noqa: F401  网页服务的依赖只在 ~/.venvs/montage-v8 之类的环境里装
+    HAS_WEB = True
+except ImportError:
+    HAS_WEB = False
+
+
+@unittest.skipUnless(HAS_WEB, "没有装 starlette、httpx（ai/montage_v8/requirements-web.txt）")
+class UploadServiceTest(unittest.TestCase):
+    def test_a_video_is_written_whole_and_listed_and_a_short_body_leaves_nothing(self):
+        import tempfile
+
+        from starlette.testclient import TestClient
+
+        from montage_v8.service.app import create_app
+
+        with tempfile.TemporaryDirectory() as d:
+            client = TestClient(create_app(Path(d)))
+            r = client.put("/api/uploads", params={"group": "湖边", "name": "a.mp4", "modified": "1700000000000"}, content=b"x" * 1000)
+            self.assertEqual(r.status_code, 200, r.text)
+            saved = Path(d) / "湖边" / "a.mp4"
+            self.assertEqual(saved.read_bytes(), b"x" * 1000)
+            self.assertEqual(int(saved.stat().st_mtime), 1700000000)
+            self.assertEqual(client.get("/api/uploads").json()["groups"][0]["files"][0]["name"], "a.mp4")
+            self.assertEqual(client.get("/uploads/湖边/a.mp4", headers={"Range": "bytes=0-9"}).status_code, 206)
+            r = client.put("/api/uploads", params={"group": "湖边", "name": "b.mp4"}, content=b"x" * 10,
+                           headers={"Content-Length": "20"})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(sorted(p.name for p in (Path(d) / "湖边").iterdir()), ["a.mp4"])
+
+
 if __name__ == "__main__":
     unittest.main()

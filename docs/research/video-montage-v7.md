@@ -35,7 +35,7 @@
 - **数据**（[`build.py`](../../ai/eval/montage_v5/prototype/build.py)）：从第六版的卡片描述、规划和剪辑记录生成 `data.js`：每个槽记下规划选的卡片、节拍和关键帧，全部 116 张描述过的卡片连同节拍都放进去，供换镜头时挑。每版的一句剪辑思路（`PITCH`）是手写的，代替规划器以后要多给的一个字段。曲库是做过结构分析的歌（`music-*.json`，现在 4 首）。上传页的拍摄时间取 DJI 文件名、iPhone 的 QuickTime 标签，其余取 UTC 创建时间加 13 小时（新西兰夏令时）。
 - **搜索**（[`search.py`](../../ai/eval/montage_v5/prototype/search.py)）：用 EmbeddingGemma 2 编码文字，和每个节拍覆盖的 2 秒窗口画面向量比，节拍取最像的窗口的分数。向量来自 A-NAS 视频索引，`build.py` 按节拍分组写进 `beats.npz`；启动时核对模型版本，和建索引时不一致就退出。分数在 0.65–0.77 之间，只用来排序，不设门槛。`/likeness` 用节拍窗口向量的均值算两个节拍的相似度，删除镜头时用。
 - **重洗的规则**：同一个节拍只用一次，不和前一镜同卡片，卡片要够长，横拍的槽不换成竖拍。锁住的镜头拖不动，其他镜头拖动时绕开它（用 Sortable 的 `draggable` 排除；它的 `filter` 会让同一列的其他镜头也拖不动）。
-- **页面**（[`index.html`](../../ai/eval/montage_v5/prototype/index.html)）：单文件，不用构建。拖动用 [SortableJS](https://github.com/SortableJS/Sortable) 1.15.6（MIT，[`vendor/`](../../ai/eval/montage_v5/prototype/vendor/LICENSE)，与上游逐字节相同）。换页用 View Transitions 淡入，新页面视野内的图片解码好或过 0.25 秒再显示，滚回顶部放在新页面画好之后（原来先滚旧页面再换内容，看起来闪两下）。进度胶囊只建一次、之后只改文字和进度条：每次重建会让转圈动画从头开始而卡顿。上传网格的滚动放在外层 `.vscroll`：滚动条直接加在 grid 上时，浏览器会把行压扁、缩略图叠在一起。只有 HTTPS 或 localhost 下浏览器才给系统通知，局域网 http 地址只有页面内提醒。
+- **页面**（[`index.html`](../../ai/montage_v8/web/index.html)）：单文件，不用构建。拖动用 [SortableJS](https://github.com/SortableJS/Sortable) 1.15.6（MIT，[`vendor/`](../../ai/montage_v8/web/vendor/LICENSE)，与上游逐字节相同）。换页用 View Transitions 淡入，新页面视野内的图片解码好或过 0.25 秒再显示，滚回顶部放在新页面画好之后（原来先滚旧页面再换内容，看起来闪两下）。进度胶囊只建一次、之后只改文字和进度条：每次重建会让转圈动画从头开始而卡顿。上传网格的滚动放在外层 `.vscroll`：滚动条直接加在 grid 上时，浏览器会把行压扁、缩略图叠在一起。只有 HTTPS 或 localhost 下浏览器才给系统通知，局域网 http 地址只有页面内提醒。
 - **存在哪**：换镜头和锁定存在浏览器本地（`proto:locked:<版本>` 等），换浏览器就没有；确认时才写进后台记录。
 
 ## 运行
@@ -90,6 +90,6 @@ cd ~/A-NAS-datasets/videos/dji-newzealand-2026-10 && ffmpeg -ss 1.8 -t 4.5 -i DJ
 
 ## 关联
 
-- 代码：[`build.py`](../../ai/eval/montage_v5/prototype/build.py)（`PITCH`、`beat_vectors`、`folders`）、[`search.py`](../../ai/eval/montage_v5/prototype/search.py)（`/search`、`/likeness`、`/record`）、[`index.html`](../../ai/eval/montage_v5/prototype/index.html)；数据位置 [`paths.py`](../../ai/eval/montage_v5/paths.py)
+- 代码：[`build.py`](../../ai/eval/montage_v5/prototype/build.py)（`PITCH`、`beat_vectors`、`folders`）、[`search.py`](../../ai/eval/montage_v5/prototype/search.py)（`/search`、`/likeness`、`/record`）、[`index.html`](../../ai/montage_v8/web/index.html)；数据位置 [`paths.py`](../../ai/eval/montage_v5/paths.py)
 - 成片与规划：[剪辑第六版](video-montage-v6.md)；描述的 token 开销与方案 B 的对比见 [#479](https://github.com/zhongwater123/A-NAS/issues/479)
 - 数据：站点文件夹 `~/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）/`（`data.js`、`beats.npz`、`hero.*`、后台记录 `log/confirm.jsonl`），不进仓库

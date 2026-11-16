@@ -26,6 +26,7 @@ import numpy as np
 from PIL import Image
 
 HERE = Path(__file__).resolve().parent
+PAGE = HERE.parents[2] / "montage_v8" / "web"   # 2026-11-16: the page moved into 第八版 with its upload service
 sys.path.insert(0, str(HERE.parent))  # montage_v5
 from paths import CARDS as CARD_DIR, CUTS, INDEXES, ROOT, VIDEOS  # noqa: E402
 
@@ -185,8 +186,8 @@ def library():
 def main():
     music = read(CUTS / "music-Forester-Symphony.json")
     SITE.mkdir(parents=True, exist_ok=True)
-    link("index.html", HERE / "index.html")
-    link("vendor", HERE / "vendor")
+    link("index.html", PAGE / "index.html")
+    link("vendor", PAGE / "vendor")
     link("frames", NAS_FRAMES / "pj")
     link("sources", SOURCES)
     link("song.mp3", music["song"])
