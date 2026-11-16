@@ -1,11 +1,12 @@
 # Gives a device what this image adds to /etc (/usr/lib/a-nas-image/etc-defaults),
-# before the accounts are made and before a-nas-sysext-ready.service reloads
-# the units, so that a unit link a new package put in /etc counts at this boot.
+# before a-nas-sysext-ready.service reloads the units, so that a unit link a
+# new package put in /etc counts at this boot. Not before systemd-sysusers,
+# which runs before local-fs.target.
 [Unit]
 Description=Add what this image's packages put in /etc
 DefaultDependencies=no
 After=local-fs.target
-Before=sysinit.target systemd-sysusers.service systemd-tmpfiles-setup.service a-nas-sysext-ready.service shutdown.target
+Before=sysinit.target systemd-tmpfiles-setup.service a-nas-sysext-ready.service shutdown.target
 Conflicts=shutdown.target
 
 [Service]
