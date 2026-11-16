@@ -139,7 +139,8 @@
 
 ## 验收证据
 
-- 单元测试（[更新服务](../../internal/systemupdate/updater/service_test.go)）：安装中断后核对全部发行包和 dpkg 审计结果，区分继续安装、重试和回退；半装的发行包会重装；手动降级失败后断电，恢复原版本；检查失败按原因去重，检查成功后同一原因可以再次记录；下载进度、同步空间预检和暂存文件变化；过期请求作废。Host Agent 先启动路径单元，启动成功才写请求，未被取走的请求算作运行中（[执行器](../../internal/hostops/linux/update_test.go)、[root 代理](../../internal/hoststate/agent/rootagent/update_test.go)）。
+- 单元测试（[更新服务](../../internal/systemupdate/updater/service_test.go)）：推送同步只取暂存目录中的普通文件；预检空间与暂存文件变化；推送没有的文件从本机软件源删除，删除后才放得下的推送先删除；检查发现推送和网络软件源的新版本，按设置和间隔检查与下载，跟踪下载进度；检查失败按原因去重，检查成功后同一原因可以再次记录。
+- 安装与恢复单元测试（[更新服务](../../internal/systemupdate/updater/service_test.go)）：没有改动软件包的安装失败可重试，只改了依赖的失败会回退；断电后核对全部发行包和 dpkg 审计结果，半装的发行包会重装；手动降级失败后断电，恢复原版本；已回退经后来的检查保持，更新的版本取代它；回退失败的警告在检查通过后清除；软件源不再有的上一版本不再提供；过期请求作废；跨午夜时段。Host Agent 先启动路径单元，启动成功才写请求，未被取走的请求算作运行中（[执行器](../../internal/hostops/linux/update_test.go)、[root 代理](../../internal/hoststate/agent/rootagent/update_test.go)）。
 - 接口测试（[`systemupdate_test.go`](../../internal/httpapi/systemupdate_test.go)，按契约核对）：成员 `403`；存储或应用在忙时安装返回 `409 update_waiting`，运行中返回 `409 update_busy`；安装、回到上一版本与设置；请求与结果各记一次活动记录。自动安装每个时段只请求一次、以“系统”为操作者，结果按发生的时间记录（[产品服务](../../internal/systemupdateapi/systemupdateapi_test.go)）；同时写的同一条结果只记一次（[账号服务](../../internal/accounts/systemupdate_test.go)）。
 - 系统测试（软件包设备，[`system-test.sh`](../../scripts/system-test.sh) 的系统更新一节）：签名软件源中有上一 release、本 release 与下一 release，暂存目录就是这个软件源：
   - 经产品接口检查，同步推送，找到下一 release；安装，`a-nas-check` 通过，数据库多出下一 release 的一步；

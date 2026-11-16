@@ -2530,9 +2530,16 @@ handoff_checked_at=$(jq -r .checkedAt /var/lib/a-nas-update/state.json)
 printf '{"kind":"check","by":"owner"}\n' >/var/lib/a-nas-update/.system-test-request
 mv -f /var/lib/a-nas-update/.system-test-request /var/lib/a-nas-update/request.json
 touch /run/anas-update-test-release
-state=$(update_settled || true)
+for _ in $(seq 1 100); do
+  state=$(update_state 2>/dev/null || true)
+  if [[ ! -e /var/lib/a-nas-update/request.json ]] &&
+    jq -e --arg before "$handoff_checked_at" '.checkedAt != $before and (.running | not)' <<<"$state" >/dev/null; then
+    break
+  fi
+  sleep 0.2
+done
 check "the request watcher starts a new run for the late request" \
-  test "$(jq -r .checkedAt <<<"$state")" != "$handoff_checked_at" -a ! -e /var/lib/a-nas-update/request.json
+  test -n "$state" -a "$(jq -r .checkedAt <<<"$state")" != "$handoff_checked_at" -a ! -e /var/lib/a-nas-update/request.json
 rm -f "$update_dropin/system-test-handoff.conf" /run/anas-update-test-finishing /run/anas-update-test-release
 systemctl daemon-reload
 
