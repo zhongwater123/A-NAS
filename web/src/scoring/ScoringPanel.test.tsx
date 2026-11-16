@@ -73,6 +73,10 @@ describe("ScoringPanel for a rater", () => {
     await waitFor(() => expect(answered).toHaveLength(1));
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 3.19 } });
     expect(answered[0].body.submission).toMatch(/^[0-9a-f-]{36}$/);
+    // The next photo starts with no score.
+    expect((screen.getByRole("textbox", { name: "分数，0 到 5，最多两位小数" }) as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("slider", { name: "分数" }).getAttribute("aria-valuetext")).toBe("未打分");
+    expect((screen.getByRole("button", { name: /确定/ }) as HTMLButtonElement).disabled).toBe(true);
     // The photo just scored now sits on the ruler, whole, at its score.
     const thumbnail = screen.getByRole("img", { name: "3.19 分的照片" });
     expect(thumbnail.getAttribute("src")).toContain("/claims/t1/thumbnail");
@@ -96,11 +100,15 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[1]).toMatchObject({ token: "t2", body: { score: 5 } });
     screen.getByRole("application").focus();
 
-    // Backspace goes back to the photo just scored; a new key replaces its score.
+    // Backspace takes the last step back, to the photo just scored with its
+    // score; a new key replaces it.
     await user.keyboard("{Backspace}");
-    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · 原来 5.00 · Esc 取消");
+    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · Esc 不改");
     await waitFor(() =>
       expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect((screen.getByRole("textbox", { name: "分数，0 到 5，最多两位小数" }) as HTMLInputElement).value).toBe(
+      "5.00",
     );
     await user.keyboard("4{Enter}");
     await waitFor(() => expect(answered).toHaveLength(3));
@@ -123,18 +131,19 @@ describe("ScoringPanel for a rater", () => {
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "继续打分" }));
     await shownPhoto();
+    await user.keyboard("3");
     await user.click(screen.getByRole("button", { name: /确定/ }));
     expect(await screen.findByText("这个批次你已经打完了")).toBeTruthy();
     expect(screen.getByText(counted("已打 6 张"))).toBeTruthy();
   });
 
-  it("scores a batch's 打分项 one after another on the same ruler and answers once", async () => {
+  it("scores a batch's 打分项 one after another, answers after the last and steps back", async () => {
     const batch = raterBatch({
       id: `b-${Math.random()}`,
       dimensions: dimensionsOf("overall", "composition", "sharpness"),
     });
     window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
-    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2", "t3"]);
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
@@ -142,47 +151,89 @@ describe("ScoringPanel for a rater", () => {
     await shownPhoto();
     const items = screen.getByRole("list", { name: "打分项" });
     const current = () => within(items).getByRole("button", { current: "step" }).textContent;
+    const arrow = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+    const box = (name: string) =>
+      (screen.getByRole("textbox", { name: `${name}，0 到 5，最多两位小数` }) as HTMLInputElement).value;
+    // A new photo starts empty: nothing to confirm, and no way on or back yet.
     expect(current()).toContain("总分");
-    expect(screen.getByRole("button", { name: /下一项/ })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /下一项/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(arrow("下一张").disabled).toBe(true);
+    expect(arrow("上一张").disabled).toBe(true);
     // Enter confirms 总分 and moves on; nothing is sent yet.
     await user.keyboard("3{Enter}");
     expect(current()).toContain("构图");
     expect(within(items).getByRole("button", { name: /总分/ }).textContent).toContain("3.00");
-    expect(screen.getByRole("textbox", { name: "构图，0 到 5，最多两位小数" })).toBeTruthy();
     // A pick of the pointer, once released, moves on by itself.
-    const slider = screen.getByRole("slider", { name: "构图" });
     await user.keyboard("2");
-    await user.pointer([{ keys: "[MouseLeft>]", target: slider }, { keys: "[/MouseLeft]" }]);
-    await waitFor(() => expect(current()).toContain("清晰度"));
-    expect(screen.getByText("看 100%", { exact: false })).toBeTruthy();
-    expect(answered).toHaveLength(0);
-    // The last one waits for 确定, even after a pick.
-    await user.keyboard("4");
     await user.pointer([
-      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "清晰度" }) },
+      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "构图" }) },
       { keys: "[/MouseLeft]" },
     ]);
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    expect(answered).toHaveLength(0);
+    await waitFor(() => expect(current()).toContain("清晰度"));
     // ↑ goes back without losing what was set.
     await user.keyboard("{ArrowUp}");
     expect(current()).toContain("构图");
     await user.keyboard("{ArrowDown}");
-    await user.click(screen.getByRole("button", { name: /确定/ }));
+    // The way on opens once every item has a score.
+    expect(arrow("下一张").disabled).toBe(true);
+    await user.keyboard("4");
+    expect(arrow("下一张").disabled).toBe(false);
+    expect(answered).toHaveLength(0);
+    // A pick on the last item answers the photo and the next one comes, empty.
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "清晰度" }) },
+      { keys: "[/MouseLeft]" },
+    ]);
     await waitFor(() => expect(answered).toHaveLength(1));
     expect(answered[0]).toMatchObject({
       token: "t1",
       body: { kind: "score", score: 3, scores: { composition: 2, sharpness: 4 } },
     });
-    // The next photo starts on 总分 again.
     await waitFor(() =>
       expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
     );
     expect(current()).toContain("总分");
+    expect(within(items).getByRole("button", { name: /构图/ }).textContent).toContain("—");
+    expect(box("总分")).toBe("");
+
+    // 撤销一步 goes back one item, and from the first item to the last
+    // photo's last item; Esc comes back with what was set here.
+    await user.keyboard("3{Enter}");
+    expect(current()).toContain("构图");
+    await user.keyboard("{Backspace}");
+    expect(current()).toContain("总分");
+    expect(box("总分")).toBe("3.00");
+    await user.keyboard("{Backspace}");
+    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · Esc 不改");
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t1/image"),
+    );
+    expect(current()).toContain("清晰度");
+    expect(box("清晰度")).toBe("4.00");
+    expect(arrow("上一张").disabled).toBe(true);
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect(box("总分")).toBe("3.00");
+
+    // The arrows: back to the last photo, and on with its scores as they stand.
+    await user.click(arrow("上一张"));
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t1/image"),
+    );
+    expect(current()).toContain("总分");
+    await user.click(arrow("下一张"));
+    await waitFor(() => expect(answered).toHaveLength(2));
+    expect(answered[1]).toMatchObject({ token: "t1", body: { score: 3, scores: { composition: 2, sharpness: 4 } } });
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect(box("总分")).toBe("3.00");
   });
 
-  it("shows the photo at 100% while Z is held, in batches that score sharpness", async () => {
-    const batch = raterBatch({ id: `b-${Math.random()}`, dimensions: dimensionsOf("overall", "sharpness") });
+  it("shows the photo at 100% on a click or while Z is held, in every batch", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}` });
     window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
     const { handlers } = raterHandlers(batch, ["t1", "t2"]);
     let gone = false;
@@ -208,8 +259,13 @@ describe("ScoringPanel for a rater", () => {
       await waitFor(() => expect(created).toHaveBeenCalled());
       await user.keyboard("{/z}");
       expect(screen.queryByRole("status", { name: "正在载入 100% 原图" })).toBeNull();
+      // A click looks, and another click comes back.
+      await user.click(await shownPhoto());
+      const loading = await screen.findByRole("status", { name: "正在载入 100% 原图" });
+      await user.click(loading);
+      expect(screen.queryByRole("status", { name: "正在载入 100% 原图" })).toBeNull();
       // A photo whose original changed says so.
-      await user.keyboard("3{Enter}4{Enter}");
+      await user.keyboard("3{Enter}");
       await waitFor(() =>
         expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
       );
