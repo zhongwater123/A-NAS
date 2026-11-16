@@ -268,8 +268,12 @@ ops-check:
 	grep -Fq -- '--face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--aesthetic-scorer /usr/lib/a-nas/ai/aesthetic-scorer.bundle --aesthetic-scorer-manifest /usr/lib/a-nas/ai/aesthetic-scorer.json' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HUB_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=TRANSFORMERS_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HOME=/var/cache/a-nas-ai/huggingface' deploy/systemd/system/anas-ai.service
 	@# Every model role the AI Worker's unit names is one the package links (scripts/lib/content.sh).
-	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do \
+	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf aesthetic-scorer:bundle; do \
 		grep -Eq "^  $${role}:" scripts/lib/content.sh && grep -Fq "/usr/lib/a-nas/ai/$${role%%:*}.$${role#*:} " deploy/systemd/system/anas-ai.service || { echo "model role $$role" >&2; exit 1; }; done
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'echo "CPUQuota=' deploy/site/a-nas-generator.sh

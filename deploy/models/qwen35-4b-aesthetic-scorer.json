@@ -1,0 +1,26 @@
+{
+  "name": "qwen35-4b-aesthetic-scorer",
+  "kind": "qv-head",
+  "version": "1.0.0",
+  "source": "Lora-SFT tower_head, commit 50b05fa6a1b1fd0cd564c494de9b9f9bd32fa84f: Qwen3.5-4B's vision tower, frozen, with aesthetic and technical heads trained on EVA (https://github.com/zhongwater123/A-NAS/issues/480)",
+  "baseModel": "https://huggingface.co/Qwen/Qwen3.5-4B",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "file": "qwen35-4b-aesthetic-scorer-1.0.0.tar",
+  "sizeBytes": 680970240,
+  "sha256": "6f77dab38bb5341f104c68872091400636d0288b83717ace6ace11fcfff52c8c",
+  "directory": "qwen35-4b-aesthetic-scorer-1.0.0",
+  "members": [
+    "MANIFEST.json",
+    "model/head.pt",
+    "model/tower/config.json",
+    "model/tower/model.safetensors",
+    "model/tower/preprocessor_config.json"
+  ],
+  "bundleManifest": {
+    "sizeBytes": 6969,
+    "sha256": "f93c9be0c28a6ec17936ad959a54756cc003a11d70a074e45554058343238cf4"
+  },
+  "memoryBytes": 2147483648,
+  "memoryNote": "Measured with the bundle's own code on a development machine, PyTorch fp32 on the CPU: about 1.7 GB once loaded and 1.9 GB at the peak of a 640 x 480 photo; a 512 px thumbnail takes no more (#480). To be measured in the Worker's cgroup on the NAS.",
+  "license": "The vision tower: Apache-2.0, cut from Qwen3.5-4B at the revision above (deploy/models/qwen3.5-4b.LICENSE). The heads: trained on EVA, whose authors publish the data and ask for their paper to be cited, without a standard licence or terms for commercial use; to be confirmed before a release ships them (#480)."
+}

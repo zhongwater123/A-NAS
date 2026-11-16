@@ -17,7 +17,9 @@ MAX_FRAME = 1 << 20
 # "detector", "faceModel" and "animalModel" it can use, and "memoryBytes", what
 # it holds once all of them have run, its own start included, as its cgroup
 # counts memory. With a text reader, also "ocrModel" and "ocrMemoryBytes":
-# reading runs as a phase of its own, after the others are released.
+# reading runs as a phase of its own, after the others are released. With an
+# aesthetic scorer, also "aestheticModel" and "aestheticMemoryBytes", a phase
+# of its own in the same way.
 OP_INFO = "info"
 OP_EMBED_IMAGE = "embed_image"
 # Encodes "text" as a search query; the provider adds the model's prompt.
@@ -42,8 +44,13 @@ OP_EMBED_ANIMALS = "embed_animals"
 # answer; "logprobs", [token, log probability] for each token; "finish", why
 # the answer ended: "stop", "length" or "repetition"}. Hanging up cancels it.
 OP_READ_TEXT = "read_text"
+# Scores the image (docs/architecture/photo-ai.md#美学打分); answers "model"
+# and "scores": {"aesthetic", "technical"}, each on 1 to 5 and not clipped.
+# Hanging up cancels it.
+OP_SCORE_AESTHETIC = "score_aesthetic"
 # Frees memory: "what" is "detector" to drop the background models (the
-# object detector, the face models, the animal model and the text reader), or
+# object detector, the face models, the animal model, the text reader and the
+# aesthetic scorer), or
 # "all" to exit after answering; systemd starts the Worker again when needed.
 OP_RELEASE = "release"
 

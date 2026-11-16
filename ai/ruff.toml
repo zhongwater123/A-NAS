@@ -4,6 +4,8 @@ target-version = "py313"
 line-length = 120
 # The spike's scripts import each other from their own folder.
 src = [".", "assistant-spike"]
+# The aesthetic scorer's code as its bundle carries it, with LF line endings (#480).
+extend-exclude = ["qv_head"]
 
 [lint]
 # Ruff's defaults (E4, E7, E9, F), the rest of pycodestyle, import order,
