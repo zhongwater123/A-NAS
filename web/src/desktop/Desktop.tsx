@@ -19,6 +19,7 @@ import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
 import { whenText } from "../assistant/taskTime";
 import { Companion } from "../companion/Companion";
+import { useDeviceTrouble } from "../companion/health";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
@@ -106,6 +107,8 @@ export function Desktop({
   onUserChange: (user: User) => void;
 }) {
   const host = useHostState(true);
+  // The companion's dot while the device is in critical trouble, held steady over the reads (health.ts).
+  const trouble = useDeviceTrouble(host.snapshot, host.disconnected);
   const wallpaper = useWallpaper();
   // Names and avatars of every account; read again whenever the page comes
   // back into view, so someone else's new nickname shows up without a reload.
@@ -356,10 +359,12 @@ export function Desktop({
         </ShellPart>
         <ShellPart name="companion">
           <Companion
+            trouble={trouble}
             onOpenVnas={(atCards) =>
               atCards ? open("assistant", { conversationId: atCards.conversation }) : open("assistant")
             }
             onOpenTaskRun={showTaskRun}
+            onOpenHealth={() => openSettings("overview")}
           />
         </ShellPart>
         <ShellPart name="family hints">

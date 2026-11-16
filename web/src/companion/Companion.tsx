@@ -8,6 +8,7 @@ import { Suspense, useEffect, useState } from "react";
 
 import type { AssistantTaskNotice } from "../desktop/api";
 import { lazyCode } from "../ui/lazyCode";
+import type { DeviceTrouble } from "./health";
 import { useCompanionMode } from "./quiet";
 
 const CompanionCard = lazyCode(() => import("./petCard").then((module) => module.CompanionCard));
@@ -41,14 +42,22 @@ export async function loadInstalledAnimations(): Promise<CompanionManifest> {
   };
 }
 
-/** What a click on the companion opens: the VNAS window, or a run of a scheduled task in it (petCard.tsx). */
+/**
+ * What a click on the companion opens: the VNAS window, or a run of a scheduled task in it, or Settings'
+ * overview where the device's health is (petCard.tsx).
+ */
 export interface CompanionOpeners {
   /** Opens the VNAS window: at a conversation's cards that wait for the member, when one is given. */
   onOpenVnas?: (atCards?: { conversation: string }) => void;
   onOpenTaskRun?: (run: AssistantTaskNotice) => void;
+  onOpenHealth?: () => void;
 }
 
-export function Companion(openers: CompanionOpeners = {}) {
+/**
+ * trouble is the device's critical trouble (health.ts), for the dot at its feet; undefined while the device is
+ * not in such trouble.
+ */
+export function Companion({ trouble, ...openers }: { trouble?: DeviceTrouble } & CompanionOpeners = {}) {
   // Hidden on this device: not even its animations are listed.
   const hidden = useCompanionMode() === "hidden";
   const [manifest, setManifest] = useState<CompanionManifest>();
@@ -81,7 +90,7 @@ export function Companion(openers: CompanionOpeners = {}) {
   if (hidden || !manifest) return null;
   return (
     <Suspense fallback={null}>
-      <CompanionCard installed={manifest.animations} pool={manifest.pool} {...openers} />
+      <CompanionCard installed={manifest.animations} pool={manifest.pool} trouble={trouble} {...openers} />
     </Suspense>
   );
 }
