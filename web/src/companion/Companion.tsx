@@ -8,6 +8,7 @@ import { Suspense, useEffect, useState } from "react";
 
 import type { AssistantTaskNotice } from "../desktop/api";
 import { lazyCode } from "../ui/lazyCode";
+import type { DeviceTrouble } from "./health";
 import { useCompanionMode } from "./quiet";
 
 const CompanionCard = lazyCode(() => import("./petCard").then((module) => module.CompanionCard));
@@ -53,10 +54,10 @@ export interface CompanionOpeners {
 }
 
 /**
- * trouble is the device's critical trouble, in Settings' words (health.ts), for the dot at its feet;
- * undefined while the device is not in such trouble.
+ * trouble is the device's critical trouble (health.ts), for the dot at its feet; undefined while the device is
+ * not in such trouble.
  */
-export function Companion({ trouble, ...openers }: { trouble?: string } & CompanionOpeners = {}) {
+export function Companion({ trouble, ...openers }: { trouble?: DeviceTrouble } & CompanionOpeners = {}) {
   // Hidden on this device: not even its animations are listed.
   const hidden = useCompanionMode() === "hidden";
   const [manifest, setManifest] = useState<CompanionManifest>();
