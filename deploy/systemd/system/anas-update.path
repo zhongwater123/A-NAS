@@ -1,0 +1,9 @@
+[Unit]
+Description=A-NAS system update: watch for requests
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
+
+[Path]
+PathExists=/var/lib/a-nas-update/request.json
+
+[Install]
+WantedBy=paths.target

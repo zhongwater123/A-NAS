@@ -798,7 +798,7 @@ func TestExportHasARowPerAnswerWithTheChosenColumns(t *testing.T) {
 	}
 }
 
-func TestTheFullViewIsTheOriginalWithoutMetadataOnlyForSharpness(t *testing.T) {
+func TestTheFullViewIsTheOriginalWithoutMetadataForTheRaterAlone(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	write(t, filepath.Join(h.photos, "清晰", "a.jpg"), jpegPicture(t, 300, 200, 1))
@@ -832,9 +832,10 @@ func TestTheFullViewIsTheOriginalWithoutMetadataOnlyForSharpness(t *testing.T) {
 	if _, err := h.store.ClaimFull(ctx, claims[0].Token, "b"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("b looked at a's photo: %v", err)
 	}
+	// Every batch has the 100% view, not only one that scores sharpness.
 	other, _, _ := h.store.Claim(ctx, plain.ID, "a")
-	if _, err := h.store.ClaimFull(ctx, other[0].Token, "a"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("a batch without sharpness showed a full view: %v", err)
+	if _, err := h.store.ClaimFull(ctx, other[0].Token, "a"); err != nil {
+		t.Fatalf("a batch of overall alone: %v", err)
 	}
 	// The other photo's original changed after the import.
 	var path string
