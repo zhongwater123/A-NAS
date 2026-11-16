@@ -53,6 +53,9 @@ step_build() {
   shopt -s nullglob
   local products=("$repo_root"/build/packages/a-nas_*.deb)
   ((${#products[@]} == 1)) || { echo "build/packages needs exactly one a-nas package: run make packages" >&2; return 2; }
+  # The next release's Product Service embeds the web UI that make web-build
+  # leaves here; without it, it stops at start.
+  [[ -f "$repo_root/internal/webui/dist/index.html" ]] || { echo "the web UI is not built: run make packages" >&2; return 2; }
   local version next
   version=$(dpkg-deb --field "${products[0]}" Version)
   next=$version+next

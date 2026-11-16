@@ -112,8 +112,14 @@ image_has_no_host_keys() {
 }
 # The image has Python, not curl.
 service_answers() { g 'python3 -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5)"' >/dev/null 2>&1; }
-# checked NAME: a-nas-check passes; what it said is in the logs as check-NAME.log.
-checked() { g a-nas-check >"$L/check-$1.log" 2>&1; }
+# checked NAME: a-nas-check passes; what it said is in the logs as
+# check-NAME.log, followed by the services' journals when it fails.
+checked() {
+  g a-nas-check >"$L/check-$1.log" 2>&1 && return 0
+  g 'systemctl status --no-pager anas-api.service anas-host-agent.service; journalctl -b --no-pager -u anas-api -u anas-host-agent | tail -n 150' \
+    >>"$L/check-$1.log" 2>&1
+  return 1
+}
 # blessed SEQUENCE: booted from it, and its UKI lost the try counter.
 blessed() { [[ "$(booted)" == "$1" && "$(esp)" == *"a-nas_$1.efi"* && "$(esp)" != *"a-nas_$1+"* ]]; }
 probe_table() {
