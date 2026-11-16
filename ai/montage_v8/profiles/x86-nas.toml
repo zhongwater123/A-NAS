@@ -1,0 +1,24 @@
+# x86 NAS（Debian）：CPU 解码和编码，规划走 Claude API（ANTHROPIC_API_KEY），音乐用预先算好的。
+# 数据目录是占位，装进产品服务时由服务的数据卷决定。
+
+[paths]
+videos = "/srv/montage/videos"
+indexes = "/srv/montage/indexes"
+cards = "/srv/montage/cards"
+cuts = "/srv/montage/cuts"
+
+[ffmpeg]
+decode = []
+encode = ["-c:v", "libx264", "-preset", "veryfast"]
+
+[describer]
+kind = "openai"
+url = "http://127.0.0.1:8094"
+schema_mode = "server"
+
+[planner]
+kind = "claude-api"
+model = "claude-opus-5-5"
+
+[music]
+kind = "precomputed"

@@ -1,0 +1,20 @@
+# 各组素材（第六版 cut.CASES）。键是卡片文件名里的组名（cards-<键>.json）；index 是视频索引名，
+# 也是 excluded.json、reviewed.json 里的键。2026-11-16（用户）：要求里不再写“围绕旅途中的人物”。
+
+[ne]
+index = "newzealand"
+instruction = "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然"
+style = "旅行"
+name = "新西兰"
+
+[ch]
+index = "chuanxi"
+instruction = "按拍摄时间顺序剪一条川西旅行 vlog，场景之间衔接自然"
+style = "旅行"
+name = "川西"
+
+[pj]
+index = "pinjie"
+instruction = "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然"
+style = "旅行"
+name = "新西兰（品杰手机）"

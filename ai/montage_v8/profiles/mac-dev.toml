@@ -1,0 +1,24 @@
+# 开发机：macOS，Apple Silicon。和第六版的实验环境相同。
+
+[paths]
+videos = "~/A-NAS-datasets/videos"
+indexes = "~/A-NAS-datasets/cache"
+cards = "~/A-NAS-datasets/剪辑对比/第五版"
+cuts = "~/A-NAS-datasets/剪辑对比/第四版/剪法24（2026-11-08）"
+
+[ffmpeg]
+decode = ["-hwaccel", "videotoolbox"]
+encode = ["-c:v", "libx264"]
+
+# 本机 llama-server：Qwen3.5-4B Q4_K_M + mmproj-F16，端口 8094。
+[describer]
+kind = "openai"
+url = "http://127.0.0.1:8094"
+schema_mode = "server"
+
+[planner]
+kind = "claude-cli"
+model = "claude-opus-5-5"
+
+[music]
+kind = "allin1"
