@@ -32,10 +32,12 @@ from paths import CARDS, CUTS as HERE, INDEXES, VIDEOS, read_json, write_json
 
 from montage import render
 
-# case: (index key, the user's request, target seconds, style, name in file names)
-CASES = {"ne": ("newzealand", "按拍摄时间顺序剪一条新西兰旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "新西兰"),
-         "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "川西"),
-         "pj": ("pinjie", "按拍摄时间顺序剪一条新西兰旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "新西兰（品杰手机）")}
+# case: (index key, the user's request, target seconds, style, name in file names). 2026-11-16 (the user): the
+# request no longer asks for a film built around the people on the trip; it left too few pictures to choose
+# from, or plain ones (people mostly small, from behind).
+CASES = {"ne": ("newzealand", "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然", 90, "旅行", "新西兰"),
+         "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，场景之间衔接自然", 90, "旅行", "川西"),
+         "pj": ("pinjie", "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然", 90, "旅行", "新西兰（品杰手机）")}
 
 # Each run of a case is a take: CUT_TAG ("-1", "-2") names its files.
 TAG = os.environ.get("CUT_TAG", "")
