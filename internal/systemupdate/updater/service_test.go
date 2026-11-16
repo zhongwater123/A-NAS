@@ -478,12 +478,17 @@ func TestBootRejectsAnInstalledReleaseWhenDpkgRecoveryIsIncomplete(t *testing.T)
 			host.installed["a-nas"], host.installed["a-nas-host"] = "2", "2"
 			host.configureErr, host.auditOutput = tc.configureErr, tc.auditOutput
 			service, _ := newService(t, host)
-			if err := service.Store.Save(State{Phase: PhaseInstalling, Current: "1", Target: "2", From: "1"}); err != nil {
+			if err := service.Store.Save(State{
+				Phase: PhaseInstalling, Current: "1", Target: "2", From: "1", BackupName: "backup",
+			}); err != nil {
 				t.Fatal(err)
 			}
 			state := run(t, service, RequestBoot)
 			if state.Phase != PhaseRolledBack || state.Current != "1" || !host.ran("dpkg --audit") {
 				t.Fatalf("state = %+v, calls = %v; want rollback to 1 after dpkg audit", state, host.calls)
+			}
+			if host.ran("sh") {
+				t.Fatalf("package recovery restored databases despite healthy services: %v", host.calls)
 			}
 		})
 	}
@@ -574,6 +579,19 @@ func TestBootResumesRestoringTheVersionAfterAFailedRevert(t *testing.T) {
 			return strings.HasPrefix(call, "apt-get install") && strings.Contains(call, "a-nas=1")
 		}) {
 		t.Fatalf("state = %+v, calls = %v; want restore 2 without trying 1 again", state, host.calls)
+	}
+}
+
+func TestARevertWhoseTargetFailsTheCheckRestoresTheOriginalVersion(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	run(t, service, RequestInstall)
+	host.checkFails["1"] = true
+	state := run(t, service, RequestRevert)
+	if state.Current != "2" || host.installed["a-nas"] != "2" || state.Records[0].Kind != RecordFailed ||
+		state.Records[0].Problem.Code != ProblemCheck || slices.Contains(state.Rejected, "2") {
+		t.Fatalf("state = %+v, installed %v; want the failed revert to have restored 2", state, host.installed)
 	}
 }
 
@@ -750,7 +768,12 @@ func TestAPushTheSystemDiskHasNoRoomForIsNotTaken(t *testing.T) {
 	service.Staging = filepath.Join(t.TempDir(), "repository")
 	writeFile(t, filepath.Join(service.Staging, "pool/main/a/a-nas/a-nas_2_amd64.deb"), "package")
 	writeFile(t, filepath.Join(service.Staging, "dists/dev/InRelease"), "signed")
-	service.FreeBytes = func(string) (int64, error) { return 1 << 30, nil }
+	service.FreeBytes = func(path string) (int64, error) {
+		if path != filepath.Dir(service.Local) {
+			t.Errorf("checked space on %s, want the file system holding %s", path, service.Local)
+		}
+		return 1 << 30, nil
+	}
 	state := run(t, service, RequestCheck)
 	if state.Phase != PhaseCheckFailed || state.Problem == nil || state.Problem.Code != ProblemDiskSpace {
 		t.Fatalf("state = %+v, want the push held for space", state)

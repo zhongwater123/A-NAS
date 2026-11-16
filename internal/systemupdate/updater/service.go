@@ -144,7 +144,11 @@ func (s *Service) syncStaging(state *State) (bool, error) {
 		return false, nil
 	}
 	result, err := Sync(s.Staging, s.Local, func(need int64) error {
-		missing, err := s.missingSpace(need)
+		destination := s.Local
+		if _, err := os.Stat(destination); errors.Is(err, os.ErrNotExist) {
+			destination = filepath.Dir(destination)
+		}
+		missing, err := s.missingSpace(destination, need)
 		if err != nil {
 			return fmt.Errorf("read free space for the pushed repository: %w", err)
 		}
@@ -242,7 +246,7 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 		// version replaces it; one that left the device failing its check,
 		// until the check passes again, as after a repair by the runbook.
 		if state.Phase != PhaseRolledBack ||
-			(state.Problem != nil && state.Problem.Code == ProblemRollback && s.healthCheck(ctx) == nil) {
+			(state.Problem != nil && state.Problem.Code == ProblemRollback && s.checkInstalled(ctx) == nil) {
 			state.Phase, state.Problem = PhaseUpToDate, nil
 		}
 		return nil
@@ -558,13 +562,13 @@ func (s *Service) fetched(files []download) int64 {
 	return total
 }
 
-// missingSpace is how many bytes the system disk lacks for need and the
+// missingSpace is how many bytes the file system lacks for need and the
 // margin; 0 when it has room.
-func (s *Service) missingSpace(need int64) (int64, error) {
+func (s *Service) missingSpace(path string, need int64) (int64, error) {
 	if s.FreeBytes == nil {
 		return 0, nil
 	}
-	free, err := s.FreeBytes("/")
+	free, err := s.FreeBytes(path)
 	if err != nil {
 		return 0, err
 	}
@@ -574,7 +578,7 @@ func (s *Service) missingSpace(need int64) (int64, error) {
 // enoughSpace checks the system disk for need bytes and the margin, and
 // leaves a problem in the state when it is short.
 func (s *Service) enoughSpace(state *State, need int64) bool {
-	if missing, _ := s.missingSpace(need); missing > 0 {
+	if missing, _ := s.missingSpace("/", need); missing > 0 {
 		state.Problem = &Problem{Code: ProblemDiskSpace, Detail: strconv.FormatInt(missing, 10)}
 		return false
 	}
@@ -633,7 +637,7 @@ func (s *Service) installVersion(ctx context.Context, version string) *Problem {
 // device goes back to the version before.
 func (s *Service) verify(ctx context.Context, state *State) error {
 	state.BackupName = s.backupOf(state.From, state.StartedAt)
-	if problem := s.healthCheck(ctx); problem != nil {
+	if problem := s.checkInstalled(ctx); problem != nil {
 		return s.goBack(ctx, state, problem)
 	}
 	s.keepContent(ctx, state.Target, state.From)
@@ -644,11 +648,19 @@ func (s *Service) verify(ctx context.Context, state *State) error {
 	return nil
 }
 
-// healthCheck checks the product services and that dpkg has no incomplete work.
+// checkInstalled checks both the product and package manager after a change.
+func (s *Service) checkInstalled(ctx context.Context) *Problem {
+	if problem := s.healthCheck(ctx); problem != nil {
+		return problem
+	}
+	return s.auditPackages(ctx)
+}
+
+// healthCheck checks the product services, which may require restoring their databases.
 func (s *Service) healthCheck(ctx context.Context) *Problem {
 	output, err := s.Commands.Run(ctx, "a-nas-check")
 	if err == nil {
-		return s.auditPackages(ctx)
+		return nil
 	}
 	var failed []string
 	for line := range strings.Lines(string(output)) {
@@ -705,6 +717,13 @@ func (s *Service) goBack(ctx context.Context, state *State, cause *Problem) erro
 			kind, problem = RecordFailed, &Problem{Code: ProblemRollback, Detail: cause.Detail + "\n" + failure.Detail}
 		}
 	}
+	if kind == RecordRolledBack {
+		if failure := s.auditPackages(ctx); failure != nil {
+			// Package metadata can remain incomplete even when the product is
+			// healthy. Database restoration cannot repair dpkg.
+			kind, problem = RecordFailed, &Problem{Code: ProblemRollback, Detail: cause.Detail + "\n" + failure.Detail}
+		}
+	}
 	state.Record(Record{At: s.now(), Kind: kind, Version: failed, From: state.From, By: state.By, Problem: problem})
 	state.Current, state.Phase, state.Problem = state.From, PhaseRolledBack, problem
 	state.Candidate, state.DownloadBytes, state.DownloadedBytes = "", 0, 0
@@ -736,7 +755,11 @@ func (s *Service) reverting(ctx context.Context, state *State) error {
 	if state.Problem != nil {
 		return s.restoreAfterRevert(ctx, state)
 	}
-	if problem := s.installVersion(ctx, state.Target); problem != nil {
+	problem := s.installVersion(ctx, state.Target)
+	if problem == nil {
+		problem = s.checkInstalled(ctx)
+	}
+	if problem != nil {
 		state.Problem = problem
 		if !s.untouched(ctx, state) {
 			// Persist the reason and the direction before apt touches From.
@@ -746,13 +769,12 @@ func (s *Service) reverting(ctx context.Context, state *State) error {
 			return s.restoreAfterRevert(ctx, state)
 		}
 		s.finishFailedRevert(state, nil)
-	} else {
-		state.Problem = s.healthCheck(ctx)
-		state.Reject(state.From)
-		state.Record(Record{At: s.now(), Kind: RecordReverted, Version: state.Target, From: state.From, By: state.By, Problem: state.Problem})
-		state.Current, state.Previous, state.InstalledAt, state.Phase = state.Target, "", s.now(), PhaseUpToDate
-		state.Reverting, state.Target, state.From, state.By, state.DpkgBefore = false, "", "", "", ""
+		return nil
 	}
+	state.Reject(state.From)
+	state.Record(Record{At: s.now(), Kind: RecordReverted, Version: state.Target, From: state.From, By: state.By})
+	state.Current, state.Previous, state.InstalledAt, state.Phase = state.Target, "", s.now(), PhaseUpToDate
+	state.Reverting, state.Target, state.From, state.By, state.DpkgBefore = false, "", "", "", ""
 	return nil
 }
 
@@ -760,7 +782,7 @@ func (s *Service) reverting(ctx context.Context, state *State) error {
 func (s *Service) restoreAfterRevert(ctx context.Context, state *State) error {
 	failure := s.installVersion(ctx, state.From)
 	if failure == nil {
-		failure = s.healthCheck(ctx)
+		failure = s.checkInstalled(ctx)
 	}
 	s.finishFailedRevert(state, failure)
 	return nil
