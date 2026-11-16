@@ -31,9 +31,9 @@
 #   apt-repository.sh signed-by REPO KEY
 #       succeeds when REPO has no distribution yet or each one is signed by a
 #       key of KEY, a GnuPG home or a key file.
-#   apt-repository.sh sums DIR GNUPGHOME
-#       writes DIR/SHA256SUMS for the files in DIR and signs it with the key
-#       that publish signs with, as SHA256SUMS.gpg beside it: what
+#   apt-repository.sh sums GNUPGHOME DIR...
+#       writes DIR/SHA256SUMS for the files in each DIR and signs it with the
+#       key that publish signs with, as SHA256SUMS.gpg beside it: what
 #       systemd-sysupdate checks a device image's update files against
 #       (scripts/build-image.sh).
 #
@@ -203,24 +203,30 @@ case "${1:-}" in
       publish "$dist" "$(IFS=,; echo "${sign[*]}")" "${debs[@]}"
     ;;
   sums)
-    [[ $# -eq 3 ]] || { echo "usage: $0 sums DIR GNUPGHOME" >&2; exit 2; }
-    dir=$(absolute "$2")
-    gnupg=$(absolute "$3")
+    [[ $# -ge 3 ]] || { echo "usage: $0 sums GNUPGHOME DIR..." >&2; exit 2; }
+    gnupg=$(absolute "$2")
+    shift 2
     key=$(signing_key "$gnupg") || { echo "no key in $gnupg can sign (apt-repository.sh key, release-key.sh install)" >&2; exit 2; }
-    secret=() passphrase_option=()
+    # All directories in one container, which reads a passphrase once.
+    secret=() passphrase_option=() mounts=()
     if [[ -n "${ANAS_RELEASE_PASSPHRASE_FILE:-}" ]]; then
       ask_passphrase
       secret=(--passphrase)
       passphrase_option=(--pinentry-mode loopback --passphrase-file /secret/passphrase)
     fi
+    for dir in "$@"; do
+      mounts+=("$(absolute "$dir"):/dirs/${#mounts[@]}")
+    done
     # shellcheck disable=SC2016 # the script expands its variables in the image
-    in_image "${secret[@]}" "$gnupg:/gnupg" "$dir:/dir" -- bash -c '
+    in_image "${secret[@]}" "$gnupg:/gnupg" "${mounts[@]}" -- bash -c '
       set -euo pipefail
       key=$1
       shift
-      cd /dir
-      find . -maxdepth 1 -type f ! -name "SHA256SUMS*" -printf "%P\n" | LC_ALL=C sort | xargs -r sha256sum >SHA256SUMS
-      gpg --batch --yes "$@" --local-user "$key!" --detach-sign --output SHA256SUMS.gpg SHA256SUMS' \
+      for dir in /dirs/*/; do
+        cd "$dir"
+        find . -maxdepth 1 -type f ! -name "SHA256SUMS*" -printf "%P\n" | LC_ALL=C sort | xargs -r sha256sum >SHA256SUMS
+        gpg --batch --yes "$@" --local-user "$key!" --detach-sign --output SHA256SUMS.gpg SHA256SUMS
+      done' \
       sums "$key" "${passphrase_option[@]}"
     ;;
   *)

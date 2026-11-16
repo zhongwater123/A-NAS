@@ -1,8 +1,10 @@
-# The boot health check of an image version: a-nas-check, from the product's
-# extension. Only a boot that systemd-boot counts is assessed, a new version's
-# first boots: a failure reboots, so the next try, or the version before,
-# starts without anyone at the device. A blessed boot is not assessed, so a
-# check that fails later never reboots a device in a loop; the update service
+# The boot health check of an image version (/usr/lib/a-nas-image/health).
+# Only a boot that systemd-boot counts is assessed, a new version's first
+# boots: a check that fails here and passed on the version before reboots, so
+# the next try, or the version before, starts without anyone at the device. A
+# setting or a disk that already failed before does not hold a version back
+# (a-nas-health-baseline.service). A blessed boot is not assessed, so a check
+# that fails later never reboots a device in a loop; the update service
 # reports it.
 [Unit]
 Description=A-NAS boot health check
@@ -14,4 +16,5 @@ FailureAction=reboot
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/sbin/a-nas-check
+StateDirectory=a-nas-health
+ExecStart=/usr/lib/a-nas-image/health assess

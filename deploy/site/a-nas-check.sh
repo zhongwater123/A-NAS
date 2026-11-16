@@ -5,18 +5,31 @@
 # rolled back (docs/runbooks/deploy-a-nas-packages.md). A service that
 # restarted a moment ago gets up to 30 s to answer.
 #
-# Usage (as root): a-nas-check
+# Usage (as root): a-nas-check [--failed FILE]
+#   --failed FILE   also writes the name of each check that failed to FILE,
+#                   one per line: the image's boot health check compares them
+#                   with those that failed before an update
+#                   (/usr/lib/a-nas-image/health in deploy/image).
 set -uo pipefail
 
+failed_file=
+if [[ "${1:-}" == --failed && -n "${2:-}" && $# -eq 2 ]]; then
+  failed_file=$2
+elif (($# > 0)); then
+  echo "usage: a-nas-check [--failed FILE]" >&2
+  exit 2
+fi
 if [[ $EUID -ne 0 ]]; then
   echo "run as root: the Host Agent's capabilities and journal are root's" >&2
   exit 1
 fi
-failures=0
+failed=()
 pass() { echo "PASS $*"; }
+# fail NAME MESSAGE...: NAME names the check for --failed.
 fail() {
+  failed+=("$1")
+  shift
   echo "FAIL $*"
-  failures=$((failures + 1))
 }
 
 # The product and the Debian packages it runs on are one release (ADR 0031).
@@ -32,7 +45,7 @@ package_versions() {
   if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
     pass "a-nas and a-nas-host ${product#installed }"
   else
-    fail "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
+    fail versions "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
   fi
   # A local console's a-nas-console declares what its screen needs from Debian
   # for the same release; apt changes it only when the command names it. In the
@@ -44,7 +57,7 @@ package_versions() {
       if [[ "${console#* }" == "${product#* }" ]]; then
         pass "a-nas-console ${console#* }"
       else
-        fail "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
+        fail console "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
       fi
       ;;
   esac
@@ -52,17 +65,23 @@ package_versions() {
 # On a device that runs the A-NAS image (ADR 0034 decision 2) the product is
 # a system extension over the image's /usr, and dpkg's records on the
 # persistent root stay as the first image left them: the image's and the
-# extension's release files say which.
+# extension's release files say which. A product and the base it runs on may
+# come from different releases; A_NAS_HOST_ID, in both, names what the
+# product needs from the base (scripts/build-image.sh).
 image_versions() {
-  local base product release=/usr/lib/extension-release.d/extension-release.a-nas-product
+  local base host product needs release=/usr/lib/extension-release.d/extension-release.a-nas-product
   # shellcheck disable=SC1091 # the image's own release file
-  base=$(. /usr/lib/os-release && echo "${IMAGE_VERSION:-}")
-  if [[ -f "$release" ]]; then
-    # shellcheck disable=SC1090 # the extension's release file
-    product=$(. "$release" && echo "${A_NAS_VERSION:-}")
+  { read -r base; read -r host; } < <(. /usr/lib/os-release && printf '%s\n' "${IMAGE_VERSION:-}" "${A_NAS_HOST_ID:-}")
+  if [[ ! -f "$release" ]]; then
+    fail product "the A-NAS image $base has no product merged: see systemd-sysext status and journalctl -u systemd-sysext"
+    return
+  fi
+  # shellcheck disable=SC1090 # the extension's release file
+  { read -r product; read -r needs; } < <(. "$release" && printf '%s\n' "${A_NAS_VERSION:-}" "${A_NAS_HOST_ID:-}")
+  if [[ -n "$needs" && "$needs" == "$host" ]]; then
     pass "a-nas ${product:-of unknown version} on the A-NAS image $base"
   else
-    fail "the A-NAS image $base has no product merged: see systemd-sysext status and journalctl -u systemd-sysext"
+    fail base "a-nas ${product:-of unknown version} needs another A-NAS image than $base: update the base, or go back to the product before (docs/runbooks/build-device-image.md)"
   fi
 }
 # shellcheck disable=SC1091 # mkosi quotes the values; read the file as systemd does
@@ -78,14 +97,14 @@ for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
   if [[ "$(id -u "$name" 2>/dev/null):$(id -g "$name" 2>/dev/null)" == "$id:$id" ]]; then
     pass "$name is $id:$id"
   else
-    fail "$name is not $id:$id; A-NAS never adopts an account it did not create: rename the other account"
+    fail "account:$name" "$name is not $id:$id; A-NAS never adopts an account it did not create: rename the other account"
   fi
 done
 for name in a-nas-kiosk a-nas-search anas-container; do
   if [[ "$(getent passwd "$name" | cut -d: -f6-7)" == /nonexistent:/usr/sbin/nologin ]]; then
     pass "$name cannot log in"
   else
-    fail "$name is missing or has a home or shell A-NAS did not give it"
+    fail "nologin:$name" "$name is missing or has a home or shell A-NAS did not give it"
   fi
 done
 
@@ -98,18 +117,18 @@ done < <(dpkg-query --listfiles a-nas 2>/dev/null | grep -E '^/usr/lib/systemd/s
 if [[ -z "$leftovers" ]]; then
   pass "no unit in /etc/systemd/system overrides the package's"
 else
-  fail "these units in /etc/systemd/system override the package's: $leftovers"
+  fail unit-overrides "these units in /etc/systemd/system override the package's: $leftovers"
 fi
 
 if grep -Eq '^ANAS_SMB_INTERFACE=[A-Za-z0-9_.:-]+$' /etc/a-nas/site.conf 2>/dev/null; then
   pass "site.conf names the SMB interface"
 else
-  fail "set ANAS_SMB_INTERFACE in /etc/a-nas/site.conf, then run a-nas-site"
+  fail site-conf "set ANAS_SMB_INTERFACE in /etc/a-nas/site.conf, then run a-nas-site"
 fi
 if systemctl is-active --quiet anas-site.service; then
   pass "anas-site.service applied this machine's settings"
 else
-  fail "anas-site.service failed; see journalctl -u anas-site"
+  fail anas-site "anas-site.service failed; see journalctl -u anas-site"
 fi
 
 for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service \
@@ -122,7 +141,7 @@ for unit in anas-host-agent.service anas-api.service anas-photos.service anas-sh
   if systemctl is-active --quiet "$unit"; then
     pass "$unit is active"
   else
-    fail "$unit is $(systemctl is-active "$unit"); see journalctl -u $unit"
+    fail "unit:$unit" "$unit is $(systemctl is-active "$unit"); see journalctl -u $unit"
   fi
 done
 # Stopped is a valid state for web search: the administrator turns it off.
@@ -163,7 +182,7 @@ if mountpoint -q /srv/a-nas/data; then
     if [[ "$state" == "$name service ready" ]]; then
       pass "$unit serves /srv/a-nas/data/$database"
     else
-      fail "$unit has not opened /srv/a-nas/data/$database (${state:-no ready line}); see journalctl -u $unit. After a rollback, restore the copy taken before the upgrade (docs/runbooks/deploy-a-nas-packages.md)"
+      fail "store:$unit" "$unit has not opened /srv/a-nas/data/$database (${state:-no ready line}); see journalctl -u $unit. After a rollback, restore the copy taken before the upgrade (docs/runbooks/deploy-a-nas-packages.md)"
     fi
   done
 else
@@ -186,7 +205,7 @@ cap_eff=$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
 if [[ "$identity_switch" == "file broker identity switch verified" && -n "$cap_eff" ]] && (((16#$cap_eff >> 6 & 3) == 3)); then
   pass "the Host Agent starts file workers as users"
 else
-  fail "the Host Agent cannot start file workers as users (CapEff=${cap_eff:-unknown}; ${identity_switch:-no identity probe result}): roll back this release"
+  fail file-workers "the Host Agent cannot start file workers as users (CapEff=${cap_eff:-unknown}; ${identity_switch:-no identity probe result}): roll back this release"
 fi
 
 if python3 -I - <<'PY'; then
@@ -206,11 +225,14 @@ raise SystemExit(1)
 PY
   pass "the Product Service answers /healthz"
 else
-  fail "the Product Service does not answer http://127.0.0.1:8080/healthz; see journalctl -u anas-api"
+  fail healthz "the Product Service does not answer http://127.0.0.1:8080/healthz; see journalctl -u anas-api"
 fi
 
-if ((failures > 0)); then
-  echo "a-nas-check: $failures checks failed"
+if [[ -n "$failed_file" ]]; then
+  if ((${#failed[@]} > 0)); then printf '%s\n' "${failed[@]}"; fi >"$failed_file"
+fi
+if ((${#failed[@]} > 0)); then
+  echo "a-nas-check: ${#failed[@]} checks failed"
   exit 1
 fi
 echo "a-nas-check: all checks passed"

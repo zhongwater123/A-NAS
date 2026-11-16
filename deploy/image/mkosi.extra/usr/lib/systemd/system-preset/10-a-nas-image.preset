@@ -4,4 +4,3 @@
 # update service decides when to check, install and restart instead.
 disable systemd-sysupdate.timer
 disable systemd-sysupdate-reboot.timer
-enable a-nas-sysext-ready.service

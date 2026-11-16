@@ -7,6 +7,8 @@ SHELLCHECK_VERSION = 0.11.0
 SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 # The a-nas package's scripts, which have no .sh to be found by.
 MAINTAINER_SCRIPTS = $(wildcard deploy/debian/*/DEBIAN/preinst deploy/debian/*/DEBIAN/postinst deploy/debian/*/DEBIAN/prerm deploy/debian/*/DEBIAN/postrm)
+# The device image's scripts (deploy/image), which have none either.
+IMAGE_SCRIPTS = $(wildcard deploy/image/mkosi.postinst deploy/image/mkosi.finalize deploy/image/mkosi.extra/usr/lib/a-nas-image/*)
 NPM ?= npm
 RUFF ?= ruff
 PIP_AUDIT ?= pip-audit
@@ -160,9 +162,9 @@ ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
-	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS)
+	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
 	$(ACTIONLINT) .github/workflows/*.yml
-	@for script in $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS); do bash -n "$$script" || exit 1; done
+	@for script in $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
 	@# Release versions sort as ADR 0034 says: candidates, development builds and releases in order.
 	bash scripts/release-version.sh --check
@@ -409,11 +411,14 @@ release:
 # commit (scripts/build-image.sh, docs/runbooks/build-device-image.md): the
 # update files in UPDATES and the disk of a new device, signed with the key
 # make release signs with (ANAS_RELEASE_TEST_KEY=1 for the test key). The
-# update files are numbered by the commit's place on main, so the commit must
-# be on main. Needs Docker; on WSL set WORK to an .img path on a Windows drive.
+# update files are numbered by the commit's place on main's first-parent line,
+# so the commit must be on it (a merge into main, or a commit pushed to main),
+# and built as committed. Needs Docker; on WSL set WORK to an .img path on a
+# Windows drive.
 UPDATES ?= $(BUILD_DIR)/updates
 image:
-	@git merge-base --is-ancestor HEAD origin/main || { echo "make image builds commits on main: fetch, or check out main" >&2; exit 2; }
+	@git rev-list --first-parent origin/main | grep -qx "$$(git rev-parse HEAD)" || { echo "make image builds commits on main's first-parent line, which numbers them: fetch, or check out main" >&2; exit 2; }
+	@test -z "$$(git status --porcelain)" || { echo "commit everything first: an image is built from a commit" >&2; exit 2; }
 	IMAGE=$(SYSTEM_TEST_IMAGE) scripts/build-image.sh $(REPO) $(VERSION) $$(git rev-list --count --first-parent HEAD) $(UPDATES) \
 		$$(if [ -n "$$ANAS_RELEASE_TEST_KEY" ]; then echo "$$HOME/.local/share/a-nas/release-test-key"; else echo "$${ANAS_RELEASE_GNUPGHOME:-$$HOME/.local/share/a-nas/release-key}"; fi)
 
