@@ -1,9 +1,8 @@
-import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
+import { FolderClosed, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
-import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
 import { appProject } from "../docker/model";
 import { FamilyGlyph } from "../family/FamilyGlyph";
@@ -17,6 +16,7 @@ import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
 import { lazyCode } from "../ui/lazyCode";
 import { WebSearchGlyph } from "../websearch/WebSearchGlyph";
+import { BackupCenterIcon, MusicIcon, TransferCenterIcon } from "./AppIconArtwork";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
@@ -112,7 +112,7 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
 interface AppDefinition {
   title: string;
   icon: AppGlyph;
-  // The gradient behind the app's desktop and dock icons.
+  // The tile style used for the app's desktop, launcher and dock icons.
   tone: string;
   // Apps on a white tile (相册, VNAS) keep it in their window's title bar too.
   lightTitle?: boolean;
@@ -205,7 +205,7 @@ const definitions = {
   },
   transfers: {
     title: "传输中心",
-    icon: ArrowDownUp,
+    icon: TransferCenterIcon,
     tone: "download",
     bounds: { x: 270, y: 84, width: 900, height: 600 },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
@@ -216,7 +216,7 @@ const definitions = {
   },
   backup: {
     title: "备份中心",
-    icon: BackupCenterGlyph,
+    icon: BackupCenterIcon,
     tone: "backup",
     bounds: { x: 220, y: 52, width: 1080, height: 700 },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
@@ -264,7 +264,7 @@ const definitions = {
   },
   music: {
     title: "音乐",
-    icon: Music2,
+    icon: MusicIcon,
     tone: "music",
     bounds: { x: 240, y: 56, width: 1080, height: 700 },
     launcher: { id: "music", keywords: "歌曲 专辑 歌手 歌单 播放 music" },
