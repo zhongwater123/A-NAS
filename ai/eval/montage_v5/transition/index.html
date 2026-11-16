@@ -31,7 +31,7 @@ button kbd{display:inline-block;min-width:1.4em;text-align:center;font-size:12px
 <main>
 <section>
 <h1>转场标注</h1>
-<p class="dim">每段 3 秒，循环播放，转场时刻在中间（第 1.5 秒）附近。有些片段是程序找出来的，有些是随机抽的，看不到程序判的是哪一类。按你看到的选：这一刻能不能拿来做转场，能的话属于哪一类。数字键选择后自动跳到下一段；← → 换段，空格暂停，0 也可以选“不是”。</p>
+<p class="dim">每段 3 秒，循环播放，转场时刻在中间（第 1.5 秒）附近。有些片段是程序找出来的，有些是随机抽的，看不到程序判的是哪一类。按你看到的选：这一刻能不能拿来做转场，能的话属于哪一类。数字键选择后自动跳到下一段（向左转场是 1，向右转场是 6）；← → 换段，空格暂停，0 也可以选“不是”。</p>
 <video id="v" autoplay muted loop playsinline></video>
 <div class="bar"><b id="pos"></b><span class="dim" id="src"></span><span class="dim" id="save"></span></div>
 <div class="choices" id="choices"></div>
@@ -41,14 +41,16 @@ button kbd{display:inline-block;min-width:1.4em;text-align:center;font-size:12px
 </main>
 <script src="data.js"></script>
 <script>
-const CHOICES = [["1","whip","甩镜头（快速摇过、画面糊开）"],["2","cover","遮挡（东西从镜头前挡过、镜头被挡黑）"],
+// 2026-11-16 (the user): whip split by where the camera turns; "whip" alone is kept for marks made before.
+const CHOICES = [["1","whip-left","向左转场（镜头快速往左甩，画面往右滑走）"],["6","whip-right","向右转场（镜头快速往右甩，画面往左滑走）"],
+  ["2","cover","遮挡（东西从镜头前挡过、镜头被挡黑）"],
   ["3","zoom","推近 / 拉远"],["4","tilt","摇向天空或地面"],["5","other","其他能做转场的"],
   ["0","none","不是转场"],["9","unsure","说不清"]];
 const items = window.ITEMS || [];
 let marks = {}, cur = 0, timer = null;
 try { marks = JSON.parse(localStorage.getItem("transition-marks") || "{}"); } catch (e) { marks = {}; }
 const v = document.getElementById("v"), list = document.getElementById("list"), box = document.getElementById("choices");
-const name = Object.fromEntries(CHOICES.map(c => [c[1], c[2].split("（")[0]]));
+const name = Object.fromEntries([...CHOICES.map(c => [c[1], c[2].split("（")[0]]), ["whip", "甩镜头"]]);
 CHOICES.forEach(([k, val, text]) => {
   const b = document.createElement("button"); b.dataset.val = val; b.innerHTML = `<kbd>${k}</kbd>${text}`;
   b.onclick = () => mark(val); box.appendChild(b);
