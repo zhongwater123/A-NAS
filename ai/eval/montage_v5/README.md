@@ -30,6 +30,7 @@
 | `windows.py` | 读视频索引（窗口与画面向量） |
 | `tools/orient.py` | 带 180° 旋转标记的视频，让 4B 判断方向 |
 | `tools/compare_page.py` | 几条成片同步对比播放的网页 |
+| `tools/log_page.py` | 剪辑日志页：每条成片带音乐段落、第一步大纲、逐个镜头（关键帧、节拍、第一步要的画面、第二步的意图）和两步的完整输入 |
 | `prototype/` | 第七版：挑一版与精修的网页原型（`build.py` 生成数据、`search.py` 向量搜索、`index.html`），见[剪辑第七版](../../../docs/research/video-montage-v7.md) |
 | `highlight/` | 精彩度标注：品杰每个节拍由人标“精彩、可用、平淡、有问题”，用来试精彩度对规划有没有帮助（`build.py` 生成数据、`server.py` 保存标注、`index.html`），见下面的“精彩度标注”和[精彩度试验](../../../docs/research/video-montage-highlight.md) |
 
@@ -98,6 +99,12 @@ CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-free-1 python cut
 
 ```bash
 python tools/compare_page.py 品杰对比.html pj music-Forester-Symphony.json "品杰 × Symphony" -time-1=按时间顺序 -free-1=不要求顺序
+```
+
+剪辑日志页（卡片从 `paths.CARDS` 读，换过描述时同样设 `ANAS_MONTAGE_CARDS`）：
+
+```bash
+python tools/log_page.py 品杰剪辑日志.html pj "品杰 × Symphony" -time-1=按时间顺序 -free-1=不要求顺序
 ```
 
 新加一组素材：在 `cut.py` 的 `CASES` 里加一行（组名、索引名、剪辑要求、目标秒数、体裁、文件名），然后按上面的顺序跑。
