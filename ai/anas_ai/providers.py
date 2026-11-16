@@ -1,7 +1,8 @@
 """AI providers: image vectors through MediaPipe, object detection through
 ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
 recognition model), animal identity vectors through ONNX Runtime, the text in
-photos through a llama-server child process, and deterministic fakes of each.
+photos through a llama-server child process, aesthetic scores through
+PyTorch, and deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
@@ -18,6 +19,7 @@ import io
 import json
 import math
 import os
+import pathlib
 import shutil
 import socket
 import struct
@@ -1134,6 +1136,143 @@ class FakeReader:
         else:
             text = json.dumps(fake_fields(schema, digest), ensure_ascii=False)
         return {"text": text, "logprobs": [[text, 0.0]], "finish": "stop"}
+
+    def release(self):
+        self.loaded = False
+
+
+# Aesthetic scores (docs/architecture/photo-ai.md#美学打分): the scorer bundle
+# of #480, Qwen3.5-4B's frozen vision tower with two small heads, through
+# PyTorch and the bundle's own code, ai/qv_head as the bundle carries it. It
+# scores the thumbnail the photo service sends on 1 to 5, not clipped.
+SCORER_KINDS = ("qv-head",)
+SCORER_DIMENSIONS = ("aesthetic", "technical")
+
+
+class AestheticScorer:
+    """The scorer bundle in directory bundle, loaded on the first photo and dropped by release().
+
+    The deploy manifest pins the bundle's MANIFEST.json, which is checked at
+    once; MANIFEST.json pins the weights, which the bundle's Scorer checks
+    before it loads them.
+    """
+
+    def __init__(self, bundle, manifest_path, threads=None):
+        manifest = read_manifest(manifest_path)
+        if manifest.get("kind") not in SCORER_KINDS:
+            raise Unavailable(f"scorer kind {manifest.get('kind')!r} is not one of {SCORER_KINDS}")
+        pinned = manifest.get("bundleManifest")
+        if not isinstance(pinned, dict):
+            raise Unavailable(f"the manifest {manifest_path} pins no bundleManifest")
+        release_path = os.path.join(bundle, "MANIFEST.json")
+        verify_file(release_path, pinned)
+        with open(release_path, encoding="utf-8") as file:
+            release = json.load(file)
+        if tuple(release["dimensions"]) != SCORER_DIMENSIONS:
+            raise Unavailable(f"the scorer gives {release['dimensions']}, not {list(SCORER_DIMENSIONS)}")
+        try:
+            # Versions without importing them: the Worker starts for every
+            # search, and importing PyTorch takes seconds.
+            torch_version = importlib.metadata.version("torch")
+            transformers_version = importlib.metadata.version("transformers")
+        except importlib.metadata.PackageNotFoundError as error:
+            raise Unavailable(f"the AI runtime has no {error.name}") from error
+        self._bundle = bundle
+        self._scorer = None
+        self._run = None
+        self.memory = manifest["memoryBytes"]
+        self.threads = threads or inference_threads()
+        # The tower, the heads, the runtime and the preprocessing (the base
+        # model's image processor in transformers and its pixel budget)
+        # change the scores, so they are part of the model they came from.
+        tower = release["tower"]
+        self.model = (
+            f"{release['name']}-{release['version']}@t{release['tower_sha256'][:12]}+h{release['head_sha256'][:12]}"
+            f"+torch-{torch_version}+transformers-{transformers_version}"
+            f"+px{tower['min_pixels']}-{tower['max_pixels']}"
+        )
+
+    def run_options(self):
+        return RunHandle()
+
+    def score(self, data, run):
+        """The image's {"aesthetic", "technical"} scores."""
+        if not data:
+            raise InvalidInput("empty image")
+        scorer = self._load()
+        from qv_head.scorer import ScorerError
+
+        if run.terminate:
+            raise Cancelled()
+        self._run = run
+        try:
+            result = scorer.score_bytes(data)
+        except ScorerError as error:
+            raise InvalidInput(str(error)) from error
+        finally:
+            self._run = None
+        return {"aesthetic": round(result.aesthetic, 4), "technical": round(result.technical, 4)}
+
+    def release(self):
+        self._scorer = None
+        gc.collect()
+
+    def _stop_if_told(self, *_):
+        """Runs before each block of the tower, the bulk of the work, and stops it once the caller hung up."""
+        if self._run is not None and self._run.terminate:
+            raise Cancelled()
+
+    def _load(self):
+        if self._scorer is None:
+            try:
+                import torch
+
+                from qv_head.scorer import Scorer
+            except ImportError as error:
+                raise Unavailable(f"the AI runtime cannot load PyTorch or the scorer: {error}") from error
+            try:
+                scorer = Scorer(pathlib.Path(self._bundle), device="cpu")
+            except (OSError, ValueError) as error:
+                # The bundle's files do not match its MANIFEST.json, or it
+                # cannot be read.
+                raise Unavailable(f"the scorer bundle {self._bundle}: {error}") from error
+            torch.set_num_threads(self.threads)
+            for block in scorer.tower.model.blocks:
+                block.register_forward_pre_hook(self._stop_if_told)
+            self._scorer = scorer
+        return self._scorer
+
+
+class FakeScorer:
+    """A deterministic stand-in: equal images get equal scores.
+
+    delay keeps a scoring running for that long, checking whether it was told
+    to stop, so that tests can cancel one.
+    """
+
+    model = "fake-scorer-sha256"
+    memory = 0
+
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.loaded = False
+        self.cancelled = 0
+
+    def run_options(self):
+        return RunHandle()
+
+    def score(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
+        digest = hashlib.sha256(data).digest()
+        return {"aesthetic": round(1 + 4 * digest[0] / 255, 4), "technical": round(1 + 4 * digest[1] / 255, 4)}
 
     def release(self):
         self.loaded = False

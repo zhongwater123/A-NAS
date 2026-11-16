@@ -82,7 +82,7 @@ M2 交付后，成员可以：
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
 - 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）；`score_aesthetic` 给图片打美学与技术分，`info` 另以 `aestheticModel` 与 `aestheticMemoryBytes` 报告它（[美学打分](#美学打分)）。
 - 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
@@ -168,6 +168,18 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - AI 处理状态与照片状态分离：`pending → running → ready / failed`，失败保存稳定错误类别。
 - 每条向量记录模型 ID（含权重哈希与预处理版本）。更换模型或预处理后，旧结果标记为 `stale`，后台重建；重建期间旧向量是否继续参与搜索是规格中的待定项，建议继续参与直到新向量就绪。
 - 删除最后一个引用时，向量与 AI 标签随对象删除；用户元数据随照片资产删除。
+
+### 美学打分
+
+按 [#480](https://github.com/zhongwater123/A-NAS/issues/480) 的方案一，Worker 内用 PyTorch 运行打分器，给缩略图打美学、技术两个分（1–5，不截断）。目前只做到 Worker，相册服务的任务、存储与界面未接入。
+
+- **打分器**：Qwen3.5-4B 的视觉塔原样冻结，挂两个小 MLP 头。代码是打分器发布包里的 `qv_head/`，原样放在 [`ai/qv_head/`](../../ai/qv_head)（只带 `Scorer` 用到的模块，Ruff 不检查）；`score.py`、HTTP 服务与 Docker 文件不用。
+- **模型文件**：清单 [`deploy/models/qwen35-4b-aesthetic-scorer.json`](../../deploy/models/qwen35-4b-aesthetic-scorer.json) 固定发布包 tar（649 MB）的哈希，内容包只解出其中的 `MANIFEST.json` 与 `model/`（视觉塔三个文件和 `head.pt`）到 `/opt/a-nas/models/<tar 的 SHA-256>/`，角色 `aesthetic-scorer` 的链接 `ai/aesthetic-scorer.bundle` 指向这个目录。视觉塔与 OCR 的 mmproj 是同一份权重，但格式不同（safetensors 对 GGUF），系统盘多占约 667 MB。
+- **校验**：Worker 启动时只核对 `MANIFEST.json` 与清单固定的哈希；第一次打分时打分器按 `MANIFEST.json` 核对权重（约 680 MB）后再加载，`release` 卸载它。
+- **运行环境**：锁文件增加 CPU 版 PyTorch 2.8.0 与 torchvision 0.23.0（按 URL 取自 PyTorch 的 CPU 索引，PyPI 上 Linux 的是 CUDA 版）、transformers 5.20.2、safetensors 0.8.0 与 pydantic 2.13.4；Pillow 沿用锁文件的 13.0.0，不用发布包写的 12.0.0。新增 wheel 约 214 MB。单元设 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，`HF_HOME` 在 `CacheDirectory` 下。
+- **协议**：`score_aesthetic` 带一个图片描述符，返回 `model` 与 `scores`（`aesthetic`、`technical`）；挂断即取消，视觉塔每一块之前检查一次。模型 ID 含视觉塔与打分头的 SHA-256、PyTorch 与 transformers 的版本和像素预算，换其中任何一个，旧分数按[上节](#失败版本与重建)的规则重算。`info` 另以 `aestheticModel` 与 `aestheticMemoryBytes` 报告它，像文字识别一样单独计算内存，不加进 `memoryBytes`，以免拖住其他后台任务的门控。
+- **资源**：清单 `memoryBytes` 先按 2 GiB（开发机实测常驻约 1.7 GB、峰值约 1.9 GB）；推理线程与其他模型相同，为可用逻辑核数减 2。开发机 CPU 上 512 px 缩略图每张约 5.5 秒，只适合空闲时后台整理。
+- **待定**：打分头用 EVA 训练，数据没有标准许可证或商用条款，随产品发行前要确认（#480）；i3-12100 上的速度与 Worker cgroup 中的内存待实测。
 
 ## 切片与顺序
 

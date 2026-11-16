@@ -52,7 +52,7 @@ class Failing:
 
 class WorkerTest(unittest.TestCase):
     def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None, started=0,
-              reader=None):
+              reader=None, scorer=None):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
@@ -60,7 +60,7 @@ class WorkerTest(unittest.TestCase):
         self.addCleanup(listener.close)
         thread = threading.Thread(target=worker.serve,
                                   args=(listener, provider, reason, idle_seconds, detector, faces, animals, started,
-                                        reader),
+                                        reader, scorer),
                                   daemon=True)
         thread.start()
         return path, thread
@@ -319,6 +319,51 @@ class WorkerTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)
         self.assertEqual(fake.cancelled, 1)
 
+    def test_scores_photos_with_the_fake(self):
+        fake = providers.FakeScorer()
+        fake.memory = 2 << 30
+        path, _ = self.start(providers.FakeProvider(dimensions=8), scorer=worker.Detector(fake), started=300 << 20)
+        info = call(path, {"op": "info"})
+        # Scoring is a phase of its own: its memory is not added to the other models'.
+        self.assertEqual((info["aestheticModel"], info["aestheticMemoryBytes"], info["memoryBytes"]),
+                         (fake.model, (300 << 20) + (2 << 30), 300 << 20))
+        seen = set()
+        for content in (b"photo %d" % i for i in range(10)):
+            scored = call(path, {"op": "score_aesthetic"}, self.image(content))
+            self.assertTrue(scored["ok"], scored)
+            self.assertEqual(scored["model"], fake.model)
+            self.assertEqual(scored, call(path, {"op": "score_aesthetic"}, self.image(content)))
+            self.assertEqual(set(scored["scores"]), {"aesthetic", "technical"})
+            self.assertTrue(all(1 <= value <= 5 for value in scored["scores"].values()))
+            seen.add(scored["scores"]["aesthetic"])
+        self.assertGreater(len(seen), 1)
+        self.assertEqual(call(path, {"op": "score_aesthetic"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "score_aesthetic"}, self.image(b""))["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+
+    def test_scoring_is_unavailable_without_a_scorer(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), scorer=worker.Detector(reason="no scorer bundle"))
+        self.assertNotIn("aestheticModel", call(path, {"op": "info"}))
+        response = call(path, {"op": "score_aesthetic"}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "no scorer bundle"})
+        self.assertTrue(call(path, {"op": "embed_image"}, self.image(b"photo"))["ok"])
+
+    def test_hanging_up_stops_the_scoring(self):
+        fake = providers.FakeScorer(delay=30)
+        path, _ = self.start(providers.FakeProvider(), scorer=worker.Detector(fake))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps({"op": "score_aesthetic"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
+
     def test_leaves_cores_for_the_user(self):
         self.assertEqual(providers.inference_threads(), max(1, len(os.sched_getaffinity(0)) - providers.RESERVED_CORES))
 
@@ -391,6 +436,50 @@ class ManifestTest(unittest.TestCase):
                        "sha256": hashlib.sha256(b"weights").hexdigest()}, file)
         with self.assertRaises(providers.Unavailable):
             providers.MediaPipeProvider(model, manifest)
+
+
+# The fields of a scorer bundle's MANIFEST.json that the Worker reads.
+SCORER_RELEASE = {"name": "test-scorer", "version": "1.0.0", "dimensions": ["aesthetic", "technical"],
+                  "tower_sha256": "a" * 64, "head_sha256": "b" * 64,
+                  "tower": {"taps": [5], "min_pixels": 65536, "max_pixels": 1048576, "precision": "bf16"}}
+
+
+class ScorerBundleTest(unittest.TestCase):
+    """What the aesthetic scorer checks when the Worker starts, before it loads anything."""
+
+    def bundle(self, release=None, kind="qv-head", pin=None):
+        """A bundle directory holding only its MANIFEST.json, and the deploy manifest that pins it."""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        content = json.dumps(release or SCORER_RELEASE).encode()
+        with open(os.path.join(directory, "MANIFEST.json"), "wb") as file:
+            file.write(content)
+        manifest = os.path.join(directory, "deploy.json")
+        pinned = pin or {"sizeBytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+        with open(manifest, "w", encoding="utf-8") as file:
+            json.dump({"name": "test-scorer", "kind": kind, "memoryBytes": 2 << 30, "bundleManifest": pinned}, file)
+        return directory, manifest
+
+    def test_only_the_pinned_bundle_and_kind_pass_the_check(self):
+        for bundle, manifest in (self.bundle(kind="onnx"), self.bundle(pin={"sizeBytes": 2, "sha256": "0" * 64}),
+                                 self.bundle(release={**SCORER_RELEASE, "dimensions": ["aesthetic"]})):
+            with self.assertRaises(providers.Unavailable):
+                providers.AestheticScorer(bundle, manifest, threads=1)
+
+    @unittest.skipIf(importlib.util.find_spec("torch"), "PyTorch is installed")
+    def test_a_runtime_without_pytorch_is_unavailable(self):
+        with self.assertRaisesRegex(providers.Unavailable, "no torch"):
+            providers.AestheticScorer(*self.bundle(), threads=1)
+
+    @unittest.skipUnless(importlib.util.find_spec("torch") and importlib.util.find_spec("transformers"),
+                         "PyTorch or transformers is not installed")
+    def test_the_model_names_the_weights_runtime_and_preprocessing(self):
+        scorer = providers.AestheticScorer(*self.bundle(), threads=1)
+        self.assertEqual(scorer.memory, 2 << 30)
+        self.assertRegex(scorer.model, r"^test-scorer-1\.0\.0@taaaaaaaaaaaa\+hbbbbbbbbbbbb\+torch-.+"
+                                       r"\+transformers-[^+]+\+px65536-1048576$")
+        # Nothing is loaded until the first photo.
+        self.assertIsNone(scorer._scorer)
 
 
 if __name__ == "__main__":

@@ -97,25 +97,43 @@ have() {
 }
 
 # Models (ADR 0016): a package for the model's file, or for each of its parts
-# (scripts/lib/content.sh model_files).
+# (scripts/lib/content.sh model_files). A bundle's package holds the members
+# its manifest lists, unpacked from its tarball.
 for role in "${ai_roles[@]}"; do
   manifest=$repo/deploy/models/${role##*:}.json
   sha=$(pin_field "$manifest" sha256)
+  mapfile -t members < <(jq -r '(.members // [])[]' "$manifest")
   while IFS=$'\t' read -r -u 3 name file size file_sha; do
     have "$name" all && continue
     target=$work/$name/opt/a-nas/models/$sha
     install -d "$target"
-    if "$stand_in"; then
-      head -c 4096 /dev/urandom >"$target/$file"
+    if ((${#members[@]})); then
+      if "$stand_in"; then
+        for member in "${members[@]}"; do
+          install -d "$(dirname "$target/$member")"
+          head -c 4096 /dev/urandom >"$target/$member"
+        done
+      else
+        source=$content/models/$sha/$file
+        pinned_file "$source" "$size" "$file_sha" || { echo "missing or not as pinned: $source ($manifest)" >&2; exit 2; }
+        directory=$(pin_field "$manifest" directory)
+        tar -C "$target" --no-same-owner --strip-components=1 -xf "$source" "${members[@]/#/$directory/}"
+      fi
+      chmod -R u=rwX,go=rX "$target"
     else
-      source=$content/models/$sha/$file
-      pinned_file "$source" "$size" "$file_sha" ||
-        { echo "missing or not as pinned: $source ($manifest; scripts/split-model.sh makes the parts)" >&2; exit 2; }
-      cp -- "$source" "$target/$file"
+      if "$stand_in"; then
+        head -c 4096 /dev/urandom >"$target/$file"
+      else
+        source=$content/models/$sha/$file
+        pinned_file "$source" "$size" "$file_sha" ||
+          { echo "missing or not as pinned: $source ($manifest; scripts/split-model.sh makes the parts)" >&2; exit 2; }
+        cp -- "$source" "$target/$file"
+      fi
+      chmod 0644 "$target/$file"
     fi
-    chmod 0644 "$target/$file"
     what="The model file deploy/models/${role##*:}.json pins by SHA-256 $sha"
     [[ "$file_sha" == "$sha" ]] || what="$file, a part of the model file deploy/models/${role##*:}.json pins by SHA-256 $sha,"
+    ((${#members[@]} == 0)) || what="The members of the bundle deploy/models/${role##*:}.json pins by SHA-256 $sha, unpacked"
     package "$name" all '' "$(pin_field "$manifest" name) for A-NAS's local AI
  $what
  in /opt/a-nas/models/$sha.$("$stand_in" && printf '\n .\n A stand-in with random content for the system test.')" \

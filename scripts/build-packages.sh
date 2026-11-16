@@ -97,7 +97,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -109,14 +109,16 @@ install -m 0755 "$build/anas-api" "$build/anas-host-agent" "$build/anas-containe
   "$repo/scripts/install-media-pool.sh" "$repo/scripts/install-screensavers.sh" "$lib/"
 install -m 0755 "$repo/scripts/run-kiosk.sh" "$lib/kiosk-launcher"
 
-# The AI Worker (ADR 0016): its code, each model role's manifest and a link
-# to the role's file in its content package, the runtime and llama.cpp.
+# The AI Worker (ADR 0016): its code and the aesthetic scorer's, each model
+# role's manifest and a link to the role's file in its content package, the
+# runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
+install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
 for role in "${ai_roles[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
   install -m 0644 "$manifest" "$lib/ai/$name.json"
-  ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)/$(model_link_file "$manifest")" "$lib/ai/$name.${rest%%:*}"
+  ln -s "$(model_link "$manifest")" "$lib/ai/$name.${rest%%:*}"
 done
 ln -s "/opt/a-nas/ai-runtimes/$(ai_runtime_id "$repo")" "$lib/ai/runtime"
 install -m 0644 "$repo/deploy/llama/llama.json" "$lib/ai/"

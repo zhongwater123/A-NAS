@@ -12,6 +12,11 @@ RUN python3 -m venv /opt/anas-ai \
  && /opt/anas-ai/bin/pip install --no-cache-dir opencv-contrib-python-headless==5.0.0.93
 # The object detector (docs/architecture/photo-objects.md).
 RUN /opt/anas-ai/bin/pip install --no-cache-dir onnxruntime==1.31.0 protobuf==7.36.2
+# The aesthetic scorer (docs/architecture/photo-ai.md#美学打分): PyTorch's CPU
+# build, from its own index as ai/requirements.in names it.
+RUN /opt/anas-ai/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.8.0+cpu torchvision==0.23.0+cpu \
+ && /opt/anas-ai/bin/pip install --no-cache-dir transformers==5.20.2 safetensors==0.8.0 pydantic==2.13.4
 # Label calibration on the development machine only (ai/eval).
 RUN /opt/anas-ai/bin/pip install --no-cache-dir scikit-learn==1.7.2
 ENTRYPOINT []
