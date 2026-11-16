@@ -1,5 +1,5 @@
 """Conversations with a member's assistant, with the product service's side of
-in-turn approvals (#111).
+in-turn approvals (#111), and the scored scenarios that check what it did.
 
 Runs as root in the spike container, with the Hermes runtime's Python, and
 plays the product service on whichever channel the sandbox runs: `hermes serve`
@@ -11,13 +11,15 @@ prepare that change from the call's arguments, and answers as the scenario
 says the member does. Approving registers the member's grant with the broker
 before Hermes hears "once"; the MCP tool can apply nothing without it.
 
-  scenarios.py FILE [--answer ANSWER] [--user alice]
+  scenarios.py FILE.txt [--answer ANSWER] [--user alice]
+  scenarios.py FILE.yaml [--case ID ...] [--repeat N] [--out DIR] [--baseline FILE] [--user alice]
 
-Each line of FILE starts a new conversation, and a line starting with "+"
-continues the one before; the staging area is emptied before each conversation.
-A line is "<answers> | <message>" or just "<message>" (answers from --answer,
-default deny). The answers are what the member does with each approval request
-of the turn, in order, the last one repeating:
+A .txt file only prints the conversations. Each line starts a new conversation,
+and a line starting with "+" continues the one before; the staging area is
+emptied before each conversation. A line is "<answers> | <message>" or just
+"<message>" (answers from --answer, default deny). The answers are what the
+member does with each approval request of the turn, in order, the last one
+repeating:
   approve  register the grant, then answer "once"
   deny     reject the change, answer "deny"
   wait     do not answer, so Hermes times out (approvals.timeout)
@@ -26,13 +28,24 @@ of the turn, in order, the last one repeating:
   forge    answer "once" without the member's grant: Hermes alone approves
 A request for an invalid submission gets no card: the product service lets it
 through so the MCP tool tells the assistant what is wrong with it.
+
+A .yaml file is a suite with assertions (docs/development/assistant-scenarios.md):
+each case runs as often as its kind asks, from the seed put back before every
+run, and is scored by vnas_eval. The runs, the summary and the report go to
+--out; with --baseline the report lists what changed against it, and the exit
+status is the report's (0 nothing to stop, 1 a safety case newly fails, 2 a
+safety case could not complete). VNAS_JUDGE_KEY_FILE switches on the
+llm-rubric judge (vnas_eval/judge.py).
 """
 import argparse
 import asyncio
+import hashlib
 import http.client
 import json
+import os
 import shutil
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -41,6 +54,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("file")
 parser.add_argument("--answer", default="deny")
 parser.add_argument("--user", default="alice")
+parser.add_argument("--case", action="append", default=[], help="only this case of a .yaml suite (repeatable)")
+parser.add_argument("--repeat", type=int, help="runs per case, instead of the kind's")
+parser.add_argument("--out", help="where a .yaml suite's results go (default /var/lib/vnas-eval/results/...)")
+parser.add_argument("--baseline", help="the accepted summary of the same suite and model to compare with")
+parser.add_argument("--model", help="the model under test, if not the one in /etc/hermes/config.yaml")
 opts = parser.parse_args()
 
 USER = opts.user
@@ -53,9 +71,11 @@ A_NAS_TOOLS = ("mcp__anas__", "mcp__companion__")
 HOME = Path(f"/srv/a-nas/data/assistant/{USER}/files")
 CHANNEL = "api_server" if Path("/etc/systemd/system/anas-assistant@.service.d/channel.conf").exists() else "serve"
 # The real model's gateway or the fake model, whichever this container runs.
-MODEL_LOG = Path("/var/log/gateway.jsonl" if Path("/etc/anas-spike/model.key").exists() else "/var/log/fake-model.jsonl")
+REAL_MODEL = Path("/etc/anas-spike/model.key").exists()
+MODEL_LOG = Path("/var/log/gateway.jsonl" if REAL_MODEL else "/var/log/fake-model.jsonl")
 APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/etc/hermes/config.yaml").read_text().splitlines()
                              if line.startswith("  timeout:")), "300"))
+RESULT_CHARS = 2000   # of a tool's result kept in a run record
 
 
 class UDS(http.client.HTTPConnection):
@@ -96,6 +116,12 @@ def short(value, n=160):
     return text if len(text) <= n else text[:n] + "…"
 
 
+def kept(value):
+    """A tool's result as a run record keeps it: text, cut to RESULT_CHARS."""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + "…"
+
+
 def card(change):
     """What the member sees: one line per operation, with the new text of each write."""
     lines = [f"card {change['id']}: {change['summary']}"]
@@ -109,20 +135,31 @@ def card(change):
 
 class Turn:
     """The product service's part of one turn, whatever the channel: respond(choice) answers
-    Hermes and says whether the approval was still pending, stop() stops the turn."""
+    Hermes and says whether the approval was still pending, stop() stops the turn. record is
+    the turn's evidence for scoring (vnas_eval.asserts)."""
 
     def __init__(self, session, said, answers):
-        self.session, self.said, self.answers = session, said, answers
+        self.session, self.said, self.answers = session, said, list(answers)
         self.submissions = {}   # session or run -> arguments of the last 提交更改 started in it
         self.changes, self.late = [], []
+        self.record = {"say": said, "answers": list(answers), "tools": [], "approvals": [], "changes": [],
+                       "answer": "", "status": "complete"}
 
     def answer(self):
         return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
 
     def started(self, key, name, args):
         print(f"  → {name} {short(args)}")
+        self.record["tools"].append({"name": name, "args": args})
         if name == SUBMIT and isinstance(args, dict):
             self.submissions[key] = args
+
+    def completed(self, name, result):
+        """The result of the latest call of that tool still without one."""
+        for tool in reversed(self.record["tools"]):
+            if tool["name"] == name and "result" not in tool:
+                tool["result"] = kept(result)
+                return
 
     async def approval(self, key, request, fields, respond, stop):
         print(f"  ⏸ approval {short(fields.get('command'), 70)} "
@@ -141,6 +178,9 @@ class Turn:
         print("    " + card(change))
         what = self.answer()
         print(f"    member: {what}")
+        self.record["approvals"].append({"answer": what, "change": {
+            "id": change["id"], "summary": change["summary"],
+            "operations": [{k: op[k] for k in ("op", "path", "to") if op.get(k)} for op in change["operations"]]}})
         if what == "approve":
             broker("POST", f"/changes/{change['id']}/approve")
             if not await respond("once"):
@@ -198,12 +238,17 @@ async def serve_turn(gw, sid, turn):
             continue
         if kind == "tool.start":
             turn.started(sid, payload.get("name"), payload.get("args"))
-        elif kind == "tool.complete" and str(payload.get("name", "")).startswith(A_NAS_TOOLS):
-            print(f"  ⇠ {payload['name']}: {short(payload.get('result') or payload.get('result_text') or payload.get('error'), 300)}")
+        elif kind == "tool.complete":
+            result = payload.get("result") or payload.get("result_text") or payload.get("error")
+            turn.completed(payload.get("name"), result)
+            if str(payload.get("name", "")).startswith(A_NAS_TOOLS):
+                print(f"  ⇠ {payload['name']}: {short(result, 300)}")
         elif kind == "message.complete":
             if payload.get("text"):
                 print(f"  answer: {short(payload['text'], 400)}")
-            print(f"  turn {payload.get('status') or 'complete'}")
+            turn.record["answer"] = payload.get("text") or ""
+            turn.record["status"] = payload.get("status") or "complete"
+            print(f"  turn {turn.record['status']}")
             break
     await turn.finish()
 
@@ -252,6 +297,7 @@ async def api_turn(session, turn):
     resp = conn.getresponse()
     if resp.status != 200:
         print(f"  stream refused: {resp.status} {resp.read()[:300]}")
+        turn.record["status"] = "failed"
         return
     for name, event in events(resp):
         if name == "tool.started":
@@ -266,18 +312,22 @@ async def api_turn(session, turn):
             await turn.approval(run, event.get("request_id"), fields, approval_answer(run, event.get("request_id")), stop)
         elif name.startswith("run.") and name != "run.started":
             print(f"  {name}")
+            turn.record["status"] = name
         elif name == "error":
             print(f"  error {short(event, 300)}")
     await turn.finish()
-    # What the model got from the A-NAS tools, and the answer, from the stored transcript.
+    # What the model got from the tools, and the answer, from the stored transcript.
     _, page = hermes("GET", f"/api/sessions/{session}/messages?inline_images=false")
     rows = page.get("data", []) if isinstance(page, dict) else []
     start = max((i for i, r in enumerate(rows) if r.get("role") == "user" and turn.said in str(r.get("content"))), default=-1)
     for row in rows[start + 1:]:
-        if row.get("role") == "tool" and row.get("tool_name", "").startswith(A_NAS_TOOLS):
-            print(f"  ⇠ {row['tool_name']}: {short(row.get('content'), 300)}")
+        if row.get("role") == "tool":
+            turn.completed(row.get("tool_name", ""), row.get("content"))
+            if row.get("tool_name", "").startswith(A_NAS_TOOLS):
+                print(f"  ⇠ {row['tool_name']}: {short(row.get('content'), 300)}")
         elif row.get("role") == "assistant" and row.get("content"):
             print(f"  answer: {short(row['content'], 400)}")
+            turn.record["answer"] = row["content"] if isinstance(row["content"], str) else json.dumps(row["content"])
 
 
 async def api_conversation(lines):
@@ -287,39 +337,195 @@ async def api_conversation(lines):
         yield session, Turn(session, said, answers), lambda turn: api_turn(session, turn)
 
 
-async def converse(paragraph):
+# ---- one conversation ----
+
+def model_records(before):
+    return [json.loads(record) for record in MODEL_LOG.read_text().splitlines()[before:]] if MODEL_LOG.exists() else []
+
+
+def model_error(records, status):
+    """A model failure that explains the turn: the turn failed or its last request did not succeed."""
+    bad = [r for r in records if r.get("status", 200) != 200]
+    if bad and (status in ("failed", "error", "run.failed") or records[-1].get("status", 200) != 200):
+        return f"HTTP {bad[-1].get('status')} ({len(bad)} of {len(records)} requests)"
+    return None
+
+
+async def converse(lines):
+    """One conversation of (answers, said) turns: the turns' records and what went wrong around them."""
     shutil.rmtree(HOME / "待确认", ignore_errors=True)
-    lines = []
-    for line in paragraph:
-        answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
-        lines.append(([a.strip() for a in answers.split(",")], said.strip()))
-    session = None
-    # session is read after the loop: the last turn's.
-    async for session, turn, run in (serve_conversation if CHANNEL == "serve" else api_conversation)(lines):  # noqa: B007
-        log_before = len(MODEL_LOG.read_text().splitlines()) if MODEL_LOG.exists() else 0
-        started = time.time()
-        print(f"\n### [{','.join(turn.answers)}] {turn.said}")
-        await run(turn)
-        if MODEL_LOG.exists():
-            records = [json.loads(record) for record in MODEL_LOG.read_text().splitlines()[log_before:]]
+    turns, errors, session = [], [], None
+    try:
+        async for session, turn, run in (serve_conversation if CHANNEL == "serve" else api_conversation)(lines):  # noqa: B007
+            log_before = len(MODEL_LOG.read_text().splitlines()) if MODEL_LOG.exists() else 0
+            started = time.time()
+            print(f"\n### [{','.join(turn.answers)}] {turn.said}")
+            await run(turn)
+            records = model_records(log_before)
             tokens = sum((r.get("usage") or {}).get("total_tokens", 0) for r in records)
-            print(f"  {len(records)} model requests, {tokens} tokens, {time.time() - started:.0f} s")
+            turn.record.update(requests=len(records), tokens=tokens, seconds=round(time.time() - started, 1))
+            if problem := model_error(records, turn.record["status"]):
+                errors.append({"kind": "model", "turn": len(turns) + 1, "detail": problem})
+            turns.append(turn.record)
+            if MODEL_LOG.exists():
+                print(f"  {len(records)} model requests, {tokens} tokens, {turn.record['seconds']:.0f} s")
+    except TimeoutError:
+        errors.append({"kind": "timeout", "turn": len(turns) + 1, "detail": "the turn did not end"})
+        print(f"  timeout in turn {len(turns) + 1}")
+    except Exception as exc:  # noqa: BLE001  any failure of the harness itself makes the run an error, not a crash
+        errors.append({"kind": "runner", "turn": len(turns) + 1, "detail": f"{type(exc).__name__}: {exc}"})
+        print(f"  runner error in turn {len(turns) + 1}: {type(exc).__name__}: {exc}")
     _, page = broker("GET", "/changes")
-    for change in page["changes"]:
-        if change.get("sessionId") == session:
-            print(f"  change {change['id']}: {change['status']}{' — ' + change['error'] if change.get('error') else ''}")
+    final = {c["id"]: c for c in page["changes"] if c.get("sessionId") == session} if session else {}
+    for change in final.values():
+        print(f"  change {change['id']}: {change['status']}{' — ' + change['error'] if change.get('error') else ''}")
+    for record in turns:
+        record["changes"] = [{"id": a["change"]["id"], "status": final.get(a["change"]["id"], {}).get("status"),
+                              "error": final.get(a["change"]["id"], {}).get("error")} for a in record["approvals"]]
+    return turns, errors
 
 
-async def main():
+async def print_only(path):
     paragraphs = []
-    for raw in Path(opts.file).read_text(encoding="utf-8").splitlines():
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
         if raw.startswith("+") and paragraphs:
             paragraphs[-1].append(raw[1:].strip())
         elif raw.strip():
             paragraphs.append([raw.strip()])
-    print(f"channel {CHANNEL}, approvals.timeout = {APPROVAL_TIMEOUT} s")
     for paragraph in paragraphs:
-        await converse(paragraph)
+        lines = []
+        for line in paragraph:
+            answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
+            lines.append(([a.strip() for a in answers.split(",")], said.strip()))
+        await converse(lines)
 
 
-asyncio.run(main())
+# ---- a scored suite ----
+
+def digest(paths):
+    """One short hash over the files' names and contents, read in chunks (the runtime is ~130 MB)."""
+    h = hashlib.sha256()
+    for path in sorted(paths):
+        h.update(str(path).encode() + b"\0")
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                h.update(chunk)
+    return "sha256:" + h.hexdigest()[:16]
+
+
+def environment():
+    """What a result depends on besides the scenarios, for the report's comparison."""
+    from ruamel.yaml import YAML
+    config = YAML(typ="safe", pure=True).load(Path("/etc/hermes/config.yaml").read_text(encoding="utf-8")) or {}
+    pin = next((line.split("=", 1)[1] for line in Path("/spike/run.sh").read_text().splitlines()
+                if line.startswith("commit=")), None)
+    runtime = Path("/spike-out/runtime.tar.gz")
+    spike = Path("/spike")
+    return {"model": opts.model or (config.get("model") or {}).get("default"), "channel": CHANNEL, "hermes": pin,
+            "runtime": digest([runtime]) if runtime.exists() else None,
+            "repo": os.environ.get("VNAS_EVAL_REPO"),
+            "skills": digest([*spike.glob("skills/*/SKILL.md"), spike / "member-skill.md", spike / "managed-config.yaml"]),
+            "approval_timeout": APPROVAL_TIMEOUT}
+
+
+def stop_instance():
+    """The member's instance stopped, so it starts again from the restored home on the next connection."""
+    subprocess.run(["/usr/bin/systemctl", "stop", f"anas-assistant-api@{USER}.service", f"anas-assistant@{USER}.service"], check=False)
+
+
+def failures(result):
+    rows = [(f"turn {i + 1}", r) for i, rs in enumerate(result["turns"]) for r in rs] + [("after", r) for r in result["after"]]
+    return [f"    ✗ {where} {r['type']}: {r['detail']}" + (f"（{r['note']}）" if r["note"] else "")
+            for where, r in rows if r["pass"] is False]
+
+
+async def run_suite(path):
+    from ruamel.yaml import YAML
+
+    from vnas_eval.asserts import load_suite, needs_retry, score_run
+    from vnas_eval.judge import Judge
+    from vnas_eval.report import compare, render, summarize
+    from vnas_eval.sandbox import HostWorld, Layout, Seed, skill_files
+
+    data = YAML(typ="safe", pure=True).load(Path(path).read_text(encoding="utf-8"))
+    cases = load_suite(data)
+    if opts.case:
+        unknown = set(opts.case) - {c.id for c in cases}
+        if unknown:
+            sys.exit(f"no such case: {sorted(unknown)}")
+        cases = [c for c in cases if c.id in opts.case]
+    other_users = sorted({c.user for c in cases} - {USER})
+    if other_users:
+        sys.exit(f"cases for {other_users}: run them with --user")
+    for case in cases:
+        case.repeat = opts.repeat or case.repeat
+    have = {"real-model": REAL_MODEL}
+    missing = [r for r in data.get("requires") or [] if not have.get(r)]
+    if missing:
+        print(f"skipped {data['suite']}: needs {missing}")
+        return 0
+
+    env = environment()
+    judge = Judge.from_env(subject_model=env["model"])
+    env["judge"] = judge.model if judge else None
+    model_slug = str(env["model"]).replace("/", "_")
+    out = Path(opts.out or f"/var/lib/vnas-eval/results/{time.strftime('%Y%m%d-%H%M%S')}-{data['suite']}-{model_slug}")
+    out.mkdir(parents=True, exist_ok=True)
+    layout = Layout(USER)
+    seed = None
+    if data.get("reset", "per-run") == "per-run":
+        # The seed as seed.sh writes it, kept for every run to start from.
+        subprocess.run(["/usr/bin/bash", "/spike/seed.sh", str(layout.data)], check=True)
+        stop_instance()
+        seed = Seed(layout, Path("/var/lib/vnas-eval/seed"))
+        seed.take()
+    print(f"suite {data['suite']}: {len(cases)} cases, channel {CHANNEL}, model {env['model']}, judge {env['judge']}")
+
+    records = {}
+    with (out / "runs.jsonl").open("a", encoding="utf-8") as runs:
+        for case in cases:
+            outcomes = []
+            while True:
+                if seed:
+                    stop_instance()
+                    seed.restore()
+                skills_before = skill_files(layout)
+                print(f"\n======== {case.id} ({case.kind}) run {len(outcomes) + 1}")
+                turns, errors = await converse([(t.answers, t.say) for t in case.turns])
+                result = score_run(case, {"turns": turns, "errors": errors}, HostWorld(layout, skills_before), judge)
+                record = {"schema": 1, "suite": case.suite, "case": case.id, "run": len(outcomes) + 1,
+                          "env": env, "turns": turns, "errors": errors + result.get("errors", []), "result": result}
+                runs.write(json.dumps(record, ensure_ascii=False) + "\n")
+                runs.flush()
+                records.setdefault(case.id, []).append(record)
+                outcomes.append(result["outcome"])
+                print(f"  ⇒ {result['outcome']}  should {result['should'][0]}/{result['should'][1]}"
+                      f"{', ' + str(result['unjudged']) + ' unjudged' if result['unjudged'] else ''}")
+                for line in failures(result):
+                    print(line)
+                if not needs_retry(case, outcomes):
+                    break
+    if seed:
+        stop_instance()
+        seed.restore()
+    if judge:
+        env["judge_served"] = judge.served
+    summary = summarize(data["suite"], env, cases, records)
+    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    baseline = json.loads(Path(opts.baseline).read_text(encoding="utf-8")) if opts.baseline else None
+    rep = compare(summary, baseline)
+    text = render(rep)
+    (out / "report.md").write_text(text, encoding="utf-8")
+    print("\n" + text + f"\nresults: {out}")
+    return rep["exit_code"]
+
+
+async def main():
+    print(f"channel {CHANNEL}, approvals.timeout = {APPROVAL_TIMEOUT} s")
+    if opts.file.endswith((".yaml", ".yml")):
+        return await run_suite(opts.file)
+    await print_only(opts.file)
+    return 0
+
+
+sys.exit(asyncio.run(main()))

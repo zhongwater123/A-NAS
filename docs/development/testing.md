@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-10
+更新时间：2026-11-16
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -138,7 +138,7 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 - 检查存储区与套接字的属主、权限和隔离。
 - 注入数据卷故障：把卷建在 device-mapper 设备上，换成 `error` 目标使 Btrfs 转为只读，再懒卸载与重新挂载，并在上传中途强制终止相册服务，确认相册暂停服务、不写系统盘并在卷恢复后自行重新打开。
 
-真实模型测试、运行环境构建和数据集评估见[AI 开发与评估](ai-development.md)。
+真实模型测试、运行环境构建和数据集评估见[AI 开发与评估](ai-development.md)。AI 助手的行为回归（换模型、升级 Hermes、改技能说明之后）见[评分场景](assistant-scenarios.md)。
 
 相册的规模基线（4 名成员、20,000 张，约 5 分钟）与 12 MP 缩略图计时默认跳过，在同一 cgo 容器中加 `-e ANAS_PHOTO_SCALE=1` 运行 `go test -count=1 -timeout 60m -run 'TestScale' -v ./internal/photos/`；结果的解读见[相册技术设计](../architecture/photo-library.md)切片 7。
 
@@ -212,3 +212,4 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)
+- [AI 助手的评分场景](assistant-scenarios.md)
