@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-10
+更新时间：2026-11-16
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -78,7 +78,7 @@ npm run dev
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`，规则与理由见 `ai/ruff.toml`；`ai/requirements-dev.txt` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
 | `make docs-check` | [`tools/doccheck`](../../tools/doccheck/main.go) 按[文档的写入规则](../README.md#写入规则)核对状态与索引；再由 lychee 离线检查每个受 Git 跟踪的 `*.md` 中的链接：目标文件存在，指向 Markdown 的锚点对应真实的标题。lychee 的版本由 Makefile 的 `LYCHEE_VERSION` 固定（不同版本生成标题锚点的规则不同），CI 按哈希安装同一版本 |
-| `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
+| `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；zizmor 检查工作流与 Dependabot 配置的安全问题（见[安全扫描](#安全扫描)）；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 | `make vendor-check` | [`scripts/check-dsh-pet-vendor.sh`](../../scripts/check-dsh-pet-vendor.sh) 离线核对复制进来的 dsh-pet：清单的池等于 `install-media-pool.sh` 固定的池与 README 记录的池，README 列出的补丁与补丁目录一致，每个复制文件的文件头写着固定的提交，目录里的文件正是 `dsh-pet/files.sha256` 列出的、内容与复制脚本写下的一致（手工改过任何一个文件都通不过）。给 `DSH_PET=<检出>`（可再给 `DSH_PET_MOV_ZIP=<zip>`）时在临时目录重新引入、要求没有差异，并确认改过的检出被拒绝；重新引入要装有 json5 的 Python，开发机 B 上给 `VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python`。CI 没有检出与 zip，只运行离线部分并打印 SKIP，完整检查是提里程碑或升级前的本地步骤，见[虚拟伙伴](../specs/virtual-companion.md#验收证据) |
 
 `make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant-spike/companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。
@@ -94,7 +94,7 @@ install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 
 开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
 
-Ruff、pip-audit 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
+Ruff、pip-audit、zizmor 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
 ```bash
 python3 -m venv ~/.local/opt/ai-tools
@@ -205,10 +205,21 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 
+## 安全扫描
+
+依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
+
+工作流：`make ops-check` 先用 actionlint 检查语法与表达式，再用 zizmor 检查工作流与 Dependabot 配置的安全问题，如模板注入、检出后保留凭据、更新没有冷却期。zizmor 的版本由 `ai/requirements-dev.txt` 按哈希固定，`PATH` 上的版本不同即失败，安装见[静态检查](#静态检查)。设了 `GH_TOKEN` 时它还做在线审计，如固定的 Action 提交是否属于该仓库、Action 是否有已知公告；CI 的 `Project checks` 传入作业的只读令牌，本地没有令牌时只做离线审计。检出都写 `persist-credentials: false`，否则 zizmor 报 `artipacked`。
+
+凭据：`make secrets-check` 用 Gitleaks 扫描 `HEAD` 的全部历史，在 PR 上就是合并后 `main` 会有的提交，PR 中加了又删掉的值也算。凭据值完全脱敏，只显示位置与指纹；版本由 `tools/gitleaks/go.mod` 固定。它需要 `.git` 与完整历史，所以不在 `check-steps` 中：WSL 副本没有 `.git`，CI 的检查作业是浅检出（取完整历史会带上标签，改变 `scripts/release-version.sh` 给出的版本）。[Security 工作流](../../.github/workflows/security.yml)在每个 PR 与每次合入 `main` 时运行它；作业 `Secrets in Git history` 不在 `main` 的规则集中，要求它通过须在规则集中加上。本地在检出中运行，未提交的改动不在扫描范围内。
+
+有命中时，真实凭据先撤销或轮换，再从代码中删除；删除当前文件中的值不会清除历史命中。核实无害的命中（测试数据、公开的模板默认值）按精确指纹写进 [`.gitleaksignore`](../../.gitleaksignore)，旁边写明依据，不排除整个目录，也不关闭规则。指纹只对应一个提交中的一行，同一个值在别处出现会重新报出。首批 10 条的核对见 [#483](https://github.com/zhongwater123/A-NAS/issues/483)。
+
 ## 关联
 
 - [Makefile](../../Makefile)
 - [CI 工作流](../../.github/workflows/ci.yml)
+- [安全工作流](../../.github/workflows/security.yml)与 [Gitleaks 的放行清单](../../.gitleaksignore)
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)
