@@ -59,7 +59,7 @@ def main(argv=None):
         from .service.app import serve
 
         serve(platform.store.videos / "uploads", Path(os.path.expanduser(args.site)) if args.site else None, args.proxy,
-              args.host, args.port)
+              args.host, args.port, platform)
         return
     if args.command == "music":
         out = platform.music.music(args.target, 90.0)

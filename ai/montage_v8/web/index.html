@@ -1095,6 +1095,7 @@ let jobTimer = 0, jobWin = null, jobShown = "";
 
 function startJob(f) {
   player.pause();
+  if (canUpload) return startRealJob();
   const first = [f.mine ? `上传 ${f.mine} 段新加的视频` : "", f.nas ? `读取 NAS 里的 ${f.nas} 段视频` : ""].filter(Boolean).join("，");
   job = { start: Date.now(), first };
   store.set("job", job);
@@ -1110,7 +1111,8 @@ function jobAt() {
   }
   return { i: JOB_STEPS.length, done: true, all: 1 };
 }
-const stepName = i => JOB_STEPS[i].name || job.first;
+const stepName = i => job.real ? job.steps[i] : JOB_STEPS[i].name || job.first;
+const stepCount = () => job.real ? job.steps.length : JOB_STEPS.length;
 
 function openJob() {
   closeJob();
@@ -1121,11 +1123,17 @@ function openJob() {
     <div class="eyebrow">正在剪辑</div><h2 style="margin-top:6px;font-size:20px">A-NAS 正在看你的素材</h2>
     <div class="stage" id="stage"></div>
     <div class="bar"><div></div></div>
-    <ol>${JOB_STEPS.map((_, i) => `<li><i></i>${esc(stepName(i))}</li>`).join("")}</ol>
-    <div class="leave"><span>剪辑在 NAS 上进行，关掉这个窗口也会继续。</span>
+    <ol>${Array.from({ length: stepCount() }, (_, i) => `<li><i></i>${esc(stepName(i))}</li>`).join("")}</ol>
+    <div class="leave"><span>剪辑在${job.real ? "这台机器" : " NAS "}上进行，关掉这个窗口也会继续。</span>
+      ${job.real ? '<button class="btn small ghost" id="stopjob">取消剪辑</button>' : ""}
       <button class="btn small" id="away">先去忙别的，好了通知我</button></div></div>`;
   document.body.appendChild(m);
   jobWin = m;
+  if (job.real) $("#stopjob", m).onclick = async () => {
+    if (!confirm("取消这次剪辑？已经做完的步骤会留着，下次同样的设置不用重做。")) return;
+    await fetch(`api/jobs/${job.id}/cancel`, { method: "POST" });
+    toast("正在取消：当前这一步做完就停");
+  };
   $("#away", m).onclick = () => {
     closeJob();
     if (window.isSecureContext && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
@@ -1137,6 +1145,7 @@ function closeJob() { if (jobWin) jobWin.remove(); jobWin = null; }
 
 function tickJob() {
   if (!job) { clearInterval(jobTimer); jobTimer = 0; return; }
+  if (job.real) return tickRealJob();
   const at = jobAt();
   if (at.done) return finishJob();
   if (jobWin) {
@@ -1163,12 +1172,13 @@ function drawPill(at) {
     if (!pill.classList.contains("done")) { pill.classList.add("done"); pill.innerHTML = `${ICON.check}三版成片好了 · 去看看`; }
     return;
   }
-  $(".pt", pill).textContent = `正在剪辑 · ${at.i + 1}/${JOB_STEPS.length}`;
+  $(".pt", pill).textContent = `正在剪辑 · ${Math.min(at.i + 1, stepCount())}/${stepCount()}`;
   $(".pbar b", pill).style.width = `${at.all * 100}%`;
 }
 
 function finishJob() {
   clearInterval(jobTimer); jobTimer = 0;
+  if (job && job.real) store.set("doneJob", job.id);
   if (jobWin) {                                        // watched to the end: straight to the films (the page change closes the window)
     job = null; store.set("job", null);
     if (location.hash === "#/choose") route(); else location.hash = "#/choose";
@@ -1213,6 +1223,68 @@ function jobSeen() {
   if (job && job.done) { job = null; store.set("job", null); }
   $("#jobpill")?.remove();
   document.title = TITLE;
+}
+
+// ---------- the real cutting job (第八版 service: /api/jobs) ----------
+// one folder at a time, the ticked videos of it (all ticked: the whole folder), the song and brief from the setup pages
+const FOLDER_CASES = new Set(["ne", "pj", "ch"]);
+async function startRealJob() {
+  const ticked = groups().flatMap(g => onIn(g.items).map(it => ({ g, it })));
+  const folders = [...new Set(ticked.map(x => x.g.id))];
+  if (folders.some(id => !FOLDER_CASES.has(id)))
+    return toast("上传的视频还要先建视频索引才能剪（下一步接上），这次只勾 NAS 文件夹里的视频");
+  if (folders.length > 1) return toast("一次只剪一个文件夹里的视频");
+  const g = groupOf(folders[0]), setup = getSetup();
+  const videos = onIn(g.items).length === g.items.length ? [] : ticked.map(x => x.it.key.split("/")[1]);
+  const r = await fetch("api/jobs", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ case: g.id, videos, song: setup.song, order: setup.order, ask: setup.ask, versions: 3 }) });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) return toast(body.error || "建不了剪辑任务");
+  job = { real: true, id: body.id, steps: body.steps, srv: body, first: `剪 ${g.name}` };
+  store.set("job", job);
+  openJob();
+  if (!jobTimer) jobTimer = setInterval(tickJob, 120);
+  tickJob();
+}
+const groupOf = id => groups().find(g => g.id === id);
+let polling = false, lastPoll = 0;
+async function tickRealJob() {
+  if (!polling && Date.now() - lastPoll > 1500) {
+    polling = true; lastPoll = Date.now();
+    try {
+      const r = await fetch(`api/jobs/${job.id}`);
+      if (r.status === 404) { job = null; store.set("job", null); return; }
+      job.srv = await r.json();
+    } catch { /* the service restarting: ask again next time */ } finally { polling = false; }
+  }
+  if (!job) return;
+  const v = job.srv;
+  if (v.state === "done") { applyResult(v.result); store.set("job", { ...job, srv: { id: v.id, state: "done" } }); return finishJob(); }
+  if (v.state === "failed" || v.state === "cancelled") {
+    clearInterval(jobTimer); jobTimer = 0;
+    toast(v.state === "failed" ? `剪辑失败：${v.error}` : "剪辑已取消");
+    job = null; store.set("job", null); closeJob(); drawPill({}); return;
+  }
+  const frac = v.total ? v.done / v.total : 0;
+  const at = { i: v.step, frac, all: (v.step + frac) / v.steps.length };
+  if (jobWin) {
+    jobWin.querySelectorAll("li").forEach((li, j) => { li.className = j < at.i ? "done" : j === at.i ? "now" : ""; });
+    $(".bar div", jobWin).style.width = `${at.all * 100}%`;
+    const st = $("#stage", jobWin), key = `${v.step}|${v.frame}|${v.detail}|${v.done}|${v.ahead}`;
+    if (key !== jobShown) {
+      jobShown = key;
+      const say = v.state === "queued" ? `<b>排队中</b>前面还有 ${v.ahead} 个剪辑任务` : `<b>${esc(v.steps[v.step] || "")}</b>${esc(v.detail || "")}`;
+      const count = v.total ? `${v.done} / ${v.total}` : "";
+      st.innerHTML = v.frame ? `<div class="pic"><img src="${esc(v.frame)}" alt=""></div><div class="say">${say}<div class="count">${count}</div></div>`
+        : `<div class="say wide">${say}<div class="count">${count}</div></div>`;
+    }
+  }
+  drawPill(at);
+}
+// the job's films, the cards they and the edit page use, the song: in place of the prototype's sample
+function applyResult(r) {
+  if (!r) return;
+  D.films = r.films; Object.assign(D.cards, r.cards); D.song = r.song;
 }
 
 // what the current step is looking at: built when the picture changes, the moving parts (typed text, playhead,
@@ -1957,8 +2029,13 @@ function roughCut(shots) {
   song.play().then(() => { raf = requestAnimationFrame(step); }).catch(() => toast("浏览器拦下了自动播放，点一下页面再试"));
 }
 
-route();
-if (job) { tickJob(); jobTimer = setInterval(tickJob, 120); }   // a job started before a reload carries on
+// a real job finished before a reload: its films replace the sample again before the first page is drawn
+const lastDone = store.get("doneJob", null);
+(lastDone ? fetch(`api/jobs/${lastDone}`).then(r => r.ok ? r.json() : null).then(v => v && v.result && applyResult(v.result)).catch(() => {})
+          : Promise.resolve()).then(() => {
+  route();
+  if (job) { tickJob(); jobTimer = setInterval(tickJob, 120); }   // a job started before a reload carries on
+});
 </script>
 </body>
 </html>

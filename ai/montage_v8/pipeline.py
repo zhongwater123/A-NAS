@@ -6,6 +6,7 @@
 
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,9 +22,18 @@ class StaleStep(RuntimeError):
     """已有的规划不是按现在的描述做的。"""
 
 
+class Cancelled(RuntimeError):
+    """任务层要求停下：在两步之间检查，不打断正在进行的模型调用。"""
+
+
 @dataclass
 class Montage:
+    """report(说明, 关键帧路径或 None, 完成数, 总数)：每做完一小步告诉任务层，命令行下为 None；
+    stop()：返回 True 就在下一步之前抛 Cancelled。"""
+
     platform: Platform
+    report: Callable | None = None
+    stop: Callable | None = None
 
     @property
     def store(self):
@@ -31,6 +41,12 @@ class Montage:
 
     def log(self, *args):
         print(*args, flush=True)
+
+    def tell(self, detail: str, frame: str | None = None, done: int = 0, total: int = 0) -> None:
+        if self.stop and self.stop():
+            raise Cancelled
+        if self.report:
+            self.report(detail, frame, done, total)
 
     # 卡片 -----------------------------------------------------------------------------------------------
 
@@ -80,9 +96,10 @@ class Montage:
         path = self.store.cards_file(case.key)
         done = self.store.all_cards(case.key)
         bad = qualityrules.poor(self.store.quality(case.key), self.store.reviewed(case.index)) if opts.quality else {}
-        for cid, c in done.items():
-            if "answer" in c:
-                continue
+        todo = [cid for cid, c in done.items() if "answer" not in c and (opts.videos is None or c["video"] in opts.videos)]
+        for k, cid in enumerate(todo):
+            c = done[cid]
+            self.tell(f"描述卡片 {cid}", c["frames"][0] if c.get("frames") else None, k, len(todo))
             if cid in bad:
                 c["error"] = "画面质量差，未描述：" + "、".join(bad[cid])
                 write_json(done, path)
@@ -109,7 +126,8 @@ class Montage:
 
     def usable(self, case: Case, opts: CutOptions) -> list[dict]:
         return catalog.usable(self.store.described(case.key), self.store.quality(case.key), self.store.reviewed(case.index),
-                              self.store.excluded(case.index), quality=opts.quality, wide=opts.wide, upright=self.store.upright)
+                              self.store.excluded(case.index), quality=opts.quality, wide=opts.wide, upright=self.store.upright,
+                              videos=opts.videos)
 
     def descriptions(self, case: Case) -> str:
         return self.store.cards_file(case.key).name
@@ -131,6 +149,7 @@ class Montage:
             return self.reused(path, case)
         m, music_file = self.music(case, song)
         system, user, schema = plan.pick_request(case, opts, self.usable(case, opts), m)
+        self.tell("第一步：读卡片目录和音乐段落，写成片大纲")
         answer, cost = self.platform.planner.ask(system, user, schema)
         out = {"system": system, "user": user, "answer": answer, "cost": cost, "descriptions": self.descriptions(case),
                "music": music_file, "labels": opts.labels_file, "wide": opts.wide}
@@ -145,6 +164,7 @@ class Montage:
         m, music_file = self.music(case, song)
         picked = self.pick(case, opts, song)["answer"]
         req = plan.shots_request(case, opts, picked, {c["id"]: c for c in self.usable(case, opts)}, m)
+        self.tell(f"第二步：给 {sum(req['pictures'])} 个画面挑节拍")
         answer, cost = self.platform.planner.ask(req["system"], req["user"], req["schema"])
         raw, shaped = plan.shots_answer(answer, req["pictures"], picked)
         out = {"system": req["system"], "user": req["user"], "raw": raw, "seconds": req["seconds"], "cap": plan.CAP,
@@ -183,6 +203,7 @@ class Montage:
         final = self.store.cuts / f"{case.key}-{case.name}-第八版{opts.tag}.mp4"
         t0 = time.perf_counter()
         if render:
+            self.tell(f"渲染 {len(clips)} 个镜头")
             self.platform.ffmpeg.render([(self.store.source(self.store.windows(case.index), c["video"]), c["start"], c["end"],
                                           c.get("slow", 1.0)) for c in clips],
                                         m["song"], m["excerpt"][0], seconds, str(final), turned=self.store.turned())

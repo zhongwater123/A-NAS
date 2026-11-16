@@ -262,6 +262,111 @@ class UploadNamesTest(unittest.TestCase):
                 {"name": "a.MOV", "size": 5, "modified": up.listing()[0]["files"][0]["modified"]}]}])
 
 
+class FakeMontage:
+    """编排层的替身：记下被调用的步骤，按需要在某一步失败或被取消。"""
+
+    def __init__(self, calls, fail=None, report=None, stop=None):
+        self.calls, self.fail, self.report, self.stop = calls, fail, report, stop
+
+    def _do(self, what):
+        from montage_v8.pipeline import Cancelled
+
+        if self.stop and self.stop():
+            raise Cancelled
+        if self.fail == what:
+            raise RuntimeError(f"{what} 坏了")
+        self.calls.append(what)
+
+    def usable(self, case, opts):
+        return [{"id": "x"}]
+
+    def describe(self, case, opts):
+        self._do("describe")
+        if self.report:
+            self.report("描述卡片 pj-001", None, 1, 2)
+
+    def music(self, case, song):
+        self._do("music")
+
+    def shots(self, case, opts, song):
+        self._do(f"shots{opts.tag}")
+
+    def cut(self, case, opts, song):
+        self._do(f"cut{opts.tag}")
+
+
+class JobsTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        from montage_v8.jobs import CutRequest, Jobs
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.jobs = Jobs(Path(self.tmp.name) / "jobs.sqlite")
+        self.cases = {"pj": CASE}
+        self.req = CutRequest.parse({"case": "pj", "song": "S", "versions": 2, "ask": " 多用大景 "}, self.cases, {"S"})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def worker(self, calls, **kw):
+        from montage_v8.jobs import Worker
+
+        return Worker(self.jobs, lambda **cb: FakeMontage(calls, report=cb.get("report"), stop=cb.get("stop"), **kw),
+                      self.cases, lambda montage, case, req, tags: {"tags": tags})
+
+    def test_a_request_is_checked_and_its_options_follow_the_page(self):
+        from montage_v8.jobs import CutRequest, RequestError
+
+        for bad in ({"case": "zz", "song": "S"}, {"case": "pj", "song": "nope"}, {"case": "pj", "song": "S", "versions": 9},
+                    {"case": "pj", "song": "S", "order": "random"}):
+            with self.assertRaises(RequestError):
+                CutRequest.parse(bad, self.cases, {"S"})
+        opts = CutRequest.parse({"case": "pj", "song": "S", "videos": ["002", "001"], "order": "place", "ask": "多用大景"},
+                                self.cases, {"S"}).options("-x")
+        self.assertTrue(opts.free_order)
+        self.assertEqual(opts.videos, frozenset({"001", "002"}))
+        self.assertEqual(opts.instruction(CASE), "剪一条旅行 vlog；多用大景")
+        self.assertEqual(self.req.steps()[-1], "渲染方案2")
+
+    def test_a_job_runs_every_step_once_and_keeps_its_result(self):
+        job = self.jobs.add(self.req)
+        calls = []
+        self.worker(calls).run(self.jobs.next())
+        got = self.jobs.get(job["id"])
+        self.assertEqual(got["state"], "done")
+        self.assertEqual(calls, ["describe", "music", f"shots-job{job['id']}-1", f"cut-job{job['id']}-1",
+                                 f"shots-job{job['id']}-2", f"cut-job{job['id']}-2"])
+        self.assertEqual(got["result"], {"tags": [f"-job{job['id']}-1", f"-job{job['id']}-2"]})
+        self.assertIsNone(self.jobs.next())
+
+    def test_a_failure_is_kept_with_its_step_and_the_next_job_still_runs(self):
+        first, second = self.jobs.add(self.req), self.jobs.add(self.req)
+        self.assertEqual(self.jobs.ahead(second["id"]), 1)
+        self.worker([], fail="music").run(self.jobs.next())
+        got = self.jobs.get(first["id"])
+        self.assertEqual((got["state"], got["error"], got["detail"]), ("failed", "music 坏了", "第 3 步出错"))
+        self.worker([]).run(self.jobs.next())
+        self.assertEqual(self.jobs.get(second["id"])["state"], "done")
+
+    def test_cancelling_stops_a_queued_job_at_once_and_a_running_one_before_its_next_step(self):
+        from montage_v8.jobs import Jobs
+
+        queued = self.jobs.add(self.req)
+        self.assertEqual(self.jobs.cancel(queued["id"])["state"], "cancelled")
+        running = self.jobs.add(self.req)
+        self.jobs.next()
+        self.jobs.cancel(running["id"])
+        calls = []
+        self.worker(calls).run(self.jobs.get(running["id"]))
+        self.assertEqual(self.jobs.get(running["id"])["state"], "cancelled")
+        self.assertEqual(calls, [])
+        # a job running when the service stopped is queued again when it starts
+        again = self.jobs.add(self.req)
+        self.jobs.next()
+        self.assertEqual(Jobs(self.jobs.path).get(again["id"])["state"], "queued")
+
+
 try:
     import starlette  # noqa: F401  网页服务的依赖只在 ~/.venvs/montage-v8 之类的环境里装
     HAS_WEB = True

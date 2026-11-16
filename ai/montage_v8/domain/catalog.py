@@ -14,13 +14,14 @@ def left_out(excluded: list[dict]) -> dict:
 
 
 def usable(described: list[dict], measures: dict, kept: set, excluded: list[dict], *, quality: bool = True,
-           wide: bool = False, upright=None) -> list[dict]:
-    """能进目录的卡片，按原顺序。measures：quality-<case>.json；kept：人工复核保留的卡片；upright(card)：竖拍。"""
+           wide: bool = False, upright=None, videos=None) -> list[dict]:
+    """能进目录的卡片，按原顺序。measures：quality-<case>.json；kept：人工复核保留的卡片；upright(card)：竖拍；
+    videos：只要这些视频的卡片（None 是全部）。"""
     bad = poor(measures, kept) if quality else {}
     out_spans = left_out(excluded)
     return [c for c in described if c["id"] not in bad
             and not any(a - 0.01 <= c["start"] < b - 0.01 for a, b in out_spans.get(c["video"], []))
-            and not (wide and upright(c))]
+            and not (wide and upright(c)) and (videos is None or c["video"] in videos)]
 
 
 def card_mark(labels: dict, cid: str, beats: int) -> str:
