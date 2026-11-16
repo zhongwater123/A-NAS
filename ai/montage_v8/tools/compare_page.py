@@ -1,18 +1,16 @@
 """A page that plays several cuts of one set side by side: each on its own, or all together from one control
-bar over the song's parts. Written beside the cuts (paths.CUTS), so its videos and frames load from there.
+bar over the song's parts. Written beside the cuts (the profile's cuts folder), so its videos and frames load from there.
 
-  python tools/compare_page.py OUT.html CASE music-<song>.json "TITLE" TAG=LABEL ...
-  e.g. python tools/compare_page.py 品杰对比.html pj music-Forester-Symphony.json "品杰 × Symphony" \\
+  python3 -m montage_v8.tools.compare_page OUT.html CASE music-<song>.json "TITLE" TAG=LABEL ...
+  e.g. python3 -m montage_v8.tools.compare_page 品杰对比.html pj music-Forester-Symphony.json "品杰 × Symphony" \\
            -symphony-place-1=同一地点连续 -symphony-2=按时间顺序
 """
 import html
 import json
 import os
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # montage_v5
-from paths import CUTS, read_json
+from montage_v8.tools import CUTS, read_json
 
 esc = html.escape
 COL = {"安静": "#7aa6c2", "中等": "#c9a227", "高潮": "#d1495b"}

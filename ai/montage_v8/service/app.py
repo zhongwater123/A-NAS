@@ -79,7 +79,8 @@ def create_app(uploads_dir: Path, site: Path | None = None, proxy: str = "") -> 
     async def forward(request: Request):
         if client is None:
             return JSONResponse({"error": "没有配置向量搜索服务（--proxy）"}, status_code=404)
-        r = await client.request(request.method, request.url.path, params=request.query_params, content=await request.body(),
+        # 同名参数要全部转过去（/likeness 有好几个 to）：QueryParams 当字典用只剩最后一个
+        r = await client.request(request.method, request.url.path, params=list(request.query_params.multi_items()), content=await request.body(),
                                  headers={k: v for k, v in request.headers.items() if k.lower() in ("content-type",)})
         return Response(r.content, status_code=r.status_code, media_type=r.headers.get("content-type"))
 

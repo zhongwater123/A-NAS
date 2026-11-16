@@ -2,7 +2,7 @@
 
 > 状态：开发机完成（三组旅行素材、三首歌；成片已人工观看；未装进 `montage.case`，未在 x86 容器里跑）  
 > 更新日期：2026-11-11  
-> 适用范围：[#405](https://github.com/zhongwater123/A-NAS/issues/405) 第五版之后的第六版，实验脚本与用法在 [`ai/eval/montage_v5/`](../../ai/eval/montage_v5/README.md)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)  
+> 适用范围：[#405](https://github.com/zhongwater123/A-NAS/issues/405) 第五版之后的第六版，实验脚本与用法在 [`ai/eval/montage_v5/`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/README.md)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)  
 > 关联：[第七版：挑一版与精修的网页原型](video-montage-v7.md)、[CutClaw 调研](video-editing-cutclaw.md)、[剪辑第四版消融实验](video-montage-ablation-v4.md)、[照片与视频成片规格](../specs/photo-to-video.md)
 
 第五版全程用本机 Qwen3.5-4B 规划。卡片超过 150 张时，4B 只从目录前面挑卡片，新西兰 6 段里有 5 段来自前 46 张。第六版换了两件事：成片按一首歌的段落和小节来剪（CutClaw 的做法），规划改用云端 Claude Opus；卡片描述、画质检查和渲染仍在本机。
@@ -19,8 +19,8 @@
 ## 技术路线
 
 1. **卡片与描述**（沿用第五版）：卡片按画面切；Qwen3.5-4B 看关键帧写节拍（景别、主体和动作）、过程、场景等字段（`proc-<case>.json`），第一步和第二步读同一份描述。
-2. **画质过滤**（[`quality.py`](../../ai/eval/montage_v5/quality.py)）：模糊（FFmpeg blurdetect）、抖动（相位相关，扣掉平滑运镜）、遮挡（底部伸进来的大块虚焦区域）、夜景失焦（暗画面在全分辨率下的锐利亮点太少）。整张卡片按关键帧的中位数判定；被判定的卡片不进目录（`cut.poor`）。方向判断不出的素材按人工复核记入 `rotation.json` 或放回。
-3. **歌曲结构**（[`structure.py`](../../ai/eval/montage_v5/structure.py)、[`music.py`](../../ai/eval/montage_v5/music.py)）：
+2. **画质过滤**（[`quality.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/quality.py)）：模糊（FFmpeg blurdetect）、抖动（相位相关，扣掉平滑运镜）、遮挡（底部伸进来的大块虚焦区域）、夜景失焦（暗画面在全分辨率下的锐利亮点太少）。整张卡片按关键帧的中位数判定；被判定的卡片不进目录（`cut.poor`）。方向判断不出的素材按人工复核记入 `rotation.json` 或放回。
+3. **歌曲结构**（[`structure.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/structure.py)、[`music.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/music.py)）：
    - allin1（Kim & Nam 2023，MIT）给出段落标签、节拍和小节线；
    - 副歌按“副歌识别”的规则修正；
    - 选段：包含第一段副歌的若干整段，总长最接近目标时长；
@@ -31,7 +31,7 @@
    - 音乐段落的交界就是换场景的地方。
 5. **两种顺序**（`CUT_ORDER`）：默认按拍摄时间先后；`CUT_ORDER=free` 删掉三处时间顺序的要求，加上“同一地点的画面连续排列：切到别的地点后，不再切回之前用过的地点”（带用户给的雪山例子）。两种各剪一条给用户选。
 6. **第二步挑节拍**（Claude Opus，`CUT_STEP2=claude`）：每个画面按镜头槽数排出要用的节拍。
-7. **填槽**（`cut_to_music`）：每个节拍从关键帧取一个槽的长度；避开有人从画面前走过的时段（[`held.py`](../../ai/eval/montage_v5/held.py)）。卡片不够长时依次用：
+7. **填槽**（`cut_to_music`）：每个节拍从关键帧取一个槽的长度；避开有人从画面前走过的时段（[`held.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/held.py)）。卡片不够长时依次用：
    1. 同一张卡片的其他节拍；
    2. 第一步给这个画面列过的其他卡片；
    3. 拍摄时间前后各 6 张卡片里画面最像的（卡片的平均帧向量，余弦相似度）。
@@ -148,7 +148,7 @@
 
 ## 关联
 
-- 代码：[`cut.py`](../../ai/eval/montage_v5/cut.py)（`CUT_ORDER`、`ORDER_ASKS`、`cut_to_music`）、[`music.py`](../../ai/eval/montage_v5/music.py)（`from_structure`、`BUILD_RISE`）、[`structure.py`](../../ai/eval/montage_v5/structure.py)、[`quality.py`](../../ai/eval/montage_v5/quality.py)、[`held.py`](../../ai/eval/montage_v5/held.py)、[`render.py`](../../ai/montage/render.py)（`not_wide`、`BLURRED`）
-- 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)、[`ai/tests/test_montage_v5.py`](../../ai/tests/test_montage_v5.py)
+- 代码：[`cut.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/cut.py)（`CUT_ORDER`、`ORDER_ASKS`、`cut_to_music`）、[`music.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/music.py)（`from_structure`、`BUILD_RISE`）、[`structure.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/structure.py)、[`quality.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/quality.py)、[`held.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/held.py)、[`render.py`](../../ai/montage/render.py)（`not_wide`、`BLURRED`）
+- 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)、[`ai/tests/test_montage_v5.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/tests/test_montage_v5.py)（2026-11-16 随第六版删除，规则的测试在 [`test_montage_v8.py`](../../ai/tests/test_montage_v8.py)）
 - 2026-11-11 精简：只留第六版的流程（第四、五版的电影用例、本机规划、按秒数剪等分支删除，数据目录里的描述、方向检查脚本和方案 B 的提示词收进本目录）；同一批卡片和规划下，两步提示词、4B 描述请求、卡片和镜头清单与精简前逐字相同
 - 数据：卡片、规划和成片在 `~/A-NAS-datasets/剪辑对比/第四版/剪法24（2026-11-08）/`，不进仓库；对比页 `品杰对比.html`、`新西兰对比.html`、`川西对比.html` 在同一目录。

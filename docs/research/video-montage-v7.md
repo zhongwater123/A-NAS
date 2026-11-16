@@ -2,7 +2,7 @@
 
 > 状态：开发机原型完成，剪辑实验到此收尾（成片沿用第六版；挑版、换镜头、重洗、删除是真实交互，处理进度与“重剪”是模拟的；未接进产品）  
 > 更新日期：2026-11-13  
-> 适用范围：[剪辑第六版](video-montage-v6.md)之后的第七版，代码在 [`ai/eval/montage_v5/prototype/`](../../ai/eval/montage_v5/prototype/)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)、[#341](https://github.com/zhongwater123/A-NAS/issues/341)  
+> 适用范围：[剪辑第六版](video-montage-v6.md)之后的第七版，代码在 [`ai/eval/montage_v5/prototype/`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/prototype/)；跟进 issue 见 [#453](https://github.com/zhongwater123/A-NAS/issues/453)、[#341](https://github.com/zhongwater123/A-NAS/issues/341)  
 > 关联：[照片与视频成片规格](../specs/photo-to-video.md)、[描述开销对比（#479）](https://github.com/zhongwater123/A-NAS/issues/479)
 
 第六版能剪出成片，但用户怎么用还是空白：一次给几版、怎么挑、哪里不满意怎么改。第七版不再改剪辑算法，在第六版的真实成片和记录上做一个网页，走一遍“上传素材 → 三版里挑一版 → 直接确认，或按音乐槽换镜头后完成”，并参考同类产品补上等待和修改的体验。
@@ -32,18 +32,18 @@
 
 ## 怎么做的
 
-- **数据**（[`build.py`](../../ai/eval/montage_v5/prototype/build.py)）：从第六版的卡片描述、规划和剪辑记录生成 `data.js`：每个槽记下规划选的卡片、节拍和关键帧，全部 116 张描述过的卡片连同节拍都放进去，供换镜头时挑。每版的一句剪辑思路（`PITCH`）是手写的，代替规划器以后要多给的一个字段。曲库是做过结构分析的歌（`music-*.json`，现在 4 首）。上传页的拍摄时间取 DJI 文件名、iPhone 的 QuickTime 标签，其余取 UTC 创建时间加 13 小时（新西兰夏令时）。
-- **搜索**（[`search.py`](../../ai/eval/montage_v5/prototype/search.py)）：用 EmbeddingGemma 2 编码文字，和每个节拍覆盖的 2 秒窗口画面向量比，节拍取最像的窗口的分数。向量来自 A-NAS 视频索引，`build.py` 按节拍分组写进 `beats.npz`；启动时核对模型版本，和建索引时不一致就退出。分数在 0.65–0.77 之间，只用来排序，不设门槛。`/likeness` 用节拍窗口向量的均值算两个节拍的相似度，删除镜头时用。
+- **数据**（[`build.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/prototype/build.py)）：从第六版的卡片描述、规划和剪辑记录生成 `data.js`：每个槽记下规划选的卡片、节拍和关键帧，全部 116 张描述过的卡片连同节拍都放进去，供换镜头时挑。每版的一句剪辑思路（`PITCH`）是手写的，代替规划器以后要多给的一个字段。曲库是做过结构分析的歌（`music-*.json`，现在 4 首）。上传页的拍摄时间取 DJI 文件名、iPhone 的 QuickTime 标签，其余取 UTC 创建时间加 13 小时（新西兰夏令时）。
+- **搜索**（[`search.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/prototype/search.py)）：用 EmbeddingGemma 2 编码文字，和每个节拍覆盖的 2 秒窗口画面向量比，节拍取最像的窗口的分数。向量来自 A-NAS 视频索引，`build.py` 按节拍分组写进 `beats.npz`；启动时核对模型版本，和建索引时不一致就退出。分数在 0.65–0.77 之间，只用来排序，不设门槛。`/likeness` 用节拍窗口向量的均值算两个节拍的相似度，删除镜头时用。
 - **重洗的规则**：同一个节拍只用一次，不和前一镜同卡片，卡片要够长，横拍的槽不换成竖拍。锁住的镜头拖不动，其他镜头拖动时绕开它（用 Sortable 的 `draggable` 排除；它的 `filter` 会让同一列的其他镜头也拖不动）。
 - **页面**（[`index.html`](../../ai/montage_v8/web/index.html)）：单文件，不用构建。拖动用 [SortableJS](https://github.com/SortableJS/Sortable) 1.15.6（MIT，[`vendor/`](../../ai/montage_v8/web/vendor/LICENSE)，与上游逐字节相同）。换页用 View Transitions 淡入，新页面视野内的图片解码好或过 0.25 秒再显示，滚回顶部放在新页面画好之后（原来先滚旧页面再换内容，看起来闪两下）。进度胶囊只建一次、之后只改文字和进度条：每次重建会让转圈动画从头开始而卡顿。上传网格的滚动放在外层 `.vscroll`：滚动条直接加在 grid 上时，浏览器会把行压扁、缩略图叠在一起。只有 HTTPS 或 localhost 下浏览器才给系统通知，局域网 http 地址只有页面内提醒。
 - **存在哪**：换镜头和锁定存在浏览器本地（`proto:locked:<版本>` 等），换浏览器就没有；确认时才写进后台记录。
 
 ## 运行
 
-代码不带数据。站点文件夹在仓库外（`ANAS_MONTAGE_PROTO`，默认 `~/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）/`），`build.py` 往里写 `data.js` 和 `beats.npz`，并建好指向本目录页面、关键帧、成片、歌曲和原始视频的软链接；其余数据位置沿用[第六版的 `paths.py`](../../ai/eval/montage_v5/README.md#数据目录)。数据改了才需要重新生成：
+代码不带数据。站点文件夹在仓库外（`ANAS_MONTAGE_PROTO`，默认 `~/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）/`），`build.py` 往里写 `data.js` 和 `beats.npz`，并建好指向本目录页面、关键帧、成片、歌曲和原始视频的软链接；其余数据位置沿用[第六版的 `paths.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/README.md#数据目录)。数据改了才需要重新生成：
 
 ```bash
-cd ai/eval/montage_v5/prototype && python3 build.py
+cd ai && python3 -m montage_v8.tools.site
 ```
 
 向量搜索与后台记录（anas 虚拟机，端口 8766 只对本机开放；MediaPipe 只装在 `anas-ai-dev:trixie` 镜像里）：
@@ -54,7 +54,7 @@ docker --context colima-anas run -d --name proto-search -p 127.0.0.1:8766:8766 \
   -v "$R/ai:/src/ai:ro" -v "$R/deploy/models:/manifest:ro" -v "$P:/proto:ro" -v "$P/log:/log" \
   -v "$HOME/A-NAS-models/embeddinggemma-2-740m:/models:ro" -v "$HOME/A-NAS-datasets/cache/xnnpack:/xnnpack" \
   -w /src/ai -e PYTHONPATH=/src/ai -e PYTHONDONTWRITEBYTECODE=1 anas-ai-dev:trixie \
-  /opt/anas-ai/bin/python /src/ai/eval/montage_v5/prototype/search.py --model /models/embeddinggemma-2-740m.litertlm \
+  /opt/anas-ai/bin/python /src/ai/montage_v8/service/search.py --model /models/embeddinggemma-2-740m.litertlm \
   --manifest /manifest/embeddinggemma-2-740m.json --beats /proto/beats.npz --weight-cache /xnnpack --records /log/confirm.jsonl
 ```
 
@@ -65,6 +65,8 @@ docker --context colima-anas run -d --name proto-search -p 127.0.0.1:8766:8766 \
 ```bash
 cd "$HOME/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）" && npx --yes http-server@14.1.1 -p 8765 -a 0.0.0.0 -c-1 --proxy http://127.0.0.1:8766
 ```
+
+2026-11-16 起也可以用第八版的网页服务代替 http-server，它同样转发搜索，还能接收上传（见[第八版 README](../../ai/montage_v8/README.md#网页与上传)）。
 
 本机打开 <http://127.0.0.1:8765>；同一局域网的人打开 `http://<这台 Mac 的局域网 IP>:8765`（`ipconfig getifaddr en0` 查 IP，换网络会变）。这台 Mac 要开着、两个服务要在跑；开放期间同一网络里的任何人都能看到素材。
 
@@ -90,6 +92,6 @@ cd ~/A-NAS-datasets/videos/dji-newzealand-2026-10 && ffmpeg -ss 1.8 -t 4.5 -i DJ
 
 ## 关联
 
-- 代码：[`build.py`](../../ai/eval/montage_v5/prototype/build.py)（`PITCH`、`beat_vectors`、`folders`）、[`search.py`](../../ai/eval/montage_v5/prototype/search.py)（`/search`、`/likeness`、`/record`）、[`index.html`](../../ai/montage_v8/web/index.html)；数据位置 [`paths.py`](../../ai/eval/montage_v5/paths.py)
+- 代码：[`build.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/prototype/build.py)（`PITCH`、`beat_vectors`、`folders`）、[`search.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/prototype/search.py)（`/search`、`/likeness`、`/record`）、[`index.html`](../../ai/montage_v8/web/index.html)；数据位置 [`paths.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/paths.py)
 - 成片与规划：[剪辑第六版](video-montage-v6.md)；描述的 token 开销与方案 B 的对比见 [#479](https://github.com/zhongwater123/A-NAS/issues/479)
 - 数据：站点文件夹 `~/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）/`（`data.js`、`beats.npz`、`hero.*`、后台记录 `log/confirm.jsonl`），不进仓库

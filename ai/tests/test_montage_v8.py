@@ -1,6 +1,6 @@
 """第八版剪辑（montage_v8）：分层的约束、领域规则和配置。不需要视频、模型或歌曲，numpy 之外只用标准库。
 
-和第六版逐个镜头比对要用开发机上的素材，见 python3 -m montage_v8 golden。
+2026-11-16 和第六版逐个镜头比对过（ai/montage_v8/README.md），之后第六版已删除。
 """
 
 import ast
@@ -291,6 +291,26 @@ class UploadServiceTest(unittest.TestCase):
                            headers={"Content-Length": "20"})
             self.assertEqual(r.status_code, 400)
             self.assertEqual(sorted(p.name for p in (Path(d) / "湖边").iterdir()), ["a.mp4"])
+
+    def test_search_requests_go_to_the_search_service_with_every_repeated_parameter(self):
+        import tempfile
+        from unittest import mock
+
+        import httpx
+        from starlette.testclient import TestClient
+
+        from montage_v8.service.app import create_app
+
+        seen = {}
+
+        async def fake(self, method, url, **kw):
+            seen.update(method=method, url=url, params=kw["params"])
+            return httpx.Response(200, json={"scores": {}})
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(httpx.AsyncClient, "request", fake):
+            client = TestClient(create_app(Path(d), proxy="http://search"))
+            self.assertEqual(client.get("/likeness?of=a/1&to=b/1&to=c/1").status_code, 200)
+        self.assertEqual(seen["params"], [("of", "a/1"), ("to", "b/1"), ("to", "c/1")])
 
 
 if __name__ == "__main__":

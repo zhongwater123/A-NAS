@@ -12,23 +12,21 @@ by hand into the same folder (docs/research/video-montage-v7.md).
 beats.npz is for search.py: the EmbeddingGemma 2 vectors of the video index's 2 s windows that each
 beat covers (flat, single-colour windows left out), so a text query can be scored against every beat.
 
-  python3 build.py
+  python3 -m montage_v8.tools.site
 """
 import json
 import os
 import re
 import subprocess
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-HERE = Path(__file__).resolve().parent
-PAGE = HERE.parents[2] / "montage_v8" / "web"   # 2026-11-16: the page moved into 第八版 with its upload service
-sys.path.insert(0, str(HERE.parent))  # montage_v5
-from paths import CARDS as CARD_DIR, CUTS, INDEXES, ROOT, VIDEOS  # noqa: E402
+from montage_v8.tools import CARDS as CARD_DIR, CUTS, INDEXES, ROOT, VIDEOS
+
+PAGE = Path(__file__).resolve().parents[1] / "web"     # the page and its vendor code
 
 SITE = Path(os.environ.get("ANAS_MONTAGE_PROTO", ROOT / "剪辑对比" / "剪辑原型（2026-11-11）"))
 CARDS = CARD_DIR / "cards-pj.json"

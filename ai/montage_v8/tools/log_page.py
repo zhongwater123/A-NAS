@@ -1,10 +1,10 @@
 """A cut log page: for each cut of a set, the film with the song's parts under it, step one's outline, every shot
 in film order (its key frame, the beat, the seconds taken from the source, what step one asked for and what step
-two meant it to show) and both steps' whole input. Written beside the cuts (paths.CUTS), so its videos and key
-frames load from there; the cards are read from paths.CARDS (ANAS_MONTAGE_CARDS) for the cards' spans.
+two meant it to show) and both steps' whole input. Written beside the cuts (the profile's cuts folder), so its videos and key
+frames load from there; the cards are read from the profile's cards folder (ANAS_MONTAGE_CARDS) for their spans.
 
-  python tools/log_page.py OUT.html CASE "TITLE" TAG=NAME ...
-  e.g. python tools/log_page.py 精简描述成片.html pj "精简描述：品杰 × Symphony" -symphony-slim-1=第 1 次
+  python3 -m montage_v8.tools.log_page OUT.html CASE "TITLE" TAG=NAME ...
+  e.g. python3 -m montage_v8.tools.log_page 精简描述成片.html pj "精简描述：品杰 × Symphony" -symphony-slim-1=第 1 次
 """
 import html
 import json
@@ -12,8 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # montage_v5
-from paths import CARDS, CUTS, read_json
+from montage_v8.tools import CARDS, CUTS, read_json
 
 esc = html.escape
 COL = {"安静": "#7aa6c2", "中等": "#c9a227", "高潮": "#d1495b"}

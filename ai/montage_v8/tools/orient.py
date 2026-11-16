@@ -6,7 +6,7 @@
 6-SURE 次：标记是对的；介于两者（4B 看不出，多是只有海和一条海平线的画面）：整段不用，记进
 excluded.json（2026-11-10 用户定：手机标记翻转、模型又判断不出的，是素材本身的问题，直接剔掉）。
 
-  python tools/orient.py http://127.0.0.1:8094 newzealand chuanxi pinjie     (只打印，--write 才写 rotation.json 和 excluded.json；
+  python3 -m montage_v8.tools.orient http://127.0.0.1:8094 newzealand chuanxi pinjie     (只打印，--write 才写 rotation.json 和 excluded.json；
   判断不出的，人工看截图后改 rotation.json 或从 excluded.json 删掉，见 README)
 """
 import base64
@@ -19,8 +19,7 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # montage_v5
-from paths import CARDS as HERE, INDEXES, VIDEOS
+from montage_v8.tools import CARDS as HERE, INDEXES, VIDEOS
 
 FRAMES = 3
 SURE = 5

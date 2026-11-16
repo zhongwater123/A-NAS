@@ -2,7 +2,7 @@
 
 > 状态：开发机完成一轮（品杰 × Symphony，只用横拍；加精彩度、对照各 2 次；成片待人工观看）；4B 打精彩度与人标的一致程度已量  
 > 更新日期：2026-11-16  
-> 适用范围：[剪辑第六版](video-montage-v6.md)的两步规划；标注页与脚本在 [`ai/eval/montage_v5/highlight/`](../../ai/eval/montage_v5/highlight/)，用法见[实验目录说明](../../ai/eval/montage_v5/README.md#精彩度标注)  
+> 适用范围：[剪辑第六版](video-montage-v6.md)的两步规划；标注页与脚本在 [`ai/eval/montage_v5/highlight/`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/)，用法见[实验目录说明](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/README.md#精彩度标注)  
 > 关联：[#453](https://github.com/zhongwater123/A-NAS/issues/453)、[剪辑第七版](video-montage-v7.md)
 
 第六版与人工剪辑对比，差距在“选什么”：规划只知道卡片里有什么，不知道哪些画面好看。4B 自己打的卡片精彩度（1–5）和亮点节拍以前试过，都从规划里去掉了：精彩度让交代地点、衔接场景的卡片排名靠后、被整批漏掉，亮点标记让车里的人脸排到了画面要的后视镜前面（#416）。这一轮换成人标：如果标得准的精彩度都帮不上规划，就不必再让模型学着打。
@@ -69,7 +69,7 @@
 
 想知道能不能不靠人标、直接复用模型的分数。比了三种（都在品杰的 432 个节拍上，统计在 anas 虚拟机里用 SciPy 与 scikit-learn 算）：
 
-1. **4B 只打四档**（[`rate_4b.py`](../../ai/eval/montage_v5/highlight/rate_4b.py)）：每个节拍只发关键帧和用户的四档定义，只回答一个数字（3 精彩、2 可用、1 平淡、0 有问题），不写描述；分数取这个数字的概率加权平均。
+1. **4B 只打四档**（[`rate_4b.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/rate_4b.py)）：每个节拍只发关键帧和用户的四档定义，只回答一个数字（3 精彩、2 可用、1 平淡、0 有问题），不写描述；分数取这个数字的概率加权平均。
 2. **第六版描述里的卡片精彩度**（4B 写描述时顺带打的 1–5 分，整张卡片一个分）：按用户给的对应关系，1 分算有问题、2–3 分算平淡、4 分算可用、5 分算精彩；比较时卡片的每个节拍都用这个档，或和卡片里人标最好的节拍比。
 3. **第六版描述里的亮点节拍**（4B 给每张卡片挑的 1–2 个节拍，卡片页上的星号）。
 
@@ -164,5 +164,5 @@ DOVER（方案 B 的美学评分）没有比：本机没有权重和代码，要
 
 ## 关联
 
-- 代码：[`cut.py`](../../ai/eval/montage_v5/cut.py)（`CUT_LABELS`、`CUT_WIDE`、`card_mark`、`CARD_MARKS`、`PICK_MARKS`、`SHOTS_MARKS`）、[`highlight/report.py`](../../ai/eval/montage_v5/highlight/report.py)（统计与对比页）、[`highlight/rate_4b.py`](../../ai/eval/montage_v5/highlight/rate_4b.py)（4B 只打四档）、[`highlight/agree.py`](../../ai/eval/montage_v5/highlight/agree.py)（一致程度）、[`highlight/index.html`](../../ai/eval/montage_v5/highlight/index.html)（标注页）
+- 代码：[`cut.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/cut.py)（`CUT_LABELS`、`CUT_WIDE`、`card_mark`、`CARD_MARKS`、`PICK_MARKS`、`SHOTS_MARKS`）、[`highlight/report.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/report.py)（统计与对比页）、[`highlight/rate_4b.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/rate_4b.py)（4B 只打四档）、[`highlight/agree.py`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/agree.py)（一致程度）、[`highlight/index.html`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/highlight/index.html)（标注页）
 - 数据：标注 `剪辑对比/精彩度标注（2026-11-13）/labels-pj.json`，规划时用的副本在 `剪辑对比/第四版/剪法24（2026-11-08）/labels-pj.json`；4B 的四档在 `精彩度标注（2026-11-13）/4b-pj.jsonl`，一致程度在同目录的 `agree-pj.json`；成片、规划与日志（`wide-1.log`、`label-1.log` 等）在同一目录，不进仓库

@@ -6,7 +6,6 @@
   python3 -m montage_v8 [--profile ...]     cut      CASE --music 歌 [--tag -1] [--free] [--wide] [--labels 文件] [--no-render]
   python3 -m montage_v8 [--profile ...]     music    歌曲文件                         分析歌曲（开发机）
   python3 -m montage_v8 [--profile ...]     check                                     看这个平台的 FFmpeg、模型服务能不能用
-  python3 -m montage_v8 golden CASE --tag T --music 歌                            和第六版逐个镜头对比填槽结果
   python3 -m montage_v8 [--profile ...]     serve [--site 网站目录] [--host 0.0.0.0] [--port 8765] [--proxy 搜索服务]
                                                   网页服务：上传的视频存到原片目录下的 uploads/
 
@@ -33,7 +32,7 @@ def options(args) -> CutOptions:
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="montage_v8", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", default=os.environ.get("MONTAGE_PROFILE", "mac-dev"))
-    ap.add_argument("command", choices=["cards", "quality", "describe", "cut", "music", "check", "golden", "serve"])
+    ap.add_argument("command", choices=["cards", "quality", "describe", "cut", "music", "check", "serve"])
     ap.add_argument("target", nargs="?", help="素材组（ne、ch、pj）或歌曲文件")
     ap.add_argument("--music", default="")
     ap.add_argument("--tag", default="")
@@ -80,10 +79,6 @@ def main(argv=None):
         if not args.music:
             ap.error("cut 要 --music")
         montage.cut(case, options(args), args.music, render=not args.no_render)
-    elif args.command == "golden":
-        from .golden import compare
-
-        sys.exit(0 if compare(montage, case, args.tag, args.music) else 1)
 
 
 if __name__ == "__main__":

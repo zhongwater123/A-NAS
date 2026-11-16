@@ -20,7 +20,7 @@
 ## 现状
 
 代码分在两处：
-- `ai/eval/montage_v5/`：第五到第七版的实验流水线，约 1400 行；
+- `ai/eval/montage_v5/`：第五到第七版的实验流水线，约 1400 行（2026-11-16 已删除，第八版取代）；
 - `ai/montage/`：早期给助手用的库，约 2500 行；第五版以后只复用了其中的 `render`。
 
 流水线按步骤拆文件，但模型、硬件和业务规则混在一起：
@@ -135,9 +135,10 @@ RK3588 是 aarch64，有 8 个 CPU 核（4×A76 + 4×A55）、NPU、Mali GPU，�
 
 2026-11-16 第八版：
 - **已完成**：步骤 1–5 一次做完，放在新包 `ai/montage_v8/` 里，没有改第六版的代码：
-  - 黄金测试是 `python3 -m montage_v8 golden`；
+  - 黄金测试是 `python3 -m montage_v8 golden`（2026-11-16 比对完后随第六版一起删除，结果记在第八版 README）；
   - arm64 检查是在 Colima 的 aarch64 Linux 容器里跑 `tests/test_montage_v8.py`；
   - 领域层的引用限制由 Ruff TID251 守住。
+- **2026-11-16 晚**：步骤 7 提前做了一部分。第七版的网页数据、向量搜索、剪辑日志页、对比页、旋转检查和精彩度工具迁进第八版（`montage_v8/tools/`、`service/search.py`），输出和迁移前逐字节相同；随后删除第六版 `ai/eval/montage_v5`。
 - **待做**：步骤 6 等板子到了实测，步骤见 [`ai/montage_v8/README.md`](../../ai/montage_v8/README.md#板子到了之后rk3588)；步骤 7（合并两套代码）以后再做。
 
 1. **固定基线**：用现有的规划结果（`pick-*.json`、`shots-*.json`）和描述做“黄金测试”：重跑填槽，镜头表和现在完全一致。渲染比对时长和镜头切点，不比对像素。
@@ -174,7 +175,7 @@ RK3588 是 aarch64，有 8 个 CPU 核（4×A76 + 4×A55）、NPU、Mali GPU，�
 
 ## 关联
 
-- 当前流水线：[`ai/eval/montage_v5/README.md`](../../ai/eval/montage_v5/README.md)
+- 当前流水线：[`ai/eval/montage_v5/README.md`](https://github.com/zhongwater123/A-NAS/blob/e2285a30/ai/eval/montage_v5/README.md)
 - 第六版的结论与已知问题：[video-montage-v6.md](../research/video-montage-v6.md)
 - 精彩度试验与描述字段精简：[video-montage-highlight.md](../research/video-montage-highlight.md)
 - 早期面向助手的剪辑规格：[photo-to-video.md](photo-to-video.md)

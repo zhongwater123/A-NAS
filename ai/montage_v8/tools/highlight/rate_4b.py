@@ -5,22 +5,19 @@ is the digit's probability-weighted mean (G-Eval, the way the 1-5 highlight scor
 
 Writes one line a beat to OUT (JSONL); beats already there are skipped, so a stopped run goes on.
 
-  python3 rate_4b.py http://127.0.0.1:8094 OUT.jsonl [--workers 2]
+  python3 -m montage_v8.tools.highlight.rate_4b http://127.0.0.1:8094 OUT.jsonl [--workers 2]
 """
 import argparse
 import json
 import math
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))  # montage_v5
-import cut  # noqa: E402
-from tag_beats import image_part  # noqa: E402
+from montage_v8.adapters.vision import image_part
+from montage_v8.tools import usable_cards
 
 CASE = "pj"
 DIGITS = {"3": "3", "2": "2", "1": "1", "0": "x"}     # the answer's digit -> the user's mark
@@ -36,7 +33,7 @@ TOP = 10
 
 
 def beats():
-    for card in cut.usable_cards(CASE):
+    for card in usable_cards(CASE):
         for n, beat in enumerate(card["answer"]["beats"], 1):
             yield f"{card['id']}/{n}", card["frames"][beat["frames"][0] - 1]
 

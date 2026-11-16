@@ -1,6 +1,6 @@
 """Build the beat labelling page's site: every beat of 品杰's usable cards, for the user to mark how striking it is.
 
-The beats are those step two chooses from (cut.usable_cards, ids "<card>/<beat>" as in the shots files), in
+The beats are those step two chooses from (the catalog, montage_v8.tools.usable_cards, ids "<card>/<beat>" as in the shots files), in
 shooting order, each with its key frame (upright as ffmpeg wrote it), its range in the source video and the
 4B description. The 4B highlight score and its highlight marks are left out, so they do not lead the marks.
 
@@ -8,19 +8,17 @@ The site is a folder outside the repository (SITE, ANAS_MONTAGE_HIGHLIGHT): data
 links there point at this folder's page, the key frames and the source videos. The marks are kept in the
 same folder (labels-pj.json) by server.py.
 
-  python3 build.py
+  python3 -m montage_v8.tools.highlight.build
 """
 import json
 import os
-import sys
 from pathlib import Path
 
 from PIL import Image
 
+from montage_v8.tools import CARDS, ROOT, VIDEOS, rotation, usable_cards
+
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))  # montage_v5
-import cut  # noqa: E402
-from paths import CARDS, ROOT, VIDEOS  # noqa: E402
 
 SITE = Path(os.environ.get("ANAS_MONTAGE_HIGHLIGHT", ROOT / "剪辑对比" / "精彩度标注（2026-11-13）"))
 CASE = "pj"
@@ -38,8 +36,8 @@ def link(name, target):
 def cards():
     """In shooting order (the dolphins' card, put back on review, comes last in the cards file)."""
     out = []
-    flipped = cut.ROTATION.get(cut.RAW[CASE], set())
-    for card in sorted(cut.usable_cards(CASE), key=lambda c: (c["video"], c["start"])):
+    flipped = rotation(CASE)
+    for card in sorted(usable_cards(CASE), key=lambda c: (c["video"], c["start"])):
         answer = card["answer"]
         width, height = Image.open(card["frames"][0]).size
         source = next(SOURCES.glob(f"{card['video']}.*"))           # most are .mov, a few .mp4

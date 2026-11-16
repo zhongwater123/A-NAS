@@ -1,8 +1,8 @@
 """How the beats the user marked are used in each cut, and a page to watch the cuts with their shots coloured
-by those marks. Written beside the cuts (paths.CUTS), so its videos and key frames load from there.
+by those marks. Written beside the cuts (the profile's cuts folder), so its videos and key frames load from there.
 
-  python3 report.py LABELS OUT.html "TITLE" GROUP:TAG=NAME ...
-  e.g. python3 report.py labels-pj.json 精彩度对比.html "精彩度试验：品杰 × Symphony" \\
+  python3 -m montage_v8.tools.highlight.report LABELS OUT.html "TITLE" GROUP:TAG=NAME ...
+  e.g. python3 -m montage_v8.tools.highlight.report labels-pj.json 精彩度对比.html "精彩度试验：品杰 × Symphony" \\
            基线:-symphony-place-3=place-3 基线:-symphony-place-4=place-4 加精彩度:-symphony-label-1=label-1
 
 Usage counts a beat as used when a shot of the cut is taken at its key frame (the clips' "beat"). A shot is
@@ -14,10 +14,8 @@ import json
 import os
 import sys
 from collections import Counter
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # montage_v5
-from paths import CUTS, read_json
+from montage_v8.tools import CUTS, read_json
 
 esc = html.escape
 MARKS = ("3", "2", "1", "x")
