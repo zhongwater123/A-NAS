@@ -1,6 +1,7 @@
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   useEffect,
   useEffectEvent,
@@ -37,7 +38,6 @@ import {
   overall,
   parseScore,
   Stopwatch,
-  sharpness,
   stageAction,
 } from "./model";
 import { type Mark, Ruler } from "./Ruler";
@@ -71,18 +71,19 @@ const breakAfter = 40 * 60_000;
 const pauseResets = 5 * 60_000;
 // The ruler shows this many of the rater's latest scores.
 const marksShown = 12;
+// The arrow keys start here on an item that has no score yet.
 const startScore = 250;
-// A value picked with the pointer moves on to the next 打分项 after this
-// long, time to see where it landed; pressing again or a key keeps it.
+// A value picked with the pointer moves on after this long, time to see
+// where it landed; pressing again or a key keeps it.
 const advanceAfter = 350;
 
-// Scores of one photo in hundredths, by 打分项.
-type Values = Record<string, number>;
+// Scores of one photo in hundredths, by 打分项; a new photo has none.
+type Values = Partial<Record<string, number>>;
 
 // One of the rater's latest photos, with its score on every 打分项.
 interface Scored {
   token: string;
-  scores: Values;
+  scores: Record<string, number>;
   width: number;
   height: number;
 }
@@ -117,7 +118,7 @@ function sizeOf(element: Element | null) {
 // looked at, and the sizes it was seen at.
 function answerOf(
   kind: ScoringRatingInput["kind"],
-  values: Values | undefined,
+  values: Record<string, number> | undefined,
   watch: Stopwatch,
   stage: Element | null,
   image: Element | null,
@@ -154,6 +155,7 @@ const compareDelay = 110;
 const compareLinger = 160;
 const keysHint = "← → 0.1　⇧ 0.01　0–5 整数分";
 const keysHintItems = "← → 0.1　⇧ 0.01　↑ ↓ 换项";
+const emptyHint = "在数轴上点选，或按 0–5";
 
 // fitIn is the size a photo of width by height is shown at in a box: whole,
 // as large as fits, never enlarged past its own size. With the box not
@@ -177,14 +179,28 @@ function useHidden() {
   return hidden;
 }
 
+// useFullscreen tells whether the window fills the screen, through the
+// browser's full screen like the media center's player.
+function useFullscreen() {
+  const [full, setFull] = useState(() => Boolean(document.fullscreenElement));
+  useEffect(() => {
+    const update = () => setFull(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+  return full;
+}
+
 // Stage shows a rater one photo at a time, whole and never cropped, on a
 // neutral wall with nothing else of it: no name, no file details, no one
 // else's scores. Below it the ruler sets a score from 0 to 5 in hundredths
 // against the rater's own latest scores, any of which can be set beside the
-// photo. A batch with several 打分项 has them scored one after another on the
-// same ruler: Enter, or releasing a pick of the pointer, moves on, and only
-// the last one answers. The photo then glides down to its place on the
-// ruler, and the next one, decoded beforehand, takes its place.
+// photo. A new photo starts with no score. A batch with several 打分项 has
+// them scored one after another on the same ruler: Enter, or releasing a pick
+// of the pointer, moves on, and after the last item the photo is answered.
+// The photo then glides down to its place on the ruler, and the next one,
+// decoded beforehand, takes its place. Arrows at the sides go back to the
+// last photo, and on once every item has a score.
 export function Stage({
   batch,
   onBack,
@@ -198,10 +214,9 @@ export function Stage({
   const dimensions = batch.dimensions;
   const several = dimensions.length > 1;
   const last = dimensions.length - 1;
-  const zoomable = dimensions.some((dimension) => dimension.id === sharpness);
   const [claims, setClaims] = useState<ScoringClaim[]>([]);
   const [revising, setRevising] = useState<ScoringClaim>();
-  const [previous, setPrevious] = useState<{ claim: ScoringClaim; values?: Values }>();
+  const [previous, setPrevious] = useState<{ claim: ScoringClaim; values?: Record<string, number> }>();
   const [loading, setLoading] = useState(true);
   const [finished, setFinished] = useState(false);
   const [failure, setFailure] = useState("");
@@ -209,9 +224,7 @@ export function Stage({
   const [visible, setVisible] = useState<string>();
   const [guide, setGuide] = useState(false);
   const [rest, setRest] = useState(false);
-  const [values, setValues] = useState<Values>(() =>
-    Object.fromEntries(dimensions.map((dimension) => [dimension.id, startScore])),
-  );
+  const [values, setValues] = useState<Values>({});
   const [item, setItem] = useState(0);
   const [reached, setReached] = useState(0);
   const [armed, setArmed] = useState(false);
@@ -219,10 +232,11 @@ export function Stage({
   const [marks, setMarks] = useState<Scored[]>([]);
   const [comparing, setComparing] = useState<Scored>();
   const [arriving, setArriving] = useState<string>();
-  const [zoom, setZoom] = useState<{ token: string; view?: FullView; failure?: string }>();
+  const [zoom, setZoom] = useState<{ token: string; by: "key" | "click"; view?: FullView; failure?: string }>();
   const [pointerAt, setPointerAt] = useState({ x: 0.5, y: 0.5 });
   const [delivery, setDelivery] = useState<OutboxState>(outbox.current());
   const hidden = useHidden();
+  const fullscreen = useFullscreen();
   const root = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const ruler = useRef<HTMLDivElement>(null);
@@ -237,13 +251,16 @@ export function Stage({
   const scoringSince = useRef(0);
   const lastAnswerAt = useRef(0);
   const reading = useRef(0);
-  // Where the last score ended: the next photo starts there on every 打分项.
-  const lastValues = useRef<Values>(values);
+  // What was set on the photo being scored while the rater went back to the
+  // last one; it is there again on the way back.
+  const stash = useRef<{ values: Values; item: number; reached: number }>(undefined);
   const fulls = useRef(new Map<string, Promise<FullView>>());
   const pointer = useRef<{ x: number; y: number }>(undefined);
 
   const dimension = dimensions[item];
-  const value = values[dimension.id] ?? startScore;
+  const value = values[dimension.id];
+  const complete = (scores: Values): scores is Record<string, number> =>
+    dimensions.every((candidate) => scores[candidate.id] !== undefined);
 
   useEffect(() => outbox.subscribe(setDelivery), [outbox]);
   useEffect(() => {
@@ -297,7 +314,7 @@ export function Stage({
         live &&
         setMarks(
           items.map((recent) => {
-            const scores: Values = { [overall]: Math.round(recent.score * 100) };
+            const scores: Record<string, number> = { [overall]: Math.round(recent.score * 100) };
             for (const [id, score] of Object.entries(recent.scores)) {
               if (score !== undefined) scores[id] = Math.round(score * 100);
             }
@@ -439,6 +456,13 @@ export function Stage({
   }, [delivery.waiting]);
 
   const ready = Boolean(shown) && visible === shown?.token && !guide && !rest;
+  const typedValue = typed === undefined ? value : parseScore(typed);
+  const typedValid = typed === undefined || typedValue !== undefined;
+  // What the photo has with what is typed now.
+  const withTyped: Values = typedValue === undefined ? values : { ...values, [dimension.id]: typedValue };
+  // Back to the last photo also from a finished batch, where none is shown.
+  const canPrevious = previous !== undefined && !revising && !guide && !rest;
+  const canNext = ready && typedValid && complete(withTyped);
 
   const setValue = (hundredths: number) => {
     setValues((current) => ({ ...current, [dimension.id]: clampScore(hundredths) }));
@@ -447,79 +471,76 @@ export function Stage({
 
   // go moves to another 打分项 of the photo, one already reached.
   const go = (to: number) => {
-    if (to < 0 || to > reached || to === item) return;
-    if (typed !== undefined && parseScore(typed) === undefined) return;
+    if (to < 0 || to > reached || to === item || !typedValid) return;
     setArmed(false);
     endCompare();
     setTyped(undefined);
+    setValues(withTyped);
     setItem(to);
   };
 
-  // answer confirms the 打分项 being set and moves on to the next; the last
-  // one, a skip or a mark answers the photo.
-  const answer = (kind: ScoringRatingInput["kind"]) => {
+  // answer sends the photo's answer, scores or a skip or a mark, and moves
+  // to the next photo, or back to the one the rater left to change this one.
+  const answer = (kind: ScoringRatingInput["kind"], scores?: Record<string, number>) => {
     if (!shown || !ready) return;
     setArmed(false);
-    let next = values;
-    if (kind === "score") {
-      const current = typed === undefined ? value : parseScore(typed);
-      if (current === undefined) return;
-      next = { ...values, [dimension.id]: current };
-      if (item < last) {
-        setValues(next);
-        setTyped(undefined);
-        endCompare();
-        setItem(item + 1);
-        setReached((furthest) => Math.max(furthest, item + 1));
-        return;
-      }
-    }
-    const { body, now } = answerOf(
-      kind,
-      kind === "score" ? next : undefined,
-      watch.current,
-      root.current,
-      image.current,
-    );
+    const { body, now } = answerOf(kind, scores, watch.current, root.current, image.current);
     outbox.push({ token: shown.token, body });
     answered.current.add(shown.token);
     endCompare();
     setZoom(undefined);
-    if (kind === "score") {
+    if (scores) {
       const from = image.current?.getBoundingClientRect();
       if (from && from.width > 0 && image.current && !reducedMotion()) {
         flight.current = { token: shown.token, from, src: image.current.currentSrc || image.current.src };
         setArriving(shown.token);
       }
-      lastValues.current = next;
     }
-    // The next photo starts on 总分 again, every 打分项 where the last score left it.
-    setValues(lastValues.current);
-    setItem(0);
-    setReached(0);
-    setTyped(undefined);
     setMarks((current) => {
       const others = current.filter((mark) => mark.token !== shown.token);
-      if (kind !== "score") return others;
-      return [...others, { token: shown.token, scores: next, width: shown.width, height: shown.height }].slice(
-        -marksShown,
-      );
+      if (!scores) return others;
+      return [...others, { token: shown.token, scores, width: shown.width, height: shown.height }].slice(-marksShown);
     });
+    setPrevious({ claim: shown, values: scores });
+    setTyped(undefined);
     if (revising) {
       setRevising(undefined);
+      const kept = stash.current;
+      stash.current = undefined;
+      setValues(kept?.values ?? {});
+      setItem(kept?.item ?? 0);
+      setReached(kept?.reached ?? 0);
     } else {
+      setValues({});
+      setItem(0);
+      setReached(0);
       setClaims((queue) => queue.filter((claim) => claim.token !== shown.token));
       setRated((count) => count + 1);
     }
-    setPrevious({ claim: shown, values: kind === "score" ? next : undefined });
     if (lastAnswerAt.current === 0 || now - lastAnswerAt.current > pauseResets) scoringSince.current = now;
     lastAnswerAt.current = now;
     if (now - scoringSince.current >= breakAfter) setRest(true);
     void refill();
   };
 
+  // confirm takes the item being set and moves on to the next; after the
+  // last one the photo is answered.
+  const confirm = () => {
+    if (!shown || !ready || typedValue === undefined) return;
+    setArmed(false);
+    if (item < last) {
+      setValues(withTyped);
+      setTyped(undefined);
+      endCompare();
+      setItem(item + 1);
+      setReached((furthest) => Math.max(furthest, item + 1));
+      return;
+    }
+    if (complete(withTyped)) answer("score", withTyped);
+  };
+
   // A pick of the pointer, once released, moves on by itself after a moment.
-  const advance = useEffectEvent(() => answer("score"));
+  const advance = useEffectEvent(() => confirm());
   useEffect(() => {
     if (!armed) return;
     const timer = window.setTimeout(() => {
@@ -529,53 +550,99 @@ export function Stage({
     return () => window.clearTimeout(timer);
   }, [armed]);
 
-  const undo = () => {
-    if (!previous || revising || guide || rest) return;
+  // revise goes back to the last photo at item at, keeping what was set on
+  // this one; the server lets the rater change only the latest answer.
+  const revise = (at: number) => {
+    if (!previous || !canPrevious) return;
     setArmed(false);
+    endCompare();
+    setZoom(undefined);
+    stash.current = { values: withTyped, item, reached };
     setRevising(previous.claim);
-    if (previous.values) setValues(previous.values);
-    setItem(0);
+    setValues(previous.values ?? {});
+    setItem(previous.values ? at : 0);
     setReached(previous.values ? last : 0);
     setTyped(undefined);
   };
 
   const cancelRevising = () => {
     setRevising(undefined);
-    setValues(lastValues.current);
-    setItem(0);
-    setReached(0);
+    const kept = stash.current;
+    stash.current = undefined;
+    setValues(kept?.values ?? {});
+    setItem(kept?.item ?? 0);
+    setReached(kept?.reached ?? 0);
     setTyped(undefined);
   };
 
-  // startZoom shows the photo at 100% while Z is held, loading it the first time.
-  const startZoom = () => {
-    if (!zoomable || !shown || !ready) return;
+  // 撤销一步 takes back the last step: the item before, or from a photo's
+  // first item the last photo's last item. A new photo's later items lose
+  // what they had; a photo being changed keeps all its scores.
+  const undo = () => {
+    if (guide || rest) return;
+    setArmed(false);
+    setTyped(undefined);
+    if (item > 0) {
+      endCompare();
+      if (!revising) {
+        const kept = { ...values };
+        for (const later of dimensions.slice(item)) delete kept[later.id];
+        setValues(kept);
+        setReached(item - 1);
+      }
+      setItem(item - 1);
+      return;
+    }
+    revise(last);
+  };
+
+  // nextPhoto answers a photo that has every item, as it stands.
+  const nextPhoto = () => {
+    if (canNext && complete(withTyped)) answer("score", withTyped);
+  };
+
+  // startZoom shows the photo at 100%, loading it the first time, while Z
+  // is held or until the next click.
+  const startZoom = (by: "key" | "click", at?: { x: number; y: number }) => {
+    if (!shown || !ready) return;
     const token = shown.token;
     let loading = fulls.current.get(token);
     if (!loading) {
       loading = fetchFull(token);
       fulls.current.set(token, loading);
-      // A failure is tried again on the next press.
+      // A failure is tried again on the next look.
       loading.catch(() => fulls.current.delete(token));
     }
     const box = image.current?.getBoundingClientRect();
-    if (box && pointer.current && box.width > 0 && box.height > 0) {
-      const inside = (from: number, size: number, at: number) => Math.min(1, Math.max(0, (at - from) / size));
-      setPointerAt({
-        x: inside(box.left, box.width, pointer.current.x),
-        y: inside(box.top, box.height, pointer.current.y),
-      });
+    const from = at ?? pointer.current;
+    if (box && from && box.width > 0 && box.height > 0) {
+      const inside = (start: number, size: number, point: number) => Math.min(1, Math.max(0, (point - start) / size));
+      setPointerAt({ x: inside(box.left, box.width, from.x), y: inside(box.top, box.height, from.y) });
     }
-    setZoom({ token });
+    setZoom({ token, by });
     loading.then(
-      (view) => setZoom((current) => (current?.token === token ? { token, view } : current)),
+      (view) => setZoom((current) => (current?.token === token ? { ...current, view } : current)),
       (caught: unknown) =>
         setZoom((current) =>
           current?.token === token
-            ? { token, failure: caught instanceof Error ? caught.message : "现在看不了 100%" }
+            ? { ...current, failure: caught instanceof Error ? caught.message : "现在看不了 100%" }
             : current,
         ),
     );
+  };
+  const clickPhoto = (event: MouseEvent<HTMLElement>) => {
+    if (zoom) setZoom(undefined);
+    else startZoom("click", { x: event.clientX, y: event.clientY });
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => undefined);
+      return;
+    }
+    // The whole window fills the screen, so that its notices show there too.
+    const target = root.current?.closest<HTMLElement>("[data-scoring-window]") ?? root.current;
+    void target?.requestFullscreen?.().catch(() => undefined);
   };
 
   const track = (event: PointerEvent<HTMLDivElement>) => {
@@ -602,42 +669,51 @@ export function Stage({
         setValue(action.score);
         break;
       case "nudge":
-        setValues((current) => ({
-          ...current,
-          [dimension.id]: clampScore((current[dimension.id] ?? startScore) + action.by),
-        }));
+        setValues((current) => {
+          const now = current[dimension.id];
+          return { ...current, [dimension.id]: now === undefined ? startScore : clampScore(now + action.by) };
+        });
         setTyped(undefined);
         break;
       case "item":
         go(item + action.by);
         break;
       case "confirm":
-        answer("score");
+        confirm();
         break;
       case "skip":
       case "flag":
-        answer(action.kind);
+        if (!revising) answer(action.kind);
         break;
       case "undo":
         undo();
         break;
+      case "previous":
+        revise(0);
+        break;
+      case "next":
+        nextPhoto();
+        break;
       case "zoom":
-        if (!event.repeat) startZoom();
+        if (!event.repeat && !zoom) startZoom("key");
+        break;
+      case "fullscreen":
+        toggleFullscreen();
         break;
       case "guide":
         setGuide((open) => !open);
         break;
       case "cancel":
-        if (guide) setGuide(false);
+        if (zoom) setZoom(undefined);
+        else if (guide) setGuide(false);
         else if (revising) cancelRevising();
         break;
     }
   };
   const release = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "z" || event.key === "Z") setZoom(undefined);
+    if ((event.key === "z" || event.key === "Z") && zoom?.by === "key") setZoom(undefined);
   };
 
-  const typedValid = typed === undefined || parseScore(typed) !== undefined;
   const side = comparing && shown && visible === shown.token ? comparing : undefined;
   const boxWidth = side ? (wallSize.width - compareGap) / 2 : wallSize.width;
   const boxHeight = side ? wallSize.height - captionRoom : wallSize.height;
@@ -647,6 +723,8 @@ export function Stage({
     width: mark.width,
     height: mark.height,
   }));
+  // The last photo's score on this item, as a pale dot; not while changing it.
+  const lastScore = revising ? undefined : marks.at(-1)?.scores[dimension.id];
   const label = several ? dimension.name : "分数";
   let body;
   if (loading) {
@@ -672,7 +750,7 @@ export function Stage({
         <p>已打 {formatCount(rated)} 张。</p>
         <div className={styles.scStageMessageActions}>
           {previous && (
-            <button type="button" className={styles.scQuiet} onClick={undo}>
+            <button type="button" className={styles.scQuiet} onClick={() => revise(0)}>
               改上一张的分数
             </button>
           )}
@@ -687,7 +765,9 @@ export function Stage({
     const sideScore = side && (side.scores[dimension.id] ?? side.scores[overall] ?? 0);
     body = (
       <>
-        <figure className={styles.scFrame}>
+        {/* A click looks at the photo at 100% and another comes back; Z held does the same from the keyboard. */}
+        {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
+        <figure className={`${styles.scFrame} ${styles.scFrameMain}`} title="单击看 100%" onClick={clickPhoto}>
           <img
             ref={image}
             key={shown.token}
@@ -701,6 +781,7 @@ export function Stage({
             <Loupe
               view={zoom.view}
               failure={zoom.failure}
+              preview={claimImageURL(shown.token)}
               box={{ width: fitted?.inlineSize ?? 0, height: fitted?.blockSize ?? 0 }}
               at={pointerAt}
             />
@@ -735,7 +816,7 @@ export function Stage({
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={root}
-      className={`${styles.scStage}${several ? ` ${styles.several}` : ""}`}
+      className={`${styles.scStage}${several ? ` ${styles.several}` : ""}${fullscreen ? ` ${styles.full}` : ""}`}
       role="application"
       aria-label={`给“${batch.name}”打分`}
       tabIndex={-1}
@@ -752,16 +833,21 @@ export function Stage({
           <span>{batch.name}</span>
         </button>
         <span className={styles.scGrow} />
-        {zoomable && dimension.id === sharpness && (
-          <span className={styles.scZoomHint}>
-            按住<kbd>Z</kbd>看 100%
-          </span>
-        )}
         <span className={styles.scCount} aria-live="polite">
           已打 <b>{formatCount(rated)}</b> 张
         </span>
         <button type="button" className={styles.scTextLink} onClick={() => setGuide(true)}>
           打分标准
+        </button>
+        <button
+          type="button"
+          className={`${styles.scTextLink} ${styles.scFullscreen}`}
+          aria-keyshortcuts="F"
+          onClick={toggleFullscreen}
+        >
+          {fullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+          {fullscreen ? "退出全屏" : "全屏"}
+          <kbd aria-hidden="true">F</kbd>
         </button>
         <button type="button" className={styles.scRound} aria-label="怎样打分" onClick={() => setGuide(true)}>
           ?
@@ -769,14 +855,7 @@ export function Stage({
       </header>
       {revising && (
         <div className={`${styles.scBanner} ${styles.scRevising}`} role="status">
-          正在改上一张
-          {!several && previous?.values && (
-            <>
-              {" · 原来 "}
-              <b>{formatScore(previous.values[overall])}</b>
-            </>
-          )}
-          {" · Esc 取消"}
+          正在改上一张 · Esc 不改
         </div>
       )}
       {delivery.waiting > 0 && delivery.retrying && (
@@ -784,6 +863,28 @@ export function Stage({
           有 {delivery.waiting} 个分数还没送达，连接恢复后会自动提交
         </div>
       )}
+      <button
+        type="button"
+        className={`${styles.scTurn} ${styles.scTurnBack}`}
+        aria-label="上一张"
+        aria-keyshortcuts="["
+        title={canPrevious ? "上一张  [" : "只能回到上一张"}
+        disabled={!canPrevious}
+        onClick={() => revise(0)}
+      >
+        <ChevronLeft aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={`${styles.scTurn} ${styles.scTurnNext}`}
+        aria-label="下一张"
+        aria-keyshortcuts="]"
+        title={canNext ? "下一张  ]" : "这一张打完才能到下一张"}
+        disabled={!canNext}
+        onClick={nextPhoto}
+      >
+        <ChevronRight aria-hidden="true" />
+      </button>
       <div ref={wall} className={`${styles.scWall}${side ? ` ${styles.comparing}` : ""}`}>
         {body}
       </div>
@@ -791,27 +892,30 @@ export function Stage({
         <div className={styles.scScale}>
           {several && (
             <ol className={styles.scItems} aria-label="打分项">
-              {dimensions.map((candidate, index) => (
-                <li key={candidate.id}>
-                  <button
-                    type="button"
-                    className={styles.scItem}
-                    aria-current={index === item ? "step" : undefined}
-                    disabled={index > reached}
-                    onClick={() => go(index)}
-                  >
-                    <span>{candidate.name}</span>
-                    <b>{index <= reached ? formatScore(values[candidate.id] ?? startScore) : "—"}</b>
-                  </button>
-                </li>
-              ))}
+              {dimensions.map((candidate, index) => {
+                const score = values[candidate.id];
+                return (
+                  <li key={candidate.id}>
+                    <button
+                      type="button"
+                      className={styles.scItem}
+                      aria-current={index === item ? "step" : undefined}
+                      disabled={index > reached}
+                      onClick={() => go(index)}
+                    >
+                      <span>{candidate.name}</span>
+                      <b>{score === undefined ? "—" : formatScore(score)}</b>
+                    </button>
+                  </li>
+                );
+              })}
             </ol>
           )}
           <Ruler
             value={value}
             label={label}
             marks={rulerMarks}
-            latest={marks.at(-1)?.token}
+            last={lastScore}
             active={side?.token}
             arriving={arriving}
             onChange={(next) => {
@@ -819,7 +923,7 @@ export function Stage({
               setValue(next);
             }}
             onRelease={() => {
-              if (several && item < last && ready) setArmed(true);
+              if (ready) setArmed(true);
             }}
             onCompare={compare}
             rulerRef={ruler}
@@ -837,7 +941,8 @@ export function Stage({
           <div className={styles.scScoreLine}>
             <input
               className={styles.scScoreInput}
-              value={typed ?? formatScore(value)}
+              value={typed ?? (value === undefined ? "" : formatScore(value))}
+              placeholder="—"
               inputMode="decimal"
               aria-label={`${label}，0 到 5，最多两位小数`}
               aria-invalid={!typedValid}
@@ -851,7 +956,7 @@ export function Stage({
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  answer("score");
+                  confirm();
                 } else if (event.key === "Escape") {
                   setTyped(undefined);
                   root.current?.focus({ preventScroll: true });
@@ -861,27 +966,52 @@ export function Stage({
             <span className={styles.scOutOf}>/ 5</span>
           </div>
           <p className={`${styles.scSay}${typedValid ? "" : ` ${styles.error}`}`}>
-            {typedValid ? several ? keysHintItems : keysHint : <span role="alert">0 到 5 之间，最多两位小数</span>}
+            {typedValid ? (
+              typedValue === undefined ? (
+                emptyHint
+              ) : several ? (
+                keysHintItems
+              ) : (
+                keysHint
+              )
+            ) : (
+              <span role="alert">0 到 5 之间，最多两位小数</span>
+            )}
           </p>
           <button
             type="button"
             className={[styles.scConfirm, item < last && styles.next, armed && styles.armed].filter(Boolean).join(" ")}
-            disabled={!ready || !typedValid}
+            disabled={!ready || typedValue === undefined}
             aria-keyshortcuts="Enter"
-            onClick={() => answer("score")}
+            onClick={confirm}
           >
             {item < last ? "下一项" : "确定"}
             <kbd aria-hidden="true">↵</kbd>
           </button>
           <div className={styles.scActs}>
-            <button type="button" className={styles.scAct} disabled={!ready} onClick={() => answer("skip")}>
+            <button
+              type="button"
+              className={styles.scAct}
+              disabled={!ready || Boolean(revising)}
+              onClick={() => answer("skip")}
+            >
               无法判断 <kbd>S</kbd>
             </button>
-            <button type="button" className={styles.scAct} disabled={!ready} onClick={() => answer("flag")}>
+            <button
+              type="button"
+              className={styles.scAct}
+              disabled={!ready || Boolean(revising)}
+              onClick={() => answer("flag")}
+            >
               图片有问题 <kbd>X</kbd>
             </button>
-            <button type="button" className={styles.scAct} disabled={!previous || Boolean(revising)} onClick={undo}>
-              撤销 <kbd>⌫</kbd>
+            <button
+              type="button"
+              className={styles.scAct}
+              disabled={!ready || (item === 0 && !canPrevious)}
+              onClick={undo}
+            >
+              撤销一步 <kbd>⌫</kbd>
             </button>
           </div>
         </div>
