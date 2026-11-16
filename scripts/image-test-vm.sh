@@ -79,10 +79,34 @@ booted() { g '. /etc/os-release && echo "$IMAGE_VERSION"'; }
 product() { g '. /usr/lib/extension-release.d/extension-release.a-nas-product && echo "$A_NAS_VERSION"'; }
 esp() { g 'ls -A /efi/EFI/Linux | tr "\n" " "'; }
 manifest() { g 'find /etc/a-nas/image-test /var/lib/a-nas/image-test -type f -print0 | sort -z | xargs -0 sha256sum'; }
-content_merged() { (($(g 'systemd-sysext list --no-legend' | grep -c a-nas-content-) >= 5)); }
-content_defined() { g "$SU components" | grep -q content-model-detector; }
-root_grew() { (($(g 'lsblk -bno SIZE /dev/disk/by-partlabel/a-nas-state') > 30 * 1024 ** 3)); }
-not_taken_again() { g "$SU $* update" 2>&1 | grep -q 'No update needed'; }
+# content_merged: each kind of content the first image holds has its release
+# file in the merged /usr.
+kinds=$(find "$T/stage-1001" -mindepth 1 -maxdepth 1 -name 'content-*' | wc -l)
+content_merged() {
+  ((kinds > 0)) &&
+    (($(g 'ls /usr/lib/extension-release.d' | sed -n 's/^extension-release\.a-nas-content-\(.*\)_[0-9]*$/\1/p' | sort -u | wc -l) == kinds))
+}
+content_defined() { [[ "$(g "$SU components")" == *content-model-detector* ]]; }
+root_grew() { (($(g 'df -B1 --output=size / | tail -n 1') > 30 * 1024 ** 3)); }
+not_taken_again() { [[ "$(g "$SU $* update" 2>&1)" == *'No update needed'* ]]; }
+# shellcheck disable=SC2016 # the guest expands these
+same_host() {
+  g '. /usr/lib/os-release && host=$A_NAS_HOST_ID && . /usr/lib/extension-release.d/extension-release.a-nas-product &&
+    test -n "$host" && test "$host" = "$A_NAS_HOST_ID"'
+}
+# image_has_no_host_keys: the persistent root of the disk a new device gets
+# holds no SSH host keys, which every device would share.
+image_has_no_host_keys() {
+  local offset status
+  offset=$(sfdisk --json "$VM/disk.raw" |
+    jq -r '.partitiontable as $t | $t.partitions[] | select(.name == "a-nas-state") | .start * ($t.sectorsize // 512)')
+  mkdir -p /mnt/first-root
+  mount -o ro,loop,offset="$offset" "$VM/disk.raw" /mnt/first-root || return 1
+  test -d /mnt/first-root/etc/ssh && ! compgen -G '/mnt/first-root/etc/ssh/ssh_host_*' >/dev/null
+  status=$?
+  umount /mnt/first-root
+  return "$status"
+}
 # The image has Python, not curl.
 service_answers() { g 'python3 -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5)"' >/dev/null 2>&1; }
 # checked NAME: a-nas-check passes; what it said is in the logs as check-NAME.log.
@@ -130,6 +154,7 @@ apply_product() {
 cleanup() {
   [[ -z "$vm" ]] || { kill -9 "$vm" 2>/dev/null; wait "$vm" 2>/dev/null; }
   cp "$L"/* "$T/logs/" 2>/dev/null
+  [[ -z "${ANAS_OWNER:-}" ]] || chown -R "$ANAS_OWNER" "$T/logs"
   rm -rf -- "$VM"
 }
 mkdir -p "$T/logs"
@@ -139,13 +164,16 @@ trap cleanup EXIT
 zstd -q -d "$T/first-disk.raw.zst" -o "$VM/disk.raw"
 truncate -s 40G "$VM/disk.raw"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$VM/vars.fd"
+check "the disk holds no SSH host keys" image_has_no_host_keys
 boot_until_up 1 || { note "FAIL 1001 boots"; exit 1; }
-g "$SU components; systemd-sysext list --no-pager; lsblk -o NAME,PARTLABEL,SIZE; journalctl -b --no-pager -u systemd-repart -u systemd-sysext -u a-nas-sysext-ready | tail -n 80" >"$L/first-boot.log" 2>&1
+g "$SU components; systemd-sysext status --no-pager; lsblk -o NAME,PARTLABEL,SIZE; df -h /; journalctl -b --no-pager -u systemd-repart -u systemd-growfs-root -u systemd-sysext -u a-nas-etc -u a-nas-sysext-ready -u a-nas-health-baseline -u sshd-keygen | tail -n 120" >"$L/first-boot.log" 2>&1
 check "1001 boots the base it was written with" test "$(booted)" = 1001
 check "the product is merged" test -n "$(product)"
+check "the base is the one the product needs" same_host
 check "each kind of content is merged" content_merged
 check "the product's update definitions name the content" content_defined
-check "the root partition grew to the disk" root_grew
+check "the root file system grew to the disk" root_grew
+check "the device made its own SSH host keys" g test -s /etc/ssh/ssh_host_ed25519_key
 iface=$(g "ip -o -4 route show to default | awk '{print \$5; exit}'")
 g "mkdir -p /etc/a-nas /etc/a-nas/image-test /var/lib/a-nas/image-test &&
   printf 'ANAS_SMB_INTERFACE=%s\n' '$iface' >/etc/a-nas/site.conf &&
@@ -173,22 +201,45 @@ check "the product before runs, with its database back" test "$(product)/$(probe
 check "a-nas-check passes after going back" checked back
 
 # --- 1003: a new base. The first try is cut while it is written.
+# Before it, the device lacks an account that a package script made, and has
+# removed an /etc file that the image put there.
+account=$(g "awk '\$1 == \"u\" { print \$2; exit }' /usr/lib/sysusers.d/a-nas-image-accounts.conf")
+account_id=
+if [[ -n "$account" ]]; then
+  account_id=$(g "id -u $account")
+  g "sed -i '/^$account:/d' /etc/passwd /etc/shadow"
+fi
+g rm /etc/a-nas-image-test-factory/removed-by-the-device
 push 1003 os
 g "$SU update" >"$L/update-cut.log" 2>&1 &
 sleep 3
 power_cut
 boot_until_up 3
 check "a power cut while a base is written leaves the device on its version" test "$(booted)" = 1001
+if [[ -n "$account" ]]; then
+  check "an account that a package script made comes back at the next boot ($account)" \
+    test "$(g "id -u $account")" = "$account_id"
+else
+  note "the image holds no account that a package script made"
+fi
+# A check that already fails does not hold the new base back: a-nas-kiosk
+# gets a shell, which a-nas-check reports, and the baseline records it.
+g "sed -i 's|^\(a-nas-kiosk:.*:\)/usr/sbin/nologin\$|\1/bin/sh|' /etc/passwd && /usr/lib/a-nas-image/health record" \
+  >"$L/baseline-1003.log" 2>&1
 g "$SU update" >"$L/update-1003.log" 2>&1
 note "ESP after writing 1003: $(esp)"
 reboot_vm
 boot_until_up 3
 note "after 1003: booted $(booted); ESP: $(esp)"
-g 'bootctl list --no-pager; systemctl status --no-pager a-nas-health.service systemd-bless-boot.service boot-complete.target; ls /sys/firmware/efi/efivars | grep -i loaderboot' >"$L/boot-1003.log" 2>&1
-check "1003 boots and is blessed after its check" blessed 1003
+g 'bootctl list --no-pager; systemctl status --no-pager a-nas-health.service a-nas-etc.service systemd-bless-boot.service boot-complete.target; journalctl -b --no-pager -u a-nas-health -u a-nas-etc; ls /sys/firmware/efi/efivars | grep -i loaderboot' >"$L/boot-1003.log" 2>&1
+check "1003 boots and is blessed after its check, which failed before it too" blessed 1003
 check "the health check ran" test "$(g systemctl is-active a-nas-health.service)" = active
 check "the product stays merged on the new base" test -n "$(product)"
+check "an /etc file the new base adds reaches the device" g test -e /etc/a-nas-image-test-factory/added-in-1003
+check "an /etc file the device removed stays removed" g test ! -e /etc/a-nas-image-test-factory/removed-by-the-device
 check "state stays across the base update" cmp -s <(manifest) "$L/manifest-0"
+g "sed -i 's|^\(a-nas-kiosk:.*:\)/bin/sh\$|\1/usr/sbin/nologin|' /etc/passwd && /usr/lib/a-nas-image/health record" \
+  >>"$L/baseline-1003.log" 2>&1
 
 # --- 1004: a base whose check fails; systemd-boot goes back after three tries.
 push 1004 os

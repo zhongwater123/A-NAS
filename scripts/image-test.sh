@@ -11,18 +11,22 @@
 #   1003  a base that differs by a file: a new base, which needs a restart
 #   1004  a base whose check fails: systemd-boot goes back to 1003
 #
-# It checks that the disk boots with the product and content merged and the
-# root grown to the disk; that the product updates without a restart, its
-# database step applied, and goes back; that a new base is blessed after its
-# check and a broken one is left after three tries; that a power cut while a
+# It checks that the disk boots with the product and every kind of content
+# merged, and the root file system grown to the disk; that the product
+# updates without a restart, its database step applied, and goes back; that a
+# new base is blessed after its check, even with a check that failed before
+# it, and a broken one is left after three tries; that a power cut while a
 # base is written leaves the device on its version; that unchanged content is
-# not copied again; and that /etc, /var/lib/a-nas and the data volume stay.
+# not copied again; that a new base's /etc files and package accounts reach
+# the device and a removed /etc file stays removed; and that /etc,
+# /var/lib/a-nas and the data volume stay.
 #
 # Usage: make packages && scripts/image-test.sh [STEP...]
 # Steps: build vm clean (default: build vm). IMAGE_TEST_DIR (default
-# build/image-test) holds the repository, the update files and, in build.img,
-# mkosi's work: about 40 GB; on WSL put it on a Windows drive. Needs Docker,
-# /dev/kvm and Go. Test keys only.
+# build/image-test), a directory of the test's own, holds the update files
+# and, in build.img, mkosi's work and cache: about 40 GB; on WSL put it on a
+# Windows drive. The repository and the keys stay in build/image-test-local.
+# Needs Docker, /dev/kvm and Go. Test keys only.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -30,7 +34,15 @@ T=${IMAGE_TEST_DIR:-$repo_root/build/image-test}
 case "$T" in /?*) ;; *) echo "IMAGE_TEST_DIR must be an absolute path" >&2; exit 2 ;; esac
 mkdir -p "$T"
 T=$(cd "$T" && pwd)
-[[ "$T" != / && "$T" != "$HOME" ]] || { echo "IMAGE_TEST_DIR must be a directory of its own" >&2; exit 2; }
+# The test empties and removes its directory, so it takes only one that is
+# empty or that it marked before.
+if [[ ! -e "$T/.a-nas-image-test" ]]; then
+  [[ -z "$(ls -A "$T")" ]] || { echo "IMAGE_TEST_DIR $T is neither empty nor the image test's: give it a directory of its own" >&2; exit 2; }
+  touch "$T/.a-nas-image-test"
+fi
+# The key and the repository stay on this machine's own disk: GnuPG's agent
+# needs a socket, and aptly hard links, which a Windows drive may not offer.
+small=$repo_root/build/image-test-local
 # shellcheck source=image-builder.sh
 . "$repo_root/scripts/image-builder.sh"
 export IMAGE=${IMAGE:-anas-systemd:trixie}
@@ -44,11 +56,8 @@ step_build() {
   local version next
   version=$(dpkg-deb --field "${products[0]}" Version)
   next=$version+next
-  # The key and the repository stay on this machine's own disk: GnuPG's agent
-  # needs a socket, and aptly hard links, which a Windows drive may not offer.
-  local small=$repo_root/build/image-test
   local repository=$small/repository gnupg=$small/gnupg
-  rm -rf -- "$small" "$T/updates" "$T"/stage-* "$T/first-disk.raw.zst"
+  rm -rf -- "$small" "$T/updates" "$T"/stage-* "$T/first-disk.raw.zst" "$T/logs"
   mkdir -p "$small"
   bash "$repo_root/scripts/apt-repository.sh" key "$gnupg" >/dev/null
   # The next release: the same packages but a Product Service with one more
@@ -73,15 +82,18 @@ step_build() {
     "$small"/next/a-nas{,-host,-console,-docker-policy}_*.deb \
     "$content"/*.deb "$small"/keyring/*.deb "${upstream[@]}" >/dev/null
 
-  # The test's own additions to the base: SSH for the test, and what makes
-  # 1003 and 1004 differ. On this disk too: a key or authorized_keys on a
+  # The test's own additions to the base: SSH for the test, an /etc file that
+  # the device removes, and what makes 1003 and 1004 differ, among them an
+  # /etc file that 1003 adds. On this disk too: a key or authorized_keys on a
   # Windows drive shows every mode, which ssh and sshd refuse.
   local extra=$small/extra
   ssh-keygen -q -t ed25519 -N '' -f "$small/ssh"
   install -d -m 0700 "$extra/base/root" "$extra/base/root/.ssh"
   install -m 0600 "$small/ssh.pub" "$extra/base/root/.ssh/authorized_keys"
+  install -D -m 0644 /dev/null "$extra/base/etc/a-nas-image-test-factory/removed-by-the-device"
   cp -a "$extra/base" "$extra/1003"
   install -D -m 0644 /dev/null "$extra/1003/usr/lib/a-nas/image-test-1003"
+  install -D -m 0644 /dev/null "$extra/1003/etc/a-nas-image-test-factory/added-in-1003"
   cp -a "$extra/1003" "$extra/1004"
   # 1004's check fails: anas-site.service, which a-nas-check reports, refuses to start.
   install -d "$extra/1004/usr/lib/systemd/system/anas-site.service.d"
@@ -110,12 +122,12 @@ step_build() {
 
 step_vm() {
   image_builder_start "$WORK"
-  image_builder_run -v "$T:/test" -v "$repo_root/build/image-test:/small:ro" \
+  image_builder_run -v "$T:/test" -v "$small:/small:ro" -e "ANAS_OWNER=$(id -u):$(id -g)" \
     -v "$repo_root/scripts/image-test-vm.sh:/image-test-vm.sh:ro" --device /dev/kvm -- bash /image-test-vm.sh
 }
 
 step_clean() {
-  rm -rf -- "$T" "$repo_root/build/image-test"
+  rm -rf -- "$T" "$small"
   docker rmi "$image_builder" >/dev/null 2>&1 || true
 }
 
