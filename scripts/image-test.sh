@@ -57,7 +57,7 @@ step_build() {
   version=$(dpkg-deb --field "${products[0]}" Version)
   next=$version+next
   local repository=$small/repository gnupg=$small/gnupg
-  rm -rf -- "$small" "$T/updates" "$T"/stage-* "$T/first-disk.raw.zst" "$T/logs"
+  rm -rf -- "$small" "$T/updates" "$T"/stage-* "$T/logs"
   mkdir -p "$small"
   bash "$repo_root/scripts/apt-repository.sh" key "$gnupg" >/dev/null
   # The next release: the same packages but a Product Service with one more
@@ -111,8 +111,10 @@ step_build() {
       cp "$dir"/SHA256SUMS "$dir"/SHA256SUMS.gpg "$stage/$(basename "$dir")/"
     done
     (cd "$T/updates" && find . -type f ! -name 'SHA256SUMS*' -printf '%P\n' | LC_ALL=C sort) >"$stage/files"
-    # install/ keeps the latest disk alone; the VM starts from the first.
-    if [[ $1 == 1001 ]]; then mv "$T/updates/install/a-nas_1001.raw.zst" "$T/first-disk.raw.zst"; fi
+    # install/ keeps the latest disk alone; the VM starts from the first,
+    # kept on this machine's own disk: a container reading gigabytes from a
+    # Windows drive met a read error.
+    if [[ $1 == 1001 ]]; then mv "$T/updates/install/a-nas_1001.raw.zst" "$small/first-disk.raw.zst"; fi
   }
   build 1001 "$version" base
   build 1002 "$next" base

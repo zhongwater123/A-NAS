@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The VM half of scripts/image-test.sh, run in the image builder container:
 # /test holds what its build step made (stage-SEQUENCE/ with the update files
-# after each image, the test's SSH key), /work is scratch on the same drive.
-# The VM's disks stay on the container's own disk and go with it.
+# after each image), /small the first disk and the test's SSH key, and /work
+# is scratch on the same drive as /test. The VM's disks stay on the
+# container's own disk and go with it.
 set -uo pipefail
 
 T=/test
@@ -94,6 +95,8 @@ same_host() {
   g '. /usr/lib/os-release && host=$A_NAS_HOST_ID && . /usr/lib/extension-release.d/extension-release.a-nas-product &&
     test -n "$host" && test "$host" = "$A_NAS_HOST_ID"'
 }
+# no_ordering_cycle: systemd dropped no job of this boot to break a cycle.
+no_ordering_cycle() { [[ "$(g 'journalctl -b --no-pager -o cat')" != *'ordering cycle'* ]]; }
 # image_has_no_host_keys: the persistent root of the disk a new device gets
 # holds no SSH host keys, which every device would share.
 image_has_no_host_keys() {
@@ -126,13 +129,17 @@ PY
 # STAGE was published, as a development machine's push leaves them in
 # /var/lib/a-nas-updates: the stage's signed SHA256SUMS and its files.
 push() {
-  local stage=$T/stage-$1 dir files
+  local stage=$T/stage-$1 dir files try
   shift
   for dir; do
     mapfile -t files < <(grep "^$dir/" "$stage/files" | sed "s|^|$T/updates/|")
-    g "rm -rf /var/lib/a-nas-updates/$dir && mkdir -p /var/lib/a-nas-updates/$dir"
-    scp -q -i /small/ssh -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      "$stage/$dir"/SHA256SUMS "$stage/$dir"/SHA256SUMS.gpg "${files[@]}" "root@127.0.0.1:/var/lib/a-nas-updates/$dir/"
+    # Reading from a Windows drive may fail now and then: up to three tries.
+    for try in 1 2 3; do
+      g "rm -rf /var/lib/a-nas-updates/$dir && mkdir -p /var/lib/a-nas-updates/$dir"
+      scp -q -i /small/ssh -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "$stage/$dir"/SHA256SUMS "$stage/$dir"/SHA256SUMS.gpg "${files[@]}" "root@127.0.0.1:/var/lib/a-nas-updates/$dir/" && break
+      note "push ${stage##*-} $dir: try $try failed"
+    done
   done
   # On the disk before anything else happens: the test cuts the power
   # moments later. A push that a power cut leaves half written is refused by
@@ -161,13 +168,14 @@ mkdir -p "$T/logs"
 trap cleanup EXIT
 
 # --- 1001: the disk a new device gets, on a disk larger than the image.
-zstd -q -d "$T/first-disk.raw.zst" -o "$VM/disk.raw"
+zstd -q -d /small/first-disk.raw.zst -o "$VM/disk.raw" || { note "FAIL the first disk decompresses"; exit 1; }
 truncate -s 40G "$VM/disk.raw"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$VM/vars.fd"
 check "the disk holds no SSH host keys" image_has_no_host_keys
 boot_until_up 1 || { note "FAIL 1001 boots"; exit 1; }
 g "$SU components; systemd-sysext status --no-pager; lsblk -o NAME,PARTLABEL,SIZE; df -h /; journalctl -b --no-pager -u systemd-repart -u systemd-growfs-root -u systemd-sysext -u a-nas-etc -u a-nas-sysext-ready -u a-nas-health-baseline -u sshd-keygen | tail -n 120" >"$L/first-boot.log" 2>&1
 check "1001 boots the base it was written with" test "$(booted)" = 1001
+check "the boot has no ordering cycle" no_ordering_cycle
 check "the product is merged" test -n "$(product)"
 check "the base is the one the product needs" same_host
 check "each kind of content is merged" content_merged
@@ -234,6 +242,7 @@ note "after 1003: booted $(booted); ESP: $(esp)"
 g 'bootctl list --no-pager; systemctl status --no-pager a-nas-health.service a-nas-etc.service systemd-bless-boot.service boot-complete.target; journalctl -b --no-pager -u a-nas-health -u a-nas-etc; ls /sys/firmware/efi/efivars | grep -i loaderboot' >"$L/boot-1003.log" 2>&1
 check "1003 boots and is blessed after its check, which failed before it too" blessed 1003
 check "the health check ran" test "$(g systemctl is-active a-nas-health.service)" = active
+check "the new base's boot has no ordering cycle" no_ordering_cycle
 check "the product stays merged on the new base" test -n "$(product)"
 check "an /etc file the new base adds reaches the device" g test -e /etc/a-nas-image-test-factory/added-in-1003
 check "an /etc file the device removed stays removed" g test ! -e /etc/a-nas-image-test-factory/removed-by-the-device
