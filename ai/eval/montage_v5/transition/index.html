@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>转场标注</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#222;--dim:#777;--line:#ddd;--acc:#a0522d;--on:#2e7d5b}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1b1b1d;--card:#252528;--ink:#e8e8e8;--dim:#9a9a9a;--line:#3a3a3e;--acc:#e0a070;--on:#6fcf9f}}
+:root[data-theme=dark]{--bg:#1b1b1d;--card:#252528;--ink:#e8e8e8;--dim:#9a9a9a;--line:#3a3a3e;--acc:#e0a070;--on:#6fcf9f}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"PingFang SC",sans-serif;margin:0;padding:16px}
+main{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 260px;gap:16px}
+@media (max-width:800px){main{grid-template-columns:1fr}}
+h1{font-size:20px;margin:0 0 4px}
+.dim{color:var(--dim);font-size:13px}
+video{width:100%;background:#000;border-radius:8px;aspect-ratio:16/9;display:block}
+.bar{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
+.choices{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px}
+button{font:inherit;padding:8px 10px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer;text-align:left}
+button.on{border-color:var(--on);box-shadow:inset 0 0 0 2px var(--on)}
+button kbd{display:inline-block;min-width:1.4em;text-align:center;font-size:12px;border:1px solid var(--line);border-radius:4px;margin-right:6px;color:var(--dim)}
+.list{max-height:80vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px}
+.list div{display:flex;justify-content:space-between;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:13px}
+.list div.cur{background:var(--bg);font-weight:600}
+.list span.m{color:var(--on)}
+#save{font-size:12px}
+</style>
+</head>
+<body>
+<main>
+<section>
+<h1>转场标注</h1>
+<p class="dim">每段 3 秒，循环播放，转场时刻在中间（第 1.5 秒）附近。有些片段是程序找出来的，有些是随机抽的，看不到程序判的是哪一类。按你看到的选：这一刻能不能拿来做转场，能的话属于哪一类。数字键选择后自动跳到下一段；← → 换段，空格暂停，0 也可以选“不是”。</p>
+<video id="v" autoplay muted loop playsinline></video>
+<div class="bar"><b id="pos"></b><span class="dim" id="src"></span><span class="dim" id="save"></span></div>
+<div class="choices" id="choices"></div>
+<p class="dim" style="margin-top:12px">“其他能做转场的”：比如相似形状或颜色、人走出画面、门窗进出、一个动作的开始或结束。拿不准就选“说不清”。</p>
+</section>
+<aside><div class="dim" id="count"></div><div class="list" id="list"></div></aside>
+</main>
+<script src="data.js"></script>
+<script>
+const CHOICES = [["1","whip","甩镜头（快速摇过、画面糊开）"],["2","cover","遮挡（东西从镜头前挡过、镜头被挡黑）"],
+  ["3","zoom","推近 / 拉远"],["4","tilt","摇向天空或地面"],["5","other","其他能做转场的"],
+  ["0","none","不是转场"],["9","unsure","说不清"]];
+const items = window.ITEMS || [];
+let marks = {}, cur = 0, timer = null;
+try { marks = JSON.parse(localStorage.getItem("transition-marks") || "{}"); } catch (e) { marks = {}; }
+const v = document.getElementById("v"), list = document.getElementById("list"), box = document.getElementById("choices");
+const name = Object.fromEntries(CHOICES.map(c => [c[1], c[2].split("（")[0]]));
+CHOICES.forEach(([k, val, text]) => {
+  const b = document.createElement("button"); b.dataset.val = val; b.innerHTML = `<kbd>${k}</kbd>${text}`;
+  b.onclick = () => mark(val); box.appendChild(b);
+});
+function render() {
+  const it = items[cur]; if (!it) return;
+  if (v.dataset.src !== it.clip) { v.src = it.clip; v.dataset.src = it.clip; v.play().catch(() => {}); }
+  document.getElementById("pos").textContent = `${cur + 1} / ${items.length}`;
+  document.getElementById("src").textContent = `${it.id} · 视频 ${it.video} · ${it.t.toFixed(1)} 秒`;
+  box.querySelectorAll("button").forEach(b => b.classList.toggle("on", marks[it.id] === b.dataset.val));
+  const done = items.filter(i => marks[i.id]).length;
+  document.getElementById("count").textContent = `已标 ${done} / ${items.length}`;
+  list.innerHTML = items.map((i, n) => `<div data-n="${n}" class="${n === cur ? "cur" : ""}"><span>${i.id}</span><span class="m">${marks[i.id] ? name[marks[i.id]] : ""}</span></div>`).join("");
+  const el = list.querySelector(".cur"); if (el) el.scrollIntoView({block: "nearest"});
+}
+list.onclick = e => { const d = e.target.closest("div[data-n]"); if (d) { cur = +d.dataset.n; render(); } };
+function save() {
+  try { localStorage.setItem("transition-marks", JSON.stringify(marks)); } catch (e) {}
+  clearTimeout(timer);
+  timer = setTimeout(() => fetch("labels", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({saved: new Date().toISOString(), labels: marks})})
+    .then(r => document.getElementById("save").textContent = r.ok ? "已保存" : "保存失败")
+    .catch(() => document.getElementById("save").textContent = "保存失败（已存在浏览器里）"), 300);
+}
+function mark(val) {
+  const it = items[cur]; if (!it) return;
+  marks[it.id] = val; save();
+  if (cur < items.length - 1) cur++;
+  render();
+}
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const c = CHOICES.find(c => c[0] === e.key);
+  if (c) { mark(c[1]); e.preventDefault(); return; }
+  if (e.key === "ArrowRight") { cur = Math.min(items.length - 1, cur + 1); render(); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { cur = Math.max(0, cur - 1); render(); e.preventDefault(); }
+  if (e.key === " ") { v.paused ? v.play() : v.pause(); e.preventDefault(); }
+});
+fetch("labels").then(r => r.json()).then(d => { if (d.labels) marks = Object.assign({}, marks, d.labels); })
+  .catch(() => {}).finally(() => { const n = items.findIndex(i => !marks[i.id]); cur = n < 0 ? 0 : n; render(); });
+</script>
+</body>
+</html>
