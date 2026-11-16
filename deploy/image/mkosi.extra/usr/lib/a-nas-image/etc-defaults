@@ -1,0 +1,23 @@
+#!/bin/bash
+# a-nas-etc.service: what this image adds to /etc, for a device whose /etc an
+# earlier image made. Each file or link in /usr/share/factory/etc
+# (deploy/image/mkosi.finalize) that /etc lacks and that no image offered
+# before is copied; what an earlier image offered stays as the administrator
+# left it, changed or removed. /var/lib/a-nas-image/etc-offered lists what
+# images offered.
+set -euo pipefail
+factory=/usr/share/factory/etc
+offered=/var/lib/a-nas-image/etc-offered
+[[ -d "$factory" ]] || exit 0
+install -d -m 0755 "${offered%/*}"
+touch "$offered"
+now=$(mktemp)
+trap 'rm -f -- "$now" "$offered.new"' EXIT
+(cd "$factory" && find . -mindepth 1 ! -type d -printf '%P\n' | LC_ALL=C sort) >"$now"
+while IFS= read -r path; do
+  if [[ -e "/etc/$path" || -L "/etc/$path" ]]; then continue; fi
+  (cd "$factory" && cp -a --parents -- "$path" /etc/)
+  echo "a-nas-etc: /etc/$path from this image"
+done < <(LC_ALL=C comm -23 "$now" <(LC_ALL=C sort -u "$offered"))
+LC_ALL=C sort -u "$offered" "$now" >"$offered.new"
+mv -f -- "$offered.new" "$offered"
