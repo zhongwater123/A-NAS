@@ -2242,7 +2242,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The photo behind one of the caller's own claims at its full size, for judging sharpness: only in batches that score sharpness
+         * The photo behind one of the caller's own claims at its full size, which the window shows at 100%
          * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
          */
         get: operations["getScoringClaimFull"];

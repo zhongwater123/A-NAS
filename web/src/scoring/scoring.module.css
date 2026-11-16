@@ -793,7 +793,7 @@
   position: relative;
   height: 184px;
   outline: none;
-  cursor: pointer;
+  cursor: crosshair;
   touch-action: none;
 }
 .sc-baseline {
@@ -820,6 +820,10 @@
 .sc-num.near {
   color: var(--sc-ink);
 }
+/* A numeral gives way to the pointer's reading, which takes its row. */
+.sc-num.covered {
+  opacity: 0;
+}
 .sc-pin {
   position: absolute;
   top: 132px;
@@ -842,38 +846,38 @@
     0 0 0 1px rgba(255, 255, 255, 0.08);
   opacity: 0.58;
   filter: saturate(0.8);
+  cursor: pointer;
   transition:
-    opacity 0.25s var(--sc-ease),
-    filter 0.25s var(--sc-ease),
-    transform 0.25s var(--sc-ease),
-    box-shadow 0.25s;
+    opacity 0.2s var(--sc-ease),
+    filter 0.2s var(--sc-ease),
+    transform 0.2s var(--sc-ease),
+    box-shadow 0.2s;
 }
-.sc-thumb.near img,
-.sc-thumb:hover img,
-.sc-thumb.active img {
+.sc-thumb.near img {
   opacity: 1;
   filter: none;
-  transform: translateY(-3px);
 }
-.sc-thumb:hover img,
-.sc-thumb.active img {
+/* The thumbnail under the pointer, or set beside the photo, comes to the
+   front with a ring; the others step back, so a stack reads clearly. */
+.sc-thumb:hover,
+.sc-thumb.active {
+  z-index: 6;
+}
+.sc-ruler.peek .sc-thumb img {
+  opacity: 0.2;
+  filter: saturate(0.6);
+}
+.sc-ruler.peek .sc-thumb:hover img,
+.sc-ruler.peek .sc-thumb.active img {
+  opacity: 1;
+  filter: none;
+  transform: translateY(-4px) scale(1.08);
   box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(242, 240, 236, 0.7);
+    0 12px 26px rgba(0, 0, 0, 0.65),
+    0 0 0 1.5px var(--sc-ink);
 }
 .sc-thumb.arriving img {
   opacity: 0;
-}
-.sc-thumb.latest::before {
-  content: "";
-  position: absolute;
-  top: -9px;
-  inset-inline-start: 50%;
-  width: 4px;
-  height: 4px;
-  margin-inline-start: -2px;
-  border-radius: 50%;
-  background: var(--sc-accent);
 }
 .sc-stem {
   position: absolute;
@@ -912,40 +916,55 @@
     0 0 0 6px rgba(240, 180, 90, 0.55),
     0 4px 14px rgba(0, 0, 0, 0.6);
 }
-.sc-tag {
-  position: absolute;
-  top: -34px;
-  color: var(--sc-accent);
-  font: 400 17px / 1 var(--sc-serif);
-  font-variant-numeric: tabular-nums;
-  opacity: 0;
-  transform: translateX(-50%);
-  transition: opacity 0.15s;
-}
-.sc-ruler.dragging .sc-tag {
-  opacity: 1;
-}
-.sc-ghost {
-  position: absolute;
-  top: 112px;
-  width: 1px;
-  height: 20px;
-  margin-inline-start: -0.5px;
-  background: rgba(242, 240, 236, 0.35);
+/* Nothing set yet: the dot follows the pointer over the scale, lighter. */
+.sc-knob.follow {
+  opacity: 0.8;
   pointer-events: none;
 }
-.sc-ghost span {
+/* The last photo's score on this item, pale, on the baseline. */
+.sc-last-dot {
   position: absolute;
-  bottom: 24px;
-  inset-inline-start: 50%;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: rgba(20, 20, 20, 0.85);
-  box-shadow: inset 0 0 0 1px var(--sc-hair);
-  color: var(--sc-ink-2);
-  font: 400 13px / 1.2 var(--sc-serif);
+  z-index: 2;
+  top: 132px;
+  width: 9px;
+  height: 9px;
+  margin: -4px 0 0 -4.5px;
+  border-radius: 50%;
+  background: rgba(240, 180, 90, 0.42);
+  box-shadow: 0 0 0 2px var(--sc-bg);
+}
+/* Where a click would land, once a score is set. */
+.sc-hover-line {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 132px;
+  margin-inline-start: -0.5px;
+  background: linear-gradient(rgba(242, 240, 236, 0), rgba(242, 240, 236, 0.28));
+  pointer-events: none;
+}
+/* The pointer's reading, in the numerals' row below the baseline. */
+.sc-reading-chip {
+  position: absolute;
+  z-index: 4;
+  top: 151px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: #232323;
+  box-shadow:
+    inset 0 0 0 1px var(--sc-hair),
+    0 6px 16px rgba(0, 0, 0, 0.5);
+  color: var(--sc-ink);
+  font: 400 16px / 1.1 var(--sc-serif);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  pointer-events: none;
   transform: translateX(-50%);
+}
+.sc-reading-chip.set {
+  background: var(--sc-accent);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  color: #1a1a1a;
 }
 
 .sc-reading {
@@ -1047,6 +1066,92 @@
 /* Several 打分项: the wall leaves room for the line of items above the scale. */
 .sc-stage.several .sc-wall {
   inset-block-end: 300px;
+}
+.sc-frame-main {
+  cursor: zoom-in;
+}
+/* Photo to photo, as in a photo viewer: an arrow at each side of the wall,
+   centred on it. A grey arrow cannot be used now. */
+.sc-turn {
+  position: absolute;
+  z-index: 3;
+  top: calc(60px + (100% - 312px) / 2);
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(28, 28, 28, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(242, 240, 236, 0.22),
+    0 8px 20px rgba(0, 0, 0, 0.4);
+  color: var(--sc-ink);
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+}
+.sc-stage.several .sc-turn {
+  top: calc(60px + (100% - 360px) / 2);
+}
+.sc-turn svg {
+  width: 22px;
+  height: 22px;
+}
+.sc-turn:hover:not(:disabled) {
+  background: rgba(48, 48, 48, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(242, 240, 236, 0.5),
+    0 10px 24px rgba(0, 0, 0, 0.5);
+}
+.sc-turn:disabled {
+  background: rgba(28, 28, 28, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(242, 240, 236, 0.08);
+  color: rgba(242, 240, 236, 0.2);
+  cursor: not-allowed;
+}
+.sc-turn-back {
+  inset-inline-start: 12px;
+}
+.sc-turn-next {
+  inset-inline-end: 12px;
+}
+.sc-fullscreen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-fullscreen svg {
+  width: 14px;
+  height: 14px;
+}
+.sc-fullscreen kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--sc-hair);
+  color: var(--sc-ink-3);
+  font: 500 10.5px / 1 var(--sc-mono);
+}
+/* Full screen: the same stage over the whole screen, with wider margins. */
+.sc-stage.full .sc-wall {
+  inset-inline: 96px;
+  inset-block-start: 64px;
+}
+.sc-stage.full .sc-instrument {
+  inset-inline: 96px 72px;
+}
+.sc-stage.full .sc-turn-back {
+  inset-inline-start: 28px;
+}
+.sc-stage.full .sc-turn-next {
+  inset-inline-end: 28px;
 }
 .sc-scale {
   min-width: 0;
@@ -1207,6 +1312,7 @@
   overflow: hidden;
   background: #0e0e0e;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: zoom-out;
 }
 .sc-loupe.loading {
   display: grid;
@@ -1231,7 +1337,36 @@
   border-radius: 999px;
   background: rgba(14, 14, 14, 0.78);
   color: var(--sc-ink);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.sc-loupe-scale b {
+  margin-inline-end: 8px;
   font: 400 13px / 1.3 var(--sc-serif);
+  letter-spacing: 0;
+}
+/* The whole photo, small, with the part shown at 100% framed. */
+.sc-overview {
+  position: absolute;
+  inset: auto 12px 12px auto;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(242, 240, 236, 0.3);
+  pointer-events: none;
+}
+.sc-overview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+.sc-overview i {
+  position: absolute;
+  box-shadow:
+    0 0 0 1.5px var(--sc-accent),
+    0 0 0 999px rgba(10, 10, 10, 0.5);
 }
 .sc-loupe-note {
   inset: 50% auto auto 50%;
@@ -2059,8 +2194,20 @@
     grid-template-columns: minmax(0, 1fr) 216px;
     gap: 28px;
   }
+  /* The arrows keep their room beside the photo. */
   .sc-wall {
-    inset-inline: 28px;
+    inset-inline: 56px;
+  }
+  .sc-turn {
+    width: 36px;
+    height: 36px;
+    margin-top: -18px;
+  }
+  .sc-turn-back {
+    inset-inline-start: 10px;
+  }
+  .sc-turn-next {
+    inset-inline-end: 10px;
   }
   .sc-score-input {
     font-size: 60px;

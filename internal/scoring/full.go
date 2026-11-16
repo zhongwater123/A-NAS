@@ -40,22 +40,19 @@ type FullView struct {
 }
 
 // ClaimFull returns the photo behind a rater's own claim at its full size,
-// for judging sharpness, in batches that score it. The original is read
-// again and must still be the photo that was imported.
+// which the window shows at 100%. The original is read again and must still
+// be the photo that was imported.
 func (s *Store) ClaimFull(ctx context.Context, token, rater string) (FullView, error) {
 	var item int64
-	var sha, source, dimensions string
-	err := s.db.QueryRowContext(ctx, `SELECT i.id, i.sha256, b.source, b.dimensions FROM claims c
+	var sha, source string
+	err := s.db.QueryRowContext(ctx, `SELECT i.id, i.sha256, b.source FROM claims c
 		JOIN items i ON i.id = c.item_id JOIN batches b ON b.id = c.batch_id WHERE c.token = ? AND c.rater = ?`,
-		token, rater).Scan(&item, &sha, &source, &dimensions)
+		token, rater).Scan(&item, &sha, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return FullView{}, ErrNotFound
 	}
 	if err != nil {
 		return FullView{}, err
-	}
-	if !slices.Contains(splitDimensions(dimensions), Sharpness) {
-		return FullView{}, ErrNotFound
 	}
 	if view, ok := s.cachedFull(sha); ok {
 		return view, nil
