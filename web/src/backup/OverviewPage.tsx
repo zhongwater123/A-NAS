@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 
 import type { Space } from "../api.generated";
+import { BackupCenterIcon } from "../desktop/AppIconArtwork";
 import { Notice } from "../ui/workspace";
 import workspaceStyles from "../ui/workspace.module.css";
 import type { Snapshot } from "./api";
 import { type SpaceData, useBackup } from "./BackupCenter";
-import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import styles from "./backup.module.css";
 import {
   describeSchedule,
@@ -289,7 +289,7 @@ function ProtectionRing({ states }: { states: SpaceState[] }) {
         ))}
       </svg>
       <span className={styles.bkRingMark}>
-        <BackupCenterGlyph />
+        <BackupCenterIcon />
       </span>
     </div>
   );
