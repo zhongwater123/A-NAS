@@ -94,7 +94,7 @@ class Judge:
         key_file = os.environ.get("VNAS_JUDGE_KEY_FILE")
         if not key_file:
             return None
-        return cls(Path(key_file).read_text(encoding="utf-8").strip(),
+        return cls(Path(key_file).read_text(encoding="utf-8-sig").strip(),  # a key saved by Notepad may carry a BOM
                    os.environ.get("VNAS_JUDGE_MODEL") or DEFAULT_MODEL, os.environ.get("VNAS_JUDGE_BASE") or DEFAULT_BASE,
                    subject_model, transport)
 

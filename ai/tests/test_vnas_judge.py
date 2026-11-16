@@ -80,6 +80,17 @@ class JudgeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "http"):
             Judge("k", base="file:///etc")
 
+    def test_from_env_reads_a_notepad_key(self):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "k"
+            key.write_bytes(b"\xef\xbb\xbfsk-test\r\n")  # Notepad's BOM and line end
+            with mock.patch.dict(os.environ, {"VNAS_JUDGE_KEY_FILE": str(key), "VNAS_JUDGE_MODEL": ""}):
+                judge = Judge.from_env()
+        self.assertEqual((judge.key, judge.model), ("sk-test", "qwen3.8-max"))
+
     def test_from_env_without_a_key_is_none(self):
         self.assertIsNone(Judge.from_env())
 

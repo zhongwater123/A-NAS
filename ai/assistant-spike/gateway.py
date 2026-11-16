@@ -16,8 +16,13 @@ import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-SOCK, LOG, UPSTREAM_HOST, KEY_FILE = sys.argv[1:5]
-KEY = Path(KEY_FILE).read_text(encoding="utf-8").strip()
+SOCK, LOG, UPSTREAM, KEY_FILE = sys.argv[1:5]
+# HOST or HOST/PREFIX: Alibaba Cloud Model Studio serves the OpenAI API under
+# /compatible-mode (dashscope.aliyuncs.com/compatible-mode), so Hermes's /v1/... goes
+# to /compatible-mode/v1/...; a bare host keeps the path as Hermes sent it.
+UPSTREAM_HOST, _, _prefix = UPSTREAM.partition("/")
+UPSTREAM_PREFIX = "/" + _prefix.strip("/") if _prefix.strip("/") else ""
+KEY = Path(KEY_FILE).read_text(encoding="utf-8-sig").strip()  # utf-8-sig: a key saved by Notepad may carry a BOM
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
 
 
@@ -43,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         upstream = http.client.HTTPSConnection(UPSTREAM_HOST, timeout=300)
         headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
-        upstream.request(method, self.path, body=body or None, headers=headers)
+        upstream.request(method, UPSTREAM_PREFIX + self.path, body=body or None, headers=headers)
         resp = upstream.getresponse()
         self.send_response(resp.status)
         self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))

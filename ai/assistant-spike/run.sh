@@ -26,6 +26,8 @@
 #
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
+#   (SPIKE_UPSTREAM is HOST or HOST/PREFIX, default api.deepseek.com; Qwen on Model Studio:
+#   SPIKE_MODEL=qwen3.8-flash SPIKE_UPSTREAM=dashscope.aliyuncs.com/compatible-mode)
 #   ai/assistant-spike/run.sh scenarios FILE [--answer ANSWER]   how the member answers: scenarios.py
 #     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills

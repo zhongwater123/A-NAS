@@ -18,7 +18,8 @@
 #
 # The key is /etc/anas-spike/model.key (root, 0600), which the owner writes by hand once;
 # install, update and remove leave it. ANAS_TRIAL_MODEL (default deepseek-flash) and ANAS_TRIAL_UPSTREAM (default
-# api.deepseek.com) pick the OpenAI-compatible service.
+# api.deepseek.com; HOST or HOST/PREFIX, e.g. dashscope.aliyuncs.com/compatible-mode for Qwen on
+# Model Studio) pick the OpenAI-compatible service.
 #
 # install runs assistant-layout.sh prepare, which works by path in folders members can
 # write; it therefore refuses to run over anything an earlier run or a member left. update
@@ -105,7 +106,7 @@ install_files() {
   for tool in socat rg tini; do command -v "$tool" >/dev/null || fail "$tool is missing"; done
   install -m 0644 "$trial/spike/anas-assistant-trial.tmpfiles" /etc/tmpfiles.d/anas-assistant-trial.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/anas-assistant-trial.conf
-  sed "s/@UPSTREAM@/$upstream/" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
+  sed "s|@UPSTREAM@|$upstream|" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
 }
 
 install_trial() {
