@@ -3,8 +3,8 @@ Description=A-NAS system update
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
 # Installing a release restarts the Host Agent and the Product Service, so the
 # update runs in a unit of its own (docs/specs/system-update.md#边界与失败).
-# The Host Agent starts it with a request, the timer without one; a run that
-# finds an install a power cut or reboot stopped finishes it first.
+# The path unit starts it when the Host Agent leaves a request; the timer
+# starts it for periodic checks. An interrupted install is finished first.
 After=network-online.target local-fs.target
 # Each request starts a run, as often as administrators ask; systemd's
 # default limit of five starts in ten seconds would drop a request, which
