@@ -455,24 +455,27 @@ function playbackSettled(playbackId: string): boolean {
 export function CompanionCard({
   installed,
   pool,
+  trouble,
   ...openers
-}: { installed: InstalledAnimations; pool?: string } & CompanionOpeners) {
+}: { installed: InstalledAnimations; pool?: string; trouble?: string } & CompanionOpeners) {
   // Safari draws no alpha in VP9: it needs dsh-pet's HEVC animations, which this pool may lack.
   const format = prefersMov() ? "mov" : "webm";
   const animations = useMemo(
     () => installedAnimations((name) => Boolean(installed[name]?.[format])),
     [installed, format],
   );
-  return animations ? <Card animations={animations} pool={pool} openers={openers} /> : null;
+  return animations ? <Card animations={animations} pool={pool} trouble={trouble} openers={openers} /> : null;
 }
 
 function Card({
   animations,
   pool,
+  trouble,
   openers = {},
 }: {
   animations: Animations;
   pool?: string;
+  trouble?: string;
   openers?: CompanionOpeners;
 }) {
   /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
@@ -1078,7 +1081,8 @@ function Card({
   }, [quiet, asleep, clipSpeed]);
 
   // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
-  // first that holds: a card of this window's turn waits for the member (the VNAS window comes up with the
+  // first that holds: the device is in critical trouble (what is wrong, and Settings' overview comes up,
+  // where its health and what to do are); a card of this window's turn waits for the member (the VNAS window comes up with the
   // card in view); a result of a scheduled task is unread (it opens, as its notice's 查看结果 does); a turn
   // of this window is under way (its step's line, how many steps and how long, with no clip); a turn just
   // ended in an error, its cross still up (the VNAS window comes up). With nothing to tell it plays a click
@@ -1096,6 +1100,11 @@ function Card({
         companionState.writePet(COMPANION_PET, "say", { text, anim: false });
         setSpoken(text);
       };
+      if (trouble) {
+        say(`${trouble}\n打开设置看看`);
+        openers.onOpenHealth?.();
+        return true;
+      }
       if (cardWaiting()) {
         say("等你确认");
         openers.onOpenVnas?.();
@@ -1129,7 +1138,7 @@ function Card({
       }
       return false;
     };
-  }, [openers, work]);
+  }, [openers, work, trouble]);
   useEffect(() => {
     const layer = clipSpeed.current;
     if (!layer) return;
@@ -1179,6 +1188,7 @@ function Card({
       style={layer}
       className={styles.layer}
       data-companion-work={work}
+      data-companion-trouble={trouble ? "" : undefined}
       data-companion-rest={paused ? "" : undefined}
       data-vnas-overlay=""
     >
@@ -1194,6 +1204,7 @@ function Card({
       <p className="sr-only" aria-live="polite">
         {spoken}
       </p>
+      {trouble && <p className="sr-only">{`设备需要处理：${trouble}`}</p>}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
 import { whenText } from "../assistant/taskTime";
 import { Companion } from "../companion/Companion";
+import { deviceTrouble } from "../companion/health";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
@@ -355,7 +356,12 @@ export function Desktop({
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
         </ShellPart>
         <ShellPart name="companion">
-          <Companion onOpenVnas={() => open("assistant")} onOpenTaskRun={showTaskRun} />
+          <Companion
+            trouble={deviceTrouble(host.snapshot, host.disconnected)}
+            onOpenVnas={() => open("assistant")}
+            onOpenTaskRun={showTaskRun}
+            onOpenHealth={() => openSettings("overview")}
+          />
         </ShellPart>
         <ShellPart name="family hints">
           <Suspense fallback={null}>

@@ -80,6 +80,36 @@
   animation: none;
 }
 
+/*
+ * The device is in critical trouble (health.ts): a still red dot at the companion's feet, on dsh-pet's
+ * stage, which moves with the pet as the root does and has its own pseudo-elements free. Below the
+ * clips' feet, which they draw from about 0.06 of the pet's size above the stage's bottom, and in front
+ * of them, so a leg or the tail does not hide it; the pointer goes through to the pet.
+ */
+.layer[data-companion-trouble] :global(.dsh-pet-stage)::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.02);
+  left: calc(50% + var(--dsh-pet-size, 240px) * 0.06);
+  width: calc(var(--dsh-pet-size, 240px) * 0.05);
+  height: calc(var(--dsh-pet-size, 240px) * 0.05);
+  border-radius: 50%;
+  background: #d93636;
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 92%),
+    0 1px 4px rgb(0 0 0 / 28%);
+  pointer-events: none;
+}
+
+/*
+ * A line the companion says keeps its line breaks (a click's answer puts what to do on the second
+ * line; VNAS's lines may break too), which dsh-pet's bubble row would run together.
+ */
+.layer :global(.pet-bub-row) {
+  white-space: pre-line;
+}
+
 /* The companion rests: so does the sign. */
 .layer[data-companion-rest] :global(.dsh-pet-root)::after {
   animation-play-state: paused;

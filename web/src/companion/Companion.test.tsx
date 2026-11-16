@@ -1491,7 +1491,7 @@ describe("walking, throwing and resting", () => {
       task: run,
       createdAt: "2026-11-06T08:00:00Z",
     });
-    const opened = { vnas: 0, runs: [] as unknown[] };
+    const opened = { vnas: 0, runs: [] as unknown[], health: 0 };
     const openers = {
       onOpenVnas: () => {
         opened.vnas += 1;
@@ -1499,10 +1499,29 @@ describe("walking, throwing and resting", () => {
       onOpenTaskRun: (task: unknown) => {
         opened.runs.push(task);
       },
+      onOpenHealth: () => {
+        opened.health += 1;
+      },
     };
     beforeEach(() => {
       opened.vnas = 0;
       opened.runs = [];
+      opened.health = 0;
+    });
+
+    it("opens Settings' overview while the device is in critical trouble, before a card that waits", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-原地踱步张望"]);
+      const { pet } = await mount(<Companion trouble="数据卷变成了只读" {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportCards([{ requestId: "r1", sessionId: "live0001", status: "awaiting" }]);
+      });
+      fetched = [];
+      fireEvent.click(pet);
+      expect((await screen.findAllByText(/数据卷变成了只读\s*打开设置看看/))[0]).toBeInTheDocument();
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 1 });
+      await settle();
+      expect(fetched).not.toContain("点击回应-元气挥手");
     });
 
     it("brings up VNAS's window at the card that waits for the member", async () => {
@@ -1578,7 +1597,46 @@ describe("walking, throwing and resting", () => {
       const { pet } = await mount(<Companion {...openers} />);
       fireEvent.click(pet);
       await plays("点击回应-元气挥手");
-      expect(opened).toEqual({ vnas: 0, runs: [] });
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 0 });
+    });
+  });
+
+  describe("the dot at its feet", () => {
+    it("shows while the device is in critical trouble, asleep too, and is gone once it is not", async () => {
+      serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+      const { view, root } = await mount(<Companion trouble="数据卷变成了只读" />);
+      const layer = () => root.closest("[data-vnas-overlay]");
+      expect(layer()).toHaveAttribute("data-companion-trouble");
+      // Its words go to the screen reader, which the dot does not reach.
+      expect(screen.getByText("设备需要处理：数据卷变成了只读")).toBeInTheDocument();
+      act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+      await plays("睡觉-开始");
+      expect(layer()).toHaveAttribute("data-companion-trouble");
+      view.rerender(<Companion />);
+      expect(layer()).not.toHaveAttribute("data-companion-trouble");
+      expect(screen.queryByText(/设备需要处理/)).toBeNull();
+    });
+
+    it("lets a click wake it while it sleeps, as ever, and opens nothing", async () => {
+      serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+      let health = 0;
+      const { pet, videos } = await mount(
+        <Companion
+          trouble="数据卷变成了只读"
+          onOpenHealth={() => {
+            health += 1;
+          }}
+        />,
+      );
+      act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+      await plays("睡觉-开始");
+      await ready(videos);
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await plays("睡觉-循环");
+      await ready(videos);
+      fireEvent.click(pet);
+      await plays("睡觉-起来");
+      expect(health).toBe(0);
     });
   });
 

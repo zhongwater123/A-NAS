@@ -1,11 +1,11 @@
 # 虚拟伙伴（大肥鱼）
 
 状态：draft（V1 实现中，[#404](https://github.com/zhongwater123/A-NAS/issues/404)；VNAS 的控制见 [#412](https://github.com/zhongwater123/A-NAS/pull/412)、[#414](../decisions/2026-11-06-companion-v1.md)）
-更新时间：2026-11-10
+更新时间：2026-11-16
 
 ## 目标
 
-已登录的 Web 桌面右下角常驻一个虚拟伙伴“大肥鱼”，就是 dsh-pet 的宠物卡片：渲染、动画链、走动、拖动、抛出、气泡、睡觉与锁都用 dsh-pet 的代码。它随这台设备上发起的 VNAS 回合与待确认卡片切换动作，定时任务出了新结果时挥手。
+已登录的 Web 桌面右下角常驻一个虚拟伙伴“大肥鱼”，就是 dsh-pet 的宠物卡片：渲染、动画链、走动、拖动、抛出、气泡、睡觉与锁都用 dsh-pet 的代码。它随这台设备上发起的 VNAS 回合与待确认卡片切换动作，定时任务出了新结果时挥手，设备出了严重问题时脚边亮一个红点。
 
 VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 2026-11-06 决定）：播放动作、说话气泡、移动与抛出、睡觉与叫醒，只在发起这段对话的设备上。所以在控制它的设备上，伙伴可以说出这段对话的内容；别处来的内容，例如定时任务的提示，在全家共用的宿主机屏幕（本地控制台）上仍只显示状态。
 
@@ -151,17 +151,26 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 - When：成员的定时任务（含提醒）有了新结果。
 - Then：伙伴照常挥手，成员回来时交代新结果也只说“有新结果”；桌面提示只写“VNAS 定时任务 · 时间 · 有新结果”，失败时加“没有完成”，不写任务名与回答的开头。内容只在成员自己打开 VNAS 时出现：点“查看结果”在 VNAS 中打开这次运行。个人设备上的提示不变。
 
+### 设备出事时脚边亮一个红点
+
+- Given：设备的[系统健康](system-health.md)为“严重”：硬盘的 SMART 自检未通过、数据卷没有挂载、缺盘降级、变成只读，或写满到拒绝新文件。
+- When：桌面读到设备状态（就是状态栏与设置“概览”已经在读的 `GET /api/v1/host-state`，不加接口）。
+- Then：伙伴脚边亮一个不动的红点，跟着它拖动、走动和飞行，不挡点击；不换动作、不说话。读屏软件读到“设备需要处理：〈原因〉”，原因是按严重程度排第一的那一项，用设置“概览”里“需要处理”的同一句话（如“数据卷变成了只读”）；健康为严重但页面不认识任何一项严重原因时，说“设备出了严重问题”。睡着、成员让它安静、停下时红点照样亮；成员选了“隐藏”时伙伴不在页面上，也没有红点。本地控制台上也亮：设备健康不是个人数据，成员与管理员看到的相同。
+- 只有“严重”才亮：“注意”一级（温度偏高、快满了、读不到 SMART、累计错误、对账失败）只在设置“概览”里列出，不亮红点，免得它天天亮着、没人再看。健康为“未知”、还没读到设备状态，或连接中断（状态栏显示“连接中断”）时也不亮：那时的读数说明不了设备现在怎样。
+- 问题解决、健康不再是严重后，红点在桌面下一次读到设备状态时消失。
+
 ### 点击与拖动
 
 - When：成员点击伙伴（或用键盘按它），或按住拖动后松开，或带着速度甩出。
 - Then：点击（或焦点在伙伴上按 Enter、空格）是问她现在怎么样，她按下面第一个成立的回应，说的话同时交给读屏软件：
-  1. 这个窗口的回合有卡片等成员确认：VNAS 窗口调到最上，确认卡片滚到可见处，气泡“等你确认”。
-  2. 有没读的定时任务新结果（包括成员回来时交代的）：打开那次运行的结果，与任务提示的“查看结果”同一入口，结果记为已读；气泡“〈任务名〉有新结果”。共用屏幕上只说“有新结果”，打开的规则与本地控制台上任务提示的“查看结果”相同。
-  3. 这个窗口的回合正在进行：不换动作，气泡说这一步的台词，下一行“第 N 步 · 已用 M 分 SS 秒”（不到一分钟说“已用 S 秒”；N 是 VNAS 这一轮调用工具的次数，伙伴自己的工具不算，还没调用时算第 1 步）。共用屏幕上台词不带对象。
-  4. 刚出错、叉还在：VNAS 窗口调到最上，气泡“这一轮出错了，打开 VNAS 看看”。
-  5. 都没有：播一段点击回应（“点击回应-”开头的几段里随机一段）。分类动作只在随机动作里出现，点击不再播。
+  1. 脚边的红点亮着（设备出了严重问题）：打开设置的“概览”，那里有系统健康与每一项的处理办法；气泡第一行是红点的原因，第二行“打开设置看看”。它排在等成员确认之前：数据有风险，比 VNAS 等人更急。
+  2. 这个窗口的回合有卡片等成员确认：VNAS 窗口调到最上，确认卡片滚到可见处，气泡“等你确认”。
+  3. 有没读的定时任务新结果（包括成员回来时交代的）：打开那次运行的结果，与任务提示的“查看结果”同一入口，结果记为已读；气泡“〈任务名〉有新结果”。共用屏幕上只说“有新结果”，打开的规则与本地控制台上任务提示的“查看结果”相同。
+  4. 这个窗口的回合正在进行：不换动作，气泡说这一步的台词，下一行“第 N 步 · 已用 M 分 SS 秒”（不到一分钟说“已用 S 秒”；N 是 VNAS 这一轮调用工具的次数，伙伴自己的工具不算，还没调用时算第 1 步）。共用屏幕上台词不带对象。
+  5. 刚出错、叉还在：VNAS 窗口调到最上，气泡“这一轮出错了，打开 VNAS 看看”。
+  6. 都没有：播一段点击回应（“点击回应-”开头的几段里随机一段）。分类动作只在随机动作里出现，点击不再播。
 
-  伙伴睡着或被锁时，点击照旧是 dsh-pet 的叫醒或收回锁。点击照常算一次输入，60 秒停下的计时重新开始。拖动时播放拖拽动画；慢慢松手时松手处即新位置，带着速度松手（或双击后拉开再放的弹弓）时按 dsh-pet 的物理飞出去，碰到页面四边反弹，落地时 Q 弹一下，在空中可以再抓住接着甩。手机倾斜与摇晃不让伙伴动。停下的位置按视口比例记在本设备，下次登录沿用；浏览器窗口变小时伙伴回到可及范围。只有一个伙伴，不做伙伴之间的碰撞。
+  伙伴睡着或被锁时，点击照旧是 dsh-pet 的叫醒或收回锁，红点亮着也一样；醒来后再点才打开设置。点击照常算一次输入，60 秒停下的计时重新开始。拖动时播放拖拽动画；慢慢松手时松手处即新位置，带着速度松手（或双击后拉开再放的弹弓）时按 dsh-pet 的物理飞出去，碰到页面四边反弹，落地时 Q 弹一下，在空中可以再抓住接着甩。手机倾斜与摇晃不让伙伴动。停下的位置按视口比例记在本设备，下次登录沿用；浏览器窗口变小时伙伴回到可及范围。只有一个伙伴，不做伙伴之间的碰撞。
 
 ### Safari 播放 HEVC 版本
 
@@ -204,7 +213,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 
 ## 验收证据
 
-- 页面：卡片的渲染、跟随本窗口的回合与头旁的标记、动作只跟真事走（工具返回不换动画、小活只亮对勾、每一步至少 1.5 秒且只演最新一步、回合结束不等、步骤动画停在收尾站姿 8 秒后重演）、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、回来时交代一件事（停着时来的新结果回来后挥手一次、别处读过的不挥手、回来时重新读列表、本地控制台不带任务名、离开时完成回来后对勾 10 秒且不放烟花、出错与新结果同时只交代出错、出错不被另一段对话的完成盖掉、屏保盖着而伙伴没停时也记下、同一回合的下一步不清、回合进行中回来留到回合结束交代（新结果挥手不放烟花、出错优先）、12 小时上限、下一回合开始时清掉回合的结束而保留新结果）、卸载时取消进行中的动画、清单读不到时重试、撤下屏保的那一下让伙伴继续、点击与拖动、点击是问她（等确认时打开 VNAS、有新结果时打开结果并读掉、共用屏幕只说有新结果、回合中说第几步用了多久且不换动作、出错时打开 VNAS、没事时只播点击回应、说的话交给读屏）、安静（按 Esc 入睡并记在本设备、刷新后直接从睡眠循环开始、设置选回正常时醒来、VNAS 在忙只显示小点、点醒后等“起来”播完再交代回合的结束、隐藏时不读清单也不显示）、让开当前窗口（打开窗口、放下、减少动态效果、被点或上锁打断后再查、等 VNAS 的移动落地、页面缩放、不往窗口上走）（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；动画取不到、解码失败或 `play()` 被拒时重试与往下走、冻结期间不重试，命令与动画链的回答（[`animationChain.test.ts`](../../web/src/companion/animationChain.test.ts)、[`cardAnimation.test.tsx`](../../web/src/companion/cardAnimation.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理、大活的判定、确认卡片之后保持等待动画、每一步的动画与短话、共用屏幕不说对象（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)、[`behaviors.test.ts`](../../web/src/companion/behaviors.test.ts)）；让开时去哪里（[`stepAside.test.ts`](../../web/src/companion/stepAside.test.ts)）；桌面在窗口打开、换到最上、移动、缩放、最大化与还原、最小化、关闭和显示桌面时告诉伙伴当前窗口（[`App.test.tsx`](../../web/src/App.test.tsx)）；`position` 让开后的回答（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；随机动作与点击的动画池（点击只有点击回应，[`animations.test.ts`](../../web/src/companion/animations.test.ts)）；命令的执行与回答、`anim` 的两段等待、锁、睡觉、成员让它安静时不能 `wake` 与 `lock`、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁、提示没发出去时撤回这一轮（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记与撤下屏保的那一下输入的通知（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名与这台设备上的伙伴（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）。
+- 页面：卡片的渲染、跟随本窗口的回合与头旁的标记、动作只跟真事走（工具返回不换动画、小活只亮对勾、每一步至少 1.5 秒且只演最新一步、回合结束不等、步骤动画停在收尾站姿 8 秒后重演）、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、回来时交代一件事（停着时来的新结果回来后挥手一次、别处读过的不挥手、回来时重新读列表、本地控制台不带任务名、离开时完成回来后对勾 10 秒且不放烟花、出错与新结果同时只交代出错、出错不被另一段对话的完成盖掉、屏保盖着而伙伴没停时也记下、同一回合的下一步不清、回合进行中回来留到回合结束交代（新结果挥手不放烟花、出错优先）、12 小时上限、下一回合开始时清掉回合的结束而保留新结果）、卸载时取消进行中的动画、清单读不到时重试、撤下屏保的那一下让伙伴继续、点击与拖动、点击是问她（等确认时打开 VNAS、有新结果时打开结果并读掉、共用屏幕只说有新结果、回合中说第几步用了多久且不换动作、出错时打开 VNAS、没事时只播点击回应、说的话交给读屏）、设备出事的红点（严重时亮、睡着也亮、好了就灭、原因交给读屏、点击先于等确认打开设置的概览、睡着时点击照旧叫醒）、安静（按 Esc 入睡并记在本设备、刷新后直接从睡眠循环开始、设置选回正常时醒来、VNAS 在忙只显示小点、点醒后等“起来”播完再交代回合的结束、隐藏时不读清单也不显示）、让开当前窗口（打开窗口、放下、减少动态效果、被点或上锁打断后再查、等 VNAS 的移动落地、页面缩放、不往窗口上走）（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；动画取不到、解码失败或 `play()` 被拒时重试与往下走、冻结期间不重试，命令与动画链的回答（[`animationChain.test.ts`](../../web/src/companion/animationChain.test.ts)、[`cardAnimation.test.tsx`](../../web/src/companion/cardAnimation.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理、大活的判定、确认卡片之后保持等待动画、每一步的动画与短话、共用屏幕不说对象（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)、[`behaviors.test.ts`](../../web/src/companion/behaviors.test.ts)）；红点的原因：只认严重、取第一项严重原因、不认识的严重原因、未知与连接中断时没有（[`health.test.ts`](../../web/src/companion/health.test.ts)）；让开时去哪里（[`stepAside.test.ts`](../../web/src/companion/stepAside.test.ts)）；桌面在窗口打开、换到最上、移动、缩放、最大化与还原、最小化、关闭和显示桌面时告诉伙伴当前窗口（[`App.test.tsx`](../../web/src/App.test.tsx)）；`position` 让开后的回答（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；随机动作与点击的动画池（点击只有点击回应，[`animations.test.ts`](../../web/src/companion/animations.test.ts)）；命令的执行与回答、`anim` 的两段等待、锁、睡觉、成员让它安静时不能 `wake` 与 `lock`、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁、提示没发出去时撤回这一轮（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记与撤下屏保的那一下输入的通知（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名与这台设备上的伙伴（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）。
 - 产品服务：配对、只发给发起本回合的窗口、频率、超时、回合结束与窗口离开的结算、锁的释放、参数的规范化与拒绝、停止回合与实例退出后的配对、晚到的子任务事件（[`companion_test.go`](../../internal/assistantapi/companion_test.go)）；每个 UID 的连接数、请求头大小、读取与空闲时限（[`companion_socket_test.go`](../../internal/assistantapi/companion_socket_test.go)）；动画清单、按池取动画与缓存（[`handler_test.go`](../../internal/webui/handler_test.go)）。
 - 伙伴服务器：结果从不是错误、参数原样转给产品服务、编不成 UTF-8 的参数回答 `bad-request`、没有套接字时回答 `no_desktop`（[`test_companion_mcp.py`](../../ai/tests/test_companion_mcp.py)）。`make ai-sdk-test` 在 `make check-steps` 中，所以 CI 也运行：它在 `build/companion-mcp-sdk` 里按 [`companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 装 Hermes 锁定的 MCP SDK（带哈希，首次运行从 PyPI 下载）后运行这组测试，设 `ANAS_COMPANION_MCP_SDK=required`，缺 SDK 即失败；Hermes 升级时按这个文件头的命令重新生成。带运行环境的系统测试另用运行环境自带的 SDK 运行同一组测试。
 - 沙箱与审批：系统测试（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)，由 [`scripts/system-test.sh`](../../scripts/system-test.sh) 调用）断言伙伴套接字 `/run/a-nas-companion-assistant/assistant.sock` 只绑进 `anas-assistant@<成员>`，不绑进 `anas-assistant-cron@` 与 `anas-assistant-curator@`，成员在沙箱外连不上；带运行环境时还断言托管配置里 `mcp_servers.anas.trust` 为 `untrusted`、`mcp_servers.companion.trust` 为 `full`，伙伴工具不经审批运行，没有 VNAS 窗口时回答没有在用的桌面。[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh) 是 spike 的手动检查，不在门禁里：装好的审批时限是一天（86400 秒），要用 `SPIKE_APPROVAL_TIMEOUT=20 ai/assistant-spike/run.sh sandbox` 建沙箱后运行。
