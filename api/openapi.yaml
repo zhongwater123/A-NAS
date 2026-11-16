@@ -39,7 +39,9 @@ paths:
   /api/v1/users/{userId}/viewing: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1viewing" }
   /api/v1/viewing/{grantId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1viewing~1{grantId}" }
   /api/v1/users: { $ref: "paths/accounts.yaml#/~1api~1v1~1users" }
-  /api/v1/users/{userId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}" }
+  /api/v1/users/{userId}/disable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1disable" }
+  /api/v1/users/{userId}/enable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1enable" }
+  /api/v1/users/{userId}/deletion: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1deletion" }
   /api/v1/users/{userId}/credential: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1credential" }
   /api/v1/local-display: { $ref: "paths/desktop.yaml#/~1api~1v1~1local-display" }
   /api/v1/wallpaper: { $ref: "paths/desktop.yaml#/~1api~1v1~1wallpaper" }
@@ -383,6 +385,9 @@ components:
     NewUsername: { $ref: "components/accounts.yaml#/schemas/NewUsername" }
     NewPassword: { $ref: "components/accounts.yaml#/schemas/NewPassword" }
     User: { $ref: "components/accounts.yaml#/schemas/User" }
+    Deletion: { $ref: "components/accounts.yaml#/schemas/Deletion" }
+    DeletionChoice: { $ref: "components/accounts.yaml#/schemas/DeletionChoice" }
+    DeletionRequest: { $ref: "components/accounts.yaml#/schemas/DeletionRequest" }
     Profile: { $ref: "components/accounts.yaml#/schemas/Profile" }
     ProfileChange: { $ref: "components/accounts.yaml#/schemas/ProfileChange" }
     PasswordChange: { $ref: "components/accounts.yaml#/schemas/PasswordChange" }

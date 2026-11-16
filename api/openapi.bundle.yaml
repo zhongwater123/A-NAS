@@ -502,8 +502,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
-  /api/v1/users/{userId}:
-    delete:
+  /api/v1/users/{userId}/disable:
+    post:
       operationId: disableUser
       x-anas-posture: admin
       parameters:
@@ -518,6 +518,70 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/users/{userId}/enable:
+    post:
+      operationId: enableUser
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Enable a disabled account again with the password it had. Web sign-in comes back first; if the Host Agent cannot enable SMB access or the assistant, the response is 503 host_enable_pending and enabling again, or the next start's identity synchronization, finishes them. An account waiting to be deleted answers 409 deletion_pending.
+      responses:
+        '204':
+          description: User enabled
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/users/{userId}/deletion:
+    put:
+      operationId: scheduleUserDeletion
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Delete a disabled member's account after 30 days, with the administrator's password again (403 reauthentication_failed). Until then nothing of it changes and the deletion can be cancelled. Its personal space and private photo library each go to the administrator or are deleted, as chosen. An account that is not disabled answers 409 account_not_disabled, one already waiting 409 deletion_pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionRequest'
+      responses:
+        '200':
+          description: The account with its deletion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: cancelUserDeletion
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Keep an account that is waiting to be deleted; it stays disabled. Once its data is being removed it answers 409 deletion_started.
+      responses:
+        '204':
+          description: Deletion cancelled
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
   /api/v1/users/{userId}/credential:
     patch:
@@ -9471,6 +9535,53 @@ components:
         avatarVersion:
           type: string
           description: Names the current avatar; absent when the user has none. See getAvatar.
+        deletion:
+          $ref: '#/components/schemas/Deletion'
+    Deletion:
+      type: object
+      additionalProperties: false
+      description: A disabled account an administrator asked to delete; only listUsers and scheduleUserDeletion show it.
+      required:
+        - dueAt
+        - personalSpace
+        - library
+        - started
+      properties:
+        dueAt:
+          type: string
+          format: date-time
+          description: When its data is removed for good.
+        personalSpace:
+          $ref: '#/components/schemas/DeletionChoice'
+        library:
+          $ref: '#/components/schemas/DeletionChoice'
+        started:
+          type: boolean
+          description: Its data is being removed; the deletion can no longer be cancelled.
+        retrying:
+          type: boolean
+          description: The last attempt to remove it failed; it is tried again.
+    DeletionChoice:
+      type: string
+      enum:
+        - transfer
+        - delete
+      description: 'transfer: the administrator who deleted the account receives it; delete: it is deleted with the account.'
+    DeletionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+        - personalSpace
+        - library
+      properties:
+        password:
+          type: string
+          description: The administrator's own password.
+        personalSpace:
+          $ref: '#/components/schemas/DeletionChoice'
+        library:
+          $ref: '#/components/schemas/DeletionChoice'
     Profile:
       type: object
       additionalProperties: false
@@ -9524,6 +9635,7 @@ components:
             - admin_library_viewing
             - credential_reset
             - assistant_task
+            - account_deleted
         actorUsername:
           type: string
         reason:
@@ -9531,6 +9643,12 @@ components:
         expiresAt:
           type: string
           format: date-time
+        folder:
+          type: string
+          description: 'account_deleted: the folder of the administrator''s personal space that holds the deleted account''s files.'
+        album:
+          type: string
+          description: 'account_deleted: the album of the administrator''s private library that holds its photos.'
         task:
           type: object
           description: 'The run an assistant_task notification tells of: one of the member''s scheduled tasks ran. At most one waits per task; a run that answered only Hermes''s silence marker is not shown.'
@@ -15164,6 +15282,7 @@ components:
         - images
         - version
         - createdBy
+        - createdById
         - createdAt
         - resolved
         - comments
@@ -15185,6 +15304,9 @@ components:
         createdBy:
           type: string
           description: Username of the account that filed the item.
+        createdById:
+          type: string
+          description: The account's ID, which a later account never shares, unlike a deleted account's name.
         createdAt:
           type: string
           format: date-time
@@ -15215,6 +15337,7 @@ components:
         - images
         - version
         - createdBy
+        - createdById
         - createdAt
       properties:
         id:
@@ -15234,6 +15357,9 @@ components:
         createdBy:
           type: string
           description: Username of the account that wrote the comment.
+        createdById:
+          type: string
+          description: The account's ID, which a later account never shares, unlike a deleted account's name.
         createdAt:
           type: string
           format: date-time

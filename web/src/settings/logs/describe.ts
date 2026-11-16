@@ -58,6 +58,10 @@ export function originLabel(detail?: string): string | undefined {
   return undefined;
 }
 
+function handoverLabel(choice?: string): string {
+  return choice === "transfer" ? "转给管理员" : "一并删除";
+}
+
 const signInFailures: Record<string, string> = {
   invalid_password: "密码错误",
   unknown_user: "账号不存在",
@@ -306,6 +310,30 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [subject, "的 Linux 账号与系统中已有的账号冲突"], meta: ["需要按运行手册处理"], tone: "danger" };
     case "user.disabled":
       return { parts: [actor, "禁用了", subject, "的账号"], meta: [], tone: "warning" };
+    case "user.enabled":
+      return { parts: [actor, "重新启用了", subject, "的账号"], meta: [] };
+    // A deleted account is gone from the directory; the detail keeps its name.
+    case "user.deletion_scheduled":
+      return {
+        parts: [actor, "删除了账号", name(detail.username || "（未知）")],
+        meta: [
+          `个人空间${handoverLabel(detail.personalSpace)}`,
+          `私有图库${handoverLabel(detail.library)}`,
+          "30 天后执行，此前可以撤销",
+        ],
+        tone: "danger",
+      };
+    case "user.deletion_cancelled":
+      return { parts: [actor, "撤销了删除账号", name(detail.username || "（未知）")], meta: ["账号仍为禁用"] };
+    case "user.deleted":
+      return {
+        parts: ["账号", name(detail.username || "（未知）"), "已彻底删除"],
+        meta: [
+          detail.folder ? `文件转入“${detail.folder}”` : "",
+          detail.album ? `照片转入“${detail.album}”相册` : "",
+        ].filter(Boolean),
+        tone: "danger",
+      };
     case "user.credential_reset":
       return { parts: [actor, "重置了", subject, "的密码"], meta: ["对方下次登录时需要设置新密码"], tone: "warning" };
     case "user.password_changed":

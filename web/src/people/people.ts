@@ -72,9 +72,11 @@ export function usePeople(): People {
   );
 }
 
-// person completes what a record knows about an account with its profile.
+// person completes what a record knows about an account with its profile. A
+// record that names its account's ID never falls back to the name: a deleted
+// account's name may belong to a newer account.
 export function person(people: People, known: Person): Person {
-  const profile = (known.id && people.byId(known.id)) || people.byUsername(known.username);
+  const profile = known.id ? people.byId(known.id) : people.byUsername(known.username);
   return profile ? { ...known, ...profile } : known;
 }
 

@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { APIError } from "../api/client";
 import { PersonAvatar } from "../people/PersonAvatar";
-import { nameOf, person, usePeople } from "../people/people";
+import { displayName, nameOf, person, usePeople } from "../people/people";
 import {
   addComment,
   deleteComment,
@@ -245,10 +245,15 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
 
   return (
     <li className={styles.fbComment}>
-      <PersonAvatar who={person(people, { username: comment.createdBy })} className={styles.fbAvatar} />
+      <PersonAvatar
+        who={person(people, { id: comment.createdById, username: comment.createdBy })}
+        className={styles.fbAvatar}
+      />
       <div className={styles.fbCommentBody}>
         <div className={styles.fbCommentHead}>
-          <span className={styles.fbAuthor}>{nameOf(people, comment.createdBy)}</span>
+          <span className={styles.fbAuthor}>
+            {displayName(person(people, { id: comment.createdById, username: comment.createdBy }))}
+          </span>
           <time dateTime={comment.createdAt} title={fullTime(comment.createdAt)}>
             {describeTime(comment.createdAt)}
           </time>

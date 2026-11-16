@@ -54,9 +54,12 @@ type Item struct {
 	Images []Image `json:"images"`
 	// Version counts edits to the text and images, so an edit made from a
 	// stale copy is refused instead of overwriting someone else's.
-	Version   int64     `json:"version"`
-	CreatedBy string    `json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
+	Version   int64  `json:"version"`
+	CreatedBy string `json:"createdBy"`
+	// CreatedByID names the account, whose name a later account may take
+	// after it is deleted.
+	CreatedByID string    `json:"createdById"`
+	CreatedAt   time.Time `json:"createdAt"`
 	// UpdatedBy and UpdatedAt record the latest edit to the text or images.
 	UpdatedBy  string     `json:"updatedBy,omitempty"`
 	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
@@ -179,7 +182,7 @@ CREATE INDEX IF NOT EXISTS comment_images_comment ON comment_images(comment_id, 
 // List returns every item, newest first, with its comments and without image
 // content.
 func (s *Store) List(ctx context.Context) ([]Item, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, text, version, created_by, created_at, updated_by, updated_at, resolved_by, resolved_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, text, version, created_by, created_by_id, created_at, updated_by, updated_at, resolved_by, resolved_at
 FROM items ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, err
@@ -338,7 +341,7 @@ type queryer interface {
 }
 
 func (s *Store) get(ctx context.Context, q queryer, id string) (Item, error) {
-	item, err := scanItem(q.QueryRowContext(ctx, `SELECT id, text, version, created_by, created_at, updated_by, updated_at, resolved_by, resolved_at
+	item, err := scanItem(q.QueryRowContext(ctx, `SELECT id, text, version, created_by, created_by_id, created_at, updated_by, updated_at, resolved_by, resolved_at
 FROM items WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Item{}, ErrNotFound
@@ -374,7 +377,7 @@ FROM items WHERE id = ?`, id))
 func scanItem(row interface{ Scan(...any) error }) (Item, error) {
 	item := Item{Images: []Image{}, Comments: []Comment{}}
 	var createdAt, updatedAt, resolvedAt string
-	if err := row.Scan(&item.ID, &item.Text, &item.Version, &item.CreatedBy, &createdAt, &item.UpdatedBy, &updatedAt, &item.ResolvedBy, &resolvedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.Text, &item.Version, &item.CreatedBy, &item.CreatedByID, &createdAt, &item.UpdatedBy, &updatedAt, &item.ResolvedBy, &resolvedAt); err != nil {
 		return Item{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)

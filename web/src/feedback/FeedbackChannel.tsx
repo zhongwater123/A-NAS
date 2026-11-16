@@ -23,7 +23,7 @@ import {
 
 import { APIError } from "../api/client";
 import { PersonAvatar } from "../people/PersonAvatar";
-import { nameOf, person, usePeople } from "../people/people";
+import { displayName, nameOf, person, usePeople } from "../people/people";
 import {
   createFeedback,
   deleteFeedback,
@@ -550,8 +550,13 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           </ul>
         )}
         <div className={styles.fbMeta}>
-          <PersonAvatar who={person(people, { username: item.createdBy })} className={styles.fbAvatar} />
-          <span className={styles.fbAuthor}>{nameOf(people, item.createdBy)}</span>
+          <PersonAvatar
+            who={person(people, { id: item.createdById, username: item.createdBy })}
+            className={styles.fbAvatar}
+          />
+          <span className={styles.fbAuthor}>
+            {displayName(person(people, { id: item.createdById, username: item.createdBy }))}
+          </span>
           <time dateTime={item.createdAt} title={fullTime(item.createdAt)}>
             {describeTime(item.createdAt)}
           </time>
