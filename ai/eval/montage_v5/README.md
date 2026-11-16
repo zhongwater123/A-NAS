@@ -96,6 +96,12 @@ CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-time-1 python cut.py pj
 CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-free-1 python cut.py pj
 ```
 
+换一条用户指令（`CUT_REQUEST`，替换 `cut.CASES` 里每组的指令；`CUT_ORDER=free` 仍作用于第一步）：
+
+```bash
+CUT_REQUEST="剪辑一个有叙事性的高光集合" CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-story-1 python cut.py pj
+```
+
 对比几条成片：
 
 ```bash

@@ -55,18 +55,20 @@ SUMMARY_CHARS = 80   # a vlog card holds more than a film's: 40 characters left 
 # is seen (three wordings tried on 12 cards, three runs each): every boat card 船上, the helicopter's 飞机或直升机里
 # (they had been drones), no drone written anywhere; but a lake seen from the shore is still taken for a boat
 # (5 of 6), its summary then a boat trip. Data: 剪辑对比/描述随机性（2026-11-16）/.
-CAMERAS = ["地面", "车里", "船上", "飞机或直升机里", "无人机航拍", "水里", "看不出"]
+CAMERAS = ["地面", "室内", "车里", "船上", "飞机或直升机里", "无人机航拍", "水里", "看不出"]
 PROMPT = (
     "下面 {count} 张图按时间先后取自同一段视频（共 {duration:.0f} 秒），每张图前标了编号和它在这段里的秒数。"
     "请输出 JSON：\n"
-    "camera：先判断这一段是在哪里拍的：地面、车里、船上、飞机或直升机里、无人机航拍、水里，看不出写看不出。"
-    "只按画面里看得见的东西判断：看得见车窗、车头是车里；看得见舷窗、窗框、玻璃反光或桨叶的影子是飞机或直升机里；"
+    "camera：先判断这一段是在哪里拍的：地面（室外）、室内（房间、餐厅、商店里）、车里、船上、飞机或直升机里、无人机航拍、水里，看不出写看不出。"
+    "只按画面里看得见的东西判断：看得见车窗、车头、座椅是车里，在房间、餐厅、商店里隔着窗户拍是室内；看得见舷窗、窗框、玻璃反光或桨叶的影子是飞机或直升机里；"
     "看得见船舷、船头、甲板、栏杆或同船的人是船上；看得见岸、路、栈桥或站在地上的脚下是地面；"
     "只看到水面、山和天空，看不到这些的写看不出，不要猜；看不出时 summary 和 beats 也不要写在船上或航拍；\n"
     "beats：见下面的分组说明；\n"
     "{process}"
     "summary：写完 {before} 再写，按 beats 一句话概括这一段，不超过 {chars} 字，beats 里的关键人物和物件要写到；\n"
-    "scene 是地点。"
+    # 2026-11-16: with camera asked first, the 4B copied it into scene (地面, 车里) for 51 of 品杰's 116 cards
+    # and 25 of Insta360's 33.
+    "scene 是这一段所在的地方，写具体的地点或环境（如街道、餐厅里、教堂前、湖边、峡湾），不要写机位（地面、车里、船上）。"
     "片头片尾字幕、制作人员名单、只有文字或黑屏的画面，what 要写明是字幕、文字或黑屏。\n"
     "这类素材是「{name}」。看片时注意：\n{focus}\n"
 )

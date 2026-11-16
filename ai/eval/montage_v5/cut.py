@@ -37,7 +37,9 @@ from montage import render
 # from, or plain ones (people mostly small, from behind).
 CASES = {"ne": ("newzealand", "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然", 90, "旅行", "新西兰"),
          "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，场景之间衔接自然", 90, "旅行", "川西"),
-         "pj": ("pinjie", "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然", 90, "旅行", "新西兰（品杰手机）")}
+         "pj": ("pinjie", "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然", 90, "旅行", "新西兰（品杰手机）"),
+         # 2026-11-16: 31 flat 4K videos from an Insta360 camera, one day (2026-11-14), 5.4 minutes.
+         "is": ("insta360", "按拍摄时间顺序剪一条旅行 vlog，场景之间衔接自然", 90, "旅行", "Insta360")}
 
 # Each run of a case is a take: CUT_TAG ("-1", "-2") names its files.
 TAG = os.environ.get("CUT_TAG", "")
@@ -47,6 +49,10 @@ TAG = os.environ.get("CUT_TAG", "")
 FREE_ORDER = os.environ.get("CUT_ORDER") == "free"
 if FREE_ORDER:
     CASES = {k: (v[0], v[1].replace("按拍摄时间顺序", ""), *v[2:]) for k, v in CASES.items()}
+# Another request for every case (CUT_REQUEST, 2026-11-16: "a highlight reel that tells a story"); the order
+# switch above still applies to step one.
+if os.environ.get("CUT_REQUEST"):
+    CASES = {k: (v[0], os.environ["CUT_REQUEST"], *v[2:]) for k, v in CASES.items()}
 ORDER_ASKS = (("开头、中间、结尾按拍摄时间先后安排；", ""), ("检查内容和先后顺序", "检查内容"),
               ("，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：", "："),
               # 2026-11-11 (the user's wording, its example too): free order cut 新西兰 back and forth between
@@ -200,7 +206,7 @@ def place(answer):
     (tag_beats.CAMERAS, descriptions since 2026-11-16): pj-038's fjord from a boat had gone among the flight's
     shots as a drone's."""
     camera = answer.get("camera", "")
-    return answer.get("scene", "") + (f"（{camera}）" if camera not in ("", "地面", "看不出") else "")
+    return answer.get("scene", "") + (f"（{camera}）" if camera not in ("", "地面", "室内", "看不出") else "")
 
 
 def usable_cards(case):
