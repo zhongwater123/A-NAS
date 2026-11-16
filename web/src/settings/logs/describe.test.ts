@@ -235,6 +235,16 @@ describe("activity sentences", () => {
         event({ category: "system", action: "system.update.install", actor: alice, detail: `{"version":"${next}"}` }),
       ),
     ).toBe("alice 开始安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
+    expect(
+      sentence(
+        event({
+          category: "system",
+          action: "system.update.install",
+          system: true,
+          detail: JSON.stringify({ version: next, by: "automatic" }),
+        }),
+      ),
+    ).toBe("系统 请求安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
     const back = describeActivity(
       event({
         category: "system",

@@ -99,7 +99,8 @@ web-test: web-install
 THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
 
 web-build: web-install
-	cd web && $(NPM) run build
+	@# The page compares the version it was built at with the installed one (docs/specs/system-update.md).
+	cd web && VITE_ANAS_VERSION='$(VERSION)' $(NPM) run build
 	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
 		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
 			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \
@@ -188,6 +189,7 @@ ops-check:
 	@# The system update runs as its own unit, which the timer and the Host Agent start (docs/specs/system-update.md).
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent update' deploy/systemd/system/anas-update.service
 	grep -Fqx 'wants timers.target anas-update.timer' scripts/build-packages.sh
+	grep -Fqx 'wants paths.target anas-update.path' scripts/build-packages.sh
 	grep -Fqx 'd /var/lib/a-nas-update 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
