@@ -22,10 +22,10 @@ var (
 // Comment is one reply under an item. Like items, any account may edit or
 // delete any comment; the latest editor is recorded.
 type Comment struct {
-	ID        string     `json:"id"`
-	Text      string     `json:"text"`
-	Images    []Image    `json:"images"`
-	Version   int64      `json:"version"`
+	ID          string     `json:"id"`
+	Text        string     `json:"text"`
+	Images      []Image    `json:"images"`
+	Version     int64      `json:"version"`
 	CreatedBy   string     `json:"createdBy"`
 	CreatedByID string     `json:"createdById"`
 	CreatedAt   time.Time  `json:"createdAt"`

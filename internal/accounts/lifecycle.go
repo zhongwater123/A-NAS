@@ -69,6 +69,7 @@ type deletionDetail struct {
 	Username      string         `json:"username"`
 	PersonalSpace DeletionChoice `json:"personalSpace,omitempty"`
 	Library       DeletionChoice `json:"library,omitempty"`
+	DueAt         *time.Time     `json:"dueAt,omitempty"`
 	Folder        string         `json:"folder,omitempty"`
 	Album         string         `json:"album,omitempty"`
 }
@@ -195,7 +196,7 @@ ON CONFLICT(user_id) DO NOTHING`, userID, actor.ID, formatTime(now), formatTime(
 		}
 		return User{}, ErrNotDisabled
 	}
-	detail := deletionDetail{Username: user.Username, PersonalSpace: request.PersonalSpace, Library: request.Library}
+	detail := deletionDetail{Username: user.Username, PersonalSpace: request.PersonalSpace, Library: request.Library, DueAt: &deletion.DueAt}
 	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.deletion_scheduled", "user", userID, detail.String()); err != nil {
 		return User{}, err
 	}

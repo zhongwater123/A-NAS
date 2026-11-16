@@ -52,7 +52,9 @@ func configuredShares(ctx context.Context, config Config, users *accounts.Servic
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		remove := func(ctx context.Context, userID string) error { return accountremoval.Request(ctx, config.SharesSocket, userID) }
+		remove := func(ctx context.Context, userID string) error {
+			return accountremoval.Request(ctx, config.SharesSocket, userID)
+		}
 		return shareservice.Proxy(config.SharesSocket, logger), remove, closeBridge, nil
 	}
 	members := func(ctx context.Context) ([]accounts.Profile, error) {

@@ -319,7 +319,7 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
         meta: [
           `个人空间${handoverLabel(detail.personalSpace)}`,
           `私有图库${handoverLabel(detail.library)}`,
-          "30 天后执行，此前可以撤销",
+          detail.dueAt ? `${formatDateTime(detail.dueAt)} 执行，此前可以撤销` : "到期执行，此前可以撤销",
         ],
         tone: "danger",
       };

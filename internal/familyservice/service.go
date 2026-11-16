@@ -175,7 +175,7 @@ func Run(parent context.Context, config Config) error {
 	routes.Handle(accountremoval.Path, served)
 	routes.Handle("/", authenticate(config.Sessions, config.Logger, served))
 	server := &http.Server{
-		Handler: routes,
+		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20,
 	}
 	serveErr := make(chan error, 1)

@@ -71,29 +71,8 @@ func (s *Service) RunDeletions(ctx context.Context, steps []DeletionStep, logger
 // runDueDeletions removes every due account and says how long to wait before
 // looking again.
 func (s *Service) runDueDeletions(ctx context.Context, steps []DeletionStep, logger *slog.Logger) time.Duration {
-	wait := deletionCheck
-	now := s.now().UTC()
-	rows, err := s.store.db.QueryContext(ctx, "SELECT user_id, due_at FROM account_deletions ORDER BY due_at, user_id")
+	due, wait, err := s.dueDeletions(ctx)
 	if err != nil {
-		logger.ErrorContext(ctx, "account deletions could not be read", "error", err)
-		return deletionRetry
-	}
-	var due []string
-	for rows.Next() {
-		var userID, dueAt string
-		if err := rows.Scan(&userID, &dueAt); err != nil {
-			_ = rows.Close()
-			logger.ErrorContext(ctx, "account deletions could not be read", "error", err)
-			return deletionRetry
-		}
-		at, _ := time.Parse(time.RFC3339Nano, dueAt)
-		if at.After(now) {
-			wait = min(wait, at.Sub(now))
-			continue
-		}
-		due = append(due, userID)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		logger.ErrorContext(ctx, "account deletions could not be read", "error", err)
 		return deletionRetry
 	}
@@ -119,6 +98,32 @@ func (s *Service) runDueDeletions(ctx context.Context, steps []DeletionStep, log
 		logger.InfoContext(ctx, "account deleted", "user_id", userID)
 	}
 	return max(wait, time.Second)
+}
+
+// dueDeletions lists the accounts whose deletion is due, and how long until
+// the next one is, at most deletionCheck.
+func (s *Service) dueDeletions(ctx context.Context) ([]string, time.Duration, error) {
+	wait := deletionCheck
+	now := s.now().UTC()
+	rows, err := s.store.db.QueryContext(ctx, "SELECT user_id, due_at FROM account_deletions ORDER BY due_at, user_id")
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var due []string
+	for rows.Next() {
+		var userID, dueAt string
+		if err := rows.Scan(&userID, &dueAt); err != nil {
+			return nil, 0, err
+		}
+		at, _ := time.Parse(time.RFC3339Nano, dueAt)
+		if at.After(now) {
+			wait = min(wait, at.Sub(now))
+			continue
+		}
+		due = append(due, userID)
+	}
+	return due, wait, rows.Err()
 }
 
 // removeAccount runs the steps that remain for one due account, then removes

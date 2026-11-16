@@ -47,7 +47,9 @@ func runFamilyService(logger *slog.Logger) error {
 // development volume, asking the photo API it also serves here.
 func configuredFamily(config Config, users *accounts.Service, photoAPI http.Handler, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
-		remove := func(ctx context.Context, userID string) error { return accountremoval.Request(ctx, config.FamilySocket, userID) }
+		remove := func(ctx context.Context, userID string) error {
+			return accountremoval.Request(ctx, config.FamilySocket, userID)
+		}
 		return familyservice.Proxy(config.FamilySocket, logger), remove, func() {}, nil
 	}
 	root := filepath.Join(config.DataMount, "family")
