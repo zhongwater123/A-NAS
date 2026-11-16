@@ -196,8 +196,8 @@ type Submission struct {
 	// same answer harmless.
 	ID string
 	// Kind is "score", "skip" (cannot judge) or "flag" (something is wrong
-	// with the photo); only a score has Score, overall in hundredths, 0 to
-	// MaxScore, and Scores, the batch's other dimensions alike.
+	// with the photo); only a score has Score, in hundredths, 0 to
+	// MaxScore, of the batch's first 打分项, and Scores, its others alike.
 	Kind   string
 	Score  *int
 	Scores map[string]int
@@ -238,29 +238,22 @@ func (submission Submission) validate() error {
 }
 
 // scoresDimensions checks that a score answers exactly the batch's
-// dimensions besides overall, which is in Score.
+// dimensions: the first in Score, the others in Scores.
 func (submission Submission) scoresDimensions(dimensions []string) error {
 	if submission.Kind != "score" {
 		return nil
 	}
-	extra := extraDimensions(dimensions)
-	if len(submission.Scores) != len(extra) {
-		return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
-	}
-	for _, dimension := range extra {
+	later := laterDimensions(dimensions)
+	answered := len(submission.Scores) == len(later)
+	for _, dimension := range later {
 		if _, ok := submission.Scores[dimension]; !ok {
-			return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
+			answered = false
 		}
 	}
-	return nil
-}
-
-func dimensionNames(ids []string) []string {
-	names := make([]string, len(ids))
-	for i, id := range ids {
-		names[i] = DimensionName(id)
+	if !answered {
+		return invalid("this batch scores %s, the first in score", strings.Join(dimensions, ", "))
 	}
-	return names
+	return nil
 }
 
 // Result tells the rater how many photos of the batch they answered.

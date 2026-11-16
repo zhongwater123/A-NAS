@@ -115,6 +115,28 @@
         content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string } } } } } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/modules/scoring/admin/dimensions:
+  get:
+    operationId: listScoringDimensions
+    summary: "Every 打分项 a batch can choose: the built-in ones, then the custom ones, oldest first"
+    x-anas-posture: admin
+    responses:
+      "200":
+        description: The 打分项
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/scoring.yaml#/schemas/ScoringDimension" } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createScoringDimension
+    summary: "Make a custom 打分项 that every batch from now on can choose; dimension_exists (409) when its name is taken"
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringDimensionInput" } } } }
+    responses:
+      "201": { description: The new 打分项, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringDimension" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/admin/batches:
   get:
     operationId: listScoringAdminBatches
