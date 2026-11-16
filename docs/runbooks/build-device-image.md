@@ -76,13 +76,13 @@
      /usr/lib/a-nas/release/postinst configure "$old"
      ```
    - 新的内容随产品发布时，先更新内容，再更新产品：`/usr/lib/systemd/systemd-sysupdate components` 列出各种内容，`--component=content-<种类> update` 取用一种，然后 `systemd-sysext refresh`。上一版内容仍并排合并，正在运行的产品照常找到它自己的那一版。
-   - 带来新基础镜像的推送（`os/` 中有新的序号，要重启）：产品与基础镜像在同一次重启时换上。先记下现在哪些检查不通过，作为健康检查的基线；再复制数据库，取用产品（不刷新）与基础镜像；最后重启：
+   - 带来新基础镜像的推送（`os/` 中有新的序号，要重启）：产品与基础镜像在同一次重启时换上。先记下现在哪些检查不通过，作为健康检查的基线；再取用产品（不刷新）与基础镜像；最后复制数据库并重启：
      ```bash
      /usr/lib/a-nas-image/health record
-     old=$(. /usr/lib/extension-release.d/extension-release.a-nas-product && echo "$A_NAS_VERSION")
-     /usr/lib/a-nas/release/preinst upgrade "$old"
      /usr/lib/systemd/systemd-sysupdate --component=product update
      /usr/lib/systemd/systemd-sysupdate update
+     old=$(. /usr/lib/extension-release.d/extension-release.a-nas-product && echo "$A_NAS_VERSION")
+     /usr/lib/a-nas/release/preinst upgrade "$old"
      systemctl reboot
      ```
      新版本开机通过健康检查后才算装好：没有出现基线中没有的 `FAIL`。`ls /efi/EFI/Linux` 中它的 UKI 去掉了 `+<剩余>-<已用>` 的计数。
