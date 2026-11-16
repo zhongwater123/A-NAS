@@ -102,6 +102,11 @@
   pointer-events: none;
 }
 
+/* Facing right, dsh-pet mirrors the clip (its video), not the stage: the feet, and the dot, are on the other side. */
+.layer[data-companion-trouble] :global(.dsh-pet-root[data-facing="right"] .dsh-pet-stage)::after {
+  left: calc(50% - var(--dsh-pet-size, 240px) * 0.11);
+}
+
 /*
  * A line the companion says keeps its line breaks (a click's answer puts what to do on the second
  * line; VNAS's lines may break too), which dsh-pet's bubble row would run together.

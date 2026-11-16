@@ -1,4 +1,4 @@
-// What the dot at the companion's feet says (docs/specs/virtual-companion.md, 出事才亮的小点): the
+// What the dot at the companion's feet says (docs/specs/virtual-companion.md, 设备出事时脚边亮一个红点): the
 // first critical reason of the system health the desktop already reads (docs/specs/system-health.md),
 // worded as Settings' overview words it. Nothing when the system is not critical: a warning such as a
 // warm disk or a volume 90% full is Settings' to tell, not a dot that would be up most days.

@@ -1133,17 +1133,24 @@ function Card({
   }, [quiet, asleep, clipSpeed]);
 
   // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
-  // first that holds: the device is in a critical trouble not told yet on this page (what is wrong, and
+  // first that holds: the device is in a critical trouble not told yet since it came (what is wrong, and
   // Settings' overview comes up, where its health and what to do are); a card of this window's turn waits for
   // the member (the VNAS window comes up with the card in view); a result of a scheduled task is unread (it
   // opens, as its notice's 查看结果 does); a turn of this window is under way (its step's line, how many steps
   // and how long, with no clip); a turn just ended in an error, its cross still up (the VNAS window comes up);
   // the trouble told before, still there (told again). A trouble that stays for days does not stand in front
-  // of every card. With nothing to tell it plays a click response, as the card does. What it says also goes to the screen reader. A drag let go, a sleeping or
-  // locked companion are the card's own. On the screen the family shares, no task's name or object.
+  // of every card. With nothing to tell it plays a click response, as the card does. What it says also goes to
+  // the screen reader. A drag let go, a sleeping or locked companion are the card's own. On the screen the
+  // family shares, no task's name or object.
   const [spoken, setSpoken] = useState("");
-  /** The trouble last told on a click (its key): it waits behind the rest until another trouble comes. */
+  /**
+   * The trouble last told on a click (its key): it waits behind the rest until another trouble comes, or
+   * this one goes and comes back.
+   */
   const toldTrouble = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trouble) toldTrouble.current = null;
+  }, [trouble]);
 
   const ask = useRef<() => boolean>(() => false);
   useEffect(() => {

@@ -1739,6 +1739,13 @@ describe("walking, throwing and resting", () => {
       view.rerender(<Companion trouble={{ key: "disk_failing:disk-1", text: "硬盘自检未通过" }} {...openers} />);
       fireEvent.click(pet);
       expect(opened).toEqual({ vnas: 2, runs: [], health: 3 });
+      // A trouble that goes and comes back is told first again.
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 3, runs: [], health: 3 });
+      view.rerender(<Companion {...openers} />);
+      view.rerender(<Companion trouble={{ key: "disk_failing:disk-1", text: "硬盘自检未通过" }} {...openers} />);
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 3, runs: [], health: 4 });
     });
 
     it("brings up VNAS's window at the card that waits for the member", async () => {
