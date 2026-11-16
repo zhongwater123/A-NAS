@@ -60,6 +60,7 @@
 - [2026-10-22：活动记录保留多久](2026-10-22-activity-record-retention.md)
 - [2026-10-30：Web 桌面首屏 JavaScript 上限放宽到 200 kB](2026-10-30-desktop-js-budget.md)
 - [2026-10-30：不调节风扇转速](2026-10-30-no-fan-control.md)
+- [2026-11-16：重新启用与删除账号的做法](2026-11-16-account-deletion.md)
 
 ### 虚拟伙伴
 
