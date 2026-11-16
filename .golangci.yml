@@ -60,6 +60,8 @@ linters:
             - "**/internal/systemdscope/*.go"
             - "**/internal/systemlog/*.go"
             - "**/internal/systemlog/journal/*.go"
+            - "**/internal/systemupdate/*.go"
+            - "**/internal/systemupdate/updater/*.go"
             - "**/internal/taskmanager/*.go"
             - "**/internal/unixmsg/*.go"
             - "**/internal/websearchswitch/*.go"
@@ -101,6 +103,8 @@ linters:
             - "github.com/zhongwater123/A-NAS/internal/systemdscope$"
             - "github.com/zhongwater123/A-NAS/internal/systemlog$"
             - "github.com/zhongwater123/A-NAS/internal/systemlog/journal$"
+            - "github.com/zhongwater123/A-NAS/internal/systemupdate$"
+            - "github.com/zhongwater123/A-NAS/internal/systemupdate/updater$"
             - "github.com/zhongwater123/A-NAS/internal/taskmanager$"
             - "github.com/zhongwater123/A-NAS/internal/unixmsg$"
             - "github.com/zhongwater123/A-NAS/internal/websearchswitch$"
@@ -160,6 +164,7 @@ linters:
             - "!**/internal/systemdscope/*.go"
             - "!**/internal/assistantchanges/*.go"
             - "!**/internal/systemlog/journal/*.go"
+            - "!**/internal/systemupdate/updater/*.go"
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
               desc: the root file broker; use internal/filebroker
@@ -175,6 +180,8 @@ linters:
               desc: the executor runs in the root broker; use filebroker.ErrChange*
             - pkg: "github.com/zhongwater123/A-NAS/internal/systemlog/journal"
               desc: journalctl runs in the Host Agent only
+            - pkg: "github.com/zhongwater123/A-NAS/internal/systemupdate/updater"
+              desc: the update service runs as root in anas-update.service; use internal/systemupdate
             - pkg: "github.com/landlock-lsm/go-landlock"
               desc: the root broker confines its workers
     errcheck:

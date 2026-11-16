@@ -33,23 +33,28 @@ export const thumbWidth = (mark: Pick<Mark, "width" | "height">) =>
 // the needle grow as under a loupe. Above the scale the rater's own latest
 // scores stand as whole thumbnails at their scores, in up to three lanes;
 // those near the needle light up, and hovering one asks the stage to set it
-// beside the photo being scored.
+// beside the photo being scored. Releasing the pointer after picking a value
+// tells the stage, which may move on to the next 打分项.
 export function Ruler({
   value,
+  label,
   marks,
   latest,
   active,
   arriving,
   onChange,
+  onRelease,
   onCompare,
   rulerRef,
 }: {
   value: number;
+  label: string;
   marks: Mark[];
   latest?: string;
   active?: string;
   arriving?: string;
   onChange: (hundredths: number) => void;
+  onRelease?: () => void;
   onCompare: (mark: Mark | undefined) => void;
   rulerRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -81,9 +86,14 @@ export function Ruler({
     else if ((event.target as HTMLElement).closest(`.${styles.scThumb}`)) setHover(undefined);
     else setHover(valueAt(event.clientX));
   };
-  const up = () => {
+  const cancel = () => {
     dragged.current = false;
     setDragging(false);
+  };
+  const up = () => {
+    const picked = dragged.current;
+    cancel();
+    if (picked) onRelease?.();
   };
 
   return (
@@ -92,7 +102,7 @@ export function Ruler({
       className={`${styles.scRuler}${dragging ? ` ${styles.dragging}` : ""}`}
       role="slider"
       tabIndex={0}
-      aria-label="分数"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={5}
       aria-valuenow={value / 100}
@@ -100,7 +110,7 @@ export function Ruler({
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
-      onPointerCancel={up}
+      onPointerCancel={cancel}
       onPointerLeave={() => setHover(undefined)}
     >
       <div className={styles.scBaseline} />

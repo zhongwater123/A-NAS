@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { AppShortcut, Transfer } from "./api.generated";
 import { focusedWindow } from "./desktop/focusedWindow";
+import { resetSystemUpdate } from "./systemupdate/status";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
 import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
@@ -141,6 +142,7 @@ beforeEach(() => {
 afterEach(() => {
   transferStore.reset();
   resetWebSearch();
+  resetSystemUpdate();
   tus.uploads.length = 0;
   vi.useRealTimers();
   vi.restoreAllMocks();

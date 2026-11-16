@@ -226,6 +226,52 @@ describe("activity sentences", () => {
       "你 执行了 backup.started",
     );
   });
+
+  it("describes system updates: who asked, and what the update service did", () => {
+    const next = "1.0.1~rc.6+dev20261113.80+g4e842653a1b2";
+    const before = "1.0.1~rc.6+dev20261112.79+g83bb9db1c0de";
+    expect(
+      sentence(
+        event({ category: "system", action: "system.update.install", actor: alice, detail: `{"version":"${next}"}` }),
+      ),
+    ).toBe("alice 开始安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
+    const back = describeActivity(
+      event({
+        category: "system",
+        action: "system.update.result.rolled-back",
+        system: true,
+        detail: JSON.stringify({ version: next, from: before, by: "automatic", problem: "check" }),
+      }),
+      owner.id,
+    );
+    expect(plainText(back.parts)).toBe(
+      "系统 安装 A-NAS 1.0.1-rc.6 开发版 4e842653 后检查没有通过，已回到 1.0.1-rc.6 开发版 83bb9db1",
+    );
+    expect(back.meta).toEqual(["安装后的检查没有通过", "自动"]);
+    expect(back.tone).toBe("warning");
+    // The first install a device recorded started from no version.
+    expect(
+      sentence(
+        event({
+          category: "system",
+          action: "system.update.result.updated",
+          system: true,
+          detail: JSON.stringify({ version: before, by: "owner" }),
+        }),
+      ),
+    ).toBe("系统 将 A-NAS 更新到 1.0.1-rc.6 开发版 83bb9db1");
+    const settings = describeActivity(
+      event({
+        category: "system",
+        action: "system.update.settings",
+        actor: owner,
+        detail: '{"autoDownload":true,"autoInstall":true,"windowStart":"03:00","windowEnd":"05:00"}',
+      }),
+      owner.id,
+    );
+    expect(plainText(settings.parts)).toBe("你 修改了系统更新设置");
+    expect(settings.meta).toEqual(["自动下载", "自动安装 03:00–05:00"]);
+  });
 });
 
 describe("grouping", () => {

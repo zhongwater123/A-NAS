@@ -71,6 +71,10 @@ const (
 	MaxScore = 500
 	// Recent is how many of a rater's latest scores the ruler shows.
 	Recent = 12
+	// DefaultMinLongEdge is the shortest longer side, in pixels, of a photo
+	// to score; smaller ones are skipped on import. Anchors are exempt: they
+	// are shown, never scored.
+	DefaultMinLongEdge = 2400
 	// maxOriginalBytes skips files no camera writes; the decode budget
 	// bounds the pixels separately.
 	maxOriginalBytes = 1 << 30
@@ -96,18 +100,21 @@ type Options struct {
 	Now       func() time.Time
 	// Random returns a uniform float in [0, 1).
 	Random func() float64
+	// MinLongEdge replaces DefaultMinLongEdge when it is not 0.
+	MinLongEdge int
 }
 
 // Store is the module's state in dir.
 type Store struct {
-	db        *sql.DB
-	dir       string
-	photosDir string
-	photos    Photos
-	logger    *slog.Logger
-	now       func() time.Time
-	random    func() float64
-	wake      chan struct{}
+	db          *sql.DB
+	dir         string
+	photosDir   string
+	photos      Photos
+	logger      *slog.Logger
+	now         func() time.Time
+	random      func() float64
+	minLongEdge int
+	wake        chan struct{}
 }
 
 // Open opens or creates the store in dir, which must exist.
@@ -115,7 +122,7 @@ func Open(dir string, options Options) (*Store, error) {
 	if options.Photos == nil || options.PhotosDir == "" {
 		return nil, errors.New("scoring store needs the photos folder")
 	}
-	for _, sub := range []string{"previews", "thumbnails", "backups", "staging"} {
+	for _, sub := range []string{"previews", "thumbnails", "full", "backups", "staging"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
 			return nil, err
 		}
@@ -126,7 +133,10 @@ func Open(dir string, options Options) (*Store, error) {
 	}
 	store := &Store{
 		db: db, dir: dir, photosDir: filepath.Clean(options.PhotosDir), photos: options.Photos,
-		logger: options.Logger, now: options.Now, random: options.Random, wake: make(chan struct{}, 1),
+		logger: options.Logger, now: options.Now, random: options.Random, minLongEdge: options.MinLongEdge, wake: make(chan struct{}, 1),
+	}
+	if store.minLongEdge == 0 {
+		store.minLongEdge = DefaultMinLongEdge
 	}
 	if store.logger == nil {
 		store.logger = slog.Default()
@@ -149,9 +159,11 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
 
-const schemaVersion = 1
+// migrations take the database from each version to the next; its version
+// is how many have run.
+var migrations = []string{schemaV1, schemaV2}
 
-const schema = `
+const schemaV1 = `
 CREATE TABLE raters (
 	account_id TEXT PRIMARY KEY,
 	added_by TEXT NOT NULL,
@@ -239,26 +251,41 @@ CREATE INDEX ratings_claim ON ratings(claim_token);
 CREATE INDEX ratings_repeat_of ON ratings(repeat_of) WHERE repeat_of IS NOT NULL;
 `
 
+// schemaV2 adds 打分项: a batch's dimensions, and a rating's scores on those
+// other than overall, which stays in ratings.score. Every batch from before
+// scores overall alone.
+const schemaV2 = `
+ALTER TABLE batches ADD COLUMN dimensions TEXT NOT NULL DEFAULT 'overall';
+CREATE TABLE rating_scores (
+	rating_id INTEGER NOT NULL REFERENCES ratings(id),
+	dimension TEXT NOT NULL CHECK (dimension <> 'overall'),
+	score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 500),
+	PRIMARY KEY (rating_id, dimension)
+) WITHOUT ROWID;
+`
+
 func (s *Store) migrate(ctx context.Context) error {
 	var version int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
 	switch {
-	case version == schemaVersion:
+	case version == len(migrations):
 		return nil
-	case version > schemaVersion:
-		return fmt.Errorf("scoring database version %d is newer than this module (%d)", version, schemaVersion)
+	case version > len(migrations):
+		return fmt.Errorf("scoring database version %d is newer than this module (%d)", version, len(migrations))
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, schema); err != nil {
-		return err
+	for _, step := range migrations[version:] {
+		if _, err := tx.ExecContext(ctx, step); err != nil {
+			return err
+		}
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
 		return err
 	}
 	return tx.Commit()

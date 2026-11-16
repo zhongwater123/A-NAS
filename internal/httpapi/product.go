@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -90,6 +91,9 @@ type ProductDependencies struct {
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
 	WebSearch *websearchapi.API
+	// SystemUpdate serves Settings → 系统更新 (docs/specs/system-update.md);
+	// nil leaves its routes out.
+	SystemUpdate *systemupdateapi.API
 	// Personalization keeps the device-wide 个性化 settings and wallpaper;
 	// nil answers personalization_unavailable.
 	Personalization *personalization.Store

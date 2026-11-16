@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { APIError } from "../api/client";
 import { retryable } from "./api";
-import { formatCorrelation, formatScore, formatSeconds, lanes, parseScore, share, stageAction } from "./model";
+import {
+  exportColumns,
+  formatCorrelation,
+  formatScore,
+  formatSeconds,
+  lanes,
+  orientationMatrix,
+  parseScore,
+  Stopwatch,
+  share,
+  stageAction,
+  uprightSize,
+} from "./model";
 
 const key = (value: string, modifiers: Partial<Record<"ctrlKey" | "altKey" | "metaKey" | "shiftKey", boolean>> = {}) =>
   stageAction({ key: value, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...modifiers });
@@ -23,6 +35,13 @@ describe("stageAction", () => {
     expect(key("Backspace")).toEqual({ kind: "undo" });
     expect(key("?")).toEqual({ kind: "guide" });
     expect(key("Escape")).toEqual({ kind: "cancel" });
+  });
+
+  it("moves between 打分项 with ↑ and ↓ and looks at 100% with Z", () => {
+    expect(key("ArrowUp")).toEqual({ kind: "item", by: -1 });
+    expect(key("ArrowDown")).toEqual({ kind: "item", by: 1 });
+    expect(key("z")).toEqual({ kind: "zoom" });
+    expect(key("Z", { shiftKey: true })).toEqual({ kind: "zoom" });
   });
 
   it("leaves the browser's shortcuts and other keys alone", () => {
@@ -81,6 +100,81 @@ describe("numbers", () => {
     expect(formatSeconds(3420)).toBe("3.4 秒");
     expect(share(3, 0)).toBe(0);
     expect(share(5, 4)).toBe(1);
+  });
+});
+
+describe("the time on a photo", () => {
+  it("runs while the photo is in view and stands still while the page is hidden or a sheet covers it", () => {
+    const watch = new Stopwatch();
+    watch.start(1_000, true);
+    watch.pause(4_000);
+    watch.pause(5_000);
+    expect(watch.elapsed(9_000)).toBe(3_000);
+    watch.resume(9_000);
+    watch.resume(9_500);
+    expect(watch.elapsed(10_000)).toBe(4_000);
+    watch.start(20_000, false);
+    expect(watch.elapsed(30_000)).toBe(0);
+  });
+});
+
+describe("the photo at 100%", () => {
+  // Where a CSS matrix sends a point of the stored picture.
+  const apply = ([a, b, c, d, e, f]: number[], x: number, y: number) => [a * x + c * y + e, b * x + d * y + f];
+
+  it("turns every EXIF orientation upright, as browsers do", () => {
+    const width = 4;
+    const height = 3;
+    // The stored picture's top-left corner, upright: where each orientation's
+    // row 0 and column 0 belong.
+    const topLeft: Record<number, number[]> = {
+      1: [0, 0],
+      2: [4, 0],
+      3: [4, 3],
+      4: [0, 3],
+      5: [0, 0],
+      6: [3, 0],
+      7: [3, 4],
+      8: [0, 4],
+    };
+    for (let orientation = 1; orientation <= 8; orientation++) {
+      const matrix = orientationMatrix(orientation, width, height);
+      const upright = uprightSize(orientation, width, height);
+      expect(apply(matrix, 0, 0)).toEqual(topLeft[orientation]);
+      // The whole picture lands inside the upright box.
+      for (const [x, y] of [
+        [0, 0],
+        [width, 0],
+        [0, height],
+        [width, height],
+      ]) {
+        const [ux, uy] = apply(matrix, x, y);
+        expect(ux).toBeGreaterThanOrEqual(0);
+        expect(ux).toBeLessThanOrEqual(upright.width);
+        expect(uy).toBeGreaterThanOrEqual(0);
+        expect(uy).toBeLessThanOrEqual(upright.height);
+      }
+    }
+    expect(uprightSize(6, 4000, 3000)).toEqual({ width: 3000, height: 4000 });
+  });
+});
+
+describe("the export's columns", () => {
+  it("has the photo and the rater first, then who, the 打分项 and the rest in a fixed order", () => {
+    expect(
+      exportColumns(["duration", "composition", "overall", "nickname", "image_size"], ["overall", "composition"]),
+    ).toEqual([
+      "image_id",
+      "image_path",
+      "rater",
+      "nickname",
+      "image_width",
+      "image_height",
+      "overall",
+      "composition",
+      "duration_s",
+    ]);
+    expect(exportColumns([], ["overall"])).toEqual(["image_id", "image_path", "rater"]);
   });
 });
 

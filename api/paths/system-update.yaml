@@ -1,0 +1,47 @@
+/api/v1/system/update:
+  get:
+    operationId: getSystemUpdate
+    x-anas-posture: admin
+    summary: The system update service's state (设置 → 系统更新, docs/specs/system-update.md)
+    description: >-
+      Administrators only. The service runs as root apart from the Product Service, which an install restarts;
+      the page reads this while an operation runs and again once the Product Service answers after an install.
+      Outcomes the service recorded are written to the activity record as they are read.
+    responses:
+      "200": { description: The state, content: { application/json: { schema: { $ref: "../components/system-update.yaml#/schemas/SystemUpdateStatus" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/system/update/actions:
+  post:
+    operationId: requestSystemUpdate
+    x-anas-posture: admin
+    summary: Check for, download, install, or go back from a version
+    description: >-
+      Administrators only, from the local desktop. The service carries the action out on its own (202). 409
+      update_busy while an operation runs; update_not_ready when the state has nothing for the action (install
+      needs a version that is ready, revert a version before); update_waiting for install and revert while a
+      storage plan or conversion runs or an app installs or uninstalls.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/system-update.yaml#/schemas/SystemUpdateAction" } } } }
+    responses:
+      "202": { description: The service took the request, content: { application/json: { schema: { $ref: "../components/system-update.yaml#/schemas/SystemUpdateStatus" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/system/update/settings:
+  put:
+    operationId: updateSystemUpdateSettings
+    x-anas-posture: admin
+    summary: Download by itself, install by itself, and the install window
+    description: Administrators only, from the local desktop (docs/decisions/2026-11-12-system-update-defaults.md).
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/system-update.yaml#/schemas/SystemUpdateSettings" } } } }
+    responses:
+      "200": { description: The state with the new settings, content: { application/json: { schema: { $ref: "../components/system-update.yaml#/schemas/SystemUpdateStatus" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

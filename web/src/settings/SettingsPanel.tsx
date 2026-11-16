@@ -1,6 +1,7 @@
 import {
   Activity,
   ChevronRight,
+  CircleFadingArrowUp,
   Globe,
   HardDrive,
   LayoutDashboard,
@@ -28,6 +29,7 @@ import type { HostStateView } from "../desktop/useHostState";
 import type { PinyinMatch } from "../music/library";
 import { loadPinyin } from "../music/pinyin";
 import { displayName } from "../people/people";
+import { hasNewVersion, useSystemUpdate } from "../systemupdate/status";
 import { useToasts } from "../ui/feedback";
 import { AccountSection } from "./AccountSection";
 import { roleLabel } from "./labels";
@@ -36,6 +38,7 @@ import { OverviewSection } from "./OverviewSection";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { Avatar, type SettingsKit, SettingsKitContext } from "./parts";
 import { StorageSection, useVolumes } from "./StorageSection";
+import { SystemUpdateSection } from "./SystemUpdateSection";
 import { type SearchEntry, searchEntries, searchSettings } from "./search";
 // After the sections' stylesheets, which these rules follow.
 import styles from "./settings.module.css";
@@ -52,6 +55,7 @@ export type SettingsSection =
   | "account"
   | "overview"
   | "storage"
+  | "system-update"
   | "personalization"
   | "users"
   | "logs"
@@ -71,6 +75,7 @@ const sectionGroups: SectionLink[][] = [
   [
     { id: "overview", label: "概览", icon: LayoutDashboard },
     { id: "storage", label: "存储", icon: HardDrive },
+    { id: "system-update", label: "系统更新", icon: CircleFadingArrowUp, adminOnly: true },
     { id: "task-manager", label: "任务管理器", icon: Activity },
   ],
   [
@@ -121,6 +126,8 @@ export function SettingsPanel({
   // "登录记录" in My account opens the logs on sign-ins.
   const [logsPreset, setLogsPreset] = useState<LogsPreset>();
   const volumes = useVolumes(storagePlan.plan?.state);
+  // A new version is marked in the sidebar and listed in the overview.
+  const update = useSystemUpdate(isAdmin).status;
   // Once opened, the terminal stays mounted while other sections are shown,
   // so its shell runs until the settings window closes.
   const [terminalOpened, setTerminalOpened] = useState(current === "terminal");
@@ -138,6 +145,11 @@ export function SettingsPanel({
   const go = (next: SettingsSection) => {
     onSectionChange(next);
     setPane("page");
+  };
+  // The logs can open on one category, such as sign-ins from My account.
+  const openLogs = (category: LogsPreset["category"]) => {
+    setLogsPreset({ category, id: Date.now() });
+    go("logs");
   };
 
   const shell = useRef<HTMLDivElement>(null);
@@ -203,6 +215,7 @@ export function SettingsPanel({
               groups={links}
               current={current}
               terminalRunning={current !== "terminal" && terminalStatus?.state === "connected"}
+              newVersion={hasNewVersion(update)}
               onGo={go}
             />
           </SettingsSearch>
@@ -225,18 +238,23 @@ export function SettingsPanel({
                   onPasswordShown={() => setPasswordRequested(false)}
                   onUserChange={onUserChange}
                   onLogout={onLogout}
-                  onShowSignIns={() => {
-                    setLogsPreset({ category: "session", id: Date.now() });
-                    go("logs");
-                  }}
+                  onShowSignIns={() => openLogs("session")}
                 />
               )}
               {current === "overview" && (
-                <OverviewSection host={host} volumes={volumes} isAdmin={isAdmin} onOpenStorage={() => go("storage")} />
+                <OverviewSection
+                  host={host}
+                  volumes={volumes}
+                  isAdmin={isAdmin}
+                  update={update}
+                  onOpenStorage={() => go("storage")}
+                  onOpenUpdate={() => go("system-update")}
+                />
               )}
               {current === "storage" && (
                 <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />
               )}
+              {current === "system-update" && <SystemUpdateSection onOpenLogs={() => openLogs("system")} />}
               {current === "personalization" && <PersonalizationSection />}
               {current === "web-search" && <WebSearchSection />}
               {current === "users" && (
@@ -276,12 +294,14 @@ function SectionNav({
   groups,
   current,
   terminalRunning,
+  newVersion,
   onGo,
 }: {
   user: User;
   groups: SectionLink[][];
   current: SettingsSection;
   terminalRunning: boolean;
+  newVersion: boolean;
   onGo: (section: SettingsSection) => void;
 }) {
   const nav = useRef<HTMLElement>(null);
@@ -326,6 +346,11 @@ function SectionNav({
               <span>{label}</span>
               {id === "terminal" && terminalRunning && (
                 <span className={styles.setNavLive} title="Shell 正在运行" aria-hidden="true" />
+              )}
+              {id === "system-update" && newVersion && (
+                <span className={styles.setNavMark} title="有新版本">
+                  <span className="sr-only">有新版本</span>
+                </span>
               )}
               <ChevronRight className={styles.setNavGo} aria-hidden="true" />
             </button>

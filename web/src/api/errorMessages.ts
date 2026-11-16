@@ -113,6 +113,12 @@ const domains = {
     invalid_query: "搜索内容为空或太长",
     search_interrupted: "搜索中断，请重试",
   },
+  systemUpdate: {
+    update_busy: "更新正在进行，请等它结束",
+    update_not_ready: "更新的状态已经变化，请看页面上的最新状态",
+    update_waiting: "数据卷正在转换或有应用正在安装，结束后再安装",
+    update_unavailable: "更新服务暂时不可用，请稍后重试",
+  },
   storage: {
     volume_busy: "数据卷正在转换、分散文件或缺少硬盘，现在不能加入新硬盘。",
     disk_too_small: "这块硬盘比缺少的硬盘小，请换一块容量不小于它的硬盘。",

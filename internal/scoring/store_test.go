@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -27,6 +29,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 type clock struct {
@@ -54,12 +57,18 @@ type harness struct {
 	mu     sync.Mutex
 }
 
+// newHarness takes photos of any size, so that tests render small ones.
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWith(t, 1)
+}
+
+func newHarnessWith(t *testing.T, minLongEdge int) *harness {
 	t.Helper()
 	h := &harness{photos: t.TempDir(), clock: &clock{now: time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)}}
 	h.random = func() float64 { return 0.99 }
 	store, err := Open(t.TempDir(), Options{
-		PhotosDir: h.photos, Photos: filesystem.NewRootFileSystem(h.photos, false), Now: h.clock.Now,
+		PhotosDir: h.photos, Photos: filesystem.NewRootFileSystem(h.photos, false), Now: h.clock.Now, MinLongEdge: minLongEdge,
 		Random: func() float64 {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -123,15 +132,17 @@ func (h *harness) importAll(t *testing.T) {
 	t.Fatal("import did not finish")
 }
 
-// batchOf makes a batch of count distinct photos and imports it.
-func (h *harness) batchOf(t *testing.T, count, required int) Batch {
+// batchOf makes a batch of count distinct photos scoring dimensions, overall
+// alone without any, and imports it.
+func (h *harness) batchOf(t *testing.T, count, required int, dimensions ...string) Batch {
 	t.Helper()
-	source := fmt.Sprintf("批次%d", count*100+required)
+	source := fmt.Sprintf("批次%d-%d", count*100+required, len(dimensions))
 	for i := range count {
 		// PNG keeps every shade, so that no two photos are the same file.
 		write(t, filepath.Join(h.photos, source, fmt.Sprintf("%03d.png", i)), picture(t, 16, 12, uint8(i), png.Encode))
 	}
-	batch, err := h.store.CreateBatch(context.Background(), "user:admin", BatchInput{Name: source, Source: source, Required: required})
+	batch, err := h.store.CreateBatch(context.Background(), "user:admin",
+		BatchInput{Name: source, Source: source, Required: required, Dimensions: dimensions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +217,9 @@ func TestImportRendersUprightPreviewsMergesCopiesAndSkipsWhatItCannotUse(t *test
 	}
 	if batch.State != "open" || batch.Files != 7 || batch.Imported != 4 || batch.Skipped != 3 || batch.Photos != 2 || batch.Anchors != 1 {
 		t.Fatalf("batch after import %+v", batch)
+	}
+	if want := map[string]int{"anchor_name": 1, "undecodable": 1, "unsupported_type": 1}; !maps.Equal(batch.SkippedBy, want) {
+		t.Fatalf("skipped by reason %v, want %v", batch.SkippedBy, want)
 	}
 	var reasons []string
 	err = each(context.Background(), h.store.db, "SELECT path || ':' || reason FROM import_files WHERE status = 'skipped' ORDER BY path", nil,
@@ -461,7 +475,8 @@ func TestRepeatsComeFromTheRatersOwnEarlierScoresAndDoNotCount(t *testing.T) {
 		t.Fatalf("stats %+v, %v", stats, err)
 	}
 	want := math.Abs(float64(original%10+1-original)) / 2
-	if stats[0].Repeats != 1 || stats[0].RepeatDifference == nil || *stats[0].RepeatDifference != want || stats[0].Scores != repeatAfter+2 {
+	overall := stats[0].Dimensions[0]
+	if stats[0].Repeats != 1 || overall.RepeatDifference == nil || *overall.RepeatDifference != want || stats[0].Scores != repeatAfter+2 {
 		t.Fatalf("stats %+v", stats[0])
 	}
 	var covered int
@@ -539,32 +554,160 @@ func TestStatsCompareEachRaterWithTheOthers(t *testing.T) {
 	for _, st := range stats {
 		byRater[st.Rater] = st
 	}
-	steady, contrary := byRater["steady"], byRater["contrary"]
-	if steady.Scores != 30 || steady.AgreementPhotos != 30 || steady.Agreement == nil || contrary.Agreement == nil {
+	steady, contrary := byRater["steady"].Dimensions[0], byRater["contrary"].Dimensions[0]
+	if byRater["steady"].Scores != 30 || steady.AgreementPhotos != 30 || steady.Agreement == nil || contrary.Agreement == nil {
 		t.Fatalf("stats %+v", stats)
 	}
 	if *steady.Agreement <= *contrary.Agreement {
 		t.Fatalf("agreement steady %.2f, contrary %.2f", *steady.Agreement, *contrary.Agreement)
 	}
-	if steady.MedianViewMilliseconds != 2500 || steady.FastShare != 0 || steady.LongestRun < 1 {
-		t.Fatalf("steady %+v", steady)
+	if byRater["steady"].MedianViewMilliseconds != 2500 || byRater["steady"].FastShare != 0 || steady.LongestRun < 1 {
+		t.Fatalf("steady %+v", byRater["steady"])
 	}
 }
 
-func TestExportHoldsEveryAnswerWithAManifestThatChecksIt(t *testing.T) {
+// withScores answers overall with value, 1 to 10, and the other dimensions
+// with the half points in scores.
+func withScores(value int, scores map[string]int) Submission {
+	submission := score(value)
+	submission.Scores = scores
+	return submission
+}
+
+func TestBatchesScoreTheirDimensionsAndFixThemAtTheFirstAnswer(t *testing.T) {
 	h := newHarness(t)
-	batch := h.batchOf(t, 2, 1)
-	h.raters(t, "a")
 	ctx := context.Background()
+	for _, bad := range [][]string{{"composition"}, {Overall, "colour"}, {Overall, Overall}} {
+		if _, err := h.store.CreateBatch(ctx, "user:admin", BatchInput{Name: "坏", Source: "坏", Required: 1, Dimensions: bad}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("dimensions %v accepted: %v", bad, err)
+		}
+	}
+	batch := h.batchOf(t, 3, 1, Sharpness, Overall, "composition")
+	if !slices.Equal(batch.Dimensions, []string{Overall, "composition", Sharpness}) {
+		t.Fatalf("dimensions %v are not in the catalogue's order", batch.Dimensions)
+	}
+	plain := h.batchOf(t, 2, 1)
+	if !slices.Equal(plain.Dimensions, []string{Overall}) {
+		t.Fatalf("a batch without a choice scores %v", plain.Dimensions)
+	}
+	h.raters(t, "a")
+	open, err := h.store.OpenBatches(ctx, "a")
+	if err != nil || len(open) != 2 || !slices.Contains(open[0].Dimensions, Sharpness) && !slices.Contains(open[1].Dimensions, Sharpness) {
+		t.Fatalf("the rater's batches %+v, %v", open, err)
+	}
 	claims, _, _ := h.store.Claim(ctx, batch.ID, "a")
-	if _, err := h.store.Submit(ctx, claims[0].Token, "a", score(3)); err != nil {
+	for _, bad := range []Submission{
+		score(5),
+		withScores(5, map[string]int{"composition": 200}),
+		withScores(5, map[string]int{"composition": 200, Sharpness: 300, "narrative": 100}),
+		withScores(5, map[string]int{"composition": 200, "narrative": 300}),
+		withScores(5, map[string]int{"composition": 200, Sharpness: 501}),
+		{ID: "skip-with-scores", Kind: "skip", Scores: map[string]int{"composition": 200}},
+	} {
+		if _, err := h.store.Submit(ctx, claims[0].Token, "a", bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%+v accepted: %v", bad, err)
+		}
+	}
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", withScores(6, map[string]int{"composition": 220, Sharpness: 410})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.store.Submit(ctx, claims[0].Token, "a", score(7)); err != nil {
+	if _, err := h.store.Submit(ctx, claims[1].Token, "a", Submission{ID: "skip-plain-0001", Kind: "skip"}); err != nil {
+		t.Fatalf("a skip needs no scores: %v", err)
+	}
+	recent, err := h.store.RecentScores(ctx, batch.ID, "a")
+	if err != nil || len(recent) != 1 || recent[0].Score != 300 || !maps.Equal(recent[0].Scores, map[string]int{"composition": 220, Sharpness: 410}) {
+		t.Fatalf("recent %+v, %v", recent, err)
+	}
+	stats, err := h.store.Stats(ctx, batch.ID)
+	if err != nil || len(stats) != 1 || len(stats[0].Dimensions) != 3 {
+		t.Fatalf("stats %+v, %v", stats, err)
+	}
+	if d := stats[0].Dimensions; d[0].Dimension != Overall || d[0].Mean != 3 || d[1].Dimension != "composition" || d[1].Mean != 2.2 || d[2].Mean != 4.1 {
+		t.Fatalf("dimension stats %+v", d)
+	}
+	name := "改名"
+	if _, err := h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Name: &name, Dimensions: []string{Overall, "composition", Sharpness}}); err != nil {
+		t.Fatalf("renaming with the same dimensions: %v", err)
+	}
+	if _, err := h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Dimensions: []string{Overall}}); !errors.Is(err, ErrInUse) {
+		t.Fatalf("changing the dimensions of an answered batch: %v", err)
+	}
+	changed, err := h.store.UpdateBatch(ctx, plain.ID, BatchPatch{Dimensions: []string{"preference", Overall}})
+	if err != nil || !slices.Equal(changed.Dimensions, []string{Overall, "preference"}) || changed.Answers != 0 {
+		t.Fatalf("changing the dimensions before any answer: %+v, %v", changed, err)
+	}
+}
+
+func TestAVersionOneDatabaseScoresOverallAlone(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
+	if err != nil {
 		t.Fatal(err)
 	}
+	for _, statement := range []string{schemaV1, "PRAGMA user_version = 1",
+		`INSERT INTO batches (id, name, source, required, rubric, state, created_by, created_at)
+		VALUES ('b1', '旧批次', '旧', 3, '', 'open', 'user:admin', '2026-11-12T09:00:00.000000000Z')`} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+	photos := t.TempDir()
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	batch, err := store.Batch(context.Background(), "b1")
+	if err != nil || !slices.Equal(batch.Dimensions, []string{Overall}) {
+		t.Fatalf("the old batch %+v, %v", batch, err)
+	}
+	var version int
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+		t.Fatalf("version %d, %v", version, err)
+	}
+}
+
+func TestImportSkipsPhotosTooSmallToScoreButNotAnchors(t *testing.T) {
+	if DefaultMinLongEdge != 2400 {
+		t.Fatalf("photos to score need a longer side of 2400 pixels, not %d", DefaultMinLongEdge)
+	}
+	photos := t.TempDir()
+	defaults, err := Open(t.TempDir(), Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = defaults.Close()
+	if defaults.minLongEdge != DefaultMinLongEdge {
+		t.Fatalf("the default minimum is %d", defaults.minLongEdge)
+	}
+	h := newHarnessWith(t, 100)
+	source := filepath.Join(h.photos, "大小")
+	write(t, filepath.Join(source, "横.jpg"), jpegPicture(t, 120, 80, 1))
+	write(t, filepath.Join(source, "竖.png"), picture(t, 60, 100, 2, png.Encode))
+	write(t, filepath.Join(source, "小.png"), picture(t, 99, 60, 3, png.Encode))
+	write(t, filepath.Join(source, AnchorFolder, "2-小锚点.jpg"), jpegPicture(t, 30, 20, 4))
+	batch, err := h.store.CreateBatch(context.Background(), "user:admin", BatchInput{Name: "大小", Source: "大小", Required: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.importAll(t)
+	batch, err = h.store.Batch(context.Background(), batch.ID)
+	if err != nil || batch.Photos != 2 || batch.Anchors != 1 || !maps.Equal(batch.SkippedBy, map[string]int{"too_small": 1}) {
+		t.Fatalf("batch %+v, %v", batch, err)
+	}
+	previews, _ := filepath.Glob(filepath.Join(h.store.dir, "previews", "*", "*.jpg"))
+	if len(previews) != 3 {
+		t.Fatalf("a photo too small to score was rendered: %v", previews)
+	}
+}
+
+// exported unpacks an export.
+func exported(t *testing.T, h *harness, batchID string, options ExportOptions) (exportManifest, []byte) {
+	t.Helper()
 	var buffer bytes.Buffer
-	if err := h.store.Export(ctx, batch.ID, &buffer, map[string]Person{"a": {Username: "alice"}}, "test"); err != nil {
+	people := map[string]Person{"a": {Username: "alice", Nickname: "小艾"}}
+	if err := h.store.Export(context.Background(), batchID, options, &buffer, people, "test"); err != nil {
 		t.Fatal(err)
 	}
 	archive, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
@@ -584,20 +727,123 @@ func TestExportHoldsEveryAnswerWithAManifestThatChecksIt(t *testing.T) {
 	if err := json.Unmarshal(contents["manifest.json"], &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Format != ExportFormat || manifest.Batch.ID != batch.ID || manifest.Batch.Required != 1 {
+	table := contents[manifest.File.Name]
+	sum := sha256.Sum256(table)
+	if manifest.Format != ExportFormat || len(contents) != 2 || hex.EncodeToString(sum[:]) != manifest.File.SHA256 {
+		t.Fatalf("manifest %+v does not check its table", manifest)
+	}
+	return manifest, table
+}
+
+func TestExportHasARowPerAnswerWithTheChosenColumns(t *testing.T) {
+	h := newHarness(t)
+	batch := h.batchOf(t, 3, 1, Overall, "composition")
+	h.raters(t, "a")
+	ctx := context.Background()
+	claims, _, _ := h.store.Claim(ctx, batch.ID, "a")
+	first := withScores(3, map[string]int{"composition": 210})
+	first.ViewMilliseconds = 4000
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", first); err != nil {
+		t.Fatal(err)
+	}
+	// Changed: the current answer spent its own time and the first one's.
+	again := withScores(7, map[string]int{"composition": 260})
+	again.ViewMilliseconds = 1250
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", again); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.Submit(ctx, claims[1].Token, "a", Submission{ID: "export-skip-01", Kind: "flag", ViewMilliseconds: 800}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := h.store.ExportSummary(ctx, batch.ID)
+	if err != nil || summary != (ExportSummary{Scores: 1, Skips: 1, Superseded: 1}) {
+		t.Fatalf("summary %+v, %v", summary, err)
+	}
+
+	manifest, table := exported(t, h, batch.ID, ExportOptions{Fields: []string{"duration", "composition", "nickname", Overall}})
+	if !bytes.HasPrefix(table, []byte("\xef\xbb\xbf")) || manifest.File.Name != "ratings.csv" || manifest.Rows.Count != 1 {
+		t.Fatalf("csv %q, manifest %+v", table, manifest)
+	}
+	records, err := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(table, []byte("\xef\xbb\xbf")))).ReadAll()
+	if err != nil || len(records) != 2 {
+		t.Fatalf("records %q, %v", records, err)
+	}
+	header := []string{"image_id", "image_path", "rater", "nickname", Overall, "composition", "duration_s"}
+	if !slices.Equal(records[0], header) {
+		t.Fatalf("header %q, want %q", records[0], header)
+	}
+	if row := records[1]; len(row[0]) != 64 || !strings.HasSuffix(row[1], ".png") || row[2] != "alice" || row[3] != "小艾" ||
+		row[4] != "3.50" || row[5] != "2.60" || row[6] != "5.25" {
+		t.Fatalf("row %q", row)
+	}
+	if len(manifest.Columns) != len(header) || manifest.Columns[6].Name != "单图耗时" || manifest.Batch.Dimensions[1].Name != "构图" {
 		t.Fatalf("manifest %+v", manifest)
 	}
-	for name, file := range manifest.Files {
-		sum := sha256.Sum256(contents[name])
-		if hex.EncodeToString(sum[:]) != file.SHA256 || strings.Count(string(contents[name]), "\n") != file.Lines {
-			t.Errorf("%s does not match the manifest", name)
+
+	manifest, table = exported(t, h, batch.ID, ExportOptions{Format: "jsonl", Fields: []string{"kind", "links"}, Include: []string{"superseded", "skips"}})
+	lines := strings.Split(strings.TrimSpace(string(table)), "\n")
+	if manifest.Rows.Count != 3 || len(lines) != 3 || !slices.Equal(manifest.Rows.Include, []string{"skips", "superseded"}) {
+		t.Fatalf("rows %+v: %s", manifest.Rows, table)
+	}
+	if !strings.HasPrefix(lines[0], `{"image_id":"`) || !strings.Contains(lines[0], `"image_path":["`) ||
+		!strings.Contains(lines[0], `"kind":"score","repeat":false,"superseded":true,"rating_id":1,"replaces":null`) ||
+		!strings.Contains(lines[1], `"superseded":false,"rating_id":2,"replaces":1`) || !strings.Contains(lines[2], `"kind":"flag"`) {
+		t.Fatalf("jsonl %s", table)
+	}
+
+	for _, bad := range []ExportOptions{{Format: "xml"}, {Fields: []string{Sharpness}}, {Fields: []string{"colour"}}, {Include: []string{"everything"}}} {
+		if err := h.store.Export(ctx, batch.ID, bad, io.Discard, nil, "test"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("export %+v: %v", bad, err)
 		}
 	}
-	if manifest.Files["images.jsonl"].Lines != 2 || manifest.Files["ratings.jsonl"].Lines != 2 {
-		t.Fatalf("files %+v", manifest.Files)
+}
+
+func TestTheFullViewIsTheOriginalWithoutMetadataOnlyForSharpness(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	write(t, filepath.Join(h.photos, "清晰", "a.jpg"), jpegPicture(t, 300, 200, 1))
+	write(t, filepath.Join(h.photos, "清晰", "b.jpg"), jpegPicture(t, 200, 300, 2))
+	sharp, err := h.store.CreateBatch(ctx, "user:admin", BatchInput{Name: "清晰", Source: "清晰", Required: 1, Dimensions: []string{Overall, Sharpness}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents["ratings.jsonl"]), `"superseded":true`) || !strings.Contains(string(contents["raters.jsonl"]), `"username":"alice"`) {
-		t.Fatalf("ratings %s raters %s", contents["ratings.jsonl"], contents["raters.jsonl"])
+	plain := h.batchOf(t, 1, 1)
+	h.importAll(t)
+	h.raters(t, "a", "b")
+	claims, _, err := h.store.Claim(ctx, sharp.ID, "a")
+	if err != nil || len(claims) != 2 {
+		t.Fatalf("claims %+v, %v", claims, err)
+	}
+	view, err := h.store.ClaimFull(ctx, claims[0].Token, "a")
+	if err != nil || view.Orientation != 1 {
+		t.Fatalf("full view %+v, %v", view, err)
+	}
+	data, err := os.ReadFile(view.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || format != "jpeg" || config.Width*config.Height != 300*200 || bytes.Contains(data, []byte("Exif")) {
+		t.Fatalf("full view %s %+v, %v", format, config, err)
+	}
+	if again, err := h.store.ClaimFull(ctx, claims[0].Token, "a"); err != nil || again != view {
+		t.Fatalf("the second look is not the cached render: %+v, %v", again, err)
+	}
+	if _, err := h.store.ClaimFull(ctx, claims[0].Token, "b"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("b looked at a's photo: %v", err)
+	}
+	other, _, _ := h.store.Claim(ctx, plain.ID, "a")
+	if _, err := h.store.ClaimFull(ctx, other[0].Token, "a"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a batch without sharpness showed a full view: %v", err)
+	}
+	// The other photo's original changed after the import.
+	var path string
+	if err := h.store.db.QueryRow("SELECT path FROM item_paths WHERE item_id = ?", h.itemOf(t, claims[1].Token)).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(h.photos, "清晰", path), jpegPicture(t, 200, 300, 9))
+	if _, err := h.store.ClaimFull(ctx, claims[1].Token, "a"); !errors.Is(err, ErrOriginalChanged) {
+		t.Fatalf("a changed original: %v", err)
 	}
 }
 

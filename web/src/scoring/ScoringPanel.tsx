@@ -165,7 +165,10 @@ function RaterHome({ onOpen }: { onOpen: (batch: ScoringRaterBatch) => void }) {
               <div className={styles.scCardBody}>
                 <div>
                   <strong>{batch.name}</strong>
-                  <span>已打 {formatCount(batch.rated)} 张</span>
+                  <span>
+                    已打 {formatCount(batch.rated)} 张
+                    {batch.dimensions.length > 1 && ` · 每张 ${batch.dimensions.length} 项`}
+                  </span>
                 </div>
                 {batch.finished ? (
                   <span className={styles.scDone}>已打完</span>
