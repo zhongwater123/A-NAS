@@ -54,6 +54,13 @@ class RunTest(unittest.TestCase):
         self.assertFalse(cut.breaks_run([], "054", "特写", set()))
 
 
+class PlaceTest(unittest.TestCase):
+    def test_the_scene_carries_the_camera_when_it_was_on_something(self):
+        self.assertEqual(cut.place({"scene": "米尔福德峡湾", "camera": "船上"}), "米尔福德峡湾（船上）")
+        self.assertEqual(cut.place({"scene": "湖边", "camera": "地面"}), "湖边")
+        self.assertEqual(cut.place({"scene": "湖边"}), "湖边")             # described before 2026-11-16
+
+
 class OrderTest(unittest.TestCase):
     def test_every_shooting_order_ask_is_in_step_ones_prompt(self):
         text = cut.PICK + cut.music_note(SONG)

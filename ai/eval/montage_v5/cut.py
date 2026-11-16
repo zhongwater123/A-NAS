@@ -195,6 +195,14 @@ def upright(card):
     return height > width
 
 
+def place(answer):
+    """The scene, with where the camera was when it was on something (a boat, a car, a plane) or a drone
+    (tag_beats.CAMERAS, descriptions since 2026-11-16): pj-038's fjord from a boat had gone among the flight's
+    shots as a drone's."""
+    camera = answer.get("camera", "")
+    return answer.get("scene", "") + (f"（{camera}）" if camera not in ("", "地面", "看不出") else "")
+
+
 def usable_cards(case):
     bad = poor(case)
     return [c for c in load(case) if c["id"] not in bad
@@ -345,7 +353,7 @@ def pick(case):
     lines = []
     for c in cards:
         where = f"视频{int(c['video'])} " if many else ""
-        lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {c['answer'].get('scene', '')} | "
+        lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {place(c['answer'])} | "
                      + " → ".join(c["answer"]["process"])
                      + (f" | {card_mark(c['id'], len(c['answer']['beats']))}" if LABELS else ""))
     many_parts = len(m["parts"])
@@ -412,7 +420,7 @@ def shots(case):
                     continue
                 c = cards[cid]
                 a = c["answer"]
-                lines.append(f"    卡片 {cid}（视频{int(c['video'])} {clock(c['start'])}–{clock(c['end'])}，{a.get('scene', '')}）：{a['summary']}")
+                lines.append(f"    卡片 {cid}（视频{int(c['video'])} {clock(c['start'])}–{clock(c['end'])}，{place(a)}）：{a['summary']}")
                 # #416 (2026-11-09): no 【亮点】 marks; two marked faces in the car came before the rear-view
                 # mirror the picture asked for.
                 for (j, _start, length), b in zip(units(c, CAP), a["beats"], strict=True):

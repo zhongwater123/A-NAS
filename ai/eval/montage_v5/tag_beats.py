@@ -1,6 +1,6 @@
 """A card described by the local Qwen3.5-4B (llama-server with its vision projector): the key frames numbered
 with their seconds into the card; the answer one beat a key frame (shot size, what is seen), the process (what
-happens, in order), a summary and the scene. Those are all the plan reads (cut.py). The travel-vlog profile
+happens, in order), a summary and the scene, after where the camera is. Those are all the plan reads (cut.py). The travel-vlog profile
 and the helpers are 方案 B's (tag_split.py and travel-vlog.prompt.md there).
 
 2026-11-13 (the user): the fields nothing read are no longer asked for: mood, tags, landmark, indoor or
@@ -49,9 +49,20 @@ SUMMARY_CHARS = 80   # a vlog card holds more than a film's: 40 characters left 
 # were gone through and left out what only some of them show: 01-013's puppet, 01-014's woman in white
 # (order_exp.py). process (#416, 2026-11-09): a short ordered list of what happens, between the beats and
 # the summary.
+# camera (2026-11-16): where the camera is, asked first. Without the old prompt's indoor-or-outdoor question
+# ("车厢是室内"), the 4B wrote boats out of the cruise and whale-watch cards and took pj-038's fjord, filmed
+# from a boat at the water's level, for a drone; the plan then put it among the flight's shots. Asked from what
+# is seen (three wordings tried on 12 cards, three runs each): every boat card 船上, the helicopter's 飞机或直升机里
+# (they had been drones), no drone written anywhere; but a lake seen from the shore is still taken for a boat
+# (5 of 6), its summary then a boat trip. Data: 剪辑对比/描述随机性（2026-11-16）/.
+CAMERAS = ["地面", "车里", "船上", "飞机或直升机里", "无人机航拍", "水里", "看不出"]
 PROMPT = (
     "下面 {count} 张图按时间先后取自同一段视频（共 {duration:.0f} 秒），每张图前标了编号和它在这段里的秒数。"
     "请输出 JSON：\n"
+    "camera：先判断这一段是在哪里拍的：地面、车里、船上、飞机或直升机里、无人机航拍、水里，看不出写看不出。"
+    "只按画面里看得见的东西判断：看得见车窗、车头是车里；看得见舷窗、窗框、玻璃反光或桨叶的影子是飞机或直升机里；"
+    "看得见船舷、船头、甲板、栏杆或同船的人是船上；看得见岸、路、栈桥或站在地上的脚下是地面；"
+    "只看到水面、山和天空，看不到这些的写看不出，不要猜；看不出时 summary 和 beats 也不要写在船上或航拍；\n"
     "beats：见下面的分组说明；\n"
     "{process}"
     "summary：写完 {before} 再写，按 beats 一句话概括这一段，不超过 {chars} 字，beats 里的关键人物和物件要写到；\n"
@@ -78,7 +89,7 @@ def schema(count, process=True):
     beats = {"type": "array", "minItems": count, "maxItems": count, "items": {"type": "object", "properties": {
         "shot_size": {"type": "string", "enum": SHOT_SIZES}, "what": short(45)}, "required": ["shot_size", "what"]}}
     steps = {"process": {"type": "array", "minItems": 1, "maxItems": count, "items": {"type": "string", "maxLength": 20}}} if process else {}
-    props = {"beats": beats, **steps, "summary": short(SUMMARY_CHARS + 20), "scene": short(20)}
+    props = {"camera": {"type": "string", "enum": CAMERAS}, "beats": beats, **steps, "summary": short(SUMMARY_CHARS + 20), "scene": short(20)}
     return {"type": "object", "properties": props, "required": list(props)}
 
 
