@@ -12,7 +12,10 @@ import (
 
 // The system update service's unit (docs/specs/system-update.md): it runs
 // apart from the Host Agent, which an install restarts.
-const updateUnit = "anas-update.service"
+const (
+	updateUnit = "anas-update.service"
+	updatePath = "anas-update.path"
+)
 
 func (e *Executor) updateStore() updater.Store {
 	return updater.Store{Dir: filepath.Join(e.systemRoot, "var", "lib", "a-nas-update")}
@@ -20,8 +23,8 @@ func (e *Executor) updateStore() updater.Store {
 
 // updateRunning reports whether a run of the service is in progress: a
 // oneshot unit is activating until its run ends. A request it has not taken
-// yet counts: the unit is starting, which systemctl start --no-block does
-// not wait for, and a read just after the request must not show it idle.
+// yet counts: a read just after the request must not show it idle while
+// the path unit is starting the service.
 func (e *Executor) updateRunning(ctx context.Context) (bool, error) {
 	if e.updateStore().RequestWaiting(e.now()) {
 		return true, nil
@@ -62,7 +65,7 @@ func (e *Executor) SystemUpdate(ctx context.Context) (systemupdate.Status, error
 	return systemupdate.Status{State: state, Running: running}, nil
 }
 
-// RequestSystemUpdate leaves the request for the service and starts it.
+// RequestSystemUpdate arms the path unit, then leaves the request for it.
 func (e *Executor) RequestSystemUpdate(ctx context.Context, request systemupdate.Request) (systemupdate.Status, error) {
 	if !systemupdate.Requestable(request.Kind) {
 		return systemupdate.Status{}, fmt.Errorf("no such system update request: %q", request.Kind)
@@ -76,14 +79,12 @@ func (e *Executor) RequestSystemUpdate(ctx context.Context, request systemupdate
 	if running {
 		return systemupdate.Status{}, systemupdate.ErrBusy
 	}
+	if output, err := e.runner.Run(ctx, "systemctl", []string{"start", updatePath}, ""); err != nil {
+		return systemupdate.Status{}, commandError("watch for system update requests", err, output)
+	}
 	store := e.updateStore()
 	if err := store.PutRequest(request); err != nil {
 		return systemupdate.Status{}, fmt.Errorf("leave the system update request: %w", err)
-	}
-	if output, err := e.runner.Run(ctx, "systemctl", []string{"start", "--no-block", updateUnit}, ""); err != nil {
-		// The administrator is told it failed: no later run may carry it out.
-		_ = store.DropRequest()
-		return systemupdate.Status{}, commandError("start the system update", err, output)
 	}
 	state, err := store.Load()
 	if err != nil {

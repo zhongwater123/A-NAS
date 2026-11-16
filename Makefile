@@ -189,6 +189,7 @@ ops-check:
 	@# The system update runs as its own unit, which the timer and the Host Agent start (docs/specs/system-update.md).
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent update' deploy/systemd/system/anas-update.service
 	grep -Fqx 'wants timers.target anas-update.timer' scripts/build-packages.sh
+	grep -Fqx 'wants paths.target anas-update.path' scripts/build-packages.sh
 	grep -Fqx 'd /var/lib/a-nas-update 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control

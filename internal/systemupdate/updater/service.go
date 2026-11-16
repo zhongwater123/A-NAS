@@ -144,7 +144,11 @@ func (s *Service) syncStaging(state *State) (bool, error) {
 		return false, nil
 	}
 	result, err := Sync(s.Staging, s.Local, func(need int64) error {
-		if missing := s.missingSpace(need); missing > 0 {
+		missing, err := s.missingSpace(need)
+		if err != nil {
+			return fmt.Errorf("read free space for the pushed repository: %w", err)
+		}
+		if missing > 0 {
 			return &spaceError{missing: missing}
 		}
 		return nil
@@ -154,13 +158,12 @@ func (s *Service) syncStaging(state *State) (bool, error) {
 		if space, ok := errors.AsType[*spaceError](err); ok {
 			problem = &Problem{Code: ProblemDiskSpace, Detail: strconv.FormatInt(space.missing, 10)}
 		}
-		switch state.Phase {
-		case PhaseAvailable, PhaseReady:
+		if result.Files == 0 && result.Removed == 0 && (state.Phase == PhaseAvailable || state.Phase == PhaseReady) {
 			// A push not taken leaves the local source as the last check
 			// read it, so the version that check found still stands; the
 			// push's problem is in the records.
 			s.recordCheckFailed(state, problem)
-		default:
+		} else {
 			s.checkFailed(state, problem)
 		}
 		return false, err
@@ -185,14 +188,13 @@ func (s *Service) checkFailed(state *State, problem *Problem) {
 	s.recordCheckFailed(state, problem)
 }
 
-// recordCheckFailed records the problem a check met, unless the last record
-// is the same.
+// recordCheckFailed records a new check failure even when its category
+// matches the last one or a successful check fell between the two.
 func (s *Service) recordCheckFailed(state *State, problem *Problem) {
-	if len(state.Records) > 0 {
-		if last := state.Records[0]; last.Kind == RecordCheckFailed && last.Problem != nil && last.Problem.Code == problem.Code {
-			return
-		}
+	if state.LastCheckProblem != nil && *state.LastCheckProblem == *problem {
+		return
 	}
+	state.LastCheckProblem = problem
 	state.Record(Record{At: s.now(), Kind: RecordCheckFailed, By: ByAutomatic, Problem: problem})
 }
 
@@ -234,6 +236,7 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 		newer = s.newer(ctx, candidate, current)
 	}
 	if !newer {
+		state.LastCheckProblem = nil
 		state.Candidate, state.DownloadBytes, state.DownloadedBytes = "", 0, 0
 		// A rollback stays on the page, with its reason, until a newer
 		// version replaces it; one that left the device failing its check,
@@ -249,7 +252,7 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 		s.checkFailed(state, &Problem{Code: ProblemInstall, Detail: err.Error()})
 		return nil
 	}
-	state.Candidate, state.Problem = candidate, nil
+	state.Candidate, state.Problem, state.LastCheckProblem = candidate, nil, nil
 	state.DownloadBytes, state.DownloadedBytes = downloadTotal(files), 0
 	if state.DownloadBytes == 0 {
 		state.Phase = PhaseReady
@@ -556,22 +559,22 @@ func (s *Service) fetched(files []download) int64 {
 }
 
 // missingSpace is how many bytes the system disk lacks for need and the
-// margin; 0 when it has room or its free space cannot be read.
-func (s *Service) missingSpace(need int64) int64 {
+// margin; 0 when it has room.
+func (s *Service) missingSpace(need int64) (int64, error) {
 	if s.FreeBytes == nil {
-		return 0
+		return 0, nil
 	}
 	free, err := s.FreeBytes("/")
-	if err != nil || free >= need+spaceMargin {
-		return 0
+	if err != nil {
+		return 0, err
 	}
-	return need + spaceMargin - free
+	return max(need+spaceMargin-free, 0), nil
 }
 
 // enoughSpace checks the system disk for need bytes and the margin, and
 // leaves a problem in the state when it is short.
 func (s *Service) enoughSpace(state *State, need int64) bool {
-	if missing := s.missingSpace(need); missing > 0 {
+	if missing, _ := s.missingSpace(need); missing > 0 {
 		state.Problem = &Problem{Code: ProblemDiskSpace, Detail: strconv.FormatInt(missing, 10)}
 		return false
 	}
@@ -641,11 +644,11 @@ func (s *Service) verify(ctx context.Context, state *State) error {
 	return nil
 }
 
-// healthCheck runs a-nas-check: nil when it passes, else the lines that failed.
+// healthCheck checks the product services and that dpkg has no incomplete work.
 func (s *Service) healthCheck(ctx context.Context) *Problem {
 	output, err := s.Commands.Run(ctx, "a-nas-check")
 	if err == nil {
-		return nil
+		return s.auditPackages(ctx)
 	}
 	var failed []string
 	for line := range strings.Lines(string(output)) {
@@ -657,6 +660,18 @@ func (s *Service) healthCheck(ctx context.Context) *Problem {
 		failed = []string{lastLines(string(output), 3)}
 	}
 	return &Problem{Code: ProblemCheck, Detail: strings.Join(failed, "\n")}
+}
+
+func (s *Service) auditPackages(ctx context.Context) *Problem {
+	output, err := s.Commands.Run(ctx, "dpkg", "--audit")
+	detail := strings.TrimSpace(string(output))
+	if err == nil && detail == "" {
+		return nil
+	}
+	if detail == "" {
+		detail = err.Error()
+	}
+	return &Problem{Code: ProblemCheck, Detail: "dpkg --audit: " + detail}
 }
 
 // goBack installs the version the install started from after a failed
@@ -718,33 +733,47 @@ func (s *Service) revert(ctx context.Context, state *State, by string) error {
 // reverting installs the version an administrator went back to: after
 // revert, or in a run that finds a revert a power cut stopped.
 func (s *Service) reverting(ctx context.Context, state *State) error {
-	left, by := state.From, state.By
+	if state.Problem != nil {
+		return s.restoreAfterRevert(ctx, state)
+	}
 	if problem := s.installVersion(ctx, state.Target); problem != nil {
-		// Back onto the version it left, which passed its check, unless
-		// nothing changed. A way back that fails, or leaves the check
-		// failing, is shown as a rollback gone wrong until the check
-		// passes again, as after an automatic rollback.
-		state.Phase = PhaseUpToDate
-		if !s.untouched(ctx, state) {
-			failure := s.installVersion(ctx, left)
-			if failure == nil {
-				failure = s.healthCheck(ctx)
-			}
-			if failure != nil {
-				problem = &Problem{Code: ProblemRollback, Detail: problem.Detail + "\n" + failure.Detail}
-				state.Phase = PhaseRolledBack
-			}
-		}
-		state.Record(Record{At: s.now(), Kind: RecordFailed, Version: state.Target, From: left, By: by, Problem: problem})
 		state.Problem = problem
+		if !s.untouched(ctx, state) {
+			// Persist the reason and the direction before apt touches From.
+			if err := s.Store.Save(*state); err != nil {
+				return err
+			}
+			return s.restoreAfterRevert(ctx, state)
+		}
+		s.finishFailedRevert(state, nil)
 	} else {
 		state.Problem = s.healthCheck(ctx)
-		state.Reject(left)
-		state.Record(Record{At: s.now(), Kind: RecordReverted, Version: state.Target, From: left, By: by, Problem: state.Problem})
+		state.Reject(state.From)
+		state.Record(Record{At: s.now(), Kind: RecordReverted, Version: state.Target, From: state.From, By: state.By, Problem: state.Problem})
 		state.Current, state.Previous, state.InstalledAt, state.Phase = state.Target, "", s.now(), PhaseUpToDate
+		state.Reverting, state.Target, state.From, state.By, state.DpkgBefore = false, "", "", "", ""
 	}
-	state.Reverting, state.Target, state.From, state.By, state.DpkgBefore = false, "", "", "", ""
 	return nil
+}
+
+// restoreAfterRevert resumes the second leg of a failed administrator revert.
+func (s *Service) restoreAfterRevert(ctx context.Context, state *State) error {
+	failure := s.installVersion(ctx, state.From)
+	if failure == nil {
+		failure = s.healthCheck(ctx)
+	}
+	s.finishFailedRevert(state, failure)
+	return nil
+}
+
+func (s *Service) finishFailedRevert(state *State, failure *Problem) {
+	state.Phase = PhaseUpToDate
+	if failure != nil {
+		state.Problem = &Problem{Code: ProblemRollback, Detail: state.Problem.Detail + "\n" + failure.Detail}
+		state.Phase = PhaseRolledBack
+	}
+	state.Record(Record{At: s.now(), Kind: RecordFailed, Version: state.Target, From: state.From, By: state.By, Problem: state.Problem})
+	state.Reverting, state.Target, state.From, state.By, state.DpkgBefore = false, "", "", "", ""
 }
 
 // boot finishes an install, rollback or revert that a power cut or reboot
@@ -758,16 +787,25 @@ func (s *Service) boot(ctx context.Context, state *State) error {
 		}
 		return nil
 	}
-	_, _ = s.Commands.Run(ctx, "dpkg", "--configure", "-a")
+	output, configureErr := s.Commands.Run(ctx, "dpkg", "--configure", "-a")
+	audit := s.auditPackages(ctx)
+	clean := configureErr == nil && audit == nil
 	switch {
-	case state.Phase == PhaseInstalling && s.landed(ctx, state.Target):
+	case state.Phase == PhaseInstalling && clean && s.landed(ctx, state.Target):
 		return s.verify(ctx, state)
-	case state.Phase == PhaseInstalling && s.untouched(ctx, state):
+	case state.Phase == PhaseInstalling && clean && s.untouched(ctx, state):
 		// Stopped before it changed anything.
 		s.notInstalled(state, &Problem{Code: ProblemInstall, Detail: "the install was interrupted before it changed anything"})
 		return nil
 	case state.Phase == PhaseInstalling:
-		return s.goBack(ctx, state, &Problem{Code: ProblemInstall, Detail: "the install was interrupted"})
+		detail := "the install was interrupted"
+		if configureErr != nil {
+			detail += "\ndpkg --configure -a: " + configureErr.Error() + "\n" + lastLines(string(output), 3)
+		}
+		if audit != nil {
+			detail += "\n" + audit.Detail
+		}
+		return s.goBack(ctx, state, &Problem{Code: ProblemInstall, Detail: detail})
 	case state.Reverting:
 		return s.reverting(ctx, state)
 	}

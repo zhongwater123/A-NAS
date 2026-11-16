@@ -187,7 +187,8 @@ type State struct {
 	StartedAt time.Time `json:"startedAt"`
 	// Reverting marks a rolling-back phase that an administrator's "back to
 	// the version before" started, not the rollback of a failed install: a
-	// run that a power cut stops in it finishes going to Target.
+	// run that a power cut stops in it finishes going to Target. If Problem
+	// is set, that attempt failed and the run restores From instead.
 	Reverting bool `json:"reverting,omitempty"`
 	// DpkgBefore sums what dpkg recorded of every package before the install
 	// or revert in progress: one that fails or is cut with dpkg recording
@@ -197,6 +198,8 @@ type State struct {
 	// before the install in progress, <time>-<From>.
 	BackupName string   `json:"backupName,omitempty"`
 	Problem    *Problem `json:"problem,omitempty"`
+	// LastCheckProblem identifies a consecutive series of identical failures.
+	LastCheckProblem *Problem `json:"lastCheckProblem,omitempty"`
 	// Rejected are versions that failed their check, or an install that
 	// changed the device, and versions an administrator went back from: not
 	// offered again.

@@ -24,7 +24,7 @@ import (
 
 // Recorder writes to the activity record (accounts.Service.RecordSystemUpdate).
 type Recorder interface {
-	RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string, at time.Time) error
+	RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string, at time.Time) (bool, error)
 }
 
 // Work names what an install waits for: "storage" while the data volume
@@ -39,10 +39,6 @@ type API struct {
 	recorder Recorder
 	logger   *slog.Logger
 	now      func() time.Time
-	// automaticAt is when the automatic install last asked for an install:
-	// it asks once in each window, so that an install the service declines,
-	// as for space, is not asked for again every few minutes.
-	automaticAt time.Time
 }
 
 func New(updater systemupdate.Updater, work Work, recorder Recorder, logger *slog.Logger) *API {
@@ -179,19 +175,21 @@ func (a *API) unavailable(w http.ResponseWriter, r *http.Request, err error) {
 	httpjson.WriteError(w, http.StatusServiceUnavailable, "update_unavailable", "system update is unavailable")
 }
 
-// record writes one event to the activity record, as at; zero is now. A
-// failure is logged: the request itself has happened.
-func (a *API) record(ctx context.Context, actorID, action, resourceID string, detail any, at time.Time) {
+// record reports whether it wrote a new activity event. A zero time is now.
+func (a *API) record(ctx context.Context, actorID, action, resourceID string, detail any, at time.Time) bool {
 	if a.recorder == nil {
-		return
+		return false
 	}
 	data, err := json.Marshal(detail)
 	if err == nil {
-		err = a.recorder.RecordSystemUpdate(ctx, actorID, action, resourceID, string(data), at)
+		var written bool
+		written, err = a.recorder.RecordSystemUpdate(ctx, actorID, action, resourceID, string(data), at)
+		if err == nil {
+			return written
+		}
 	}
-	if err != nil {
-		a.logger.ErrorContext(ctx, "system update not written to the activity record", "action", action, "error", err)
-	}
+	a.logger.ErrorContext(ctx, "system update not written to the activity record", "action", action, "error", err)
+	return false
 }
 
 // systemActor is the actor the activity log shows as 系统 and filters as 系统任务
@@ -240,8 +238,14 @@ func (a *API) automatic(ctx context.Context) {
 	a.mirror(ctx, status)
 	now := a.now()
 	if status.Running || status.Phase != systemupdate.PhaseReady || !status.Settings.AutoInstall ||
-		!status.Settings.InWindow(now) || !a.automaticAt.Before(status.Settings.WindowOpened(now)) ||
-		len(a.work(ctx)) > 0 {
+		!status.Settings.InWindow(now) || len(a.work(ctx)) > 0 {
+		return
+	}
+	// Record the attempt and claim this window before dispatch. A service
+	// restart or a rejected request must not permit a second dispatch.
+	window := status.Settings.WindowOpened(now).UTC().Format(time.RFC3339)
+	if !a.record(ctx, systemActor, "system.update.install", "automatic "+window,
+		map[string]string{"version": status.Candidate, "by": systemupdate.ByAutomatic}, now) {
 		return
 	}
 	request := systemupdate.Request{Kind: systemupdate.RequestInstall, By: systemupdate.ByAutomatic}
@@ -249,8 +253,6 @@ func (a *API) automatic(ctx context.Context) {
 		a.logger.ErrorContext(ctx, "automatic install not started", "error", err)
 		return
 	}
-	a.automaticAt = now
-	a.record(ctx, systemActor, "system.update.install", "", map[string]string{"version": status.Candidate, "by": systemupdate.ByAutomatic}, time.Time{})
 	a.logger.InfoContext(ctx, "automatic install started", "version", status.Candidate)
 }
 

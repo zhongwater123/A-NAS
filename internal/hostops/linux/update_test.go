@@ -40,8 +40,8 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	if err != nil || !ok || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
 		t.Fatalf("the request left for the service = %+v, %v, %v", request, ok, err)
 	}
-	if !slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
-		t.Fatalf("the service was not started: %v", runner.commands)
+	if !slices.Contains(runner.commands, "systemctl start anas-update.path") {
+		t.Fatalf("the request watcher was not started: %v", runner.commands)
 	}
 	info, err := os.Stat(store.Dir)
 	if err != nil || info.Mode().Perm() != 0o700 {
@@ -74,10 +74,10 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	}
 }
 
-func TestARequestWhoseUnitDidNotStartIsNotLeft(t *testing.T) {
+func TestARequestIsNotLeftIfTheWatcherDoesNotStart(t *testing.T) {
 	root := t.TempDir()
 	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
-	runner := &systemdRunner{activeState: "inactive", runErr: errors.New("Failed to start anas-update.service")}
+	runner := &systemdRunner{activeState: "inactive", runErr: errors.New("Failed to start anas-update.path")}
 	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
 	ctx := context.Background()
 	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}); err == nil {

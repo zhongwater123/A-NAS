@@ -20,6 +20,8 @@ type fakeHost struct {
 	versions     []string // the versions of a-nas the source has, oldest first
 	updateOutput string
 	updateErr    error
+	configureErr error
+	auditOutput  string
 	checkFails   map[string]bool // a-nas versions whose a-nas-check fails
 	installFails map[string]bool // versions apt fails to install before it changes anything
 	// brokenInstalls are versions whose install fails while dpkg unpacks
@@ -78,7 +80,12 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 		}
 		return nil, errors.New("not installed")
 	case "dpkg":
-		if args[0] == "--compare-versions" {
+		switch args[0] {
+		case "--configure":
+			return nil, h.configureErr
+		case "--audit":
+			return []byte(h.auditOutput), nil
+		case "--compare-versions":
 			if args[1] > args[3] {
 				return nil, nil
 			}
@@ -457,6 +464,31 @@ func TestBootJudgesTheWholeRelease(t *testing.T) {
 	}
 }
 
+func TestBootRejectsAnInstalledReleaseWhenDpkgRecoveryIsIncomplete(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		configureErr error
+		auditOutput  string
+	}{
+		{name: "configure failed", configureErr: errors.New("dpkg failed")},
+		{name: "audit reports incomplete package", auditOutput: "dependency is only half installed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := newFakeHost()
+			host.installed["a-nas"], host.installed["a-nas-host"] = "2", "2"
+			host.configureErr, host.auditOutput = tc.configureErr, tc.auditOutput
+			service, _ := newService(t, host)
+			if err := service.Store.Save(State{Phase: PhaseInstalling, Current: "1", Target: "2", From: "1"}); err != nil {
+				t.Fatal(err)
+			}
+			state := run(t, service, RequestBoot)
+			if state.Phase != PhaseRolledBack || state.Current != "1" || !host.ran("dpkg --audit") {
+				t.Fatalf("state = %+v, calls = %v; want rollback to 1 after dpkg audit", state, host.calls)
+			}
+		})
+	}
+}
+
 func TestARollbackSavesItsReasonBeforeItInstalls(t *testing.T) {
 	host := newFakeHost()
 	host.checkFails["2"] = true
@@ -512,6 +544,36 @@ func TestBootFinishesAnInterruptedRevert(t *testing.T) {
 	}
 	if !slices.Contains(state.Rejected, "2") || slices.Contains(state.Rejected, "1") || state.Records[0].Kind != RecordReverted {
 		t.Fatalf("state = %+v, want 2 left behind and 1 kept", state)
+	}
+}
+
+func TestBootResumesRestoringTheVersionAfterAFailedRevert(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	run(t, service, RequestCheck)
+	run(t, service, RequestInstall)
+	host.brokenInstalls["1"] = true
+	var interrupted State
+	host.onInstall = func(version string) {
+		if version == "2" {
+			interrupted = load(t, service)
+		}
+	}
+	run(t, service, RequestRevert)
+	if interrupted.Phase != PhaseRollingBack || !interrupted.Reverting || interrupted.Problem == nil {
+		t.Fatalf("state before restoring 2 = %+v; want persisted cause and direction", interrupted)
+	}
+	if err := service.Store.Save(interrupted); err != nil {
+		t.Fatal(err)
+	}
+	host.onInstall = nil
+	host.calls = nil
+	state := run(t, service, RequestBoot)
+	if state.Current != "2" || state.Reverting || state.Records[0].Kind != RecordFailed ||
+		slices.ContainsFunc(host.calls, func(call string) bool {
+			return strings.HasPrefix(call, "apt-get install") && strings.Contains(call, "a-nas=1")
+		}) {
+		t.Fatalf("state = %+v, calls = %v; want restore 2 without trying 1 again", state, host.calls)
 	}
 }
 
@@ -640,6 +702,18 @@ func TestASourceThatStaysUnreachableIsRecordedOnce(t *testing.T) {
 	host.updateOutput = "W: OpenPGP signature verification failed\n"
 	if state = run(t, service, RequestTick); len(state.Records) != 2 || state.Records[0].Problem.Code != ProblemSignature {
 		t.Fatalf("records = %+v", state.Records)
+	}
+	// A different reason in the same category also gets recorded.
+	host.updateOutput = "E: The following signatures were invalid\n"
+	if state = run(t, service, RequestCheck); len(state.Records) != 3 || state.Records[0].Problem.Detail != strings.TrimSpace(host.updateOutput) {
+		t.Fatalf("records = %+v, want the new signature failure", state.Records)
+	}
+	reason := host.updateOutput
+	host.updateOutput, host.updateErr = "", nil
+	run(t, service, RequestCheck)
+	host.updateOutput, host.updateErr = reason, errors.New("exit status 100")
+	if state = run(t, service, RequestCheck); len(state.Records) != 4 {
+		t.Fatalf("records = %+v, want the failure recorded again after a successful check", state.Records)
 	}
 }
 
@@ -865,6 +939,24 @@ func TestSyncAsksForRoomBeforeItCopies(t *testing.T) {
 	}
 }
 
+func TestSyncRefusesAPushThatGrewAfterCheckingRoom(t *testing.T) {
+	directory := t.TempDir()
+	staging, local := filepath.Join(directory, "staging"), filepath.Join(directory, "local")
+	writeFile(t, filepath.Join(staging, "dists/dev/InRelease"), "signed")
+	packageFile := filepath.Join("pool", "package.deb")
+	writeFile(t, filepath.Join(staging, packageFile), "small")
+	result, err := Sync(staging, local, func(_ int64) error {
+		writeFile(t, filepath.Join(staging, packageFile), strings.Repeat("larger", 100))
+		return nil
+	})
+	if err == nil || result.Files != 0 || result.Bytes != 0 {
+		t.Fatalf("Sync() = %+v, %v; want the changed push refused", result, err)
+	}
+	if _, err := os.Stat(local); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("local repository changed despite the refusal: %v", err)
+	}
+}
+
 func TestSyncCountsTheRoomThePushFrees(t *testing.T) {
 	directory := t.TempDir()
 	staging, local := filepath.Join(directory, "staging"), filepath.Join(directory, "local")
@@ -886,7 +978,11 @@ func TestSyncCountsTheRoomThePushFrees(t *testing.T) {
 	room := func(budget int64) func(int64) error {
 		return func(need int64) error {
 			asked = append(asked, need)
-			if need > budget {
+			available := budget
+			if _, err := os.Stat(filepath.Join(local, oldModel)); errors.Is(err, os.ErrNotExist) {
+				available += 40
+			}
+			if need > available {
 				return full
 			}
 			return nil
@@ -903,7 +999,7 @@ func TestSyncCountsTheRoomThePushFrees(t *testing.T) {
 	if err != nil || result.Files != 2 || result.Removed != 1 {
 		t.Fatalf("Sync() = %+v, %v; want the new model in the old one's place", result, err)
 	}
-	if want := []int64{73, 33}; !slices.Equal(asked, want) {
+	if want := []int64{73, 33, 73}; !slices.Equal(asked, want) {
 		t.Fatalf("asked for %v bytes, want %v", asked, want)
 	}
 	for name, want := range map[string]bool{newModel: true, oldModel: false, "pool/main/a/a-nas-model-v1": false} {

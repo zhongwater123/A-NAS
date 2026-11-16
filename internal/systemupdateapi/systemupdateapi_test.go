@@ -37,9 +37,14 @@ type recordedEvent struct {
 
 type recorder struct{ events []recordedEvent }
 
-func (r *recorder) RecordSystemUpdate(_ context.Context, actorID, action, resourceID, _ string, at time.Time) error {
+func (r *recorder) RecordSystemUpdate(_ context.Context, actorID, action, resourceID, _ string, at time.Time) (bool, error) {
+	for _, event := range r.events {
+		if resourceID != "" && event.action == action && event.resource == resourceID {
+			return false, nil
+		}
+	}
 	r.events = append(r.events, recordedEvent{actor: actorID, action: action, resource: resourceID, at: at})
-	return nil
+	return true, nil
 }
 
 func TestTheAutomaticInstallAsksOnceAWindowAsTheSystem(t *testing.T) {
@@ -53,7 +58,12 @@ func TestTheAutomaticInstallAsksOnceAWindowAsTheSystem(t *testing.T) {
 	api.now = func() time.Time { return now }
 	ctx := context.Background()
 	// Every five minutes through the night; the service declines each time.
-	for range 30 {
+	for i := range 30 {
+		if i == 10 {
+			// Product Service restarts after the first attempt was declined.
+			api = New(updater, nil, events, slog.New(slog.DiscardHandler))
+			api.now = func() time.Time { return now }
+		}
 		api.automatic(ctx)
 		now = now.Add(5 * time.Minute)
 	}

@@ -21,6 +21,12 @@ type SyncResult struct {
 	Removed int
 }
 
+type stagedFile struct {
+	name      string
+	info      fs.FileInfo
+	needsCopy bool
+}
+
 // Sync makes local, the directory apt reads as the file: source, a copy of
 // the repository a development machine pushed into staging, the staging
 // account's directory (docs/specs/system-update.md#开发机推送了新版本).
@@ -48,7 +54,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		return result, fmt.Errorf("open the pushed repository: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	var files []string
+	var files []stagedFile
 	var need int64
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -67,8 +73,16 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-		files = append(files, name)
-		if info, err := entry.Info(); err == nil && !have(filepath.Join(local, filepath.FromSlash(name)), info) {
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s changed while reading the pushed repository", name)
+		}
+		needsCopy := !have(filepath.Join(local, filepath.FromSlash(name)), info)
+		files = append(files, stagedFile{name: name, info: info, needsCopy: needsCopy})
+		if needsCopy {
 			need += info.Size()
 		}
 		return nil
@@ -76,7 +90,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 	if err != nil {
 		return result, fmt.Errorf("read the pushed repository: %w", err)
 	}
-	if !slices.ContainsFunc(files, func(name string) bool { return strings.HasPrefix(name, "dists/") }) {
+	if !slices.ContainsFunc(files, func(file stagedFile) bool { return strings.HasPrefix(file.name, "dists/") }) {
 		return result, errors.New("the pushed repository has no dists directory")
 	}
 	gone, freed, err := stale(local, files)
@@ -93,17 +107,19 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		if result.Removed, err = prune(local, gone); err != nil {
 			return result, err
 		}
-		pruned = true
-	}
-	slices.SortStableFunc(files, func(a, b string) int { return syncOrder(a) - syncOrder(b) })
-	for _, name := range files {
-		copied, size, err := syncFile(root, name, filepath.Join(local, filepath.FromSlash(name)))
-		if err != nil {
+		if err := room(need); err != nil {
 			return result, err
 		}
-		if copied {
+		pruned = true
+	}
+	slices.SortStableFunc(files, func(a, b stagedFile) int { return syncOrder(a.name) - syncOrder(b.name) })
+	for _, file := range files {
+		if err := syncFile(root, file, filepath.Join(local, filepath.FromSlash(file.name))); err != nil {
+			return result, err
+		}
+		if file.needsCopy {
 			result.Files++
-			result.Bytes += size
+			result.Bytes += file.info.Size()
 		}
 	}
 	if !pruned {
@@ -122,7 +138,7 @@ func have(target string, info fs.FileInfo) bool {
 // stale lists the files under local's dists and pool that are not among
 // pushed, and the bytes they hold. It reads local through os.Root, as Sync
 // reads staging, so that no link in local leads it, or prune after it, out.
-func stale(local string, pushed []string) ([]string, int64, error) {
+func stale(local string, pushed []stagedFile) ([]string, int64, error) {
 	root, err := os.OpenRoot(local)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, 0, nil
@@ -132,8 +148,8 @@ func stale(local string, pushed []string) ([]string, int64, error) {
 	}
 	defer func() { _ = root.Close() }()
 	keep := make(map[string]bool, len(pushed))
-	for _, name := range pushed {
-		keep[name] = true
+	for _, file := range pushed {
+		keep[file.name] = true
 	}
 	var names []string
 	var size int64
@@ -208,37 +224,43 @@ func syncOrder(name string) int {
 	}
 }
 
-// syncFile copies one file unless target has it already.
-func syncFile(root *os.Root, name, target string) (bool, int64, error) {
+// syncFile copies at most the size budgeted during preflight. A source
+// changed since that scan is left for the next sync.
+func syncFile(root *os.Root, file stagedFile, target string) error {
+	name := file.name
 	// O_NONBLOCK: a pipe put in place of the file since the walk saw it must
 	// not hold the open; it is refused below as not a regular file.
 	source, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return false, 0, fmt.Errorf("open %s in the pushed repository: %w", name, err)
+		return fmt.Errorf("open %s in the pushed repository: %w", name, err)
 	}
 	defer func() { _ = source.Close() }()
 	info, err := source.Stat()
 	if err != nil {
-		return false, 0, err
+		return err
 	}
-	if !info.Mode().IsRegular() {
-		return false, 0, fmt.Errorf("%s in the pushed repository is not a regular file", name)
+	if !sameStagedFile(file.info, info) {
+		return fmt.Errorf("%s changed after checking space for the pushed repository", name)
 	}
-	if have(target, info) {
-		return false, 0, nil
+	if !file.needsCopy {
+		return nil
 	}
 	//nolint:gosec // apt reads the local repository as _apt, as the runbook installs it
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return false, 0, err
+		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".*")
 	if err != nil {
-		return false, 0, err
+		return err
 	}
 	defer func() { _ = os.Remove(temporary.Name()) }()
-	size, err := io.Copy(temporary, source)
-	if err == nil && size != info.Size() {
-		err = fmt.Errorf("%s changed while it was copied", name)
+	_, err = io.CopyN(temporary, source, info.Size())
+	if err == nil {
+		var after fs.FileInfo
+		after, err = source.Stat()
+		if err == nil && !sameStagedFile(info, after) {
+			err = fmt.Errorf("%s changed while it was copied", name)
+		}
 	}
 	if err == nil {
 		err = temporary.Chmod(0o644)
@@ -256,7 +278,12 @@ func syncFile(root *os.Root, name, target string) (bool, int64, error) {
 		err = os.Rename(temporary.Name(), target)
 	}
 	if err != nil {
-		return false, 0, fmt.Errorf("copy %s from the pushed repository: %w", name, err)
+		return fmt.Errorf("copy %s from the pushed repository: %w", name, err)
 	}
-	return true, size, nil
+	return nil
+}
+
+func sameStagedFile(before, after fs.FileInfo) bool {
+	return after.Mode().IsRegular() && os.SameFile(before, after) &&
+		before.Size() == after.Size() && before.ModTime().Equal(after.ModTime())
 }

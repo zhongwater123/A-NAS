@@ -2458,6 +2458,7 @@ check "two copies of the databases stay, under the same names on both disks" \
 # reads. It installs the next release and goes back, rolls back a release
 # whose check fails, and finishes an install a killed run left.
 check "the package started the system update timer" systemctl is-active --quiet anas-update.timer
+check "the package started the system update request watcher" systemctl is-active --quiet anas-update.path
 staging=/home/system-test-staging
 install -d "$staging"
 mount --bind "$repository" "$staging"
@@ -2509,6 +2510,32 @@ state=$(update_settled || true)
 check "the check took the push into the local repository" test -s /var/local/a-nas-repository/dists/dev/InRelease
 check "the check offers the next release, ready to install from the push" \
   test "$(jq -r '"\(.phase)|\(.candidate)|\(.current)|\(.downloadBytes)"' <<<"$state")" = "ready|$next|$version|0"
+
+# Put a request after the service has already run its last request read,
+# while systemd still considers that invocation to be starting.
+update_dropin=/run/systemd/system/anas-update.service.d
+install -d "$update_dropin"
+cat >"$update_dropin/system-test-handoff.conf" <<'EOF'
+[Service]
+ExecStartPost=/bin/sh -c 'if [ ! -e /run/anas-update-test-finishing ]; then touch /run/anas-update-test-finishing; timeout 15 /bin/sh -c "until [ -e /run/anas-update-test-release ]; do sleep 0.1; done"; fi'
+EOF
+systemctl daemon-reload
+systemctl start --no-block anas-update.service
+for _ in $(seq 1 100); do
+  if [[ -e /run/anas-update-test-finishing ]]; then break; fi
+  sleep 0.1
+done
+check "the update is between its last request read and unit exit" test -e /run/anas-update-test-finishing
+handoff_checked_at=$(jq -r .checkedAt /var/lib/a-nas-update/state.json)
+printf '{"kind":"check","by":"owner"}\n' >/var/lib/a-nas-update/.system-test-request
+mv -f /var/lib/a-nas-update/.system-test-request /var/lib/a-nas-update/request.json
+touch /run/anas-update-test-release
+state=$(update_settled || true)
+check "the request watcher starts a new run for the late request" \
+  test "$(jq -r .checkedAt <<<"$state")" != "$handoff_checked_at" -a ! -e /var/lib/a-nas-update/request.json
+rm -f "$update_dropin/system-test-handoff.conf" /run/anas-update-test-finishing /run/anas-update-test-release
+systemctl daemon-reload
+
 check "an administrator asks for the install" test "$(update_ask install)" = 202
 check "a second request waits for the run in progress" test "$(update_ask check)" = 409
 state=$(update_settled || true)

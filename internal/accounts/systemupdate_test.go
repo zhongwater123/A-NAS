@@ -17,7 +17,7 @@ func TestASystemUpdateOutcomeIsWrittenOnceAtTheTimeItHappened(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			if err := service.RecordSystemUpdate(ctx, "system", "system.update.result.updated",
+			if _, err := service.RecordSystemUpdate(ctx, "system", "system.update.result.updated",
 				"2026-11-14T03:10:00Z updated", `{"version":"2"}`, at); err != nil {
 				t.Error(err)
 			}

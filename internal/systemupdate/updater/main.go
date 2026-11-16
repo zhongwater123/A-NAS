@@ -21,22 +21,16 @@ const (
 	aptArchives     = "/var/cache/apt/archives"
 )
 
-// staleRequest is how long a request waits for the run that takes it: the
-// Host Agent starts the unit as it leaves one, so an older one belongs to a
-// start that failed.
-const staleRequest = 10 * time.Minute
-
 // Main is one run of anas-update.service (`anas-host-agent update`): the
-// request the Host Agent left, or the timer's tick, and then any request
-// left while it worked.
+// request the Host Agent left, or the timer's tick. The path unit starts a
+// fresh run for any request left while it worked.
 func Main(ctx context.Context) error {
 	dir := os.Getenv("STATE_DIRECTORY") // systemd's StateDirectory
 	if dir == "" {
 		dir = DefaultStateDir
 	}
 	store := Store{Dir: dir}
-	started := time.Now()
-	request, ok, err := takeRequest(store, started.Add(-staleRequest))
+	request, ok, err := takeRequest(store, time.Now().Add(-staleRequest))
 	if err != nil {
 		return err
 	}
@@ -57,21 +51,7 @@ func Main(ctx context.Context) error {
 		Archives:  aptArchives,
 		FreeBytes: freeBytes,
 	}
-	if err := service.Run(ctx, request); err != nil {
-		return err
-	}
-	// The Host Agent's start joins a run already starting, such as the
-	// timer's, which has looked for a request before this one was left: it
-	// is carried out now, while the page still shows a run.
-	for {
-		request, ok, err := takeRequest(store, started)
-		if err != nil || !ok {
-			return err
-		}
-		if err := service.Run(ctx, request); err != nil {
-			return err
-		}
-	}
+	return service.Run(ctx, request)
 }
 
 // takeRequest takes the request left for a run; one that waited too long is
