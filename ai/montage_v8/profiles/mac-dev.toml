@@ -16,6 +16,11 @@ kind = "openai"
 url = "http://127.0.0.1:8094"
 schema_mode = "server"
 
+# 图文向量模型（给上传的视频建索引）：anas 虚拟机里的 EmbeddingGemma 服务（service/search.py，只编码时不带 --beats）。
+[embedder]
+kind = "http"
+url = "http://127.0.0.1:8766"
+
 [planner]
 kind = "claude-cli"
 model = "claude-opus-5-5"

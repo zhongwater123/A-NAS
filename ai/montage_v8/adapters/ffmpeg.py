@@ -93,6 +93,41 @@ class Ffmpeg:
                 return True
         return False
 
+    def duration(self, file) -> float:
+        """视频的秒数（容器里记的）。"""
+        fmt = self._probe(["-show_entries", "format=duration", str(file)]).get("format", {})
+        if "duration" not in fmt:
+            raise FfmpegError(f"读不出 {file} 的时长，可能不是视频或文件坏了")
+        return float(fmt["duration"])
+
+    def jpeg(self, file, ms: int, duration_ms: int, edge: int = 512) -> tuple[bytes, float]:
+        """(JPEG, 灰度标准差)：ms 毫秒处的一帧，长边缩到 edge、质量 82（和 A-NAS 相册给模型的图片相同）。
+        取不到帧时往前退（最后一帧在结尾之前；有的片子画面比文件短）。"""
+        import io
+
+        from PIL import Image
+
+        at = min(ms, max(duration_ms - 100, 0)) / 1000
+        while True:
+            png = self.run(["-ss", f"{at:.3f}", "-i", str(file), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]).stdout
+            if png or at <= 0:
+                break
+            at = max(at - 1, 0)
+        if not png:
+            raise FfmpegError(f"{file} 在 {ms / 1000:.1f} 秒取不到画面")
+        with Image.open(io.BytesIO(png)) as image:
+            # 和 A-NAS 相册给模型的图片（eval/embed.render、Go 的 imaging.Fit）一样缩：保持比例、短边截断取整，
+            # 一步 LANCZOS（thumbnail 会先粗缩一步，向量就差一点）
+            width, height = image.size
+            if width > edge or height > edge:
+                size = (edge, max(1, int(edge / (width / height)))) if width / height > 1 else (max(1, int(edge * (width / height))), edge)
+                image = image.resize(size, Image.Resampling.LANCZOS)
+            rgb = image.convert("RGB")
+            spread = float(np.asarray(rgb.convert("L"), dtype=np.float32).std())
+            out = io.BytesIO()
+            rgb.save(out, format="JPEG", quality=82)
+        return out.getvalue(), spread
+
     def blur(self, image):
         out = self.run(["-i", str(image), "-vf", "blurdetect,metadata=print:file=-", "-f", "null", "-"], text=True).stdout
         return float(next(line.split("=", 1)[1] for line in out.splitlines() if "lavfi.blur=" in line))

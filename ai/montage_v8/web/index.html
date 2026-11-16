@@ -782,7 +782,7 @@ function uploadPage() {
             <p>NAS 里的视频按文件夹列出。点文件夹展开，里面按拍摄时间排好、按天分开。</p>
             <p>文件夹前的圆圈勾选整个文件夹，日期那一行勾选那一天；点一下视频勾选或取消，按住 Shift 点可以连选一段。只剪勾选的视频。</p>
             <p>点 ＋ 添加这台电脑上的视频，也可以把视频或整个文件夹拖进这个框，一个文件夹成为一组。</p>
-            <p class="faint">添加的视频会上传到运行这个网站的机器上保存（Mac 或 RK3588 板子，原片目录下的 uploads 文件夹），下次打开还在。剪辑还没接上：三版成片仍用“新西兰 · 品杰手机”里的示例素材剪。</p>
+            <p class="faint">添加的视频会上传到运行这个网站的机器上保存（Mac 或 RK3588 板子，原片目录下的 uploads 文件夹），下次打开还在。勾选一个文件夹里的视频点开始剪辑，就在这台机器上真的剪：上传的视频先建索引、切卡片、检查画质，再描述和规划。</p>
           </div>
         </span>
       </div>
@@ -1228,19 +1228,22 @@ function jobSeen() {
 // ---------- the real cutting job (第八版 service: /api/jobs) ----------
 // one folder at a time, the ticked videos of it (all ticked: the whole folder), the song and brief from the setup pages
 const FOLDER_CASES = new Set(["ne", "pj", "ch"]);
+// an uploaded folder (shown from the server, "=name", or added on this visit, "+n") is cut as "upload:<folder>":
+// the job indexes its videos, cuts them into cards and checks them before describing; its videos are named by file
+const folderOf = x => FOLDER_CASES.has(x.g.id) ? x.g.id : `upload:${x.g.id.startsWith("=") ? x.g.name : x.it.group}`;
 async function startRealJob() {
   const ticked = groups().flatMap(g => onIn(g.items).map(it => ({ g, it })));
-  const folders = [...new Set(ticked.map(x => x.g.id))];
-  if (folders.some(id => !FOLDER_CASES.has(id)))
-    return toast("上传的视频还要先建视频索引才能剪（下一步接上），这次只勾 NAS 文件夹里的视频");
+  if (ticked.some(x => x.it.up && x.it.up.state !== "ok")) return toast("还有视频没上传完，传完再开始剪辑");
+  const folders = [...new Set(ticked.map(folderOf))];
   if (folders.length > 1) return toast("一次只剪一个文件夹里的视频");
-  const g = groupOf(folders[0]), setup = getSetup();
-  const videos = onIn(g.items).length === g.items.length ? [] : ticked.map(x => x.it.key.split("/")[1]);
+  const setup = getSetup(), folder = folders[0], upload = folder.startsWith("upload:");
+  const all = upload ? null : groupOf(folder);
+  const videos = upload ? ticked.map(x => x.it.name) : onIn(all.items).length === all.items.length ? [] : ticked.map(x => x.it.key.split("/")[1]);
   const r = await fetch("api/jobs", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ case: g.id, videos, song: setup.song, order: setup.order, ask: setup.ask, versions: 3 }) });
+    body: JSON.stringify({ case: folder, videos, song: setup.song, order: setup.order, ask: setup.ask, versions: 3 }) });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) return toast(body.error || "建不了剪辑任务");
-  job = { real: true, id: body.id, steps: body.steps, srv: body, first: `剪 ${g.name}` };
+  job = { real: true, id: body.id, steps: body.steps, srv: body, first: `剪 ${upload ? folder.slice(7) : all.name}` };
   store.set("job", job);
   openJob();
   if (!jobTimer) jobTimer = setInterval(tickJob, 120);

@@ -53,6 +53,24 @@ class Store:
             vectors = dict(zip(data["keys"].tolist(), data["vectors"], strict=True))
         return WindowIndex.build(meta, vectors)
 
+    @staticmethod
+    def read_vectors(path) -> dict:
+        path = Path(path)
+        if not path.exists():
+            return {}
+        with np.load(path) as data:
+            return dict(zip(data["keys"].tolist(), data["vectors"], strict=True))
+
+    @staticmethod
+    def write_vectors(vectors: dict, path) -> None:
+        """和 A-NAS 视频索引器的 frames.npz 同一个格式：keys 和 vectors 两个数组。"""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        keys = sorted(vectors)
+        partial = path.with_name(path.name + ".partial.npz")
+        np.savez(partial, keys=np.array(keys), vectors=np.stack([np.asarray(vectors[k], dtype=np.float32) for k in keys]))
+        os.replace(partial, path)
+
     def source(self, ix: WindowIndex, video: str) -> str:
         return str(self.videos / ix.videos[video]["file"])
 

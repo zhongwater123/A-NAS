@@ -106,7 +106,7 @@ def _job_routes(platform, jobs_db):
     from starlette.concurrency import run_in_threadpool
 
     from .. import config
-    from ..jobs import CutRequest, Jobs, RequestError, Worker
+    from ..jobs import UPLOAD, CutRequest, Jobs, RequestError, Worker
     from ..pipeline import Montage
     from . import results
 
@@ -114,7 +114,17 @@ def _job_routes(platform, jobs_db):
     cases = config.cases()
     # 不放在 /media/ 能访问到的目录里
     jobs = Jobs(jobs_db or store.videos.parent / "montage-jobs" / "jobs.sqlite")
-    worker = Worker(jobs, lambda **kw: Montage(platform, **kw), cases, results.build)
+    def resolve(name: str):
+        """素材组：cases.toml 里的，或 "upload:<文件夹>"（原片目录下 uploads/<文件夹> 存在且有视频）。"""
+        if name in cases:
+            return cases[name]
+        if name.startswith(UPLOAD):
+            folder = name.removeprefix(UPLOAD)
+            if any(g["name"] == folder for g in Uploads(store.videos / "uploads").listing()):
+                return Montage(platform).upload_case(folder)
+        return None
+
+    worker = Worker(jobs, lambda **kw: Montage(platform, **kw), resolve, results.build)
 
     def songs() -> dict[str, Path]:
         return {p.stem.removeprefix("music-"): p for p in sorted(store.cuts.glob("music-*.json")) if "." not in p.stem}
@@ -130,7 +140,7 @@ def _job_routes(platform, jobs_db):
     async def create(request: Request):
         try:
             body = await request.json()
-            req = CutRequest.parse(body, cases, set(songs()))
+            req = CutRequest.parse(body, resolve, set(songs()))
         except (ValueError, RequestError) as error:
             return JSONResponse({"error": str(error)}, status_code=400)
         job = await run_in_threadpool(jobs.add, req)

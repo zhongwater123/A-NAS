@@ -15,13 +15,14 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .domain.options import Case, CutOptions
 from .pipeline import Cancelled, Montage
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
+UPLOAD = "upload:"
 SCHEMA = """CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created REAL NOT NULL, updated REAL NOT NULL,
@@ -46,8 +47,9 @@ class RequestError(ValueError):
 
 @dataclass(frozen=True)
 class CutRequest:
-    """一次剪辑：case 素材组；videos 勾选的视频（空是全部）；song 曲库里的歌（music-<歌>.json 的歌名）；
-    order "place"（同一地点连在一起，不按时间）或 "time"；ask 补充要求；versions 剪几版。"""
+    """一次剪辑：case 素材组（cases.toml 里的键，或 "upload:<上传文件夹>"）；videos 勾选的视频（素材组里是视频编号，
+    上传文件夹里是文件名；空是全部）；song 曲库里的歌（music-<歌>.json 的歌名）；order "place"（同一地点连在一起，
+    不按时间）或 "time"；ask 补充要求；versions 剪几版。"""
 
     case: str
     song: str
@@ -58,10 +60,11 @@ class CutRequest:
     wide: bool = False
 
     @classmethod
-    def parse(cls, body: dict, cases: dict[str, Case], songs: set[str]) -> "CutRequest":
-        case = body.get("case")
-        if case not in cases:
-            raise RequestError(f"素材要从 {'、'.join(cases)} 里选一组")
+    def parse(cls, body: dict, resolve: Callable[[str], Case | None], songs: set[str]) -> "CutRequest":
+        """resolve(case) 给出素材组，不存在给 None。"""
+        case = str(body.get("case", ""))
+        if resolve(case) is None:
+            raise RequestError("没有这组素材（上传的文件夹要先上传完）")
         song = body.get("song", "")
         if song not in songs:
             raise RequestError(f"《{song}》还没有分析过段落和小节，先在曲库里选分析过的歌")
@@ -81,8 +84,16 @@ class CutRequest:
         return CutOptions(tag=tag, free_order=self.order == "place", ask=self.ask, wide=self.wide,
                           videos=frozenset(self.videos) if self.videos else None)
 
+    @property
+    def folder(self) -> str | None:
+        """上传文件夹的名字；不是上传的就是 None。"""
+        return self.case.removeprefix(UPLOAD) if self.case.startswith(UPLOAD) else None
+
     def steps(self) -> list[str]:
-        out = ["检查素材", "本机模型补写卡片描述", "读取歌曲的段落和小节"]
+        out = ["检查素材"]
+        if self.folder is not None:
+            out += ["给视频建索引", "按画面切成卡片", "检查模糊、抖动、遮挡"]
+        out += ["本机模型补写卡片描述", "读取歌曲的段落和小节"]
         for k in range(1, self.versions + 1):
             out += [f"规划方案{k}", f"渲染方案{k}"]
         return out
@@ -178,7 +189,7 @@ class Worker:
 
     jobs: Jobs
     montage: Callable[..., Montage]         # 每个任务一个，带上它的进度回报
-    cases: dict
+    resolve: Callable[[str], Case | None]   # 素材组的名字 → Case
     results: Callable
     poll: float = 1.0
     _wake: threading.Event = field(default_factory=threading.Event)
@@ -221,22 +232,34 @@ class Worker:
             return self.jobs.get(jid)["cancel"]
 
         montage = self.montage(report=report, stop=stop)
-        case = self.cases[req.case]
+        case = self.resolve(req.case)
+        n = iter(range(len(req.steps())))
         try:
-            step(0, "数一数这次能用的卡片")
-            usable = montage.usable(case, req.options(""))
-            if not usable:
-                raise RequestError("勾选的视频里没有能用的画面（可能还没切卡片，或画质都不合格）")
-            step(1)
+            step(next(n), "看看这次要剪的视频")
+            if case is None:
+                raise RequestError("这组素材不在了")
+            if req.folder is not None:
+                step(next(n))
+                ids = montage.index(case, req.folder)
+                if req.videos:                    # 勾的是文件名，换成索引里的视频编号
+                    wanted = set(req.videos)
+                    req = replace(req, videos=tuple(v for v, f in ids.items() if f.rsplit("/", 1)[-1] in wanted))
+                step(next(n))
+                montage.cards(case)
+                step(next(n))
+                montage.quality(case)
+            step(next(n))
             montage.describe(case, req.options(""))
-            step(2)
+            if not montage.usable(case, req.options("")):
+                raise RequestError("勾选的视频里没有能用的画面（画质都不合格，或太短切不出卡片）")
+            step(next(n))
             montage.music(case, req.song)
             tags = []
             for k in range(1, req.versions + 1):
                 tag = f"-job{jid}-{k}"
-                step(1 + 2 * k)
+                step(next(n))
                 montage.shots(case, req.options(tag), req.song)
-                step(2 + 2 * k)
+                step(next(n))
                 montage.cut(case, req.options(tag), req.song)
                 tags.append(tag)
             self.jobs.update(jid, state=DONE, step=len(req.steps()), detail="剪好了",

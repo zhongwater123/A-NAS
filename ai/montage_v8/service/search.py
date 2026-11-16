@@ -16,6 +16,12 @@ It also keeps the page's back-office log, one JSON line per confirmed film (--re
 and says how alike two beats' pictures are (the mean of their windows), for the shot that covers a deleted one:
 
   GET /likeness?of=pj-009/2&to=pj-017/1&to=pj-001/1         → {"scores": {"pj-017/1": 0.81, ...}}
+
+2026-11-16 (第八版): it also embeds pictures, for indexing uploaded videos (adapters/embedder.py); without
+--beats it serves only that:
+
+  POST /embed  (a JPEG)                                       → {"model": ..., "vector": [...]}
+  GET  /model                                                 → {"model": ...}
 """
 import argparse
 import json
@@ -35,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--manifest", required=True)
-    parser.add_argument("--beats", required=True)
+    parser.add_argument("--beats", help="the page's beats.npz; without it only /embed is served")
     parser.add_argument("--weight-cache")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--records", help="JSONL file the confirmations are appended to")
@@ -43,24 +49,30 @@ def main():
     records = Path(args.records) if args.records else None
     writing = threading.Lock()
 
-    with np.load(args.beats) as data:
-        keys, owner, vectors = data["keys"].tolist(), data["owner"], data["vectors"]
-        built_with = str(data["model"])
+    if args.beats:
+        with np.load(args.beats) as data:
+            keys, owner, vectors = data["keys"].tolist(), data["owner"], data["vectors"]
+            built_with = str(data["model"])
+    else:
+        keys, owner, vectors, built_with = [], np.zeros(0, dtype=np.int32), np.zeros((0, 1), dtype=np.float32), None
     started = time.monotonic()
     provider = providers.MediaPipeProvider(args.model, args.manifest, cache_dir=args.weight_cache)
-    if provider.model != built_with:
+    model = threading.Lock()                      # one call into the model at a time: requests come on many threads
+    if built_with and provider.model != built_with:
         raise SystemExit(f"the beats' vectors come from {built_with}, the model here is {provider.model}")
     print(f"{provider.model} loaded in {time.monotonic() - started:.1f} s; {len(keys)} beats", flush=True)
     cache = {}
     # a beat's picture as one vector: the mean of its windows, for picture-to-picture likeness
     pictures = np.zeros((len(keys), vectors.shape[1]), dtype=np.float32)
     np.add.at(pictures, owner, vectors)
-    pictures /= np.linalg.norm(pictures, axis=1, keepdims=True)
+    if len(keys):
+        pictures /= np.linalg.norm(pictures, axis=1, keepdims=True)
     row = {k: n for n, k in enumerate(keys)}
 
     def scores(query):
         if query not in cache:
-            q = np.asarray(provider.embed_query(query), dtype=np.float32)
+            with model:
+                q = np.asarray(provider.embed_query(query), dtype=np.float32)
             best = np.full(len(keys), -1.0, dtype=np.float32)
             np.maximum.at(best, owner, vectors @ q)
             cache[query] = {k: round(float(s), 4) for k, s in zip(keys, best, strict=True)}
@@ -68,6 +80,19 @@ def main():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if urlparse(self.path).path == "/embed":     # a JPEG in, its vector out: 第八版 indexes uploaded videos with it
+                size = int(self.headers.get("Content-Length") or 0)
+                if not 0 < size <= 8 << 20:
+                    return self.reply(413, {"error": "one JPEG up to 8 MiB"})
+                image = self.rfile.read(size)
+                try:
+                    with model:
+                        vector = np.asarray(provider.embed_image(image), dtype=np.float32)
+                except Exception as error:  # noqa: BLE001  a picture the model cannot read is the caller's to report
+                    return self.reply(400, {"error": f"could not embed: {error}"})
+                return self.reply(200, {"model": provider.model, "vector": [round(float(x), 7) for x in vector]})
+            if urlparse(self.path).path == "/model":
+                return self.reply(200, {"model": provider.model})
             if urlparse(self.path).path != "/record" or records is None:
                 return self.reply(404, {"error": "POST /record, with --records set"})
             size = int(self.headers.get("Content-Length") or 0)
@@ -92,6 +117,8 @@ def main():
                 if of not in row or not all(t in row for t in to):
                     return self.reply(404, {"error": "unknown beat"})
                 return self.reply(200, {"scores": {t: round(float(pictures[row[of]] @ pictures[row[t]]), 4) for t in to}})
+            if url.path == "/model":
+                return self.reply(200, {"model": provider.model})
             if url.path == "/records":
                 lines = records.read_text(encoding="utf-8").splitlines() if records and records.exists() else []
                 return self.reply(200, {"records": [json.loads(line) for line in reversed(lines[-500:])]})

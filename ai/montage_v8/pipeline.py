@@ -4,6 +4,7 @@
 只调用领域层和端口，不认识具体平台；平台由 config.load 选定的适配器决定。
 """
 
+import hashlib
 import statistics
 import time
 from collections.abc import Callable
@@ -12,10 +13,20 @@ from pathlib import Path
 
 from .adapters.store import HeldCache, read_json, write_json
 from .config import Platform
-from .domain import cards as cardrules, catalog, describe, fill, picture, plan, quality as qualityrules
+from .domain import (
+    cards as cardrules,
+    catalog,
+    describe,
+    fill,
+    picture,
+    plan,
+    quality as qualityrules,
+    windows as windowrules,
+)
 from .domain.options import Case, CutOptions
 
 POINT_WIDTH, DARK, SHAKE_FPS = 1920, 60, 10
+VIDEO_SUFFIXES = {".mov", ".mp4", ".m4v", ".mts", ".avi", ".mkv"}
 
 
 class StaleStep(RuntimeError):
@@ -47,6 +58,55 @@ class Montage:
             raise Cancelled
         if self.report:
             self.report(detail, frame, done, total)
+
+    # 上传的文件夹 ---------------------------------------------------------------------------------------
+
+    UPLOAD_INSTRUCTION = "剪一条旅行 vlog，场景之间衔接自然"
+
+    def upload_case(self, folder: str) -> Case:
+        """上传文件夹（原片目录下 uploads/<文件夹>）作为一组素材：键是 u 加文件夹名的短摘要（卡片编号和文件名里用），
+        索引名 upload-<键>。"""
+        key = "u" + hashlib.sha1(folder.encode("utf-8")).hexdigest()[:6]  # noqa: S324  只是取个短名字，不做安全用途
+        return Case(key=key, index=f"upload-{key}", instruction=self.UPLOAD_INSTRUCTION, style="旅行", name=folder)
+
+    def index(self, case: Case, folder: str) -> dict:
+        """给上传文件夹里的视频建窗口索引（domain/windows.py），已经编码过的帧不再编码。返回 {视频编号: 文件}。"""
+        embedder, ff = self.platform.embedder, self.platform.ffmpeg
+        if embedder is None:
+            raise RuntimeError("这个平台的配置里没有图文向量模型（[embedder]），上传的视频建不了索引")
+        here = self.store.videos / "uploads" / folder
+        files = [(str(f.relative_to(self.store.videos)), f.stat().st_mtime) for f in sorted(here.iterdir())
+                 if f.is_file() and f.suffix.lower() in VIDEO_SUFFIXES] if here.is_dir() else []
+        if not files:
+            raise RuntimeError(f"上传文件夹“{folder}”里没有视频")
+        model = embedder.model
+        d = self.store.indexes / f"video-moments-{case.index}" / model
+        old = read_json(d / "index.json") if (d / "index.json").exists() else {"videos": {}}
+        vectors = self.store.read_vectors(d / "frames.npz")
+        ids = windowrules.numbered(files, {meta["file"]: vid for vid, meta in old["videos"].items()})
+        durations = {vid: old["videos"][vid]["duration"] if vid in old["videos"] else ff.duration(self.store.videos / rel)
+                     for vid, rel in ids.items()}
+        todo = sum(len(windowrules.windows(round(t * 1000))) for t in durations.values())
+        out, done = {"model": model, "layout": "2s1f", "videos": {}}, 0
+        for vid, rel in ids.items():
+            path, duration = self.store.videos / rel, durations[vid]
+            flat_before = {w["frame"]: w["flat"] for w in old["videos"].get(vid, {}).get("windows", [])}
+            rows = []
+            for start, end, frame in windowrules.windows(round(duration * 1000)):
+                key = f"{vid}/{frame}"
+                if key in vectors and frame in flat_before:
+                    flat = flat_before[frame]
+                else:
+                    self.tell(f"编码 {Path(rel).name} 第 {start / 1000:.0f} 秒", None, done, todo)
+                    jpeg, spread = ff.jpeg(path, frame, round(duration * 1000), windowrules.EDGE)
+                    vectors[key] = embedder.embed_image(jpeg)
+                    flat = spread < windowrules.FLAT
+                rows.append({"start": start / 1000, "end": end / 1000, "frame": frame, "flat": flat})
+                done += 1
+            out["videos"][vid] = {"file": rel, "duration": duration, "windows": rows}
+            self.store.write_vectors(vectors, d / "frames.npz")
+        write_json(out, d / "index.json")
+        return ids
 
     # 卡片 -----------------------------------------------------------------------------------------------
 

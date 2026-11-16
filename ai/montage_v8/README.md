@@ -73,8 +73,25 @@ python3 -m montage_v8 --profile mac-dev describe pj
   - **取消**：排队中的直接取消；执行中的在下一步之前停，不打断正在进行的模型调用或渲染。
   - **服务重启**：正在执行的任务回到排队，再执行时复用已做完的步骤，不会重复花钱。
   - **开销**：每版规划约 0.4 美元（Claude），三版约 1.3 美元；品杰一组每版规划加渲染约 3 分钟。
-  - **限制**：只能剪 NAS 里已建好视频索引的文件夹（`cases.toml` 里的 ne、ch、pj）。上传的视频要先建窗口索引（EmbeddingGemma），这一步还不在第八版里。曲库里只有分析过段落的歌能选。
+  - **上传的文件夹**也能剪：任务先给视频建窗口索引，再切卡片、检查画质，然后接着描述和规划，详见下面的“建索引”。
+  - **限制**：一次只剪一个文件夹；曲库里只有分析过段落的歌能选。
   - **接口**：`POST /api/jobs`、`GET /api/jobs/<id>`、`POST /api/jobs/<id>/cancel`、`GET /api/songs`；关键帧、成片、原片、歌在 `/media/` 下。
+- **建索引**（上传的视频，`pipeline.index`、[`domain/windows.py`](domain/windows.py)）：
+  - **窗口**：和 A-NAS 视频索引器的 2s1f 布局相同，每 2 秒一个窗口，取窗口正中一帧，长边缩到 512、JPEG 质量 82。
+  - **编码**：用 EmbeddingGemma 2 编码，灰度标准差小于 8 的帧算纯色。
+  - **只建剪辑要用的**：镜头切点和标签不建。
+  - **存放**：索引写在 `<索引目录>/video-moments-upload-<键>/<模型>/`。键是 `u` 加文件夹名摘要，卡片编号也用它，例如 `u5c450a-001`。
+  - **视频编号**：按修改时间编成 001、002……；以后往文件夹里加视频，已有的编号不变，已编码的帧也不再编码。
+  - **编码服务**：编码在 `service/search.py` 里做。它要 MediaPipe，开发机上只能在 anas 虚拟机里跑；不带 `--beats` 时只做编码，配置里是 `[embedder]`。
+  - **向量差异**：开发机的 FFmpeg 取出的帧和虚拟机里的有细微差别，同一帧的向量余弦约 0.97–0.996。上传的视频只和自己的索引比，不影响剪辑。
+
+  启动编码服务（端口 8766，只对本机开放）：
+
+  ```bash
+  R="$HOME/code/A-NAS/.claude/worktrees/montage-v8"; docker --context colima-anas run -d --name v8-embed -p 127.0.0.1:8766:8766 -v "$R/ai:/src/ai:ro" -v "$R/deploy/models:/manifest:ro" -v "$HOME/A-NAS-models/embeddinggemma-2-740m:/models:ro" -v "$HOME/A-NAS-datasets/cache/xnnpack:/xnnpack" -w /src/ai -e PYTHONPATH=/src/ai anas-ai-dev:trixie /opt/anas-ai/bin/python /src/ai/montage_v8/service/search.py --model /models/embeddinggemma-2-740m.litertlm --manifest /manifest/embeddinggemma-2-740m.json --weight-cache /xnnpack
+  ```
+
+  2026-11-16 实测：上传品杰 11 段、约 6 分钟的视频，任务建索引、切出 13 张卡片、检查画质、本机 4B 描述，规划和渲染一版。成片 95.2 秒、29 个镜头，规划 0.27 美元。
 - **没有登录**：服务默认只对本机开放。用 `--host 0.0.0.0` 对局域网开放后，同一局域网里任何人都能上传，只在可信的网络里这样用。
 
 装依赖（只需一次，开发机和板子相同）：

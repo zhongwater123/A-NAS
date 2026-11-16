@@ -9,6 +9,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .adapters.embedder import HttpEmbedder
 from .adapters.ffmpeg import Ffmpeg
 from .adapters.music import Allin1, Precomputed
 from .adapters.planner import ClaudeApi, ClaudeCli
@@ -34,6 +35,7 @@ class Platform:
     planner: object
     music: object
     workers: int
+    embedder: object = None
 
 
 def _pick(kinds: dict, section: dict, what: str):
@@ -61,7 +63,8 @@ def load(name: str) -> Platform:
         describer=_pick({"openai": OpenAIVision}, raw["describer"], "describer"),
         planner=_pick({"claude-cli": ClaudeCli, "claude-api": ClaudeApi}, planner, "planner"),
         music=_pick({"allin1": Allin1, "precomputed": Precomputed}, music, "music"),
-        workers=int(raw.get("workers", 1)))
+        workers=int(raw.get("workers", 1)),
+        embedder=_pick({"http": HttpEmbedder}, raw["embedder"], "embedder") if "embedder" in raw else None)
 
 
 def cases() -> dict[str, Case]:

@@ -232,6 +232,22 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(got["properties"]["a"]["items"]["additionalProperties"])
 
 
+class WindowsTest(unittest.TestCase):
+    def test_a_window_every_two_seconds_with_its_middle_frame(self):
+        from montage_v8.domain import windows
+
+        self.assertEqual(windows.windows(5000), [(0, 2000, 1000), (2000, 4000, 3000), (4000, 5000, 4500)])
+        self.assertEqual(windows.windows(0), [])
+
+    def test_videos_keep_their_numbers_and_new_ones_follow_in_time_order(self):
+        from montage_v8.domain import windows
+
+        first = windows.numbered([("u/b.mov", 2.0), ("u/a.mov", 1.0)], {})
+        self.assertEqual(first, {"001": "u/a.mov", "002": "u/b.mov"})
+        later = windows.numbered([("u/c.mov", 0.5), ("u/a.mov", 1.0), ("u/b.mov", 2.0)], {f: v for v, f in first.items()})
+        self.assertEqual(later, {"001": "u/a.mov", "002": "u/b.mov", "003": "u/c.mov"})
+
+
 class UploadNamesTest(unittest.TestCase):
     def test_names_stay_inside_the_uploads_folder_and_only_videos_are_taken(self):
         import tempfile
@@ -288,6 +304,16 @@ class FakeMontage:
     def music(self, case, song):
         self._do("music")
 
+    def index(self, case, folder):
+        self._do(f"index {folder}")
+        return {"001": "uploads/湖边/a.mov", "002": "uploads/湖边/b.mov"}
+
+    def cards(self, case):
+        self._do("cards")
+
+    def quality(self, case):
+        self._do("quality")
+
     def shots(self, case, opts, song):
         self._do(f"shots{opts.tag}")
 
@@ -303,8 +329,9 @@ class JobsTest(unittest.TestCase):
 
         self.tmp = tempfile.TemporaryDirectory()
         self.jobs = Jobs(Path(self.tmp.name) / "jobs.sqlite")
-        self.cases = {"pj": CASE}
-        self.req = CutRequest.parse({"case": "pj", "song": "S", "versions": 2, "ask": " 多用大景 "}, self.cases, {"S"})
+        self.cases = {"pj": CASE, "upload:湖边": CASE}
+        self.resolve = self.cases.get
+        self.req = CutRequest.parse({"case": "pj", "song": "S", "versions": 2, "ask": " 多用大景 "}, self.resolve, {"S"})
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -313,7 +340,7 @@ class JobsTest(unittest.TestCase):
         from montage_v8.jobs import Worker
 
         return Worker(self.jobs, lambda **cb: FakeMontage(calls, report=cb.get("report"), stop=cb.get("stop"), **kw),
-                      self.cases, lambda montage, case, req, tags: {"tags": tags})
+                      self.resolve, lambda montage, case, req, tags: {"tags": tags, "videos": req.videos})
 
     def test_a_request_is_checked_and_its_options_follow_the_page(self):
         from montage_v8.jobs import CutRequest, RequestError
@@ -321,9 +348,9 @@ class JobsTest(unittest.TestCase):
         for bad in ({"case": "zz", "song": "S"}, {"case": "pj", "song": "nope"}, {"case": "pj", "song": "S", "versions": 9},
                     {"case": "pj", "song": "S", "order": "random"}):
             with self.assertRaises(RequestError):
-                CutRequest.parse(bad, self.cases, {"S"})
+                CutRequest.parse(bad, self.resolve, {"S"})
         opts = CutRequest.parse({"case": "pj", "song": "S", "videos": ["002", "001"], "order": "place", "ask": "多用大景"},
-                                self.cases, {"S"}).options("-x")
+                                self.resolve, {"S"}).options("-x")
         self.assertTrue(opts.free_order)
         self.assertEqual(opts.videos, frozenset({"001", "002"}))
         self.assertEqual(opts.instruction(CASE), "剪一条旅行 vlog；多用大景")
@@ -337,8 +364,22 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(got["state"], "done")
         self.assertEqual(calls, ["describe", "music", f"shots-job{job['id']}-1", f"cut-job{job['id']}-1",
                                  f"shots-job{job['id']}-2", f"cut-job{job['id']}-2"])
-        self.assertEqual(got["result"], {"tags": [f"-job{job['id']}-1", f"-job{job['id']}-2"]})
+        self.assertEqual(got["result"], {"tags": [f"-job{job['id']}-1", f"-job{job['id']}-2"], "videos": []})
         self.assertIsNone(self.jobs.next())
+
+    def test_an_uploaded_folder_is_indexed_cut_and_checked_first_and_its_files_become_video_numbers(self):
+        from montage_v8.jobs import CutRequest
+
+        req = CutRequest.parse({"case": "upload:湖边", "song": "S", "versions": 1, "videos": ["b.mov"]}, self.resolve, {"S"})
+        self.assertEqual(req.steps()[:4], ["检查素材", "给视频建索引", "按画面切成卡片", "检查模糊、抖动、遮挡"])
+        job = self.jobs.add(req)
+        calls = []
+        self.worker(calls).run(self.jobs.next())
+        got = self.jobs.get(job["id"])
+        self.assertEqual(got["state"], "done", got["error"])
+        self.assertEqual(calls[:4], ["index 湖边", "cards", "quality", "describe"])
+        self.assertEqual(got["result"]["videos"], ["002"])
+        self.assertEqual(got["step"], len(req.steps()))
 
     def test_a_failure_is_kept_with_its_step_and_the_next_job_still_runs(self):
         first, second = self.jobs.add(self.req), self.jobs.add(self.req)

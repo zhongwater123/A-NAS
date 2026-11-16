@@ -5,6 +5,7 @@
 | FrameSource | FFmpeg + VideoToolbox | FFmpeg（CPU） | FFmpeg + rkmpp |
 | Describer | llama-server（Metal） | llama-server | llama-server（CPU）或 RKLLM 服务（NPU），待实测 |
 | Planner | claude 命令行 | Claude API | Claude API |
+| Embedder | 虚拟机里的 EmbeddingGemma 服务 | 同左（Linux 上直接跑） | 同左，待实测 |
 | MusicAnalyzer | allin1 | 预先算好的 JSON | 预先算好的 JSON |
 | Renderer | FFmpeg + libx264 | FFmpeg + libx264 | FFmpeg + h264_rkmpp |
 """
@@ -44,6 +45,17 @@ class Planner(Protocol):
 
     def ask(self, system: str, user: str, schema: dict) -> tuple[dict, dict]:
         """(回答, 开销)：回答符合 schema；开销有 seconds、model、usd、input、output。"""
+        ...
+
+
+class Embedder(Protocol):
+    """图文向量模型：给窗口的关键帧编码，建视频的窗口索引。"""
+
+    @property
+    def model(self) -> str: ...
+
+    def embed_image(self, jpeg: bytes) -> list[float]:
+        """一张 JPEG 的向量（已归一化）。"""
         ...
 
 
