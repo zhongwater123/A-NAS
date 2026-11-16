@@ -132,6 +132,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSyncIdentities(w, r)
 		return
 	}
+	if r.URL.Path == wire.EnableCredentialPath {
+		h.handleEnableCredential(w, r)
+		return
+	}
+	if r.URL.Path == wire.RemoveAccountPath {
+		h.handleRemoveAccount(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
 		h.handleDisableCredential(w, r)
 		return
@@ -562,6 +570,61 @@ func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request
 	if err := h.credentials.DisableCredential(r.Context(), username); err != nil {
 		h.logger.ErrorContext(r.Context(), "disable credential failed", "username", username, "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) handleEnableCredential(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	enabler, ok := h.credentials.(accountid.CredentialEnabler)
+	if !ok {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		return
+	}
+	var request wire.EnableDocument
+	if err := decodeRequest(r, &request); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	if err := enabler.EnableCredential(r.Context(), accountid.EnableRequest{Username: request.Username, SMB: request.SMB}); err != nil {
+		h.logger.ErrorContext(r.Context(), "enable credential failed", "username", request.Username, "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) handleRemoveAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	remover, ok := h.credentials.(accountid.AccountRemover)
+	if !ok {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "account operation is unavailable")
+		return
+	}
+	var request wire.AccountRemovalDocument
+	if err := decodeRequest(r, &request); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	if err := remover.RemoveAccount(r.Context(), accountid.AccountRemoval{
+		Username: request.Username, UID: request.UID, PrivateSpaceID: request.PrivateSpaceID,
+		TransferTo: request.TransferTo, TransferToUID: request.TransferToUID, Folder: request.Folder,
+	}); err != nil {
+		h.logger.ErrorContext(r.Context(), "remove account failed", "username", request.Username, "error", err)
+		if errors.Is(err, accountid.ErrVolumeUnavailable) {
+			httpjson.WriteError(w, http.StatusLocked, wire.VolumeUnavailableCode, "the data volume is offline")
+			return
+		}
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "account operation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

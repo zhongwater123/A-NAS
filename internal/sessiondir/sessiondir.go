@@ -189,6 +189,29 @@ func (d *Directory) ActiveProfiles(ctx context.Context) ([]accountid.Profile, er
 	return profiles, rows.Err()
 }
 
+// AccountDeletion returns the started deletion of userID, or
+// accountid.ErrNotDeleting.
+func (d *Directory) AccountDeletion(ctx context.Context, userID string) (accountid.AccountDeletion, error) {
+	db, err := d.open()
+	if err != nil {
+		return accountid.AccountDeletion{}, err
+	}
+	deletion := accountid.AccountDeletion{UserID: userID}
+	err = db.QueryRowContext(ctx, `SELECT u.username, d.personal_space, d.library, IFNULL(a.id, ''), IFNULL(a.username, '')
+FROM account_deletions d
+JOIN users u ON u.id = d.user_id
+LEFT JOIN users a ON a.id = d.requested_by AND a.role = ? AND a.status = ?
+WHERE d.user_id = ? AND d.started_at IS NOT NULL`, accountid.RoleAdmin, accountid.UserStatusActive, userID).Scan(
+		&deletion.Username, &deletion.PersonalSpace, &deletion.Library, &deletion.AdminID, &deletion.AdminUsername)
+	if errors.Is(err, sql.ErrNoRows) {
+		return accountid.AccountDeletion{}, accountid.ErrNotDeleting
+	}
+	if err != nil {
+		return accountid.AccountDeletion{}, err
+	}
+	return deletion, nil
+}
+
 // LibraryViewings returns an administrator's unexpired grants to view
 // members' private photo libraries.
 func LibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]accountid.LibraryViewing, error) {

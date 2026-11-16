@@ -18,6 +18,11 @@ type (
 	IdentitySynchronizer  = accountid.IdentitySynchronizer
 	CredentialRequest     = accountid.CredentialRequest
 	CredentialProvisioner = accountid.CredentialProvisioner
+	CredentialEnabler     = accountid.CredentialEnabler
+	EnableRequest         = accountid.EnableRequest
+	AccountRemover        = accountid.AccountRemover
+	AccountRemoval        = accountid.AccountRemoval
+	AccountDeletion       = accountid.AccountDeletion
 	ViewingScope          = accountid.ViewingScope
 	ViewingRequest        = accountid.ViewingRequest
 	ViewingProvisioner    = accountid.ViewingProvisioner
@@ -52,6 +57,7 @@ const (
 )
 
 var (
+	ErrNotDeleting       = accountid.ErrNotDeleting
 	ErrSessionNotFound   = accountid.ErrSessionNotFound
 	ErrUserNotFound      = accountid.ErrUserNotFound
 	ErrIdentityConflict  = accountid.ErrIdentityConflict
@@ -62,6 +68,12 @@ var (
 func WithSessionToken(ctx context.Context, token string) context.Context {
 	return accountid.WithSessionToken(ctx, token)
 }
+
+// HandoverFolder is accountid.HandoverFolder.
+func HandoverFolder(username string) string { return accountid.HandoverFolder(username) }
+
+// HandoverAlbum is accountid.HandoverAlbum.
+func HandoverAlbum(username string) string { return accountid.HandoverAlbum(username) }
 
 // SessionToken is accountid.SessionToken.
 func SessionToken(ctx context.Context) string { return accountid.SessionToken(ctx) }

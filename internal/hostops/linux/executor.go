@@ -272,8 +272,19 @@ func (e *Executor) SetCredential(ctx context.Context, request accountid.Credenti
 		if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", request.Username}, ""); err != nil {
 			return commandError("keep Samba credential disabled", err, output)
 		}
+		return e.applySambaConfiguration(ctx)
 	}
-	return e.applySambaConfiguration(ctx)
+	// A reset left the credential disabled; enable it explicitly rather than
+	// rely on how smbpasswd -a treats the disabled flag.
+	if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-e", request.Username}, ""); err != nil {
+		return commandError("enable Samba credential", err, output)
+	}
+	if err := e.applySambaConfiguration(ctx); err != nil {
+		return err
+	}
+	// A member who had to choose a new password had the assistant masked by
+	// every identity synchronization until now.
+	return e.enableAssistant(ctx, request.Username)
 }
 
 // DataVolumeReady reports whether the intended Btrfs data volume, with its

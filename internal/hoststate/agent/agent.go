@@ -187,6 +187,18 @@ func (c *Client) DisableCredential(ctx context.Context, username string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/accounts/credential/"+url.PathEscape(username), nil, nil)
 }
 
+func (c *Client) EnableCredential(ctx context.Context, request accountid.EnableRequest) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, wire.EnableCredentialPath,
+		wire.EnableDocument{Username: request.Username, SMB: request.SMB}, nil)
+}
+
+func (c *Client) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, wire.RemoveAccountPath, wire.AccountRemovalDocument{
+		Username: removal.Username, UID: removal.UID, PrivateSpaceID: removal.PrivateSpaceID,
+		TransferTo: removal.TransferTo, TransferToUID: removal.TransferToUID, Folder: removal.Folder,
+	}, nil)
+}
+
 func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/snapshots", wire.SnapshotDocument{SpaceID: spaceID, SnapshotID: snapshotID}, nil)
 }
@@ -365,6 +377,10 @@ var _ datavolume.VolumeExecutor = (*Client)(nil)
 var _ accountid.CredentialProvisioner = (*Client)(nil)
 
 var _ accountid.IdentitySynchronizer = (*Client)(nil)
+
+var _ accountid.CredentialEnabler = (*Client)(nil)
+
+var _ accountid.AccountRemover = (*Client)(nil)
 
 var _ accountid.ViewingProvisioner = (*Client)(nil)
 

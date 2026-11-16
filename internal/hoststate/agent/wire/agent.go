@@ -60,6 +60,27 @@ type CredentialDocument struct {
 	Enabled        bool           `json:"enabled"`
 }
 
+// EnableCredentialPath and RemoveAccountPath take an EnableDocument and an
+// AccountRemovalDocument (accountid.CredentialEnabler, accountid.AccountRemover).
+const (
+	EnableCredentialPath = "/v1/accounts/enable"
+	RemoveAccountPath    = "/v1/accounts/remove"
+)
+
+type EnableDocument struct {
+	Username string `json:"username"`
+	SMB      bool   `json:"smb"`
+}
+
+type AccountRemovalDocument struct {
+	Username       string `json:"username"`
+	UID            int    `json:"uid"`
+	PrivateSpaceID string `json:"privateSpaceId"`
+	TransferTo     string `json:"transferTo,omitempty"`
+	TransferToUID  int    `json:"transferToUid,omitempty"`
+	Folder         string `json:"folder,omitempty"`
+}
+
 type IdentityDocument struct {
 	Username string         `json:"username"`
 	UID      int            `json:"uid"`
