@@ -16,11 +16,14 @@ export interface SystemUpdateView {
   status?: SystemUpdateStatus;
   // error is why the last read got no answer, as while the services restart.
   error?: unknown;
-  // pageVersion is the version this page first read, which its code is from.
+  // pageVersion is the version this page's code is from: the one it was
+  // built at, or, in a build without one, the first version it read.
   pageVersion?: string;
 }
 
-let view: SystemUpdateView = {};
+const builtVersion = import.meta.env.VITE_ANAS_VERSION || undefined;
+
+let view: SystemUpdateView = { pageVersion: builtVersion };
 const listeners = new Set<() => void>();
 
 function publish(next: SystemUpdateView) {
@@ -101,7 +104,7 @@ export function useSystemUpdate(enabled: boolean): SystemUpdateView {
 
 // resetSystemUpdate forgets everything read, for tests that each start anew.
 export function resetSystemUpdate() {
-  view = {};
+  view = { pageVersion: builtVersion };
   reading = undefined;
   window.clearTimeout(timer);
 }

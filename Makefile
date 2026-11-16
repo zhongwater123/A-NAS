@@ -34,10 +34,16 @@ GOLANGCI_LINT ?= $(GO) tool -modfile=tools/golangci-lint/go.mod golangci-lint
 # actionlint checks the GitHub workflows (ops-check), with ShellCheck on their
 # run: scripts; a module of its own for the same reason as golangci-lint.
 ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
+# zizmor audits the workflows' security (ops-check); ai/requirements-dev.txt
+# pins it, as Ruff, since releases differ in what they find.
+ZIZMOR ?= zizmor
+# Gitleaks looks for secrets in the Git history (secrets-check); a module of its
+# own for the same reason as golangci-lint.
+GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -101,7 +107,8 @@ web-test: web-install
 THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
 
 web-build: web-install
-	cd web && $(NPM) run build
+	@# The page compares the version it was built at with the installed one (docs/specs/system-update.md).
+	cd web && VITE_ANAS_VERSION='$(VERSION)' $(NPM) run build
 	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
 		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
 			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \
@@ -153,17 +160,22 @@ VENDOR_PYTHON ?= python3
 vendor-check:
 	PYTHON=$(VENDOR_PYTHON) scripts/check-dsh-pet-vendor.sh $(DSH_PET) $(DSH_PET_MOV_ZIP)
 
-# Shell scripts, the GitHub workflows (actionlint), units and installer
-# conventions, Dependabot's groups (tools/depcheck keeps 0.x web packages out
-# of them), and the AI locks: every pin has a hash, and the runtime's leaves
-# out what ai/requirements.excludes names, which a lock regenerated without
-# --excludes (Dependabot's) would not.
+# Shell scripts, the GitHub workflows (actionlint; zizmor for them and
+# Dependabot's configuration, with its online audits when GH_TOKEN is set),
+# units and installer conventions, Dependabot's groups (tools/depcheck keeps
+# 0.x web packages out of them), and the AI locks: every pin has a hash, and
+# the runtime's leaves out what ai/requirements.excludes names, which a lock
+# regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
 	$(ACTIONLINT) .github/workflows/*.yml
+	@want="$$(sed -n 's/^zizmor==\([0-9.]*\).*/\1/p' ai/requirements-dev.txt)"; \
+	have="$$($(ZIZMOR) --version 2>/dev/null | cut -d ' ' -f 2)"; \
+	if [ "$$have" != "$$want" ]; then echo "ops-check needs zizmor $$want (ai/requirements-dev.txt); found: $${have:-none}" >&2; exit 1; fi
+	$(ZIZMOR) --strict-collection .github/workflows .github/dependabot.yml
 	@for script in $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
 	@# Release versions sort as ADR 0034 says: candidates, development builds and releases in order.
@@ -190,6 +202,7 @@ ops-check:
 	@# The system update runs as its own unit, which the timer and the Host Agent start (docs/specs/system-update.md).
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-host-agent update' deploy/systemd/system/anas-update.service
 	grep -Fqx 'wants timers.target anas-update.timer' scripts/build-packages.sh
+	grep -Fqx 'wants paths.target anas-update.path' scripts/build-packages.sh
 	grep -Fqx 'd /var/lib/a-nas-update 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
 	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
@@ -329,6 +342,16 @@ vuln-check:
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
+
+# Secrets in the history of HEAD (Gitleaks): what main has after a merge, so a
+# value added and removed again within a pull request still counts. Values are
+# shown fully redacted. A finding judged harmless is let through by its exact
+# fingerprint in .gitleaksignore, with the reason beside it. Not in check-steps:
+# it needs .git and the whole history, which the WSL copy and CI's shallow
+# checkout lack; the Security workflow runs it.
+secrets-check:
+	@if [ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" != false ]; then echo "secrets-check needs a clone with its whole history" >&2; exit 1; fi
+	$(GITLEAKS) git --log-opts=HEAD --redact=100 --no-banner --verbose .
 
 test:
 	$(GO) test ./...
