@@ -1,0 +1,21 @@
+# Each version's UKI, with three tries: systemd-boot goes back to the version
+# before when a new one does not pass its boot health check three times.
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=url-file
+Path=file:///var/lib/a-nas-updates/os/
+MatchPattern=a-nas_@v.efi
+
+[Target]
+Type=regular-file
+Path=/EFI/Linux
+PathRelativeTo=boot
+MatchPattern=a-nas_@v+@l-@d.efi \
+             a-nas_@v+@l.efi \
+             a-nas_@v.efi
+Mode=0444
+TriesLeft=3
+TriesDone=0
+InstancesMax=2

@@ -1,6 +1,8 @@
 [Unit]
 Description=A-NAS system update: take a push, check, download
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
+# Not on a device that runs the A-NAS image (anas-update.service).
+ConditionOSRelease=IMAGE_ID!=a-nas
 
 [Timer]
 # Two minutes after the timer starts: soon after boot, which also finishes an

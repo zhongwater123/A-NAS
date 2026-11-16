@@ -2632,16 +2632,21 @@
   background: var(--set-bg);
   container: settingsmain / inline-size;
 }
+/* The column never outgrows the page: in a narrow window a long title or row
+   shrinks and ellipsizes instead of widening what .set-main scrolls. */
 .set-page {
   max-width: 664px;
   margin: 0 auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
   animation: set-page-in 0.22s var(--set-ease);
 }
 /* The title stays at the top of the scrolling page. Its background and the
    line under it reach across the page's side padding; once the page has
-   scrolled, the title shrinks in place without moving the content. */
+   scrolled, the title shrinks in place without moving the content.
+   Both reach out as shadows cut to their own height: a box reaching past
+   .set-main's edges would widen what it scrolls, a shadow does not. */
 .set-header {
   position: sticky;
   top: 0;
@@ -2659,11 +2664,13 @@
 .set-header::after {
   content: "";
   position: absolute;
-  right: -100vmax;
+  right: 0;
   bottom: 0;
-  left: -100vmax;
+  left: 0;
   height: 1px;
   background: var(--set-line-strong);
+  box-shadow: 0 0 0 100vmax var(--set-line-strong);
+  clip-path: inset(0 -100vmax);
   opacity: 0;
   transition: opacity 0.2s;
 }

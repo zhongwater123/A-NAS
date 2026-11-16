@@ -77,7 +77,8 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
   }
   if (scoring) {
     return (
-      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
+      // The stage asks this window, with its notices, to fill the screen.
+      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`} data-scoring-window>
         <Stage batch={scoring.batch} onBack={() => setScoring(undefined)} onRefused={refused} />
         {toasts}
       </div>

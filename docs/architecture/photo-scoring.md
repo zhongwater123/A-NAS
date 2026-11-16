@@ -21,7 +21,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 - 打分服务的单元用 `TemporaryFileSystem=/srv:ro` 盖住整个数据卷，再绑定自己的存储（读写）与 `照片打分`（只读）。读共享空间靠单元授予的 `a-nas-users` 组；这个组对共享空间有写权限，所以只读完全来自只读绑定挂载，系统测试核对写入失败。
 - 导入时读原图：先从文件头读尺寸，要打分的照片长边不足 2400 px 的直接跳过（`too_small`，锚点不限）；其余哈希、读 EXIF 方向、在解码预算内解码（[`imagerender`](../../internal/imagerender/imagerender.go)，与相册共用），写出长边 2048 px 的 JPEG 预览。标准库编码不写 EXIF、XMP 与 ICC。最小长边是 `scoring.Options.MinLongEdge`，默认 2400；测试用小图时调低。
-- 100% 查看再读一次原图：只给领取者本人、只在含清晰度的批次。模块按 `item_paths` 依次打开原图，SHA-256 仍等于导入时的才用，否则 `original_changed`（410）。在同一解码预算内解码，按存储方向原样编码成质量 92 的 JPEG（[`imagerender.FullJPEG`](../../internal/imagerender/imagerender.go)），不转正，因此不透明的照片不再复制像素，6000 万像素的 JPEG 解码后约 90 MB，在单元 768 MB 的内存上限内；EXIF 方向放在响应头 `X-Image-Orientation`，网页用 CSS 矩阵转正。结果按内容缓存在 `full/`，只留最近用过的 16 份，同一张照片的几位打分人共用。
+- 100% 查看再读一次原图：只给领取者本人，每个批次都有。模块按 `item_paths` 依次打开原图，SHA-256 仍等于导入时的才用，否则 `original_changed`（410）。在同一解码预算内解码，按存储方向原样编码成质量 92 的 JPEG（[`imagerender.FullJPEG`](../../internal/imagerender/imagerender.go)），不转正，因此不透明的照片不再复制像素，6000 万像素的 JPEG 解码后约 90 MB，在单元 768 MB 的内存上限内；EXIF 方向放在响应头 `X-Image-Orientation`，网页用 CSS 矩阵转正。结果按内容缓存在 `full/`，只留最近用过的 16 份，同一张照片的几位打分人共用。
 
 ## 模块与身份
 
@@ -66,7 +66,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 整个窗口是一间中性深灰的“暗房”：灰色不带色相，只有指针、进度和选中用一种暖色；数字用随前端打包的 Fraunces 衬线体（[`@fontsource-variable/fraunces`](https://fontsource.org/fonts/fraunces)，SIL OFL），只在打开窗口时加载拉丁字符子集，NAS 不能上网时也一样。打分页上照片的显示尺寸由窗口按预览的宽高算出（[`Stage.tsx`](../../web/src/scoring/Stage.tsx) 的 `fitIn`），所以并排对照时两张照片的缩放可以平滑过渡；还没量到窗口时只靠样式表保证完整显示。
 
-多个打分项共用一条数轴：网页为每张照片保存一组百分之一分，数轴按正在打的项取分数排列缩略图。点选后自动进入下一项由一个 0.35 秒的计时完成，按下数轴或任意键就取消；最后一项没有这个计时。100% 查看（[`Loupe.tsx`](../../web/src/scoring/Loupe.tsx)）把原图按设备像素比缩到一个原图像素对一个屏幕像素，用 `orientationMatrix` 转正，平移到鼠标所指的点不动；原图用对象 URL 保存，换照片时释放。
+多个打分项共用一条数轴：网页为每张照片保存一组百分之一分，新照片从空的一组开始，数轴按正在打的项取分数排列缩略图。点选后进入下一项、最后一项后提交，都由一个 0.35 秒的计时完成，按下数轴或任意键就取消。“上一张”只能回到刚提交的一张，因为模块只允许替换本人最近一次的回答（`rating_locked`）；回去前网页把这一张已打的分数和所在的项暂存，改完提交或按 Esc 后恢复。全屏用浏览器的 Fullscreen API，作用在带 `data-scoring-window` 的打分窗口上，让窗口的提示一起留在屏幕上。100% 查看（[`Loupe.tsx`](../../web/src/scoring/Loupe.tsx)）把原图按设备像素比缩到一个原图像素对一个屏幕像素，用 `orientationMatrix` 转正，平移到鼠标所指的点不动；右下角的小窗用已经加载的预览图，不再多读一次；原图用对象 URL 保存，换照片时释放。
 
 ## 备份与移除
 
@@ -80,7 +80,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 - [`internal/modules/modules_test.go`](../../internal/modules/modules_test.go)：清单校验、未安装 404、未运行 503、转发只带会话令牌。
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：每个接口都在契约中并按姿态守卫。
 - [系统测试](../../scripts/system-test.sh)：安装脚本、存储归属、套接字权限、单元内只看到存储与 `照片打分`、写不进共享空间、跳过太小的照片、沙箱内重读原图的 100% 查看、按全部打分项提交、移除脚本。
-- [`web/src/scoring`](../../web/src/scoring/ScoringPanel.test.tsx)：键盘打分、改分、悬停缩略图并排对照、逐项打分与自动进入下一项、100% 查看、管理员的批次缩略图、按原因的跳过、按项的打分人统计与提醒、导出对话框、打分人开关；[`model.test.ts`](../../web/src/scoring/model.test.ts)：计时、八种 EXIF 方向的转正矩阵、导出的列序。
+- [`web/src/scoring`](../../web/src/scoring/ScoringPanel.test.tsx)：键盘打分、改分、悬停缩略图并排对照、新照片没有分数、逐项打分与自动进入下一项和下一张、撤销一步与改上一张、两侧箭头、单击与按住 Z 的 100% 查看、管理员的批次缩略图、按原因的跳过、按项的打分人统计与提醒、导出对话框、打分人开关；[`model.test.ts`](../../web/src/scoring/model.test.ts)：计时、八种 EXIF 方向的转正矩阵、导出的列序。
 
 ## 关联
 

@@ -237,7 +237,7 @@ function describeSystemUpdate(action: string, actor: Part, raw?: string): Descri
     case "download":
       return { parts: [actor, "开始下载 A-NAS", version], meta: [] };
     case "install":
-      return { parts: [actor, "开始安装 A-NAS", version], meta: [] };
+      return { parts: [actor, text("by") === "automatic" ? "请求安装 A-NAS" : "开始安装 A-NAS", version], meta: [] };
     case "revert":
       return { parts: [actor, "开始回到 A-NAS", version], meta: [] };
     case "settings":

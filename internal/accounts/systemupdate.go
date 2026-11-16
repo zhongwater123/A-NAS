@@ -1,23 +1,18 @@
 package accounts
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RecordSystemUpdate writes a system update event to the activity record
 // (docs/specs/system-update.md): an administrator's request, with actorID,
-// or an outcome the update service recorded, with no actor. resourceID,
-// when set, names the event, which is then written only once however often
-// it is offered.
-func (s *Service) RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string) error {
-	if resourceID != "" {
-		var written bool
-		err := s.store.db.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM audit_events WHERE action = ? AND resource_id = ?)", action, resourceID).Scan(&written)
-		if err != nil {
-			return err
-		}
-		if written {
-			return nil
-		}
+// or what the system did, with the system's actor. at is when it happened;
+// zero is now. resourceID, when set, names the event, which is then written
+// only once however often it is offered. It returns whether it was written.
+func (s *Service) RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string, at time.Time) (bool, error) {
+	if at.IsZero() {
+		at = s.now()
 	}
-	return s.appendAudit(ctx, actorID, action, "system-update", resourceID, detail)
+	return s.insertAudit(ctx, s.store.db, actorID, action, "system-update", resourceID, detail, at, resourceID != "")
 }

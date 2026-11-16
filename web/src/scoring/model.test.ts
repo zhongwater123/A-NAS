@@ -44,6 +44,13 @@ describe("stageAction", () => {
     expect(key("Z", { shiftKey: true })).toEqual({ kind: "zoom" });
   });
 
+  it("turns photos with [ and ] and fills the screen with F", () => {
+    expect(key("[")).toEqual({ kind: "previous" });
+    expect(key("]")).toEqual({ kind: "next" });
+    expect(key("f")).toEqual({ kind: "fullscreen" });
+    expect(key("F", { shiftKey: true })).toEqual({ kind: "fullscreen" });
+  });
+
   it("leaves the browser's shortcuts and other keys alone", () => {
     expect(key("5", { ctrlKey: true })).toBeUndefined();
     expect(key("s", { metaKey: true })).toBeUndefined();

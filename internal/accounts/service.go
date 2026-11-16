@@ -1042,10 +1042,24 @@ func (s *Service) appendAudit(ctx context.Context, actorID, action, resourceType
 // appendAuditTo records an audit event through db, which may be a
 // transaction the event must commit with.
 func (s *Service) appendAuditTo(ctx context.Context, db sqlExecutor, actorID, action, resourceType, resourceID, detail string) error {
-	_, err := db.ExecContext(ctx,
-		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?,?,?,?,?,?,?)",
-		s.randomID("audit"), nullableString(actorID), action, resourceType, resourceID, formatTime(s.now().UTC()), detail)
+	_, err := s.insertAudit(ctx, db, actorID, action, resourceType, resourceID, detail, s.now(), false)
 	return err
+}
+
+// insertAudit can also claim an event key. The check and insert are one
+// statement so concurrent callers cannot both claim it.
+func (s *Service) insertAudit(ctx context.Context, db sqlExecutor, actorID, action, resourceType, resourceID, detail string, at time.Time, once bool) (bool, error) {
+	result, err := db.ExecContext(ctx, `INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail)
+SELECT ?,?,?,?,?,?,? WHERE NOT ? OR NOT EXISTS (
+	SELECT 1 FROM audit_events WHERE action = ? AND resource_type = ? AND resource_id = ?
+)`,
+		s.randomID("audit"), nullableString(actorID), action, resourceType, resourceID, formatTime(at.UTC()), detail,
+		once, action, resourceType, resourceID)
+	if err != nil {
+		return false, err
+	}
+	written, err := result.RowsAffected()
+	return written == 1, err
 }
 
 // reservedUsernames are Samba's special sections and the Shared share. Share
