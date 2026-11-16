@@ -23,6 +23,7 @@ import (
 	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -157,8 +158,14 @@ func Run(parent context.Context, config Config) error {
 	current := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		(*api.Load()).ServeHTTP(w, r)
 	})
+	// A deleted account's library is removed on the Product Service's
+	// request, which carries no session: the request is only a prompt, and
+	// what to do comes from the Host Agent (accountremoval).
+	routes := http.NewServeMux()
+	routes.Handle(accountremoval.Path, current)
+	routes.Handle("/", Authenticate(config.Sessions, config.Logger, gate, current))
 	server := &http.Server{
-		Handler:           Authenticate(config.Sessions, config.Logger, gate, current),
+		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
 	serveError := make(chan error, 2)
@@ -243,7 +250,8 @@ func supervise(ctx, background context.Context, config Config, gate *Gate, serve
 			defer close(background)
 			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors, cmp.Or(config.VectorCheckEvery, VectorCheckInterval))
 		}()
-		serve(preparingVectors(service, photosapi.New(service, config.Logger)))
+		serve(accountremoval.Route(deletionLookup(config.Sessions), RemoveAccount(service), config.Logger,
+			preparingVectors(service, photosapi.New(service, config.Logger))))
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
 
 		lost := watchStore(ctx, config, service)
@@ -255,6 +263,36 @@ func supervise(ctx, background context.Context, config Config, gate *Gate, serve
 			return
 		}
 		config.Logger.Error("photo store lost; photos are unavailable until it returns", "error", lost)
+	}
+}
+
+// deletionLookup asks the Host Agent about account deletions through the
+// session lookup, which can.
+func deletionLookup(sessions SessionResolver) accountremoval.Lookup {
+	lookup, ok := sessions.(interface {
+		AccountDeletion(context.Context, string) (accounts.AccountDeletion, error)
+	})
+	if !ok {
+		return func(context.Context, string) (accounts.AccountDeletion, error) {
+			return accounts.AccountDeletion{}, errors.New("account deletions cannot be looked up")
+		}
+	}
+	return lookup.AccountDeletion
+}
+
+// RemoveAccount removes a deleted account's private library, handing its
+// photos to the administrator first when that was chosen.
+func RemoveAccount(service *photos.Service) accountremoval.Remove {
+	return func(ctx context.Context, deletion accounts.AccountDeletion) error {
+		removal := photos.AccountRemoval{UserID: deletion.UserID}
+		if deletion.Library == "transfer" {
+			if deletion.AdminID == "" {
+				return errors.New("the administrator who deleted the account no longer administers the device")
+			}
+			removal.Transfer, removal.AdminID, removal.AdminUsername = true, deletion.AdminID, deletion.AdminUsername
+			removal.Album = accounts.HandoverAlbum(deletion.Username)
+		}
+		return service.RemoveAccount(ctx, removal)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -41,15 +42,18 @@ func runShareService(logger *slog.Logger) error {
 	})
 }
 
-func configuredShares(ctx context.Context, config Config, users *accounts.Service, fs *files.Service, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(), error) {
+// configuredShares returns the share API, how to remove a deleted account's
+// shares, and how to stop. A NAS forwards both to the share service.
+func configuredShares(ctx context.Context, config Config, users *accounts.Service, fs *files.Service, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	local := sharefiles.NewLocal(fs, users)
 	if config.Live() {
 		local.SetBroker(filebroker.NewClient(config.FileBrokerSocket))
 		closeBridge, err := sharefiles.Serve(ctx, config.ShareFilesSocket, local)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return shareservice.Proxy(config.SharesSocket, logger), closeBridge, nil
+		remove := func(ctx context.Context, userID string) error { return accountremoval.Request(ctx, config.SharesSocket, userID) }
+		return shareservice.Proxy(config.SharesSocket, logger), remove, closeBridge, nil
 	}
 	members := func(ctx context.Context) ([]accounts.Profile, error) {
 		active, err := users.ActiveUsers(ctx)
@@ -64,7 +68,7 @@ func configuredShares(ctx context.Context, config Config, users *accounts.Servic
 	}
 	root := filepath.Join(config.DataMount, "shares")
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	store, err := shares.Open(filepath.Join(root, "shares.db"), filepath.Join(root, "content"), shares.Options{
 		Backend: sharefiles.NewBackend(local),
@@ -92,7 +96,8 @@ func configuredShares(ctx context.Context, config Config, users *accounts.Servic
 		},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return sharesapi.NewWithPreview(store, logger, members, media), func() { _ = store.Interrupt("Share service stopped before task completion") }, nil
+	return sharesapi.NewWithPreview(store, logger, members, media), store.RemoveAccount,
+		func() { _ = store.Interrupt("Share service stopped before task completion") }, nil
 }

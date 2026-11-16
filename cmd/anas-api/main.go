@@ -198,7 +198,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "storage.db", storageStore)
-	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
+	accountService := accounts.NewService(accountStore, operations, accounts.Options{DeletionDelay: config.DeletionDelay})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
 		return err
@@ -334,12 +334,12 @@ func run(logger *slog.Logger) error {
 		appOptions.VolumeReady = func(ctx context.Context) error { return volumeGuard.Check(ctx, volumeRoot, false) }
 	}
 
-	shareAPI, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
+	shareAPI, removeShares, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
 	defer closeShares()
-	familyAPI, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
+	familyAPI, removeFamily, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
@@ -392,6 +392,11 @@ func run(logger *slog.Logger) error {
 	}
 	tasks.Go(func() error { syncIdentities(background, accountService.SyncIdentities, logger); return nil })
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
+	// Deleted accounts are removed once their 30 days are over
+	// (docs/specs/account-enable-and-delete.md).
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily,
+		musicService, mediaService, transferService)
+	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
 	// snapshot that stopping interrupts is deleted again before the catalog
 	// closes.
@@ -737,6 +742,15 @@ func (*developmentOperations) SetCredential(context.Context, accounts.Credential
 	return nil
 }
 func (*developmentOperations) DisableCredential(context.Context, string) error { return nil }
+func (*developmentOperations) EnableCredential(context.Context, accounts.EnableRequest) error {
+	return nil
+}
+
+// Development spaces are folders of the development volume; a deleted
+// account's stays there.
+func (*developmentOperations) RemoveAccount(context.Context, accounts.AccountRemoval) error {
+	return nil
+}
 
 // Development volumes have no ACLs; viewing access is decided by the Policy.
 func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequest) error {

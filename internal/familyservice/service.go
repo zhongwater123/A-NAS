@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/family"
 	"github.com/zhongwater123/A-NAS/internal/familyapi"
@@ -164,14 +165,21 @@ func Run(parent context.Context, config Config) error {
 	var current atomic.Pointer[http.Handler]
 	unavailable := familyapi.New(nil, config.Logger, nil)
 	current.Store(&unavailable)
+	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		(*current.Load()).ServeHTTP(w, r)
+	})
+	// A deleted account leaves the family on the Product Service's request,
+	// which carries no session; what to do comes from the Host Agent
+	// (accountremoval).
+	routes := http.NewServeMux()
+	routes.Handle(accountremoval.Path, served)
+	routes.Handle("/", authenticate(config.Sessions, config.Logger, served))
 	server := &http.Server{
-		Handler: authenticate(config.Sessions, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			(*current.Load()).ServeHTTP(w, r)
-		})),
+		Handler: routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20,
 	}
-	served := make(chan error, 1)
-	go func() { served <- server.Serve(listener) }()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
@@ -183,7 +191,7 @@ func Run(parent context.Context, config Config) error {
 	}()
 	select {
 	case <-parent.Done():
-	case err = <-served:
+	case err = <-serveErr:
 		return err
 	}
 	shutdown, stop := context.WithTimeout(context.Background(), shutdownGrace)
@@ -210,6 +218,27 @@ func Accounts(profiles func(context.Context) ([]accounts.Profile, error)) func(c
 	}
 }
 
+// RemoveAccount takes a deleted account out of the family.
+func RemoveAccount(store *family.Store) accountremoval.Remove {
+	return func(ctx context.Context, deletion accounts.AccountDeletion) error {
+		return store.RemoveAccount(ctx, deletion.UserID)
+	}
+}
+
+// deletionLookup asks the Host Agent about account deletions through the
+// session lookup, which can.
+func deletionLookup(sessions SessionResolver) accountremoval.Lookup {
+	lookup, ok := sessions.(interface {
+		AccountDeletion(context.Context, string) (accounts.AccountDeletion, error)
+	})
+	if !ok {
+		return func(context.Context, string) (accounts.AccountDeletion, error) {
+			return accounts.AccountDeletion{}, errors.New("account deletions cannot be looked up")
+		}
+	}
+	return lookup.AccountDeletion
+}
+
 // supervise opens the store when it is ready, serves it, and takes it out of
 // service when the data volume goes away.
 func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
@@ -234,7 +263,8 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				continue
 			}
 		}
-		serve(familyapi.New(store, config.Logger, config.Media))
+		serve(accountremoval.Route(deletionLookup(config.Sessions), RemoveAccount(store), config.Logger,
+			familyapi.New(store, config.Logger, config.Media)))
 		config.Logger.Info("family service ready")
 		warned = false
 		purged := time.Time{}

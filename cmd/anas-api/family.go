@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/family"
@@ -44,13 +45,14 @@ func runFamilyService(logger *slog.Logger) error {
 // configuredFamily returns the family API. A NAS forwards it to the family
 // service; development serves it in this process from a directory on the
 // development volume, asking the photo API it also serves here.
-func configuredFamily(config Config, users *accounts.Service, photoAPI http.Handler, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(), error) {
+func configuredFamily(config Config, users *accounts.Service, photoAPI http.Handler, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
-		return familyservice.Proxy(config.FamilySocket, logger), func() {}, nil
+		remove := func(ctx context.Context, userID string) error { return accountremoval.Request(ctx, config.FamilySocket, userID) }
+		return familyservice.Proxy(config.FamilySocket, logger), remove, func() {}, nil
 	}
 	root := filepath.Join(config.DataMount, "family")
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	store, err := family.Open(root, family.Options{
 		Accounts: familyservice.Accounts(func(ctx context.Context) ([]accounts.Profile, error) {
@@ -67,10 +69,10 @@ func configuredFamily(config Config, users *accounts.Service, photoAPI http.Hand
 		Photos: familyservice.Photos{API: photoAPI},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := store.Purge(context.Background()); err != nil {
 		logger.Warn("family trash purge failed", "error", err)
 	}
-	return familyapi.New(store, logger, media), func() { _ = store.Close() }, nil
+	return familyapi.New(store, logger, media), store.RemoveAccount, func() { _ = store.Close() }, nil
 }
