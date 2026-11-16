@@ -114,10 +114,11 @@ function sizeOf(element: Element | null) {
 }
 
 // answerOf is what the page sends for an answer given now: the kind and, for
-// a score, overall and the other 打分项 in points, how long the photo was
-// looked at, and the sizes it was seen at.
+// a score, the batch's first 打分项 and the others in points, how long the
+// photo was looked at, and the sizes it was seen at.
 function answerOf(
   kind: ScoringRatingInput["kind"],
+  first: string,
   values: Record<string, number> | undefined,
   watch: Stopwatch,
   stage: Element | null,
@@ -131,8 +132,8 @@ function answerOf(
     pixelRatio: Math.min(16, window.devicePixelRatio || 1),
   };
   if (kind === "score" && values) {
-    body.score = values[overall] / 100;
-    const others = Object.entries(values).filter(([id]) => id !== overall);
+    body.score = values[first] / 100;
+    const others = Object.entries(values).filter(([id]) => id !== first);
     if (others.length > 0) {
       body.scores = Object.fromEntries(others.map(([id, value]) => [id, value / 100])) as ScoringScores;
     }
@@ -213,6 +214,12 @@ export function Stage({
   const outbox = outboxFor(batch.id);
   const dimensions = batch.dimensions;
   const several = dimensions.length > 1;
+  // A batch of 总分 alone shows no item names, as it always did; any other
+  // names what is being scored.
+  const named = several || dimensions[0].id !== overall;
+  // Answers keep the first item in score, and the ruler lands a scored photo
+  // at it.
+  const first = dimensions[0].id;
   const last = dimensions.length - 1;
   const [claims, setClaims] = useState<ScoringClaim[]>([]);
   const [revising, setRevising] = useState<ScoringClaim>();
@@ -314,7 +321,7 @@ export function Stage({
         live &&
         setMarks(
           items.map((recent) => {
-            const scores: Record<string, number> = { [overall]: Math.round(recent.score * 100) };
+            const scores: Record<string, number> = { [first]: Math.round(recent.score * 100) };
             for (const [id, score] of Object.entries(recent.scores)) {
               if (score !== undefined) scores[id] = Math.round(score * 100);
             }
@@ -326,7 +333,7 @@ export function Stage({
     return () => {
       live = false;
     };
-  }, [batch.id]);
+  }, [batch.id, first]);
 
   // The photos in the queue are decoded ahead of their turn.
   useEffect(() => {
@@ -484,7 +491,7 @@ export function Stage({
   const answer = (kind: ScoringRatingInput["kind"], scores?: Record<string, number>) => {
     if (!shown || !ready) return;
     setArmed(false);
-    const { body, now } = answerOf(kind, scores, watch.current, root.current, image.current);
+    const { body, now } = answerOf(kind, first, scores, watch.current, root.current, image.current);
     outbox.push({ token: shown.token, body });
     answered.current.add(shown.token);
     endCompare();
@@ -719,13 +726,13 @@ export function Stage({
   const boxHeight = side ? wallSize.height - captionRoom : wallSize.height;
   const rulerMarks: Mark[] = marks.map((mark) => ({
     token: mark.token,
-    score: mark.scores[dimension.id] ?? mark.scores[overall] ?? 0,
+    score: mark.scores[dimension.id] ?? mark.scores[first] ?? 0,
     width: mark.width,
     height: mark.height,
   }));
   // The last photo's score on this item, as a pale dot; not while changing it.
   const lastScore = revising ? undefined : marks.at(-1)?.scores[dimension.id];
-  const label = several ? dimension.name : "分数";
+  const label = named ? dimension.name : "分数";
   let body;
   if (loading) {
     body = (
@@ -762,7 +769,7 @@ export function Stage({
     );
   } else if (shown && visible === shown.token) {
     const fitted = fitIn(shown.width, shown.height, boxWidth, boxHeight);
-    const sideScore = side && (side.scores[dimension.id] ?? side.scores[overall] ?? 0);
+    const sideScore = side && (side.scores[dimension.id] ?? side.scores[first] ?? 0);
     body = (
       <>
         {/* A click looks at the photo at 100% and another comes back; Z held does the same from the keyboard. */}
@@ -793,14 +800,14 @@ export function Stage({
             <img
               key={side.token}
               src={claimImageURL(side.token)}
-              alt={`你打过${several ? dimension.name : ""} ${formatScore(sideScore)} 分的照片`}
+              alt={`你打过${named ? dimension.name : ""} ${formatScore(sideScore)} 分的照片`}
               draggable={false}
               className={styles.scPrint}
               style={fitIn(side.width, side.height, boxWidth, boxHeight)}
             />
             <figcaption className={styles.scCaption}>
               你打过
-              {several && <em>{dimension.name}</em>}
+              {named && <em>{dimension.name}</em>}
               <b>{formatScore(sideScore)}</b>
             </figcaption>
           </figure>
@@ -930,14 +937,17 @@ export function Stage({
           />
         </div>
         <div className={styles.scReading}>
-          {several && (
+          {named && (
             <div className={styles.scWhich} aria-live="polite">
               <strong key={dimension.id}>{dimension.name}</strong>
-              <small>
-                {item + 1} / {dimensions.length}
-              </small>
+              {several && (
+                <small>
+                  {item + 1} / {dimensions.length}
+                </small>
+              )}
             </div>
           )}
+          {named && dimension.description && <p className={styles.scAbout}>{dimension.description}</p>}
           <div className={styles.scScoreLine}>
             <input
               className={styles.scScoreInput}

@@ -8,7 +8,7 @@ import type { operations, ScoringBatch, ScoringExportField, ScoringRatingInput }
 // only the API speaks points with two decimals.
 export const maxScore = 500;
 
-// overall is 总分, which every batch scores first.
+// overall is 总分. A batch of it alone shows no item names.
 export const overall = "overall";
 
 export type StageAction =

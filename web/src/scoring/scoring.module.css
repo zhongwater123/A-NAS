@@ -434,6 +434,34 @@
   font-weight: 600;
   letter-spacing: 0.06em;
 }
+/* The batch's 打分项 in the order raters score them, with what custom ones
+   ask to look at. */
+.sc-guide-items {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sc-guide-items li {
+  display: grid;
+  grid-template-columns: 24px 96px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(242, 240, 236, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(242, 240, 236, 0.08);
+}
+.sc-guide-items li > span:first-child {
+  color: var(--sc-ink-3);
+  font: 400 15px / 1 var(--sc-serif);
+}
+.sc-guide-items li > span + b + span,
+.sc-guide-items li > b + span {
+  color: var(--sc-ink-3);
+  font-size: 13px;
+}
 .sc-rubric {
   color: var(--sc-ink-2);
   white-space: pre-wrap;
@@ -1248,6 +1276,14 @@
     transform: translateY(10px);
   }
 }
+/* What a custom 打分项 asks raters to look at, under its name. */
+.sc-about {
+  margin: -6px 0 8px;
+  color: var(--sc-ink-3);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: end;
+}
 /* 下一项 is quieter than 确定, which alone answers the photo. A pick of the
    pointer presses it by itself: it fills while the page waits. */
 .sc-confirm.next {
@@ -1986,6 +2022,94 @@
 }
 .sc-chip:disabled:not([aria-pressed="true"]) {
   opacity: 0.45;
+}
+/* A batch's 打分项, numbered in the order they were picked, which is the
+   order raters score them. */
+.sc-field-head {
+  display: flex;
+  align-items: baseline;
+}
+.sc-field-head small {
+  margin-inline-start: auto;
+  color: var(--sc-ink-3);
+  font: 400 13px / 1 var(--sc-serif);
+}
+.sc-pick {
+  height: 34px;
+  gap: 8px;
+  padding-inline-start: 8px;
+}
+.sc-pick i {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: #1c1c1c;
+  font: normal 400 12.5px / 1 var(--sc-serif);
+}
+.sc-chip.sc-pick[aria-pressed="true"] i::after {
+  content: none;
+}
+.sc-make {
+  gap: 6px;
+  height: 34px;
+  background: rgba(240, 180, 90, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(240, 180, 90, 0.3);
+  color: var(--sc-accent);
+}
+.sc-make svg {
+  width: 13px;
+  height: 13px;
+}
+.sc-hint.warn {
+  color: var(--sc-accent);
+}
+/* Making a custom 打分项, in place under the choices. */
+.sc-maker {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(240, 180, 90, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(240, 180, 90, 0.32);
+}
+.sc-maker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--sc-ink-3);
+  font-size: 11.5px;
+}
+.sc-maker .sc-input {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+}
+.sc-maker .sc-input small {
+  color: var(--sc-ink-4);
+  font-size: 11px;
+}
+.sc-maker-go {
+  display: flex;
+  gap: 6px;
+}
+.sc-maker-go button {
+  height: 36px;
+}
+.sc-maker-failure {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #f08a72;
+  font-size: 12.5px;
+}
+@container scoringwindow (max-width: 760px) {
+  .sc-maker {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 /* One of a few: the export's format, the 打分项 the statistics show. */
 .sc-tabs {
