@@ -145,7 +145,7 @@ def describe(case, url):
         start, end, times = c["start"], c["end"], c["times"]
         t0 = time.perf_counter()
         try:
-            answer, score, seconds, errors = tag_beats.describe_v2(
+            answer, seconds, errors = tag_beats.describe_v2(
                 c["frames"], [t - start for t in times], list(range(1, len(times) + 1)), end - start, url)
             for b, a_, b_ in zip(answer["beats"], [start, *times[1:]], [*times[1:], end], strict=True):
                 b["start"], b["end"] = round(a_, 2), round(b_, 2)
@@ -154,7 +154,8 @@ def describe(case, url):
             flags = [[i + 1, j + 1] for i in range(len(whats)) for j in range(i + 1, len(whats))
                      if whats[i] == whats[j] and (vecs is None or float(vecs[i] @ vecs[j]) < STILL)]
             c.pop("error", None)
-            c |= {"answer": answer, "score": score, "seconds": round(seconds, 1), "errors": errors, "repeats": flags}
+            c.pop("score", None)          # the 1-5 highlight score of descriptions before 2026-11-13
+            c |= {"answer": answer, "seconds": round(seconds, 1), "errors": errors, "repeats": flags}
         except Exception as error:  # noqa: BLE001  kept as the card's result
             c |= {"error": str(error), "seconds": round(time.perf_counter() - t0, 1)}
         write_json(done, path)

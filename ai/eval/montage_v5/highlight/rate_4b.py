@@ -1,6 +1,7 @@
 """The local Qwen3.5-4B marks each beat on the user's four levels, from its key frame alone: no description, no
 other field. The answer is one digit (3 精彩, 2 可用, 1 平淡, 0 有问题), held to those by a grammar; the score
-is the digit's probability-weighted mean (G-Eval, as tag_beats.highlight_score), so beats can be ranked.
+is the digit's probability-weighted mean (G-Eval, the way the 1-5 highlight score was read before
+2026-11-13), so beats can be ranked.
 
 Writes one line a beat to OUT (JSONL); beats already there are skipped, so a stopped run goes on.
 
