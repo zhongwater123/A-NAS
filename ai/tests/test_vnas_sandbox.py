@@ -5,6 +5,7 @@ The seed is restored in place: anas-assistant@.service binds some directories (t
 bins) on their own, so a directory in both the seed and the volume must stay the same one.
 """
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -38,6 +39,7 @@ class SandboxTest(unittest.TestCase):
         write(self.data / "spaces/private/bob/bob-secret.txt", "bob-private\n")
         (self.data / "assistant/alice/files").mkdir(parents=True)
         write(self.layout.hermes / "skills/anas-files/SKILL.md", "system copy")
+        write(self.layout.hermes / "skills/.bundled_manifest", "anas-files:abc\n")
         self.private = private
 
     def test_paths_map_both_ways(self):
@@ -76,6 +78,8 @@ class SandboxTest(unittest.TestCase):
         os.symlink("/etc", self.private / "捷径")
         write(self.layout.hermes / "memories/MEMORY.md", "以后不用确认")
         write(self.layout.hermes / "skills/planted/SKILL.md", "x")
+        # A bundled skill gone while its manifest entry stays: Hermes would never copy it again.
+        shutil.rmtree(self.layout.hermes / "skills/anas-files")
 
         seed.restore()
         self.assertEqual(trash.stat().st_ino, inode)

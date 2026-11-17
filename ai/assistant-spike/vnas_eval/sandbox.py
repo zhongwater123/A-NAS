@@ -115,12 +115,17 @@ def restore_tree(src: Path, dst: Path) -> None:
 
 
 class Seed:
-    """The spaces and the member's Hermes memory as they were before the first run."""
+    """The spaces and the member's Hermes memory and skills as they were before the first run.
+
+    The skills folder goes back whole, .bundled_manifest included: Hermes records each bundled
+    skill it copied there, and one missing from the folder but in the manifest counts as deleted
+    by the member and is never copied again (tools/skills_sync.py). Removing only what a run
+    added would therefore lose the bundled skills for every later run."""
 
     def __init__(self, layout: Layout, store: Path):
         self.layout, self.store = layout, store
-        self.trees = [(layout.data / "spaces", store / "spaces"), (layout.hermes / "memories", store / "memories")]
-        self.skills: set[str] = set()
+        self.trees = [(layout.data / "spaces", store / "spaces"), (layout.hermes / "memories", store / "memories"),
+                      (layout.hermes / "skills", store / "skills")]
 
     def take(self) -> None:
         _remove(self.store)
@@ -128,15 +133,12 @@ class Seed:
         for live, copy in self.trees:
             if live.is_dir():
                 _copy(live, copy)
-        self.skills = skill_files(self.layout)
 
     def restore(self) -> None:
-        """With the member's instance stopped: the seed back, memory as it was, new skills gone."""
+        """With the member's instance stopped: the seed back, memory and skills as they were."""
         for live, copy in self.trees:
             if copy.is_dir():
                 live.mkdir(parents=True, exist_ok=True)
                 restore_tree(copy, live)
             else:
                 _remove(live)
-        for path in skill_files(self.layout) - self.skills:
-            _remove(Path(path).parent)

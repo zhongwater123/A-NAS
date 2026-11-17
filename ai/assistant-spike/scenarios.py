@@ -76,6 +76,7 @@ MODEL_LOG = Path("/var/log/gateway.jsonl" if REAL_MODEL else "/var/log/fake-mode
 APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/etc/hermes/config.yaml").read_text().splitlines()
                              if line.startswith("  timeout:")), "300"))
 RESULT_CHARS = 2000   # of a tool's result kept in a run record
+RUNTIME_PYTHON = "/opt/a-nas/assistant-runtimes/spike/venv/bin/python"
 
 
 class UDS(http.client.HTTPConnection):
@@ -433,6 +434,15 @@ def stop_instance():
     subprocess.run(["/usr/bin/systemctl", "stop", f"anas-assistant-api@{USER}.service", f"anas-assistant@{USER}.service"], check=False)
 
 
+def sync_bundled_skills(layout):
+    """Hermes copies its bundled skills into the member's home on a first session, which counted
+    them as created by the first run. Copy them as the member before the seed is taken, so every
+    run starts with them (vnas_eval.sandbox.Seed keeps the folder whole)."""
+    subprocess.run(["/usr/bin/setpriv", f"--reuid={USER}", f"--regid={USER}", "--init-groups", "--",
+                    "/usr/bin/env", f"HERMES_HOME={layout.hermes}", f"HOME={HOME}", RUNTIME_PYTHON, "-c",
+                    "from tools.skills_sync import sync_skills; sync_skills(quiet=True)"], check=True)
+
+
 def failures(result):
     rows = [(f"turn {i + 1}", r) for i, rs in enumerate(result["turns"]) for r in rs] + [("after", r) for r in result["after"]]
     return [f"    ✗ {where} {r['type']}: {r['detail']}" + (f"（{r['note']}）" if r["note"] else "")
@@ -477,6 +487,7 @@ async def run_suite(path):
         # The seed as seed.sh writes it, kept for every run to start from.
         subprocess.run(["/usr/bin/bash", "/spike/seed.sh", str(layout.data)], check=True)
         stop_instance()
+        sync_bundled_skills(layout)
         seed = Seed(layout, Path("/var/lib/vnas-eval/seed"))
         seed.take()
     print(f"suite {data['suite']}: {len(cases)} cases, channel {CHANNEL}, model {env['model']}, judge {env['judge']}")
