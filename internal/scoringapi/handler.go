@@ -257,12 +257,14 @@ func (h *handler) createDimension(w http.ResponseWriter, r *http.Request, user a
 }
 
 type raterBatch struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Rubric     string      `json:"rubric"`
-	Dimensions []dimension `json:"dimensions"`
-	Rated      int         `json:"rated"`
-	Finished   bool        `json:"finished"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Rubric       string        `json:"rubric"`
+	Dimensions   []dimension   `json:"dimensions"`
+	Scale        scoring.Scale `json:"scale"`
+	HideDecimals bool          `json:"hideDecimals"`
+	Rated        int           `json:"rated"`
+	Finished     bool          `json:"finished"`
 }
 
 func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -279,7 +281,7 @@ func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user acco
 	for _, batch := range batches {
 		items = append(items, raterBatch{
 			ID: batch.ID, Name: batch.Name, Rubric: batch.Rubric, Dimensions: dimensionsBody(catalogue, batch.Dimensions),
-			Rated: batch.Rated, Finished: batch.Finished,
+			Scale: batch.Scale, HideDecimals: batch.HideDecimals, Rated: batch.Rated, Finished: batch.Finished,
 		})
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
@@ -554,15 +556,17 @@ type skippedReason struct {
 }
 
 type batch struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Source     string      `json:"source"`
-	Required   int         `json:"required"`
-	Rubric     string      `json:"rubric"`
-	Dimensions []dimension `json:"dimensions"`
-	State      string      `json:"state"`
-	CreatedAt  time.Time   `json:"createdAt"`
-	Import     struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Source       string        `json:"source"`
+	Required     int           `json:"required"`
+	Rubric       string        `json:"rubric"`
+	Dimensions   []dimension   `json:"dimensions"`
+	Scale        scoring.Scale `json:"scale"`
+	HideDecimals bool          `json:"hideDecimals"`
+	State        string        `json:"state"`
+	CreatedAt    time.Time     `json:"createdAt"`
+	Import       struct {
 		Files     int             `json:"files"`
 		Imported  int             `json:"imported"`
 		Skipped   int             `json:"skipped"`
@@ -579,7 +583,7 @@ type batch struct {
 func batchBody(b scoring.Batch, catalogue scoring.Catalogue) batch {
 	body := batch{
 		ID: b.ID, Name: b.Name, Source: b.Source, Required: b.Required, Rubric: b.Rubric, Dimensions: dimensionsBody(catalogue, b.Dimensions),
-		State: b.State, CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started,
+		Scale: b.Scale, HideDecimals: b.HideDecimals, State: b.State, CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started,
 		Flagged: b.Flagged, Answers: b.Answers,
 	}
 	body.Import.Files, body.Import.Imported, body.Import.Skipped = b.Files, b.Imported, b.Skipped
@@ -616,17 +620,20 @@ func (h *handler) batches(w http.ResponseWriter, r *http.Request, _ accounts.Use
 
 func (h *handler) createBatch(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var request struct {
-		Name       string   `json:"name"`
-		Source     string   `json:"source"`
-		Required   int      `json:"required"`
-		Rubric     string   `json:"rubric"`
-		Dimensions []string `json:"dimensions,omitempty"`
+		Name         string        `json:"name"`
+		Source       string        `json:"source"`
+		Required     int           `json:"required"`
+		Rubric       string        `json:"rubric"`
+		Dimensions   []string      `json:"dimensions,omitempty"`
+		Scale        scoring.Scale `json:"scale,omitempty"`
+		HideDecimals bool          `json:"hideDecimals,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	created, err := h.store.CreateBatch(r.Context(), user.ID, scoring.BatchInput{
 		Name: request.Name, Source: request.Source, Required: request.Required, Rubric: request.Rubric, Dimensions: request.Dimensions,
+		Scale: request.Scale, HideDecimals: request.HideDecimals,
 	})
 	if err != nil {
 		h.fail(w, r, err)
@@ -641,17 +648,20 @@ func (h *handler) createBatch(w http.ResponseWriter, r *http.Request, user accou
 
 func (h *handler) updateBatch(w http.ResponseWriter, r *http.Request, _ accounts.User) {
 	var request struct {
-		Name       *string  `json:"name,omitempty"`
-		Rubric     *string  `json:"rubric,omitempty"`
-		Required   *int     `json:"required,omitempty"`
-		Dimensions []string `json:"dimensions,omitempty"`
-		State      *string  `json:"state,omitempty"`
+		Name         *string        `json:"name,omitempty"`
+		Rubric       *string        `json:"rubric,omitempty"`
+		Required     *int           `json:"required,omitempty"`
+		Dimensions   []string       `json:"dimensions,omitempty"`
+		Scale        *scoring.Scale `json:"scale,omitempty"`
+		HideDecimals *bool          `json:"hideDecimals,omitempty"`
+		State        *string        `json:"state,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	updated, err := h.store.UpdateBatch(r.Context(), r.PathValue("batchId"), scoring.BatchPatch{
-		Name: request.Name, Rubric: request.Rubric, Required: request.Required, Dimensions: request.Dimensions, State: request.State,
+		Name: request.Name, Rubric: request.Rubric, Required: request.Required, Dimensions: request.Dimensions,
+		Scale: request.Scale, HideDecimals: request.HideDecimals, State: request.State,
 	})
 	if err != nil {
 		h.fail(w, r, err)

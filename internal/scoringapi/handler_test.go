@@ -350,3 +350,37 @@ func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
 		t.Fatalf("alice's batches: %s", batches.Body)
 	}
 }
+
+func TestBatchesTellRatersTheirScaleAndTakeOnlyItsScores(t *testing.T) {
+	a := setup(t)
+	batches := scoringapi.AdminPrefix + "/batches"
+	wholeHidden := map[string]any{"name": "整数", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"},
+		"scale": "whole", "hideDecimals": true}
+	if code := a.call("admin-token", http.MethodPost, batches, wholeHidden).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("hiding the decimals of whole points: %d", code)
+	}
+	batch := a.createOpen(map[string]any{"name": "一位小数", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"},
+		"scale": "tenths", "hideDecimals": true})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	listed := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil)
+	if !strings.Contains(listed.Body.String(), `"scale":"tenths","hideDecimals":true`) {
+		t.Fatalf("alice's batches: %s", listed.Body)
+	}
+	claims := decode[struct {
+		Items []struct{ Token string } `json:"items"`
+	}](t, a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil))
+	rating := scoringapi.PathPrefix + "/claims/" + claims.Items[0].Token + "/rating"
+	offScale := map[string]any{"submission": "alice-0001", "kind": "score", "score": 3.47, "viewMs": 3100}
+	if code := a.call("alice-token", http.MethodPut, rating, offScale).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("3.47 on a scale of tenths: %d", code)
+	}
+	onScale := map[string]any{"submission": "alice-0002", "kind": "score", "score": 3.5, "viewMs": 3100}
+	if rated := a.call("alice-token", http.MethodPut, rating, onScale); rated.Code != http.StatusOK {
+		t.Fatalf("3.5 on a scale of tenths: %d %s", rated.Code, rated.Body)
+	}
+	if code := a.call("admin-token", http.MethodPatch, batches+"/"+batch, map[string]any{"scale": "three"}).Code; code != http.StatusConflict {
+		t.Fatalf("changing the scale of a scored batch: %d", code)
+	}
+}

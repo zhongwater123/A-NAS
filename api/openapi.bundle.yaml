@@ -12675,6 +12675,14 @@ components:
         rater:
           type: boolean
           description: An administrator chose the caller as a rater.
+    ScoringScale:
+      type: string
+      enum:
+        - hundredths
+        - tenths
+        - whole
+        - three
+      description: 'How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).'
     ScoringRaterBatch:
       type: object
       additionalProperties: false
@@ -12683,6 +12691,8 @@ components:
         - name
         - rubric
         - dimensions
+        - scale
+        - hideDecimals
         - rated
         - finished
       properties:
@@ -12695,6 +12705,11 @@ components:
           description: The administrator's scoring guide.
         dimensions:
           $ref: '#/components/schemas/ScoringDimensions'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+        hideDecimals:
+          type: boolean
+          description: The window shows no scores to the rater, who scores by the place on the number line; the answers still have the scale's decimals.
         rated:
           type: integer
           minimum: 0
@@ -12826,7 +12841,7 @@ components:
           type: number
           minimum: 0
           maximum: 5
-          description: 'Only with kind score: the batch''s first 打分项, 0 to 5 with at most two decimals; more decimals are refused (validation_failed).'
+          description: 'Only with kind score: the batch''s first 打分项, 0 to 5 with at most two decimals; more decimals, or a score that is not one of the batch''s scale, are refused (validation_failed).'
         scores:
           $ref: '#/components/schemas/ScoringScores'
           description: 'Only with kind score: exactly the batch''s 打分项 after the first (validation_failed otherwise).'
@@ -12852,6 +12867,8 @@ components:
         - required
         - rubric
         - dimensions
+        - scale
+        - hideDecimals
         - state
         - createdAt
         - import
@@ -12878,6 +12895,11 @@ components:
           type: string
         dimensions:
           $ref: '#/components/schemas/ScoringDimensions'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+        hideDecimals:
+          type: boolean
+          description: Raters see no scores, only the place on the number line.
         state:
           type: string
           enum:
@@ -12952,7 +12974,7 @@ components:
         answers:
           type: integer
           minimum: 0
-          description: Answers of every kind; once there is one, the batch's 打分项 can no longer change.
+          description: Answers of every kind; once there is one, the batch's 打分项, scale and hideDecimals can no longer change.
     ScoringBatchInput:
       type: object
       additionalProperties: false
@@ -12979,6 +13001,12 @@ components:
           maxLength: 2000
         dimensions:
           $ref: '#/components/schemas/ScoringDimensionChoice'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+          description: hundredths when left out.
+        hideDecimals:
+          type: boolean
+          description: Only with hundredths or tenths (validation_failed otherwise); false when left out.
     ScoringBatchPatch:
       type: object
       additionalProperties: false
@@ -12996,6 +13024,12 @@ components:
           maximum: 10
         dimensions:
           $ref: '#/components/schemas/ScoringDimensionChoice'
+          description: Refused with batch_in_use once the batch has an answer.
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+          description: Refused with batch_in_use once the batch has an answer. A scale without decimals turns hideDecimals off unless the patch sets it.
+        hideDecimals:
+          type: boolean
           description: Refused with batch_in_use once the batch has an answer.
         state:
           type: string

@@ -6393,12 +6393,20 @@ export interface components {
             /** @description An administrator chose the caller as a rater. */
             rater: boolean;
         };
+        /**
+         * @description How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
+         * @enum {string}
+         */
+        ScoringScale: "hundredths" | "tenths" | "whole" | "three";
         ScoringRaterBatch: {
             id: string;
             name: string;
             /** @description The administrator's scoring guide. */
             rubric: string;
             dimensions: components["schemas"]["ScoringDimensions"];
+            scale: components["schemas"]["ScoringScale"];
+            /** @description The window shows no scores to the rater, who scores by the place on the number line; the answers still have the scale's decimals. */
+            hideDecimals: boolean;
             /** @description The caller's own answers in the batch, skips and marks included. */
             rated: number;
             /** @description No photo of the batch is left for the caller. */
@@ -6447,7 +6455,7 @@ export interface components {
              * @enum {string}
              */
             kind: "score" | "skip" | "flag";
-            /** @description Only with kind score: the batch's first 打分项, 0 to 5 with at most two decimals; more decimals are refused (validation_failed). */
+            /** @description Only with kind score: the batch's first 打分项, 0 to 5 with at most two decimals; more decimals, or a score that is not one of the batch's scale, are refused (validation_failed). */
             score?: number;
             /** @description Only with kind score: exactly the batch's 打分项 after the first (validation_failed otherwise). */
             scores?: components["schemas"]["ScoringScores"];
@@ -6466,6 +6474,9 @@ export interface components {
             required: number;
             rubric: string;
             dimensions: components["schemas"]["ScoringDimensions"];
+            scale: components["schemas"]["ScoringScale"];
+            /** @description Raters see no scores, only the place on the number line. */
+            hideDecimals: boolean;
             /** @enum {string} */
             state: "importing" | "open" | "closed";
             /** Format: date-time */
@@ -6491,7 +6502,7 @@ export interface components {
             started: number;
             /** @description Photos a rater marked as having a problem. */
             flagged: number;
-            /** @description Answers of every kind; once there is one, the batch's 打分项 can no longer change. */
+            /** @description Answers of every kind; once there is one, the batch's 打分项, scale and hideDecimals can no longer change. */
             answers: number;
         };
         ScoringBatchInput: {
@@ -6500,6 +6511,10 @@ export interface components {
             required: number;
             rubric: string;
             dimensions: components["schemas"]["ScoringDimensionChoice"];
+            /** @description hundredths when left out. */
+            scale?: components["schemas"]["ScoringScale"];
+            /** @description Only with hundredths or tenths (validation_failed otherwise); false when left out. */
+            hideDecimals?: boolean;
         };
         ScoringBatchPatch: {
             name?: string;
@@ -6507,6 +6522,10 @@ export interface components {
             required?: number;
             /** @description Refused with batch_in_use once the batch has an answer. */
             dimensions?: components["schemas"]["ScoringDimensionChoice"];
+            /** @description Refused with batch_in_use once the batch has an answer. A scale without decimals turns hideDecimals off unless the patch sets it. */
+            scale?: components["schemas"]["ScoringScale"];
+            /** @description Refused with batch_in_use once the batch has an answer. */
+            hideDecimals?: boolean;
             /** @enum {string} */
             state?: "open" | "closed";
         };
@@ -8055,6 +8074,7 @@ export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
 export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
 export type ScoringMe = components['schemas']['ScoringMe'];
+export type ScoringScale = components['schemas']['ScoringScale'];
 export type ScoringRaterBatch = components['schemas']['ScoringRaterBatch'];
 export type ScoringAnchor = components['schemas']['ScoringAnchor'];
 export type ScoringRecentScore = components['schemas']['ScoringRecentScore'];
