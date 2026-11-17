@@ -15358,6 +15358,9 @@ components:
         updatedBy:
           type: string
           description: Username of the latest editor of the text or images.
+        updatedById:
+          type: string
+          description: The latest editor's account ID; absent for edits recorded before IDs were.
         updatedAt:
           type: string
           format: date-time
@@ -15365,6 +15368,9 @@ components:
           type: boolean
         resolvedBy:
           type: string
+        resolvedById:
+          type: string
+          description: The account ID of who marked it handled; absent for marks recorded before IDs were.
         resolvedAt:
           type: string
           format: date-time
@@ -15411,6 +15417,9 @@ components:
         updatedBy:
           type: string
           description: Username of the latest editor.
+        updatedById:
+          type: string
+          description: The latest editor's account ID; absent for edits recorded before IDs were.
         updatedAt:
           type: string
           format: date-time

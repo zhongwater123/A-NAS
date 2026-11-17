@@ -95,3 +95,10 @@ export function fullName(who: { username: string; nickname?: string }): string {
 export function nameOf(people: People, username: string): string {
   return displayName(people.byUsername(username) ?? { username });
 }
+
+// nameOfAccount resolves who a record names to the name to show: by account
+// ID when the record has one, so a deleted account's name taken by a newer
+// account does not bring that account's nickname.
+export function nameOfAccount(people: People, id: string | undefined, username: string): string {
+  return displayName(person(people, { id, username }));
+}

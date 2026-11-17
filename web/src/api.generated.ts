@@ -7402,10 +7402,14 @@ export interface components {
             createdAt: string;
             /** @description Username of the latest editor of the text or images. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
             resolved: boolean;
             resolvedBy?: string;
+            /** @description The account ID of who marked it handled; absent for marks recorded before IDs were. */
+            resolvedById?: string;
             /** Format: date-time */
             resolvedAt?: string;
             /** @description Replies under the item, oldest first. */
@@ -7425,6 +7429,8 @@ export interface components {
             createdAt: string;
             /** @description Username of the latest editor. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
         };
