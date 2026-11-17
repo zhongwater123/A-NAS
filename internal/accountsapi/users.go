@@ -24,7 +24,7 @@ func NewUsers(service *accounts.Service, logger *slog.Logger) *Users {
 }
 
 func (u *Users) Routes() []apiroute.Route {
-	get, post, patch, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete
+	get, post, put, patch, del := http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete
 	session, mutation, admin := apiroute.Session, apiroute.Mutation, apiroute.Admin
 	// Managing accounts is the administrator's: the guard refuses a member
 	// before the service checks again (#270).
@@ -35,7 +35,10 @@ func (u *Users) Routes() []apiroute.Route {
 		{Method: get, Pattern: "/api/v1/users", Posture: admin, Handler: u.list},
 		{Method: post, Pattern: "/api/v1/users", Posture: admin, Handler: u.create},
 		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: admin, Handler: u.resetCredential},
-		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: admin, Handler: u.disable},
+		{Method: post, Pattern: "/api/v1/users/{userID}/disable", Posture: admin, Handler: u.disable},
+		{Method: post, Pattern: "/api/v1/users/{userID}/enable", Posture: admin, Handler: u.enable},
+		{Method: put, Pattern: "/api/v1/users/{userID}/deletion", Posture: admin, Handler: u.scheduleDeletion},
+		{Method: del, Pattern: "/api/v1/users/{userID}/deletion", Posture: admin, Handler: u.cancelDeletion},
 		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: admin, Handler: u.startViewing},
 		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: admin, Handler: u.endViewing},
 		{Method: get, Pattern: "/api/v1/spaces", Posture: session, Handler: u.spaces},
@@ -108,6 +111,41 @@ func (u *Users) resetCredential(w http.ResponseWriter, r *http.Request, session 
 
 func (u *Users) disable(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if err := u.accounts.DisableUser(r.Context(), session.User, r.PathValue("userID")); err != nil {
+		WriteError(w, r, u.logger, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (u *Users) enable(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if err := u.accounts.EnableUser(r.Context(), session.User, r.PathValue("userID")); err != nil {
+		WriteError(w, r, u.logger, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (u *Users) scheduleDeletion(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	var request struct {
+		Password      string                  `json:"password"`
+		PersonalSpace accounts.DeletionChoice `json:"personalSpace"`
+		Library       accounts.DeletionChoice `json:"library"`
+	}
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
+		return
+	}
+	user, err := u.accounts.ScheduleDeletion(r.Context(), session.User, r.PathValue("userID"), accounts.DeletionRequest{
+		Password: request.Password, PersonalSpace: request.PersonalSpace, Library: request.Library,
+	})
+	if err != nil {
+		WriteError(w, r, u.logger, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, user)
+}
+
+func (u *Users) cancelDeletion(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	if err := u.accounts.CancelDeletion(r.Context(), session.User, r.PathValue("userID")); err != nil {
 		WriteError(w, r, u.logger, err)
 		return
 	}

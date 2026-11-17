@@ -115,6 +115,10 @@ type Config struct {
 	// change broker; it refuses it now, so that neither meaning is taken for
 	// the other.
 	HostAgentChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET"`
+	// AccountDeletionDelay shortens how long a deleted account waits before
+	// it is removed, for the system test; products keep the 30 days.
+	AccountDeletionDelay string        `env:"ANAS_ACCOUNT_DELETION_DELAY"`
+	DeletionDelay        time.Duration `env:"-"`
 }
 
 // MediaConfig reaches the sandboxed FFmpeg worker. The Product, Photo and
@@ -187,6 +191,11 @@ func loadConfig(environment map[string]string) (Config, error) {
 	}
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
+	if c.AccountDeletionDelay != "" {
+		if c.DeletionDelay, err = time.ParseDuration(c.AccountDeletionDelay); err != nil || c.DeletionDelay <= 0 {
+			problem(errors.New("ANAS_ACCOUNT_DELETION_DELAY must be a positive duration such as 30s"))
+		}
+	}
 	switch {
 	case c.FakeStorage == "":
 	case live:

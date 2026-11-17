@@ -64,6 +64,30 @@ schemas:
       mustChangePassword: { type: boolean }
       nickname: { type: string, maxLength: 24, description: "The name pages show instead of username; absent when the user has not chosen one." }
       avatarVersion: { type: string, description: "Names the current avatar; absent when the user has none. See getAvatar." }
+      deletion: { $ref: "#/schemas/Deletion" }
+  Deletion:
+    type: object
+    additionalProperties: false
+    description: A disabled account an administrator asked to delete; only listUsers and scheduleUserDeletion show it.
+    required: [dueAt, personalSpace, library, started]
+    properties:
+      dueAt: { type: string, format: date-time, description: When its data is removed for good. }
+      personalSpace: { $ref: "#/schemas/DeletionChoice" }
+      library: { $ref: "#/schemas/DeletionChoice" }
+      started: { type: boolean, description: "Its data is being removed; the deletion can no longer be cancelled." }
+      retrying: { type: boolean, description: "The last attempt to remove it failed; it is tried again." }
+  DeletionChoice:
+    type: string
+    enum: [transfer, delete]
+    description: "transfer: the administrator who deleted the account receives it; delete: it is deleted with the account."
+  DeletionRequest:
+    type: object
+    additionalProperties: false
+    required: [password, personalSpace, library]
+    properties:
+      password: { type: string, description: The administrator's own password. }
+      personalSpace: { $ref: "#/schemas/DeletionChoice" }
+      library: { $ref: "#/schemas/DeletionChoice" }
   Profile:
     type: object
     additionalProperties: false
@@ -98,10 +122,12 @@ schemas:
     required: [id, kind, actorUsername, createdAt]
     properties:
       id: { type: string }
-      kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset, assistant_task] }
+      kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset, assistant_task, account_deleted] }
       actorUsername: { type: string }
       reason: { type: string }
       expiresAt: { type: string, format: date-time }
+      folder: { type: string, description: "account_deleted: the folder of the administrator's personal space that holds the deleted account's files." }
+      album: { type: string, description: "account_deleted: the album of the administrator's private library that holds its photos." }
       task:
         type: object
         description: "The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown."

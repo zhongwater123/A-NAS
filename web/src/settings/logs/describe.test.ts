@@ -58,6 +58,23 @@ describe("activity sentences", () => {
     expect(describeActivity(unknown, owner.id).meta[0]).toBe("账号不存在");
   });
 
+  it("names a deleted account from the detail, which outlives it", () => {
+    expect(sentence(event({ category: "account", action: "user.enabled", actor: owner, subject: alice }))).toBe(
+      "你 重新启用了 alice 的账号",
+    );
+    const scheduled = event({
+      category: "account",
+      action: "user.deletion_scheduled",
+      actor: owner,
+      detail: '{"username":"carol","personalSpace":"transfer","library":"delete","dueAt":"2026-12-16T10:00:00Z"}',
+    });
+    expect(sentence(scheduled)).toBe("你 删除了账号 carol");
+    expect(describeActivity(scheduled, owner.id).meta.slice(0, 2)).toEqual(["个人空间转给管理员", "私有图库一并删除"]);
+    expect(
+      sentence(event({ category: "account", action: "user.deleted", actor: owner, detail: '{"username":"carol"}' })),
+    ).toBe("账号 carol 已彻底删除");
+  });
+
   it("describes account changes and administrative viewing", () => {
     expect(
       sentence(event({ category: "account", action: "user.credential_reset", actor: owner, subject: alice })),

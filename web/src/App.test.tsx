@@ -1277,6 +1277,28 @@ describe("ADR 0008 account safeguards", () => {
     await waitFor(() => expect(acknowledged).toEqual(["notification:1"]));
   });
 
+  it("tells the administrator where a deleted account's files and photos went", async () => {
+    serveDesktop({
+      notifications: [
+        {
+          id: "notification:3",
+          kind: "account_deleted",
+          actorUsername: "carol",
+          folder: "carol 的文件",
+          album: "carol 的照片",
+          createdAt: "2026-12-16T10:00:00Z",
+        },
+      ],
+    });
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(
+      within(notice).getByText(
+        /账号 carol 已于 .* 删除。文件在你个人空间的“carol 的文件”文件夹，照片在你私有图库的“carol 的照片”相册。/,
+      ),
+    ).toBeTruthy();
+  });
+
   it("tells the owner when an administrator viewed the private photo library", async () => {
     serveDesktop({
       notifications: [

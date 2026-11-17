@@ -350,7 +350,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/users/{userId}": {
+    "/api/v1/users/{userId}/disable": {
         parameters: {
             query?: never;
             header?: never;
@@ -359,9 +359,44 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
         /** @description Disable an account. Web sign-in ends first; if the Host Agent cannot disable SMB access or assistant units, the response retains the 503 smb_disable_pending code. Disabling again retries the host operations. */
-        delete: operations["disableUser"];
+        post: operations["disableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Enable a disabled account again with the password it had. Web sign-in comes back first; if the Host Agent cannot enable SMB access or the assistant, the response is 503 host_enable_pending and enabling again, or the next start's identity synchronization, finishes them. An account waiting to be deleted answers 409 deletion_pending. */
+        post: operations["enableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{userId}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Delete a disabled member's account after 30 days, with the administrator's password again (403 reauthentication_failed). Until then nothing of it changes and the deletion can be cancelled. Its personal space and private photo library each go to the administrator or are deleted, as chosen. An account that is not disabled answers 409 account_not_disabled, one already waiting 409 deletion_pending. */
+        put: operations["scheduleUserDeletion"];
+        post?: never;
+        /** @description Keep an account that is waiting to be deleted; it stays disabled. Once its data is being removed it answers 409 deletion_started. */
+        delete: operations["cancelUserDeletion"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5057,6 +5092,32 @@ export interface components {
             nickname?: string;
             /** @description Names the current avatar; absent when the user has none. See getAvatar. */
             avatarVersion?: string;
+            deletion?: components["schemas"]["Deletion"];
+        };
+        /** @description A disabled account an administrator asked to delete; only listUsers and scheduleUserDeletion show it. */
+        Deletion: {
+            /**
+             * Format: date-time
+             * @description When its data is removed for good.
+             */
+            dueAt: string;
+            personalSpace: components["schemas"]["DeletionChoice"];
+            library: components["schemas"]["DeletionChoice"];
+            /** @description Its data is being removed; the deletion can no longer be cancelled. */
+            started: boolean;
+            /** @description The last attempt to remove it failed; it is tried again. */
+            retrying?: boolean;
+        };
+        /**
+         * @description transfer: the administrator who deleted the account receives it; delete: it is deleted with the account.
+         * @enum {string}
+         */
+        DeletionChoice: "transfer" | "delete";
+        DeletionRequest: {
+            /** @description The administrator's own password. */
+            password: string;
+            personalSpace: components["schemas"]["DeletionChoice"];
+            library: components["schemas"]["DeletionChoice"];
         };
         Profile: {
             id: string;
@@ -5075,11 +5136,15 @@ export interface components {
         Notification: {
             id: string;
             /** @enum {string} */
-            kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task";
+            kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task" | "account_deleted";
             actorUsername: string;
             reason?: string;
             /** Format: date-time */
             expiresAt?: string;
+            /** @description account_deleted: the folder of the administrator's personal space that holds the deleted account's files. */
+            folder?: string;
+            /** @description account_deleted: the album of the administrator's private library that holds its photos. */
+            album?: string;
             /** @description The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown. */
             task?: {
                 taskId: string;
@@ -7350,14 +7415,20 @@ export interface components {
             version: number;
             /** @description Username of the account that filed the item. */
             createdBy: string;
+            /** @description The account's ID, which a later account never shares, unlike a deleted account's name. */
+            createdById: string;
             /** Format: date-time */
             createdAt: string;
             /** @description Username of the latest editor of the text or images. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
             resolved: boolean;
             resolvedBy?: string;
+            /** @description The account ID of who marked it handled; absent for marks recorded before IDs were. */
+            resolvedById?: string;
             /** Format: date-time */
             resolvedAt?: string;
             /** @description Replies under the item, oldest first. */
@@ -7371,10 +7442,14 @@ export interface components {
             version: number;
             /** @description Username of the account that wrote the comment. */
             createdBy: string;
+            /** @description The account's ID, which a later account never shares, unlike a deleted account's name. */
+            createdById: string;
             /** Format: date-time */
             createdAt: string;
             /** @description Username of the latest editor. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
         };
@@ -7893,6 +7968,9 @@ export type CredentialInput = components['schemas']['CredentialInput'];
 export type NewUsername = components['schemas']['NewUsername'];
 export type NewPassword = components['schemas']['NewPassword'];
 export type User = components['schemas']['User'];
+export type Deletion = components['schemas']['Deletion'];
+export type DeletionChoice = components['schemas']['DeletionChoice'];
+export type DeletionRequest = components['schemas']['DeletionRequest'];
 export type Profile = components['schemas']['Profile'];
 export type ProfileChange = components['schemas']['ProfileChange'];
 export type PasswordChange = components['schemas']['PasswordChange'];
@@ -8828,6 +8906,89 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    enableUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User enabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    scheduleUserDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description The account with its deletion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    cancelUserDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deletion cancelled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     resetUserCredential: {
