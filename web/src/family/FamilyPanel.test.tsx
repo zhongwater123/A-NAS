@@ -7,7 +7,7 @@ import type { FamilyRecordInput } from "../api.generated";
 import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
 import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
-import { apiError, http, server } from "../test/server";
+import { http, server } from "../test/server";
 import { summarize } from "./FamilyNotices";
 import { FamilyPanel } from "./FamilyPanel";
 import { isoDate } from "./format";
@@ -371,7 +371,7 @@ describe("FamilyPanel", () => {
         approved.push(role);
         if (changed) {
           changed = false;
-          return response(409).json(apiError("request_changed"));
+          return response(409).json({ error: { code: "request_changed", message: "the role changed" } });
         }
         return response(200).json({
           accountId: "user:aunt",
