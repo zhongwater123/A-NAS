@@ -28,6 +28,11 @@ UPSTREAM_PREFIX = "/" + _prefix.strip("/") if _prefix.strip("/") else ""
 CONNECTION = http.client.HTTPConnection if _plain else http.client.HTTPSConnection
 KEY = Path(KEY_FILE).read_text(encoding="utf-8-sig").strip()  # utf-8-sig: a key saved by Notepad may carry a BOM
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
+# GATEWAY_NO_CACHE=1 asks a LiteLLM relay not to answer from its response cache
+# ("cache": {"no-cache": true} in the body; a Cache-Control header does not do it).
+# The scored scenarios need it: the first request of a conversation is often the same
+# byte for byte, and a cached answer makes repeated runs one run.
+NO_CACHE = os.environ.get("GATEWAY_NO_CACHE") == "1"
 
 
 def log(record):
@@ -91,6 +96,9 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except ValueError:
             body = {}
+        if NO_CACHE and isinstance(body, dict) and body:
+            body["cache"] = {"no-cache": True}
+            raw = json.dumps(body, ensure_ascii=False).encode()
         started = time.time()
         result = self.forward("POST", raw)
         status, usage = result if result else (404, None)

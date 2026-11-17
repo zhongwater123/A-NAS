@@ -428,6 +428,7 @@ def environment():
             "runtime": digest([runtime]) if runtime.exists() else None,
             "repo": os.environ.get("VNAS_EVAL_REPO"),
             "skills": digest([*spike.glob("skills/*/SKILL.md"), spike / "member-skill.md", spike / "managed-config.yaml"]),
+            "upstream_cache": None if not REAL_MODEL else "bypassed" if Path("/etc/anas-spike/upstream-no-cache").exists() else "allowed",
             "approval_timeout": APPROVAL_TIMEOUT}
 
 

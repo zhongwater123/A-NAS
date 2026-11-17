@@ -106,8 +106,15 @@ if [[ "${SPIKE_MODEL_GATEWAY:-}" == external ]]; then
   : # the caller's own unit serves /run/anas-assistant-gw/model.sock
 elif [[ -n "${SPIKE_MODEL:-}" ]]; then
   # Real model: the gateway holds the key; the sandbox cannot see the key file.
-  transient model-gateway --quiet python3 "$here/gateway.py" /run/anas-assistant-gw/model.sock \
-    /var/log/gateway.jsonl "${SPIKE_UPSTREAM:-api.deepseek.com}" /etc/anas-spike/model.key
+  # SPIKE_NO_CACHE=1 goes past a LiteLLM relay's response cache (gateway.py); the marker
+  # tells scenarios.py, which records it with the results.
+  if [[ "${SPIKE_NO_CACHE:-}" == 1 ]]; then
+    touch /etc/anas-spike/upstream-no-cache
+  else
+    rm -f /etc/anas-spike/upstream-no-cache
+  fi
+  transient model-gateway --quiet --setenv=GATEWAY_NO_CACHE="${SPIKE_NO_CACHE:-}" python3 "$here/gateway.py" \
+    /run/anas-assistant-gw/model.sock /var/log/gateway.jsonl "${SPIKE_UPSTREAM:-api.deepseek.com}" /etc/anas-spike/model.key
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi

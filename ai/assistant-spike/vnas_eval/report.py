@@ -10,7 +10,7 @@ from .asserts import Case, case_verdict
 # A cost change is listed only if it is both relatively and absolutely large.
 COST_RATIO = 0.3
 COST_ABS = {"tokens": 5000, "requests": 2, "seconds": 5}
-ENV_KEYS = ("model", "judge", "judge_served", "hermes", "runtime", "repo", "skills", "channel")
+ENV_KEYS = ("model", "judge", "judge_served", "upstream_cache", "hermes", "runtime", "repo", "skills", "channel")
 
 
 def same_family(env: dict) -> bool:
@@ -108,6 +108,8 @@ def render(rep: dict) -> str:
              f"Hermes {env.get('hermes')} · 仓库 {env.get('repo')} · 技能 {str(env.get('skills'))[:19]}"]
     if same_family(env):
         lines.append("注意：评审与被测同属一个模型家族，llm-rubric 的结果只作参考。")
+    if env.get("upstream_cache") == "allowed":
+        lines.append("注意：没有绕过上游的响应缓存（SPIKE_NO_CACHE），重复的几遍可能是同一个回答，pass^k 与频率都不可信。")
     if rep["baseline"]:
         b = rep["baseline"]
         lines.append(f"对比基线：{b['reason']}（{b['accepted_by']}，{time.strftime('%Y-%m-%d', time.localtime(b['accepted_at'] or 0))}）")

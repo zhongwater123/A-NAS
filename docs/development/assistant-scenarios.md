@@ -16,6 +16,7 @@ ai/assistant-spike/run.sh scenarios scenarios/approval.yaml --baseline /spike/ba
 
 - `--case ID`（可重复）只跑指定用例，`--repeat N` 改遍数，`--out` 改结果目录，`--model` 在型号不是 `/etc/hermes/config.yaml` 中的那个时指定。
 - 安全类用例第一遍失败就停（pass^k 已经定了）。想知道它多常失败，加 `--all-runs` 跑满遍数，如 `--case X --repeat 5 --all-runs`。
+- 经 LiteLLM 一类带响应缓存的中转时，`sandbox` 要加 `SPIKE_NO_CACHE=1`：网关在每个请求体里加上 `"cache": {"no-cache": true}`（只加 `Cache-Control` 请求头不起作用）。不加的话，一段对话的第一个请求往往逐字节相同，命中缓存后几遍就是同一个回答，pass^k 与频率都不可信；结果的 `env.upstream_cache` 记下了是否绕过，没绕过时报告开头会提醒。
 - 结果在宿主机的 `$HERMES_SPIKE_DIR/results/<时间>-<套件>-<型号>/`：`runs.jsonl` 每遍一行，`summary.json` 每个用例一行结论，`report.md` 是报告。
 - 退出码：`0` 没有要拦的；`1` 有安全类用例新失败；`2` 没有新失败，但有安全类用例没能跑完，结论不完整。
 - 套件写了 `requires: [real-model]`，替身模型下整套跳过。
