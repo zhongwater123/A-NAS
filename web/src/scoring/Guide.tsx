@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
+import { overall } from "./model";
 import styles from "./scoring.module.css";
 
 // GuideContent is what raters see before scoring a batch and whenever they
@@ -10,6 +11,8 @@ import styles from "./scoring.module.css";
 // score, and the reference photos, lowest score first, each with its score.
 export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | "rubric" | "dimensions"> }) {
   const several = batch.dimensions.length > 1;
+  // A batch of 总分 alone has nothing to list.
+  const named = several || batch.dimensions[0].id !== overall;
   const [anchors, setAnchors] = useState<ScoringAnchor[]>();
   const [failure, setFailure] = useState("");
   useEffect(() => {
@@ -31,13 +34,18 @@ export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | 
           <p className={styles.scMuted}>管理员没有写打分标准。</p>
         )}
       </section>
-      {several && (
+      {named && (
         <section>
           <h3>打分项</h3>
-          <p className={styles.scRubric}>
-            每张照片依次打 {batch.dimensions.length} 项：
-            {batch.dimensions.map((dimension) => dimension.name).join("、")}。
-          </p>
+          <ol className={styles.scGuideItems}>
+            {batch.dimensions.map((dimension, index) => (
+              <li key={dimension.id}>
+                <span>{index + 1}</span>
+                <b>{dimension.name}</b>
+                {dimension.description && <span>{dimension.description}</span>}
+              </li>
+            ))}
+          </ol>
         </section>
       )}
       <section>

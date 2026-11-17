@@ -18,7 +18,6 @@ import type {
 } from "../../api.generated";
 import { healthyState, metricsState, session as sessionFixture } from "../fixtures";
 import { http, server } from "../server";
-import { scoringCatalogue } from "./scoring";
 import { webSearchStatus } from "./websearch";
 
 export const session = sessionFixture();
@@ -60,7 +59,7 @@ export function shellHandlers(options: ShellOptions = {}) {
       response(200).json({ items: options.scoring ? [{ id: "scoring" }] : [] }),
     ),
     http.get("/api/v1/modules/scoring/me", ({ response }) =>
-      response(200).json({ ...(options.scoring ?? { admin: false, rater: false }), dimensions: scoringCatalogue }),
+      response(200).json(options.scoring ?? { admin: false, rater: false }),
     ),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),

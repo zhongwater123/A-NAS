@@ -37,16 +37,17 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 数据
 
-`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `migrations` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总分。
+`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `migrations` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总分；第 3 版加入自定义打分项，并让总分可以排在第一项以外（见下面的 `rating_scores`）。
 
-- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按目录顺序以逗号连接的 ID，默认 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。打分项的目录在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
+- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按打分顺序以逗号连接的 ID，即管理员点选的先后；第 1 版留下的空值是 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。内置打分项在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
+- `custom_dimensions`：管理员自定义的打分项（`custom_<n>`、名称、说明）。编号只增不复用，名称在全部打分项中唯一；没有改名与删除，所以一个 ID 在每个批次、每次导出里都是同一个意思。
 - `import_files`：来源文件夹中的每个文件与处理结果（`pending`、`done`、`skipped` 及原因）。导入一次处理一个文件，重启后从 `pending` 继续。
 - `contents`：按原图 SHA-256 的预览尺寸；预览文件在 `previews/<前两位>/<sha256>.jpg`，数轴、批次卡片与管理员批次列表用的缩略图（长边 320 px）在第一次请求时从预览生成，放在 `thumbnails/`。不同批次的同一张图共用一份预览与缩略图。管理员批次列表的缩略图是批次随机顺序中的第一张；导入期间它可能换成后来导入的图，所以这个接口不让浏览器长期缓存。
 - `items`：批次中的一张图（同一批次内按内容去重），锚点图带参考分；`covered` 是当前有效、非重复检查的打分数，`shuffle` 是导入时的随机序。`item_paths` 记下它在来源文件夹中的全部相对路径。
 - `claims`：发给打分人的图。令牌是 128 位随机数，打分人只知道令牌；10 分钟租期；`repeat_of` 标出重复检查。
 - 分数与参考分一律存为整数的百分之一分（0–500），只有接口与导出写成两位小数的 0–5 分，避免浮点误差进入数据。
-- `ratings`：只追加。每条回答带提交 ID（唯一）、类型、总分、看图时长、显示尺寸；改分时旧记录写 `superseded_at`，新记录写 `replaces`。部分唯一索引保证同一打分人对同一张图只有一条当前有效的回答（重复检查除外）。总分留在 `ratings.score`，所以凑满人数、重复检查、数轴与只打总分的批次都不受打分项影响。
-- `rating_scores`：一条打分在总分以外各项的分数（`rating_id`、`dimension`、`score`）。提交在同一事务中写入，且必须正好是批次的其余打分项。
+- `ratings`：只追加。每条回答带提交 ID（唯一）、类型、批次第一项的分数、看图时长、显示尺寸；改分时旧记录写 `superseded_at`，新记录写 `replaces`。部分唯一索引保证同一打分人对同一张图只有一条当前有效的回答（重复检查除外）。第 3 版以前每个批次的第一项都是总分，所以 `ratings.score` 不用迁移就符合“第一项”的含义，凑满人数、重复检查与只打总分的批次都不受打分项影响。
+- `rating_scores`：一条打分在第一项以外各项的分数（`rating_id`、`dimension`、`score`），总分不是第一项时也在这里。提交在同一事务中写入，且必须正好是批次的其余打分项。第 3 版重建这张表，去掉了“不能是总分”的约束。接口沿用同一分法：`score` 是第一项，`scores` 是其余各项。
 
 ## 并发与一致性
 
@@ -66,7 +67,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 整个窗口是一间中性深灰的“暗房”：灰色不带色相，只有指针、进度和选中用一种暖色；数字用随前端打包的 Fraunces 衬线体（[`@fontsource-variable/fraunces`](https://fontsource.org/fonts/fraunces)，SIL OFL），只在打开窗口时加载拉丁字符子集，NAS 不能上网时也一样。打分页上照片的显示尺寸由窗口按预览的宽高算出（[`Stage.tsx`](../../web/src/scoring/Stage.tsx) 的 `fitIn`），所以并排对照时两张照片的缩放可以平滑过渡；还没量到窗口时只靠样式表保证完整显示。
 
-多个打分项共用一条数轴：网页为每张照片保存一组百分之一分，新照片从空的一组开始，数轴按正在打的项取分数排列缩略图。点选后进入下一项、最后一项后提交，都由一个 0.35 秒的计时完成，按下数轴或任意键就取消。“上一张”只能回到刚提交的一张，因为模块只允许替换本人最近一次的回答（`rating_locked`）；回去前网页把这一张已打的分数和所在的项暂存，改完提交或按 Esc 后恢复。全屏用浏览器的 Fullscreen API，作用在带 `data-scoring-window` 的打分窗口上，让窗口的提示一起留在屏幕上。100% 查看（[`Loupe.tsx`](../../web/src/scoring/Loupe.tsx)）把原图按设备像素比缩到一个原图像素对一个屏幕像素，用 `orientationMatrix` 转正，平移到鼠标所指的点不动；右下角的小窗用已经加载的预览图，不再多读一次；原图用对象 URL 保存，换照片时释放。
+多个打分项共用一条数轴：网页为每张照片保存一组百分之一分，新照片从空的一组开始，数轴按正在打的项取分数排列缩略图，打完的照片落到第一项的分数处。只打总分的批次不显示项名，其余都写出正在打的项和自定义项的说明。打分项的目录（内置与自定义）只在管理员接口 `/admin/dimensions` 中；打分人从自己的批次里拿到这一批的打分项。点选后进入下一项、最后一项后提交，都由一个 0.35 秒的计时完成，按下数轴或任意键就取消。“上一张”只能回到刚提交的一张，因为模块只允许替换本人最近一次的回答（`rating_locked`）；回去前网页把这一张已打的分数和所在的项暂存，改完提交或按 Esc 后恢复。全屏用浏览器的 Fullscreen API，作用在带 `data-scoring-window` 的打分窗口上，让窗口的提示一起留在屏幕上。100% 查看（[`Loupe.tsx`](../../web/src/scoring/Loupe.tsx)）把原图按设备像素比缩到一个原图像素对一个屏幕像素，用 `orientationMatrix` 转正，平移到鼠标所指的点不动；右下角的小窗用已经加载的预览图，不再多读一次；原图用对象 URL 保存，换照片时释放。
 
 ## 备份与移除
 
@@ -75,8 +76,8 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 验证
 
-- [`internal/scoring/store_test.go`](../../internal/scoring/store_test.go)：导入与去重、按原因计数的跳过、2400 像素限制与锚点例外、先凑满再开新图、8 位打分人并发时没有一张图超过人数、租期与迟到提交、重试与改分、重复检查、统计、打分项的顺序与锁定、第 1 版数据库的升级、导出的列与记录及改过分照片的耗时、100% 查看、备份保留。
-- [`internal/scoringapi/handler_test.go`](../../internal/scoringapi/handler_test.go)：打分人看不到别人的图与分数，成员进不了管理接口，批次缩略图只给管理员且不长期缓存；打分项、100% 查看与导出选项经过接口。
+- [`internal/scoring/store_test.go`](../../internal/scoring/store_test.go)：导入与去重、按原因计数的跳过、2400 像素限制与锚点例外、先凑满再开新图、8 位打分人并发时没有一张图超过人数、租期与迟到提交、重试与改分、重复检查、统计、打分项按选择的顺序与锁定、自定义打分项、第 1 版与第 2 版数据库的升级、导出的列与记录及改过分照片的耗时、100% 查看、备份保留。
+- [`internal/scoringapi/handler_test.go`](../../internal/scoringapi/handler_test.go)：打分人看不到别人的图与分数，成员进不了管理接口，批次缩略图只给管理员且不长期缓存；打分项（按选择的顺序，第一项在 `score`）、自定义打分项与同名拒绝、100% 查看与导出选项经过接口。
 - [`internal/modules/modules_test.go`](../../internal/modules/modules_test.go)：清单校验、未安装 404、未运行 503、转发只带会话令牌。
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：每个接口都在契约中并按姿态守卫。
 - [系统测试](../../scripts/system-test.sh)：安装脚本、存储归属、套接字权限、单元内只看到存储与 `照片打分`、写不进共享空间、跳过太小的照片、沙箱内重读原图的 100% 查看、按全部打分项提交、移除脚本。
