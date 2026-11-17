@@ -22,12 +22,13 @@
    - 原片与成片都是成员个人图库里的照片资产。
    - 窗口向量、卡片、画质与卡片描述按内容对象计算，存在相册 Catalog，跨项目复用（[决定记录](../decisions/2026-11-17-montage-center-first-version.md)）。
    - 剪辑中心不保存原片、分析结果或成片的副本。
+   - #514 说“项目特定的卡片分组、候选、规划、时间线与人工编辑由剪辑中心持有”。这里的理解是：卡片按视频内容切，与项目无关，所以归相册；项目特定的是从卡片里选出的目录、规划与时间线，归剪辑中心。
 3. **项目授权。**
    - **登记**：成员在场时，剪辑中心用这次请求转发来的会话，请相册登记一条授权，列出项目里的资产。
    - **使用**：之后剪辑中心经相册的授权套接字凭授权做这些事：查资产状态，请求并读取分析，取原片的只读描述符，存回成片，撤销授权。
    - **相册的检查**：
-     - 只接受剪辑服务的 UID，用 `SO_PEERCRED` 核对；
-     - 每次按授权主人的受限身份重新走 Policy，这个身份不带管理员身份与查看授权；
+     - 套接字由 systemd 持有，只有剪辑服务的账号能连；相册再用 `SO_PEERCRED` 核对 UID；
+     - 每次按授权主人重新构造一种新的“授权身份”走 Policy：能看到视频、打开原片，只能往主人的个人图库导入，不带管理员身份与查看授权；
      - 主人账号停用、资产不可见或授权已撤销时拒绝。
    - 剪辑中心不保存会话。
    - 这是相册在“成员会话”与“成员助手”之外的第三条身份路径，本 ADR 接受后修订 [ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定 4。
@@ -46,14 +47,14 @@
    - 本 ADR 接受后修订 [ADR 0024](0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 3（沙箱的出口）与决定 8（A-NAS 的 MCP 服务器）。
 6. **媒体只经类型化操作。**
    - 渲染用 FFmpeg Worker 新增的 `frames`、`segment`、`assemble` 操作，参数由 Worker 自己拼，输入只有只读描述符。
-   - 一条消息最多带 2 个描述符：拼好的画面与歌曲音源。
+   - `assemble` 一条消息带 2 个描述符：拼好的画面与歌曲音源。
 
 ## 后果
 
 - **原片、成片与分析各只有一份**，生命周期都由相册管理：素材进回收站或被删除、成片被删、账号被删除，都只在相册一处发生。删除剪辑项目不动相册里的任何资产。
-- **改剪法要动相册**：第八版的卡片与画质规则成为相册分析的一部分，调整剪法要改相册的分析身份并重算。这是用户接受的代价。
+- **改剪法要动相册**：第八版的卡片与画质规则成为相册分析的一部分，调整剪法要改相册的分析身份并重算。这是[决定记录](../decisions/2026-11-17-montage-center-first-version.md)第 8 项带来的代价。
 - **剪辑服务被攻破时的影响**：
-  - 它在 `a-nas-photos` 组里，能连相册接口，可以用当时收到的成员会话操作相册。这一点与家庭中心相同。
+  - 它在 `a-nas-photos` 组里，能连相册接口，可以用当时收到的成员会话操作相册；也能直接连 AI Worker，绕过相册的准入占用模型。这两点与家庭中心相同。
   - 成员离线时，它凭授权只能读成员授过权的资产并存回成片，读不到别人的。
 - **相册多了有人在等的 AI 工作**：剪辑分析排在相册自己的积压之前；前台有人用时照样让路。
 - **规划依赖成员的 VNAS**：没有密钥或 VNAS 不可用时，任务停在“等待规划”，上传、浏览与播放照常。
@@ -72,7 +73,7 @@
 
 ## 关联
 
-- 需求：[#514](https://github.com/zhongwater123/A-NAS/issues/514)；决定：[剪辑中心首版的范围、数据归属与几项做法](../decisions/2026-11-17-montage-center-first-version.md)
+- 需求：[#514](https://github.com/zhongwater123/A-NAS/issues/514)；决定：[剪辑中心首版的数据归属与几项做法](../decisions/2026-11-17-montage-center-first-version.md)
 - 设计：[剪辑中心技术设计](../architecture/montage-center.md)、[向量索引](../architecture/vector-index.md)、[相册 AI](../architecture/photo-ai.md)
 - 规格：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)
 - 代码：[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)（按对端 UID 认成员的先例）、[`internal/familyservice`](../../internal/familyservice/service.go)（转发会话与会话查询的先例）

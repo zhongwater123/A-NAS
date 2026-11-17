@@ -15,13 +15,9 @@
 
 用户 2026-10-19 要求“相册可以往里面放视频”，并且“视频暂不参与任何 AI 功能，只是可以通过相册承载”。实现见 [PR #146](https://github.com/zhongwater123/A-NAS/pull/146)；实现时另选的默认做法等用户确认，见[相册视频的默认做法](2026-10-20-photo-video-defaults.md)。
 
-用户 2026-11-17 为剪辑中心定了一个例外（[决定记录](2026-11-17-montage-center-first-version.md)第 8、9 项）：
-- 剪辑中心按项目请求时，相册为这些视频计算窗口向量、卡片、画质与卡片描述，结果存在 Catalog，供剪辑中心使用；
-- 视频照旧不进相册的搜索、聚合、找相似与 AI 整理进度，助手经相册接口也照旧看不到视频。
-
-[相册视频规格](../specs/photo-video.md)在 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 接受后随之修订。
+（2026-11-17 用户为剪辑中心定了例外：相册为剪辑中心请求的视频计算基础分析，见[决定记录](2026-11-17-montage-center-first-version.md)第 8、9 项与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 4。）
 
 ## 关联
 
 - [相册视频规格](../specs/photo-video.md)
-- [剪辑中心首版的范围、数据归属与几项做法](2026-11-17-montage-center-first-version.md)
+- [剪辑中心首版的数据归属与几项做法](2026-11-17-montage-center-first-version.md)
