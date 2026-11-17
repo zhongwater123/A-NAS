@@ -2459,13 +2459,16 @@ probe = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'rollback_pr
 print(f"{version}:{probe}")
 PY
 }
+# This release's own steps, which the next release's step follows.
+steps=$(probe_table)
+steps=${steps%%:*}
 check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
-check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the newer release applied its step" test "$(probe_table)" = "$((steps + 1)):1"
 check "the newer release brought its keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "the upgrade copied the databases first" \
   test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
 check "apt rolls back to this release" reinstall rollback-this "$version"
-check "this release took the database back with the newer release's Down" test "$(probe_table)" = 0:0
+check "this release took the database back with the newer release's Down" test "$(probe_table)" = "$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
@@ -2601,13 +2604,13 @@ state=$(update_settled || true)
 check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
-check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:1:1"
+check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
 check "the update service went back, and the database with it" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous // "")|\(.records[0].kind)"' <<<"$state"):$(a_nas_version):$(probe_table)" = \
-  "up-to-date|$version||reverted:$version:0:0"
+  "up-to-date|$version||reverted:$version:$steps:0"
 check "a-nas-check passes after going back" quiet a-nas-check
 update_ask check >/dev/null
 state=$(update_settled || true)
@@ -2635,7 +2638,7 @@ check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
-check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:0:0"
+check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check
 update_ask check >/dev/null
 state=$(update_settled || true)

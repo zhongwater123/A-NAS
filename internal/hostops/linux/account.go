@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
@@ -529,6 +530,12 @@ func (e *Executor) removeHostAccount(ctx context.Context, username string, uid i
 		if len(fields) < 4 || fields[2] != id || fields[3] != id {
 			return fmt.Errorf("%w: %s", accountid.ErrIdentityConflict, username)
 		}
+		// userdel refuses an account that still runs anything, such as the
+		// File Broker worker it used shortly before, which waits five idle
+		// minutes before it exits.
+		if err := e.endProcesses(uid); err != nil {
+			return err
+		}
 		if output, err := e.runner.Run(ctx, "userdel", []string{username}, ""); err != nil {
 			return commandError("remove account", err, output)
 		}
@@ -544,6 +551,53 @@ func (e *Executor) removeHostAccount(ctx context.Context, username string, uid i
 		return commandError("remove account group", err, output)
 	}
 	return nil
+}
+
+// endProcesses kills every process running with uid as any of its user IDs.
+// The account is being deleted, so nothing may keep running as it. It reads
+// /proc itself: the Host Agent links only reviewed packages (#221), and a
+// process table library is not one of them.
+func (e *Executor) endProcesses(uid int) error {
+	proc := filepath.Join(e.systemRoot, "proc")
+	want := strconv.Itoa(uid)
+	for range 10 {
+		entries, err := os.ReadDir(proc)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, entry := range entries {
+			pid, err := strconv.Atoi(entry.Name())
+			if err != nil {
+				continue
+			}
+			// A process that exited meanwhile has no status.
+			status, err := os.ReadFile(filepath.Join(proc, entry.Name(), "status"))
+			if err != nil || !runsAs(string(status), want) {
+				continue
+			}
+			found = true
+			if err := unix.Kill(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+				return fmt.Errorf("end process %d of UID %d: %w", pid, uid, err)
+			}
+		}
+		if !found {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("processes of UID %d keep running", uid)
+}
+
+// runsAs reports whether a process status names uid among the real,
+// effective, saved and filesystem user IDs of its Uid line.
+func runsAs(status, uid string) bool {
+	for line := range strings.Lines(status) {
+		if ids, ok := strings.CutPrefix(line, "Uid:"); ok {
+			return slices.Contains(strings.Fields(ids), uid)
+		}
+	}
+	return false
 }
 
 var (
