@@ -149,8 +149,25 @@ func (s *Service) createSnapshot(ctx context.Context, spaceID, actorID, name str
 	// snapshot, so what a crash or a failed discard leaves, the next sweep
 	// knows to delete. Sweeps delete no other snapshot (#269).
 	s.holdSnapshot(snapshot.ID, true)
-	if _, err := s.store.db.ExecContext(ctx, "INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)",
-		snapshot.ID, spaceID, formatTime(snapshot.CreatedAt)); err != nil {
+	note, args := "INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)", []any{snapshot.ID, spaceID, formatTime(snapshot.CreatedAt)}
+	if origin == SnapshotOriginScheduled {
+		// A scheduled snapshot is noted only while its schedule is there and
+		// on, in the one statement. The schedules were read before the
+		// snapshots of the spaces ahead of this one were taken; a schedule
+		// switched off since is not run, and one deleted with its account
+		// (RemoveAccount) either finds this note, held, and comes back for
+		// the snapshot, or left no schedule for this statement to find.
+		note = `INSERT INTO pending_snapshots(id, space_id, created_at)
+SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM snapshot_schedules WHERE space_id = ? AND enabled = 1)`
+		args = append(args, spaceID)
+	}
+	result, err := s.store.db.ExecContext(ctx, note, args...)
+	if err == nil {
+		if noted, _ := result.RowsAffected(); noted == 0 {
+			err = errScheduleGone
+		}
+	}
+	if err != nil {
 		s.holdSnapshot(snapshot.ID, false)
 		return Snapshot{}, err
 	}
