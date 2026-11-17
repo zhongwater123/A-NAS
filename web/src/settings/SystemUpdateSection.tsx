@@ -279,7 +279,10 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
         tone: "accent",
         icon: LoaderCircle,
         spin: true,
-        title: `正在回到 ${versionLabel(status.target ?? "")}`,
+        // After an install or a check that failed, the target is the version
+        // that failed and the device goes back to the one it had; only when
+        // an administrator went back is the target where it goes.
+        title: `正在回到 ${versionLabel((problem ? status.current : status.target) ?? "")}`,
         detail: restart,
         progress: null,
       };
@@ -293,6 +296,8 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
           title: "回到原版本时出错",
           detail: "A-NAS 可能无法正常运行，请按部署手册的“回滚或恢复”处理",
           why,
+          // A check that passes after the repair is what takes this away.
+          action: check,
         };
       return {
         tone: "warning",
