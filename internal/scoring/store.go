@@ -163,7 +163,7 @@ func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
 
 // migrations take the database from each version to the next; its version
 // is how many have run.
-var migrations = []string{schemaV1, schemaV2, schemaV3}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
 
 const schemaV1 = `
 CREATE TABLE raters (
@@ -289,6 +289,16 @@ CREATE TABLE rating_scores_v3 (
 INSERT INTO rating_scores_v3 (rating_id, dimension, score) SELECT rating_id, dimension, score FROM rating_scores;
 DROP TABLE rating_scores;
 ALTER TABLE rating_scores_v3 RENAME TO rating_scores;
+`
+
+// schemaV4 gives every batch a scale, which every batch before had on the
+// number line with two decimals, and lets a scale with decimals keep them
+// from raters.
+const schemaV4 = `
+ALTER TABLE batches ADD COLUMN scale TEXT NOT NULL DEFAULT 'hundredths'
+	CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three'));
+ALTER TABLE batches ADD COLUMN hide_decimals INTEGER NOT NULL DEFAULT 0
+	CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'));
 `
 
 func (s *Store) migrate(ctx context.Context) error {

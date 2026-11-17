@@ -214,11 +214,18 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
   return (
     <div className={styles.scCover}>
       {recent.map((item) => {
-        const score = formatScore(Math.round(item.score * 100));
+        // A batch that hides scores from raters shows none here either.
+        const score = batch.hideDecimals ? undefined : formatScore(Math.round(item.score * 100), batch.scale);
+        const alt =
+          score === undefined
+            ? "你打过的照片"
+            : batch.scale === "three"
+              ? `你打了“${score}”的照片`
+              : `你打了 ${score} 分的照片`;
         return (
           <figure key={item.token}>
-            <img src={claimThumbnailURL(item.token)} alt={`你打了 ${score} 分的照片`} loading="lazy" />
-            <figcaption>{score}</figcaption>
+            <img src={claimThumbnailURL(item.token)} alt={alt} loading="lazy" />
+            {score !== undefined && <figcaption>{score}</figcaption>}
           </figure>
         );
       })}
