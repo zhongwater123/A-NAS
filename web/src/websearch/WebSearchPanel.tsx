@@ -4,6 +4,7 @@ import { type CSSProperties, type FormEvent, Fragment, type ReactNode, useEffect
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { WebSearchIcon } from "../desktop/AppIconArtwork";
 import { useToasts } from "../ui/feedback";
 import {
   categoryLabels,
@@ -19,7 +20,6 @@ import {
 import { EngineStatus } from "./EngineStatus";
 import { ExternalLink, Infobox, ResultList } from "./ResultViews";
 import { useWebSearch } from "./status";
-import { WebSearchGlyph } from "./WebSearchGlyph";
 import styles from "./websearch.module.css";
 
 export { durationText } from "./ResultViews";
@@ -183,9 +183,7 @@ export function WebSearchPanel() {
     return (
       <div className={styles.ws}>
         <div className={styles.wsOff} role="status">
-          <span className={styles.wsOffMark} aria-hidden>
-            <WebSearchGlyph size={30} />
-          </span>
+          <WebSearchIcon className={styles.wsOffMark} size={64} />
           <strong>管理员已关闭网页搜索</strong>
         </div>
       </div>
@@ -291,9 +289,7 @@ export function WebSearchPanel() {
         </>
       ) : (
         <div className={styles.wsHome}>
-          <span className={styles.wsHomeMark} aria-hidden>
-            <WebSearchGlyph size={34} />
-          </span>
+          <WebSearchIcon size={64} />
           {box}
           {tabs}
         </div>
