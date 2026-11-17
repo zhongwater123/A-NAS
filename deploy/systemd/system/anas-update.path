@@ -1,6 +1,9 @@
 [Unit]
 Description=A-NAS system update: watch for requests
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/system-update.md
+# Not on a device that runs the A-NAS image (anas-update.service), where a
+# request the service skips would trigger it again and again.
+ConditionOSRelease=IMAGE_ID!=a-nas
 
 [Path]
 PathExists=/var/lib/a-nas-update/request.json

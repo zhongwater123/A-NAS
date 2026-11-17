@@ -184,6 +184,10 @@ fi
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
 printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
+# A deleted account is removed after 10 seconds instead of 30 days, so that
+# the test sees it go (docs/specs/account-enable-and-delete.md).
+install -d /etc/systemd/system/anas-api.service.d
+printf '[Service]\nEnvironment=ANAS_ACCOUNT_DELETION_DELAY=10s\n' > /etc/systemd/system/anas-api.service.d/system-test.conf
 
 # Web search (ADR 0030) runs a stand-in for SearXNG under the real unit and its
 # sandbox (scripts/system-test-search.py), which the stand-in runtime holds.
@@ -1982,8 +1986,8 @@ smbclient "//$ip/carol" -A /tmp/carol.smb -m SMB3 --client-protection=encrypt < 
 carol_client=$!
 for _ in $(seq 1 50); do [[ "$(smb_sessions_of carol)" -gt 0 ]] && break; sleep 0.2; done
 check "a member stays connected over SMB" test "$(smb_sessions_of carol)" -gt 0
-check "the administrator disables the member" test "$(status_of -X DELETE -b /tmp/owner.jar \
-  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user")" = 204
+check "the administrator disables the member" test "$(status_of -X POST -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/disable")" = 204
 check "disabling ends the member's SMB session" smb_sessions_end carol
 check "the disabled member cannot open SMB" smb_refused NT_STATUS_ACCOUNT_DISABLED carol carol ls
 kill "$carol_client" 2>/dev/null || true
@@ -1994,6 +1998,59 @@ for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sle
 check "the Product Service's start synchronizes identities with a disabled SMB account" \
   bash -c "for _ in \$(seq 1 30); do journalctl -u anas-api --since '$synced_at' -o cat --no-pager |
     grep -Fq 'identity synchronization succeeded' && exit 0; sleep 1; done; exit 1"
+
+# --- Enabling the member again gives back her sign-in and SMB with the
+# password she had (docs/specs/account-enable-and-delete.md).
+check "the administrator enables the member again" test "$(status_of -X POST -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/enable")" = 204
+check "the enabled member signs in with her password" login carol "$carol_password" /tmp/carol.jar
+check "the enabled member opens SMB again" quiet smb carol carol ls
+
+# --- Deleting the member: she waits, can be kept, and then goes, with her
+# personal space handed to the administrator; her name can be used again.
+carol_csrf=$(login carol "$carol_password" /tmp/carol.jar || true)
+printf 'carol keeps this\n' > /tmp/carol.txt
+upload /tmp/carol.jar "$carol_csrf" "$(space_of /tmp/carol.jar private)" /tmp/carol.txt carol.txt >/dev/null || true
+carol_uid=$(id -u carol)
+# The administrator already has a folder of the name her files get, so theirs
+# gets a number, which the notice must name.
+check "the administrator has a folder named like the handover" test "$(status_of -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' -d '{"parentId":"","name":"carol 的文件"}' \
+  "$api/api/v1/spaces/$owner_private/directories")" = 201
+check "the administrator disables the member before deleting her" test "$(status_of -X POST -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/disable")" = 204
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+delete_carol() { # STATUS
+  test "$(status_of -X PUT -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -d "{\"password\":\"$owner_password\",\"personalSpace\":\"transfer\",\"library\":\"delete\"}" \
+    "$api/api/v1/users/$carol_user/deletion")" = "$1"
+}
+check "the administrator deletes the member" delete_carol 200
+check "the administrator keeps her before the time is up" test "$(status_of -X DELETE -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/deletion")" = 204
+check "the kept member is still there" getent passwd carol
+check "the administrator deletes the member again" delete_carol 200
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+carol_gone() {
+  for _ in $(seq 1 120); do
+    curl -fsS -b /tmp/owner.jar "$api/api/v1/users" | jq -e --arg id "$carol_user" 'all(.items[]; .id != $id)' >/dev/null && return
+    sleep 0.5
+  done
+  return 1
+}
+check "the member is removed once her time is up" carol_gone
+check "her Linux account is gone" bash -c '! getent passwd carol && ! getent group carol'
+check "her Samba account is gone" bash -c '! pdbedit --user carol >/dev/null 2>&1'
+check "her personal space is gone" test ! -e /srv/a-nas/data/spaces/private/carol
+handed="/srv/a-nas/data/spaces/private/owner/carol 的文件 (2)"
+check "her files are in the administrator's personal space" grep -qx 'carol keeps this' "$handed/carol.txt"
+check "the handed-over files belong to the administrator" test "$(stat -c %U "$handed/carol.txt")" = owner
+check "the administrator is told where they are" bash -c "curl -fsS -b /tmp/owner.jar $api/api/v1/notifications |
+  jq -e '[.items[] | select(.kind == \"account_deleted\" and .folder == \"carol 的文件 (2)\")] | length == 1' >/dev/null"
+check "the name can be used for a new member" test "$(status_of -X POST -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
+  -H 'Content-Type: application/json' -d "{\"username\":\"carol\",\"password\":\"$(secret)$(secret)\"}" "$api/api/v1/users")" = 201
+check "the new member gets a new UID" test "$(id -u carol)" != "$carol_uid"
+check "the new member's personal space starts empty" test ! -e /srv/a-nas/data/spaces/private/carol/carol.txt
 
 # --- Restarting the Host Agent keeps all of the above.
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -2407,13 +2464,16 @@ probe = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'rollback_pr
 print(f"{version}:{probe}")
 PY
 }
+# This release's own steps, which the next release's step follows.
+steps=$(probe_table)
+steps=${steps%%:*}
 check "apt upgrades to a release with a newer database step" reinstall upgrade-next "$next"
-check "the newer release applied its step" test "$(probe_table)" = 1:1
+check "the newer release applied its step" test "$(probe_table)" = "$((steps + 1)):1"
 check "the newer release brought its keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "the upgrade copied the databases first" \
   test -n "$(find /var/backups/a-nas -mindepth 2 -maxdepth 3 -path "*$version*/system-disk/control.db")"
 check "apt rolls back to this release" reinstall rollback-this "$version"
-check "this release took the database back with the newer release's Down" test "$(probe_table)" = 0:0
+check "this release took the database back with the newer release's Down" test "$(probe_table)" = "$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
@@ -2549,13 +2609,13 @@ state=$(update_settled || true)
 check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
-check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:1:1"
+check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
 check "the update service went back, and the database with it" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous // "")|\(.records[0].kind)"' <<<"$state"):$(a_nas_version):$(probe_table)" = \
-  "up-to-date|$version||reverted:$version:0:0"
+  "up-to-date|$version||reverted:$version:$steps:0"
 check "a-nas-check passes after going back" quiet a-nas-check
 update_ask check >/dev/null
 state=$(update_settled || true)
@@ -2583,7 +2643,7 @@ check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
-check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:0:0"
+check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check
 update_ask check >/dev/null
 state=$(update_settled || true)

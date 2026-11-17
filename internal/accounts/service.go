@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -73,6 +74,9 @@ type User struct {
 	Nickname string `json:"nickname,omitempty"`
 	// AvatarVersion names the user's current avatar image; empty means none.
 	AvatarVersion string `json:"avatarVersion,omitempty"`
+	// Deletion is set on a disabled account an administrator asked to
+	// delete; only ListUsers fills it.
+	Deletion *Deletion `json:"deletion,omitempty"`
 }
 
 // ActiveAdministrator reports whether u may administer the device: an
@@ -125,6 +129,9 @@ type Options struct {
 	// PasswordCost's fields left zero take DefaultPasswordCost's; tests
 	// lower them.
 	PasswordCost PasswordCost
+	// DeletionDelay is how long a deleted account waits before it is
+	// removed; zero takes DefaultDeletionDelay. The system test shortens it.
+	DeletionDelay time.Duration
 }
 
 type Store struct {
@@ -159,6 +166,26 @@ func (s *Store) migrate(ctx context.Context) error {
 var databaseSchema = sqlitedb.Schema{
 	Name:     "control.db",
 	Baseline: func(ctx context.Context, db *sql.DB) error { return (&Store{db: db}).baseline(ctx) },
+	Steps: []sqlitedb.Step{{
+		// A disabled account an administrator asked to delete
+		// (docs/specs/account-enable-and-delete.md). No foreign key: the row
+		// goes in the same transaction as the account.
+		Up: `CREATE TABLE account_deletions (
+    user_id TEXT PRIMARY KEY,
+    requested_by TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    personal_space TEXT NOT NULL CHECK (personal_space IN ('transfer', 'delete')),
+    library TEXT NOT NULL CHECK (library IN ('transfer', 'delete')),
+    started_at TEXT,
+    completed_steps TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    -- The names the folder and album handed to the administrator got.
+    handed_folder TEXT NOT NULL DEFAULT '',
+    handed_album TEXT NOT NULL DEFAULT ''
+);`,
+		Down: "DROP TABLE account_deletions;",
+	}},
 }
 
 // baseline is the structure the store made before it had steps.
@@ -353,6 +380,13 @@ type Service struct {
 	passwords    *passwordWork
 	signIns      signInFailures
 	sessions     sessionMemory
+	// deletionDelay is Options.DeletionDelay; deletionWake tells
+	// RunDeletions that a deletion was asked for or cancelled.
+	deletionDelay time.Duration
+	deletionWake  chan struct{}
+	// identityMu keeps a deletion from starting while identity
+	// synchronization sends accounts to the Host Agent (startDeletion).
+	identityMu sync.Mutex
 }
 
 func NewService(store *Store, credentials CredentialProvisioner, options Options) *Service {
@@ -376,7 +410,12 @@ func NewService(store *Store, credentials CredentialProvisioner, options Options
 	}
 	// The decoy draws from crypto/rand, leaving Random's sequence to tokens.
 	decoy := func() (string, error) { return hashPassword(rand.Text(), rand.Reader, cost) }
-	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost, passwords: newPasswordWork(decoy)}
+	delay := options.DeletionDelay
+	if delay <= 0 {
+		delay = DefaultDeletionDelay
+	}
+	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost, passwords: newPasswordWork(decoy),
+		deletionDelay: delay, deletionWake: make(chan struct{}, 1)}
 }
 
 func (s *Service) SetupAdministrator(ctx context.Context, username, password string) (User, error) {
@@ -728,7 +767,19 @@ func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
 		}
 		users = append(users, user)
 	}
-	return users, rows.Err()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	deletions, err := s.deletions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range users {
+		if deletion, ok := deletions[users[i].ID]; ok {
+			users[i].Deletion = &deletion
+		}
+	}
+	return users, nil
 }
 
 func (s *Service) ActiveUsers(ctx context.Context) ([]User, error) {
@@ -916,15 +967,20 @@ func (s *Service) ResetCredential(ctx context.Context, actor User, userID, passw
 	}
 	var user User
 	var privateSpaceID string
+	var deleting bool
 	err := s.store.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.role, u.status, u.created_at, s.id
+SELECT u.id, u.username, u.role, u.status, u.created_at, s.id, EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = u.id)
 FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'
-WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status, new(string), &privateSpaceID)
+WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status, new(string), &privateSpaceID, &deleting)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrUserNotFound
 	}
 	if err != nil {
 		return err
+	}
+	// Setting a credential provisions the host account a deletion removes.
+	if deleting {
+		return ErrDeletionPending
 	}
 	passwordHash, err := s.newPasswordHash(ctx, password)
 	if err != nil {
@@ -1011,9 +1067,16 @@ func (s *Service) SyncIdentities(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
+	// An account being deleted may already be gone from the host; it must
+	// not be made again. No deletion starts until the Host Agent has the list
+	// read here (startDeletion).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	rows, err := s.store.db.QueryContext(ctx, `SELECT u.username, u.role, u.status, u.must_change_password, i.uid
 FROM users u JOIN linux_identities i ON i.user_id = u.id
-WHERE u.status IN ('active', 'disabled') ORDER BY i.uid`)
+WHERE u.status IN ('active', 'disabled')
+AND NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = u.id AND d.started_at IS NOT NULL)
+ORDER BY i.uid`)
 	if err != nil {
 		return err
 	}

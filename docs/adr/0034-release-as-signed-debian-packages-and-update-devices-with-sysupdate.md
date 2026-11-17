@@ -99,7 +99,7 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    2026-11-11 完成：[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)。正式签名密钥与软件源的位置待用户决定（[签名密钥](../decisions/2026-11-11-release-signing-key.md)、[放在哪里](../decisions/2026-11-11-update-hosting.md)）。
 3. **镜像与 systemd-sysupdate 的验证（2026-11-10 完成）**：在虚拟机中用 mkosi 构建镜像，以 Debian 13 的 systemd 257 验证自动退回、断电、数据不变、下载量、产品层做成 system extension，以及是否需要更新的 systemd。结论见下一节，做法与数据见[研究记录](../research/sysupdate-image-verification.md)。
 4. **更新服务与界面**：Host Agent 的更新服务与“设置”中的更新页，见[系统更新规格](../specs/system-update.md)。2026-11-13 软件包设备的部分完成：独立的 `anas-update` 单元由 root 同步开发机推送的软件源、检查、下载、安装、运行 `a-nas-check` 与回退，Host Agent 只留下请求、读取状态；镜像设备随第 5 步接入。
-5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。
+5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。2026-11-13 第一部分完成：镜像与签名的更新文件（`make image`），在虚拟机中按设备的做法更新的测试（`make image-test`），[手册](../runbooks/build-device-image.md)；镜像设备接入“设置 → 系统更新”是第二部分。
 6. **Experimental NAS 改用镜像**：用户决定时间后重装系统盘。数据卷在另外的硬盘上，不受影响。
 
 ## 第 3 步的验证结论（2026-11-10）

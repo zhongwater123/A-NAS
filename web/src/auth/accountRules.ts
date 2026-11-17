@@ -55,8 +55,11 @@ export const accountErrors: Record<string, string> = {
   reauthentication_failed: "密码不正确",
   setup_complete: "设备已经启用，请刷新页面后登录",
   setup_local_only: "只能在 NAS 本机屏幕上（或经 SSH 隧道）启用设备",
-  smb_disable_pending:
-    "账号已禁用，网页登录已失效；文件共享或助手服务尚未完全停用。可以再点一次“禁用账号”重试，产品服务重启时也会自动重试",
+  smb_disable_pending: "账号已禁用，网页登录已失效；文件共享或助手服务尚未完全停用，产品服务重启时会自动补做",
+  host_enable_pending: "账号已重新启用，可以登录网页；文件共享或助手服务尚未恢复，产品服务重启时会自动补做",
+  deletion_pending: "这个账号正在等待删除，请先撤销删除",
+  deletion_started: "这个账号的数据已经开始删除，无法撤销",
+  account_not_disabled: "只能删除已禁用的账号，请先禁用",
   credential_provision_failed: "SMB 凭据没有设置成功，请稍后重试",
   invalid_nickname: "昵称最多 24 个字符，不能包含换行或不可见的格式字符",
   nickname_unavailable: "这个名字已经是其他人的账号名或昵称，请换一个",

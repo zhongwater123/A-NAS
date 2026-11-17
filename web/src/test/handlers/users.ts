@@ -1,6 +1,13 @@
 // Accounts: the signed-in user's own password, nickname and avatar, and the
 // members an administrator manages in 设置 → 用户与权限.
-import type { CredentialInput, PasswordChange, ProfileChange, User, ViewingRequest } from "../../api.generated";
+import type {
+  CredentialInput,
+  DeletionRequest,
+  PasswordChange,
+  ProfileChange,
+  User,
+  ViewingRequest,
+} from "../../api.generated";
 import { user } from "../fixtures";
 import { apiError, http, pathOf } from "../server";
 
@@ -46,13 +53,17 @@ export function accountHandlers(signedIn: User, taken: string[] = ["owner"]) {
 
 // membersHandlers answers 用户与权限 with users and accepts what an
 // administrator does to them, recording each request with the path the
-// client wrote: creating, resetting a password, read-only viewing, disabling.
+// client wrote: creating, resetting a password, read-only viewing, disabling,
+// enabling again, and deleting or keeping an account.
 export function membersHandlers(users: User[]) {
   const sent = {
     created: [] as CredentialInput[],
     resets: [] as Array<{ path: string; body: { password: string } }>,
     viewings: [] as Array<{ path: string; body: ViewingRequest }>,
     disabled: [] as string[],
+    enabled: [] as string[],
+    deletions: [] as Array<{ path: string; body: DeletionRequest }>,
+    cancelled: [] as string[],
   };
   const handlers = [
     http.get("/api/v1/users", ({ response }) => response(200).json({ items: users })),
@@ -80,8 +91,30 @@ export function membersHandlers(users: User[]) {
         expiresAt: "2026-10-08T10:00:00Z",
       });
     }),
-    http.delete("/api/v1/users/{userId}", ({ request, response }) => {
+    http.post("/api/v1/users/{userId}/disable", ({ request, response }) => {
       sent.disabled.push(pathOf(request));
+      return response(204).empty();
+    }),
+    http.post("/api/v1/users/{userId}/enable", ({ request, response }) => {
+      sent.enabled.push(pathOf(request));
+      return response(204).empty();
+    }),
+    http.put("/api/v1/users/{userId}/deletion", async ({ params, request, response }) => {
+      const body = await request.json();
+      sent.deletions.push({ path: pathOf(request), body });
+      const deleted = users.find((candidate) => candidate.id === params.userId) ?? alice;
+      return response(200).json({
+        ...deleted,
+        deletion: {
+          dueAt: "2026-12-16T10:00:00Z",
+          personalSpace: body.personalSpace,
+          library: body.library,
+          started: false,
+        },
+      });
+    }),
+    http.delete("/api/v1/users/{userId}/deletion", ({ request, response }) => {
+      sent.cancelled.push(pathOf(request));
       return response(204).empty();
     }),
   ];
