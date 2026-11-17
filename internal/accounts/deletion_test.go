@@ -10,6 +10,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 )
 
 // lifecycleHost stands in for the Host Agent's credential, enabling and
@@ -20,6 +21,8 @@ type lifecycleHost struct {
 	enabled   []accounts.EnableRequest
 	removed   []accounts.AccountRemoval
 	enableErr error
+	// handedTo is the folder RemoveAccount says the files went to.
+	handedTo string
 }
 
 func (h *lifecycleHost) SetCredential(_ context.Context, request accounts.CredentialRequest) error {
@@ -37,9 +40,9 @@ func (h *lifecycleHost) EnableCredential(_ context.Context, request accounts.Ena
 	return h.enableErr
 }
 
-func (h *lifecycleHost) RemoveAccount(_ context.Context, removal accounts.AccountRemoval) error {
+func (h *lifecycleHost) RemoveAccount(_ context.Context, removal accounts.AccountRemoval) (string, error) {
 	h.removed = append(h.removed, removal)
-	return nil
+	return h.handedTo, nil
 }
 
 func (h *lifecycleHost) SyncIdentities(context.Context, []accounts.Identity) error { return nil }
@@ -48,13 +51,16 @@ type lifecycleFixture struct {
 	service      *accounts.Service
 	host         *lifecycleHost
 	admin, alice accounts.User
+	// database is control.db, which the Host Agent reads too.
+	database string
 }
 
 const alicePassword = "alice password for testing"
 
 func newLifecycleFixture(t *testing.T, delay time.Duration) lifecycleFixture {
 	t.Helper()
-	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
+	database := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +75,7 @@ func newLifecycleFixture(t *testing.T, delay time.Duration) lifecycleFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return lifecycleFixture{service: service, host: host, admin: admin, alice: alice}
+	return lifecycleFixture{service: service, host: host, admin: admin, alice: alice, database: database}
 }
 
 func (f lifecycleFixture) user(t *testing.T, id string) (accounts.User, bool) {
@@ -261,18 +267,25 @@ func TestADueDeletionRemovesTheAccountAfterEveryStepAndFreesItsName(t *testing.T
 	var ran []string
 	var seen accounts.Removal
 	failPhotos := errors.New("the photo service is unavailable")
+	failShares := errors.New("the share service is unavailable")
+	sharesFail := true
 	steps := []accounts.DeletionStep{
-		{Name: "photos", Remove: func(_ context.Context, removal accounts.Removal) error {
+		{Name: "photos", Remove: func(_ context.Context, removal accounts.Removal) (accounts.Handover, error) {
 			ran = append(ran, "photos")
 			seen = removal
-			return failPhotos
+			return accounts.Handover{}, failPhotos
 		}},
 		f.service.HostRemoval(),
-		{Name: "shares", Remove: func(context.Context, accounts.Removal) error { ran = append(ran, "shares"); return nil }},
+		accounts.ForgetStep("shares", func(context.Context, accounts.Removal) error {
+			ran = append(ran, "shares")
+			if sharesFail {
+				return failShares
+			}
+			return nil
+		}),
 	}
 	f.service.RunDueDeletions(ctx, steps)
-	if seen.Username != "alice" || seen.Administrator.ID != f.admin.ID || seen.Folder != "alice 的文件" || seen.Album != "alice 的照片" ||
-		seen.PrivateSpaceID == "" || seen.UID < accounts.FirstUserUID {
+	if seen.Username != "alice" || seen.Administrator.ID != f.admin.ID || seen.PrivateSpaceID == "" || seen.UID < accounts.FirstUserUID {
 		t.Fatalf("the steps saw %+v", seen)
 	}
 	user, _ := f.user(t, f.alice.ID)
@@ -285,18 +298,38 @@ func TestADueDeletionRemovesTheAccountAfterEveryStepAndFreesItsName(t *testing.T
 	if _, err := f.service.StartViewing(ctx, f.admin, f.alice.ID, "correct horse battery staple", "check"); !errors.Is(err, accounts.ErrDeletionStarted) {
 		t.Fatalf("viewing a space being removed: %v", err)
 	}
+	// The Host Agent reads the removal from control.db itself, not from the
+	// Product Service's request.
+	directory := sessiondir.New(f.database)
+	t.Cleanup(func() { _ = directory.Close() })
+	removal, err := directory.AccountRemoval(ctx, f.alice.ID)
+	if err != nil || removal.Username != "alice" || removal.UID != seen.UID || removal.PrivateSpaceID != seen.PrivateSpaceID ||
+		removal.TransferTo != "owner" || removal.TransferToUID < accounts.FirstUserUID || removal.Folder != "alice 的文件" {
+		t.Fatalf("the Host Agent reads %+v, %v", removal, err)
+	}
 
-	steps[0].Remove = func(context.Context, accounts.Removal) error { ran = append(ran, "photos"); return nil }
+	// The administrator already had a folder and an album of those names:
+	// the steps say which names theirs got, and the next attempt keeps them.
+	steps[0].Remove = func(context.Context, accounts.Removal) (accounts.Handover, error) {
+		ran = append(ran, "photos")
+		return accounts.Handover{Album: "alice 的照片 (2)"}, nil
+	}
+	f.host.handedTo = "alice 的文件 (2)"
 	f.service.RunDueDeletions(ctx, steps)
-	if want := []string{"photos", "photos", "shares"}; !slices.Equal(ran, want) {
+	sharesFail = false
+	f.service.RunDueDeletions(ctx, steps)
+	if want := []string{"photos", "photos", "shares", "shares"}; !slices.Equal(ran, want) {
 		t.Fatalf("steps ran %v, want %v", ran, want)
 	}
-	if len(f.host.removed) != 1 || f.host.removed[0].Username != "alice" || f.host.removed[0].TransferTo != "owner" ||
-		f.host.removed[0].Folder != "alice 的文件" || f.host.removed[0].TransferToUID < accounts.FirstUserUID {
+	if len(f.host.removed) != 1 || f.host.removed[0].UserID != f.alice.ID || f.host.removed[0].Username != "alice" ||
+		f.host.removed[0].TransferTo != "owner" || f.host.removed[0].Folder != "alice 的文件" {
 		t.Fatalf("the Host Agent was asked %+v", f.host.removed)
 	}
 	if _, found := f.user(t, f.alice.ID); found {
 		t.Fatal("the deleted account is still listed")
+	}
+	if _, err := directory.AccountRemoval(ctx, f.alice.ID); !errors.Is(err, accounts.ErrNotDeleting) {
+		t.Fatalf("the Host Agent still reads a removal: %v", err)
 	}
 	if !f.audited(t, "user.deleted") {
 		t.Fatal("the deletion was not audited")
@@ -306,7 +339,7 @@ func TestADueDeletionRemovesTheAccountAfterEveryStepAndFreesItsName(t *testing.T
 		t.Fatal(err)
 	}
 	if len(notices) != 1 || notices[0].Kind != accounts.NotificationAccountDeleted || notices[0].ActorUsername != "alice" ||
-		notices[0].Folder != "alice 的文件" || notices[0].Album != "alice 的照片" {
+		notices[0].Folder != "alice 的文件 (2)" || notices[0].Album != "alice 的照片 (2)" {
 		t.Fatalf("notifications = %+v", notices)
 	}
 	again, err := f.service.CreateMember(ctx, f.admin, "alice", "another alice password")
@@ -322,13 +355,36 @@ func TestADueDeletionRemovesTheAccountAfterEveryStepAndFreesItsName(t *testing.T
 	}
 }
 
+// A transfer that found nothing to hand over makes no folder or album, and
+// the administrator is told of none.
+func TestADeletionThatHandedNothingOverSendsNoNotice(t *testing.T) {
+	f := newLifecycleFixture(t, time.Millisecond)
+	ctx := context.Background()
+	f.disable(t)
+	f.schedule(t, accounts.DeletionDelete, accounts.DeletionTransfer)
+	time.Sleep(5 * time.Millisecond)
+	f.service.RunDueDeletions(ctx, []accounts.DeletionStep{
+		{Name: "photos", Remove: func(context.Context, accounts.Removal) (accounts.Handover, error) { return accounts.Handover{}, nil }},
+		f.service.HostRemoval(),
+	})
+	if _, found := f.user(t, f.alice.ID); found {
+		t.Fatal("the deleted account is still listed")
+	}
+	if len(f.host.removed) != 1 || f.host.removed[0].TransferTo != "" {
+		t.Fatalf("the Host Agent was asked %+v", f.host.removed)
+	}
+	if notices, err := f.service.Notifications(ctx, f.admin); err != nil || len(notices) != 0 {
+		t.Fatalf("notifications = %+v, %v", notices, err)
+	}
+}
+
 func TestADeletionThatIsNotDueYetWaits(t *testing.T) {
 	f := newLifecycleFixture(t, time.Hour)
 	f.disable(t)
 	f.schedule(t, accounts.DeletionDelete, accounts.DeletionDelete)
 	ran := false
 	wait := f.service.RunDueDeletions(context.Background(), []accounts.DeletionStep{
-		{Name: "photos", Remove: func(context.Context, accounts.Removal) error { ran = true; return nil }},
+		accounts.ForgetStep("photos", func(context.Context, accounts.Removal) error { ran = true; return nil }),
 	})
 	if ran {
 		t.Fatal("a deletion ran before it was due")
@@ -338,5 +394,14 @@ func TestADeletionThatIsNotDueYetWaits(t *testing.T) {
 	}
 	if user, _ := f.user(t, f.alice.ID); user.Deletion == nil || user.Deletion.Started {
 		t.Fatalf("deletion = %+v", user.Deletion)
+	}
+	// Until it starts, the Host Agent and the services refuse to remove it.
+	directory := sessiondir.New(f.database)
+	t.Cleanup(func() { _ = directory.Close() })
+	if _, err := directory.AccountRemoval(context.Background(), f.alice.ID); !errors.Is(err, accounts.ErrNotDeleting) {
+		t.Fatalf("the Host Agent reads a removal that has not started: %v", err)
+	}
+	if _, err := directory.AccountDeletion(context.Background(), f.alice.ID); !errors.Is(err, accounts.ErrNotDeleting) {
+		t.Fatalf("the services read a deletion that has not started: %v", err)
 	}
 }

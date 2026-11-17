@@ -2012,6 +2012,11 @@ carol_csrf=$(login carol "$carol_password" /tmp/carol.jar || true)
 printf 'carol keeps this\n' > /tmp/carol.txt
 upload /tmp/carol.jar "$carol_csrf" "$(space_of /tmp/carol.jar private)" /tmp/carol.txt carol.txt >/dev/null || true
 carol_uid=$(id -u carol)
+# The administrator already has a folder of the name her files get, so theirs
+# gets a number, which the notice must name.
+check "the administrator has a folder named like the handover" test "$(status_of -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' -d '{"parentId":"","name":"carol 的文件"}' \
+  "$api/api/v1/spaces/$owner_private/directories")" = 201
 check "the administrator disables the member before deleting her" test "$(status_of -X POST -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/disable")" = 204
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -2037,11 +2042,11 @@ check "the member is removed once her time is up" carol_gone
 check "her Linux account is gone" bash -c '! getent passwd carol && ! getent group carol'
 check "her Samba account is gone" bash -c '! pdbedit --user carol >/dev/null 2>&1'
 check "her personal space is gone" test ! -e /srv/a-nas/data/spaces/private/carol
-handed="/srv/a-nas/data/spaces/private/owner/carol 的文件"
+handed="/srv/a-nas/data/spaces/private/owner/carol 的文件 (2)"
 check "her files are in the administrator's personal space" grep -qx 'carol keeps this' "$handed/carol.txt"
 check "the handed-over files belong to the administrator" test "$(stat -c %U "$handed/carol.txt")" = owner
 check "the administrator is told where they are" bash -c "curl -fsS -b /tmp/owner.jar $api/api/v1/notifications |
-  jq -e '[.items[] | select(.kind == \"account_deleted\" and .folder == \"carol 的文件\")] | length == 1' >/dev/null"
+  jq -e '[.items[] | select(.kind == \"account_deleted\" and .folder == \"carol 的文件 (2)\")] | length == 1' >/dev/null"
 check "the name can be used for a new member" test "$(status_of -X POST -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
   -H 'Content-Type: application/json' -d "{\"username\":\"carol\",\"password\":\"$(secret)$(secret)\"}" "$api/api/v1/users")" = 201
 check "the new member gets a new UID" test "$(id -u carol)" != "$carol_uid"

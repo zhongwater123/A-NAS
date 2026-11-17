@@ -38,8 +38,10 @@ func (e *Executor) EnableCredential(ctx context.Context, request accountid.Enabl
 	if !request.SMB {
 		return nil
 	}
-	if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-e", request.Username}, ""); err != nil {
-		return commandError("enable Samba credential", err, output)
+	// As in identity synchronization, an account whose password Samba never
+	// received gets its SMB credential with the next password change.
+	if err := e.enableSambaIfPresent(ctx, request.Username); err != nil {
+		return err
 	}
 	if err := e.setIdentityEnabled(request.Username, true); err != nil {
 		return err
@@ -52,78 +54,95 @@ func (e *Executor) EnableCredential(ctx context.Context, request accountid.Enabl
 // while it is filled, then renamed to the folder the administrator sees.
 const handoverPrefix = ".a-nas-handover-"
 
+// handoverAttribute marks the folder of handed-over files with the UID of the
+// account they came from. Only root reads or writes trusted attributes, and
+// the mark stays when the administrator renames the folder, so a removal sent
+// again still finds the folder it made.
+const handoverAttribute = "trusted.a-nas.handover-from"
+
 // RemoveAccount removes a deleted account from the host for good
 // (docs/specs/account-enable-and-delete.md): its assistant, its personal
 // space (copied into the receiving administrator's personal space first when
 // asked), its folders in Shared, its viewing grants, and its Linux, group and
 // Samba accounts. Its UID is never reused, so files it left in Shared keep it
-// as their owner.
+// as their owner. It returns the folder of the administrator's personal
+// space that holds the handed-over files, as named now.
 //
 // The account leaves the identity and space registries before its folders
 // are deleted, so the reconciliation that recreates missing roots and trash
 // folders no longer knows them. A request that failed part way is sent
-// again; every step treats what is already gone as done.
-func (e *Executor) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) error {
+// again; every step treats what is already gone as done. One removal runs at
+// a time, so a request sent again while an earlier one still copies waits for
+// it and then finds it done.
+func (e *Executor) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) (string, error) {
 	if err := e.validRemoval(removal); err != nil {
-		return err
+		return "", err
 	}
 	if e.identityError != nil {
-		return e.identityError
+		return "", e.identityError
 	}
 	if e.registryError != nil {
-		return e.registryError
+		return "", e.registryError
 	}
 	if e.viewingError != nil {
-		return e.viewingError
+		return "", e.viewingError
 	}
+	e.removalMu.Lock()
+	defer e.removalMu.Unlock()
 	// Folders are copied or deleted on the volume; with it offline nothing
 	// would be, and the registries would forget them.
 	if !e.dataVolumeReady() {
-		return accountid.ErrVolumeUnavailable
+		return "", accountid.ErrVolumeUnavailable
 	}
 	privateRoot := filepath.Join(e.mountPoint, "spaces", "private", removal.Username)
 	if registered, err := e.privateSpaceRoot(removal.PrivateSpaceID); err == nil && registered != privateRoot {
-		return errors.New("the private space is registered at another path")
+		return "", errors.New("the private space is registered at another path")
 	}
 	var adminRoot string
 	if removal.TransferTo != "" {
 		var err error
 		if adminRoot, err = e.handoverRoot(removal); err != nil {
-			return err
+			return "", err
 		}
 	}
 	// The account is disabled already; make sure nothing of it still runs.
 	if err := errors.Join(e.disableSambaIfPresent(ctx, removal.Username), e.disableAssistant(ctx, removal.Username)); err != nil {
-		return err
+		return "", err
 	}
 	if err := e.revokeSpaceViewing(ctx, removal.PrivateSpaceID); err != nil {
-		return err
+		return "", err
 	}
 	if err := e.forgetIdentity(removal.Username); err != nil {
-		return err
+		return "", err
 	}
 	if err := e.unregisterSpace(removal.PrivateSpaceID); err != nil {
-		return err
+		return "", err
 	}
 	shared := filepath.Join(e.mountPoint, "spaces", "shared")
 	agentFolder := filepath.Join(shared, "Agent空间", removal.Username)
 	if adminRoot != "" {
 		if err := e.handOver(ctx, removal, adminRoot, privateRoot, agentFolder); err != nil {
-			return err
+			return "", err
 		}
 	}
 	for _, path := range []string{privateRoot, agentFolder, filepath.Join(shared, ".a-nas-trash", removal.Username)} {
 		if err := e.removeTree(ctx, path); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if err := e.removeAssistant(ctx, removal.Username); err != nil {
-		return err
+		return "", err
 	}
 	if err := e.removeHostAccount(ctx, removal.Username, removal.UID); err != nil {
-		return err
+		return "", err
 	}
-	return e.applySambaConfiguration(ctx)
+	if err := e.applySambaConfiguration(ctx); err != nil {
+		return "", err
+	}
+	if adminRoot == "" {
+		return "", nil
+	}
+	return handedOverFolder(adminRoot, removal.UID)
 }
 
 func (e *Executor) validRemoval(removal accountid.AccountRemoval) error {
@@ -225,10 +244,12 @@ func (e *Executor) unregisterSpace(spaceID string) error {
 // handOver copies the account's personal space, without its trash, and its
 // Agent空间 folder into a new folder of the administrator's personal space.
 // The copy shares the files' data on the volume (reflink), so it takes no
-// more space. It is made in a directory only root can enter, given to the
-// administrator with the access files created there get, and renamed into
-// place only after the originals are deleted: a retry then finds either the
-// originals or the finished copy, never half of each.
+// more space, except for files that cannot share theirs (copyTree). It is
+// made in a directory only root can enter, marked with the account's UID
+// (handoverAttribute), given to the administrator with the access files
+// created there get, and renamed into place only after the originals are
+// deleted: a retry then finds either the originals or the finished copy,
+// never half of each.
 func (e *Executor) handOver(ctx context.Context, removal accountid.AccountRemoval, adminRoot, privateRoot, agentFolder string) error {
 	ready := filepath.Join(adminRoot, handoverPrefix+strconv.Itoa(removal.UID))
 	partial := ready + ".partial"
@@ -289,6 +310,9 @@ func (e *Executor) copyForHandover(ctx context.Context, removal accountid.Accoun
 	if err := os.Chmod(partial, 0o700); err != nil {
 		return err
 	}
+	if err := unix.Lsetxattr(partial, handoverAttribute, []byte(strconv.Itoa(removal.UID)), 0); err != nil {
+		return &os.PathError{Op: "mark handed-over files", Path: partial, Err: err}
+	}
 	if slices.Contains(sources, privateRoot) {
 		if err := e.copyTree(ctx, privateRoot, partial); err != nil {
 			return err
@@ -315,10 +339,13 @@ func (e *Executor) copyForHandover(ctx context.Context, removal accountid.Accoun
 }
 
 // copyTree copies the contents of source into target. Links are copied as
-// links, never followed; data is shared with the original.
+// links, never followed. Data is shared with the original where btrfs can
+// clone it; a file it cannot, such as one marked No_COW (chattr +C), which a
+// member may do to her own files, is copied in full rather than failing the
+// removal on every retry.
 func (e *Executor) copyTree(ctx context.Context, source, target string) error {
 	if output, err := e.runner.Run(ctx, "cp", []string{
-		"--recursive", "--no-dereference", "--reflink=always", "--preserve=timestamps,links", "--", source + "/.", target + "/",
+		"--recursive", "--no-dereference", "--reflink=auto", "--preserve=timestamps,links", "--", source + "/.", target + "/",
 	}, ""); err != nil {
 		return commandError("copy files for the administrator", err, output)
 	}
@@ -340,6 +367,36 @@ func freeName(directory, name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no free name for %q", name)
+}
+
+// handedOverFolder names the folder of adminRoot marked as holding the files
+// of the account with uid, as the administrator may have renamed it since;
+// empty when there is none, because nothing was left to hand over or the
+// administrator moved or deleted it. Names starting with a dot are skipped:
+// they are the copy still being made, which the administrator cannot see.
+func handedOverFolder(adminRoot string, uid int) (string, error) {
+	entries, err := os.ReadDir(adminRoot)
+	if err != nil {
+		return "", err
+	}
+	want := strconv.Itoa(uid)
+	value := make([]byte, 16)
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		size, err := unix.Lgetxattr(filepath.Join(adminRoot, entry.Name()), handoverAttribute, value)
+		if errors.Is(err, unix.ENODATA) || errors.Is(err, unix.ERANGE) {
+			continue
+		}
+		if err != nil {
+			return "", &os.PathError{Op: "read handed-over mark", Path: filepath.Join(adminRoot, entry.Name()), Err: err}
+		}
+		if string(value[:size]) == want {
+			return entry.Name(), nil
+		}
+	}
+	return "", nil
 }
 
 // The access a handed-over file gets: what a file the administrator creates
@@ -568,16 +625,11 @@ func (e *Executor) endProcesses(uid int) error {
 		found := false
 		for _, entry := range entries {
 			pid, err := strconv.Atoi(entry.Name())
-			if err != nil {
-				continue
-			}
-			// A process that exited meanwhile has no status.
-			status, err := os.ReadFile(filepath.Join(proc, entry.Name(), "status"))
-			if err != nil || !runsAs(string(status), want) {
+			if err != nil || !processRunsAs(proc, entry.Name(), want) {
 				continue
 			}
 			found = true
-			if err := unix.Kill(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+			if err := killProcess(proc, pid, want); err != nil {
 				return fmt.Errorf("end process %d of UID %d: %w", pid, uid, err)
 			}
 		}
@@ -587,6 +639,35 @@ func (e *Executor) endProcesses(uid int) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("processes of UID %d keep running", uid)
+}
+
+// processRunsAs reports whether the process with the /proc entry name runs
+// as uid. A process that exited meanwhile has no status.
+func processRunsAs(proc, name, uid string) bool {
+	status, err := os.ReadFile(filepath.Join(proc, name, "status"))
+	return err == nil && runsAs(string(status), uid)
+}
+
+// killProcess kills pid if it still runs as uid. Its process ID may have been
+// given to another process since its status was read, so it is pinned with a
+// pidfd first and its status read again: the signal then goes to the process
+// that was checked, or to none if it has exited.
+func killProcess(proc string, pid int, uid string) error {
+	fd, err := unix.PidfdOpen(pid, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	if !processRunsAs(proc, strconv.Itoa(pid), uid) {
+		return nil
+	}
+	if err := unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
+		return err
+	}
+	return nil
 }
 
 // runsAs reports whether a process status names uid among the real,

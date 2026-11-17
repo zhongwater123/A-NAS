@@ -1,7 +1,7 @@
 # 重新启用与删除账号
 
 状态：implemented
-更新时间：2026-11-16
+更新时间：2026-11-17
 
 ## 目标
 
@@ -48,14 +48,14 @@
 
 - Given：`alice` 的 30 天已到。
 - When：产品服务的删除任务发现它（启动时一次，之后至迟每小时一次，申请或撤销删除时也会唤醒）。
-- Then：先记下开始时间，从此不可撤销，然后依次执行：
-  1. **相册**：选了转给管理员时，`alice` 私有图库中不在回收站的照片复制到管理员的私有图库，原图字节共用，保留用户标签与纠错，并放进新相册“alice 的照片”（重名时加序号）；人物、文件夹与相册不随迁。随后无论哪种选择，删除她的私有图库及其回收站、相册、人物、文字修订和她的相册审计；不再被任何照片使用的原图一并删除。
+- Then：先记下开始时间，从此不可撤销，然后依次执行（每一步至多等 1 小时，超时算失败）：
+  1. **相册**：选了转给管理员时，`alice` 私有图库中不在回收站的照片复制到管理员的私有图库，原图字节共用，保留用户标签与纠错，并放进新相册“alice 的照片”（重名时加序号）；人物、文件夹与相册不随迁。没有可转的照片时不建相册。随后无论哪种选择，删除她的私有图库及其回收站、相册、人物、文字修订和她的相册审计；不再被任何照片使用的原图一并删除。
   2. **文件**：删除她个人空间的全部快照，再清掉这个空间的文件目录、快照计划，以及她在所有空间的回收站记录。
   3. **宿主机**（Host Agent）：
      - 停止并屏蔽助手，断开 SMB；
      - 结束对她个人空间的查看授权；
      - 把她移出身份登记与空间登记，此后对账不会再建她的目录；
-     - 选了转给管理员时，把个人空间（不含回收站）和 `Shared/Agent空间/alice` 以 reflink 复制到管理员个人空间的“alice 的文件”（重名时加序号），属主改为管理员，权限与管理员自己建的文件相同，文件 `0660`、文件夹 `0770`；
+     - 选了转给管理员时，把个人空间（不含回收站）和 `Shared/Agent空间/alice` 以 reflink 复制到管理员个人空间的“alice 的文件”（重名时加序号），属主改为管理员，权限与管理员自己建的文件相同，文件 `0660`、文件夹 `0770`；不能共享数据的文件（如标了 No_COW 的）整份复制，会多占空间；
      - 删除她的个人空间子卷、`Shared/Agent空间/alice` 与 `Shared/.a-nas-trash/alice`；
      - 删除助手的数据子卷、修改记录、令牌、成员配置和运行目录，并解除单元屏蔽；
      - 删除 Samba 账号、Linux 账号与同名私有组。
@@ -63,7 +63,7 @@
      - 分享：删除她发出的分享及其内容与对话，把她从别人分享的收件人中移除；
      - 家庭：移除她的成员资格、加入申请与只给她看的审计，她发的内容和留言保留；
      - 音乐、影视中心、传输：删除她的收藏、播放记录、歌单、个人空间中的媒体库与传输记录。
-  5. **账号**：在一个事务中删除她的账号、会话、头像、通知、查看授权记录与个人空间记录，审计记录 `user.deleted`。选了转移时，给管理员一条通知，写明文件夹与相册的名字。
+  5. **账号**：在一个事务中删除她的账号、会话、头像、通知、查看授权记录与个人空间记录，审计记录 `user.deleted`。有内容转给管理员时，给管理员一条通知，写明文件夹与相册实际得到的名字（含重名时的序号）；名字由做转移的一步报回，随这一步记下，后面的步骤重试也不丢。什么都没转（例如图库里只有回收站中的照片）时不提这一项。
 - 她的 UID 保留，永不分配给别人；账号名从此可以再用，新账号拿到新 UID，看不到她的任何东西。
 - 留下的：她在 Shared 中建的文件（属主仍是她的 UID，其他成员照常读写）、共享图库中她上传的照片（由管理员管理）、家庭频道的内容与留言（显示原名字）、问题反馈、活动日志（显示为“已删除的账号”）。
 
@@ -73,14 +73,22 @@
 - 数据卷离线、相册或分享服务不可用、正在拍快照时，这一轮失败，下次再试。
 - 转给管理员的步骤只在申请删除的那位管理员仍是有效管理员时执行；否则失败并重试。
 - 相册、分享与家庭服务只按 Host Agent 的回答行事：产品服务的请求只告诉它们去检查哪个账号，Host Agent 从控制面确认删除已开始，再告诉它们怎么处理（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。
-- 转移在一个只有 root 能进入的临时目录中完成，删除原件后才改名为管理员看到的文件夹；中途失败重试时，要么从原件重新复制，要么直接使用已完成的副本。
-- 删除开始后，身份同步不再为她建 Linux 账号，重置密码与审计查看都被拒绝。
-- 页面上按账号 ID 查人：内容记下了作者 ID 时，查不到就只显示记下的名字，不会把已删除账号的内容算到之后同名的新账号头上。
+- Host Agent 自己也不采信产品服务的说法：删除请求只带账号 ID，账号名、UID、个人空间和转给哪位管理员都由它从控制面读出；删除尚未开始的账号一律拒绝（`409 not_deleting`）。
+- 转移在一个只有 root 能进入的临时目录中完成，删除原件后才改名为管理员看到的文件夹；中途失败重试时，要么从原件重新复制，要么直接使用已完成的副本。这个文件夹带一个只有 root 能读写的标记（来源账号的 UID），管理员改名后重试也能找回它的名字。
+- 产品服务等 Host Agent 的回答有时限；大空间复制得更久时，Host Agent 不随之中止，而是做完；产品服务下一次请求会等它做完，再拿到结果。同一时间只做一个账号的删除。
+- 删除开始后，身份同步不再为她建 Linux 账号，重置密码与审计查看都被拒绝。开始删除前会等正在进行的身份同步做完，避免它把刚删掉的 Linux 账号又建回来。
+- 页面上按账号 ID 查人：内容记下了作者 ID 时，查不到就只显示记下的名字，不会把已删除账号的内容算到之后同名的新账号头上。问题反馈的作者、最近编辑者与处理者都记 ID（`feedback.db` 的第一个 step）；此前记下的编辑与处理没有 ID，仍按名字查。
+- 开发环境（Fake 预览）没有 Host Agent：到期时开发卷上她的个人空间文件夹同样被移给管理员（不含回收站）或删除，同名新账号拿到空的个人空间。
 
 ## 验收证据
 
-- 单元测试：账号服务的启用、申请、撤销与到期执行（[`deletion_test.go`](../../internal/accounts/deletion_test.go)）；Host Agent 的启用与删除命令（[`account_test.go`](../../internal/hostops/linux/account_test.go)）；相册的转移与清除（[`account_test.go`](../../internal/photos/account_test.go)）；分享、家庭、文件、音乐、影视、传输的清除；设置页的菜单与对话框（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）。
-- root 集成测试：真实 Btrfs 与 Samba 下的转移与删除（[`root_account_integration_test.go`](../../internal/hostops/linux/root_account_integration_test.go)）。
+- 单元测试：
+  - 账号服务的启用、申请、撤销与到期执行，含重名序号与跨重试保留的名字、什么都没转时不通知、Host Agent 从控制面读出的删除（[`deletion_test.go`](../../internal/accounts/deletion_test.go)）；
+  - Host Agent 的启用与删除命令（[`account_test.go`](../../internal/hostops/linux/account_test.go)），只按控制面删除、客户端不再等待时继续做完（[`removal_test.go`](../../internal/hoststate/agent/rootagent/removal_test.go)）；
+  - 服务间的删除请求（[`accountremoval_test.go`](../../internal/accountremoval/accountremoval_test.go)）；
+  - 相册的转移与清除（[`account_test.go`](../../internal/photos/account_test.go)）；分享（[`account_test.go`](../../internal/shares/account_test.go)）、家庭（[`account_test.go`](../../internal/family/account_test.go)）、文件（[`account_test.go`](../../internal/files/account_test.go)）、音乐（[`account_test.go`](../../internal/music/account_test.go)）、影视（[`account_test.go`](../../internal/media/account_test.go)）、传输（[`account_test.go`](../../internal/transfers/account_test.go)）的清除；
+  - 设置页的菜单与对话框（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）；问题反馈不把旧账号的内容算到同名新账号头上（[`FeedbackChannel.test.tsx`](../../web/src/feedback/FeedbackChannel.test.tsx)）。
+- root 集成测试：真实 Btrfs 与 Samba 下的转移与删除，含重名序号、No_COW 文件与改名后的重试（[`root_account_integration_test.go`](../../internal/hostops/linux/root_account_integration_test.go)）。
 - 系统测试：禁用后重新启用、申请并撤销删除、缩短期限后的到期执行与同名重建（[`scripts/system-test.sh`](../../scripts/system-test.sh)）。
 
 ## 关联

@@ -732,11 +732,15 @@ func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, 
 	if err != nil {
 		return nil, "", nil, err
 	}
-	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, nil
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated, volume: config.DataMount}, nil
 }
 
-// developmentOperations stand in for the Host Agent in fake mode.
-type developmentOperations struct{ *simulatedStorage }
+// developmentOperations stand in for the Host Agent in fake mode. volume is
+// the development volume, whose folders are the spaces.
+type developmentOperations struct {
+	*simulatedStorage
+	volume string
+}
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
@@ -746,10 +750,40 @@ func (*developmentOperations) EnableCredential(context.Context, accounts.EnableR
 	return nil
 }
 
-// Development spaces are folders of the development volume; a deleted
-// account's stays there.
-func (*developmentOperations) RemoveAccount(context.Context, accounts.AccountRemoval) error {
-	return nil
+// RemoveAccount moves a deleted account's development space, a folder of the
+// development volume, into the administrator's without its trash, or deletes
+// it, as the Host Agent does with its subvolume: a later account of the same
+// name, whose space is the same folder, starts empty.
+func (o *developmentOperations) RemoveAccount(_ context.Context, removal accounts.AccountRemoval) (string, error) {
+	private := filepath.Join(o.volume, "spaces", "private")
+	source := filepath.Join(private, removal.Username)
+	if removal.TransferTo == "" {
+		return "", os.RemoveAll(source)
+	}
+	if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(filepath.Join(source, ".a-nas-trash")); err != nil {
+		return "", err
+	}
+	target := filepath.Join(private, removal.TransferTo)
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return "", err
+	}
+	for n := 1; n < 1000; n++ {
+		folder := removal.Folder
+		if n > 1 {
+			folder = fmt.Sprintf("%s (%d)", removal.Folder, n)
+		}
+		if _, err := os.Lstat(filepath.Join(target, folder)); errors.Is(err, os.ErrNotExist) {
+			return folder, os.Rename(source, filepath.Join(target, folder))
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free name for %q", removal.Folder)
 }
 
 // Development volumes have no ACLs; viewing access is decided by the Policy.

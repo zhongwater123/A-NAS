@@ -48,7 +48,8 @@ func runFamilyService(logger *slog.Logger) error {
 func configuredFamily(config Config, users *accounts.Service, photoAPI http.Handler, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
-			return accountremoval.Request(ctx, config.FamilySocket, userID)
+			_, err := accountremoval.Request(ctx, config.FamilySocket, userID)
+			return err
 		}
 		return familyservice.Proxy(config.FamilySocket, logger), remove, func() {}, nil
 	}

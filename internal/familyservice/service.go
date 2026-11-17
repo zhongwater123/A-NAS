@@ -220,8 +220,8 @@ func Accounts(profiles func(context.Context) ([]accounts.Profile, error)) func(c
 
 // RemoveAccount takes a deleted account out of the family.
 func RemoveAccount(store *family.Store) accountremoval.Remove {
-	return func(ctx context.Context, deletion accounts.AccountDeletion) error {
-		return store.RemoveAccount(ctx, deletion.UserID)
+	return func(ctx context.Context, deletion accounts.AccountDeletion) (accountremoval.Result, error) {
+		return accountremoval.Result{}, store.RemoveAccount(ctx, deletion.UserID)
 	}
 }
 

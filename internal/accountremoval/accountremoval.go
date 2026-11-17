@@ -8,6 +8,7 @@ package accountremoval
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,9 +30,16 @@ const Path = "/internal/v1/account-removals/"
 // Lookup asks the Host Agent about an account's deletion.
 type Lookup func(context.Context, string) (accountid.AccountDeletion, error)
 
+// Result is what a service handed to the administrator who deleted the
+// account: the album of their private library the photo service put its
+// photos in, with the name it got. Empty is nothing.
+type Result struct {
+	Album string `json:"album,omitempty"`
+}
+
 // Remove removes what a service keeps for the account; what is already gone
 // counts as removed.
-type Remove func(context.Context, accountid.AccountDeletion) error
+type Remove func(context.Context, accountid.AccountDeletion) (Result, error)
 
 // Route answers Path with removal and everything else with next.
 func Route(lookup Lookup, remove Remove, logger *slog.Logger, next http.Handler) http.Handler {
@@ -45,8 +53,8 @@ func Route(lookup Lookup, remove Remove, logger *slog.Logger, next http.Handler)
 	})
 }
 
-// Handler serves POST Path{userID}: 204 once removed, 409 not_deleting for an
-// account whose deletion has not started.
+// Handler serves POST Path{userID}: 200 with the Result once removed, 409
+// not_deleting for an account whose deletion has not started.
 func Handler(lookup Lookup, remove Remove, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -67,8 +75,9 @@ func Handler(lookup Lookup, remove Remove, logger *slog.Logger) http.Handler {
 			httpjson.WriteError(w, http.StatusConflict, "not_deleting", "the account is not being deleted")
 			return
 		}
+		var result Result
 		if err == nil {
-			err = remove(r.Context(), deletion)
+			result, err = remove(r.Context(), deletion)
 		}
 		if err != nil {
 			logger.ErrorContext(r.Context(), "account removal failed", "user_id", userID, "error", err)
@@ -76,12 +85,13 @@ func Handler(lookup Lookup, remove Remove, logger *slog.Logger) http.Handler {
 			return
 		}
 		logger.InfoContext(r.Context(), "account data removed", "user_id", userID)
-		w.WriteHeader(http.StatusNoContent)
+		httpjson.Write(w, http.StatusOK, result)
 	})
 }
 
-// Request asks the service on socketPath to remove what it keeps for userID.
-func Request(ctx context.Context, socketPath, userID string) error {
+// Request asks the service on socketPath to remove what it keeps for userID
+// and returns what it handed to the administrator.
+func Request(ctx context.Context, socketPath, userID string) (Result, error) {
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var dialer net.Dialer
@@ -91,16 +101,20 @@ func Request(ctx context.Context, socketPath, userID string) error {
 	}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://service"+Path+url.PathEscape(userID), nil)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("reach %s: %w", socketPath, err)
+		return Result{}, fmt.Errorf("reach %s: %w", socketPath, err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusNoContent {
-		return nil
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		return Result{}, fmt.Errorf("%s answered %s: %s", socketPath, response.Status, strings.TrimSpace(string(detail)))
 	}
-	detail, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-	return fmt.Errorf("%s answered %s: %s", socketPath, response.Status, strings.TrimSpace(string(detail)))
+	var result Result
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&result); err != nil {
+		return Result{}, fmt.Errorf("%s answered an invalid result: %w", socketPath, err)
+	}
+	return result, nil
 }

@@ -23,41 +23,44 @@ import (
 func accountDeletionSteps(config Config, users *accounts.Service, photoService *photos.Service, fileService *files.Service,
 	removeShares, removeFamily func(context.Context, string) error,
 	musicService *music.Service, mediaService *media.Service, transferService *transfers.Service) []accounts.DeletionStep {
-	photosStep := func(ctx context.Context, removal accounts.Removal) error {
-		if config.Live() {
-			return accountremoval.Request(ctx, config.PhotosSocket, removal.UserID)
+	// The photo service names the album it handed the photos over in.
+	photosStep := func(ctx context.Context, removal accounts.Removal) (accounts.Handover, error) {
+		var result accountremoval.Result
+		var err error
+		switch {
+		case config.Live():
+			result, err = accountremoval.Request(ctx, config.PhotosSocket, removal.UserID)
+		case photoService != nil:
+			// Development runs the photo library in this process and knows
+			// the deletion itself.
+			result, err = photoservice.RemoveAccount(photoService)(ctx, accounts.AccountDeletion{
+				UserID: removal.UserID, Username: removal.Username,
+				PersonalSpace: string(removal.PersonalSpace), Library: string(removal.Library),
+				AdminID: removal.Administrator.ID, AdminUsername: removal.Administrator.Username,
+			})
 		}
-		if photoService == nil {
-			return nil
-		}
-		// Development runs the photo library in this process and knows the
-		// deletion itself.
-		return photoservice.RemoveAccount(photoService)(ctx, accounts.AccountDeletion{
-			UserID: removal.UserID, Username: removal.Username,
-			PersonalSpace: string(removal.PersonalSpace), Library: string(removal.Library),
-			AdminID: removal.Administrator.ID, AdminUsername: removal.Administrator.Username,
-		})
+		return accounts.Handover{Album: result.Album}, err
 	}
 	return []accounts.DeletionStep{
 		{Name: "photos", Remove: photosStep},
-		{Name: "files", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		accounts.ForgetStep("files", func(ctx context.Context, removal accounts.Removal) error {
 			return fileService.RemoveAccount(ctx, removal.UserID, removal.PrivateSpaceID)
-		}},
+		}),
 		users.HostRemoval(),
-		{Name: "shares", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		accounts.ForgetStep("shares", func(ctx context.Context, removal accounts.Removal) error {
 			return removeShares(ctx, removal.UserID)
-		}},
-		{Name: "family", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		}),
+		accounts.ForgetStep("family", func(ctx context.Context, removal accounts.Removal) error {
 			return removeFamily(ctx, removal.UserID)
-		}},
-		{Name: "music", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		}),
+		accounts.ForgetStep("music", func(ctx context.Context, removal accounts.Removal) error {
 			return musicService.RemoveAccount(ctx, removal.UserID, removal.PrivateSpaceID)
-		}},
-		{Name: "media", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		}),
+		accounts.ForgetStep("media", func(ctx context.Context, removal accounts.Removal) error {
 			return mediaService.RemoveAccount(ctx, removal.UserID, removal.PrivateSpaceID)
-		}},
-		{Name: "transfers", Remove: func(ctx context.Context, removal accounts.Removal) error {
+		}),
+		accounts.ForgetStep("transfers", func(ctx context.Context, removal accounts.Removal) error {
 			return transferService.RemoveAccount(ctx, removal.UserID)
-		}},
+		}),
 	}
 }

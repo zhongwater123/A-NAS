@@ -128,12 +128,17 @@ type CredentialEnabler interface {
 	EnableCredential(context.Context, EnableRequest) error
 }
 
-// AccountRemoval asks the Host Agent to remove a deleted account for good
+// AccountRemoval is a deleted account the Host Agent removes for good
 // (docs/specs/account-enable-and-delete.md). TransferTo names the
 // administrator who receives the account's personal space and Agent空间
 // folder; empty deletes them. Folder is the name the transferred files get in
-// that administrator's personal space.
+// that administrator's personal space, with a number added when it is taken.
+//
+// The Host Agent reads all of it from the control plane, as the photo, share
+// and family services read AccountDeletion: of the Product Service's request
+// it takes only UserID.
 type AccountRemoval struct {
+	UserID         string
 	Username       string
 	UID            int
 	PrivateSpaceID string
@@ -169,10 +174,12 @@ func HandoverFolder(username string) string { return username + " 的文件" }
 func HandoverAlbum(username string) string { return username + " 的照片" }
 
 // AccountRemover removes an account's host identity and the data kept under
-// its name. Every step treats what is already gone as done, so a request
-// that failed part way is sent again.
+// its name, and returns the folder of the administrator's personal space that
+// holds its handed-over files, as named now; empty when nothing was handed
+// over. Every step treats what is already gone as done, so a request that
+// failed part way is sent again, and it still returns the folder.
 type AccountRemover interface {
-	RemoveAccount(context.Context, AccountRemoval) error
+	RemoveAccount(context.Context, AccountRemoval) (string, error)
 }
 
 // Identity is the Linux account the Host Agent keeps for one A-NAS user.

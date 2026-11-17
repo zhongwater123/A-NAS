@@ -25,10 +25,15 @@ func TestRemovingAnAccountHandsItsPhotosToTheAdministrator(t *testing.T) {
 	before := len(objectFiles(t, root))
 
 	removal := photos.AccountRemoval{UserID: alice.UserID, Transfer: true, AdminID: admin.UserID, AdminUsername: "admin", Album: "alice 的照片"}
-	if err := service.RemoveAccount(ctx, removal); err != nil {
+	album, err := service.RemoveAccount(ctx, removal)
+	if err != nil {
 		t.Fatalf("RemoveAccount() error = %v", err)
 	}
-	// The administrator had an album of that name; the new one gets a number.
+	// The administrator had an album of that name; the new one gets a number,
+	// which the notice names.
+	if album != "alice 的照片 (2)" {
+		t.Fatalf("RemoveAccount() album = %q, want alice 的照片 (2)", album)
+	}
 	albums, err := service.Albums(ctx, admin, adminPrivate.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -57,8 +62,8 @@ func TestRemovingAnAccountHandsItsPhotosToTheAdministrator(t *testing.T) {
 		t.Fatalf("object files %d → %d, want one fewer", before, after)
 	}
 	// Sent again, it finds nothing left to do.
-	if err := service.RemoveAccount(ctx, removal); err != nil {
-		t.Fatalf("RemoveAccount() again error = %v", err)
+	if album, err := service.RemoveAccount(ctx, removal); err != nil || album != "" {
+		t.Fatalf("RemoveAccount() again = %q, %v; want no album", album, err)
 	}
 	if albums, _ := service.Albums(ctx, admin, adminPrivate.ID); len(albums) != 2 {
 		t.Fatalf("a second removal made another album: %+v", albums)
@@ -76,7 +81,7 @@ func TestRemovingAnAccountWithoutTransferDeletesItsLibrary(t *testing.T) {
 	bobs := importPhoto(t, service, bob, bobPrivate.ID, "", "both.png", both)
 	before := len(objectFiles(t, root))
 
-	if err := service.RemoveAccount(ctx, photos.AccountRemoval{UserID: alice.UserID}); err != nil {
+	if _, err := service.RemoveAccount(ctx, photos.AccountRemoval{UserID: alice.UserID}); err != nil {
 		t.Fatalf("RemoveAccount() error = %v", err)
 	}
 	if _, err := service.Get(ctx, admin, only.ID); !errors.Is(err, photos.ErrNotFound) {
@@ -98,8 +103,29 @@ func TestRemovingAnAccountWithoutTransferDeletesItsLibrary(t *testing.T) {
 
 func TestRemovingAnAccountRefusesToHandItsPhotosToItself(t *testing.T) {
 	service, _, _ := newService(t)
-	err := service.RemoveAccount(context.Background(), photos.AccountRemoval{UserID: alice.UserID, Transfer: true, AdminID: alice.UserID})
+	_, err := service.RemoveAccount(context.Background(), photos.AccountRemoval{UserID: alice.UserID, Transfer: true, AdminID: alice.UserID})
 	if err == nil {
 		t.Fatal("an account's photos were handed to itself")
+	}
+}
+
+// With every photo in the trash there is nothing to hand over: no album is
+// made, so the notice names none.
+func TestRemovingAnAccountWithOnlyTrashedPhotosMakesNoAlbum(t *testing.T) {
+	service, _, _ := newService(t)
+	ctx := context.Background()
+	alicePrivate, _ := libraries(t, service, alice)
+	adminPrivate, _ := libraries(t, service, admin)
+	trashed := importPhoto(t, service, alice, alicePrivate.ID, "", "trashed.png", pngBytes(t, 6))
+	if _, err := service.Trash(ctx, alice, trashed.ID); err != nil {
+		t.Fatal(err)
+	}
+	removal := photos.AccountRemoval{UserID: alice.UserID, Transfer: true, AdminID: admin.UserID, AdminUsername: "admin", Album: "alice 的照片"}
+	album, err := service.RemoveAccount(ctx, removal)
+	if err != nil || album != "" {
+		t.Fatalf("RemoveAccount() = %q, %v; want no album", album, err)
+	}
+	if albums, err := service.Albums(ctx, admin, adminPrivate.ID); err != nil || len(albums) != 0 {
+		t.Fatalf("the administrator's albums = %+v, %v", albums, err)
 	}
 }

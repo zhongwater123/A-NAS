@@ -281,18 +281,20 @@ func deletionLookup(sessions SessionResolver) accountremoval.Lookup {
 }
 
 // RemoveAccount removes a deleted account's private library, handing its
-// photos to the administrator first when that was chosen.
+// photos to the administrator first when that was chosen, and names the
+// album they went to.
 func RemoveAccount(service *photos.Service) accountremoval.Remove {
-	return func(ctx context.Context, deletion accounts.AccountDeletion) error {
+	return func(ctx context.Context, deletion accounts.AccountDeletion) (accountremoval.Result, error) {
 		removal := photos.AccountRemoval{UserID: deletion.UserID}
 		if deletion.Library == "transfer" {
 			if deletion.AdminID == "" {
-				return errors.New("the administrator who deleted the account no longer administers the device")
+				return accountremoval.Result{}, errors.New("the administrator who deleted the account no longer administers the device")
 			}
 			removal.Transfer, removal.AdminID, removal.AdminUsername = true, deletion.AdminID, deletion.AdminUsername
 			removal.Album = accounts.HandoverAlbum(deletion.Username)
 		}
-		return service.RemoveAccount(ctx, removal)
+		album, err := service.RemoveAccount(ctx, removal)
+		return accountremoval.Result{Album: album}, err
 	}
 }
 

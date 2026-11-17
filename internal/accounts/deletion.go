@@ -11,11 +11,28 @@ import (
 	"time"
 )
 
-// DeletionStep removes what one part of A-NAS keeps for a deleted account.
-// It runs again after a failure, so what is already gone counts as removed.
+// DeletionStep removes what one part of A-NAS keeps for a deleted account,
+// and says what it handed to the administrator. It runs again after a
+// failure, so what is already gone counts as removed.
 type DeletionStep struct {
 	Name   string
-	Remove func(context.Context, Removal) error
+	Remove func(context.Context, Removal) (Handover, error)
+}
+
+// ForgetStep is a step that hands nothing to the administrator.
+func ForgetStep(name string, forget func(context.Context, Removal) error) DeletionStep {
+	return DeletionStep{Name: name, Remove: func(ctx context.Context, removal Removal) (Handover, error) {
+		return Handover{}, forget(ctx, removal)
+	}}
+}
+
+// Handover is what a step gave the administrator who deleted the account:
+// the folder of their personal space and the album of their private library
+// that hold its files and photos, with the names they got, which have a
+// number added when the plain one was taken. Empty is nothing.
+type Handover struct {
+	Folder string
+	Album  string
 }
 
 // Removal is a deleted account as the steps that remove it see it.
@@ -27,13 +44,8 @@ type Removal struct {
 	PersonalSpace  DeletionChoice
 	Library        DeletionChoice
 	// Administrator asked for the deletion and receives what is transferred.
-	Administrator        User
-	AdministratorUID     int
-	AdministratorSpaceID string
-	// Folder and Album name what the administrator receives: a folder in
-	// their personal space and an album in their private library.
-	Folder string
-	Album  string
+	Administrator    User
+	AdministratorUID int
 }
 
 // deletionRetry is how soon a deletion that failed is tried again.
@@ -42,6 +54,11 @@ const deletionRetry = 15 * time.Minute
 // deletionCheck is how long RunDeletions waits at most before it looks for
 // due deletions again, however far the next one is.
 const deletionCheck = time.Hour
+
+// deletionStepTimeout bounds one step, so that a service that never answers
+// holds up the other deletions only this long. A step that runs out is tried
+// again; the Host Agent finishes a removal whose answer was not awaited.
+const deletionStepTimeout = time.Hour
 
 func (s *Service) wakeDeletions() {
 	select {
@@ -130,8 +147,7 @@ func (s *Service) dueDeletions(ctx context.Context) ([]string, time.Duration, er
 // the account. From the first step on, the deletion can no longer be
 // cancelled.
 func (s *Service) removeAccount(ctx context.Context, userID string, steps []DeletionStep) error {
-	if _, err := s.store.db.ExecContext(ctx, "UPDATE account_deletions SET started_at = ? WHERE user_id = ? AND started_at IS NULL",
-		formatTime(s.now().UTC()), userID); err != nil {
+	if err := s.startDeletion(ctx, userID); err != nil {
 		return err
 	}
 	removal, done, err := s.removalOf(ctx, userID)
@@ -142,16 +158,35 @@ func (s *Service) removeAccount(ctx context.Context, userID string, steps []Dele
 		if slices.Contains(done, step.Name) {
 			continue
 		}
-		if err := step.Remove(ctx, removal); err != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, deletionStepTimeout)
+		handover, err := step.Remove(stepCtx, removal)
+		cancel()
+		if err != nil {
 			return fmt.Errorf("%s: %w", step.Name, err)
 		}
 		done = append(done, step.Name)
-		if _, err := s.store.db.ExecContext(ctx, "UPDATE account_deletions SET completed_steps = ? WHERE user_id = ?",
-			strings.Join(done, ","), userID); err != nil {
+		// What a step handed over is kept with the step, for the notice once
+		// every step is done, possibly attempts later.
+		if _, err := s.store.db.ExecContext(ctx, `UPDATE account_deletions SET completed_steps = ?,
+handed_folder = COALESCE(NULLIF(?, ''), handed_folder), handed_album = COALESCE(NULLIF(?, ''), handed_album)
+WHERE user_id = ?`, strings.Join(done, ","), handover.Folder, handover.Album, userID); err != nil {
 			return err
 		}
 	}
 	return s.removeAccountRecords(ctx, removal)
+}
+
+// startDeletion records that the account's deletion has started, from when
+// identity synchronization leaves the account out. It waits for a
+// synchronization in progress, which may still be making the account on the
+// host: one that read the account before this point and reached the Host
+// Agent after the host step would make the removed account again.
+func (s *Service) startDeletion(ctx context.Context, userID string) error {
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	_, err := s.store.db.ExecContext(ctx, "UPDATE account_deletions SET started_at = ? WHERE user_id = ? AND started_at IS NULL",
+		formatTime(s.now().UTC()), userID)
+	return err
 }
 
 // removalOf reads a started deletion and the steps it has completed.
@@ -168,8 +203,6 @@ WHERE d.user_id = ?`, userID).Scan(&removal.Username, &removal.UID, &removal.Pri
 	if err != nil {
 		return Removal{}, nil, fmt.Errorf("read account deletion: %w", err)
 	}
-	removal.Folder = HandoverFolder(removal.Username)
-	removal.Album = HandoverAlbum(removal.Username)
 	if removal.PersonalSpace == DeletionTransfer || removal.Library == DeletionTransfer {
 		// Only the administrator who asked receives it, and only while they
 		// still administer the device.
@@ -180,10 +213,6 @@ WHERE d.user_id = ?`, userID).Scan(&removal.Username, &removal.UID, &removal.Pri
 		removal.Administrator = admin
 		if removal.AdministratorUID, err = s.uidForUser(ctx, admin.ID); err != nil {
 			return Removal{}, nil, err
-		}
-		if err := s.store.db.QueryRowContext(ctx, "SELECT id FROM spaces WHERE kind = 'private' AND owner_user_id = ?", admin.ID).
-			Scan(&removal.AdministratorSpaceID); err != nil {
-			return Removal{}, nil, fmt.Errorf("read the administrator's personal space: %w", err)
 		}
 	}
 	var done []string
@@ -196,20 +225,23 @@ WHERE d.user_id = ?`, userID).Scan(&removal.Username, &removal.UID, &removal.Pri
 // HostRemoval is the step that removes the account from the host: its Linux
 // identity, SMB credential, assistant and the folders kept under its name,
 // with its personal space handed to the administrator or deleted. The files
-// step must have deleted the space's snapshots first.
+// step must have deleted the space's snapshots first. The Host Agent reads
+// the removal from the control plane itself and only learns the account from
+// this request (AccountRemoval).
 func (s *Service) HostRemoval() DeletionStep {
-	return DeletionStep{Name: "host", Remove: func(ctx context.Context, removal Removal) error {
+	return DeletionStep{Name: "host", Remove: func(ctx context.Context, removal Removal) (Handover, error) {
 		remover, ok := s.credentials.(AccountRemover)
 		if !ok {
-			return errors.New("account removal is unavailable")
+			return Handover{}, errors.New("account removal is unavailable")
 		}
-		request := AccountRemoval{Username: removal.Username, UID: removal.UID, PrivateSpaceID: removal.PrivateSpaceID}
+		request := AccountRemoval{UserID: removal.UserID, Username: removal.Username, UID: removal.UID, PrivateSpaceID: removal.PrivateSpaceID}
 		if removal.PersonalSpace == DeletionTransfer {
 			request.TransferTo = removal.Administrator.Username
 			request.TransferToUID = removal.AdministratorUID
-			request.Folder = removal.Folder
+			request.Folder = HandoverFolder(removal.Username)
 		}
-		return remover.RemoveAccount(ctx, request)
+		folder, err := remover.RemoveAccount(ctx, request)
+		return Handover{Folder: folder}, err
 	}}
 }
 
@@ -223,7 +255,11 @@ func (s *Service) removeAccountRecords(ctx context.Context, removal Removal) err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var requestedBy string
-	if err := tx.QueryRowContext(ctx, "SELECT requested_by FROM account_deletions WHERE user_id = ?", removal.UserID).Scan(&requestedBy); err != nil {
+	// The administrator is told the names the steps gave what they handed
+	// over: a step that handed nothing over left its name empty.
+	detail := deletionDetail{Username: removal.Username, PersonalSpace: removal.PersonalSpace, Library: removal.Library}
+	if err := tx.QueryRowContext(ctx, "SELECT requested_by, handed_folder, handed_album FROM account_deletions WHERE user_id = ?",
+		removal.UserID).Scan(&requestedBy, &detail.Folder, &detail.Album); err != nil {
 		return err
 	}
 	for _, statement := range []string{
@@ -237,13 +273,6 @@ func (s *Service) removeAccountRecords(ctx context.Context, removal Removal) err
 		if _, err := tx.ExecContext(ctx, statement, removal.UserID); err != nil {
 			return err
 		}
-	}
-	detail := deletionDetail{Username: removal.Username, PersonalSpace: removal.PersonalSpace, Library: removal.Library}
-	if removal.PersonalSpace == DeletionTransfer {
-		detail.Folder = removal.Folder
-	}
-	if removal.Library == DeletionTransfer {
-		detail.Album = removal.Album
 	}
 	if err := s.appendAuditTo(ctx, tx, requestedBy, "user.deleted", "user", removal.UserID, detail.String()); err != nil {
 		return err

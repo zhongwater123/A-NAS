@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -178,7 +179,10 @@ var databaseSchema = sqlitedb.Schema{
     library TEXT NOT NULL CHECK (library IN ('transfer', 'delete')),
     started_at TEXT,
     completed_steps TEXT NOT NULL DEFAULT '',
-    last_error TEXT NOT NULL DEFAULT ''
+    last_error TEXT NOT NULL DEFAULT '',
+    -- The names the folder and album handed to the administrator got.
+    handed_folder TEXT NOT NULL DEFAULT '',
+    handed_album TEXT NOT NULL DEFAULT ''
 );`,
 		Down: "DROP TABLE account_deletions;",
 	}},
@@ -380,6 +384,9 @@ type Service struct {
 	// RunDeletions that a deletion was asked for or cancelled.
 	deletionDelay time.Duration
 	deletionWake  chan struct{}
+	// identityMu keeps a deletion from starting while identity
+	// synchronization sends accounts to the Host Agent (startDeletion).
+	identityMu sync.Mutex
 }
 
 func NewService(store *Store, credentials CredentialProvisioner, options Options) *Service {
@@ -1061,7 +1068,10 @@ func (s *Service) SyncIdentities(ctx context.Context) error {
 		return nil
 	}
 	// An account being deleted may already be gone from the host; it must
-	// not be made again.
+	// not be made again. No deletion starts until the Host Agent has the list
+	// read here (startDeletion).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	rows, err := s.store.db.QueryContext(ctx, `SELECT u.username, u.role, u.status, u.must_change_password, i.uid
 FROM users u JOIN linux_identities i ON i.user_id = u.id
 WHERE u.status IN ('active', 'disabled')

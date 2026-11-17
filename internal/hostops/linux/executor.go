@@ -112,6 +112,8 @@ type Executor struct {
 	// synchronization both create them, and the second groupadd failed.
 	fixedGroupsMu sync.Mutex
 	identitiesMu  sync.Mutex
+	// removalMu lets one account removal run at a time (RemoveAccount).
+	removalMu     sync.Mutex
 	identities    map[string]identityRecord
 	identityPath  string
 	identityError error

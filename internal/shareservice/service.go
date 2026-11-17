@@ -280,8 +280,8 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 		failed := make(chan error, 1)
 		var retired atomic.Bool
 		next := sharesapi.NewWithPreview(store.Store, config.Logger, config.Sessions.ActiveProfiles, config.Media)
-		remove := func(ctx context.Context, deletion accounts.AccountDeletion) error {
-			return store.RemoveAccount(ctx, deletion.UserID)
+		remove := func(ctx context.Context, deletion accounts.AccountDeletion) (accountremoval.Result, error) {
+			return accountremoval.Result{}, store.RemoveAccount(ctx, deletion.UserID)
 		}
 		serve(accountremoval.Route(deletionLookup(config.Sessions), remove, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if retired.Load() {

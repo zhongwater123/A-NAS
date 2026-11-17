@@ -192,11 +192,12 @@ func (c *Client) EnableCredential(ctx context.Context, request accountid.EnableR
 		wire.EnableDocument{Username: request.Username, SMB: request.SMB}, nil)
 }
 
-func (c *Client) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) error {
-	return c.doJSON(ctx, c.operationClient, http.MethodPost, wire.RemoveAccountPath, wire.AccountRemovalDocument{
-		Username: removal.Username, UID: removal.UID, PrivateSpaceID: removal.PrivateSpaceID,
-		TransferTo: removal.TransferTo, TransferToUID: removal.TransferToUID, Folder: removal.Folder,
-	}, nil)
+// RemoveAccount sends only removal.UserID: the Host Agent reads what to
+// remove, and whom to hand it to, from the control plane.
+func (c *Client) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) (string, error) {
+	var result wire.AccountRemovalResult
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, wire.RemoveAccountPath, wire.AccountRemovalDocument{UserID: removal.UserID}, &result)
+	return result.Folder, err
 }
 
 func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) error {
@@ -356,6 +357,9 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		}
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == wire.UpdateBusyCode {
 			return systemupdate.ErrBusy
+		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == wire.NotDeletingCode {
+			return accountid.ErrNotDeleting
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}

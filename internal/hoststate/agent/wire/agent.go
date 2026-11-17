@@ -72,14 +72,21 @@ type EnableDocument struct {
 	SMB      bool   `json:"smb"`
 }
 
+// AccountRemovalDocument names a deleted account. The Host Agent reads the
+// rest of the removal from the control plane, never from the request.
 type AccountRemovalDocument struct {
-	Username       string `json:"username"`
-	UID            int    `json:"uid"`
-	PrivateSpaceID string `json:"privateSpaceId"`
-	TransferTo     string `json:"transferTo,omitempty"`
-	TransferToUID  int    `json:"transferToUid,omitempty"`
-	Folder         string `json:"folder,omitempty"`
+	UserID string `json:"userId"`
 }
+
+// AccountRemovalResult names the folder of the administrator's personal space
+// that holds the account's handed-over files; empty when none does.
+type AccountRemovalResult struct {
+	Folder string `json:"folder,omitempty"`
+}
+
+// NotDeletingCode answers a removal for an account whose deletion has not
+// started.
+const NotDeletingCode = "not_deleting"
 
 type IdentityDocument struct {
 	Username string         `json:"username"`

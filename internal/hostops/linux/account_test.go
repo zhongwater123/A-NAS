@@ -44,6 +44,7 @@ func TestEnablingAnAccountUnlocksItAndGivesBackSMBAndTheAssistant(t *testing.T) 
 	}
 	want := []string{
 		"usermod --unlock alice",
+		"pdbedit --user alice",
 		"smbpasswd -e alice",
 		"systemctl unmask " + strings.Join(assistantUnits, " "),
 		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
@@ -75,6 +76,23 @@ func TestEnablingAnAccountThatMustChooseAPasswordOnlyUnlocksIt(t *testing.T) {
 	}
 	if strings.Join(host.commands, "\n") != "usermod --unlock alice" {
 		t.Fatalf("commands: %v", host.commands)
+	}
+}
+
+// An account whose password Samba never received gets SMB with its next
+// password change, as identity synchronization lets it; enabling it again
+// does not fail on that.
+func TestEnablingAnAccountWithoutASambaEntryStillEnablesTheRest(t *testing.T) {
+	executor, host := disabledAlice(t, true)
+	delete(host.samba, "alice")
+	if err := executor.EnableCredential(context.Background(), accountid.EnableRequest{Username: "alice", SMB: true}); err != nil {
+		t.Fatal(err)
+	}
+	if host.ran("smbpasswd -e alice") {
+		t.Fatalf("enabled a Samba entry that does not exist: %v", host.commands)
+	}
+	if !host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer") {
+		t.Fatalf("the assistant stays off: %v", host.commands)
 	}
 }
 
@@ -121,7 +139,7 @@ func TestRemovingAnAccountNeedsTheDataVolumeAndAValidRequest(t *testing.T) {
 	executor, host := disabledAlice(t, true)
 	ctx := context.Background()
 	valid := accountid.AccountRemoval{Username: "alice", UID: 20100, PrivateSpaceID: "space:alice"}
-	if err := executor.RemoveAccount(ctx, valid); !errors.Is(err, accountid.ErrVolumeUnavailable) {
+	if _, err := executor.RemoveAccount(ctx, valid); !errors.Is(err, accountid.ErrVolumeUnavailable) {
 		t.Fatalf("removal with the volume offline: %v", err)
 	}
 	for _, invalid := range []accountid.AccountRemoval{
@@ -131,7 +149,7 @@ func TestRemovingAnAccountNeedsTheDataVolumeAndAValidRequest(t *testing.T) {
 		{Username: "alice", UID: 20100, PrivateSpaceID: "space:alice", TransferTo: "owner", TransferToUID: 20101, Folder: "../escape"},
 		{Username: "alice", UID: 20100, PrivateSpaceID: "space:alice", TransferTo: "owner", TransferToUID: 20101, Folder: ".hidden"},
 	} {
-		if err := executor.RemoveAccount(ctx, invalid); err == nil || errors.Is(err, accountid.ErrVolumeUnavailable) {
+		if _, err := executor.RemoveAccount(ctx, invalid); err == nil || errors.Is(err, accountid.ErrVolumeUnavailable) {
 			t.Errorf("RemoveAccount(%+v) = %v, want an invalid request", invalid, err)
 		}
 	}

@@ -212,6 +212,44 @@ WHERE d.user_id = ? AND d.started_at IS NOT NULL`, accountid.RoleAdmin, accounti
 	return deletion, nil
 }
 
+// AccountRemoval returns what the Host Agent removes of userID, whose
+// deletion has started, or accountid.ErrNotDeleting: its Linux identity, its
+// personal space and, when the personal space goes to the administrator who
+// asked for the deletion, that administrator, who must still administer the
+// device.
+func (d *Directory) AccountRemoval(ctx context.Context, userID string) (accountid.AccountRemoval, error) {
+	db, err := d.open()
+	if err != nil {
+		return accountid.AccountRemoval{}, err
+	}
+	removal := accountid.AccountRemoval{UserID: userID}
+	var personalSpace string
+	err = db.QueryRowContext(ctx, `SELECT u.username, i.uid, s.id, d.personal_space, IFNULL(a.username, ''), IFNULL(ai.uid, 0)
+FROM account_deletions d
+JOIN users u ON u.id = d.user_id
+JOIN linux_identities i ON i.user_id = u.id
+JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'
+LEFT JOIN users a ON a.id = d.requested_by AND a.role = ? AND a.status = ?
+LEFT JOIN linux_identities ai ON ai.user_id = a.id
+WHERE d.user_id = ? AND d.started_at IS NOT NULL`, accountid.RoleAdmin, accountid.UserStatusActive, userID).Scan(
+		&removal.Username, &removal.UID, &removal.PrivateSpaceID, &personalSpace, &removal.TransferTo, &removal.TransferToUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return accountid.AccountRemoval{}, accountid.ErrNotDeleting
+	}
+	if err != nil {
+		return accountid.AccountRemoval{}, err
+	}
+	if personalSpace != "transfer" {
+		removal.TransferTo, removal.TransferToUID = "", 0
+		return removal, nil
+	}
+	if removal.TransferTo == "" || removal.TransferToUID == 0 {
+		return accountid.AccountRemoval{}, errors.New("the administrator who deleted the account no longer administers the device")
+	}
+	removal.Folder = accountid.HandoverFolder(removal.Username)
+	return removal, nil
+}
+
 // LibraryViewings returns an administrator's unexpired grants to view
 // members' private photo libraries.
 func LibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]accountid.LibraryViewing, error) {

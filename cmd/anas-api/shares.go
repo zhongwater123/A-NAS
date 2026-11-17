@@ -53,7 +53,8 @@ func configuredShares(ctx context.Context, config Config, users *accounts.Servic
 			return nil, nil, nil, err
 		}
 		remove := func(ctx context.Context, userID string) error {
-			return accountremoval.Request(ctx, config.SharesSocket, userID)
+			_, err := accountremoval.Request(ctx, config.SharesSocket, userID)
+			return err
 		}
 		return shareservice.Proxy(config.SharesSocket, logger), remove, closeBridge, nil
 	}

@@ -5,6 +5,7 @@
 package rootagent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -46,7 +47,17 @@ type handler struct {
 	// had its redundancy restored.
 	restoring     func() bool
 	spreadStopped func() bool
-	logger        *slog.Logger
+	// deletions reads deleted accounts from the control plane.
+	deletions AccountDeletions
+	logger    *slog.Logger
+}
+
+// AccountDeletions reads, from the control plane, what to remove of an
+// account whose deletion has started, or accountid.ErrNotDeleting: the Host
+// Agent removes accounts on its own reading, not on the Product Service's
+// word (sessiondir.Directory).
+type AccountDeletions interface {
+	AccountRemoval(context.Context, string) (accountid.AccountRemoval, error)
 }
 
 type Services struct {
@@ -72,6 +83,9 @@ type Services struct {
 	// SpreadStopped reports whether spreading the mirror over its disks left
 	// space unusable and waits for the disks to change or the administrator.
 	SpreadStopped func() bool
+	// Deletions reads deleted accounts for their removal; without it no
+	// account is removed.
+	Deletions AccountDeletions
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -87,7 +101,8 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
 		systemLogs: services.SystemLogs, webSearch: services.WebSearch, systemUpdate: services.SystemUpdate,
 		reconcileFailed: services.ReconcileFailed,
-		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
+		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, deletions: services.Deletions,
+		logger: logger,
 	}
 }
 
@@ -606,20 +621,33 @@ func (h *handler) handleRemoveAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	remover, ok := h.credentials.(accountid.AccountRemover)
-	if !ok {
+	if !ok || h.deletions == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "account operation is unavailable")
 		return
 	}
 	var request wire.AccountRemovalDocument
-	if err := decodeRequest(r, &request); err != nil {
+	if err := decodeRequest(r, &request); err != nil || strings.TrimSpace(request.UserID) == "" {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	if err := remover.RemoveAccount(r.Context(), accountid.AccountRemoval{
-		Username: request.Username, UID: request.UID, PrivateSpaceID: request.PrivateSpaceID,
-		TransferTo: request.TransferTo, TransferToUID: request.TransferToUID, Folder: request.Folder,
-	}); err != nil {
-		h.logger.ErrorContext(r.Context(), "remove account failed", "username", request.Username, "error", err)
+	// What to remove and whom to hand it to come from the control plane: the
+	// request only names the account.
+	removal, err := h.deletions.AccountRemoval(r.Context(), request.UserID)
+	if errors.Is(err, accountid.ErrNotDeleting) {
+		httpjson.WriteError(w, http.StatusConflict, wire.NotDeletingCode, "the account is not being deleted")
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "account removal could not be read", "user_id", request.UserID, "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "account operation failed")
+		return
+	}
+	// The removal outlives a client that stops waiting: copying a large
+	// personal space can take longer than the Product Service waits, and its
+	// next attempt then waits for this one and finds it done.
+	folder, err := remover.RemoveAccount(context.WithoutCancel(r.Context()), removal)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "remove account failed", "username", removal.Username, "error", err)
 		if errors.Is(err, accountid.ErrVolumeUnavailable) {
 			httpjson.WriteError(w, http.StatusLocked, wire.VolumeUnavailableCode, "the data volume is offline")
 			return
@@ -627,7 +655,7 @@ func (h *handler) handleRemoveAccount(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "account operation failed")
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	httpjson.Write(w, http.StatusOK, wire.AccountRemovalResult{Folder: folder})
 }
 
 func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
