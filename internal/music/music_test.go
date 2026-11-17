@@ -21,6 +21,7 @@ import (
 	"github.com/mewkiz/flac"
 	"github.com/mewkiz/flac/meta"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/codectest"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/imagetest"
@@ -727,7 +728,7 @@ func TestLengthsAndCoversWaitForAWorkerThatIsAway(t *testing.T) {
 func TestRealFFmpegDecodesThroughTheWorker(t *testing.T) {
 	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
-		t.Skip("FFmpeg is not installed")
+		codectest.Missing(t, "FFmpeg is not installed")
 	}
 	f := newFixtureWith(t, ffmpegworker.Local{Tools: tools})
 	for _, sample := range []struct{ name, codec, title string }{{"wavpack.wv", "wavpack", "WavPack 歌曲"}, {"aiff.aiff", "pcm_s24be", "AIFF 歌曲"}} {
@@ -743,7 +744,7 @@ func TestRealFFmpegDecodesThroughTheWorker(t *testing.T) {
 			generate.Args = append(generate.Args[:len(generate.Args)-1], "-write_id3v2", "1", path)
 		}
 		if output, err := generate.CombinedOutput(); err != nil {
-			t.Skipf("FFmpeg cannot generate %s: %v %s", sample.name, err, output)
+			codectest.Missing(t, "FFmpeg cannot generate %s: %v %s", sample.name, err, output)
 		}
 	}
 	f.scan(t, f.admin)

@@ -9,9 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/codectest"
 )
 
 func TestRequestsAreBoundedBeforeAnyCommandRuns(t *testing.T) {
@@ -229,13 +232,13 @@ func TestClosingAStreamStopsFFmpeg(t *testing.T) {
 func TestRealFFmpeg(t *testing.T) {
 	tools, ok := LocalTools()
 	if !ok {
-		t.Skip("FFmpeg is not installed")
+		codectest.Missing(t, "FFmpeg is not installed")
 	}
 	sample := filepath.Join(t.TempDir(), "sample.mkv")
 	generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=4",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "ac3", sample)
 	if output, err := generate.CombinedOutput(); err != nil {
-		t.Skipf("FFmpeg cannot generate a sample: %v %s", err, output)
+		codectest.Missing(t, "FFmpeg cannot generate a sample: %v %s", err, output)
 	}
 	file, err := os.Open(sample)
 	if err != nil {
@@ -281,16 +284,21 @@ func TestRealFFmpeg(t *testing.T) {
 func TestRealFFmpegAudio(t *testing.T) {
 	tools, ok := LocalTools()
 	if !ok {
-		t.Skip("FFmpeg is not installed")
+		codectest.Missing(t, "FFmpeg is not installed")
 	}
 	local := Local{Tools: tools}
 	ctx := context.Background()
-	for _, sample := range []struct{ name, codec string }{{"hi.aiff", "pcm_s24be"}, {"lossy.wma", "wmav2"}, {"hi.wv", "wavpack"}} {
+	// WMA has no sample rate above 48 kHz. Asked for 96 kHz, FFmpeg refused
+	// the sample, which skipped the whole test wherever FFmpeg was installed.
+	for _, sample := range []struct {
+		name, codec string
+		rate        int
+	}{{"hi.aiff", "pcm_s24be", 96000}, {"lossy.wma", "wmav2", 44100}, {"hi.wv", "wavpack", 96000}} {
 		path := filepath.Join(t.TempDir(), sample.name)
-		generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3:sample_rate=96000",
+		generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3:sample_rate="+strconv.Itoa(sample.rate),
 			"-ac", "2", "-c:a", sample.codec, "-metadata", "title=测试", path)
 		if output, err := generate.CombinedOutput(); err != nil {
-			t.Skipf("FFmpeg cannot generate %s: %v %s", sample.name, err, output)
+			codectest.Missing(t, "FFmpeg cannot generate %s: %v %s", sample.name, err, output)
 		}
 		file, err := os.Open(path)
 		if err != nil {

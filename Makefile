@@ -43,7 +43,7 @@ GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test codec-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -402,6 +402,12 @@ ai-sdk-test: $(AI_SDK_STAMP)
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
 	ANAS_ROOT_INTEGRATION=1 $(GO) test -tags rootintegration -count=1 ./internal/hostops/linux
+
+# The tests of the real codecs (FFmpeg, libheif), which fail there instead of
+# being skipped, in a disposable container of the system test's image; needs
+# Docker, Go and the image from scripts/build-system-test-image.sh.
+codec-test:
+	scripts/codec-test.sh $(SYSTEM_TEST_IMAGE)
 
 # Installs the release with apt from a signed repository into a disposable
 # Debian 13 systemd container, then upgrades, rolls back and upgrades again;
