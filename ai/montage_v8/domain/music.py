@@ -83,15 +83,33 @@ def music_note(m: dict) -> str:
     return "\n" + "\n".join(lines) + "\n"
 
 
+TAKE_MOST = 6.0     # 秒：高潮段一个镜头最长（和 plan.CAP 相同）
+
+
 def slotted(m: dict, parts: list[dict]) -> list:
-    """每个画面的槽：一段的槽按顺序尽量平均分给它的画面，多出来的给前面的画面。"""
+    """每个画面的槽：一段的槽按顺序尽量平均分给它的画面，多出来的给前面的画面；高潮段一个画面一个镜头（one_take）。"""
     out = []
     for mp, part in zip(m["parts"], parts, strict=True):
         each, extra = divmod(len(mp["slots"]), len(part["scenes"]))
         got, at = [], 0
         for k in range(len(part["scenes"])):
             take = each + (1 if k < extra else 0)
-            got.append(mp["slots"][at:at + take])
+            got.append(one_take(mp["slots"][at:at + take], mp["level"]))
             at += take
         out.append(got)
+    return out
+
+
+def one_take(slots: list, level: str) -> list:
+    """高潮段一个画面的几个槽连成一个镜头：同一段连续的原片跨过小节线，只在换画面处切；超过 TAKE_MOST 秒的画面在
+    会超过的那条小节线上切开。（2026-11-17，用户：每小节一切时，潜水的副歌是 8 段 1.9 秒，每个画面是同一张卡片的
+    两段，dv-020 先放 13 秒再跳回 2 秒，像抽帧；Insta360 拼接第 6 版一条大街放了 9 秒，加了上限。）"""
+    if level != "高潮" or len(slots) < 2:
+        return [list(s) for s in slots]
+    out = [list(slots[0])]
+    for a, b in slots[1:]:
+        if b - out[-1][0] <= TAKE_MOST + 0.05:
+            out[-1][1] = b
+        else:
+            out.append([a, b])
     return out

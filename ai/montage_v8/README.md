@@ -12,7 +12,7 @@
 | 编排层 | `pipeline.py` | 切卡片 → 量画质 → 描述 → 第一步 → 第二步 → 填槽 → 渲染，结果可复用 | 领域层和端口 |
 | 配置 | `profiles/` | `mac-dev`、`x86-nas`、`rk3588` 各一份；`cases.toml` 是各组素材 | |
 | 入口层 | `service/`、`web/`、`__main__.py`、`doctor.py` | 网页服务和网页（上传、转发搜索）、向量搜索服务、命令行、平台自检 | 编排层；网页服务另要 `requirements-web.txt` |
-| 工具 | `tools/` | 第七版网页的数据、剪辑日志页、多版对比页、旋转检查、精彩度试验 | 编排层和存储 |
+| 工具 | `tools/` | 第七版网页的数据、剪辑日志页、多版对比页、旋转检查、拼接原片、精彩度试验 | 编排层和存储 |
 
 领域层不许做输入输出：Ruff 的 TID251 禁止它引用 `subprocess`、`os`、`requests`、`PIL` 等（`ai/ruff.toml`）；`tests/test_montage_v8.py` 还检查它只引用标准库、NumPy 和它自己。
 
@@ -52,6 +52,22 @@ python3 -m montage_v8 --profile mac-dev describe pj
 - **请求**：两步规划的 system、user、schema 和第六版当前代码逐字相同（四种剪法）；卡片描述的请求也相同。
 - **音乐槽**：三首歌用自己算的响度重算，和原来的 `music-*.json` 相同。
 - **成片**：用已有规划重新渲染品杰一条，抽 5 帧和第六版成片像素相同，耗时 62 秒。
+
+### 之后从第六版移植的（2026-11-17）
+
+第八版分出去以后，第六版在 `feat/montage-highlight-labels` 分支上继续改。用户挑了四项移植过来，其余（默认不按拍摄顺序、白天夜里不穿插、补位先从别的卡片补、第二步看关键帧等）没有移植。原因和试验见那条分支上[第六版调研](https://github.com/zhongwater123/A-NAS/blob/feat/montage-highlight-labels/docs/research/video-montage-v6.md)的“切点与镜头顺序”“潜水拼接前后”两节。
+
+| 改动 | 位置 | 做什么 |
+|---|---|---|
+| 4B 先写机位 | `domain/prompts.py`（`CAMERAS`、`PROMPT`）、`domain/describe.py`、`domain/plan.py`（`place`） | 描述先判断在哪里拍的（地面、室内、车里、船上、飞机或直升机里、无人机航拍、水里、看不出），两步规划在场景后面带上交通工具、航拍或水里的机位。之前描述的卡片没有这个字段，照旧只写场景 |
+| 副歌一个画面一个镜头 | `domain/music.py`（`one_take`）、`domain/fill.py` | 高潮段一个画面的几个槽连成一个镜头，只在换画面处切；超过 6 秒的画面在会超过的那条小节线上切开。第二步的提示词同步改了 |
+| 同一画面按拍摄先后 | `domain/fill.py`（`in_shooting_order`） | 填完一个画面后，它的几个槽连同补位按拍摄先后重排，开头和结尾的画面也一样；槽都是整小节，切点仍在小节线上 |
+| 拼接素材，拼接点是硬切点 | `tools/join.py`、`domain/fill.py`（`Footage.parts`）、`adapters/store.py`（`joined`） | 接连拍的原片先拼成一个文件再切卡片；剪辑时一个镜头不出关键帧所在的那条原片，连续镜头按原片数，补位只取紧挨着的卡片。方向不同的原片不拼（第六版的拼接把竖拍的几段拼成了横躺的） |
+
+比对：
+- **品杰 story-3**（已有规划，只填槽）：26 个画面里 23 个镜头和移植前相同，变的 3 个都在副歌，是一个画面一个镜头的结果。
+- **潜水拼接第 1 版**（`dj`，已有规划）：副歌按原片 0、11、36 秒的先后放（移植前是 36、11、0 秒），没有镜头跨过拼接点。
+- **拼接工具**：只分组不拼，潜水 26 条原片分成 13 组；第六版拼成一个文件的 13 条（03 日上午那次下潜）按方向分成了 8 组。
 
 ## 网页、上传与剪辑任务
 
@@ -119,6 +135,7 @@ python3 -m venv --system-site-packages ~/.venvs/montage-v8 && ~/.venvs/montage-v
 | `python3 -m montage_v8.tools.log_page 日志.html pj "标题" -tag=名字 ...` | 剪辑日志页：成片、大纲、逐个镜头、两步的完整输入 |
 | `python3 -m montage_v8.tools.compare_page 对比.html pj music-歌名.json "标题" -tag=名字 ...` | 几条成片同步播放对比 |
 | `python3 -m montage_v8.tools.orient http://127.0.0.1:8094 pinjie` | 检查旋转标记（`--write` 才写 `rotation.json`、`excluded.json`） |
+| `python3 -m montage_v8.tools.join 原片目录 拼接后的目录 [joined-parts.json]` | 接连拍（间隔不超过 30 分钟）、编码和方向相同的原片拼成一个文件，写 `joined-parts.json`（默认在卡片目录）；拼好的目录再建索引、切卡片 |
 
 **精彩度试验**（`tools/highlight/`，结果见[精彩度试验](../../docs/research/video-montage-highlight.md)）：
 

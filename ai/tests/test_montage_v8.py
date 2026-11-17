@@ -4,6 +4,7 @@
 """
 
 import ast
+import datetime
 import sys
 import unittest
 from pathlib import Path
@@ -76,7 +77,14 @@ class MusicTest(unittest.TestCase):
     def test_a_parts_slots_are_shared_among_its_pictures_the_earlier_taking_the_odd_ones(self):
         got = music.slotted(SONG, [{"scenes": [{}]}, {"scenes": [{}, {}]}])
         self.assertEqual([len(p) for p in got[0]], [2])
-        self.assertEqual([len(p) for p in got[1]], [3, 2])
+        self.assertEqual(got[1], [[[8.0, 14.0]], [[14.0, 18.0]]])     # 高潮段一个画面一个镜头
+
+    def test_a_chorus_picture_is_one_take_across_its_bar_lines_at_most_six_seconds(self):
+        self.assertEqual(music.one_take([[77.43, 79.36], [79.36, 81.3]], "高潮"), [[77.43, 81.3]])
+        self.assertEqual(music.one_take([[60.01, 63.88], [63.88, 67.75]], "中等"), [[60.01, 63.88], [63.88, 67.75]])
+        # 潜水拼接第 1 版：一个 15.5 秒的画面在会超过 6 秒的小节线上切开。
+        bars = [[77.43 + 1.94 * i, 77.43 + 1.94 * (i + 1)] for i in range(8)]
+        self.assertEqual([round(b - a, 2) for a, b in music.one_take(bars, "高潮")], [5.82, 5.82, 3.88])
 
     def test_step_one_reads_each_part_with_its_level_and_shots(self):
         note = music.music_note(SONG)
@@ -171,6 +179,27 @@ class FillTest(unittest.TestCase):
         self.assertAlmostEqual(fill.seconds(clips), 6.0)
         self.assertAlmostEqual(clips[1]["start"], 5.0)                       # 关键帧 6 秒在 3 秒镜头的三分之一处
 
+    def test_a_shot_of_joined_footage_stays_inside_its_source_file(self):
+        # 拼接文件 001 由两条原片拼成，第二条从 5 秒起：关键帧 6 秒的节拍不往前取到 5 秒之前。
+        footage = fill.Footage(self.cards, ["t-001"], self.ix, lambda v: f"/v/{v}.mov", set(),
+                               parts={"001": [{"file": "a.mp4", "at": 0.0}, {"file": "b.mp4", "at": 5.5}]})
+        m = {"parts": [{"level": "中等", "slots": [[0.0, 3.0]]}]}
+        planned = {"slots": [[[[0.0, 3.0]]]],
+                   "answer": {"parts": [{"name": "一", "pictures": [{"beats": ["t-001/2"], "shows": "s", "link": "l"}]}]}}
+        picked = {"parts": [{"scenes": [{"query": "q", "cards": ["t-001"]}]}]}
+        clips, _short = fill.fill(m, planned, picked, footage, lambda *a: (a[3], a[4]), fps=30)
+        self.assertGreaterEqual(clips[0]["start"], 5.5)
+
+    def test_a_pictures_slots_go_in_shooting_order_each_with_its_fills_and_length(self):
+        # 潜水拼接第 1 版的副歌：一条录像在 6 秒上限处切成 5.8、5.8、3.9 秒，原来放成 36、11、0 秒。
+        slots = [[77.43, 83.24], [83.24, 89.05], [89.05, 92.92]]
+        pieces = [{"card": "dj-009", "start": s, "slot": slot} for s, slot in zip((36.4, 11.1, 0.0), slots, strict=True)]
+        pieces.append({"card": "dj-010", "start": 0.0, "slot": slots[0]})       # 第一个槽的补位跟着它走
+        got = fill.in_shooting_order(pieces, slots, 30, {"dj-009": 9, "dj-010": 10}.get)
+        self.assertEqual([(x["card"], x["start"], x["slot"]) for x in got],
+                         [("dj-009", 0.0, [77.43, 81.3]), ("dj-009", 11.1, [81.3, 87.11]),
+                          ("dj-009", 36.4, [87.11, 92.92]), ("dj-010", 0.0, [87.11, 92.92])])
+
 
 class PictureTest(unittest.TestCase):
     def test_something_soft_coming_up_from_the_bottom_ends_the_clear_span(self):
@@ -191,6 +220,31 @@ class PictureTest(unittest.TestCase):
         self.assertLess(picture.jitter(pan), 0.5)
 
 
+class JoinTest(unittest.TestCase):
+    def test_videos_shot_one_after_another_are_joined_unless_turned_another_way(self):
+        from montage_v8.tools import join
+
+        t = datetime.datetime(2025, 8, 3, 2, 52)
+        flat, upright = ("h264", 3840, 2880, "30/1", "yuv420p", 0, "aac"), ("h264", 3840, 2880, "30/1", "yuv420p", 90, "aac")
+        rows = [(t, 60.0, flat, "a"), (t + datetime.timedelta(minutes=6), 20.0, flat, "b"),
+                (t + datetime.timedelta(minutes=8), 30.0, upright, "c"),        # 竖着拍的：另起一组
+                (t + datetime.timedelta(minutes=9), 30.0, flat, "d"),
+                (t + datetime.timedelta(hours=2), 30.0, flat, "e")]            # 隔了两小时
+        self.assertEqual([[p for p, _ in g["parts"]] for g in join.runs(rows)], [["a", "b"], ["c"], ["d"], ["e"]])
+
+
+class PlaceTest(unittest.TestCase):
+    def test_the_scene_carries_the_camera_when_it_was_on_something(self):
+        self.assertEqual(plan.place({"scene": "米尔福德峡湾", "camera": "船上"}), "米尔福德峡湾（船上）")
+        self.assertEqual(plan.place({"scene": "湖边", "camera": "地面"}), "湖边")
+        self.assertEqual(plan.place({"scene": "餐厅里", "camera": "室内"}), "餐厅里")
+        self.assertEqual(plan.place({"scene": "湖边"}), "湖边")             # 2026-11-16 之前的描述没有机位
+
+    def test_the_4b_is_asked_where_the_camera_was_first(self):
+        _content, schema, _spans = describe.request(["a.jpg"], [0.0], [1], 4.0)
+        self.assertEqual(next(iter(schema["properties"])), "camera")
+
+
 class DescribeTest(unittest.TestCase):
     def test_one_beat_a_key_frame_with_its_frames_after_the_answer(self):
         content, schema, spans = describe.request(["a.jpg", "b.jpg"], [0.0, 4.0], [1, 2], 8.0)
@@ -203,7 +257,8 @@ class DescribeTest(unittest.TestCase):
 
     def test_a_prompt_mode_answer_is_checked_locally(self):
         _content, schema, _spans = describe.request(["a.jpg"], [0.0], [1], 4.0)
-        good = {"beats": [{"shot_size": "远景", "what": "湖"}], "process": ["看湖"], "summary": "湖", "scene": "湖边"}
+        good = {"camera": "地面", "beats": [{"shot_size": "远景", "what": "湖"}], "process": ["看湖"], "summary": "湖",
+                "scene": "湖边"}
         vision._required(vision.parse_json("```json\n" + __import__("json").dumps(good) + "\n```"), schema)
         with self.assertRaises(DescribeError):
             vision._required({**good, "beats": [{"shot_size": "大景", "what": "湖"}]}, schema)

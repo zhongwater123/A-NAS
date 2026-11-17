@@ -74,6 +74,11 @@ class Store:
     def source(self, ix: WindowIndex, video: str) -> str:
         return str(self.videos / ix.videos[video]["file"])
 
+    def joined(self) -> dict:
+        """拼接过的素材由哪些原片拼成（joined-parts.json，tools/join.py 写），没拼接过是空的。"""
+        path = self.cards / "joined-parts.json"
+        return read_json(path) if path.exists() else {}
+
     def turned(self) -> set:
         """旋转标记写反的原片（rotation.json），渲染和取帧时翻回来。"""
         path = self.cards / "rotation.json"

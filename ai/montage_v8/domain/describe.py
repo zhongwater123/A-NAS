@@ -1,9 +1,9 @@
-"""卡片描述的请求和回答（第六版 tag_beats.describe_v2）：一张关键帧一个节拍（景别、画面），然后是过程、概括和场景。
+"""卡片描述的请求和回答（第六版 tag_beats.describe_v2）：先是机位，然后一张关键帧一个节拍（景别、画面），过程、概括和场景。
 
 只产出请求的内容（文字和图片按顺序）与 JSON Schema；由 Describer 端口交给视觉模型（llama.cpp、RKLLM……）。
 """
 
-from .prompts import GROUPED, PROCESS, PROMPT, SHOT_SIZES, SUMMARY_CHARS, SYSTEM_PROMPT, TRAVEL
+from .prompts import CAMERAS, GROUPED, PROCESS, PROMPT, SHOT_SIZES, SUMMARY_CHARS, SYSTEM_PROMPT, TRAVEL
 
 SYSTEM = SYSTEM_PROMPT
 
@@ -19,7 +19,8 @@ def schema(count: int, process: bool = True) -> dict:
     beats = {"type": "array", "minItems": count, "maxItems": count, "items": {"type": "object", "properties": {
         "shot_size": {"type": "string", "enum": SHOT_SIZES}, "what": short(45)}, "required": ["shot_size", "what"]}}
     steps = {"process": {"type": "array", "minItems": 1, "maxItems": count, "items": {"type": "string", "maxLength": 20}}} if process else {}
-    props = {"beats": beats, **steps, "summary": short(SUMMARY_CHARS + 20), "scene": short(20)}
+    props = {"camera": {"type": "string", "enum": CAMERAS}, "beats": beats, **steps, "summary": short(SUMMARY_CHARS + 20),
+             "scene": short(20)}
     return {"type": "object", "properties": props, "required": list(props)}
 
 

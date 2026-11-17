@@ -250,7 +250,8 @@ class Montage:
 
         footage = fill.Footage(cards={c["id"]: c for c in self.store.described(case.key)},
                                catalog=[c["id"] for c in self.usable(case, opts)], index=ix,
-                               source=lambda video: self.store.source(ix, video), turned=turned)
+                               source=lambda video: self.store.source(ix, video), turned=turned,
+                               parts=self.store.joined())
         held = HeldCache(self.store.cuts / f"held-{case.key}.json", compute)
         clips, short = fill.fill(m, planned, picked, footage, held, fps=ff.fps, labels=opts.labels)
         return m, clips, short

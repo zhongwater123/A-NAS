@@ -18,3 +18,17 @@ index = "pinjie"
 instruction = "按拍摄时间顺序剪一条新西兰旅行 vlog，场景之间衔接自然"
 style = "旅行"
 name = "新西兰（品杰手机）"
+
+# 2026-11-16：潜水，26 条视频（DJI Osmo Action 5 Pro 和两条手机 MOV），2025-08-02 到 08-04。
+[dv]
+index = "diving"
+instruction = "按拍摄时间顺序剪一条潜水旅行 vlog，场景之间衔接自然"
+style = "旅行"
+name = "潜水"
+
+# 2026-11-17（用户）：同一批潜水素材先拼接（tools/join.py），接连拍的几条是一个文件；拼接点是硬切点。
+[dj]
+index = "divingj"
+instruction = "按拍摄时间顺序剪一条潜水旅行 vlog，场景之间衔接自然"
+style = "旅行"
+name = "潜水（拼接）"

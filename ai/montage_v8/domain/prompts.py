@@ -1,4 +1,4 @@
-"""两步规划和卡片描述用的提示词，作为数据（第六版 cut.py、tag_beats.py 原文，一字未改）。
+"""两步规划和卡片描述用的提示词，作为数据（第六版 cut.py、tag_beats.py 原文）。
 
 改提示词只改这里；拼装请求的逻辑在 plan.py 和 describe.py。
 """
@@ -63,7 +63,7 @@ ENDING = ("结尾的最后一个画面要静下来，节奏放缓，有结束的
 OPEN_CLOSE = f"- 开场先交代地点、时代和人物，不要跳切；{ENDING}；"
 
 # 第二步。节拍按能取几秒列出：从关键帧起，至少 SHORTEST，至多 CAP。
-SHOTS_SYSTEM = """你是剪辑师。大纲定好了段落和每个段落要的画面，程序定好了每个画面约几秒。你给每个画面挑节拍；程序按音乐把每个画面切成几个镜头，镜头卡在小节上；按你排的顺序，每个镜头用一个节拍，从节拍开头取。成片约 {target:g} 秒，配音乐，不用原声。高潮段的画面只挑全景、远景的节拍，第一个画面的第一个节拍必须是全景或远景，挑最开阔的那个；画面只有一两个镜头时，放不下卡片里的整个过程：不要默认挑第一个节拍，要从这张卡片的全部节拍里挑出最关键、最精彩的那一刻排在第一。高潮段前的最后一个画面，在符合这个画面内容的节拍里，挑最处在“还没”状态的：还没到、还没看见、还没打开、还没落地。
+SHOTS_SYSTEM = """你是剪辑师。大纲定好了段落和每个段落要的画面，程序定好了每个画面约几秒。你给每个画面挑节拍；程序按音乐把每个画面切成几个镜头，镜头卡在小节上；按你排的顺序挑出每个镜头用的节拍，从节拍开头取，一个画面的几个镜头再按拍摄时间先后放；高潮段每个画面尽量一个镜头，超过 6 秒才在小节上切开。成片约 {target:g} 秒，配音乐，不用原声。高潮段的画面只挑全景、远景的节拍，第一个画面的第一个节拍必须是全景或远景，挑最开阔的那个；画面只有一两个镜头时，放不下卡片里的整个过程：不要默认挑第一个节拍，要从这张卡片的全部节拍里挑出最关键、最精彩的那一刻排在第一。高潮段前的最后一个画面，在符合这个画面内容的节拍里，挑最处在“还没”状态的：还没到、还没看见、还没打开、还没落地。
 下面每个画面列出它可以取自的卡片（id、时间、场景、概括）和节拍（节拍 id、景别、能取几秒、画面）。
 每个画面写：
 - beats：从它的卡片里挑节拍，最合适的排前面，多列一两个备用；一个节拍只用一次；
@@ -99,13 +99,27 @@ SUMMARY_CHARS = 80   # a vlog card holds more than a film's: 40 characters left 
 # were gone through and left out what only some of them show: 01-013's puppet, 01-014's woman in white
 # (order_exp.py). process (#416, 2026-11-09): a short ordered list of what happens, between the beats and
 # the summary.
+# camera (2026-11-16): where the camera is, asked first. Without the old prompt's indoor-or-outdoor question
+# ("车厢是室内"), the 4B wrote boats out of the cruise and whale-watch cards and took pj-038's fjord, filmed
+# from a boat at the water's level, for a drone; the plan then put it among the flight's shots. Asked from what
+# is seen (three wordings tried on 12 cards, three runs each): every boat card 船上, the helicopter's 飞机或直升机里
+# (they had been drones), no drone written anywhere; but a lake seen from the shore is still taken for a boat
+# (5 of 6), its summary then a boat trip. Data: 剪辑对比/描述随机性（2026-11-16）/. 室内 (2026-11-16, Insta360):
+# a breakfast shot through a restaurant's window had been 地面.
+CAMERAS = ["地面", "室内", "车里", "船上", "飞机或直升机里", "无人机航拍", "水里", "看不出"]
 PROMPT = (
     "下面 {count} 张图按时间先后取自同一段视频（共 {duration:.0f} 秒），每张图前标了编号和它在这段里的秒数。"
     "请输出 JSON：\n"
+    "camera：先判断这一段是在哪里拍的：地面（室外）、室内（房间、餐厅、商店里）、车里、船上、飞机或直升机里、无人机航拍、水里，看不出写看不出。"
+    "只按画面里看得见的东西判断：看得见车窗、车头、座椅是车里，在房间、餐厅、商店里隔着窗户拍是室内；看得见舷窗、窗框、玻璃反光或桨叶的影子是飞机或直升机里；"
+    "看得见船舷、船头、甲板、栏杆或同船的人是船上；看得见岸、路、栈桥或站在地上的脚下是地面；"
+    "只看到水面、山和天空，看不到这些的写看不出，不要猜；看不出时 summary 和 beats 也不要写在船上或航拍；\n"
     "beats：见下面的分组说明；\n"
     "{process}"
     "summary：写完 {before} 再写，按 beats 一句话概括这一段，不超过 {chars} 字，beats 里的关键人物和物件要写到；\n"
-    "scene 是地点。"
+    # 2026-11-16: with camera asked first, the 4B copied it into scene (地面, 车里) for 51 of 品杰's 116 cards
+    # and 25 of Insta360's 33.
+    "scene 是这一段所在的地方，写具体的地点或环境（如街道、餐厅里、教堂前、湖边、峡湾），不要写机位（地面、车里、船上）。"
     "片头片尾字幕、制作人员名单、只有文字或黑屏的画面，what 要写明是字幕、文字或黑屏。\n"
     "这类素材是「{name}」。看片时注意：\n{focus}\n"
 )

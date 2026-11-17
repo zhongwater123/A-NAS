@@ -33,6 +33,13 @@ def clock(t: float) -> str:
     return f"{int(t // 60)}:{int(t % 60):02d}"
 
 
+def place(answer: dict) -> str:
+    """场景，机位在交通工具上（船、车、飞机）、航拍或水里时带上机位（prompts.CAMERAS，2026-11-16 起的描述有）：
+    品杰 pj-038 在船上拍的峡湾，被当成航拍放进了直升机那段。"""
+    camera = answer.get("camera", "")
+    return answer.get("scene", "") + (f"（{camera}）" if camera not in ("", "地面", "室内", "看不出") else "")
+
+
 def _replace(text: str, pairs, what: str) -> str:
     for a, b in pairs:
         if a not in text:
@@ -62,7 +69,7 @@ def pick_request(case: Case, opts: CutOptions, cards: list[dict], m: dict) -> tu
     lines = []
     for c in cards:
         where = f"视频{int(c['video'])} " if many else ""
-        lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {c['answer'].get('scene', '')} | "
+        lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {place(c['answer'])} | "
                      + " → ".join(c["answer"]["process"])
                      + (f" | {card_mark(opts.labels, c['id'], len(c['answer']['beats']))}" if opts.labels else ""))
     parts = len(m["parts"])
@@ -111,7 +118,7 @@ def shots_request(case: Case, opts: CutOptions, picked: dict, cards: dict, m: di
                     continue
                 c = cards[cid]
                 a = c["answer"]
-                lines.append(f"    卡片 {cid}（视频{int(c['video'])} {clock(c['start'])}–{clock(c['end'])}，{a.get('scene', '')}）：{a['summary']}")
+                lines.append(f"    卡片 {cid}（视频{int(c['video'])} {clock(c['start'])}–{clock(c['end'])}，{place(a)}）：{a['summary']}")
                 for (j, _start, length), b in zip(units(c, CAP), a["beats"], strict=True):
                     ids.append(f"{cid}/{j}")
                     mark = MARK.get(opts.labels.get(f"{cid}/{j}", ""), "")
