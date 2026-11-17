@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,6 +102,11 @@ func (s *Service) runDueDeletions(ctx context.Context, steps []DeletionStep, log
 			if ctx.Err() != nil {
 				return wait
 			}
+			if errors.Is(err, errDeletionNotDue) {
+				// Cancelled since the list was read; one asked for again
+				// woke this loop when it was scheduled and has its own time.
+				continue
+			}
 			logger.ErrorContext(ctx, "account deletion failed; it is tried again", "user_id", userID, "error", err)
 			message := err.Error()
 			if len(message) > 500 {
@@ -181,13 +187,48 @@ WHERE user_id = ?`, strings.Join(done, ","), handover.Folder, handover.Album, us
 // synchronization in progress, which may still be making the account on the
 // host: one that read the account before this point and reached the Host
 // Agent after the host step would make the removed account again.
+//
+// The deletion is read again here. Removing the accounts listed before this
+// one, or waiting for the synchronization, can take hours, in which an
+// administrator may have cancelled it, or cancelled it and asked again with
+// other choices: that request waits its own 30 days. Only a deletion that is
+// due now starts, and from then on it cannot be cancelled.
 func (s *Service) startDeletion(ctx context.Context, userID string) error {
 	s.identityMu.Lock()
 	defer s.identityMu.Unlock()
-	_, err := s.store.db.ExecContext(ctx, "UPDATE account_deletions SET started_at = ? WHERE user_id = ? AND started_at IS NULL",
-		formatTime(s.now().UTC()), userID)
-	return err
+	now := s.now().UTC()
+	var dueAt string
+	var startedAt sql.NullString
+	err := s.store.db.QueryRowContext(ctx, "SELECT due_at, started_at FROM account_deletions WHERE user_id = ?", userID).Scan(&dueAt, &startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errDeletionNotDue
+	}
+	if err != nil {
+		return err
+	}
+	if startedAt.Valid {
+		return nil
+	}
+	if at, _ := time.Parse(time.RFC3339Nano, dueAt); at.After(now) {
+		return errDeletionNotDue
+	}
+	// due_at names the request that was read: one made in between is not it.
+	result, err := s.store.db.ExecContext(ctx, "UPDATE account_deletions SET started_at = ? WHERE user_id = ? AND started_at IS NULL AND due_at = ?",
+		formatTime(now), userID, dueAt)
+	if err != nil {
+		return err
+	}
+	if started, err := result.RowsAffected(); err != nil {
+		return err
+	} else if started == 0 {
+		return errDeletionNotDue
+	}
+	return nil
 }
+
+// errDeletionNotDue reports a deletion that was listed as due and, by the
+// time its turn came, was cancelled or replaced by a later request.
+var errDeletionNotDue = errors.New("the account's deletion is no longer due")
 
 // removalOf reads a started deletion and the steps it has completed.
 func (s *Service) removalOf(ctx context.Context, userID string) (Removal, []string, error) {
