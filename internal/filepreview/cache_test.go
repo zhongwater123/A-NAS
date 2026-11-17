@@ -31,7 +31,10 @@ func TestDiskCacheBoundsAndRestartCleanup(t *testing.T) {
 			if cache.get(key(2)) != nil || cache.bytes != 8 || cache.entries.Len() != 2 {
 				t.Fatalf("LRU bounds: bytes=%d entries=%d", cache.bytes, cache.entries.Len())
 			}
-			if err := os.WriteFile(filepath.Join(dir, ".preview-interrupted"), []byte("partial"), 0600); err != nil {
+			// What renameio leaves behind when a write is cut off: a dot, the
+			// preview's name and a random number.
+			interrupted := "." + key(4) + ".preview1234567"
+			if err := os.WriteFile(filepath.Join(dir, interrupted), []byte("partial"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			restarted, err := openDiskCache(dir)
@@ -41,7 +44,7 @@ func TestDiskCacheBoundsAndRestartCleanup(t *testing.T) {
 			if restarted.bytes != 8 || restarted.entries.Len() != 2 || string(restarted.get(key(1))) != "1111" {
 				t.Fatal("restart did not restore cache")
 			}
-			if _, err := os.Stat(filepath.Join(dir, ".preview-interrupted")); !os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(dir, interrupted)); !os.IsNotExist(err) {
 				t.Fatal("interrupted write remained")
 			}
 			info, _ := os.Stat(dir)
