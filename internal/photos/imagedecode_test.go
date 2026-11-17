@@ -162,6 +162,16 @@ func TestLocalImageDecodersShareSlotUntilRenderingFinishes(t *testing.T) {
 	}
 }
 
+func TestImagesWithAPixelOutsideThePaletteAreUnsupported(t *testing.T) {
+	err := withDecodedImage(context.Background(), bytes.NewReader(imagetest.OutsidePalettePicture()), func(image.Image) error {
+		t.Error("a pixel outside the palette reached the photo service's rendering")
+		return nil
+	})
+	if !errors.Is(err, ErrUnsupportedType) {
+		t.Fatalf("withDecodedImage() error = %v, want ErrUnsupportedType", err)
+	}
+}
+
 func TestImageDecodeSlotSurvivesDecoderPanicAndRejectsCancelledWork(t *testing.T) {
 	func() {
 		defer func() {

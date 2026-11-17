@@ -341,6 +341,23 @@ func TestCoversThatPanicTheDecoderLeaveTheScanRunning(t *testing.T) {
 	imagetest.RequirePanicLogged(t, logged, "music cover", "song.mp3", "cover.jpg", "Embedded", "Folder")
 }
 
+func TestCoversWithAPixelOutsideThePaletteAreSkipped(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "Folder", "aria.flac"), flacFile(t, 44100, nil, [2]string{"TITLE", "Aria"}))
+	write(t, filepath.Join(f.shared, "Folder", "cover.jpg"), imagetest.OutsidePalettePicture())
+
+	if status := f.scan(t, f.admin); status.Tracks != 1 {
+		t.Fatalf("library holds %d tracks, want 1", status.Tracks)
+	}
+	if track, ok := f.tracks(t, f.admin)["Aria"]; !ok || track.CoverID != "" {
+		t.Errorf("track = %+v (indexed %v), want it indexed without a cover", track, ok)
+	}
+	if logged := panics(); len(logged) != 0 {
+		t.Errorf("logged %+v, want no panic", logged)
+	}
+}
+
 func TestMembersOnlySeeTheirOwnSpaceAndTheSharedSpace(t *testing.T) {
 	f := newFixture(t)
 	write(t, filepath.Join(f.private, "mine.mp3"), mp3File(5, id3Frame("TIT2", text("Mine"))))

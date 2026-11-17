@@ -20,6 +20,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/imagerender"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -109,7 +110,7 @@ func NormalizeWallpaper(picture []byte) (data []byte, width, height int, err err
 	if config.Width*config.Height > maxWallpaperPixels {
 		return nil, 0, 0, ErrImageTooLarge
 	}
-	source, err := imaging.Decode(bytes.NewReader(picture), imaging.AutoOrientation(true))
+	source, err := imagerender.Decode(bytes.NewReader(picture), imaging.AutoOrientation(true))
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("%w: %v", ErrUnsupportedImage, err)
 	}
