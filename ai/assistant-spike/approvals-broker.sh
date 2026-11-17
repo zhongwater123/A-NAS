@@ -38,8 +38,12 @@ def agent(user, method, path, body=None):
     return (out.stdout or out.stderr).strip()
 
 
+def as_member(user, cmd):
+    subprocess.run(["setpriv", f"--reuid={user}", f"--regid={user}", "--groups=20000", "--", "sh", "-c", cmd], check=True)
+
+
 def as_alice(cmd):
-    subprocess.run(["setpriv", "--reuid=alice", "--regid=alice", "--groups=20000", "--", "sh", "-c", cmd], check=True)
+    as_member("alice", cmd)
 
 
 def check(name, ok, detail=""):
@@ -103,6 +107,80 @@ as_alice(f"rmdir '{DATA}/spaces/private/alice/子目录' && ln -s {DATA}/spaces/
 result = agent("alice", "POST", "/apply", sub)
 check("a folder swapped for a link to Shared after the card is not written through", "已执行" not in result
       and not os.path.exists(f"{DATA}/spaces/shared/a.md"), result)
-state = "/srv/a-nas/data/assistant/.changes" if os.environ.get("EXECUTOR") == "host-agent" else "/var/lib/anas-spike/changes"
+
+# copy: a file or folder from wherever the assistant reads, nothing staged; applying copies it as the member.
+ALICE, MINE, OWN = pwd.getpwnam("alice").pw_uid, f"{DATA}/spaces/private/alice", f"{DATA}/assistant/alice/files"
+
+
+def copy(path, source):
+    return {"summary": "复制", "operations": [{"op": "copy", "path": path, "source": source}]}
+
+
+def approved(sub):
+    """Prepare, approve and apply a submission; the card's first operation and the reply."""
+    status, change = product("POST", "/changes/prepare", sub)
+    if status != 200:
+        return {}, f"{status} {json.dumps(change, ensure_ascii=False)[:200]}"
+    product("POST", f"/changes/{change['id']}/approve")
+    return change["operations"][0], agent("alice", "POST", "/apply", sub)
+
+
+def text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def leftovers(folder):
+    return [name for name in os.listdir(folder) if name.startswith(".a-nas-assistant-")]
+
+
+family = f"{DATA}/spaces/shared/family.md"
+op, result = approved(copy("/nas/个人空间/复制/家庭.md", "/nas/共享空间/family.md"))
+check("prepare a copy from Shared shows where from and its size", op.get("from") == "/nas/共享空间/family.md"
+      and op.get("size") == os.path.getsize(family) and not op.get("folder") and op.get("exists") is False, json.dumps(op, ensure_ascii=False))
+copied = f"{MINE}/复制/家庭.md"
+check("applies the copy as the member, into a new folder", "已执行" in result and os.path.exists(copied)
+      and text(copied) == text(family) and os.stat(copied).st_uid == ALICE, result)
+as_alice(f"printf '# 计划\\n- 复制来的新版本\\n' > '{STAGED}'")
+old = text(copied)
+op, result = approved(copy("/nas/个人空间/复制/家庭.md", "/nas/助手/待确认/个人空间/计划.md"))
+check("a copy that replaces a file moves the old one to the recycle bin", "已执行" in result and op.get("exists") is True
+      and "复制来的新版本" in text(copied) and text(f"{MINE}/.a-nas-trash/alice/复制/家庭.md") == old, result)
+
+as_alice(f"mkdir -p '{OWN}/素材/子' && printf aa > '{OWN}/素材/a.txt' && printf bbbb > '{OWN}/素材/子/b.txt'")
+folder_copy = copy("/nas/个人空间/素材", "/nas/助手/素材")
+op, result = approved(folder_copy)
+check("prepare a folder copy shows a folder with the size of its files", op.get("folder") is True and op.get("size") == 6,
+      json.dumps(op, ensure_ascii=False))
+check("applies a folder copy as the member", "已执行" in result and text(f"{MINE}/素材/子/b.txt") == "bbbb"
+      and os.stat(f"{MINE}/素材/子").st_uid == ALICE and not leftovers(MINE), result)
+status, change = product("POST", "/changes/prepare", folder_copy)
+check("a folder is not copied over an existing one", status == 422, json.dumps(change, ensure_ascii=False)[:200])
+status, change = product("POST", "/changes/prepare", copy("/nas/个人空间/复制/家庭.md", "/nas/助手/素材"))
+check("a folder is not copied over a file", status == 422 and "已经存在" in change.get("error", ""), json.dumps(change, ensure_ascii=False)[:200])
+status, change = product("POST", "/changes/prepare", copy("/nas/个人空间/素材", "/nas/共享空间/family.md"))
+check("a file is not copied over a folder", status == 422 and "不是普通文件" in change.get("error", ""), json.dumps(change, ensure_ascii=False)[:200])
+
+status, change = product("POST", "/changes/prepare", copy("/nas/个人空间/passwd", "/etc/passwd"))
+check("a source outside what the assistant reads is refused", status == 422 and "只能复制" in change.get("error", ""), json.dumps(change, ensure_ascii=False)[:200])
+as_alice(f"ln -sfn ../共享空间/family.md '{MINE}/链接'")
+status, change = product("POST", "/changes/prepare", copy("/nas/个人空间/链接副本", "/nas/个人空间/链接"))
+check("a link is not copied", status == 422 and "不能复制" in change.get("error", ""), json.dumps(change, ensure_ascii=False)[:200])
+as_alice(f"mkdir -p '{OWN}/带链接' && echo x > '{OWN}/带链接/a.txt' && ln -sfn /etc '{OWN}/带链接/系统'")
+op, result = approved(copy("/nas/个人空间/带链接", "/nas/助手/带链接"))
+check("a folder with a link inside is not copied, and nothing is left", "已执行" not in result and not os.path.exists(f"{MINE}/带链接")
+      and not leftovers(MINE), result)
+as_member("bob", f"echo bob-only > '{DATA}/spaces/shared/bob-only.txt' && chmod 600 '{DATA}/spaces/shared/bob-only.txt'")
+op, result = approved(copy("/nas/个人空间/bob-only.txt", "/nas/共享空间/bob-only.txt"))
+check("a file the member cannot read is not copied", "已执行" not in result and not os.path.exists(f"{MINE}/bob-only.txt"), result)
+
+as_alice(f"printf v1 > '{OWN}/素材/a.txt'")
+sub = copy("/nas/个人空间/a副本.txt", "/nas/助手/素材/a.txt")
+status, change = product("POST", "/changes/prepare", sub)
+product("POST", f"/changes/{change['id']}/approve")
+as_alice(f"printf 'v2, rewritten after the card' > '{OWN}/素材/a.txt'")
+result = agent("alice", "POST", "/apply", sub)
+check("a source changed after the card is not copied", "被改动过" in result and not os.path.exists(f"{MINE}/a副本.txt"), result)
+state ="/srv/a-nas/data/assistant/.changes" if os.environ.get("EXECUTOR") == "host-agent" else "/var/lib/anas-spike/changes"
 print("INFO state dir mode", oct(os.stat(state).st_mode & 0o777))
 PY
