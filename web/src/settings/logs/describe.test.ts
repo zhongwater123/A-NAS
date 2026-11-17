@@ -262,6 +262,11 @@ describe("activity sentences", () => {
         }),
       ),
     ).toBe("系统 请求安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
+    expect(
+      sentence(
+        event({ category: "system", action: "system.update.restart", actor: alice, detail: `{"version":"${next}"}` }),
+      ),
+    ).toBe("alice 重启了设备以使用 A-NAS 1.0.1-rc.6 开发版 4e842653");
     const back = describeActivity(
       event({
         category: "system",

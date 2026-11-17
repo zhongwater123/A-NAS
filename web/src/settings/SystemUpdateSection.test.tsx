@@ -191,6 +191,64 @@ describe("Settings → 系统更新", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("installs a new base on a device that runs the image, then restarts into it once confirmed", async () => {
+    const sent = serve({
+      status: systemUpdateStatus({
+        phase: "ready",
+        candidate: nextVersion,
+        suites: [],
+        image: { base: "1001", restart: true },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByRole("heading", { name: `${next} 可以安装` })).toBeTruthy();
+    expect(screen.getByText("安装后需要重启设备")).toBeTruthy();
+    const versions = screen.getByRole("region", { name: "版本" });
+    expect(within(versions).getByText("1001")).toBeTruthy();
+    expect(within(versions).queryByText("更新渠道")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "安装" }));
+    const dialog = screen.getByRole("dialog", { name: `安装 A-NAS ${next}？` });
+    expect(within(dialog).getByText(/写入备用分区/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "安装" }));
+
+    expect(await screen.findByRole("heading", { name: `${next} 已装好，重启后生效` })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "立即重启" }));
+    const restart = screen.getByRole("dialog", { name: "重启设备？" });
+    expect(within(restart).getByText(/开机检查没有通过时，会自动回到/)).toBeTruthy();
+    await user.click(within(restart).getByRole("button", { name: "重启" }));
+
+    expect(await screen.findByRole("heading", { name: "已是最新版本" })).toBeTruthy();
+    expect(sent.actions).toEqual(["install", "restart"]);
+  });
+
+  it("says a new base did not pass its boot check and the device went back", async () => {
+    serve({
+      status: systemUpdateStatus({
+        phase: "rolled-back",
+        suites: [],
+        image: { base: "1001", restart: false },
+        problem: { code: "boot", detail: "the base 1002 did not pass its boot check" },
+        records: [
+          {
+            at: "2026-11-17T03:10:00Z",
+            kind: "rolled-back",
+            version: nextVersion,
+            from: currentVersion,
+            by: "automatic",
+            problem: { code: "boot" },
+          },
+        ],
+      }),
+    });
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { name: `${next} 重启后没有通过开机检查，已回到 ${current}` }),
+    ).toBeTruthy();
+    expect(screen.getByText(`${next} 重启后没有通过开机检查，已回到 ${current}`, { selector: "span" })).toBeTruthy();
+  });
+
   it("saves the automatic download, the automatic install and its window", async () => {
     const sent = serve();
     const user = userEvent.setup();

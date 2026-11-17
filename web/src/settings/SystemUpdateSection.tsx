@@ -7,6 +7,7 @@ import {
   LoaderCircle,
   type LucideIcon,
   PackageCheck,
+  Power,
   RotateCcw,
   TriangleAlert,
 } from "lucide-react";
@@ -30,6 +31,8 @@ import { Banner, Group, Modal, PageHeader, Pill, Row } from "./parts";
 import styles from "./settings.module.css";
 
 type Action = SystemUpdateAction["action"];
+// The actions that ask first.
+type Confirmed = "install" | "revert" | "restart";
 
 // The page checks again when it opens and the last check is older than this.
 const checkAfterMs = 60 * 60_000;
@@ -43,7 +46,7 @@ export function SystemUpdateSection({ onOpenLogs }: { onOpenLogs: () => void }) 
   const { status, error: readError, pageVersion } = useSystemUpdate(true);
   const [sending, setSending] = useState<Action>();
   const [error, setError] = useState("");
-  const [confirm, setConfirm] = useState<"install" | "revert">();
+  const [confirm, setConfirm] = useState<Confirmed>();
 
   // Opening the page checks when the last check is an hour old.
   const looked = useRef(false);
@@ -112,7 +115,7 @@ export function SystemUpdateSection({ onOpenLogs }: { onOpenLogs: () => void }) 
         status={status}
         restarting={readError !== undefined && updateBusy(status)}
         sending={sending}
-        onAct={(action) => (action === "install" ? setConfirm("install") : void act(action))}
+        onAct={(action) => (action === "install" || action === "restart" ? setConfirm(action) : void act(action))}
       />
       <Group title="版本" anchor="update-version">
         <Row
@@ -127,11 +130,12 @@ export function SystemUpdateSection({ onOpenLogs }: { onOpenLogs: () => void }) 
             value={<VersionValue version={status.candidate} />}
           />
         )}
+        {status.image && <Row label="系统映像" value={<span className={styles.setMono}>{status.image.base}</span>} />}
         {status.suites.length > 0 && (
           <Row label="更新渠道" value={status.suites.map((suite) => suiteLabels[suite] ?? suite).join("与")} />
         )}
       </Group>
-      <SettingsGroup settings={status.settings} onError={setError} />
+      <SettingsGroup settings={status.settings} image={status.image !== undefined} onError={setError} />
       <Group
         title="记录"
         anchor="update-records"
@@ -195,6 +199,9 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
   const note = problem ? problemText(problem) : undefined;
   const check = { action: "check" as const, label: "检查更新" };
   const restart = restarting ? "服务正在重启，恢复后自动刷新" : "安装时服务会重启，恢复后自动刷新";
+  // On a device that runs the A-NAS image, a version with a new base is
+  // written beside the one that runs, and a restart starts it.
+  const needsRestart = status.image?.restart === true;
   switch (status.phase) {
     case "available":
       return {
@@ -225,8 +232,10 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
           status.waiting.length > 0
             ? `${status.waiting.map((what) => waitingText[what] ?? what).join("，")}，结束后可以安装`
             : settings.autoInstall
-              ? `将在 ${settings.windowStart}–${settings.windowEnd} 之间自动安装`
-              : undefined,
+              ? `将在 ${settings.windowStart}–${settings.windowEnd} 之间自动安装${needsRestart ? "并重启" : ""}`
+              : needsRestart
+                ? "安装后需要重启设备"
+                : undefined,
         note,
         why,
         action: { action: "install", label: "安装" },
@@ -237,9 +246,34 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
         icon: LoaderCircle,
         spin: true,
         title: `正在安装 ${versionLabel(status.target ?? "")}`,
-        detail: restart,
+        detail: needsRestart ? "正在写入新系统，服务照常运行" : restart,
         progress: null,
       };
+    case "restart-pending": {
+      const target = versionLabel(status.target ?? "");
+      // A restart was asked for: the device goes down, then comes back.
+      if (status.running || restarting)
+        return {
+          tone: "accent",
+          icon: LoaderCircle,
+          spin: true,
+          title: "设备正在重启",
+          detail: `重启后检查 ${target}，恢复后自动刷新`,
+          progress: null,
+        };
+      return {
+        tone: "accent",
+        icon: Power,
+        title: `${target} 已装好，重启后生效`,
+        detail:
+          status.waiting.length > 0
+            ? `${status.waiting.map((what) => waitingText[what] ?? what).join("，")}，结束后可以重启`
+            : settings.autoInstall
+              ? `将在 ${settings.windowStart}–${settings.windowEnd} 之间自动重启`
+              : undefined,
+        action: { action: "restart", label: "立即重启" },
+      };
+    }
     case "rolling-back":
       return {
         tone: "accent",
@@ -264,9 +298,10 @@ function present(status: SystemUpdateStatus, restarting: boolean): Presentation 
         tone: "warning",
         icon: TriangleAlert,
         title: record?.version
-          ? `${versionLabel(record.version)} 安装后检查没有通过，已回到 ${versionLabel(status.current ?? "")}`
+          ? `${versionLabel(record.version)} ${problem?.code === "boot" ? "重启后没有通过开机检查" : "安装后检查没有通过"}，已回到 ${versionLabel(status.current ?? "")}`
           : `已回到 ${versionLabel(status.current ?? "")}`,
-        detail: note,
+        // The title already says why the device went back from a new base.
+        detail: problem?.code === "boot" ? undefined : note,
         why,
         action: check,
       };
@@ -310,7 +345,7 @@ function StatusCard({
   const { action } = shown;
   // A check runs without changing the phase; its button says so.
   const checking = (status.running && action?.action === "check") || sending === "check";
-  const blocked = action?.action === "install" && status.waiting.length > 0;
+  const blocked = (action?.action === "install" || action?.action === "restart") && status.waiting.length > 0;
   return (
     <section
       className={`${styles.updHero} ${styles[shown.tone] ?? ""}`}
@@ -384,7 +419,15 @@ const windowPattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // SettingsGroup holds the automatic download and install. The install window
 // is saved when a time field is left with both times valid.
-function SettingsGroup({ settings, onError }: { settings: SystemUpdateSettings; onError: (text: string) => void }) {
+function SettingsGroup({
+  settings,
+  image,
+  onError,
+}: {
+  settings: SystemUpdateSettings;
+  image: boolean;
+  onError: (text: string) => void;
+}) {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ start: settings.windowStart, end: settings.windowEnd });
   const [seen, setSeen] = useState(settings);
@@ -427,7 +470,7 @@ function SettingsGroup({ settings, onError }: { settings: SystemUpdateSettings; 
       <div className={styles.setRow} data-setting="auto-install">
         <div className={styles.setRowText}>
           <span>自动安装</span>
-          <small>只在设定的时段内安装，安装时服务会重启</small>
+          <small>{image ? "只在设定的时段内安装，需要时重启设备" : "只在设定的时段内安装，安装时服务会重启"}</small>
         </div>
         <Switch.Root
           className={styles.setSwitch}
@@ -488,7 +531,9 @@ function recordText(record: SystemUpdateRecord): string {
     case "updated":
       return from ? `从 ${from} 更新到 ${version}` : `更新到 ${version}`;
     case "rolled-back":
-      return `${version} 安装后检查没有通过，已回到 ${from}`;
+      return record.problem?.code === "boot"
+        ? `${version} 重启后没有通过开机检查，已回到 ${from}`
+        : `${version} 安装后检查没有通过，已回到 ${from}`;
     case "reverted":
       return `从 ${from} 回到 ${version}`;
     case "check-failed":
@@ -520,42 +565,62 @@ function ConfirmDialog({
   onClose,
   onConfirm,
 }: {
-  kind: "install" | "revert";
+  kind: Confirmed;
   status: SystemUpdateStatus;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const current = versionLabel(status.current ?? "");
-  const install = kind === "install";
-  const version = versionLabel((install ? status.candidate : status.previous) ?? "");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
     await onConfirm();
     setBusy(false);
   };
+  const asked = confirmation(kind, status, current);
   return (
-    <Modal
-      title={install ? `安装 A-NAS ${version}？` : `回到 A-NAS ${version}？`}
-      description={
-        install
-          ? `安装期间 A-NAS 的服务会重启，正在进行的上传、终端与相册整理会中断后重连。安装后的检查没有通过时，会自动回到 ${current}。`
-          : `A-NAS 的服务会重启，正在进行的上传、终端与相册整理会中断后重连。之后不会再自动安装 ${current}，直到出现更新的版本。`
-      }
-      busy={busy}
-      onClose={onClose}
-    >
+    <Modal title={asked.title} description={asked.description} busy={busy} onClose={onClose}>
       <form className={styles.setDialogForm} onSubmit={(event) => void submit(event)}>
         <footer>
           <button type="button" className={styles.setBtn} onClick={onClose} disabled={busy}>
             取消
           </button>
           <button className={`${styles.setBtn} primary`} disabled={busy} autoFocus>
-            {busy ? "正在开始…" : install ? "安装" : "回到这个版本"}
+            {busy ? "正在开始…" : asked.button}
           </button>
         </footer>
       </form>
     </Modal>
   );
+}
+
+// confirmation is what the dialog asks before an action that interrupts the
+// services or restarts the device.
+function confirmation(kind: Confirmed, status: SystemUpdateStatus, current: string) {
+  const interrupted = "正在进行的上传、终端与相册整理会中断";
+  switch (kind) {
+    case "install": {
+      const version = versionLabel(status.candidate ?? "");
+      return {
+        title: `安装 A-NAS ${version}？`,
+        description: status.image?.restart
+          ? `新系统写入备用分区，写入期间服务照常运行。之后重启设备生效，重启时${interrupted}；重启后的开机检查没有通过时，会自动回到 ${current}。`
+          : `安装期间 A-NAS 的服务会重启，${interrupted}后重连。安装后的检查没有通过时，会自动回到 ${current}。`,
+        button: "安装",
+      };
+    }
+    case "restart":
+      return {
+        title: "重启设备？",
+        description: `重启需要几分钟，期间无法访问 A-NAS，${interrupted}。${versionLabel(status.target ?? "")} 开机检查没有通过时，会自动回到 ${current}。`,
+        button: "重启",
+      };
+    case "revert":
+      return {
+        title: `回到 A-NAS ${versionLabel(status.previous ?? "")}？`,
+        description: `A-NAS 的服务会重启，${interrupted}后重连。之后不会再自动安装 ${current}，直到出现更新的版本。`,
+        button: "回到这个版本",
+      };
+  }
 }
