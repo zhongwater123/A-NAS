@@ -267,7 +267,7 @@ for _ in $(seq 1 180); do
   g pgrep -x systemd-sysupdate >/dev/null 2>&1 && break
   sleep 1
 done
-sleep 3
+sleep 2
 power_cut
 boot_until_up 3
 check "a power cut while a base is written leaves the device on its version" test "$(booted)" = 1001
