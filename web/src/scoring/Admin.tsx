@@ -68,6 +68,7 @@ import {
   formatWhen,
   repeatGood,
   repeatPoor,
+  type Scale,
   sameRunAlert,
   share,
   stateLabel,
@@ -422,6 +423,8 @@ function BatchDetail({
                 ))}
               </span>
             </dd>
+            <dt>打分方式</dt>
+            <dd>{scaleSaid(batch)}</dd>
             <dt>打分标准</dt>
             <dd className={styles.scRubricClamp}>{batch.rubric || "没有写"}</dd>
           </dl>
@@ -458,6 +461,7 @@ function BatchDetail({
             stats={stats}
             dimension={batch.dimensions.find((dimension) => dimension.id === shownDimension) ?? batch.dimensions[0]}
             several={batch.dimensions.length > 1}
+            scale={batch.scale}
           />
         )}
       </section>
@@ -564,10 +568,12 @@ function StatsTable({
   stats,
   dimension,
   several,
+  scale,
 }: {
   stats: ScoringRaterStats[];
   dimension: ScoringDimension;
   several: boolean;
+  scale: Scale;
 }) {
   return (
     <table className={styles.scTable}>
@@ -599,7 +605,8 @@ function StatsTable({
           if (row.scores > 0 && row.fastShare >= fastShareAlert) {
             alerts.push(`${formatPercent(row.fastShare)} 的照片在 1 秒内打完`);
           }
-          if (item && item.longestRun >= sameRunAlert) {
+          // Whole points and three levels give one score many times in a row.
+          if (item && withDecimals(scale) && item.longestRun >= sameRunAlert) {
             alerts.push(`${several ? dimension.name : ""}连续 ${formatCount(item.longestRun)} 张同分`);
           }
           const agreement = item?.agreement ?? null;
@@ -703,6 +710,8 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   const [required, setRequired] = useState(3);
   const [rubric, setRubric] = useState("");
   const [dimensions, setDimensions] = useState<DimensionID[]>([]);
+  const [scale, setScale] = useState<Scale>("hundredths");
+  const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
@@ -724,7 +733,17 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     event.preventDefault();
     setBusy(true);
     try {
-      onCreated(await createBatch({ name: name.trim(), source, required, rubric: rubric.trim(), dimensions }));
+      onCreated(
+        await createBatch({
+          name: name.trim(),
+          source,
+          required,
+          rubric: rubric.trim(),
+          dimensions,
+          scale,
+          hideDecimals: hidden,
+        }),
+      );
     } catch (caught) {
       setFailure(scoringError(caught));
       setBusy(false);
@@ -789,13 +808,16 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
               rubric={rubric}
               setRubric={setRubric}
               items={
-                <DimensionPicker
-                  catalogue={catalogue}
-                  onMade={add}
-                  chosen={dimensions}
-                  setChosen={setDimensions}
-                  locked={false}
-                />
+                <>
+                  <DimensionPicker
+                    catalogue={catalogue}
+                    onMade={add}
+                    chosen={dimensions}
+                    setChosen={setDimensions}
+                    locked={false}
+                  />
+                  <ScalePicker scale={scale} setScale={setScale} hidden={hidden} setHidden={setHidden} locked={false} />
+                </>
               }
             />
             <MinimumNote />
@@ -889,6 +911,98 @@ function DimensionPicker({
           : chosen.length === 0
             ? "至少选一项。按点选的先后顺序打分，再点一次取消。"
             : "按点选的先后顺序打分，再点一次取消。有人打过分后不能再改。"}
+      </p>
+    </div>
+  );
+}
+
+// The scales a batch can be scored on, each with what a score looks like.
+const scaleChoices: { scale: Scale; example: string; name: string; about: string }[] = [
+  { scale: "hundredths", example: "3.47", name: "数轴 · 两位小数", about: "0–5，精确到 0.01" },
+  { scale: "tenths", example: "3.5", name: "数轴 · 一位小数", about: "0–5，精确到 0.1" },
+  { scale: "whole", example: "3", name: "数轴 · 整数", about: "0–5，只有整数" },
+  { scale: "three", example: "中", name: "三档", about: "差 1 · 中 3 · 好 5" },
+];
+const withDecimals = (scale: Scale) => scale === "hundredths" || scale === "tenths";
+
+// scaleSaid names a batch's scale on its page.
+const scaleSaid = (batch: Pick<ScoringBatch, "scale" | "hideDecimals">) => {
+  const choice = scaleChoices.find((candidate) => candidate.scale === batch.scale);
+  return `${choice?.name ?? batch.scale}${batch.hideDecimals ? "，打分人看不到分数" : ""}`;
+};
+
+// ScalePicker chooses how every 打分项 of a batch is scored and, on a scale
+// with decimals, whether raters see them or score by the place on the number
+// line alone. A batch with an answer keeps its own.
+function ScalePicker({
+  scale,
+  setScale,
+  hidden,
+  setHidden,
+  locked,
+}: {
+  scale: Scale;
+  setScale: (scale: Scale) => void;
+  hidden: boolean;
+  setHidden: (hidden: boolean) => void;
+  locked: boolean;
+}) {
+  const label = useId();
+  const hint = useId();
+  const group = useId();
+  const step = scale === "hundredths" ? "0.01" : "0.1";
+  return (
+    <div className={styles.scField}>
+      <div className={styles.scFieldHead}>
+        <span id={label} className={styles.scFieldLabel}>
+          打分方式
+        </span>
+      </div>
+      <div className={styles.scScales} role="radiogroup" aria-labelledby={label} aria-describedby={hint}>
+        {scaleChoices.map((choice) => (
+          <label key={choice.scale} className={styles.scScaleChoice}>
+            <input
+              type="radio"
+              name={group}
+              value={choice.scale}
+              checked={choice.scale === scale}
+              disabled={locked}
+              onChange={() => {
+                setScale(choice.scale);
+                if (!withDecimals(choice.scale)) setHidden(false);
+              }}
+            />
+            <span
+              className={`${styles.scScaleExample}${choice.scale === "three" ? ` ${styles.word}` : ""}`}
+              aria-hidden="true"
+            >
+              {choice.example}
+            </span>
+            <b>{choice.name}</b>
+            <small>{choice.about}</small>
+          </label>
+        ))}
+      </div>
+      {withDecimals(scale) && (
+        <label className={styles.scCheck}>
+          <input
+            type="checkbox"
+            checked={!hidden}
+            disabled={locked}
+            onChange={(event) => setHidden(!event.target.checked)}
+          />
+          <span>
+            打分人看得到小数
+            <small>
+              {hidden
+                ? `数轴上只标 0–5 整数，打分人按位置打分，看不到分数；导出的分数仍精确到 ${step}。`
+                : `打分时显示选中的分数，如 ${scale === "hundredths" ? "3.47" : "3.5"}。`}
+            </small>
+          </span>
+        </label>
+      )}
+      <p id={hint} className={styles.scHint}>
+        {locked ? "批次已有打分，打分方式不能再改。" : "所有打分项用同一种方式。有人打过分后不能再改。"}
       </p>
     </div>
   );
@@ -1091,6 +1205,8 @@ function EditBatchDialog({
   const [required, setRequired] = useState(batch.required);
   const [rubric, setRubric] = useState(batch.rubric);
   const [dimensions, setDimensions] = useState(batch.dimensions.map((dimension) => dimension.id));
+  const [scale, setScale] = useState<Scale>(batch.scale);
+  const [hidden, setHidden] = useState(batch.hideDecimals);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = batch.answers > 0;
@@ -1103,7 +1219,7 @@ function EditBatchDialog({
           name: name.trim(),
           required,
           rubric: rubric.trim(),
-          ...(locked ? {} : { dimensions }),
+          ...(locked ? {} : { dimensions, scale, hideDecimals: hidden }),
         }),
       );
     } catch (caught) {
@@ -1144,13 +1260,16 @@ function EditBatchDialog({
           rubric={rubric}
           setRubric={setRubric}
           items={
-            <DimensionPicker
-              catalogue={catalogue}
-              onMade={add}
-              chosen={dimensions}
-              setChosen={setDimensions}
-              locked={locked}
-            />
+            <>
+              <DimensionPicker
+                catalogue={catalogue}
+                onMade={add}
+                chosen={dimensions}
+                setChosen={setDimensions}
+                locked={locked}
+              />
+              <ScalePicker scale={scale} setScale={setScale} hidden={hidden} setHidden={setHidden} locked={locked} />
+            </>
           }
         />
       </form>

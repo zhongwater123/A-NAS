@@ -994,6 +994,75 @@
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
   color: #1a1a1a;
 }
+/* Whole points: a stop on each, nothing between. */
+.sc-stop {
+  position: absolute;
+  z-index: 1;
+  top: 132px;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: #191919;
+  box-shadow: inset 0 0 0 1.5px rgba(242, 240, 236, 0.32);
+  transition: box-shadow 0.15s;
+}
+.sc-stop.hover {
+  box-shadow: inset 0 0 0 1.5px rgba(242, 240, 236, 0.7);
+}
+/* Three levels: three wide places to click instead of a scale. */
+.sc-ruler.levels {
+  cursor: pointer;
+}
+.sc-zone {
+  position: absolute;
+  top: 124px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 56px;
+  border-radius: 12px;
+  background: rgba(242, 240, 236, 0.025);
+  box-shadow: inset 0 0 0 1px var(--sc-hair);
+  color: var(--sc-ink-2);
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
+}
+.sc-zone b {
+  margin-inline-end: -0.3em;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+}
+.sc-zone small {
+  color: var(--sc-ink-3);
+  font: 400 17px / 1 var(--sc-serif);
+}
+.sc-zone kbd {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 12px;
+  transform: translateY(-50%);
+}
+.sc-zone.hover {
+  background: rgba(242, 240, 236, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(242, 240, 236, 0.36);
+  color: var(--sc-ink);
+}
+.sc-zone.on {
+  background: rgba(240, 180, 90, 0.13);
+  box-shadow: inset 0 0 0 1.5px var(--sc-accent);
+  color: var(--sc-accent);
+}
+.sc-zone.on small {
+  color: rgba(240, 180, 90, 0.75);
+}
+.sc-ruler.levels .sc-last-dot {
+  top: 124px;
+}
 
 .sc-reading {
   display: flex;
@@ -1032,6 +1101,39 @@
 .sc-out-of {
   color: var(--sc-ink-3);
   font: 300 22px / 1 var(--sc-serif);
+}
+/* Three levels and hidden scores: nothing to type, the level's word or
+   only that a place is chosen. */
+.sc-no-score {
+  color: var(--sc-ink-4);
+  font: 300 76px / 0.9 var(--sc-serif);
+}
+.sc-level {
+  color: var(--sc-ink);
+  font-size: 60px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+}
+.sc-placed {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sc-ink-2);
+  font-size: 22px;
+  letter-spacing: 0.12em;
+  line-height: 68px;
+}
+.sc-placed i {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--sc-accent);
+  box-shadow: 0 0 0 4px rgba(240, 180, 90, 0.18);
+}
+.sc-item b.sc-item-set {
+  color: var(--sc-accent);
+  font-size: 13px;
 }
 .sc-say {
   min-height: 18px;
@@ -2064,6 +2166,107 @@
 }
 .sc-hint.warn {
   color: var(--sc-accent);
+}
+/* 打分方式: four cards, each with what a score looks like on it. */
+.sc-scales {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+@container scoringwindow (max-width: 760px) {
+  .sc-scales {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.sc-scale-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 11px 12px 10px;
+  border-radius: 12px;
+  background: rgba(242, 240, 236, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(242, 240, 236, 0.09);
+  color: var(--sc-ink-2);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+/* The radio covers its card unseen, so a click anywhere on it chooses. */
+.sc-scale-choice input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.sc-scale-choice b {
+  color: var(--sc-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.sc-scale-choice small {
+  color: var(--sc-ink-3);
+  font-size: 11.5px;
+}
+.sc-scale-example {
+  margin-bottom: 4px;
+  color: var(--sc-ink-3);
+  font: 300 30px / 1.05 var(--sc-serif);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
+}
+.sc-scale-example.word {
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.3em;
+}
+.sc-scale-choice:hover {
+  background: rgba(242, 240, 236, 0.08);
+}
+.sc-scale-choice:has(input:checked) {
+  background: var(--sc-accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--sc-accent);
+}
+.sc-scale-choice:has(input:checked) .sc-scale-example {
+  color: var(--sc-accent);
+}
+.sc-scale-choice:has(input:focus-visible) {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 2px;
+}
+.sc-scale-choice:has(input:disabled) {
+  cursor: default;
+}
+.sc-scale-choice:has(input:disabled):not(:has(input:checked)) {
+  opacity: 0.45;
+}
+.sc-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--sc-ink);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.sc-check input {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: var(--sc-accent);
+}
+.sc-check small {
+  display: block;
+  margin-top: 2px;
+  color: var(--sc-ink-3);
+  font-size: 12px;
 }
 /* Making a custom 打分项, in place under the choices. */
 .sc-maker {
