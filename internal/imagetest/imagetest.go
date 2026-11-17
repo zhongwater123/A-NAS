@@ -1,7 +1,7 @@
 // Package imagetest gives tests of in-process image decoding a picture whose
 // decoder panics, as a decoder with a bug may on a malformed picture, a
-// picture whose decoder waits for the test, and a record of the panics decode
-// guards log.
+// picture whose decoder returns pixels outside their palette, a picture whose
+// decoder waits for the test, and a record of the panics decode guards log.
 package imagetest
 
 import (
@@ -24,9 +24,13 @@ import (
 // The pictures do not start with a NUL byte: ID3 readers take one after a
 // picture's description for part of the description.
 var (
-	panicking = []byte("\x01anas-panicking-picture")
-	held      = []byte("\x01anas-held-picture")
+	panicking      = []byte("\x01anas-panicking-picture")
+	outsidePalette = []byte("\x01anas-outside-palette-picture")
+	held           = []byte("\x01anas-held-picture")
 )
+
+// twoColours is the palette of the OutsidePalettePicture.
+var twoColours = color.Palette{color.Black, color.White}
 
 // PanicMessage is the panic of the PanickingPicture decoder. It stands for
 // input a decoder quotes, so guards must not log it.
@@ -44,6 +48,13 @@ var register = sync.OnceFunc(func() {
 		func(io.Reader) (image.Image, error) { panic(PanicMessage) },
 		func(io.Reader) (image.Config, error) {
 			return image.Config{ColorModel: color.RGBAModel, Width: 64, Height: 48}, nil
+		})
+	image.RegisterFormat("webp", string(outsidePalette[:8]),
+		func(io.Reader) (image.Image, error) {
+			return &image.Paletted{Pix: []uint8{1, 70}, Stride: 2, Rect: image.Rect(0, 0, 2, 1), Palette: twoColours}, nil
+		},
+		func(io.Reader) (image.Config, error) {
+			return image.Config{ColorModel: twoColours, Width: 2, Height: 1}, nil
 		})
 	image.RegisterFormat("webp", string(held[:8]),
 		func(io.Reader) (image.Image, error) {
@@ -68,6 +79,15 @@ var register = sync.OnceFunc(func() {
 func PanickingPicture() []byte {
 	register()
 	return slices.Clone(panicking)
+}
+
+// OutsidePalettePicture returns a picture whose header reads as a 2x1 WebP
+// with a palette of two colours and whose decoder returns pixel 70 in it, as
+// in CVE-2023-36308. imaging looks that pixel up in goroutines of its own, so
+// a decode point that hands it to imaging ends the test binary.
+func OutsidePalettePicture() []byte {
+	register()
+	return slices.Clone(outsidePalette)
 }
 
 // HeldPicture returns a picture whose header reads as a width x height WebP

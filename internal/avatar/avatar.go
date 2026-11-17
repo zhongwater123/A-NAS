@@ -16,6 +16,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/imagerender"
 )
 
 // Size is the edge of a stored avatar in pixels: twice the largest place a
@@ -67,7 +68,7 @@ func Normalize(picture []byte) (normalized []byte, err error) {
 	if config.Width*config.Height > maxPixels {
 		return nil, ErrTooLarge
 	}
-	source, err := imaging.Decode(bytes.NewReader(picture), imaging.AutoOrientation(true))
+	source, err := imagerender.Decode(bytes.NewReader(picture), imaging.AutoOrientation(true))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
