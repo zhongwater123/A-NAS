@@ -49,10 +49,11 @@ const bridge = createWorkStatusBridge({ state: companionState, workStatus: store
 /** Live conversations whose turn this window started and has not seen end. */
 const prompting = new Set<string>();
 /**
- * Waiting entries for the member's cards, by card: the entry, its turn's conversation, and the step that turn
- * was at when the card came.
+ * Waiting entries for the member's cards, by card: the entry, its turn's conversation (live), the step that
+ * turn was at when the card came, and the conversation as stored that the card belongs to (null while it is
+ * not known). In the order they came.
  */
-const cards = new Map<string, { id: string; sessionId: string; step: string | null }>();
+const cards = new Map<string, { id: string; sessionId: string; step: string | null; conversation: string | null }>();
 /**
  * The turns this window started, by conversation: since when, how many tool calls it made (steps, as a click
  * tells them), how many of VNAS's own tools (tools), whether something waited for the member, and whether it
@@ -281,6 +282,25 @@ export function cardWaiting(): boolean {
 }
 
 /**
+ * The conversation, as stored, of the card that has waited longest for the member in a turn this window
+ * started, of those whose conversation is known; null when none is (conversations not stored yet), undefined
+ * when no card waits.
+ */
+export function waitingConversation(): string | null | undefined {
+  if (cards.size === 0) return undefined;
+  for (const card of cards.values()) if (card.conversation) return card.conversation;
+  return null;
+}
+
+/**
+ * Whether a turn this window started has not ended yet: from its prompt on, before its first stage too
+ * (thinking comes with message.start, seconds later), until its message.complete, stop or withdrawal.
+ */
+export function turnInFlight(): boolean {
+  return prompting.size > 0;
+}
+
+/**
  * The newest turn of this window under way (not ended, no card waiting in it): how many of VNAS's tools it
  * called, since when, and the line its stage shows now; null when none is.
  */
@@ -346,11 +366,13 @@ function bigTurn(turn: Turn): boolean {
 }
 
 /** The member's cards: each one awaiting a decision in a turn this window started is a waiting entry. */
-export function reportCards(list: Iterable<{ requestId: string; sessionId: string; status: string }>): void {
-  const waiting = new Map<string, string>();
+export function reportCards(
+  list: Iterable<{ requestId: string; sessionId: string; status: string; storedSessionId?: string | null }>,
+): void {
+  const waiting = new Map<string, { sessionId: string; conversation: string | null }>();
   for (const card of list)
     if (card.status === "awaiting" && prompting.has(card.sessionId)) {
-      waiting.set(card.requestId, card.sessionId);
+      waiting.set(card.requestId, { sessionId: card.sessionId, conversation: card.storedSessionId || null });
       const turn = turns.get(card.sessionId);
       if (turn) turn.waited = true;
     }
@@ -360,12 +382,17 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
       keepCardClip(card.sessionId, card.step);
       clear(card.id);
     }
-  for (const [requestId, sessionId] of waiting)
-    if (!cards.has(requestId)) {
-      const id = `card:${requestId}`;
-      cards.set(requestId, { id, sessionId, step: stepCall(lines.get(sessionId)?.key) });
-      set(id, "waiting", behaviorStep("waiting", "card"));
+  for (const [requestId, { sessionId, conversation }] of waiting) {
+    const known = cards.get(requestId);
+    if (known) {
+      // A conversation stored after its card came.
+      known.conversation ??= conversation;
+      continue;
     }
+    const id = `card:${requestId}`;
+    cards.set(requestId, { id, sessionId, step: stepCall(lines.get(sessionId)?.key), conversation });
+    set(id, "waiting", behaviorStep("waiting", "card"));
+  }
 }
 
 /**

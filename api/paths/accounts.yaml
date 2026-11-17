@@ -161,8 +161,8 @@
       "201": { description: Member created, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/User" } } } }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/users/{userId}:
-  delete:
+/api/v1/users/{userId}/disable:
+  post:
     operationId: disableUser
     x-anas-posture: admin
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
@@ -172,6 +172,48 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/users/{userId}/enable:
+  post:
+    operationId: enableUser
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    description: >-
+      Enable a disabled account again with the password it had. Web sign-in comes back first; if the Host Agent cannot
+      enable SMB access or the assistant, the response is 503 host_enable_pending and enabling again, or the next start's
+      identity synchronization, finishes them. An account waiting to be deleted answers 409 deletion_pending.
+    responses:
+      "204": { description: User enabled }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/users/{userId}/deletion:
+  put:
+    operationId: scheduleUserDeletion
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    description: >-
+      Delete a disabled member's account after 30 days, with the administrator's password again (403
+      reauthentication_failed). Until then nothing of it changes and the deletion can be cancelled. Its personal space
+      and private photo library each go to the administrator or are deleted, as chosen. An account that is not disabled
+      answers 409 account_not_disabled, one already waiting 409 deletion_pending.
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/DeletionRequest" } } } }
+    responses:
+      "200": { description: The account with its deletion, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/User" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: cancelUserDeletion
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    description: Keep an account that is waiting to be deleted; it stays disabled. Once its data is being removed it answers 409 deletion_started.
+    responses:
+      "204": { description: Deletion cancelled }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/users/{userId}/credential:
   patch:
     operationId: resetUserCredential

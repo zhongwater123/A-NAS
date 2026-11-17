@@ -19,7 +19,7 @@ import (
 // thumbnail at its score for reference.
 type RecentScore struct {
 	Token string
-	// Score is overall in hundredths, Scores the batch's other dimensions.
+	// Score is the batch's first 打分项 in hundredths, Scores its others.
 	Score         int
 	Scores        map[string]int
 	Width, Height int

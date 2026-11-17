@@ -79,10 +79,7 @@ else
   public=${ANAS_RELEASE_PUBLIC_KEY:-$repo/deploy/release/a-nas-archive-key.asc}
   subkey=$(ANAS_RELEASE_GNUPGHOME=$gnupg ANAS_RELEASE_PUBLIC_KEY=$public "$repo/scripts/release-key.sh" check) || exit 2
   ask_passphrase
-  # shellcheck disable=SC2016 # the container's shell expands these
-  in_image --passphrase "$gnupg:/gnupg" -- bash -c 'printf x | gpg --batch --quiet --pinentry-mode loopback \
-    --passphrase-file /secret/passphrase --local-user "$1!" --detach-sign >/dev/null 2>&1' bash "$subkey" ||
-    { echo "the passphrase does not unlock subkey $subkey in $gnupg" >&2; exit 2; }
+  passphrase_unlocks "$gnupg" "$subkey" || { echo "the passphrase does not unlock subkey $subkey in $gnupg" >&2; exit 2; }
   signer="$("$repo/scripts/apt-repository.sh" fingerprint "$gnupg"), subkey $subkey"
 fi
 "$repo/scripts/apt-repository.sh" signed-by "$repository" "$public" ||

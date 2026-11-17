@@ -115,6 +115,73 @@ type CredentialProvisioner interface {
 	DisableCredential(context.Context, string) error
 }
 
+// EnableRequest gives a disabled account its host access back with the
+// password it had. SMB is false while the account must choose a new password:
+// its SMB credential and assistant then stay off until it does.
+type EnableRequest struct {
+	Username string
+	SMB      bool
+}
+
+// CredentialEnabler undoes DisableCredential.
+type CredentialEnabler interface {
+	EnableCredential(context.Context, EnableRequest) error
+}
+
+// AccountRemoval is a deleted account the Host Agent removes for good
+// (docs/specs/account-enable-and-delete.md). TransferTo names the
+// administrator who receives the account's personal space and Agent空间
+// folder; empty deletes them. Folder is the name the transferred files get in
+// that administrator's personal space, with a number added when it is taken.
+//
+// The Host Agent reads all of it from the control plane, as the photo, share
+// and family services read AccountDeletion: of the Product Service's request
+// it takes only UserID.
+type AccountRemoval struct {
+	UserID         string
+	Username       string
+	UID            int
+	PrivateSpaceID string
+	TransferTo     string
+	TransferToUID  int
+	Folder         string
+}
+
+// ErrNotDeleting answers a service that asks about an account whose deletion
+// has not started.
+var ErrNotDeleting = errors.New("the account is not being deleted")
+
+// AccountDeletion is what the Host Agent tells the photo, share and family
+// services about an account whose deletion has started, read from the
+// control plane: they act on it, never on the Product Service's word. Each
+// of PersonalSpace and Library is "transfer" or "delete"; an administrator
+// is named only when one of them is a transfer and that administrator still
+// administers the device.
+type AccountDeletion struct {
+	UserID        string `json:"userId"`
+	Username      string `json:"username"`
+	PersonalSpace string `json:"personalSpace"`
+	Library       string `json:"library"`
+	AdminID       string `json:"adminId,omitempty"`
+	AdminUsername string `json:"adminUsername,omitempty"`
+}
+
+// HandoverFolder and HandoverAlbum name what an administrator receives from
+// an account deleted with a transfer: a folder in their personal space and an
+// album in their private photo library.
+func HandoverFolder(username string) string { return username + " 的文件" }
+
+func HandoverAlbum(username string) string { return username + " 的照片" }
+
+// AccountRemover removes an account's host identity and the data kept under
+// its name, and returns the folder of the administrator's personal space that
+// holds its handed-over files, as named now; empty when nothing was handed
+// over. Every step treats what is already gone as done, so a request that
+// failed part way is sent again, and it still returns the folder.
+type AccountRemover interface {
+	RemoveAccount(context.Context, AccountRemoval) (string, error)
+}
+
 // Identity is the Linux account the Host Agent keeps for one A-NAS user.
 type Identity struct {
 	Username string

@@ -39,7 +39,9 @@ paths:
   /api/v1/users/{userId}/viewing: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1viewing" }
   /api/v1/viewing/{grantId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1viewing~1{grantId}" }
   /api/v1/users: { $ref: "paths/accounts.yaml#/~1api~1v1~1users" }
-  /api/v1/users/{userId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}" }
+  /api/v1/users/{userId}/disable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1disable" }
+  /api/v1/users/{userId}/enable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1enable" }
+  /api/v1/users/{userId}/deletion: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1deletion" }
   /api/v1/users/{userId}/credential: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1credential" }
   /api/v1/local-display: { $ref: "paths/desktop.yaml#/~1api~1v1~1local-display" }
   /api/v1/wallpaper: { $ref: "paths/desktop.yaml#/~1api~1v1~1wallpaper" }
@@ -147,6 +149,7 @@ paths:
   /api/v1/modules/scoring/claims/{token}/thumbnail: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1thumbnail" }
   /api/v1/modules/scoring/claims/{token}/rating: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1rating" }
   /api/v1/modules/scoring/admin/sources: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1sources" }
+  /api/v1/modules/scoring/admin/dimensions: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1dimensions" }
   /api/v1/modules/scoring/admin/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches" }
   /api/v1/modules/scoring/admin/batches/{batchId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}" }
   /api/v1/modules/scoring/admin/batches/{batchId}/stats: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1stats" }
@@ -383,6 +386,9 @@ components:
     NewUsername: { $ref: "components/accounts.yaml#/schemas/NewUsername" }
     NewPassword: { $ref: "components/accounts.yaml#/schemas/NewPassword" }
     User: { $ref: "components/accounts.yaml#/schemas/User" }
+    Deletion: { $ref: "components/accounts.yaml#/schemas/Deletion" }
+    DeletionChoice: { $ref: "components/accounts.yaml#/schemas/DeletionChoice" }
+    DeletionRequest: { $ref: "components/accounts.yaml#/schemas/DeletionRequest" }
     Profile: { $ref: "components/accounts.yaml#/schemas/Profile" }
     ProfileChange: { $ref: "components/accounts.yaml#/schemas/ProfileChange" }
     PasswordChange: { $ref: "components/accounts.yaml#/schemas/PasswordChange" }
@@ -486,6 +492,7 @@ components:
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
+    ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }
     ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }
     ScoringAnchor: { $ref: "components/scoring.yaml#/schemas/ScoringAnchor" }
     ScoringRecentScore: { $ref: "components/scoring.yaml#/schemas/ScoringRecentScore" }

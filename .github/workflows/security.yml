@@ -1,0 +1,43 @@
+name: Security
+
+# Gitleaks reads the history of the commit under test (make secrets-check):
+# a pull request's merge commit, or main after a merge. It needs the whole
+# history, so it runs here and not in `make check`: fetching the tags there
+# would change the version scripts/release-version.sh gives the build.
+# No schedule: main's history changes only by merges, which run this, and a
+# new Gitleaks release comes as a Dependabot pull request (tools/gitleaks).
+# This is not a check the ruleset requires unless its job name is added there.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: Secrets in Git history
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository with its history
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+          cache: true
+          cache-dependency-path: tools/gitleaks/go.sum
+
+      - name: Scan the history for secrets
+        run: make secrets-check

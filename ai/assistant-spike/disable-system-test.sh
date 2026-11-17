@@ -57,13 +57,13 @@ check "bob's assistant is running before he is disabled" systemctl is-active --q
 ) &
 restarts=$!
 check "disabling a task owner succeeds through the product API" \
-  test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user")" = 204
+  test "$(status_of -X POST -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user/disable")" = 204
 kill "$restarts"
 wait "$restarts" 2>/dev/null || true
 check "disabling stops his assistant although it kept being started" \
   test "$(systemctl show -p MainPID --value anas-assistant@bob.service)" = 0
 check "disabling him again only retries and succeeds" \
-  test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user")" = 204
+  test "$(status_of -X POST -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user/disable")" = 204
 check "the Host Agent rejects the disabled scheduled-task owner" \
   test "$(status_of --unix-socket "$host_socket" -H 'Content-Type: application/json' \
     -d "{\"uid\":$bob_uid}" http://host-agent/v1/accounts/resolve-uid)" = 401
