@@ -1120,6 +1120,24 @@
   color: var(--as-muted);
   font-size: 12px;
 }
+/* What a write puts there that the card does not show (#172). */
+.as-op-warn {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--as-danger);
+  background: var(--as-danger-soft);
+  font-size: 12px;
+}
+.as-unseen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 14px 0;
+  color: var(--as-ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
 .as-op-title code {
   padding: 1px 6px;
   border-radius: 5px;

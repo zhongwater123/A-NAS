@@ -7614,7 +7614,7 @@ export interface components {
                 to?: string;
                 /** @description What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder). */
                 from?: string;
-                /** @description Bytes a copy copies; a folder's files together. */
+                /** @description Bytes a copy copies, a folder's files together, or a write leaves. */
                 size?: number;
                 /** @description A copy of a whole folder. */
                 folder?: boolean;
@@ -7622,8 +7622,16 @@ export interface components {
                 exists?: boolean;
                 /** @description Text of a written file when the card was made; absent when it is new or not text. */
                 before?: string;
-                /** @description Text the write leaves; absent when it is not text. */
+                /** @description Text the write leaves, at most its first 64 KiB; absent when it is not text. */
                 after?: string;
+                /** @description Bytes of the file a write replaces. */
+                beforeSize?: number;
+                /** @description after is only the start of what the write leaves: the member has not seen all of it. */
+                partial?: boolean;
+                /** @description What the write leaves is not text, so the card shows none of it. */
+                binary?: boolean;
+                /** @description before is only the start of the file the write replaces. */
+                beforePartial?: boolean;
             }[];
         } & {
             [key: string]: unknown;

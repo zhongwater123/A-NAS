@@ -1523,15 +1523,25 @@ const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, st
   );
 };
 
-function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean): Promise<void> }) {
+export function ApprovalCard({
+  approval,
+  onDecide,
+}: {
+  approval: Approval;
+  onDecide(confirm: boolean): Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
   const choose = (confirm: boolean) => {
     setBusy(true);
     void onDecide(confirm).finally(() => setBusy(false));
   };
+  const [seen, setSeen] = useState(false);
   const { change, status } = approval;
   if (!change) return null;
   const operations = change.operations ?? [];
+  // A write whose new content the card cannot show whole needs the member to
+  // say so before confirming: the rest goes in unseen (#172).
+  const unseen = operations.some((operation) => operation.op === "write" && (operation.partial || operation.binary));
   return (
     <article className={styles.asChange}>
       <header>
@@ -1548,6 +1558,12 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
           <OperationRow key={index} operation={operation} />
         ))}
       </ul>
+      {unseen && status === "awaiting" && (
+        <label className={styles.asUnseen}>
+          <input type="checkbox" checked={seen} disabled={busy} onChange={(event) => setSeen(event.target.checked)} />
+          有文件没有完整显示，我知道确认后会写入全部内容
+        </label>
+      )}
       <footer>
         <button
           type="button"
@@ -1560,7 +1576,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
         <button
           type="button"
           className={styles.asConfirm}
-          disabled={busy || status !== "awaiting"}
+          disabled={busy || status !== "awaiting" || (unseen && !seen)}
           onClick={() => choose(true)}
         >
           {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
@@ -1768,8 +1784,24 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
           <FilePen />
           <span>{created ? "新建" : "修改"}</span>
           <code>{target}</code>
+          {operation.size !== undefined && (
+            <small>
+              {operation.beforeSize !== undefined ? `${formatBytes(operation.beforeSize)} → ` : ""}
+              {formatBytes(operation.size)}
+            </small>
+          )}
         </div>
-        <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
+        {operation.binary ? (
+          <p className={styles.asOpWarn}>新内容不是文本，这里无法显示</p>
+        ) : (
+          <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
+        )}
+        {operation.partial && operation.size !== undefined && (
+          <p className={styles.asOpWarn}>
+            新内容只显示了前 64 KiB，还有 {formatBytes(operation.size - 64 * 1024)} 没有显示
+          </p>
+        )}
+        {operation.beforePartial && <p className={styles.asOpNote}>原文件只显示了前 64 KiB</p>}
       </li>
     );
   }

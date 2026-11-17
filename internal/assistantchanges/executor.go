@@ -810,7 +810,11 @@ func preview(data []byte) *string {
 	return &text
 }
 
-// preview is the card: each operation, with the old and new text of every write.
+// preview is the card: each operation, with the old and new text of every
+// write. A card shows the start of each file only, so a write also says how
+// large the file was and will be, and whether the new content is shown only
+// in part or is not text at all (#172): the member then knows the card does
+// not show everything the write puts there.
 func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 	type operation struct {
 		Op     string  `json:"op"`
@@ -822,6 +826,14 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		Exists bool    `json:"exists"`
 		Before *string `json:"before,omitempty"`
 		After  *string `json:"after,omitempty"`
+		// BeforeSize is the size of the file a write replaces.
+		BeforeSize *int64 `json:"beforeSize,omitempty"`
+		// Partial: After is only the start of the new content.
+		// Binary: the new content is not text, so there is no After.
+		// BeforePartial: Before is only the start of the old file.
+		Partial       bool `json:"partial,omitempty"`
+		Binary        bool `json:"binary,omitempty"`
+		BeforePartial bool `json:"beforePartial,omitempty"`
 	}
 	dir := filepath.Join(e.Root, account, c.ID)
 	ops := make([]operation, 0, len(c.Steps))
@@ -832,12 +844,22 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == filesystem.KindDirectory
 		}
 		if s.Op == "write" {
+			size := s.SourceSize
+			op.Size = &size
+			if s.Before.Exists {
+				before := s.Before.Size
+				op.BeforeSize, op.BeforePartial = &before, before > previewLimit
+			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)+".before"), previewLimit); err == nil {
 				op.Before = preview(data)
 			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)), previewLimit); err == nil {
 				op.After = preview(data)
 			}
+			// A copy cut to its start once the change ended reads short as
+			// well: what decides is the size of the file the write leaves.
+			op.Binary = op.After == nil && size > 0
+			op.Partial = !op.Binary && size > previewLimit
 		}
 		ops = append(ops, op)
 	}

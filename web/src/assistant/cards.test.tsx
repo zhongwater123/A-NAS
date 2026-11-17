@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CommandCard, QuestionCard } from "./AssistantPanel";
+import { ApprovalCard, CommandCard, QuestionCard } from "./AssistantPanel";
 import type { Approval } from "./api";
 
 const base = { requestId: "req-3", sessionId: "0a1b2c3d", storedSessionId: "20261015_120000_abcdef", createdAt: 1 };
@@ -84,5 +84,69 @@ describe("cards for what the assistant asks", () => {
     expect(screen.getByRole("button", { name: "照片" }).getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "回答" }));
     expect(onAnswer).toHaveBeenCalledWith({ q1: "桌面", q2: JSON.stringify(["猫", "狗", "兔子"]) });
+  });
+
+  it("says what a write puts there that the card does not show, and asks the member to know it (#172)", () => {
+    const onDecide = vi.fn(() => Promise.resolve());
+    const approval: Approval = {
+      ...base,
+      kind: "change",
+      status: "awaiting",
+      change: {
+        id: "c1",
+        summary: "写报告",
+        status: "awaiting",
+        operations: [
+          {
+            op: "write",
+            path: "/nas/共享空间/Agent空间/alice/报告.md",
+            exists: true,
+            before: "旧的开头",
+            after: "新的开头",
+            size: 2 * 1024 * 1024,
+            beforeSize: 1024,
+            partial: true,
+          },
+          { op: "write", path: "/nas/个人空间/照片.jpg", exists: false, size: 4096, binary: true },
+        ],
+      },
+    };
+    render(<ApprovalCard approval={approval} onDecide={onDecide} />);
+    expect(screen.getByText("1.0 KiB → 2.0 MiB")).toBeTruthy();
+    expect(screen.getByText("新内容只显示了前 64 KiB，还有 1.9 MiB 没有显示")).toBeTruthy();
+    expect(screen.getByText("新内容不是文本，这里无法显示")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "确认更改" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "有文件没有完整显示，我知道确认后会写入全部内容" }));
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onDecide).toHaveBeenCalledWith(true);
+  });
+
+  it("confirms a change shown whole without asking more", () => {
+    const approval: Approval = {
+      ...base,
+      kind: "change",
+      status: "awaiting",
+      change: {
+        id: "c2",
+        summary: "计划加一项",
+        status: "awaiting",
+        operations: [
+          {
+            op: "write",
+            path: "/nas/个人空间/计划.md",
+            exists: true,
+            before: "a",
+            after: "a\nb",
+            size: 3,
+            beforeSize: 1,
+          },
+        ],
+      },
+    };
+    render(<ApprovalCard approval={approval} onDecide={vi.fn(() => Promise.resolve())} />);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect((screen.getByRole("button", { name: "确认更改" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
