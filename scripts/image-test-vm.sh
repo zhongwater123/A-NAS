@@ -70,9 +70,18 @@ boot_until_up() { # boot_until_up MAX
   return 1
 }
 # restarted MAX: the update service restarted the VM, as it does into a new
-# base: QEMU, started with -no-reboot, exits, and starts again.
+# base: QEMU, started with -no-reboot, exits, and starts again. A VM still
+# up after five minutes did not restart: a failure, and the power goes.
 restarted() {
-  wait "$vm" || true
+  local deadline=$((SECONDS + 300))
+  while kill -0 "$vm" 2>/dev/null && ((SECONDS < deadline)); do sleep 2; done
+  if kill -0 "$vm" 2>/dev/null; then
+    note "FAIL the device restarts when the update service restarts it"
+    failures=$((failures + 1))
+    power_cut
+  else
+    wait "$vm" || true
+  fi
   boot_until_up "$1"
 }
 power_cut() {
@@ -223,6 +232,9 @@ check "a-nas-check passes on the new device" checked 1001
 manifest >"$L/manifest-0"
 boot_id=$(g cat /proc/sys/kernel/random/boot_id)
 first=$(product)
+# This release's own database steps, which the next release's step follows.
+steps=$(probe_table)
+steps=${steps%%:*}
 
 # --- 1002: a new product, without a restart, then back to the one before.
 push 1002
@@ -234,7 +246,7 @@ check "the update service offers the next product, with no restart" \
 ask install
 keep 1002-install
 check "the next product installs" test "$(state phase)/$(state current)" = "up-to-date/$first+next"
-check "the next product runs, with its database step" test "$(product)/$(probe_table)" = "$first+next/1:1"
+check "the next product runs, with its database step" test "$(product)/$(probe_table)" = "$first+next/$((steps + 1)):1"
 check "a-nas-check passes on the next product" checked 1002
 check "the product changed without a restart" test "$(g cat /proc/sys/kernel/random/boot_id)" = "$boot_id"
 check "unchanged content and an unchanged base are not written again" \
@@ -243,7 +255,7 @@ check "the base now starts the next product" starts 1001 1002
 ask revert
 keep 1002-revert
 check "the product goes back" test "$(state phase)/$(state records.0.kind)" = "up-to-date/reverted"
-check "the product before runs, with its database back" test "$(product)/$(probe_table)" = "$first/0:0"
+check "the product before runs, with its database back" test "$(product)/$(probe_table)" = "$first/$steps:0"
 check "a-nas-check passes after going back" checked back
 
 # --- 1003: a new base. The first install is cut while the base is written.
@@ -263,11 +275,20 @@ push 1003
 ask check
 check "a new base is offered, with a restart" test "$(state phase)/$(state image.restart)" = "ready/true"
 ask install >/dev/null 2>&1 &
-for _ in $(seq 1 180); do
-  g pgrep -x systemd-sysupdate >/dev/null 2>&1 && break
-  sleep 1
+# The power goes while the base's /usr partition is written: systemd-sysupdate
+# has systemd-pull unpack it at the partition's offset. (pgrep -x cannot find
+# systemd-sysupdate itself: a process name keeps 15 characters. The brackets
+# keep the pattern from matching the shell that runs pgrep.)
+written=
+for _ in $(seq 1 360); do
+  if g "pgrep -f 'systemd-pull raw .*-[-]offset'" >/dev/null 2>&1; then
+    written=1
+    break
+  fi
+  sleep 0.5
 done
-sleep 2
+[[ -n "$written" ]] || note "the base's write was not seen; the power goes now"
+sleep 1
 power_cut
 boot_until_up 3
 check "a power cut while a base is written leaves the device on its version" test "$(booted)" = 1001
@@ -313,7 +334,7 @@ ask tick
 keep 1003-back
 check "the device is back on the base and product before" \
   test "$(booted)/$(product)/$(state phase)/$(state records.0.kind)" = "1001/$first/up-to-date/reverted"
-check "the product before runs with its database back" test "$(probe_table)" = "0:0"
+check "the product before runs with its database back" test "$(probe_table)" = "$steps:0"
 check "a-nas-check passes after going back to the base before" checked back-base
 
 # --- 1004: a base whose check fails, installed as in the install window: the
@@ -327,7 +348,7 @@ note "after 1004: booted $(booted); ESP: $(esp); boots so far $boots"
 ask tick
 keep 1004
 check "a base that fails its check is left for the one before" test "$(booted)" = 1001
-check "the base before starts its own product" test "$(product)/$(probe_table)" = "$first/0:0"
+check "the base before starts its own product" test "$(product)/$(probe_table)" = "$first/$steps:0"
 check "the update service says the new base did not pass its boot check" \
   test "$(state phase)/$(state problem.code)/$(state records.0.kind)" = "rolled-back/boot/rolled-back"
 check "a-nas-check passes after the fallback" checked fallback
