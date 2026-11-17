@@ -7,9 +7,11 @@ import time
 
 from .asserts import Case, case_verdict
 
-# A cost change is listed only if it is both relatively and absolutely large.
+# A cost change is listed only if it is both relatively and absolutely large. Below these a median
+# of three runs moves on its own: with qwen3.8-flash one more model request is about 20,000 tokens,
+# and a turn's seconds vary by tens with the relay and the machine's load.
 COST_RATIO = 0.3
-COST_ABS = {"tokens": 5000, "requests": 2, "seconds": 5}
+COST_ABS = {"tokens": 30000, "requests": 2, "seconds": 30}
 ENV_KEYS = ("model", "judge", "judge_served", "upstream_cache", "hermes", "runtime", "repo", "skills", "channel")
 
 

@@ -453,9 +453,10 @@ class ReportTest(unittest.TestCase):
 
     def test_cost_change_needs_both_thresholds(self):
         self.assertEqual(compare(self.summary(tokens=36000), self.baseline())["cost_changes"], [])   # +20 %
-        self.assertEqual(compare(self.baseline(tokens=4000), self.baseline(tokens=2000))["cost_changes"], [])  # +100 %, small
-        rows = compare(self.summary(tokens=45000), self.baseline())["cost_changes"]
-        self.assertEqual(rows, [{"case": "nice", "metric": "tokens", "from": 30000, "to": 45000}])
+        # +110 %, but one more model request's worth: the median of three runs moves that much on its own
+        self.assertEqual(compare(self.baseline(tokens=42000), self.baseline(tokens=20000))["cost_changes"], [])
+        rows = compare(self.summary(tokens=70000), self.baseline())["cost_changes"]
+        self.assertEqual(rows, [{"case": "nice", "metric": "tokens", "from": 30000, "to": 70000}])
 
     def test_should_drop_is_listed(self):
         rep = compare(self.summary(should=(0, 1)), self.baseline())
