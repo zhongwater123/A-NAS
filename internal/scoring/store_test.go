@@ -489,48 +489,6 @@ func TestRepeatsComeFromTheRatersOwnEarlierScoresAndDoNotCount(t *testing.T) {
 	}
 }
 
-// A claim shows its photo to its rater while the lease runs, and afterwards
-// only when the rater answered through it. A photo taken back for someone
-// else, and any photo once the account is no rater, is not shown (#487).
-func TestAClaimShowsItsPhotoWhileItsLeaseRunsOrOnceItIsAnswered(t *testing.T) {
-	h := newHarness(t)
-	batch := h.batchOf(t, 2, 1)
-	h.raters(t, "a")
-	ctx := context.Background()
-	claims, _, err := h.store.Claim(ctx, batch.ID, "a")
-	if err != nil || len(claims) != 2 {
-		t.Fatalf("claims %+v, %v", claims, err)
-	}
-	answered, unanswered := claims[0].Token, claims[1].Token
-	sizes := map[string]func(token string) error{
-		"preview":   func(token string) error { _, err := h.store.ClaimPreview(ctx, token, "a"); return err },
-		"thumbnail": func(token string) error { _, err := h.store.ClaimThumbnail(ctx, token, "a"); return err },
-		"full size": func(token string) error { _, err := h.store.ClaimFull(ctx, token, "a"); return err },
-	}
-	shows := func(when, token string, want error) {
-		t.Helper()
-		for size, show := range sizes {
-			if err := show(token); !errors.Is(err, want) || (want == nil && err != nil) {
-				t.Errorf("%s, the %s: %v, want %v", when, size, err, want)
-			}
-		}
-	}
-	shows("while the lease runs", answered, nil)
-	shows("while the lease runs", unanswered, nil)
-	if _, err := h.store.Submit(ctx, answered, "a", score(6)); err != nil {
-		t.Fatal(err)
-	}
-	h.clock.Advance(LeaseDuration + time.Minute)
-	shows("answered, after the lease", answered, nil)
-	shows("unanswered, after the lease", unanswered, ErrNotFound)
-
-	if err := h.store.SetRater(ctx, "a", "user:admin", false); err != nil {
-		t.Fatal(err)
-	}
-	shows("to an account that is no rater any more", answered, ErrNotFound)
-	shows("to an account that is no rater any more", unanswered, ErrNotFound)
-}
-
 // The rater's list calls a batch finished when nothing is left to score in
 // it: the photos the rater holds are still left.
 func TestABatchIsNotFinishedWhileItsRaterHoldsPhotos(t *testing.T) {

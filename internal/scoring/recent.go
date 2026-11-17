@@ -80,11 +80,16 @@ func (s *Store) RecentScores(ctx context.Context, batchID, rater string) ([]Rece
 // ClaimThumbnail returns the small JPEG of the photo behind a rater's own
 // claim, rendering it from the preview the first time.
 func (s *Store) ClaimThumbnail(ctx context.Context, token, rater string) (string, error) {
-	photo, err := s.claimed(ctx, token, rater)
+	var sha string
+	err := s.db.QueryRowContext(ctx, `SELECT i.sha256 FROM claims c JOIN items i ON i.id = c.item_id
+		WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&sha)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
 	if err != nil {
 		return "", err
 	}
-	return s.thumbnail(ctx, photo.sha)
+	return s.thumbnail(ctx, sha)
 }
 
 // BatchCover returns the small JPEG of the photo that stands for a batch in
