@@ -68,7 +68,7 @@
 
 ## 关联
 
-- [#514](https://github.com/zhongwater123/A-NAS/issues/514)、原型差异 [#515](https://github.com/zhongwater123/A-NAS/issues/515)、原型代码 [PR #454](https://github.com/zhongwater123/A-NAS/pull/454)
+- [#514](https://github.com/zhongwater123/A-NAS/issues/514)、原型差异 [#515](https://github.com/zhongwater123/A-NAS/issues/515)、原型代码 [PR #454](https://github.com/zhongwater123/A-NAS/pull/454)；第八版从第六版移植的 4 项见 [#516](https://github.com/zhongwater123/A-NAS/pull/516)
 - 外发约束 [#295](https://github.com/zhongwater123/A-NAS/issues/295)
 - [相册放视频，视频不参与 AI](2026-10-19-videos-in-the-photo-library.md)，第 8、9 项是它的例外
 - [AI 助手 V1 的模型与开启范围](https://github.com/zhongwater123/A-NAS/pull/519)，VNAS 改为云端 DeepSeek、全员默认开启

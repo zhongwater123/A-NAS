@@ -106,7 +106,7 @@ anas-photos
 | 窗口向量、卡片、画质、卡片描述 | 相册：按内容对象，跨项目、跨成员复用 | Catalog（见“剪辑分析”）；窗口向量另同步到相册的 Qdrant |
 | 项目、批次、素材范围、任务、规划、时间线、版本与成片资产的对应 | 剪辑中心 | `montage/montage.db` |
 | 曲库（内部测试） | 剪辑中心 | `montage/songs/` |
-| 渲染中间文件 | 剪辑中心 | `montage/tmp/`，任务结束和服务启动时清空 |
+| 渲染中间文件 | 剪辑中心 | `montage/tmp/<job-id>/`，任务结束时删除（见“清理”） |
 
 剪辑中心不保存原片、分析结果或成片的副本；卡片为什么归相册、怎样理解 #514 的“项目特定的卡片分组”，见 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 2。
 
@@ -157,13 +157,13 @@ anas-photos
 | 表 | 主要列 | 说明 |
 |---|---|---|
 | `batches` | id、owner_user_id、request_key、created_at | 一次主动导入；`(owner_user_id, request_key)` 唯一，重复提交返回第一次的结果 |
-| `projects` | id、owner_user_id、name、grant_id、state、song_id、ask、chronological、created_at | `state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权并删除这一行 |
+| `projects` | id、owner_user_id、name、grant_id、state、song_id、ask、chronological、created_at | `state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
 | `project_assets` | project_id、asset_id、object_id、batch_id、added_at | 素材范围固定到内容对象 |
 | `jobs` | id、owner_user_id、project_id、request_key、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error | 见“持久任务” |
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
 | `rounds` | id、job_id、step、attempt_token、session_id、state、started_at、ended_at | 规划的每一轮 |
-| `plans` | job_id、step、round_id、answer_json、accepted_at | `(job_id, step)` 唯一，每步只收一份。“重新规划”从还没收下的那一步开始；每次“生成”是新任务，两步都重新规划 |
-| `versions` | id、project_id、job_id、version_key、film_asset_id、created_at | 成片存进相册后才写一行；失败或取消的任务不留版本。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
+| `plans` | job_id、step、round_id、catalog_key、answer_json、accepted_at、voided_at | 每个任务每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
+| `versions` | id、project_id、number、job_id、version_key、film_asset_id、created_at | 成片存进相册后才写一行；失败或取消的任务不留版本。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | song_id、manifest_digest、state、reason、loudness | 曲库校验结果与响度 |
 
@@ -201,11 +201,11 @@ montage/
 |---|---|
 | `register(session, projectId, assetIds)` | 登记或追加。会话只在这次请求里用，相册经 Host Agent 认出成员，再按上面的受限身份检查：每个资产都是本人能看到、未进回收站的视频。以 `(主人, projectId)` 为幂等键，重试不会多出授权。不存在、看不见、在回收站、不是视频，这四种情况的回答完全相同。一次最多 500 个资产 |
 | `lookup(grantId, assetIds)` | 每个资产的状态 `available`、`trashed` 或 `missing`，以及 `objectId`、时长、宽高、拍摄时间、各项分析的进度 |
-| `analyze(grantId, assetIds)` | 为这些视频排剪辑分析，见“剪辑分析” |
+| `analyze(grantId, assetIds, retry)` | 为这些视频排剪辑分析，见“剪辑分析”；`retry` 把失败的分析改回待做 |
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。窗口向量放在 memfd 里，是 `n × 768` 个小端 float32，只按长度校验 |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
-| `list()` | 列出剪辑中心的全部授权（主人、项目 ID、是否撤销），供启动对账 |
+| `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 
 **被攻破时**：剪辑服务在 `a-nas-photos` 组里，所以：
@@ -253,7 +253,7 @@ montage/
 **任务粒度与租约**
 - 一个视频一个任务，但按块推进：
   - 窗口每 30 个一块；
-  - 画质每张卡片一块，帧再按 30 秒分批；
+  - 画质每张卡片一块，帧再按 30 秒分批（见“卡片与画质”）；
   - 描述每张卡片一块。
 - 每块落库后续租约，块之间检查准入。
 - 一次描述可能要 15 分钟，超过 5 分钟的租约，所以相册的任务表增加续租：调用进行中每 30 秒续一次。
@@ -303,11 +303,14 @@ montage/
 ### 卡片与画质
 
 - **卡片**：调计算 Worker 的 `cards`，输入是窗口时间、是否纯色和向量，输出卡片与关键帧时刻。纯色阈值与第八版相同（`FLAT=8.0`），记在分析身份里。
-- **画质**：每张卡片要三组帧，分块取、分块交给计算 Worker，每块不超过 30 秒，相邻块重叠一帧（抖动按相邻帧计算），所以内存不随卡片长度增长：
+- **画质**：每张卡片要三组帧：
   - 关键帧：宽 512 的 JPEG，质量与第八版相同。模糊值按第八版的标定对**编码后的 JPEG** 跑 blurdetect；遮挡由计算 Worker 从 JPEG 缩成 256×144 的灰度图计算。
   - 抖动：覆盖整张卡片的 320×180 灰度帧，每秒 10 帧。
   - 夜空锐点：关键帧时刻宽 1920 的灰度帧，逐帧计算。
-- 判定规则与阈值沿用第八版的 `domain/picture.py`、`domain/quality.py`，记在分析身份里。
+- **分两步算，保证和第八版一致**：第八版的抖动先算相邻帧的位移，再做 5 帧滑动平均、去掉两端，最后对整张卡片取中位数（`domain/picture.py` 的 `jitter`），中位数不能按块合并。
+  1. `quality_part`：抖动帧按 30 秒一块交给计算 Worker（相邻块重叠一帧），只返回逐对位移；关键帧与锐点帧逐张返回各自的数值。内存不随卡片长度增长。
+  2. `quality`：相册拼起整张卡片的位移和各帧数值，再调一次，算平滑、中位数与不可用原因。
+- 判定规则与阈值沿用第八版的 `domain/picture.py`、`domain/quality.py`，记在分析身份里；黄金比对包括抖动值。
 - **拼接素材**：第八版的拼接工具 `tools/join.py` 是离线手动步骤，首版不做。每段视频单独切卡片。
 
 ### 卡片描述
@@ -336,7 +339,8 @@ montage/
 | 操作 | 调用方 | 输入 | 输出 | 来自第八版 |
 |---|---|---|---|---|
 | `cards` | 相册 | 窗口时间、是否纯色、向量 | 卡片与关键帧时刻 | `domain/cards.py` |
-| `quality` | 相册 | 一张卡片的关键帧 JPEG、抖动帧、锐点帧、模糊值 | 模糊、抖动、遮挡、失焦与不可用原因 | `domain/picture.py`、`domain/quality.py` |
+| `quality_part` | 相册 | 一块抖动帧，或一张关键帧 JPEG（附模糊值），或一张锐点帧 | 逐对位移，或这一帧的遮挡、暗帧、锐点数值 | `domain/picture.py` |
+| `quality` | 相册 | 一张卡片的全部位移与各帧数值 | 模糊、抖动、遮挡、失焦与不可用原因 | `domain/picture.py`、`domain/quality.py` |
 | `catalog` | 剪辑中心 | 卡片、描述、画质、选项 | 可用卡片的目录文本 | `domain/catalog.py` |
 | `music` | 剪辑中心 | 结构 JSON、响度序列、目标秒数 | 选段、音乐段落、小节槽 | `domain/music.py` |
 | `plan` | 剪辑中心 | 目录、音乐段落、要求、顺序；第二步再加第一步的答案 | 一步规划的三样东西：规则、数据、这一轮的精确 Schema（见“规划”） | `domain/plan.py`（`pick_request`、`shots_request`）、`domain/prompts.py`、`domain/music.py` 的音乐说明 |
@@ -356,7 +360,7 @@ montage/
 
 **其他约定**
 - **单实例**：Worker 是单实例，逐个处理连接。每次调用都在秒级到几十秒；取消在当前调用结束时生效。
-- **依赖**：NumPy 改为 `ai/requirements.in` 的直接依赖，现在它只是 mediapipe 带进来的间接依赖。
+- **依赖**：NumPy 与 Pillow（遮挡与暗帧判断要把 JPEG 转成灰度，第八版用 PIL）改为 `ai/requirements.in` 的直接依赖，现在它们只是间接依赖。
 - **跨语言测试**：照 `internal/aiworker/python_test.go` 的做法，用真实运行环境跑 Go 与 Python 之间的协议测试。
 - **系统测试**：系统测试的 Python 环境没有 NumPy，所以用固定回答的替身计算 Worker，只证明接线与权限；真实计算的证据在开发机上取。
 
@@ -364,7 +368,10 @@ montage/
 1. 原样搬进来，用第八版的结果文件做黄金比对：同样的输入，镜头表逐个相同。
 2. 修复缺陷，每项单独提交，见“原型缺陷的修复”。
 
-**样本**：第八版的结果文件（品杰、新西兰、川西三组的窗口向量、卡片、描述、规划与 `held` 缓存）来自真人素材，不进公开的仓库，放在开发机上。黄金比对的测试从环境变量给出的目录读样本，没有样本时跳过，所以它的证据层是“开发机”。M6 的 PR 写明样本的位置与各文件的 SHA-256；首版闭环所用的 11 段视频清单也一样记在 M10 的 PR 里。
+**样本**：第八版的结果文件来自真人素材，不进公开的仓库。
+- 位置：开发机 C（macOS，见[开发环境](../development/LOCAL_ENVIRONMENT.md)）的 `~/A-NAS-datasets/`，目录按原型的 `profiles/mac-dev.toml`：原片在 `videos/`，窗口向量在 `cache/`，卡片与描述在 `剪辑对比/第五版`，规划与镜头表在 `剪辑对比/第四版/剪法24（2026-11-08）`。
+- 组名见原型的 `profiles/cases.toml`：`pj`（品杰，新西兰）、`ne`（新西兰）、`ch`（川西）。
+- 黄金比对的测试从环境变量给出的目录读样本，没有样本时跳过，所以证据层是“开发机”。M6 的 PR 列出所用各文件的 SHA-256；首版闭环所用的 11 段视频清单与摘要记在 M10 的 PR 里。
 
 `plan` 不在黄金比对之内：第八版把规则和数据写在同一段文字里（例如音乐说明里有“进入高潮段前的最后一个画面……”），交给 VNAS 时要拆开，见“规划”。
 
@@ -399,7 +406,7 @@ montage/
 - MP4 的 faststart 要能回头改文件，所以 Worker 先写进自己的 memfd（和 `image` 操作一样经 `/proc/self/fd` 访问），写完再作为正文发回。剪辑中心边收边写进 `tmp/<job-id>/`，再交给 `saveFilm`。这份 memfd 计入 FFmpeg slice 的 3 GiB 内存上限。
 - 512 MiB 的推导：
   - 画面码率上限：16 Mbit/s × 150 s ÷ 8 = 300,000,000 B；
-  - VBV 余量：每段编码都从缓冲区装满约九成开始，最多再多出一个 bufsize，即 2,000,000 B。镜头最短 1.5 秒（第八版 `PIECE_LEAST`），150 秒最多 100 段，合计最多 200,000,000 B；
+  - VBV 余量：每段编码都从缓冲区装满约九成开始，最多再多出一个 bufsize，即 2,000,000 B。时间线校验限定镜头不超过 100 个（第八版最短镜头 1.5 秒，150 秒约 100 段，但槽尾可能留下更短的镜头，所以不靠它推导），合计最多 200,000,000 B；
   - 音频：192 kbit/s × 150 s ÷ 8 = 3,600,000 B；
   - MP4 索引约 1 MiB；
   - 合计约 5.05 亿字节，合 482 MiB，取 512 MiB。
@@ -420,7 +427,7 @@ montage/
 
 ## 曲库
 
-- **来源**：2026-11-17 用户决定，用已分析过段落的 10 首歌（开发机 `~/Music/QQ音乐`，共 306 MB）。其中 9 首的副歌已由用户逐首听过确认（[第六版研究](https://github.com/zhongwater123/A-NAS/blob/d83340e/docs/research/video-montage-v6.md)的“副歌识别”一节）。
+- **来源**：2026-11-17 用户决定，用已分析过段落的 10 首歌（开发机 C 的 `~/Music/QQ音乐`，共 306 MB）。其中 9 首的副歌已由用户逐首听过确认（[第六版研究](https://github.com/zhongwater123/A-NAS/blob/d83340e/docs/research/video-montage-v6.md)的“副歌识别”一节）。
 - **放置**：每首一个目录 `montage/songs/<song-id>/`，放音源、allin1 的 `structure.json` 和 `manifest.json`。
   - `manifest.json` 写歌名、歌手、音源摘要、结构模型，用途写“仅内部测试”。
   - `song-id` 取音源字节 SHA-256 的前 16 位。
@@ -462,7 +469,7 @@ montage/
   - **数据**：卡片目录、音乐段落、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
-- 计算 Worker 的 `plan` 输出这三样；剪辑中心在领取一轮时取第一步的规则与数据，大纲收下后再取第二步的数据。
+- 计算 Worker 的 `plan` 输出这三样。两步的规则在领取一轮时一起取出、一开始就给模型（第二步的 system 文字只依赖目标时长，不依赖第一步的答案）；第一步的数据随领取取出，第二步的数据等大纲收下后再生成。
 - 提示词还要求不调用终端、代码、提问与委派，免得出现成员看不到的审批卡片；也要求不把描述写进记忆。
 
 **校验错误怎样退回**：服务器用低层的 `Server` 实现，参数在工具里自己校验，不合格时返回普通结果 `status: "rejected"`，不用 `isError`。原因是 Hermes 把 `isError` 计入熔断：连续 3 次后，这个服务器 60 秒内的调用一律不可达（[Hermes 研究](../research/hermes-agent-runtime.md)）。MCP 规范本身推荐用 `isError` 让模型自我纠正，这里不用只是因为这个熔断。
@@ -477,10 +484,15 @@ montage/
 4. 外壳经助手网关 `/api/v1/assistant/ws` 依次：
    - 调 `session.create`；
    - 用 `PATCH /rounds/{id}` 记下会话的存储 ID，取消时要用；
-   - 调 `session.title`，标题“剪辑：<项目名> · <时间>”。标题在实例内必须唯一，`session.create` 也不收标题；
-   - 调 `prompt.submit`，成功后用 `PATCH /rounds/{id}` 记下“已提交”。
-5. 还没提交就失败了（没有密钥、实例起不来、`session.create` 出错），外壳调 `POST /rounds/{id}/abandon`：这一轮作废，任务回到 `waiting(vnas)` 并写明原因，没有调用过模型。
-6. 外壳在网关上看到这一轮结束时，调 `POST /rounds/{id}/end`。如果答案还没交齐，这一步进入 `needs_input`（原因 `vnas_unknown`）。外壳没有报告时（比如窗口关了），已提交的一轮 30 分钟没有交答案也按同样处理；领取后 5 分钟还没提交的一轮按作废处理。超时的一轮由下一次桌面轮询用存储 ID 中断。
+   - 调 `session.title`，标题“剪辑：<项目名> · <这一轮的短编号>”。标题在实例内必须唯一，`session.create` 也不收标题；设标题失败时照常提交；
+   - 调 `prompt.submit`，成功后用 `PATCH /rounds/{id}` 记下“已提交”。带这一轮 token 的任何 brief 或 submit 调用，也把这一轮记为已提交。
+5. 还没记下会话的存储 ID 就失败了（没有密钥、实例起不来、`session.create` 出错），外壳调 `POST /rounds/{id}/abandon`：这一轮作废，任务回到 `waiting(vnas)` 并写明原因；这时 `prompt.submit` 还没发出，没有调用过模型。连续作废时，下一次领取按 1、2、4……分钟退避，最长 30 分钟。
+6. 外壳在网关上看到这一轮结束时，调 `POST /rounds/{id}/end`。如果答案还没交齐，这一步进入 `needs_input`（原因 `vnas_unknown`）。外壳没有报告时（比如窗口关了）：
+   - 领取后 5 分钟还没记下存储 ID 的一轮，按作废处理；
+   - 已记下存储 ID、但没确认提交的一轮，5 分钟后进入 `needs_input(vnas_unknown)`，交给用户决定，不自动再开一轮，因为模型可能已经在跑；
+   - 已提交的一轮 30 分钟没有交答案，同样进入 `needs_input(vnas_unknown)`。
+
+   超时的一轮由下一次桌面轮询用存储 ID 中断。
 7. 提示框显示：正在规划、成片已存进相册、需要处理。
 
 **VNAS 不可用**：没有密钥、实例起不来或网关报错时，任务停在 `waiting(vnas)`，项目页和提示写明原因。PR [#519](https://github.com/zhongwater123/A-NAS/pull/519) 合并后，VNAS 默认对全部成员开启，管理员填写密钥后可用。
@@ -525,25 +537,28 @@ montage/
 | `music_invalid` | 歌曲不合格 |
 | `vnas_unknown` | 规划没有交回 |
 | `plan_invalid` | 规划连续 3 次不合格 |
-| `storage_full` | 存回相册时空间不足 |
+| `storage_full` | 渲染或存回相册时空间不足 |
 
 **执行**
 - 一个调度协程，同一时刻只执行一个任务的一个步骤。处于 `waiting` 的任务不占调度，别的任务照常执行。
 - 领取任务时写 `lease_until = now + 5 min`，执行中每 30 秒续一次。
 - 服务只有一个实例，启动时直接把 `running` 的任务收回到 `queued`，不等租约过期（相册 `RecoverJobs` 也是这样）。收回后从第一个没完成的步骤接着做。
 
-**步骤与输入摘要**：每一步先算 `input_key`，同一个任务里 `steps` 有同样的键就直接复用，所以重启和重试不会重做已完成的步骤。跨任务复用的只有相册的分析与曲库的结果；每次“生成”都重新规划，所以再生成一版会得到新的剪法。
+**步骤与输入摘要**：每一步先算 `input_key`，同一个任务里 `steps` 有同样的键就直接复用，所以重启和重试不会重做已完成的步骤。每一步的键都包含上游步骤的键，上游变了，下游跟着重做。跨任务复用的只有相册的分析与曲库的结果；每次“生成”都重新规划，所以再生成一版可能得到不同的剪法。
 
 | 步骤 | `input_key` 的组成 |
 |---|---|
-| 分析 | 各素材的 `objectId` 与相册返回的分析身份 |
-| 目录 | 卡片、画质、描述的分析身份，`catalog` 的算法版本，选项 |
+| 分析 | 排序后的素材 `objectId` 集合，与相册返回的分析身份 |
+| 目录 | 分析步骤的键、`catalog` 的算法版本、选项 |
 | 歌曲 | `song-id`、`music` 的算法版本、目标秒数 |
-| 第一步规划 | 目录文本的摘要、要求、顺序、歌曲键、提示词版本 |
-| 第二步规划 | 第一步答案的摘要、提示词版本 |
-| 填槽 | 两步答案的摘要、`fill` 的算法版本、窗口向量的分析身份 |
+| 第一步规划 | 目录步骤的键、要求、顺序、歌曲步骤的键、提示词版本 |
+| 第二步规划 | 第一步规划的键与答案的摘要、提示词版本 |
+| 填槽 | 第二步规划的键与答案的摘要、`fill` 的算法版本 |
 | 渲染 | 时间线的摘要、渲染预设版本、`song-id` |
 | 存回 | `versionKey` = 任务 ID 加渲染步骤的 `input_key`。重渲染的输出不必逐字节相同，存回也不会重复 |
+
+- 去掉素材后，目录的键变了，所以已收下的规划作废（`plans.voided_at`），两步都重新规划，不会复用含已删素材卡片的旧目录。
+- 任务开始时固定素材范围、歌与要求。任务进行中改项目设置或追加素材，只影响下一次“生成”。
 
 **失败分类**
 
@@ -569,7 +584,8 @@ montage/
 | 歌曲 | 见“曲库” | 这首歌不可选 |
 | 第一步答案 | 符合 Schema；段落数与音乐段落一致；引用的卡片都在本次目录里 | `rejected` 退回给 VNAS 改；连续 3 次不合格则 `needs_input(plan_invalid)` |
 | 第二步答案 | 符合 Schema；节拍属于所引用的卡片 | 同上 |
-| 时间线 | 每个镜头的起止有限、起点小于终点、不超出原片时长；引用属于本项目；槽位不重叠；各镜头帧数之和等于音乐选段的帧数；没有空槽 | `failed`，不渲染，不报成功 |
+| 时间线 | 每个镜头的起止有限、起点小于终点、不超出原片时长；引用属于本项目；槽位不重叠；各镜头帧数之和等于音乐选段的帧数；没有空槽；镜头不超过 100 个（`assemble` 上限的前提） | `failed`，不渲染，不报成功 |
+| 要求 | 不超过默认规则的字数上限 | 请求回答 400 |
 | 成片 | 时长与时间线一致（误差 ≤ 0.1 秒）；1920×1080；30 帧；有音轨 | `failed`，丢弃文件 |
 
 ## 不支持的要求
@@ -581,7 +597,7 @@ montage/
 - 字幕；
 - 原声、配音。
 
-提示的意思是：首版固定横屏 1920×1080，时长跟着音乐走（约 90 秒），单曲配乐，不加字幕、不保留原声。第八版的规划答案本来就有 `unmet` 字段（素材里找不到的内容），成片页原样显示。
+提示的意思是：首版固定横屏 1920×1080，时长跟着音乐走（约 90 秒），单曲配乐，不加字幕、不保留原声。第八版的规划答案本来就有 `unmet` 字段（素材里找不到的内容），成片页的显示见规格。
 
 ## 接口
 
@@ -600,8 +616,9 @@ montage/
 | POST | `/projects/{id}/generate` | `{requestKey}`：回答 202 与任务；项目已有进行中的任务时回答 409 |
 | GET | `/jobs/{id}` | 状态、步骤、进度、排队位置、等待原因 |
 | POST | `/jobs/{id}/cancel` | 取消 |
-| POST | `/jobs/{id}/drop-missing` | 去掉缺失的素材后继续 |
+| POST | `/jobs/{id}/drop-assets` | `{assetIds}`：从这个任务去掉缺失或分析失败的素材后继续（项目的素材范围随之去掉） |
 | POST | `/jobs/{id}/retry-analysis` | 相册分析失败后重试 |
+| POST | `/jobs/{id}/retry` | 空间不足时腾出空间后，从停下的步骤重试 |
 | POST | `/jobs/{id}/replan` | 规划没有交回或不合格时重新规划 |
 | POST | `/jobs/{id}/rounds` | 领取一轮规划（见“规划”） |
 | PATCH | `/rounds/{id}` | 记下 VNAS 会话的存储 ID、已提交 |
@@ -619,7 +636,7 @@ montage/
 - **页面**：项目列表 → 新建（上传或从相册选）→ 确认素材与配乐 → 要求 → 进度 → 成片。
 - **上传**：复用相册的上传队列 `web/src/photos/uploads.tsx`（并行 2 个、接入传输中心、可重试、处理实况照片），目标是本人的个人图库，按 `LibraryPicker` 的规则找出个人图库。
   - 队列跑完后列出成功与失败，失败的可以重试；只用成功的资产建项目。
-  - 单独上传的 MOV 如果补进了图库里在等它的实况照片，不会产生新资产，页面说明它没有加入项目。
+  - 单独上传的 MOV 如果补进了图库里在等它的实况照片，上传接口不返回新资产，所以它不进项目（页面行为见规格）。
 - **数据获取**：引入 TanStack Query（[#271](https://github.com/zhongwater123/A-NAS/issues/271)），放在懒加载的窗口代码里。执行中每 2 秒轮询一次，窗口不可见时停止。
 - **播放**：成片是相册视频，直接复用 `VideoPlayer`。
 - **提示**：主线没有通用的桌面通知中心，剪辑的提示照 `FamilyNotices` 的做法放在桌面外壳里。

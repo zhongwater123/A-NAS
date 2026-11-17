@@ -19,7 +19,7 @@
    - 它不做可移除模块（[ADR 0037](0037-plug-removable-modules-in-as-separate-services.md)），因为它要连相册的授权套接字和 FFmpeg Worker，而模块看不到这两样。
    - 它只持有剪辑中心子卷里的四样东西：项目、规划、时间线与任务，以及内部测试用的曲库。
 2. **素材、基础分析与成片归相册。**
-   - 原片与成片都是成员个人图库里的照片资产。
+   - 原片与成片都是相册里的照片资产：上传的原片与成片在成员的个人图库，从相册选入的视频留在原来的图库。
    - 窗口向量、卡片、画质与卡片描述按内容对象计算，存在相册 Catalog，跨项目复用（[决定记录](../decisions/2026-11-17-montage-center-first-version.md)）。
    - 剪辑中心不保存原片、分析结果或成片的副本。
    - #514 说“项目特定的卡片分组、候选、规划、时间线与人工编辑由剪辑中心持有”。这里的理解是：卡片按视频内容切，与项目无关，所以归相册；项目特定的是从卡片里选出的目录、规划与时间线，归剪辑中心。
@@ -38,7 +38,7 @@
      - 窗口向量照 [ADR 0028](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md) 存进 Catalog，经独立的 outbox 同步到相册实例里的新集合；
      - 卡片与画质由新增的剪辑计算 Worker 算出，它运行第八版 `domain/` 的纯计算；
      - 卡片描述由 AI Worker 新增的 `describe_frames` 写出。
-   - **AI Worker 的客户端**：仍然只有相册一个。它收到的关键帧由相册从自己的原片里取出，本 ADR 接受后在 [ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md) 决定 4 中写明。
+   - **AI Worker 的客户端**：按设计只有相册调用（剪辑服务因所在的组也能连上，见“后果”）。它收到的关键帧由相册从自己的原片里取出，本 ADR 接受后在 [ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md) 决定 4 中写明。
    - **视频与相册 AI 功能**：视频照旧不进相册的搜索、聚合与找相似，也不进助手用的相册接口。
 5. **规划在成员自己的 VNAS 里。**
    - 新增 MCP 服务器 `montage`。它的套接字由 systemd 持有，只绑定进成员的对话沙箱，不绑定进定时任务与整理单元。
