@@ -1166,8 +1166,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Check for, download, install, or go back from a version
-         * @description Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before); update_waiting for install and revert while a storage plan or conversion runs or an app installs or uninstalls.
+         * Check for, download, install, or go back from a version; restart into a new base image
+         * @description Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before and no restart waiting, restart a new base image that waits for it); update_waiting for install, revert and restart while a storage plan or conversion runs or an app installs or uninstalls.
          */
         post: operations["requestSystemUpdate"];
         delete?: never;
@@ -5839,14 +5839,14 @@ export interface components {
             source: boolean;
         };
         /**
-         * @description Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check); rolling-back; rolled-back (the check of the new version failed); check-failed (the source could not be read or its signature was wrong).
+         * @description Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check; on a device that runs the A-NAS image, the product switch or the write of a new base image); rolling-back; rolled-back (the check of the new version failed, or its base image its boot check); check-failed (the source could not be read or its signature was wrong); restart-pending (a new base image is written and a restart starts it).
          * @enum {string}
          */
-        SystemUpdatePhase: "up-to-date" | "available" | "downloading" | "ready" | "installing" | "rolling-back" | "rolled-back" | "check-failed";
+        SystemUpdatePhase: "up-to-date" | "available" | "downloading" | "ready" | "installing" | "rolling-back" | "rolled-back" | "check-failed" | "restart-pending";
         SystemUpdateProblem: {
             /** @enum {string} */
-            code: "unreachable" | "signature" | "disk_space" | "download" | "install" | "check" | "rollback" | "staging" | "not_installed";
-            /** @description What apt or a-nas-check said; for disk_space, the bytes still missing. */
+            code: "unreachable" | "signature" | "disk_space" | "download" | "install" | "check" | "rollback" | "staging" | "not_installed" | "boot";
+            /** @description What apt, systemd-sysupdate or a-nas-check said; for disk_space, the bytes still missing. */
             detail?: string;
         };
         SystemUpdateRecord: {
@@ -5870,7 +5870,7 @@ export interface components {
         };
         SystemUpdateAction: {
             /** @enum {string} */
-            action: "check" | "download" | "install" | "revert";
+            action: "check" | "download" | "install" | "revert" | "restart";
         };
         SystemUpdateStatus: {
             phase: components["schemas"]["SystemUpdatePhase"];
@@ -5895,7 +5895,7 @@ export interface components {
             checkedAt?: string;
             /** Format: date-time */
             installedAt?: string;
-            /** @description The version an operation in progress installs. */
+            /** @description The version an operation in progress installs, or that waits for a restart. */
             target?: string;
             /** Format: date-time */
             startedAt?: string;
@@ -5903,8 +5903,9 @@ export interface components {
             /** @description The last ten outcomes, newest first. */
             records: components["schemas"]["SystemUpdateRecord"][];
             settings: components["schemas"]["SystemUpdateSettings"];
-            /** @description What an install waits for now. */
+            /** @description What an install, revert or restart waits for now. */
             waiting: ("storage" | "apps")[];
+            image?: components["schemas"]["SystemUpdateImage"];
         };
         Transfer: {
             id: string;
@@ -7691,6 +7692,13 @@ export interface components {
             /** Format: int64 */
             capacityBytes?: number;
         };
+        /** @description Set on a device that runs the A-NAS image (ADR 0034 decision 2). */
+        SystemUpdateImage: {
+            /** @description The base image the device runs, by its release's sequence on main. */
+            base: string;
+            /** @description Installing the candidate writes a new base image, which a restart starts. */
+            restart: boolean;
+        };
         /**
          * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
          * @enum {string}
@@ -8166,6 +8174,7 @@ export type TaskManagerTemperature = components['schemas']['TaskManagerTemperatu
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
 export type MissingDisk = components['schemas']['MissingDisk'];
+export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];

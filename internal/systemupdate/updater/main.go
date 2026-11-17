@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -51,7 +54,35 @@ func Main(ctx context.Context) error {
 		Archives:  aptArchives,
 		FreeBytes: freeBytes,
 	}
+	if IsImage(imageOSRelease) {
+		source, err := updateSource(os.Getenv("ANAS_UPDATE_URL"))
+		if err != nil {
+			return err
+		}
+		return NewImageService(*service, source).Run(ctx, request)
+	}
 	return service.Run(ctx, request)
+}
+
+// updateSource is the directory of this architecture's update files under
+// ANAS_UPDATE_URL, the address in site.conf that a device downloads them
+// from (docs/decisions/2026-11-13-device-image-defaults.md); "" reads what a
+// push leaves. Every file is checked against the archive key's signature,
+// so http serves as well as https.
+func updateSource(address string) (string, error) {
+	if address == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(address)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" ||
+		parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("ANAS_UPDATE_URL is not an http or https address of a directory: %q", address)
+	}
+	architecture := systemdArchitecture()
+	if architecture == "" {
+		return "", errors.New("no update files are published for " + runtime.GOARCH)
+	}
+	return strings.TrimSuffix(parsed.String(), "/") + "/" + architecture, nil
 }
 
 // takeRequest takes the request left for a run; one that waited too long is

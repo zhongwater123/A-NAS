@@ -48,6 +48,44 @@ type stagedFile struct {
 // index local had may then name a file that is gone; apt refuses to install
 // from it before it changes anything, and the next sync finishes the copy.
 func Sync(staging, local string, room func(need int64) error) (SyncResult, error) {
+	return syncLayout(aptLayout, staging, local, room)
+}
+
+// SyncImage does what Sync does for a device that runs the A-NAS image: the
+// push is the update files of scripts/build-image.sh, each kind in a
+// directory of its own (os, product and content-ROLE), and local is the
+// directory the device reads them from. The files come first, then the
+// release files that name them, then each directory's SHA256SUMS and its
+// signature; systemd-sysupdate and the update service check every file
+// against them.
+func SyncImage(staging, local string, room func(need int64) error) (SyncResult, error) {
+	return syncLayout(imageLayout, staging, local, room)
+}
+
+// layout is what a push holds: the top-level directories Sync takes, the
+// one a push cannot lack, and the order files are copied in.
+type layout struct {
+	top      func(name string) bool
+	required string
+	order    func(name string) int
+}
+
+var (
+	aptLayout = layout{
+		top:      func(name string) bool { return name == "dists" || name == "pool" },
+		required: "dists",
+		order:    syncOrder,
+	}
+	imageLayout = layout{
+		top: func(name string) bool {
+			return name == "os" || name == "product" || strings.HasPrefix(name, "content-")
+		},
+		required: "product",
+		order:    imageSyncOrder,
+	}
+)
+
+func syncLayout(l layout, staging, local string, room func(need int64) error) (SyncResult, error) {
 	var result SyncResult
 	root, err := os.OpenRoot(staging)
 	if err != nil {
@@ -64,7 +102,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 			return nil
 		}
 		top, _, _ := strings.Cut(name, "/")
-		if top != "dists" && top != "pool" {
+		if !l.top(top) {
 			if entry.IsDir() {
 				return fs.SkipDir
 			}
@@ -90,10 +128,10 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 	if err != nil {
 		return result, fmt.Errorf("read the pushed repository: %w", err)
 	}
-	if !slices.ContainsFunc(files, func(file stagedFile) bool { return strings.HasPrefix(file.name, "dists/") }) {
-		return result, errors.New("the pushed repository has no dists directory")
+	if !slices.ContainsFunc(files, func(file stagedFile) bool { return strings.HasPrefix(file.name, l.required+"/") }) {
+		return result, fmt.Errorf("the pushed repository has no %s directory", l.required)
 	}
-	gone, freed, err := stale(local, files)
+	gone, freed, err := stale(l, local, files)
 	if err != nil {
 		return result, err
 	}
@@ -104,7 +142,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		if err := room(need - freed); err != nil {
 			return result, err
 		}
-		if result.Removed, err = prune(local, gone); err != nil {
+		if result.Removed, err = prune(l, local, gone); err != nil {
 			return result, err
 		}
 		if err := room(need); err != nil {
@@ -112,7 +150,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		}
 		pruned = true
 	}
-	slices.SortStableFunc(files, func(a, b stagedFile) int { return syncOrder(a.name) - syncOrder(b.name) })
+	slices.SortStableFunc(files, func(a, b stagedFile) int { return l.order(a.name) - l.order(b.name) })
 	for _, file := range files {
 		if err := syncFile(root, file, filepath.Join(local, filepath.FromSlash(file.name))); err != nil {
 			return result, err
@@ -123,7 +161,7 @@ func Sync(staging, local string, room func(need int64) error) (SyncResult, error
 		}
 	}
 	if !pruned {
-		result.Removed, err = prune(local, gone)
+		result.Removed, err = prune(l, local, gone)
 	}
 	return result, err
 }
@@ -135,10 +173,26 @@ func have(target string, info fs.FileInfo) bool {
 	return err == nil && got.Mode().IsRegular() && got.Size() == info.Size() && got.ModTime().Equal(info.ModTime())
 }
 
-// stale lists the files under local's dists and pool that are not among
-// pushed, and the bytes they hold. It reads local through os.Root, as Sync
-// reads staging, so that no link in local leads it, or prune after it, out.
-func stale(local string, pushed []stagedFile) ([]string, int64, error) {
+// tops lists the top-level directories of local that the layout takes.
+func tops(l layout, root *os.Root) []string {
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() && l.top(entry.Name()) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
+}
+
+// stale lists the files under local's directories of the layout that are
+// not among pushed, and the bytes they hold. It reads local through os.Root,
+// as Sync reads staging, so that no link in local leads it, or prune after
+// it, out.
+func stale(l layout, local string, pushed []stagedFile) ([]string, int64, error) {
 	root, err := os.OpenRoot(local)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, 0, nil
@@ -153,7 +207,7 @@ func stale(local string, pushed []stagedFile) ([]string, int64, error) {
 	}
 	var names []string
 	var size int64
-	for _, top := range []string{"dists", "pool"} {
+	for _, top := range tops(l, root) {
 		err := fs.WalkDir(root.FS(), top, func(name string, entry fs.DirEntry, err error) error {
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil
@@ -177,9 +231,9 @@ func stale(local string, pushed []stagedFile) ([]string, int64, error) {
 	return names, size, nil
 }
 
-// prune removes the files stale found from local, and the directories under
-// dists and pool that leaves empty, through os.Root.
-func prune(local string, names []string) (int, error) {
+// prune removes the files stale found from local, and the directories of
+// the layout that leaves empty, through os.Root.
+func prune(l layout, local string, names []string) (int, error) {
 	if len(names) == 0 {
 		return 0, nil
 	}
@@ -196,7 +250,7 @@ func prune(local string, names []string) (int, error) {
 		removed++
 	}
 	var directories []string
-	for _, top := range []string{"dists", "pool"} {
+	for _, top := range tops(l, root) {
 		_ = fs.WalkDir(root.FS(), top, func(name string, entry fs.DirEntry, err error) error {
 			if err == nil && entry.IsDir() {
 				directories = append(directories, name)
@@ -221,6 +275,19 @@ func syncOrder(name string) int {
 		return 2
 	default:
 		return 1
+	}
+}
+
+// imageSyncOrder puts the update files first, then the release files that
+// name them, then each directory's SHA256SUMS and its signature.
+func imageSyncOrder(name string) int {
+	switch base := path.Base(name); {
+	case base == "SHA256SUMS" || base == "SHA256SUMS.gpg":
+		return 2
+	case strings.HasSuffix(base, ".json"):
+		return 1
+	default:
+		return 0
 	}
 }
 

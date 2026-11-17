@@ -90,6 +90,39 @@ func TestTheAutomaticInstallAsksOnceAWindowAsTheSystem(t *testing.T) {
 	}
 }
 
+func TestTheInstallWindowRestartsIntoANewBaseOnce(t *testing.T) {
+	updater := &decliningUpdater{status: systemupdate.Status{State: systemupdate.State{
+		Phase: systemupdate.PhaseRestartPending, Current: "1", Target: "2",
+		Settings: systemupdate.Settings{AutoInstall: true, WindowStart: "03:00", WindowEnd: "05:00"},
+		Image:    &systemupdate.Image{Base: "1001", TargetBase: "1002"},
+	}}}
+	events := &recorder{}
+	api := New(updater, nil, events, slog.New(slog.DiscardHandler))
+	now := time.Date(2026, 11, 14, 2, 55, 0, 0, time.Local)
+	api.now = func() time.Time { return now }
+	for range 30 {
+		api.automatic(context.Background())
+		now = now.Add(5 * time.Minute)
+	}
+	if len(updater.requests) != 1 || updater.requests[0] != (systemupdate.Request{Kind: systemupdate.RequestRestart, By: systemupdate.ByAutomatic}) {
+		t.Fatalf("requests = %+v", updater.requests)
+	}
+	if len(events.events) != 1 || events.events[0].action != "system.update.restart" || events.events[0].actor != systemActor {
+		t.Fatalf("events = %+v", events.events)
+	}
+}
+
+func TestARestartIsReadyOnlyWhenABaseWaitsForIt(t *testing.T) {
+	waiting := systemupdate.Status{State: systemupdate.State{Phase: systemupdate.PhaseRestartPending, Previous: "1"}}
+	if !actionReady(systemupdate.RequestRestart, waiting) || actionReady(systemupdate.RequestRevert, waiting) {
+		t.Fatal("a waiting base takes a restart and no revert")
+	}
+	settled := systemupdate.Status{State: systemupdate.State{Phase: systemupdate.PhaseUpToDate, Previous: "1"}}
+	if actionReady(systemupdate.RequestRestart, settled) || !actionReady(systemupdate.RequestRevert, settled) {
+		t.Fatal("a settled device takes a revert and no restart")
+	}
+}
+
 func TestOutcomesAreRecordedAtTheTimeTheyHappened(t *testing.T) {
 	at := time.Date(2026, 11, 14, 3, 10, 0, 0, time.UTC)
 	updater := &decliningUpdater{status: systemupdate.Status{State: systemupdate.State{
