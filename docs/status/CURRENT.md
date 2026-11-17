@@ -10,7 +10,7 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：软件包 `1.0.1~rc.6+dev20261117.89+gc738affa140b`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，含 AI 助手试用包；2026-11-17 核对），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
+- 已部署：`c738affa140b`，软件包 `1.0.1~rc.6+dev20261117.89+gc738affa140b`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，含 AI 助手试用包；2026-11-17 核对），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
   - 宿主机依赖由 `a-nas-host` 与 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
   - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `842b388a0f1987f5`；AI Worker 的内存上限为总内存减 2.5 GiB（5150 MiB）。
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
