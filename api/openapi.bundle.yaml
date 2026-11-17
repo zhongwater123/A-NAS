@@ -2753,7 +2753,8 @@ paths:
   /api/v1/family/join:
     post:
       operationId: joinFamily
-      summary: Ask to join with a family role; the first account, or the first after everyone has gone, founds the family as its guardian
+      summary: Ask to join with a family role; the first account, or the first after every member left or had their account deleted, founds the family as its guardian
+      description: While the family has members whose accounts are only disabled, joining is a request like any other. Asking again with another role replaces the request, which then counts as new.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -2842,10 +2843,26 @@ paths:
   /api/v1/family/requests/{accountId}/approve:
     post:
       operationId: approveFamilyJoin
-      summary: A guardian admits a requester; 爸爸 and 妈妈 become guardians
+      summary: A guardian admits a requester with the role the guardian was shown; 爸爸 and 妈妈 become guardians
+      description: 'request_changed (409) when the requester has asked again with another role since: the guardian looks at the request again.'
       parameters:
         - $ref: '#/components/parameters/FamilyAccountID'
         - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  minLength: 1
+                  maxLength: 8
+                  description: The role in the request the guardian saw.
       responses:
         '200':
           description: The new member
@@ -2853,9 +2870,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FamilyMember'
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
   /api/v1/family/requests/{accountId}:
     delete:

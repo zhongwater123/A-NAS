@@ -1643,7 +1643,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ask to join with a family role; the first account, or the first after everyone has gone, founds the family as its guardian */
+        /**
+         * Ask to join with a family role; the first account, or the first after every member left or had their account deleted, founds the family as its guardian
+         * @description While the family has members whose accounts are only disabled, joining is a request like any other. Asking again with another role replaces the request, which then counts as new.
+         */
         post: operations["joinFamily"];
         /** Withdraw the caller's own join request */
         delete: operations["cancelFamilyJoin"];
@@ -1695,7 +1698,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** A guardian admits a requester; 爸爸 and 妈妈 become guardians */
+        /**
+         * A guardian admits a requester with the role the guardian was shown; 爸爸 and 妈妈 become guardians
+         * @description request_changed (409) when the requester has asked again with another role since: the guardian looks at the request again.
+         */
         post: operations["approveFamilyJoin"];
         delete?: never;
         options?: never;
@@ -11441,7 +11447,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The role in the request the guardian saw. */
+                    role: string;
+                };
+            };
+        };
         responses: {
             /** @description The new member */
             200: {
@@ -11452,8 +11465,10 @@ export interface operations {
                     "application/json": components["schemas"]["FamilyMember"];
                 };
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     rejectFamilyJoin: {

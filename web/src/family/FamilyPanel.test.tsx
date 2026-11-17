@@ -7,7 +7,7 @@ import type { FamilyRecordInput } from "../api.generated";
 import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
 import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
-import { http, server } from "../test/server";
+import { apiError, http, server } from "../test/server";
 import { summarize } from "./FamilyNotices";
 import { FamilyPanel } from "./FamilyPanel";
 import { isoDate } from "./format";
@@ -355,6 +355,40 @@ describe("FamilyPanel", () => {
     expect(await screen.findByRole("complementary", { name: "二宝的资料" })).toBeTruthy();
     await waitFor(() => expect(handled).toHaveBeenCalledWith(intent));
     expect(screen.getByRole("button", { name: "二宝" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("approves a join request with the role the guardian saw", async () => {
+    const approved: string[] = [];
+    let changed = true;
+    const overview = familyOverview({
+      requests: [{ accountId: "user:aunt", username: "aunt", role: "外婆", requestedAt: "2026-10-30T08:00:00Z" }],
+    });
+    server.use(
+      ...familyHandlers({ overview }),
+      http.get("/api/v1/family/babies/{babyId}/wall", ({ response }) => response(200).json({ items: [] })),
+      http.post("/api/v1/family/requests/{accountId}/approve", async ({ request, response }) => {
+        const { role } = await request.json();
+        approved.push(role);
+        if (changed) {
+          changed = false;
+          return response(409).json(apiError("request_changed"));
+        }
+        return response(200).json({
+          accountId: "user:aunt",
+          username: "aunt",
+          role,
+          guardian: false,
+          joinedAt: "2026-10-30T09:00:00Z",
+          active: true,
+        });
+      }),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "家人" }));
+    await userEvent.click(await screen.findByRole("button", { name: "同意" }));
+    expect(await screen.findByText("对方刚改了称呼，请看过新的申请后再同意")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "同意" }));
+    await waitFor(() => expect(approved).toEqual(["外婆", "外婆"]));
   });
 
   it("asks a guardian to add the first baby", async () => {

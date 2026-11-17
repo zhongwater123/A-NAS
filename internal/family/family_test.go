@@ -103,8 +103,8 @@ func (f *fixture) family(t *testing.T) Baby {
 	must(f.store.Join(ctx, mom, "妈妈"))
 	must(f.store.Join(ctx, dad, "爸爸"))
 	must(f.store.Join(ctx, grandma, "外婆"))
-	must(f.store.Approve(ctx, mom, dad.AccountID))
-	must(f.store.Approve(ctx, mom, grandma.AccountID))
+	must(f.store.Approve(ctx, mom, dad.AccountID, "爸爸"))
+	must(f.store.Approve(ctx, mom, grandma.AccountID, "外婆"))
 	return must(f.store.AddBaby(ctx, mom, BabyFields{Name: "小米粒", Sex: "female", BirthDate: "2026-03-15"}))
 }
 
@@ -155,15 +155,15 @@ func TestFirstAccountFoundsTheFamilyAndGuardiansApproveTheRest(t *testing.T) {
 	wantErr(t, err, ErrNotMember)
 	// Only guardians approve.
 	must(f.store.Join(ctx, dad, "爸爸"))
-	_, err = f.store.Approve(ctx, grandma, dad.AccountID)
+	_, err = f.store.Approve(ctx, grandma, dad.AccountID, "爸爸")
 	wantErr(t, err, ErrNotMember)
-	if member := must(f.store.Approve(ctx, mom, dad.AccountID)); !member.Guardian {
+	if member := must(f.store.Approve(ctx, mom, dad.AccountID, "爸爸")); !member.Guardian {
 		t.Fatal("a father who joins is a guardian")
 	}
-	if member := must(f.store.Approve(ctx, mom, grandma.AccountID)); member.Guardian {
+	if member := must(f.store.Approve(ctx, mom, grandma.AccountID, "外婆")); member.Guardian {
 		t.Fatal("a grandmother who joins is a relative")
 	}
-	_, err = f.store.Approve(ctx, grandma, tenant.AccountID)
+	_, err = f.store.Approve(ctx, grandma, tenant.AccountID, "舅舅")
 	wantErr(t, err, ErrForbidden)
 	// A rejected account may ask again.
 	must(f.store.Join(ctx, tenant, "舅舅"))
@@ -179,6 +179,72 @@ func TestFirstAccountFoundsTheFamilyAndGuardiansApproveTheRest(t *testing.T) {
 	wantErr(t, err, ErrInvalid)
 }
 
+// A guardian approves the request as shown: one whose role changed since
+// is refused and shown again as a new request (#358).
+func TestApprovalIsForTheRoleTheGuardianSaw(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	must(f.store.Join(ctx, mom, "妈妈"))
+	must(f.store.Join(ctx, grandma, "外婆"))
+	first := must(f.store.Overview(ctx, mom)).Requests
+	f.now = f.now.Add(time.Hour)
+	// Asking again with the same role is the same request.
+	must(f.store.Join(ctx, grandma, "外婆"))
+	if again := must(f.store.Overview(ctx, mom)).Requests; len(again) != 1 || !again[0].RequestedAt.Equal(first[0].RequestedAt) {
+		t.Fatalf("the same request again = %+v, was %+v", again, first)
+	}
+	// Another role is a new request, which the guardian hears of again.
+	must(f.store.Join(ctx, grandma, "爸爸"))
+	changed := must(f.store.Overview(ctx, mom)).Requests
+	if len(changed) != 1 || changed[0].Role != "爸爸" || !changed[0].RequestedAt.After(first[0].RequestedAt) {
+		t.Fatalf("the changed request = %+v", changed)
+	}
+	_, err := f.store.Approve(ctx, mom, grandma.AccountID, "外婆")
+	wantErr(t, err, ErrRequestChanged)
+	if overview := must(f.store.Overview(ctx, grandma)); overview.Me.Status != StatusPending {
+		t.Fatalf("grandma after a refused approval: %+v", overview.Me)
+	}
+	if member := must(f.store.Approve(ctx, mom, grandma.AccountID, "爸爸")); !member.Guardian || member.Role != "爸爸" {
+		t.Fatalf("approved as shown = %+v", member)
+	}
+}
+
+// Disabling every member does not hand the family to the next account: it
+// only goes to a new founder once every member left or was deleted (#358).
+func TestAFamilyOfDisabledMembersIsNotFoundedAgain(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	baby := f.family(t)
+	for _, member := range []Actor{mom, dad, grandma} {
+		delete(f.accounts, member.AccountID)
+	}
+	if me := must(f.store.Join(ctx, tenant, "妈妈")); me.Status != StatusPending || me.Guardian {
+		t.Fatalf("joining a family of disabled members = %+v", me)
+	}
+	_, err := f.store.Records(ctx, tenant, baby.ID, "", "")
+	wantErr(t, err, ErrNotMember)
+	// Enabling a guardian again lets the family decide.
+	f.accounts[mom.AccountID] = Account{ID: mom.AccountID, Username: mom.Username}
+	if requests := must(f.store.Overview(ctx, mom)).Requests; len(requests) != 1 || requests[0].AccountID != tenant.AccountID {
+		t.Fatalf("requests once mom is back = %+v", requests)
+	}
+	if err := f.store.Reject(ctx, mom, tenant.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	// Once everyone has left, the next account founds the family again.
+	for _, member := range []Actor{dad, grandma} {
+		if err := f.store.RemoveAccount(ctx, member.AccountID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.store.Leave(ctx, mom); err != nil {
+		t.Fatal(err)
+	}
+	if me := must(f.store.Join(ctx, tenant, "舅舅")); me.Status != StatusMember || !me.Guardian {
+		t.Fatalf("joining a family everyone left = %+v", me)
+	}
+}
+
 func TestTheFamilyAlwaysKeepsAGuardian(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -188,12 +254,25 @@ func TestTheFamilyAlwaysKeepsAGuardian(t *testing.T) {
 	wantErr(t, err, ErrLastGuardian)
 	wantErr(t, f.store.Leave(ctx, mom), ErrLastGuardian)
 	wantErr(t, f.store.Remove(ctx, grandma, dad.AccountID), ErrForbidden)
-	// When the only guardian's account goes, the earliest member left takes
-	// over, so the family can still approve people.
+	// A guardian whose account is disabled keeps the role: nobody else is
+	// made one, and the family waits for the account to be enabled.
 	delete(f.accounts, mom.AccountID)
+	if overview := must(f.store.Overview(ctx, dad)); overview.Me.Guardian {
+		t.Fatalf("dad while mom's account is disabled: %+v", overview.Me)
+	}
+	f.accounts[mom.AccountID] = Account{ID: mom.AccountID, Username: mom.Username}
+	if overview := must(f.store.Overview(ctx, mom)); !overview.Me.Guardian {
+		t.Fatalf("mom once her account is enabled again: %+v", overview.Me)
+	}
+	// When the only guardian's account is deleted, the earliest member left
+	// takes over, so the family can still approve people.
+	delete(f.accounts, mom.AccountID)
+	if err := f.store.RemoveAccount(ctx, mom.AccountID); err != nil {
+		t.Fatal(err)
+	}
 	overview := must(f.store.Overview(ctx, dad))
 	if !overview.Me.Guardian {
-		t.Fatalf("dad after mom's account went: %+v", overview.Me)
+		t.Fatalf("dad after mom's account was deleted: %+v", overview.Me)
 	}
 	if len(overview.Members) != 2 {
 		t.Fatalf("members = %+v", overview.Members)

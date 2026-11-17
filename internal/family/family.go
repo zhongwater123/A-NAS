@@ -41,6 +41,9 @@ var (
 	ErrConflict = errors.New("conflicts with the current state")
 	// ErrLastGuardian refuses to leave the family without a guardian.
 	ErrLastGuardian = errors.New("the family needs at least one guardian")
+	// ErrRequestChanged refuses to approve a join request whose role is not
+	// the one the guardian was shown: the requester changed it since.
+	ErrRequestChanged = errors.New("the join request changed")
 	// ErrInChannel refuses a photo record whose photos are all in the
 	// channel already.
 	ErrInChannel = errors.New("the photos are in the channel already")
