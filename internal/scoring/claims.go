@@ -175,19 +175,42 @@ func (s *Store) pick(ctx context.Context, tx *sql.Tx, batchID, rater string, req
 	return item, nil, err
 }
 
-// ClaimPreview returns the preview behind a rater's own claim, submitted or
-// not, so that the rater can go back to it to change the latest score.
-func (s *Store) ClaimPreview(ctx context.Context, token, rater string) (string, error) {
-	var sha string
-	err := s.db.QueryRowContext(ctx, `SELECT i.sha256 FROM claims c JOIN items i ON i.id = c.item_id
-		WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&sha)
+// claimedPhoto is the photo behind a claim, for showing it to its rater.
+type claimedPhoto struct {
+	item   int64
+	sha    string
+	source string
+}
+
+// claimed finds the photo behind a rater's own claim, to show it in any size.
+// It goes to a chosen rater only, and only while the claim's lease runs or
+// once the rater answered through it: to change the latest score, and for
+// the thumbnails of the scores given. A claim that ran out unanswered was
+// taken back for someone else, and an account taken off the raters sees no
+// photo through a token it still knows (docs/specs/photo-scoring.md#边界与失败).
+// To anyone else the photo is not there.
+func (s *Store) claimed(ctx context.Context, token, rater string) (claimedPhoto, error) {
+	var photo claimedPhoto
+	err := s.db.QueryRowContext(ctx, `SELECT i.id, i.sha256, b.source FROM claims c
+		JOIN items i ON i.id = c.item_id JOIN batches b ON b.id = c.batch_id
+		WHERE c.token = ? AND c.rater = ? AND (c.submitted = 1 OR c.expires_at > ?)
+		AND EXISTS (SELECT 1 FROM raters WHERE account_id = c.rater)`,
+		token, rater, sqlitedb.FormatTime(s.now())).Scan(&photo.item, &photo.sha, &photo.source)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return claimedPhoto{}, ErrNotFound
 	}
+	return photo, err
+}
+
+// ClaimPreview returns the preview behind a rater's own claim: one whose
+// lease runs, or one the rater answered, so that the rater can go back to it
+// to change the latest score.
+func (s *Store) ClaimPreview(ctx context.Context, token, rater string) (string, error) {
+	photo, err := s.claimed(ctx, token, rater)
 	if err != nil {
 		return "", err
 	}
-	return s.previewPath(sha), nil
+	return s.previewPath(photo.sha), nil
 }
 
 // Submission is a rater's answer for one claim.
