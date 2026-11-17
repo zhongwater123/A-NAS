@@ -24,7 +24,27 @@ class SlotsTest(unittest.TestCase):
         parts = [{"scenes": [{}]}, {"scenes": [{}, {}]}]
         got = cut.slotted(SONG, parts)
         self.assertEqual([len(p) for p in got[0]], [2])
-        self.assertEqual([len(p) for p in got[1]], [3, 2])
+        self.assertEqual(got[1], [[[8.0, 14.0]], [[14.0, 18.0]]])     # a chorus picture is one shot
+
+    def test_a_chorus_picture_is_one_take_across_its_bar_lines(self):
+        self.assertEqual(cut.one_take([[77.43, 79.36], [79.36, 81.3]], "高潮"), [[77.43, 81.3]])
+        self.assertEqual(cut.one_take([[60.01, 63.88], [63.88, 67.75]], "中等"), [[60.01, 63.88], [63.88, 67.75]])
+        self.assertEqual(cut.one_take([[77.43, 79.36]], "高潮"), [[77.43, 79.36]])
+
+    def test_a_pictures_slots_go_in_shooting_order_each_with_its_fills(self):
+        slots = [[0.0, 4.0], [4.0, 8.0]]
+        pieces = [{"card": "dv-020", "start": 13.3, "slot": [0.0, 4.0]},       # step two listed beat 3 first
+                  {"card": "dv-020", "start": 2.1, "slot": [4.0, 8.0]},
+                  {"card": "dv-021", "start": 0.0, "slot": [4.0, 8.0]}]        # the second slot's fill
+        rank = {"dv-020": 20, "dv-021": 21}.get
+        got = cut.in_shooting_order(pieces, slots, 30, rank)
+        self.assertEqual([(x["card"], x["start"], x["slot"]) for x in got],
+                         [("dv-020", 2.1, [0.0, 4.0]), ("dv-021", 0.0, [0.0, 4.0]), ("dv-020", 13.3, [4.0, 8.0])])
+
+    def test_slots_of_different_lengths_keep_their_order(self):
+        pieces = [{"card": "a", "start": 9.0, "slot": [0.0, 4.0]}, {"card": "a", "start": 1.0, "slot": [4.0, 6.0]}]
+        got = cut.in_shooting_order(pieces, [[0.0, 4.0], [4.0, 6.0]], 30, lambda _c: 0)
+        self.assertEqual([x["start"] for x in got], [9.0, 1.0])
 
     def test_step_one_reads_each_part_with_its_level_and_shots(self):
         note = cut.music_note(SONG)

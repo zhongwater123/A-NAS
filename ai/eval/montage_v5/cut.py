@@ -257,7 +257,7 @@ ENDING = ("结尾的最后一个画面要静下来，节奏放缓，有结束的
 OPEN_CLOSE = f"- 开场先交代地点、时代和人物，不要跳切；{ENDING}；"
 
 # Step two. Beats are listed with what they can run: from the key frame, at least SHORTEST, at most CAP.
-SHOTS_SYSTEM = """你是剪辑师。大纲定好了段落和每个段落要的画面，程序定好了每个画面约几秒。你给每个画面挑节拍；程序按音乐把每个画面切成几个镜头，镜头卡在小节上；按你排的顺序，每个镜头用一个节拍，从节拍开头取。成片约 {target:g} 秒，配音乐，不用原声。高潮段的画面只挑全景、远景的节拍，第一个画面的第一个节拍必须是全景或远景，挑最开阔的那个；画面只有一两个镜头时，放不下卡片里的整个过程：不要默认挑第一个节拍，要从这张卡片的全部节拍里挑出最关键、最精彩的那一刻排在第一。高潮段前的最后一个画面，在符合这个画面内容的节拍里，挑最处在“还没”状态的：还没到、还没看见、还没打开、还没落地。
+SHOTS_SYSTEM = """你是剪辑师。大纲定好了段落和每个段落要的画面，程序定好了每个画面约几秒。你给每个画面挑节拍；程序按音乐把每个画面切成几个镜头，镜头卡在小节上；按你排的顺序挑出每个镜头用的节拍，从节拍开头取，一个画面的几个镜头再按拍摄时间先后放；高潮段每个画面只有一个镜头，不在画面中间切。成片约 {target:g} 秒，配音乐，不用原声。高潮段的画面只挑全景、远景的节拍，第一个画面的第一个节拍必须是全景或远景，挑最开阔的那个；画面只有一两个镜头时，放不下卡片里的整个过程：不要默认挑第一个节拍，要从这张卡片的全部节拍里挑出最关键、最精彩的那一刻排在第一。高潮段前的最后一个画面，在符合这个画面内容的节拍里，挑最处在“还没”状态的：还没到、还没看见、还没打开、还没落地。
 下面每个画面列出它可以取自的卡片（id、时间、场景、概括）和节拍（节拍 id、景别、能取几秒、画面）。
 每个画面写：
 - beats：从它的卡片里挑节拍，最合适的排前面，多列一两个备用；一个节拍只用一次；
@@ -321,10 +321,31 @@ def slotted(m, parts):
         got, at = [], 0
         for k in range(len(part["scenes"])):
             take = each + (1 if k < extra else 0)
-            got.append(mp["slots"][at:at + take])
+            got.append(one_take(mp["slots"][at:at + take], mp["level"]))
             at += take
         out.append(got)
     return out
+
+
+def one_take(slots, level):
+    """A chorus picture's slots as one shot: one stretch of its footage across its bar lines, cut only where
+    the picture changes. (2026-11-17, the user: cut on every bar, 潜水 alldays-2's chorus was eight 1.9 s
+    pieces, each picture two pieces of one card, dv-020's 13 s and then its 2 s, as if frames were dropped.)"""
+    return [[slots[0][0], slots[-1][1]]] if level == "高潮" and len(slots) > 1 else [list(s) for s in slots]
+
+
+def in_shooting_order(pieces, slots, fps, rank):
+    """A picture's pieces with its slots in shooting order (rank: a card's place in it), whatever order step
+    two listed its beats in (2026-11-17, the user: 潜水's dv-020 went from 13 s back to 2 s). Slots are
+    swapped whole, each with its fills, and only when all are one length, so the cuts stay on the bar lines."""
+    groups = [[x for x in pieces if x["slot"] == [a, b]] for a, b in slots]
+    if len(groups) < 2 or not all(groups) or len({round(b * fps) - round(a * fps) for a, b in slots}) > 1:
+        return pieces
+    groups.sort(key=lambda g: (rank(g[0]["card"]), g[0]["start"]))
+    for (a, b), g in zip(slots, groups, strict=True):
+        for x in g:
+            x["slot"] = [a, b]
+    return [x for g in groups for x in g]
 
 
 def units(card, cap):
@@ -555,6 +576,7 @@ def cut_to_music(case):
             # takes the final slot, and what fills the rest of that slot goes before it (新西兰 fortnight-6
             # ended on two neighbours after its starry-sky ending, ne-154, held 2 s of a 5 s slot).
             ending = p == many and k == len(part["pictures"])
+            slots = one_take(slots, level)       # takes made before one_take still have a slot a bar
             mine = len(clips)
             listed = [b for b in dict.fromkeys(pic["beats"]) if b.rsplit("/", 1)[0] in cards]
             pool = [f"{cid}/{n}" for cid in dict.fromkeys(b.rsplit("/", 1)[0] for b in listed)
@@ -632,6 +654,9 @@ def cut_to_music(case):
                 last = clips[mine]       # the final slot's first piece: the chosen beat; its fills in shooting order
                 rest = sorted(clips[mine + 1:], key=lambda c: (c["slot"][0], catalog.index(c["card"]) if c["slot"] == last["slot"] and c["card"] in catalog else 0))
                 clips[mine:] = [*rest, last]
+            elif not (p == 1 and k == 1):       # the opening keeps step two's widest beat first
+                clips[mine:] = in_shooting_order(clips[mine:], slots, fps,
+                                                 lambda cid: catalog.index(cid) if cid in catalog else len(catalog))
     for c in clips:
         beats = cards[c["card"]]["answer"]["beats"]
         c |= {"beat": f"{c['card']}/{c['beats'][0]}", "frame": cards[c["card"]]["frames"][c["beats"][0] - 1],
