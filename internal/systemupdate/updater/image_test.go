@@ -110,13 +110,11 @@ func newImageService(t *testing.T) (*ImageService, *fakeImage) {
 	host := &fakeImage{failing: map[string]bool{}, versions: map[string]string{"1001": "1.0.1"}}
 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
 	s := &ImageService{
-		Service: Service{
-			Store:    Store{Dir: filepath.Join(directory, "state")},
-			Commands: host,
-			Staging:  filepath.Join(directory, "staging"),
-			Backups:  filepath.Join(directory, "backups"),
-			Now:      func() time.Time { return now },
-		},
+		Store:          Store{Dir: filepath.Join(directory, "state")},
+		Commands:       host,
+		Staging:        filepath.Join(directory, "staging"),
+		Backups:        filepath.Join(directory, "backups"),
+		Now:            func() time.Time { return now },
 		Updates:        filepath.Join(directory, "updates"),
 		Sysext:         filepath.Join(directory, "sysext"),
 		Extensions:     filepath.Join(directory, "extensions"),
@@ -462,7 +460,7 @@ func TestImageDownloadsFromANetworkSource(t *testing.T) {
 	writeFile(t, filepath.Join(published, "os", "SHA256SUMS.gpg"), "signature")
 	server := httptest.NewServer(http.FileServer(http.Dir(published)))
 	defer server.Close()
-	s.Source, s.Staging = server.URL, ""
+	s.Source, s.Staging = func() (string, error) { return server.URL, nil }, ""
 
 	state := runImage(t, s, RequestCheck, "owner")
 	if state.Phase != PhaseAvailable || state.DownloadBytes == 0 || state.Candidate != "1.0.3" {
@@ -496,7 +494,7 @@ func TestImageDownloadThatDoesNotMatchItsSumIsDiscarded(t *testing.T) {
 	publish(t, published, "1002", "1.0.2", "1001", nil)
 	server := httptest.NewServer(http.FileServer(http.Dir(published)))
 	defer server.Close()
-	s.Source, s.Staging = server.URL, ""
+	s.Source, s.Staging = func() (string, error) { return server.URL, nil }, ""
 	runImage(t, s, RequestCheck, "owner")
 	// The same size, other bytes.
 	writeFile(t, filepath.Join(published, "product", productFile("1002")), "produkt 1002")

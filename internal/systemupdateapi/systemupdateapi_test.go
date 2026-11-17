@@ -113,11 +113,11 @@ func TestTheInstallWindowRestartsIntoANewBaseOnce(t *testing.T) {
 }
 
 func TestARestartIsReadyOnlyWhenABaseWaitsForIt(t *testing.T) {
-	waiting := systemupdate.Status{State: systemupdate.State{Phase: systemupdate.PhaseRestartPending, Previous: "1"}}
+	waiting := systemupdate.Status{Phase: systemupdate.PhaseRestartPending, Previous: "1"}
 	if !actionReady(systemupdate.RequestRestart, waiting) || actionReady(systemupdate.RequestRevert, waiting) {
 		t.Fatal("a waiting base takes a restart and no revert")
 	}
-	settled := systemupdate.Status{State: systemupdate.State{Phase: systemupdate.PhaseUpToDate, Previous: "1"}}
+	settled := systemupdate.Status{Phase: systemupdate.PhaseUpToDate, Previous: "1"}
 	if actionReady(systemupdate.RequestRestart, settled) || !actionReady(systemupdate.RequestRevert, settled) {
 		t.Fatal("a settled device takes a revert and no restart")
 	}

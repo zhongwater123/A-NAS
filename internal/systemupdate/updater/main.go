@@ -55,11 +55,7 @@ func Main(ctx context.Context) error {
 		FreeBytes: freeBytes,
 	}
 	if IsImage(imageOSRelease) {
-		source, err := updateSource(os.Getenv("ANAS_UPDATE_URL"))
-		if err != nil {
-			return err
-		}
-		return NewImageService(*service, source).Run(ctx, request)
+		return NewImageService(*service).Run(ctx, request)
 	}
 	return service.Run(ctx, request)
 }

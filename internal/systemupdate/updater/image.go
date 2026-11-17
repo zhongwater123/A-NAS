@@ -71,9 +71,10 @@ type ImageService struct {
 	// Service is the state, commands, staging directory, database copies,
 	// clock and disk space, as on a device installed with apt.
 	Service
-	// Source is the network address of the architecture's update files
-	// (ANAS_UPDATE_URL); "" reads what a push left in Updates.
-	Source string
+	// Source gives the network address of the architecture's update files
+	// (ANAS_UPDATE_URL), read when a run needs it; "" reads what a push left
+	// in Updates, and an address that is none fails the check.
+	Source func() (string, error)
 	// Updates is the directory of update files the device installs from,
 	// which systemd-sysupdate reads for the base.
 	Updates string
@@ -104,14 +105,33 @@ type ImageService struct {
 	BootWait time.Duration
 }
 
-// NewImageService is the service with the device's paths.
-func NewImageService(service Service, source string) *ImageService {
+// NewImageService is the service with the device's paths and the address in
+// the unit's environment.
+func NewImageService(service Service) *ImageService {
 	return &ImageService{
-		Service: service, Source: source, Updates: imageUpdates, Sysext: imageSysext, Extensions: imageExtensions,
+		Service: service, Updates: imageUpdates, Sysext: imageSysext, Extensions: imageExtensions,
 		Products: imageProducts, ESP: imageESP, OSRelease: imageOSRelease, ProductRelease: imageProductRelease,
 		Health: imageHealth, Sysupdate: imageSysupdate, Pull: imagePull, Release: releaseScripts,
 		BootID: func() string { return ReadBootID(bootIDFile) }, HTTP: &http.Client{},
+		Source: func() (string, error) { return updateSource(os.Getenv("ANAS_UPDATE_URL")) },
 	}
+}
+
+// source is where the update files come from: the address Source gives, or
+// "" for a push.
+func (s *ImageService) source() (string, error) {
+	if s.Source == nil {
+		return "", nil
+	}
+	return s.Source()
+}
+
+// downloads reports whether the device downloads its update files rather
+// than taking a push, as it does once an address is set, even one that is
+// not an address.
+func (s *ImageService) downloads() bool {
+	address, err := s.source()
+	return address != "" || err != nil
 }
 
 // ReadBootID reads a boot ID file, such as /proc/sys/kernel/random/boot_id; "" when it cannot.
@@ -283,7 +303,7 @@ func (s *ImageService) tick(ctx context.Context, state *State) error {
 // syncPush takes a push into Updates, as Service.syncStaging does into the
 // local apt source. A device that downloads from Source takes no push.
 func (s *ImageService) syncPush(state *State) (bool, error) {
-	if s.Staging == "" || s.Source != "" {
+	if s.Staging == "" || s.downloads() {
 		return false, nil
 	}
 	if _, err := os.Stat(filepath.Join(s.Staging, "product")); errors.Is(err, os.ErrNotExist) {
@@ -379,8 +399,9 @@ func (s *ImageService) check(ctx context.Context, state *State, takePush bool) e
 	}
 	newest := ""
 	for name := range sums {
-		sequence, ok := strings.CutPrefix(name, "a-nas-release_")
-		if sequence, ok = strings.CutSuffix(sequence, ".json"); ok && (newest == "" || sequenceLess(newest, sequence)) {
+		sequence, prefixed := strings.CutPrefix(name, "a-nas-release_")
+		sequence, suffixed := strings.CutSuffix(sequence, ".json")
+		if prefixed && suffixed && sequence != "" && (newest == "" || sequenceLess(newest, sequence)) {
 			newest = sequence
 		}
 	}
@@ -456,7 +477,10 @@ func (s *ImageService) previousThere(img *Image) bool {
 // systemd-pull checks the signature against the keys of the A-NAS archive
 // (/usr/lib/systemd/import-pubring.gpg), as systemd-sysupdate does.
 func (s *ImageService) index(ctx context.Context) (map[string]string, *Problem) {
-	if s.Source != "" {
+	if _, err := s.source(); err != nil {
+		return nil, &Problem{Code: ProblemUnreachable, Detail: err.Error()}
+	}
+	if s.downloads() {
 		temporary, err := s.temporary(".index-")
 		if err != nil {
 			return nil, &Problem{Code: ProblemUnreachable, Detail: err.Error()}
@@ -526,7 +550,7 @@ func (s *ImageService) release(ctx context.Context, sums map[string]string, sequ
 	name := releaseFileName(sequence)
 	target := filepath.Join(s.Updates, "product", name)
 	file := releaseFile{SHA256: sums[name]}
-	if s.Source != "" && !matches(target, file) {
+	if s.downloads() && !matches(target, file) {
 		if err := s.get(ctx, "product/"+name, target, 0, nil); err != nil {
 			return release{}, &Problem{Code: ProblemUnreachable, Detail: err.Error()}
 		}
@@ -604,7 +628,7 @@ func (s *ImageService) missing(r release, img *Image) ([]string, *Problem) {
 			missing = append(missing, name)
 		}
 	}
-	if len(missing) > 0 && s.Source == "" {
+	if len(missing) > 0 && !s.downloads() {
 		return nil, &Problem{Code: ProblemStaging, Detail: "the push lacks " + strings.Join(missing, ", ")}
 	}
 	return missing, nil
@@ -628,7 +652,7 @@ func (s *ImageService) candidateRelease(ctx context.Context, state *State) (rele
 // SHA256SUMS, which systemd-sysupdate checks. Files of other releases go
 // first, so that downloads do not pile up.
 func (s *ImageService) download(ctx context.Context, state *State) error {
-	if state.Phase != PhaseAvailable || state.Image.Candidate == "" || s.Source == "" {
+	if state.Phase != PhaseAvailable || state.Image.Candidate == "" || !s.downloads() {
 		return nil
 	}
 	sums, problem := s.verifiedSums(ctx, filepath.Join(s.Updates, "product"))
@@ -745,7 +769,7 @@ func (s *ImageService) pruneUpdates(keep map[string]bool) {
 // from what NAME.partial holds; progress, when set, hears how many bytes of
 // it are on disk.
 func (s *ImageService) get(ctx context.Context, name, target string, size int64, progress func(int64)) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return err
 	}
 	partial := target + ".partial"
@@ -758,7 +782,11 @@ func (s *ImageService) get(ctx context.Context, name, target string, size int64,
 			offset = info.Size()
 		}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(s.Source, "/")+"/"+name, nil)
+	address, err := s.source()
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(address, "/")+"/"+name, nil)
 	if err != nil {
 		return err
 	}
@@ -779,17 +807,16 @@ func (s *ImageService) get(ctx context.Context, name, target string, size int64,
 	default:
 		return fmt.Errorf("download %s: %s", name, response.Status)
 	}
-	//nolint:gosec // update files are not secret; systemd-sysupdate reads them
 	out, err := os.OpenFile(partial, flags, 0o644)
 	if err != nil {
 		return err
 	}
-	var reader io.Reader = response.Body
+	// A signed list or its signature is small; a file stops at its size.
+	limit := int64(1 << 20)
 	if size > 0 {
-		reader = io.LimitReader(response.Body, size-offset)
-	} else {
-		reader = io.LimitReader(response.Body, 1<<20) // a signed list or its signature
+		limit = size - offset
 	}
+	reader := io.LimitReader(response.Body, limit)
 	written := offset
 	_, err = io.Copy(out, &progressReader{reader: reader, add: func(n int) {
 		written += int64(n)
@@ -827,7 +854,7 @@ func (r *progressReader) Read(p []byte) (int, error) {
 
 // moveInto replaces target with the file from, across directories.
 func moveInto(from, target string) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return err
 	}
 	data, err := os.ReadFile(from)
@@ -922,7 +949,7 @@ func checkedCopy(from, target string, file releaseFile) error {
 		return err
 	}
 	defer func() { _ = source.Close() }()
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".*.tmp")
@@ -963,7 +990,7 @@ func (s *ImageService) copyDatabases(ctx context.Context, state *State) *Problem
 
 // link points name at target, replacing it whole.
 func link(target, name string) error {
-	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(name), 0o750); err != nil {
 		return err
 	}
 	temporary := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".new")
