@@ -51,7 +51,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         upstream = CONNECTION(UPSTREAM_HOST, timeout=300)
-        headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
+        # A User-Agent: http.client sends none, and an AWS load balancer in front of a relay
+        # answers such requests 403 before the relay sees the key.
+        headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
+                   "Accept": self.headers.get("Accept", "*/*"), "User-Agent": "anas-spike-gateway"}
         upstream.request(method, UPSTREAM_PREFIX + self.path, body=body or None, headers=headers)
         resp = upstream.getresponse()
         self.send_response(resp.status)

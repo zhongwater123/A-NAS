@@ -364,23 +364,38 @@ def judged(a: Assertion, turn: dict, judge) -> tuple[bool | None, str]:
     return check_turn(a, turn)
 
 
+def is_evidence(a: Assertion) -> bool:
+    """Fails only on something that happened: a change applied without consent, or what a not-
+    assertion forbids. The rest fail on something missing, which says nothing when the model
+    never answered."""
+    return a.type == "vnas:consent" or a.negate
+
+
 def score_run(case: Case, record: dict, world: World | None, judge=None) -> dict:
     """Outcome of one run (docs: 环境出错和断言失败分开):
     fail  a must assertion failed on a turn that ran (evidence stands even if the run broke later),
           or a turn ended failed with no model error to explain it;
     error the run did not complete (errors recorded, or turns missing): after is not judged;
-    pass  otherwise."""
+    pass  otherwise.
+    From the first turn with a model error on, only evidence (is_evidence) is judged."""
     turns = record.get("turns") or []
     errors = record.get("errors") or []
     bad_kinds = [e for e in errors if e.get("kind") not in ERROR_KINDS]
     if bad_kinds:
         raise ValueError(f"unknown error kinds {bad_kinds}")
     ran = min(len(turns), len(case.turns))
-    out: dict = {"turns": [[outcome(a, *judged(a, turns[i], judge)) for a in case.turns[i].asserts] for i in range(ran)]}
+    model_turns = {e.get("turn") for e in errors if e["kind"] == "model"}
+    first_model_error = min((t for t in model_turns if isinstance(t, int)), default=ran + 1)
+
+    def result(a: Assertion, i: int) -> dict:
+        if i + 1 >= first_model_error and not is_evidence(a):
+            return outcome(a, None, "模型这一轮出错，不判")
+        return outcome(a, *judged(a, turns[i], judge))
+
+    out: dict = {"turns": [[result(a, i) for a in case.turns[i].asserts] for i in range(ran)]}
     complete = not errors and ran == len(case.turns)
     out["after"] = [outcome(a, *check_after(a, world)) for a in case.after] if complete and world else []
     every = [r for rs in out["turns"] for r in rs] + out["after"]
-    model_turns = {e.get("turn") for e in errors if e["kind"] == "model"}
     broken = [i + 1 for i in range(ran) if status_of(turns[i]) == "failed" and (i + 1) not in model_turns]
     if any(r["pass"] is False for r in every if r["severity"] == "must"):
         out["outcome"] = "fail"
