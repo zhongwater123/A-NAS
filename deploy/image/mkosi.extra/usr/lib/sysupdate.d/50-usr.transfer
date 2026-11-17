@@ -1,8 +1,8 @@
 # The image's /usr, written into the free slot; the UKI comes last, so that a
 # UKI is in the ESP only once its /usr partition carries the version's label.
-# The update files are where a push leaves them (scripts/build-image.sh),
-# read as file:// so that systemd-sysupdate checks them against the signed
-# SHA256SUMS as it does a download.
+# The update files are where the update service leaves a push or a download
+# (scripts/build-image.sh), read as file:// so that systemd-sysupdate checks
+# them against the signed SHA256SUMS as it does a download.
 [Transfer]
 ProtectVersion=%A
 
