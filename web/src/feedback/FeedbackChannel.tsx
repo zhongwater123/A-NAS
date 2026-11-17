@@ -23,7 +23,7 @@ import {
 
 import { APIError } from "../api/client";
 import { PersonAvatar } from "../people/PersonAvatar";
-import { nameOf, person, usePeople } from "../people/people";
+import { nameOfAccount, person, usePeople } from "../people/people";
 import {
   createFeedback,
   deleteFeedback,
@@ -456,7 +456,11 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
         const latest = (await onRefresh())?.find((candidate) => candidate.id === item.id);
         if (latest) {
           setBaseVersion(latest.version);
-          setChangedBy(nameOf(people, latest.updatedBy ?? latest.createdBy));
+          setChangedBy(
+            latest.updatedBy
+              ? nameOfAccount(people, latest.updatedById, latest.updatedBy)
+              : nameOfAccount(people, latest.createdById, latest.createdBy),
+          );
         } else onRemove(item.id);
       } else fail(caught);
     } finally {
@@ -550,15 +554,18 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           </ul>
         )}
         <div className={styles.fbMeta}>
-          <PersonAvatar who={person(people, { username: item.createdBy })} className={styles.fbAvatar} />
-          <span className={styles.fbAuthor}>{nameOf(people, item.createdBy)}</span>
+          <PersonAvatar
+            who={person(people, { id: item.createdById, username: item.createdBy })}
+            className={styles.fbAvatar}
+          />
+          <span className={styles.fbAuthor}>{nameOfAccount(people, item.createdById, item.createdBy)}</span>
           <time dateTime={item.createdAt} title={fullTime(item.createdAt)}>
             {describeTime(item.createdAt)}
           </time>
           {item.updatedBy && item.updatedAt && (
             <span
               className={styles.fbEdited}
-              title={`${nameOf(people, item.updatedBy)} 于 ${fullTime(item.updatedAt)} 编辑`}
+              title={`${nameOfAccount(people, item.updatedById, item.updatedBy)} 于 ${fullTime(item.updatedAt)} 编辑`}
             >
               已编辑
             </span>
@@ -567,7 +574,7 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
             {resolved && item.resolvedBy && item.resolvedAt && (
               <span className={styles.fbResolved} title={fullTime(item.resolvedAt)}>
                 <CheckCheck />
-                {nameOf(people, item.resolvedBy)} 已处理
+                {nameOfAccount(people, item.resolvedById, item.resolvedBy)} 已处理
               </span>
             )}
             <button

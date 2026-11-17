@@ -1,0 +1,27 @@
+# Gitleaks findings judged harmless (make secrets-check), by exact fingerprint:
+# commit:file:rule:line. A fingerprint covers one line of one commit, so the
+# same value added anywhere else is reported again. A real secret is revoked or
+# rotated, never listed here. First review: #483 (2026-11-16).
+
+# The assistant spike's API Server channel, used before `hermes serve` (#109):
+# one made-up key per sandbox user (alice, bob) of the disposable spike
+# containers, for a server on 127.0.0.1 inside each sandbox. Only the spike
+# installs it, with SPIKE_CHANNEL=api_server (ai/assistant-spike/api-server-channel/).
+536fb959ac581e015be19871aefe03e1f89e54ed:ai/assistant-spike/measure.sh:curl-auth-header:26
+3793cce9c048ae254dbfe5740dd7683115483c4a:ai/assistant-spike/boundary.sh:curl-auth-header:9
+dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:10
+dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:20
+dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:21
+dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:28
+
+# Linkwarden's manifest, as the CasaOS app store publishes it, sets a fixed
+# Meilisearch master key in both services. Meilisearch publishes no port: only
+# Linkwarden reaches it, on the app's own network, like the databases whose
+# fixed passwords internal/appstore/credentials.go leaves alone.
+b4154e17c43dd4944fc836fbe911279c5f02989f:internal/appstore/catalog/linkwarden/docker-compose.yml:generic-api-key:22
+b4154e17c43dd4944fc836fbe911279c5f02989f:internal/appstore/catalog/linkwarden/docker-compose.yml:generic-api-key:359
+
+# A made-up key in a test's expected request body, on the voice processing
+# branch (#203), not yet in main.
+8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:164
+8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:165

@@ -196,8 +196,9 @@ type Submission struct {
 	// same answer harmless.
 	ID string
 	// Kind is "score", "skip" (cannot judge) or "flag" (something is wrong
-	// with the photo); only a score has Score, overall in hundredths, 0 to
-	// MaxScore, and Scores, the batch's other dimensions alike.
+	// with the photo); only a score has Score, in hundredths, 0 to
+	// MaxScore, of the batch's first 打分项, and Scores, its others alike,
+	// each one of the batch's scale.
 	Kind   string
 	Score  *int
 	Scores map[string]int
@@ -237,30 +238,31 @@ func (submission Submission) validate() error {
 	return nil
 }
 
-// scoresDimensions checks that a score answers exactly the batch's
-// dimensions besides overall, which is in Score.
-func (submission Submission) scoresDimensions(dimensions []string) error {
+// answers checks that a score answers exactly the batch's dimensions, the
+// first in Score and the others in Scores, each with a score of its scale.
+func (submission Submission) answers(dimensions []string, scale Scale) error {
 	if submission.Kind != "score" {
 		return nil
 	}
-	extra := extraDimensions(dimensions)
-	if len(submission.Scores) != len(extra) {
-		return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
+	if !scale.fits(*submission.Score) {
+		return invalid("a score of this batch is %s", scale.says())
 	}
-	for _, dimension := range extra {
-		if _, ok := submission.Scores[dimension]; !ok {
-			return invalid("this batch scores %s", strings.Join(dimensionNames(dimensions), "、"))
+	for dimension, score := range submission.Scores {
+		if !scale.fits(score) {
+			return invalid("a score of %s is %s", dimension, scale.says())
 		}
 	}
-	return nil
-}
-
-func dimensionNames(ids []string) []string {
-	names := make([]string, len(ids))
-	for i, id := range ids {
-		names[i] = DimensionName(id)
+	later := laterDimensions(dimensions)
+	answered := len(submission.Scores) == len(later)
+	for _, dimension := range later {
+		if _, ok := submission.Scores[dimension]; !ok {
+			answered = false
+		}
 	}
-	return names
+	if !answered {
+		return invalid("this batch scores %s, the first in score", strings.Join(dimensions, ", "))
+	}
+	return nil
 }
 
 // Result tells the rater how many photos of the batch they answered.
@@ -282,9 +284,10 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 	err := s.within(ctx, func(tx *sql.Tx) error {
 		var item int64
 		var batchID, dimensions string
+		var scale Scale
 		var repeatOf sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT c.item_id, c.batch_id, c.repeat_of, b.dimensions FROM claims c JOIN batches b ON b.id = c.batch_id
-			WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&item, &batchID, &repeatOf, &dimensions)
+		err := tx.QueryRowContext(ctx, `SELECT c.item_id, c.batch_id, c.repeat_of, b.dimensions, b.scale FROM claims c
+			JOIN batches b ON b.id = c.batch_id WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&item, &batchID, &repeatOf, &dimensions, &scale)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -309,7 +312,7 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 		if ok, err := raterIn(ctx, tx, rater); err != nil || !ok {
 			return errors.Join(err, ErrNotRater)
 		}
-		if err := submission.scoresDimensions(splitDimensions(dimensions)); err != nil {
+		if err := submission.answers(splitDimensions(dimensions), scale); err != nil {
 			return err
 		}
 		var previous sql.NullInt64

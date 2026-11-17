@@ -185,7 +185,7 @@ func run(logger *slog.Logger) error {
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
 		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, ReconcileFailed: reconcileFailed.Load,
-		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped,
+		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped, Deletions: sessions,
 	}, logger)
 	mux := http.NewServeMux()
 	mux.Handle("/", operations)

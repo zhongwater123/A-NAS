@@ -48,5 +48,13 @@ function describeNotification(item: Notification, people: People): string {
     const until = item.expiresAt ? `，${new Date(item.expiresAt).toLocaleString("zh-CN")} 自动结束` : "";
     return `管理员 ${actor} 于 ${when} 开启了对你${what}的只读查看${until}。原因：${item.reason ?? "未填写"}`;
   }
+  if (item.kind === "account_deleted") {
+    // The deleted account is gone from the directory; its name is what is left.
+    const where = [
+      item.folder ? `文件在你个人空间的“${item.folder}”文件夹` : "",
+      item.album ? `照片在你私有图库的“${item.album}”相册` : "",
+    ].filter(Boolean);
+    return `账号 ${item.actorUsername} 已于 ${when} 删除。${where.join("，")}。`;
+  }
   return `管理员 ${actor} 于 ${when} 重置了你的密码。`;
 }

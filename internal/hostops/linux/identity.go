@@ -70,12 +70,23 @@ func (e *Executor) syncIdentity(ctx context.Context, identity accountid.Identity
 	if err := e.ensureIdentity(ctx, identity); err != nil {
 		return err
 	}
-	if !identity.Enabled {
-		if err := errors.Join(e.disableSambaIfPresent(ctx, identity.Username), e.disableAssistant(ctx, identity.Username)); err != nil {
+	if identity.Enabled {
+		// Enabling an account again may have stopped part way; this finishes it.
+		if err := errors.Join(e.unlockAccount(ctx, identity.Username), e.enableSambaIfPresent(ctx, identity.Username),
+			e.enableAssistant(ctx, identity.Username)); err != nil {
 			return err
 		}
+	} else if err := errors.Join(e.disableSambaIfPresent(ctx, identity.Username), e.disableAssistant(ctx, identity.Username)); err != nil {
+		return err
 	}
 	return e.recordIdentity(identity)
+}
+
+func (e *Executor) unlockAccount(ctx context.Context, username string) error {
+	if output, err := e.runner.Run(ctx, "usermod", []string{"--unlock", username}, ""); err != nil {
+		return commandError("unlock account", err, output)
+	}
+	return nil
 }
 
 func validIdentity(identity accountid.Identity) error {
@@ -210,17 +221,37 @@ func (e *Executor) getent(ctx context.Context, database, key string) ([]string, 
 }
 
 func (e *Executor) disableSambaIfPresent(ctx context.Context, username string) error {
-	if _, err := e.runner.Run(ctx, "pdbedit", []string{"--user", username}, ""); err != nil {
-		var coded exitCoder
-		if errors.As(err, &coded) {
-			return nil
-		}
-		return fmt.Errorf("look up Samba account: %w", err)
+	if present, err := e.sambaAccountPresent(ctx, username); err != nil || !present {
+		return err
 	}
 	if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", username}, ""); err != nil {
 		return commandError("disable Samba credential", err, output)
 	}
 	return e.disconnectSMBSessions(ctx, username)
+}
+
+// enableSambaIfPresent enables an account's SMB credential when it has one;
+// an account whose password Samba never received gets it with the next
+// password change.
+func (e *Executor) enableSambaIfPresent(ctx context.Context, username string) error {
+	if present, err := e.sambaAccountPresent(ctx, username); err != nil || !present {
+		return err
+	}
+	if output, err := e.runner.Run(ctx, "smbpasswd", []string{"-e", username}, ""); err != nil {
+		return commandError("enable Samba credential", err, output)
+	}
+	return nil
+}
+
+func (e *Executor) sambaAccountPresent(ctx context.Context, username string) (bool, error) {
+	if _, err := e.runner.Run(ctx, "pdbedit", []string{"--user", username}, ""); err != nil {
+		var coded exitCoder
+		if errors.As(err, &coded) {
+			return false, nil
+		}
+		return false, fmt.Errorf("look up Samba account: %w", err)
+	}
+	return true, nil
 }
 
 var smbPID = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)

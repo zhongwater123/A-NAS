@@ -54,15 +54,22 @@ type Item struct {
 	Images []Image `json:"images"`
 	// Version counts edits to the text and images, so an edit made from a
 	// stale copy is refused instead of overwriting someone else's.
-	Version   int64     `json:"version"`
-	CreatedBy string    `json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
-	// UpdatedBy and UpdatedAt record the latest edit to the text or images.
-	UpdatedBy  string     `json:"updatedBy,omitempty"`
-	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
-	Resolved   bool       `json:"resolved"`
-	ResolvedBy string     `json:"resolvedBy,omitempty"`
-	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+	Version   int64  `json:"version"`
+	CreatedBy string `json:"createdBy"`
+	// CreatedByID names the account, whose name a later account may take
+	// after it is deleted.
+	CreatedByID string    `json:"createdById"`
+	CreatedAt   time.Time `json:"createdAt"`
+	// UpdatedBy and UpdatedAt record the latest edit to the text or images;
+	// UpdatedByID is the editor's account ID, empty for edits recorded
+	// before IDs were. ResolvedByID is the same for ResolvedBy.
+	UpdatedBy    string     `json:"updatedBy,omitempty"`
+	UpdatedByID  string     `json:"updatedById,omitempty"`
+	UpdatedAt    *time.Time `json:"updatedAt,omitempty"`
+	Resolved     bool       `json:"resolved"`
+	ResolvedBy   string     `json:"resolvedBy,omitempty"`
+	ResolvedByID string     `json:"resolvedById,omitempty"`
+	ResolvedAt   *time.Time `json:"resolvedAt,omitempty"`
 	// Comments are the replies under the item, oldest first.
 	Comments []Comment `json:"comments"`
 }
@@ -122,6 +129,18 @@ func (s *Store) migrate(ctx context.Context) error {
 var databaseSchema = sqlitedb.Schema{
 	Name:     "feedback.db",
 	Baseline: func(ctx context.Context, db *sql.DB) error { return (&Store{db: db}).baseline(ctx) },
+	Steps: []sqlitedb.Step{{
+		// Who edited or handled an item, and who edited a comment, by account
+		// ID as well as name: a deleted account's name may be taken by a
+		// later account, which must not appear to have done it
+		// (docs/specs/account-enable-and-delete.md). Earlier rows have none.
+		Up: `ALTER TABLE items ADD COLUMN updated_by_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE items ADD COLUMN resolved_by_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE comments ADD COLUMN updated_by_id TEXT NOT NULL DEFAULT '';`,
+		Down: `ALTER TABLE items DROP COLUMN updated_by_id;
+ALTER TABLE items DROP COLUMN resolved_by_id;
+ALTER TABLE comments DROP COLUMN updated_by_id;`,
+	}},
 }
 
 // baseline is the structure the store made before it had steps.
@@ -179,7 +198,7 @@ CREATE INDEX IF NOT EXISTS comment_images_comment ON comment_images(comment_id, 
 // List returns every item, newest first, with its comments and without image
 // content.
 func (s *Store) List(ctx context.Context) ([]Item, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, text, version, created_by, created_at, updated_by, updated_at, resolved_by, resolved_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, text, version, created_by, created_by_id, created_at, updated_by, updated_by_id, updated_at, resolved_by, resolved_by_id, resolved_at
 FROM items ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, err
@@ -268,8 +287,8 @@ func (s *Store) Edit(ctx context.Context, actor Actor, id string, version int64,
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE items SET text = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ?`,
-			text, actor.Username, formatTime(s.now()), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET text = ?, version = version + 1, updated_by = ?, updated_by_id = ?, updated_at = ? WHERE id = ?`,
+			text, actor.Username, actor.ID, formatTime(s.now()), id); err != nil {
 			return err
 		}
 		for _, imageID := range removed {
@@ -292,12 +311,13 @@ func (s *Store) Edit(ctx context.Context, actor Actor, id string, version int64,
 // SetResolved marks the item handled or open again. It is not an edit: it
 // leaves the version alone so it never invalidates someone's open editor.
 func (s *Store) SetResolved(ctx context.Context, actor Actor, id string, resolved bool) (Item, error) {
-	by, at := "", ""
+	by, byID, at := "", "", ""
 	if resolved {
-		by, at = actor.Username, formatTime(s.now())
+		by, byID, at = actor.Username, actor.ID, formatTime(s.now())
 	}
 	// Marking an already handled item again keeps who handled it first.
-	if _, err := s.db.ExecContext(ctx, `UPDATE items SET resolved_by = ?, resolved_at = ? WHERE id = ? AND (resolved_at = '') = ?`, by, at, id, resolved); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE items SET resolved_by = ?, resolved_by_id = ?, resolved_at = ? WHERE id = ? AND (resolved_at = '') = ?`,
+		by, byID, at, id, resolved); err != nil {
 		return Item{}, err
 	}
 	return s.Get(ctx, id)
@@ -338,7 +358,7 @@ type queryer interface {
 }
 
 func (s *Store) get(ctx context.Context, q queryer, id string) (Item, error) {
-	item, err := scanItem(q.QueryRowContext(ctx, `SELECT id, text, version, created_by, created_at, updated_by, updated_at, resolved_by, resolved_at
+	item, err := scanItem(q.QueryRowContext(ctx, `SELECT id, text, version, created_by, created_by_id, created_at, updated_by, updated_by_id, updated_at, resolved_by, resolved_by_id, resolved_at
 FROM items WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Item{}, ErrNotFound
@@ -374,7 +394,8 @@ FROM items WHERE id = ?`, id))
 func scanItem(row interface{ Scan(...any) error }) (Item, error) {
 	item := Item{Images: []Image{}, Comments: []Comment{}}
 	var createdAt, updatedAt, resolvedAt string
-	if err := row.Scan(&item.ID, &item.Text, &item.Version, &item.CreatedBy, &createdAt, &item.UpdatedBy, &updatedAt, &item.ResolvedBy, &resolvedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.Text, &item.Version, &item.CreatedBy, &item.CreatedByID, &createdAt, &item.UpdatedBy, &item.UpdatedByID, &updatedAt,
+		&item.ResolvedBy, &item.ResolvedByID, &resolvedAt); err != nil {
 		return Item{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)

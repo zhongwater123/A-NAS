@@ -1,0 +1,14 @@
+# Names the disk that holds the /usr slots for systemd-sysupdate's /usr
+# transfer (/usr/lib/sysupdate.d/50-usr.transfer): bootctl -RR is the whole
+# disk the root file system is on. Not in /run/a-nas, the Host Agent's runtime
+# directory, which systemd empties whenever the Host Agent restarts.
+[Unit]
+Description=Link the system disk for systemd-sysupdate
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'ln -sfn "$(bootctl -RR)" /run/a-nas-system-disk'

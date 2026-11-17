@@ -198,7 +198,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "storage.db", storageStore)
-	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
+	accountService := accounts.NewService(accountStore, operations, accounts.Options{DeletionDelay: config.DeletionDelay})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
 		return err
@@ -334,12 +334,12 @@ func run(logger *slog.Logger) error {
 		appOptions.VolumeReady = func(ctx context.Context) error { return volumeGuard.Check(ctx, volumeRoot, false) }
 	}
 
-	shareAPI, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
+	shareAPI, removeShares, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
 	defer closeShares()
-	familyAPI, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
+	familyAPI, removeFamily, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
@@ -392,6 +392,11 @@ func run(logger *slog.Logger) error {
 	}
 	tasks.Go(func() error { syncIdentities(background, accountService.SyncIdentities, logger); return nil })
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
+	// Deleted accounts are removed once their 30 days are over
+	// (docs/specs/account-enable-and-delete.md).
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily,
+		musicService, mediaService, transferService)
+	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
 	// snapshot that stopping interrupts is deleted again before the catalog
 	// closes.
@@ -727,16 +732,59 @@ func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, 
 	if err != nil {
 		return nil, "", nil, err
 	}
-	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, nil
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated, volume: config.DataMount}, nil
 }
 
-// developmentOperations stand in for the Host Agent in fake mode.
-type developmentOperations struct{ *simulatedStorage }
+// developmentOperations stand in for the Host Agent in fake mode. volume is
+// the development volume, whose folders are the spaces.
+type developmentOperations struct {
+	*simulatedStorage
+	volume string
+}
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
 }
 func (*developmentOperations) DisableCredential(context.Context, string) error { return nil }
+func (*developmentOperations) EnableCredential(context.Context, accounts.EnableRequest) error {
+	return nil
+}
+
+// RemoveAccount moves a deleted account's development space, a folder of the
+// development volume, into the administrator's without its trash, or deletes
+// it, as the Host Agent does with its subvolume: a later account of the same
+// name, whose space is the same folder, starts empty.
+func (o *developmentOperations) RemoveAccount(_ context.Context, removal accounts.AccountRemoval) (string, error) {
+	private := filepath.Join(o.volume, "spaces", "private")
+	source := filepath.Join(private, removal.Username)
+	if removal.TransferTo == "" {
+		return "", os.RemoveAll(source)
+	}
+	if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(filepath.Join(source, ".a-nas-trash")); err != nil {
+		return "", err
+	}
+	target := filepath.Join(private, removal.TransferTo)
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return "", err
+	}
+	for n := 1; n < 1000; n++ {
+		folder := removal.Folder
+		if n > 1 {
+			folder = fmt.Sprintf("%s (%d)", removal.Folder, n)
+		}
+		if _, err := os.Lstat(filepath.Join(target, folder)); errors.Is(err, os.ErrNotExist) {
+			return folder, os.Rename(source, filepath.Join(target, folder))
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free name for %q", removal.Folder)
+}
 
 // Development volumes have no ACLs; viewing access is decided by the Policy.
 func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequest) error {

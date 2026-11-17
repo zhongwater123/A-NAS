@@ -86,9 +86,14 @@ type BatchInput struct {
 	Source   string
 	Required int
 	Rubric   string
-	// Dimensions are the 打分项 to score, overall among them; none is
-	// overall alone.
+	// Dimensions are the 打分项 to score, one at least, in the order raters
+	// score them.
 	Dimensions []string
+	// Scale is how every 打分项 is scored; empty is Hundredths.
+	Scale Scale
+	// HideDecimals keeps a scale's decimals from raters, who score by the
+	// place on the number line alone; only a scale with decimals has it.
+	HideDecimals bool
 }
 
 const (
@@ -109,9 +114,25 @@ func (input *BatchInput) normalize() error {
 	case utf8.RuneCountInString(input.Rubric) > maxRubricRunes:
 		return invalid("the scoring guide has at most %d characters", maxRubricRunes)
 	}
-	dimensions, err := normalizeDimensions(input.Dimensions)
-	input.Dimensions = dimensions
-	return err
+	if input.Scale == "" {
+		input.Scale = Hundredths
+	}
+	switch {
+	case !input.Scale.valid():
+		return invalid("scale must be hundredths, tenths, whole or three")
+	case input.HideDecimals && !input.Scale.HasDecimals():
+		return invalid("only a scale with decimals can hide them")
+	}
+	return nil
+}
+
+// checkDimensions checks a batch's 打分项 against the catalogue.
+func (s *Store) checkDimensions(ctx context.Context, ids []string) error {
+	catalogue, err := s.Catalogue(ctx)
+	if err != nil {
+		return err
+	}
+	return catalogue.check(ids)
 }
 
 // Batch is a batch as administrators see it.
@@ -122,9 +143,13 @@ type Batch struct {
 	Required   int
 	Rubric     string
 	Dimensions []string
-	State      string
-	CreatedBy  string
-	CreatedAt  time.Time
+	// Scale and HideDecimals are fixed, like the dimensions, by the first
+	// answer.
+	Scale        Scale
+	HideDecimals bool
+	State        string
+	CreatedBy    string
+	CreatedAt    time.Time
 	// Import counts the files found in the source and how far preview
 	// rendering is; Files is 0 until the folder was scanned.
 	Files, Imported, Skipped int
@@ -141,13 +166,16 @@ func (s *Store) CreateBatch(ctx context.Context, by string, input BatchInput) (B
 	if err := input.normalize(); err != nil {
 		return Batch{}, err
 	}
+	if err := s.checkDimensions(ctx, input.Dimensions); err != nil {
+		return Batch{}, err
+	}
 	if info, err := os.Stat(filepath.Join(s.photosDir, input.Source)); err != nil || !info.IsDir() {
 		return Batch{}, invalid("folder %q is not in the scoring folder", input.Source)
 	}
 	id := "b" + randomToken(6)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO batches (id, name, source, required, rubric, dimensions, state, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'importing', ?, ?)`, id, input.Name, input.Source, input.Required, input.Rubric,
-		joinDimensions(input.Dimensions), by, s.timestamp())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO batches (id, name, source, required, rubric, dimensions, scale, hide_decimals,
+		state, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'importing', ?, ?)`, id, input.Name, input.Source, input.Required,
+		input.Rubric, joinDimensions(input.Dimensions), input.Scale, input.HideDecimals, by, s.timestamp())
 	if err != nil {
 		return Batch{}, err
 	}
@@ -160,9 +188,12 @@ type BatchPatch struct {
 	Name     *string
 	Rubric   *string
 	Required *int
-	// Dimensions change only while the batch has no answer: an answer
-	// scores the dimensions there were.
-	Dimensions []string
+	// Dimensions, in their new order, the scale and hiding the decimals
+	// change only while the batch has no answer: an answer scores the
+	// dimensions there were, on the scale there was.
+	Dimensions   []string
+	Scale        *Scale
+	HideDecimals *bool
 	// State is "open" or "closed"; a batch that is importing opens itself.
 	State *string
 }
@@ -173,7 +204,8 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 	if err != nil {
 		return Batch{}, err
 	}
-	input := BatchInput{Name: current.Name, Source: current.Source, Required: current.Required, Rubric: current.Rubric, Dimensions: current.Dimensions}
+	input := BatchInput{Name: current.Name, Source: current.Source, Required: current.Required, Rubric: current.Rubric,
+		Dimensions: current.Dimensions, Scale: current.Scale, HideDecimals: current.HideDecimals}
 	if patch.Name != nil {
 		input.Name = *patch.Name
 	}
@@ -186,11 +218,27 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 	if patch.Dimensions != nil {
 		input.Dimensions = patch.Dimensions
 	}
+	if patch.Scale != nil {
+		input.Scale = *patch.Scale
+		// A scale without decimals has none to hide.
+		if patch.HideDecimals == nil && !input.Scale.HasDecimals() {
+			input.HideDecimals = false
+		}
+	}
+	if patch.HideDecimals != nil {
+		input.HideDecimals = *patch.HideDecimals
+	}
 	if err := input.normalize(); err != nil {
 		return Batch{}, err
 	}
-	if !slices.Equal(input.Dimensions, current.Dimensions) && current.Answers > 0 {
+	dimensionsChange := !slices.Equal(input.Dimensions, current.Dimensions)
+	if (dimensionsChange || input.Scale != current.Scale || input.HideDecimals != current.HideDecimals) && current.Answers > 0 {
 		return Batch{}, ErrInUse
+	}
+	if dimensionsChange {
+		if err := s.checkDimensions(ctx, input.Dimensions); err != nil {
+			return Batch{}, err
+		}
 	}
 	state := current.State
 	if patch.State != nil {
@@ -203,10 +251,13 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 		state = *patch.State
 	}
 	// The answer check and the change are one statement, so that a first
-	// answer cannot slip in between and score dimensions that are gone.
-	result, err := s.db.ExecContext(ctx, `UPDATE batches SET name = ?, rubric = ?, required = ?, state = ?, dimensions = ?
-		WHERE id = ? AND (dimensions = ? OR NOT EXISTS (SELECT 1 FROM ratings WHERE batch_id = ?))`,
-		input.Name, input.Rubric, input.Required, state, joinDimensions(input.Dimensions), id, joinDimensions(input.Dimensions), id)
+	// answer cannot slip in between and score dimensions or a scale that
+	// are gone.
+	dimensions := joinDimensions(input.Dimensions)
+	result, err := s.db.ExecContext(ctx, `UPDATE batches SET name = ?, rubric = ?, required = ?, state = ?, dimensions = ?, scale = ?, hide_decimals = ?
+		WHERE id = ? AND (dimensions = ? AND scale = ? AND hide_decimals = ? OR NOT EXISTS (SELECT 1 FROM ratings WHERE batch_id = ?))`,
+		input.Name, input.Rubric, input.Required, state, dimensions, input.Scale, input.HideDecimals,
+		id, dimensions, input.Scale, input.HideDecimals, id)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -264,7 +315,7 @@ func (s *Store) DeleteBatch(ctx context.Context, id string) error {
 	return nil
 }
 
-const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.dimensions, b.state, b.created_by, b.created_at,
+const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.dimensions, b.scale, b.hide_decimals, b.state, b.created_by, b.created_at,
 	(SELECT count(*) FROM ratings r WHERE r.batch_id = b.id),
 	(SELECT count(*) FROM import_files f WHERE f.batch_id = b.id),
 	(SELECT count(*) FROM import_files f WHERE f.batch_id = b.id AND f.status = 'done'),
@@ -278,7 +329,8 @@ const batchColumns = `b.id, b.name, b.source, b.required, b.rubric, b.dimensions
 func scanBatch(row interface{ Scan(...any) error }) (Batch, error) {
 	var batch Batch
 	var created, dimensions string
-	err := row.Scan(&batch.ID, &batch.Name, &batch.Source, &batch.Required, &batch.Rubric, &dimensions, &batch.State, &batch.CreatedBy, &created,
+	err := row.Scan(&batch.ID, &batch.Name, &batch.Source, &batch.Required, &batch.Rubric, &dimensions, &batch.Scale, &batch.HideDecimals,
+		&batch.State, &batch.CreatedBy, &created,
 		&batch.Answers, &batch.Files, &batch.Imported, &batch.Skipped, &batch.Photos, &batch.Anchors, &batch.Complete, &batch.Started, &batch.Flagged)
 	if err != nil {
 		return Batch{}, err
@@ -352,6 +404,9 @@ type RaterBatch struct {
 	Name       string
 	Rubric     string
 	Dimensions []string
+	// Scale and HideDecimals tell the window how to show scores.
+	Scale        Scale
+	HideDecimals bool
 	// Rated counts the rater's own ratings, including skips and marks.
 	Rated int
 	// Finished is set when no photo of the batch is left for this rater.
@@ -368,12 +423,13 @@ func (s *Store) OpenBatches(ctx context.Context, rater string) ([]RaterBatch, er
 		required int
 	}
 	var batches []open
-	err := each(ctx, s.db, `SELECT b.id, b.name, b.rubric, b.dimensions, b.required,
+	err := each(ctx, s.db, `SELECT b.id, b.name, b.rubric, b.dimensions, b.scale, b.hide_decimals, b.required,
 		(SELECT count(*) FROM ratings r WHERE r.batch_id = b.id AND r.rater = ? AND r.superseded_at IS NULL)
 		FROM batches b WHERE b.state = 'open' ORDER BY b.created_at DESC, b.id`, []any{rater}, func(rows *sql.Rows) error {
 		var batch open
 		var dimensions string
-		if err := rows.Scan(&batch.ID, &batch.Name, &batch.Rubric, &dimensions, &batch.required, &batch.Rated); err != nil {
+		if err := rows.Scan(&batch.ID, &batch.Name, &batch.Rubric, &dimensions, &batch.Scale, &batch.HideDecimals, &batch.required,
+			&batch.Rated); err != nil {
 			return err
 		}
 		batch.Dimensions = splitDimensions(dimensions)

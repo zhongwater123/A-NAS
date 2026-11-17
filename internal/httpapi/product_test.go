@@ -275,7 +275,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	if reset.Code != http.StatusNoContent {
 		t.Fatalf("reset credential status = %d; body=%s", reset.Code, reset.Body.String())
 	}
-	disableRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+createdMember.ID, nil)
+	disableRequest := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+createdMember.ID+"/disable", nil)
 	disableRequest.Header.Set("X-CSRF-Token", session.CSRFToken)
 	disableRequest.AddCookie(responseCookies[0])
 	disable := httptest.NewRecorder()

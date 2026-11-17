@@ -78,6 +78,8 @@ func New(store *scoring.Store, directory Directory, version string, logger *slog
 	}
 	for pattern, serve := range map[string]route{
 		"GET /sources":                          h.sources,
+		"GET /dimensions":                       h.dimensions,
+		"POST /dimensions":                      h.createDimension,
 		"GET /batches":                          h.batches,
 		"POST /batches":                         h.createBatch,
 		"PATCH /batches/{batchId}":              h.updateBatch,
@@ -168,6 +170,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "batch_importing", "the batch is still importing")
 	case errors.Is(err, scoring.ErrInUse):
 		httpjson.WriteError(w, http.StatusConflict, "batch_in_use", "the batch already has ratings")
+	case errors.Is(err, scoring.ErrNameTaken):
+		httpjson.WriteError(w, http.StatusConflict, "dimension_exists", "a scoring dimension has this name")
 	case errors.Is(err, scoring.ErrOriginalChanged):
 		httpjson.WriteError(w, http.StatusGone, "original_changed", "the original is gone or no longer the imported photo")
 	default:
@@ -176,22 +180,39 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 type dimension struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Custom      bool   `json:"custom"`
 }
 
-func dimensionsBody(ids []string) []dimension {
-	body := make([]dimension, len(ids))
-	for i, id := range ids {
-		body[i] = dimension{ID: id, Name: scoring.DimensionName(id)}
+func dimensionBody(d scoring.Dimension) dimension {
+	return dimension{ID: d.ID, Name: d.Name, Description: d.Description, Custom: d.Custom}
+}
+
+// dimensionsBody describes ids from catalogue in their order.
+func dimensionsBody(catalogue scoring.Catalogue, ids []string) []dimension {
+	described := catalogue.Describe(ids)
+	body := make([]dimension, len(described))
+	for i, d := range described {
+		body[i] = dimensionBody(d)
 	}
 	return body
 }
 
+// catalogue reads every 打分项, or answers the failure.
+func (h *handler) catalogue(w http.ResponseWriter, r *http.Request) (scoring.Catalogue, bool) {
+	catalogue, err := h.store.Catalogue(r.Context())
+	if err != nil {
+		h.fail(w, r, err)
+		return nil, false
+	}
+	return catalogue, true
+}
+
 type me struct {
-	Admin      bool        `json:"admin"`
-	Rater      bool        `json:"rater"`
-	Dimensions []dimension `json:"dimensions"`
+	Admin bool `json:"admin"`
+	Rater bool `json:"rater"`
 }
 
 func (h *handler) me(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -200,21 +221,50 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request, user accounts.User)
 		h.fail(w, r, err)
 		return
 	}
-	catalogue := make([]dimension, len(scoring.Dimensions))
-	for i, d := range scoring.Dimensions {
-		catalogue[i] = dimension{ID: d.ID, Name: d.Name}
+	w.Header().Set("Cache-Control", "no-store")
+	httpjson.Write(w, http.StatusOK, me{Admin: user.ActiveAdministrator(), Rater: rater})
+}
+
+// dimensions lists every 打分项 a batch can choose: the built-in ones,
+// then the custom ones, oldest first.
+func (h *handler) dimensions(w http.ResponseWriter, r *http.Request, _ accounts.User) {
+	catalogue, ok := h.catalogue(w, r)
+	if !ok {
+		return
+	}
+	items := make([]dimension, len(catalogue))
+	for i, d := range catalogue {
+		items[i] = dimensionBody(d)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpjson.Write(w, http.StatusOK, me{Admin: user.ActiveAdministrator(), Rater: rater, Dimensions: catalogue})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *handler) createDimension(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if !httpjson.Read(w, r, 4<<10, &request) {
+		return
+	}
+	created, err := h.store.CreateDimension(r.Context(), user.ID, request.Name, request.Description)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusCreated, dimensionBody(created))
 }
 
 type raterBatch struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Rubric     string      `json:"rubric"`
-	Dimensions []dimension `json:"dimensions"`
-	Rated      int         `json:"rated"`
-	Finished   bool        `json:"finished"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Rubric       string        `json:"rubric"`
+	Dimensions   []dimension   `json:"dimensions"`
+	Scale        scoring.Scale `json:"scale"`
+	HideDecimals bool          `json:"hideDecimals"`
+	Rated        int           `json:"rated"`
+	Finished     bool          `json:"finished"`
 }
 
 func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -223,11 +273,15 @@ func (h *handler) raterBatches(w http.ResponseWriter, r *http.Request, user acco
 		h.fail(w, r, err)
 		return
 	}
+	catalogue, ok := h.catalogue(w, r)
+	if !ok {
+		return
+	}
 	items := make([]raterBatch, 0, len(batches))
 	for _, batch := range batches {
 		items = append(items, raterBatch{
-			ID: batch.ID, Name: batch.Name, Rubric: batch.Rubric, Dimensions: dimensionsBody(batch.Dimensions),
-			Rated: batch.Rated, Finished: batch.Finished,
+			ID: batch.ID, Name: batch.Name, Rubric: batch.Rubric, Dimensions: dimensionsBody(catalogue, batch.Dimensions),
+			Scale: batch.Scale, HideDecimals: batch.HideDecimals, Rated: batch.Rated, Finished: batch.Finished,
 		})
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
@@ -502,15 +556,17 @@ type skippedReason struct {
 }
 
 type batch struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	Source     string      `json:"source"`
-	Required   int         `json:"required"`
-	Rubric     string      `json:"rubric"`
-	Dimensions []dimension `json:"dimensions"`
-	State      string      `json:"state"`
-	CreatedAt  time.Time   `json:"createdAt"`
-	Import     struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Source       string        `json:"source"`
+	Required     int           `json:"required"`
+	Rubric       string        `json:"rubric"`
+	Dimensions   []dimension   `json:"dimensions"`
+	Scale        scoring.Scale `json:"scale"`
+	HideDecimals bool          `json:"hideDecimals"`
+	State        string        `json:"state"`
+	CreatedAt    time.Time     `json:"createdAt"`
+	Import       struct {
 		Files     int             `json:"files"`
 		Imported  int             `json:"imported"`
 		Skipped   int             `json:"skipped"`
@@ -524,10 +580,10 @@ type batch struct {
 	Answers  int `json:"answers"`
 }
 
-func batchBody(b scoring.Batch) batch {
+func batchBody(b scoring.Batch, catalogue scoring.Catalogue) batch {
 	body := batch{
-		ID: b.ID, Name: b.Name, Source: b.Source, Required: b.Required, Rubric: b.Rubric, Dimensions: dimensionsBody(b.Dimensions),
-		State: b.State, CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started,
+		ID: b.ID, Name: b.Name, Source: b.Source, Required: b.Required, Rubric: b.Rubric, Dimensions: dimensionsBody(catalogue, b.Dimensions),
+		Scale: b.Scale, HideDecimals: b.HideDecimals, State: b.State, CreatedAt: b.CreatedAt.UTC(), Photos: b.Photos, Anchors: b.Anchors, Complete: b.Complete, Started: b.Started,
 		Flagged: b.Flagged, Answers: b.Answers,
 	}
 	body.Import.Files, body.Import.Imported, body.Import.Skipped = b.Files, b.Imported, b.Skipped
@@ -550,9 +606,13 @@ func (h *handler) batches(w http.ResponseWriter, r *http.Request, _ accounts.Use
 		h.fail(w, r, err)
 		return
 	}
+	catalogue, ok := h.catalogue(w, r)
+	if !ok {
+		return
+	}
 	items := make([]batch, 0, len(batches))
 	for _, b := range batches {
-		items = append(items, batchBody(b))
+		items = append(items, batchBody(b, catalogue))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
@@ -560,44 +620,58 @@ func (h *handler) batches(w http.ResponseWriter, r *http.Request, _ accounts.Use
 
 func (h *handler) createBatch(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var request struct {
-		Name       string   `json:"name"`
-		Source     string   `json:"source"`
-		Required   int      `json:"required"`
-		Rubric     string   `json:"rubric"`
-		Dimensions []string `json:"dimensions,omitempty"`
+		Name         string        `json:"name"`
+		Source       string        `json:"source"`
+		Required     int           `json:"required"`
+		Rubric       string        `json:"rubric"`
+		Dimensions   []string      `json:"dimensions,omitempty"`
+		Scale        scoring.Scale `json:"scale,omitempty"`
+		HideDecimals bool          `json:"hideDecimals,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	created, err := h.store.CreateBatch(r.Context(), user.ID, scoring.BatchInput{
 		Name: request.Name, Source: request.Source, Required: request.Required, Rubric: request.Rubric, Dimensions: request.Dimensions,
+		Scale: request.Scale, HideDecimals: request.HideDecimals,
 	})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusCreated, batchBody(created))
+	catalogue, ok := h.catalogue(w, r)
+	if !ok {
+		return
+	}
+	httpjson.Write(w, http.StatusCreated, batchBody(created, catalogue))
 }
 
 func (h *handler) updateBatch(w http.ResponseWriter, r *http.Request, _ accounts.User) {
 	var request struct {
-		Name       *string  `json:"name,omitempty"`
-		Rubric     *string  `json:"rubric,omitempty"`
-		Required   *int     `json:"required,omitempty"`
-		Dimensions []string `json:"dimensions,omitempty"`
-		State      *string  `json:"state,omitempty"`
+		Name         *string        `json:"name,omitempty"`
+		Rubric       *string        `json:"rubric,omitempty"`
+		Required     *int           `json:"required,omitempty"`
+		Dimensions   []string       `json:"dimensions,omitempty"`
+		Scale        *scoring.Scale `json:"scale,omitempty"`
+		HideDecimals *bool          `json:"hideDecimals,omitempty"`
+		State        *string        `json:"state,omitempty"`
 	}
 	if !httpjson.Read(w, r, 64<<10, &request) {
 		return
 	}
 	updated, err := h.store.UpdateBatch(r.Context(), r.PathValue("batchId"), scoring.BatchPatch{
-		Name: request.Name, Rubric: request.Rubric, Required: request.Required, Dimensions: request.Dimensions, State: request.State,
+		Name: request.Name, Rubric: request.Rubric, Required: request.Required, Dimensions: request.Dimensions,
+		Scale: request.Scale, HideDecimals: request.HideDecimals, State: request.State,
 	})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, batchBody(updated))
+	catalogue, ok := h.catalogue(w, r)
+	if !ok {
+		return
+	}
+	httpjson.Write(w, http.StatusOK, batchBody(updated, catalogue))
 }
 
 func (h *handler) deleteBatch(w http.ResponseWriter, r *http.Request, _ accounts.User) {

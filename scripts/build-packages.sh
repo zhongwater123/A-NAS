@@ -103,6 +103,11 @@ install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/search" "$lib/vectors" "$lib/s
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
 install -m 0755 "$repo"/deploy/debian/a-nas/DEBIAN/{preinst,postinst,prerm,postrm} "$root/DEBIAN/"
+# A device that runs the image gets the product as a system extension, which
+# dpkg does not install: the copies run before and after the extension is
+# switched (scripts/build-image.sh).
+install -d "$lib/release"
+install -m 0755 "$repo"/deploy/debian/a-nas/DEBIAN/{preinst,postinst} "$lib/release/"
 
 # The programs, and the scripts their units and runbooks run.
 install -m 0755 "$build/anas-api" "$build/anas-host-agent" "$build/anas-container-agent" \
@@ -145,6 +150,7 @@ wants sockets.target anas-ai.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path
+wants paths.target anas-update.path
 wants timers.target anas-update.timer
 # What follows the machine: its settings, and the health check.
 install -m 0755 "$repo/deploy/site/a-nas-generator.sh" "$root/usr/lib/systemd/system-generators/a-nas-generator"

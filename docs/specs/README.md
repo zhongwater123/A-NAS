@@ -31,6 +31,7 @@
 - [系统更新](system-update.md)（软件包设备 implemented；镜像设备 draft）
 - [设备温度与风扇](device-temperatures.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented）
+- [重新启用与删除账号](account-enable-and-delete.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
 - [音乐](music.md)（implemented）

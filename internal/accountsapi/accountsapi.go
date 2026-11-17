@@ -47,6 +47,18 @@ func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", err.Error())
 	case errors.Is(err, accounts.ErrSMBDisablePending):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "smb_disable_pending", err.Error())
+	case errors.Is(err, accounts.ErrHostEnablePending):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "host_enable_pending", err.Error())
+	case errors.Is(err, accounts.ErrDeletionPending):
+		httpjson.WriteError(w, http.StatusConflict, "deletion_pending", err.Error())
+	case errors.Is(err, accounts.ErrDeletionStarted):
+		httpjson.WriteError(w, http.StatusConflict, "deletion_started", err.Error())
+	case errors.Is(err, accounts.ErrNotDisabled):
+		httpjson.WriteError(w, http.StatusConflict, "account_not_disabled", err.Error())
+	case errors.Is(err, accounts.ErrNoDeletion):
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, accounts.ErrInvalidInput):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, accounts.ErrCredentialProvision):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "credential_provision_failed", "account could not be enabled for SMB; repair the host service and retry")
 	case errors.Is(err, accounts.ErrForbidden):

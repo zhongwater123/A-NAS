@@ -134,13 +134,33 @@ export function Row({
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+// Field labels one control. A set of choices, such as Segmented, is a group
+// instead: a label around several buttons would press the first one when its
+// text is clicked.
+export function Field({
+  label,
+  hint,
+  group,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  group?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className={styles.setField}>
-      <label>
-        <span>{label}</span>
-        {children}
-      </label>
+      {group ? (
+        <div role="group" aria-label={label}>
+          <span>{label}</span>
+          {children}
+        </div>
+      ) : (
+        <label>
+          <span>{label}</span>
+          {children}
+        </label>
+      )}
       {hint && <small>{hint}</small>}
     </div>
   );
