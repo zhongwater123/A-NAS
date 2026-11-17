@@ -132,7 +132,7 @@ func (options *ExportOptions) columns(batch Batch, catalogue Catalogue) ([]Colum
 		if !slices.Contains(options.Fields, dimension.ID) {
 			continue
 		}
-		description := "0 到 5，两位小数；跳过和标记没有分数"
+		description := batch.Scale.describe() + "；跳过和标记没有分数"
 		if dimension.Description != "" {
 			description = dimension.Description + "。" + description
 		}
@@ -280,8 +280,13 @@ type exportBatch struct {
 	Required   int               `json:"required"`
 	Rubric     string            `json:"rubric"`
 	Dimensions []exportDimension `json:"dimensions"`
-	State      string            `json:"state"`
-	CreatedAt  string            `json:"createdAt"`
+	// Scale is how raters scored, and HideDecimals whether they saw only
+	// the place on the number line; the scores keep the scale's decimals
+	// either way.
+	Scale        Scale  `json:"scale"`
+	HideDecimals bool   `json:"hideDecimals"`
+	State        string `json:"state"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 type exportDimension struct {
@@ -370,7 +375,7 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 		}
 		values := make([]any, len(columns))
 		for i, column := range columns {
-			values[i] = row.value(column.Key, images[row.item], people[row.rater])
+			values[i] = row.value(column.Key, images[row.item], people[row.rater], batch.Scale)
 		}
 		if err := table.row(values); err != nil {
 			return err
@@ -401,7 +406,8 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 	if err := encoder.Encode(exportManifest{
 		Format: ExportFormat, ExportedAt: now.Format(time.RFC3339), Module: module,
 		Batch: exportBatch{ID: batch.ID, Name: batch.Name, Source: batch.Source, Required: batch.Required, Rubric: batch.Rubric,
-			Dimensions: dimensions, State: batch.State, CreatedAt: batch.CreatedAt.UTC().Format(time.RFC3339)},
+			Dimensions: dimensions, Scale: batch.Scale, HideDecimals: batch.HideDecimals, State: batch.State,
+			CreatedAt: batch.CreatedAt.UTC().Format(time.RFC3339)},
 		Rows:    exportCount{Include: include, Count: count},
 		File:    exportFile{Name: name, SHA256: hex.EncodeToString(digest.Sum(nil))},
 		Columns: columns,
@@ -412,8 +418,8 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 }
 
 // value is what column key shows for the row: a number, a string, a bool, a
-// list of strings or nil for nothing.
-func (r exportRow) value(key string, image exportImage, person Person) any {
+// list of strings or nil for nothing. Scores have the decimals of scale.
+func (r exportRow) value(key string, image exportImage, person Person, scale Scale) any {
 	nullInt := func(value sql.NullInt64) any {
 		if value.Valid && value.Int64 > 0 {
 			return value.Int64
@@ -445,7 +451,7 @@ func (r exportRow) value(key string, image exportImage, person Person) any {
 	case "image_height":
 		return image.height
 	case "duration_s":
-		return twoPlaces(math.Round(float64(r.totalMs)/10) / 100)
+		return fixed{math.Round(float64(r.totalMs)/10) / 100, 2}
 	case "submitted_at":
 		if at, err := time.Parse(sqlitedb.TimeLayout, r.created); err == nil {
 			return at.Local().Format(time.RFC3339)
@@ -478,18 +484,21 @@ func (r exportRow) value(key string, image exportImage, person Person) any {
 		return nil
 	}
 	if score, ok := r.scores[key]; ok {
-		return twoPlaces(points(score))
+		return fixed{points(score), scale.Places()}
 	}
 	return nil
 }
 
-// twoPlaces is a score in points or a time in seconds, written with two
-// decimals in both formats.
-type twoPlaces float64
-
-func (v twoPlaces) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.FormatFloat(float64(v), 'f', 2, 64)), nil
+// fixed is a score in points or a time in seconds, written with as many
+// decimals as places in both formats.
+type fixed struct {
+	value  float64
+	places int
 }
+
+func (v fixed) String() string { return strconv.FormatFloat(v.value, 'f', v.places, 64) }
+
+func (v fixed) MarshalJSON() ([]byte, error) { return []byte(v.String()), nil }
 
 // tableWriter writes rows as CSV or as JSON Lines with the columns' keys.
 type tableWriter struct {
@@ -586,8 +595,8 @@ func csvCell(value any) string {
 		return strconv.Itoa(v)
 	case int64:
 		return strconv.FormatInt(v, 10)
-	case twoPlaces:
-		return strconv.FormatFloat(float64(v), 'f', 2, 64)
+	case fixed:
+		return v.String()
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	}

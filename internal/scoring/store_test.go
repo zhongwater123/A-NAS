@@ -696,6 +696,83 @@ func TestCustomDimensionsAreNamedOnceAndExportedWithTheirDescription(t *testing.
 	}
 }
 
+func TestScalesTakeTheirOwnScores(t *testing.T) {
+	for _, c := range []struct {
+		scale     Scale
+		fits, not []int
+	}{
+		{Hundredths, []int{0, 347, 500}, nil},
+		{Tenths, []int{0, 350, 500}, []int{347, 5}},
+		{Whole, []int{0, 300, 500}, []int{350, 50}},
+		{Three, []int{100, 300, 500}, []int{0, 200, 400, 350}},
+	} {
+		for _, score := range c.fits {
+			if !c.scale.fits(score) {
+				t.Errorf("%s refuses %d", c.scale, score)
+			}
+		}
+		for _, score := range c.not {
+			if c.scale.fits(score) {
+				t.Errorf("%s takes %d", c.scale, score)
+			}
+		}
+	}
+}
+
+func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	for _, bad := range []BatchInput{{Scale: "stars"}, {Scale: Whole, HideDecimals: true}, {Scale: Three, HideDecimals: true}} {
+		bad.Name, bad.Source, bad.Required, bad.Dimensions = "坏", "坏", 1, []string{Overall}
+		if _, err := h.store.CreateBatch(ctx, "user:admin", bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q hiding decimals %v accepted: %v", bad.Scale, bad.HideDecimals, err)
+		}
+	}
+	batch := h.batchOf(t, 3, 1, Overall, "composition")
+	if batch.Scale != Hundredths || batch.HideDecimals {
+		t.Fatalf("a new batch is on %q, hiding %v", batch.Scale, batch.HideDecimals)
+	}
+	tenths, three, whole, hide := Tenths, Three, Whole, true
+	batch, err := h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Scale: &tenths, HideDecimals: &hide})
+	if err != nil || batch.Scale != Tenths || !batch.HideDecimals {
+		t.Fatalf("on tenths, hidden: %+v, %v", batch, err)
+	}
+	// Three levels have no decimals to hide.
+	batch, err = h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Scale: &three})
+	if err != nil || batch.Scale != Three || batch.HideDecimals {
+		t.Fatalf("on three levels: %+v, %v", batch, err)
+	}
+	h.raters(t, "a")
+	open, err := h.store.OpenBatches(ctx, "a")
+	if err != nil || len(open) != 1 || open[0].Scale != Three || open[0].HideDecimals {
+		t.Fatalf("the rater's batches %+v, %v", open, err)
+	}
+	claims, _, _ := h.store.Claim(ctx, batch.ID, "a")
+	// score(6) is 3.00, 中; 2.00 and 2.50 are no level.
+	for _, off := range []Submission{withScores(6, map[string]int{"composition": 200}), withScores(5, map[string]int{"composition": 100})} {
+		if _, err := h.store.Submit(ctx, claims[0].Token, "a", off); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%d and %v accepted on three levels: %v", *off.Score, off.Scores, err)
+		}
+	}
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", withScores(6, map[string]int{"composition": 500})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Scale: &whole}); !errors.Is(err, ErrInUse) {
+		t.Fatalf("changing the scale after an answer: %v", err)
+	}
+	if _, err := h.store.UpdateBatch(ctx, batch.ID, BatchPatch{Scale: &three}); err != nil {
+		t.Fatalf("the same scale again: %v", err)
+	}
+	manifest, table := exported(t, h, batch.ID, ExportOptions{Fields: []string{Overall, "composition"}})
+	records, err := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(table, []byte("\xef\xbb\xbf")))).ReadAll()
+	if err != nil || len(records) != 2 || records[1][3] != "3" || records[1][4] != "5" {
+		t.Fatalf("records %q, %v", records, err)
+	}
+	if manifest.Batch.Scale != Three || manifest.Batch.HideDecimals || !strings.HasPrefix(manifest.Columns[3].Description, "三档：1 差，3 中，5 好") {
+		t.Fatalf("manifest %+v", manifest)
+	}
+}
+
 func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
@@ -731,6 +808,13 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	// Overall may now be among the scores after the first.
 	if _, err := store.db.Exec("INSERT INTO rating_scores (rating_id, dimension, score) VALUES (1, 'overall', 100)"); err != nil {
 		t.Fatalf("overall after the first: %v", err)
+	}
+	// Every earlier batch was scored on the number line with two decimals.
+	if batch, err := store.Batch(context.Background(), "b1"); err != nil || batch.Scale != Hundredths || batch.HideDecimals {
+		t.Fatalf("an earlier batch is on %q, hiding %v: %v", batch.Scale, batch.HideDecimals, err)
+	}
+	if _, err := store.db.Exec("UPDATE batches SET hide_decimals = 1, scale = 'three'"); err == nil {
+		t.Fatal("three levels with their decimals hidden")
 	}
 	var version int
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {

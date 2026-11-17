@@ -197,7 +197,8 @@ type Submission struct {
 	ID string
 	// Kind is "score", "skip" (cannot judge) or "flag" (something is wrong
 	// with the photo); only a score has Score, in hundredths, 0 to
-	// MaxScore, of the batch's first 打分项, and Scores, its others alike.
+	// MaxScore, of the batch's first 打分项, and Scores, its others alike,
+	// each one of the batch's scale.
 	Kind   string
 	Score  *int
 	Scores map[string]int
@@ -237,11 +238,19 @@ func (submission Submission) validate() error {
 	return nil
 }
 
-// scoresDimensions checks that a score answers exactly the batch's
-// dimensions: the first in Score, the others in Scores.
-func (submission Submission) scoresDimensions(dimensions []string) error {
+// answers checks that a score answers exactly the batch's dimensions, the
+// first in Score and the others in Scores, each with a score of its scale.
+func (submission Submission) answers(dimensions []string, scale Scale) error {
 	if submission.Kind != "score" {
 		return nil
+	}
+	if !scale.fits(*submission.Score) {
+		return invalid("a score of this batch is %s", scale.says())
+	}
+	for dimension, score := range submission.Scores {
+		if !scale.fits(score) {
+			return invalid("a score of %s is %s", dimension, scale.says())
+		}
 	}
 	later := laterDimensions(dimensions)
 	answered := len(submission.Scores) == len(later)
@@ -275,9 +284,10 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 	err := s.within(ctx, func(tx *sql.Tx) error {
 		var item int64
 		var batchID, dimensions string
+		var scale Scale
 		var repeatOf sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT c.item_id, c.batch_id, c.repeat_of, b.dimensions FROM claims c JOIN batches b ON b.id = c.batch_id
-			WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&item, &batchID, &repeatOf, &dimensions)
+		err := tx.QueryRowContext(ctx, `SELECT c.item_id, c.batch_id, c.repeat_of, b.dimensions, b.scale FROM claims c
+			JOIN batches b ON b.id = c.batch_id WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&item, &batchID, &repeatOf, &dimensions, &scale)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -302,7 +312,7 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 		if ok, err := raterIn(ctx, tx, rater); err != nil || !ok {
 			return errors.Join(err, ErrNotRater)
 		}
-		if err := submission.scoresDimensions(splitDimensions(dimensions)); err != nil {
+		if err := submission.answers(splitDimensions(dimensions), scale); err != nil {
 			return err
 		}
 		var previous sql.NullInt64

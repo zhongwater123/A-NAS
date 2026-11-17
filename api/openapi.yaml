@@ -487,6 +487,7 @@ components:
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
+    ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }
     ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }
     ScoringAnchor: { $ref: "components/scoring.yaml#/schemas/ScoringAnchor" }
     ScoringRecentScore: { $ref: "components/scoring.yaml#/schemas/ScoringRecentScore" }
