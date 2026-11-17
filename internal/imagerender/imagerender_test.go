@@ -3,129 +3,72 @@ package imagerender
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
+	"image/png"
 	"testing"
+
+	"github.com/disintegration/imaging"
+
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
 
-// imaging has no release without CVE-2023-36308 (GHSA-q7pp-wcgr-pffx): its
-// scanner looks up a paletted image's pixels in the palette unchecked, so a
-// pixel past the end of the palette panics. The panic happens in imaging's
-// own worker goroutines, where no decode guard (OVERVIEW invariant 18) can
-// recover it, and ends the process. A paletted image can reach imaging only
-// from a decoder, and every decoder our services register refuses such a
-// pixel: x/image's TIFF and BMP decoders, which imaging registers, return an
-// error; image/gif returns an error; image/png extends the palette. This test
-// keeps the TIFF and BMP decoders to that, with the advisory's own case: a
-// colour map shorter than the pixels need.
-func TestPixelOutsidePaletteIsUndecodable(t *testing.T) {
+// imaging has no release without CVE-2023-36308: a pixel past the end of a
+// paletted picture's palette panics in imaging's own goroutines and ends the
+// process. Decode refuses such a picture whatever decoder made it, and
+// WithDecoded decodes with it.
+func TestAPixelOutsideThePaletteNeverReachesImaging(t *testing.T) {
+	err := WithDecoded(context.Background(), bytes.NewReader(imagetest.OutsidePalettePicture()), func(image.Image) error {
+		t.Error("a pixel outside the palette was decoded and would reach imaging")
+		return nil
+	})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("WithDecoded() error = %v, want ErrUnsupported", err)
+	}
+	// With AutoOrientation, imaging turns a picture before Decode checks it,
+	// but only a JPEG, and a JPEG is never paletted.
+	if _, err := Decode(bytes.NewReader(imagetest.OutsidePalettePicture()), imaging.AutoOrientation(true)); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("Decode() error = %v, want ErrUnsupported", err)
+	}
+
+	// A paletted picture whose pixels are all in its palette decodes.
+	var inside bytes.Buffer
+	if err := png.Encode(&inside, &image.Paletted{Pix: []uint8{1, 0}, Stride: 2, Rect: image.Rect(0, 0, 2, 1),
+		Palette: color.Palette{color.Black, color.White}}); err != nil {
+		t.Fatal(err)
+	}
+	if src, err := Decode(&inside); err != nil {
+		t.Errorf("Decode() of a paletted PNG = %v", err)
+	} else if _, ok := src.(*image.Paletted); !ok {
+		t.Errorf("Decode() of a paletted PNG = %T, want *image.Paletted", src)
+	}
+}
+
+func TestOutsidePalette(t *testing.T) {
+	twoColours := color.Palette{color.Black, color.White}
+	full := make(color.Palette, 256)
+	for i := range full {
+		full[i] = color.Gray{Y: uint8(i)}
+	}
+	paletted := func(palette color.Palette, pixels ...uint8) *image.Paletted {
+		return &image.Paletted{Pix: pixels, Stride: len(pixels), Rect: image.Rect(0, 0, len(pixels), 1), Palette: palette}
+	}
 	for _, picture := range []struct {
-		format string
-		encode func(pixels []byte) []byte
+		name    string
+		picture image.Image
+		want    bool
 	}{
-		{"tiff", palettedTIFF},
-		{"bmp", palettedBMP},
+		{"the last colour", paletted(twoColours, 1, 0), false},
+		{"one past the last colour", paletted(twoColours, 0, 2), true},
+		{"the advisory's pixel", paletted(twoColours, 1, 70), true},
+		{"no palette", paletted(nil, 0), true},
+		{"every index of a full palette", paletted(full, 0, 255), false},
+		{"no pixels", paletted(nil), false},
+		{"not paletted", image.NewNRGBA(image.Rect(0, 0, 2, 1)), false},
 	} {
-		t.Run(picture.format, func(t *testing.T) {
-			// The same picture with both pixels in the palette decodes, so the
-			// pixel outside it is the only reason the other one does not.
-			inside := picture.encode([]byte{1, 0})
-			decoded := false
-			if err := WithDecoded(context.Background(), bytes.NewReader(inside), func(image.Image) error {
-				decoded = true
-				return nil
-			}); err != nil || !decoded {
-				t.Fatalf("the picture with pixels inside its palette: WithDecoded = %v, decoded %v", err, decoded)
-			}
-
-			outside := picture.encode([]byte{1, 70})
-			config, format, err := image.DecodeConfig(bytes.NewReader(outside))
-			if err != nil || format != picture.format {
-				t.Fatalf("DecodeConfig = %q, %v; want %s", format, err, picture.format)
-			}
-			if palette, ok := config.ColorModel.(color.Palette); !ok || len(palette) != 2 {
-				t.Fatalf("colour model %T, want a palette of 2", config.ColorModel)
-			}
-			err = WithDecoded(context.Background(), bytes.NewReader(outside), func(image.Image) error {
-				t.Fatal("a pixel outside the palette decoded and would reach imaging")
-				return nil
-			})
-			if err == nil {
-				t.Fatal("WithDecoded succeeded, want a decode error")
-			}
-		})
+		if got := outsidePalette(picture.picture); got != picture.want {
+			t.Errorf("%s: outsidePalette() = %v, want %v", picture.name, got, picture.want)
+		}
 	}
-}
-
-// palettedTIFF and palettedBMP encode a 2x1 picture with a palette of two
-// colours and the given two pixels.
-func palettedTIFF(pixels []byte) []byte {
-	type entry struct {
-		tag, kind uint16
-		count     uint32
-		value     uint32
-	}
-	const (
-		short = 3
-		long  = 4
-	)
-	entries := []entry{
-		{256, short, 1, 2},     // ImageWidth
-		{257, short, 1, 1},     // ImageLength
-		{258, short, 1, 8},     // BitsPerSample
-		{259, short, 1, 1},     // Compression: none
-		{262, short, 1, 3},     // PhotometricInterpretation: palette
-		{273, long, 1, 0},      // StripOffsets, set below
-		{277, short, 1, 1},     // SamplesPerPixel
-		{278, short, 1, 1},     // RowsPerStrip
-		{279, long, 1, 2},      // StripByteCounts
-		{320, short, 3 * 2, 0}, // ColorMap: red, green and blue of 2 colours, set below
-	}
-	colorMap := []uint16{0, 0xffff, 0, 0xffff, 0, 0xffff}
-	colorMapOffset := uint32(8 + 2 + 12*len(entries) + 4)
-	pixelOffset := colorMapOffset + uint32(2*len(colorMap))
-	entries[5].value = pixelOffset
-	entries[9].value = colorMapOffset
-
-	le := binary.LittleEndian
-	b := le.AppendUint32([]byte("II*\x00"), 8)
-	b = le.AppendUint16(b, uint16(len(entries)))
-	for _, e := range entries {
-		b = le.AppendUint16(b, e.tag)
-		b = le.AppendUint16(b, e.kind)
-		b = le.AppendUint32(b, e.count)
-		b = le.AppendUint32(b, e.value)
-	}
-	b = le.AppendUint32(b, 0) // no next IFD
-	for _, v := range colorMap {
-		b = le.AppendUint16(b, v)
-	}
-	return append(b, pixels...)
-}
-
-func palettedBMP(pixels []byte) []byte {
-	const (
-		headers    = 14 + 40
-		colorsUsed = 2
-		rowBytes   = 4 // a row is padded to four bytes
-	)
-	le := binary.LittleEndian
-	pixelOffset := uint32(headers + 4*colorsUsed)
-	b := le.AppendUint32([]byte("BM"), pixelOffset+rowBytes) // file size
-	b = le.AppendUint32(b, 0)                                // reserved
-	b = le.AppendUint32(b, pixelOffset)
-	b = le.AppendUint32(b, 40) // BITMAPINFOHEADER
-	b = le.AppendUint32(b, 2)  // width
-	b = le.AppendUint32(b, 1)  // height, bottom-up
-	b = le.AppendUint16(b, 1)  // planes
-	b = le.AppendUint16(b, 8)  // bits per pixel
-	b = le.AppendUint32(b, 0)  // no compression
-	b = le.AppendUint32(b, rowBytes)
-	b = le.AppendUint32(b, 0) // horizontal resolution
-	b = le.AppendUint32(b, 0) // vertical resolution
-	b = le.AppendUint32(b, colorsUsed)
-	b = le.AppendUint32(b, 0)                      // important colours: all
-	b = append(b, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0) // black and white, as BGR0
-	return append(append(b, pixels...), 0, 0)      // row padding
 }
