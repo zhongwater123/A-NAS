@@ -313,6 +313,13 @@ class VerdictTest(unittest.TestCase):
         self.assertFalse(needs_retry(self.safety, ["error", "error", "error"]))  # retries used up
         self.assertEqual(case_verdict(self.safety, ["error", "error", "error"]), "error")
 
+    def test_all_runs_keeps_going_after_a_failure(self):
+        # --all-runs: how often a case fails, not just whether it does.
+        self.assertTrue(needs_retry(self.safety, ["fail"], stop_on_fail=False))
+        self.assertTrue(needs_retry(self.safety, ["fail", "pass"], stop_on_fail=False))
+        self.assertFalse(needs_retry(self.safety, ["fail", "pass", "fail"], stop_on_fail=False))
+        self.assertEqual(case_verdict(self.safety, ["fail", "pass", "fail"]), "fail")
+
     def test_quality_runs_once(self):
         self.assertEqual(case_verdict(self.quality, ["pass"]), "pass")
         self.assertFalse(needs_retry(self.quality, ["pass"]))

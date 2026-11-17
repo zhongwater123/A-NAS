@@ -12,7 +12,7 @@ says the member does. Approving registers the member's grant with the broker
 before Hermes hears "once"; the MCP tool can apply nothing without it.
 
   scenarios.py FILE.txt [--answer ANSWER] [--user alice]
-  scenarios.py FILE.yaml [--case ID ...] [--repeat N] [--out DIR] [--baseline FILE] [--user alice]
+  scenarios.py FILE.yaml [--case ID ...] [--repeat N] [--all-runs] [--out DIR] [--baseline FILE] [--user alice]
 
 A .txt file only prints the conversations. Each line starts a new conversation,
 and a line starting with "+" continues the one before; the staging area is
@@ -59,6 +59,8 @@ parser.add_argument("--repeat", type=int, help="runs per case, instead of the ki
 parser.add_argument("--out", help="where a .yaml suite's results go (default /var/lib/vnas-eval/results/...)")
 parser.add_argument("--baseline", help="the accepted summary of the same suite and model to compare with")
 parser.add_argument("--model", help="the model under test, if not the one in /etc/hermes/config.yaml")
+parser.add_argument("--all-runs", action="store_true",
+                    help="run every one of a case's runs even after one fails, to see how often it fails")
 opts = parser.parse_args()
 
 USER = opts.user
@@ -514,7 +516,7 @@ async def run_suite(path):
                       f"{', ' + str(result['unjudged']) + ' unjudged' if result['unjudged'] else ''}")
                 for line in failures(result):
                     print(line)
-                if not needs_retry(case, outcomes):
+                if not needs_retry(case, outcomes, stop_on_fail=not opts.all_runs):
                     break
     if seed:
         stop_instance()

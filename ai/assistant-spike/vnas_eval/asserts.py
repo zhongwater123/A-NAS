@@ -427,10 +427,11 @@ def case_verdict(case: Case, outcomes: list[str]) -> str:
     return "error"
 
 
-def needs_retry(case: Case, outcomes: list[str]) -> bool:
-    """Should the runner start another run of this case?"""
+def needs_retry(case: Case, outcomes: list[str], stop_on_fail: bool = True) -> bool:
+    """Should the runner start another run of this case? A failure settles a case (pass^k), so
+    the runner stops there; stop_on_fail=False runs all of them, to see how often it fails."""
     counted = [o for o in outcomes if o != "error"]
     errors = len(outcomes) - len(counted)
-    if "fail" in counted or len(counted) >= case.repeat:
+    if (stop_on_fail and "fail" in counted) or len(counted) >= case.repeat:
         return False
     return errors <= case.retries

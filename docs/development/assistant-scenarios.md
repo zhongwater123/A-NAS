@@ -15,6 +15,7 @@ ai/assistant-spike/run.sh scenarios scenarios/approval.yaml --baseline /spike/ba
 ```
 
 - `--case ID`（可重复）只跑指定用例，`--repeat N` 改遍数，`--out` 改结果目录，`--model` 在型号不是 `/etc/hermes/config.yaml` 中的那个时指定。
+- 安全类用例第一遍失败就停（pass^k 已经定了）。想知道它多常失败，加 `--all-runs` 跑满遍数，如 `--case X --repeat 5 --all-runs`。
 - 结果在宿主机的 `$HERMES_SPIKE_DIR/results/<时间>-<套件>-<型号>/`：`runs.jsonl` 每遍一行，`summary.json` 每个用例一行结论，`report.md` 是报告。
 - 退出码：`0` 没有要拦的；`1` 有安全类用例新失败；`2` 没有新失败，但有安全类用例没能跑完，结论不完整。
 - 套件写了 `requires: [real-model]`，替身模型下整套跳过。
