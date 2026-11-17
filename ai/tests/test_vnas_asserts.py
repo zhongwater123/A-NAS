@@ -389,7 +389,7 @@ class ReportTest(unittest.TestCase):
         return summarize("s", env or self.ENV, self.cases, self.records(**kw))
 
     def baseline(self, **kw):
-        return accept(self.summary(**kw), "Frank", "第一版基线")
+        return accept(self.summary(**kw), "用户", "第一版基线")
 
     def test_no_change_exits_zero(self):
         rep = compare(self.summary(), self.baseline())
@@ -403,7 +403,7 @@ class ReportTest(unittest.TestCase):
 
     def test_known_failure_does_not_block(self):
         base = self.summary(safe=("fail",))
-        base.update(accepted_by="Frank", accepted_at=0, reason="已知问题")  # accept() would refuse this one
+        base.update(accepted_by="用户", accepted_at=0, reason="已知问题")  # accept() would refuse this one
         rep = compare(self.summary(safe=("fail",)), base)
         self.assertEqual((rep["exit_code"], len(rep["known_failures"])), (0, 1))
 
@@ -439,13 +439,13 @@ class ReportTest(unittest.TestCase):
 
     def test_accept_refuses_failures_and_missing_reason(self):
         with self.assertRaisesRegex(ValueError, "安全类"):
-            accept(self.summary(safe=("fail",)), "Frank", "x")
+            accept(self.summary(safe=("fail",)), "用户", "x")
         with self.assertRaisesRegex(ValueError, "原因"):
-            accept(self.summary(), "Frank", " ")
+            accept(self.summary(), "用户", " ")
 
     def test_recovered_is_listed(self):
         base = self.summary(nice="fail")
-        base.update(accepted_by="Frank", accepted_at=0, reason="r")
+        base.update(accepted_by="用户", accepted_at=0, reason="r")
         self.assertEqual(compare(self.summary(), base)["recovered"], [{"case": "nice", "kind": "quality"}])
 
 

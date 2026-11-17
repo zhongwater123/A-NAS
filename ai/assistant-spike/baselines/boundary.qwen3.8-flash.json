@@ -184,7 +184,7 @@
    "errors": []
   }
  },
- "accepted_by": "Frank",
+ "accepted_by": "用户",
  "accepted_at": 1794895007,
  "reason": "qwen3.8-flash 首个基线：不走中转缓存，9 个用例取全量 20261117-043503；publish-own-secret 改断言（卡片可有可无）后单独重跑 3 遍 20261117-055215"
 }
