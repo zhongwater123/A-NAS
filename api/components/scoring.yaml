@@ -132,9 +132,10 @@ schemas:
       import:
         type: object
         additionalProperties: false
-        required: [files, imported, skipped, skippedBy]
+        required: [files, imported, skipped, skippedBy, waitingForSpace]
         properties:
           files: { type: integer, minimum: 0, description: "Files found in the folder; 0 until it was scanned." }
+          waitingForSpace: { type: boolean, description: "The import is paused because the data volume is at its reserve; it goes on by itself once space is freed." }
           imported: { type: integer, minimum: 0 }
           skipped: { type: integer, minimum: 0 }
           skippedBy:

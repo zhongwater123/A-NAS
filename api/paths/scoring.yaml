@@ -59,19 +59,22 @@
       "200": { description: The held photos, content: { application/json: { schema: { $ref: "../components/scoring.yaml#/schemas/ScoringClaims" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/claims/{token}/image:
   get:
     operationId: getScoringClaimImage
-    summary: "The preview behind one of the caller's own claims, answered or not"
+    summary: "The preview behind one of the caller's own claims while the caller holds it or has an answer for it in force"
+    description: "A claim whose lease ended unanswered went back to the batch: not_found (404). A member no longer chosen as a rater gets not_rater (403) for every claim."
     parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
     responses:
       "200": { description: The preview, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/claims/{token}/full:
   get:
     operationId: getScoringClaimFull
     summary: "The photo behind one of the caller's own claims at its full size, which the window shows at 100%"
-    description: "Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported."
+    description: "Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported. The caller sees it on the same terms as the preview; insufficient_storage (507) when rendering it would take the data volume below its reserve."
     parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
     responses:
       "200":
@@ -79,16 +82,20 @@
         headers:
           X-Image-Orientation: { description: "The EXIF orientation, 1 to 8, to apply for display.", schema: { type: integer, minimum: 1, maximum: 8 } }
         content: { image/jpeg: { schema: { type: string, format: binary } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "410": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/claims/{token}/thumbnail:
   get:
     operationId: getScoringClaimThumbnail
-    summary: "A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims"
+    summary: "A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims, on the same terms as the preview"
     parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringClaimToken" }]
     responses:
       "200": { description: The thumbnail, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/claims/{token}/rating:
   put:
     operationId: rateScoringPhoto
@@ -104,6 +111,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/admin/sources:
   get:
     operationId: listScoringSources
@@ -158,6 +166,7 @@
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/admin/batches/{batchId}:
   parameters: [{ $ref: "../components/scoring.yaml#/parameters/ScoringBatchID" }]
   patch:

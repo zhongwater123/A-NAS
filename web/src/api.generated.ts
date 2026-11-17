@@ -2259,7 +2259,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The preview behind one of the caller's own claims, answered or not */
+        /**
+         * The preview behind one of the caller's own claims while the caller holds it or has an answer for it in force
+         * @description A claim whose lease ended unanswered went back to the batch: not_found (404). A member no longer chosen as a rater gets not_rater (403) for every claim.
+         */
         get: operations["getScoringClaimImage"];
         put?: never;
         post?: never;
@@ -2278,7 +2281,7 @@ export interface paths {
         };
         /**
          * The photo behind one of the caller's own claims at its full size, which the window shows at 100%
-         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported. The caller sees it on the same terms as the preview; insufficient_storage (507) when rendering it would take the data volume below its reserve.
          */
         get: operations["getScoringClaimFull"];
         put?: never;
@@ -2296,7 +2299,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims */
+        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims, on the same terms as the preview */
         get: operations["getScoringClaimThumbnail"];
         put?: never;
         post?: never;
@@ -6485,6 +6488,8 @@ export interface components {
             import: {
                 /** @description Files found in the folder; 0 until it was scanned. */
                 files: number;
+                /** @description The import is paused because the data volume is at its reserve; it goes on by itself once space is freed. */
+                waitingForSpace: boolean;
                 imported: number;
                 skipped: number;
                 /** @description The skipped files by reason, most first: too_small (a photo to score whose longer side is under 2400 pixels), unsupported_type, undecodable, too_large, unreadable, missing, not_a_file, anchor_name (an anchor without a score in its name). */
@@ -12605,6 +12610,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     getScoringClaimImage: {
@@ -12627,6 +12633,7 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
         };
     };
@@ -12652,8 +12659,10 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             410: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     getScoringClaimThumbnail: {
@@ -12676,7 +12685,9 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     rateScoringPhoto: {
@@ -12712,6 +12723,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listScoringSources: {
@@ -12843,6 +12855,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     deleteScoringBatch: {
