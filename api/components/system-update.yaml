@@ -3,10 +3,11 @@ schemas:
     type: string
     description: >-
       Where an update stands: up-to-date; available (newer, to download from a network source); downloading;
-      ready (on the device, a push or a download); installing (apt, then a-nas-check); rolling-back; rolled-back
-      (the check of the new version failed); check-failed (the source could not be read or its signature was
-      wrong).
-    enum: [up-to-date, available, downloading, ready, installing, rolling-back, rolled-back, check-failed]
+      ready (on the device, a push or a download); installing (apt, then a-nas-check; on a device that runs the
+      A-NAS image, the product switch or the write of a new base image); rolling-back; rolled-back (the check of
+      the new version failed, or its base image its boot check); check-failed (the source could not be read or its
+      signature was wrong); restart-pending (a new base image is written and a restart starts it).
+    enum: [up-to-date, available, downloading, ready, installing, rolling-back, rolled-back, check-failed, restart-pending]
   SystemUpdateProblem:
     type: object
     additionalProperties: false
@@ -14,8 +15,8 @@ schemas:
     properties:
       code:
         type: string
-        enum: [unreachable, signature, disk_space, download, install, check, rollback, staging, not_installed]
-      detail: { type: string, description: "What apt or a-nas-check said; for disk_space, the bytes still missing." }
+        enum: [unreachable, signature, disk_space, download, install, check, rollback, staging, not_installed, boot]
+      detail: { type: string, description: "What apt, systemd-sysupdate or a-nas-check said; for disk_space, the bytes still missing." }
   SystemUpdateRecord:
     type: object
     additionalProperties: false
@@ -41,7 +42,7 @@ schemas:
     additionalProperties: false
     required: [action]
     properties:
-      action: { type: string, enum: [check, download, install, revert] }
+      action: { type: string, enum: [check, download, install, revert, restart] }
   SystemUpdateStatus:
     type: object
     additionalProperties: false
@@ -57,7 +58,7 @@ schemas:
       suites: { type: array, items: { type: string }, description: "The distributions the device follows, such as release and dev." }
       checkedAt: { type: string, format: date-time }
       installedAt: { type: string, format: date-time }
-      target: { type: string, description: The version an operation in progress installs. }
+      target: { type: string, description: "The version an operation in progress installs, or that waits for a restart." }
       startedAt: { type: string, format: date-time }
       problem: { $ref: "#/schemas/SystemUpdateProblem" }
       records:
@@ -67,5 +68,14 @@ schemas:
       settings: { $ref: "#/schemas/SystemUpdateSettings" }
       waiting:
         type: array
-        description: What an install waits for now.
+        description: What an install, revert or restart waits for now.
         items: { type: string, enum: [storage, apps] }
+      image: { $ref: "#/schemas/SystemUpdateImage" }
+  SystemUpdateImage:
+    type: object
+    additionalProperties: false
+    description: Set on a device that runs the A-NAS image (ADR 0034 decision 2).
+    required: [base, restart]
+    properties:
+      base: { type: string, description: "The base image the device runs, by its release's sequence on main." }
+      restart: { type: boolean, description: "Installing the candidate writes a new base image, which a restart starts." }

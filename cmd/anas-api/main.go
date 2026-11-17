@@ -672,7 +672,8 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 // configuredSystemUpdate reaches the system update service through the Host
 // Agent on a NAS (docs/specs/system-update.md). Development has one in
 // memory with two development builds numbered as scripts/release-version.sh
-// numbers them, the newer waiting to be installed.
+// numbers them, the newer waiting to be installed; ANAS_FAKE_UPDATE=image
+// makes it a device that runs the A-NAS image.
 func configuredSystemUpdate(config Config, operations productOperations) systemupdate.Updater {
 	if config.Live() {
 		updater, ok := operations.(systemupdate.Updater)
@@ -682,8 +683,12 @@ func configuredSystemUpdate(config Config, operations productOperations) systemu
 		return updater
 	}
 	return systemupdate.NewMemory("1.0.1~rc.6+dev20261112.79+g83bb9db1c0de",
-		"1.0.1~rc.6+dev20261113.80+g4e842653a1b2", 4*time.Second)
+		"1.0.1~rc.6+dev20261113.80+g4e842653a1b2", 4*time.Second, config.FakeUpdate == fakeUpdateImage)
 }
+
+// fakeUpdateImage is ANAS_FAKE_UPDATE's value for a device that runs the
+// A-NAS image.
+const fakeUpdateImage = "image"
 
 // updateWork names what an install waits for: a storage plan that runs or a
 // conversion of the data volume, and an app that installs or uninstalls.

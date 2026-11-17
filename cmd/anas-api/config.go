@@ -67,6 +67,10 @@ type Config struct {
 	// FakeStorage picks the simulated host in fake mode: empty for the usual
 	// disks, degraded for a volume that loses a disk (devstorage.go).
 	FakeStorage string `env:"ANAS_FAKE_STORAGE"`
+	// FakeUpdate picks the simulated system update in fake mode: empty for a
+	// device installed with apt, image for one that runs the A-NAS image,
+	// whose update waits for a restart.
+	FakeUpdate string `env:"ANAS_FAKE_UPDATE"`
 	// StateDir holds the SQLite stores and caches; it defaults to the user's
 	// configuration directory.
 	StateDir string `env:"ANAS_STATE_DIR"`
@@ -202,6 +206,13 @@ func loadConfig(environment map[string]string) (Config, error) {
 		problem(errors.New("ANAS_FAKE_STORAGE applies to fake mode only"))
 	case c.FakeStorage != fakeStorageDegraded:
 		problem(fmt.Errorf("ANAS_FAKE_STORAGE must be empty or %s", fakeStorageDegraded))
+	}
+	switch {
+	case c.FakeUpdate == "":
+	case live:
+		problem(errors.New("ANAS_FAKE_UPDATE applies to fake mode only"))
+	case c.FakeUpdate != fakeUpdateImage:
+		problem(fmt.Errorf("ANAS_FAKE_UPDATE must be empty or %s", fakeUpdateImage))
 	}
 	switch {
 	case c.InternetHTTPAddr == "" && c.InternetHost == "":

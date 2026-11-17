@@ -11,6 +11,7 @@ mkdir -p "$units/sysinit.target.wants" "$units/boot-complete.target.requires" "$
 # The device's own SSH host keys, before sshd starts (mkosi.finalize).
 ln -sf ../sshd-keygen.service "$units/ssh.service.wants/"
 ln -sf ../systemd-sysext.service "$units/sysinit.target.wants/"
+ln -sf ../a-nas-product-select.service "$units/sysinit.target.wants/"
 ln -sf ../a-nas-etc.service "$units/sysinit.target.wants/"
 ln -sf ../a-nas-sysext-ready.service "$units/sysinit.target.wants/"
 ln -sf ../a-nas-system-disk.service "$units/sysinit.target.wants/"
