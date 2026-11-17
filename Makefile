@@ -337,8 +337,13 @@ go-lint:
 # SearXNG's pins, so an advisory there moves its commit) and the Web UI's
 # runtime packages (npm audit, with the registry's advisories). A new advisory
 # fails it without a change; fix that first (AGENTS.md).
+# It also checks the Go tools the checks run, each from its own module under
+# tools/: Dependabot updates only the tool itself there, so an advisory in the
+# rest of the module would otherwise show only as a Dependabot alert. As for
+# the product, govulncheck reports only what the tool's code can reach.
 vuln-check:
 	$(GO) tool govulncheck ./...
+	for tool in actionlint gitleaks golangci-lint; do $(GO) tool govulncheck -C tools/$$tool tool || exit 1; done
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev

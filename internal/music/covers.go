@@ -18,6 +18,7 @@ import (
 	"github.com/disintegration/imaging"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/imagerender"
 )
 
 // Cover sizes. Small covers fill track rows and album grids; large ones the
@@ -107,7 +108,7 @@ func (c coverStore) Put(picture []byte) (id string, err error) {
 	if config.Width <= 0 || config.Height <= 0 || config.Width*config.Height > maxCoverPixels {
 		return "", errors.New("cover dimensions are out of range")
 	}
-	source, _, err := image.Decode(bytes.NewReader(picture))
+	source, err := imagerender.Decode(bytes.NewReader(picture))
 	if err != nil {
 		return "", fmt.Errorf("decode cover: %w", err)
 	}

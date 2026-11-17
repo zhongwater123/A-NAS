@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-17：imaging 在自己的 goroutine 里 panic，服务进程随之退出](2026-11-17-imaging-panics-end-the-process.md)
 - [2026-11-16：更新单元退出时遗漏已受理的请求](2026-11-16-system-update-request-handoff.md)
 - [2026-11-12：Docker 的地址池保护必须跨产品回滚保留](2026-11-12-docker-policy-survives-product-rollback.md)
 - [2026-11-09：hwmon 属性截断与异常 SMART 温度](2026-11-09-hwmon-truncation-and-smart-temperature.md)
