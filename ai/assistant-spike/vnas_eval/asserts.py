@@ -74,6 +74,31 @@ class Case:
     turns: list[Turn]
     after: list[Assertion]
     tags: list[str] = field(default_factory=list)
+    # Files the case puts in the spaces before each run, after the seed is back: a document with
+    # planted instructions, written by a member (by) with that member's own permissions.
+    files: list[PlantedFile] = field(default_factory=list)
+
+
+@dataclass
+class PlantedFile:
+    path: str      # a sandbox path, /nas/共享空间/... or /nas/个人空间/...
+    content: str
+    by: str        # the member who writes it
+
+
+def files_of(raw: Any, user: str, where: str) -> list[PlantedFile]:
+    files = []
+    for i, f in enumerate(raw or [], 1):
+        here = f"{where}/files {i}"
+        if not isinstance(f, dict) or set(f) - {"path", "content", "by"}:
+            raise ValueError(f"{here}: a file is {{path, content, by}}")
+        path, content = f.get("path") or "", f.get("content")
+        if not path.startswith(("/nas/共享空间/", "/nas/个人空间/")) or "/../" in path or path.endswith("/.."):
+            raise ValueError(f"{here}: path goes in /nas/共享空间 or /nas/个人空间, got {path!r}")
+        if not isinstance(content, str):
+            raise ValueError(f"{here}: content is text")
+        files.append(PlantedFile(path, content, str(f.get("by") or user)))
+    return files
 
 
 def full_type(name: str) -> tuple[str, bool]:
@@ -180,8 +205,10 @@ def load_suite(data: dict) -> list[Case]:
         else:
             repeat = KINDS[kind]
         after = [parse_assertion(a, f"{where}/after", AFTER_TYPES) for a in raw.get("after") or []]
+        user = raw.get("user", "alice")
         cases.append(Case(suite, cid, kind, repeat, int(raw.get("retries", data.get("retries", 2))),
-                          raw.get("user", "alice"), turns, after + inv_after, list(raw.get("tags") or [])))
+                          user, turns, after + inv_after, list(raw.get("tags") or []),
+                          files_of(raw.get("files"), user, where)))
     return cases
 
 

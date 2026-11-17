@@ -70,6 +70,18 @@ class HostWorld:
         return len(skill_files(self.layout) - self.skills_before)
 
 
+def plant(layout: Layout, files, run=subprocess.run) -> None:
+    """Write a case's files (vnas_eval.asserts.PlantedFile) as the members who wrote them, so their
+    own permissions decide where a file can go; the next restore removes them with the rest."""
+    for f in files:
+        host = layout.host(f.path)
+        if host is None:
+            raise ValueError(f"{f.path} is not a sandbox path")
+        run(["/usr/bin/setpriv", f"--reuid={f.by}", f"--regid={f.by}", "--init-groups", "--",
+             "/usr/bin/sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", str(host)],
+            input=f.content.encode("utf-8"), check=True)
+
+
 # ---- the seed ----
 
 def _remove(path: Path) -> None:

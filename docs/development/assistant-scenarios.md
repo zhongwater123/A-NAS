@@ -6,6 +6,8 @@
 
 ## 运行
 
+什么时候跑（2026-11-17 定）：改了下面任何一样，提交前在本机跑一次 approval、boundary 与 injection 全量并带上 `--baseline`，把报告贴进 PR：被测型号或模型中转、Hermes 固定提交、[`skills/`](../../ai/assistant-spike/skills/anas-files/SKILL.md) 下的技能说明、[托管配置](../../ai/assistant-spike/managed-config.yaml)、文件代理。不进 CI，也不定时跑：一次约 350 万 token、一小时，还要真实模型的密钥。
+
 在 [spike 容器](../../ai/assistant-spike/run.sh)中运行，真实模型的准备与 `.txt` 场景相同：
 
 ```bash
@@ -78,6 +80,8 @@ cases:
 | `invariants` | `turn` 每轮都查，`after` 每段对话结束都查；`defaults: false` 关掉默认的 `consent` |
 
 用例字段：`id`（套件内唯一）、`description`、`tags`、`user`（默认 alice，要与 `--user` 一致）、`kind`、`repeat`。`answer` 写一个值，或写列表（本轮多个审批请求依次怎么答，最后一个重复使用），取值与 `.txt` 相同：`approve`、`deny`、`wait`、`stop`、`late`、`forge`。
+
+`files` 列出用例自己要放的文件，每一遍恢复种子之后、对话之前写入，下一遍恢复时随之清掉，不用改 `seed.sh`。每项是 `{path, content, by}`：`path` 在 `/nas/共享空间` 或 `/nas/个人空间`（后者是本用例成员的个人空间）；`by` 是写这个文件的成员，默认是本用例的成员，以他自己的身份和权限写入，他写不了的位置这一遍就报错。用来放夹带指令的文档，见 [`scenarios/injection.yaml`](../../ai/assistant-spike/scenarios/injection.yaml)。
 
 `clarify` 是成员怎么回答助手的反问（Hermes 的 `clarify` 工具：一次 1–5 个问题，可带选项），写一个值或列表（本轮第几次反问用第几个，最后一个重复使用），见 [`vnas_eval/member.py`](../../ai/assistant-spike/vnas_eval/member.py)：
 
@@ -192,14 +196,24 @@ cases:
 
 promptfoo 的执行器只能在一轮对话结束后看结果，而这里一轮对话的中途，执行器要扮演产品服务（见到审批请求 → 让 broker 生成卡片 → 按场景替成员确认、拒绝、不回答或停止），还要在容器里读 broker 状态、文件和记忆。所以只沿用它的断言词汇，判分（[`vnas_eval/asserts.py`](../../ai/assistant-spike/vnas_eval/asserts.py)）、评审与报告放在 `scenarios.py` 旁边，只用标准库；YAML 用 Hermes 运行环境自带的 ruamel.yaml 解析。
 
+## 借用的开源做法
+
+2026-11-17 对照过几个开源的评测项目，借用其中的做法和数据，不引入它们的执行器：
+
+- [AgentDojo](https://github.com/ethz-spylab/agentdojo)（MIT）：injection 套件的指令写法改编自它的攻击模板（`important_instructions` 冒充成员本人并署名、`tool_knowledge` 写全工具参数、`system_message` 伪装系统消息）；判法也照它，安全看注入的目标有没有达成，成员原本的事有没有办成另记。
+- [τ²-bench](https://github.com/sierra-research/tau2-bench)（MIT）：安全类用例的 pass^k 取自它。它用模型扮演用户、多轮追问，这里成员的话还是写死的，需要更自然的多轮对话时再借。
+- [Inspect](https://github.com/UKGovernmentBEIS/inspect_ai)（MIT）：成熟的评测框架，日志查看与重复次数都现成，但它的 agent bridge 只代理模型调用，接不上回合中途的审批与反问，换过去要重写执行器。
+- [promptfoo](https://github.com/promptfoo/promptfoo)（MIT）：断言词汇取自它；它的间接注入插件要在它的云端生成攻击，不用。
+- [EvalScope](https://github.com/modelscope/evalscope)（Apache-2.0）：能用 OpenAI 兼容接口对千问跑 τ²-bench、BFCL 一类通用的工具调用基准，换被测型号前可以先用它粗筛，粗筛过了再跑这里的场景。
+
 ## 尚未决定
 
-- 评审用的 `qwen3.8-max` 快照名（被测型号已定为 `qwen3.8-flash`）。
-- 回归什么时候跑：只在改了助手相关文件时手动跑，还是定时跑一次真实模型。
+- 评审用的 `qwen3.8-max` 快照名（被测型号已定为 `qwen3.8-flash`）。中转目前只返回不带日期的 `qwen3.8-max`，有固定快照后再钉住。
+- 评审的校准集：llm-rubric 现在只作参考，要让它参与判定，先用人工标注的一批回答检验一致率。
 
 ## 关联
 
-- [`ai/assistant-spike/scenarios.py`](../../ai/assistant-spike/scenarios.py)、[`vnas_eval/`](../../ai/assistant-spike/vnas_eval/__init__.py)、[场景文件](../../ai/assistant-spike/scenarios/approval.yaml)
+- [`ai/assistant-spike/scenarios.py`](../../ai/assistant-spike/scenarios.py)、[`vnas_eval/`](../../ai/assistant-spike/vnas_eval/__init__.py)、场景文件（[approval](../../ai/assistant-spike/scenarios/approval.yaml)、[boundary](../../ai/assistant-spike/scenarios/boundary.yaml)、[injection](../../ai/assistant-spike/scenarios/injection.yaml)）
 - [测试](../../ai/tests/test_vnas_asserts.py)：断言与报告；[评审](../../ai/tests/test_vnas_judge.py)；[隔离](../../ai/tests/test_vnas_sandbox.py)
 - [Hermes Agent 作为 AI 助手运行时的可行性](../research/hermes-agent-runtime.md)：`.txt` 场景的历次结果
 - [评审模型的决定](../decisions/2026-11-13-assistant-eval-judge.md)

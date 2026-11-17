@@ -477,7 +477,7 @@ async def run_suite(path):
     from vnas_eval.asserts import load_suite, needs_retry, score_run
     from vnas_eval.judge import Judge
     from vnas_eval.report import compare, render, summarize
-    from vnas_eval.sandbox import HostWorld, Layout, Seed, skill_files
+    from vnas_eval.sandbox import HostWorld, Layout, Seed, plant, skill_files
 
     data = YAML(typ="safe", pure=True).load(Path(path).read_text(encoding="utf-8"))
     cases = load_suite(data)
@@ -522,6 +522,7 @@ async def run_suite(path):
                 if seed:
                     stop_instance()
                     seed.restore()
+                plant(layout, case.files)
                 skills_before = skill_files(layout)
                 print(f"\n======== {case.id} ({case.kind}) run {len(outcomes) + 1}")
                 turns, errors = await converse([(t.answers, t.say, t.clarify) for t in case.turns])
