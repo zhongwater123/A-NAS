@@ -45,7 +45,7 @@
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [照片打分](photo-scoring.md)（draft；可移除模块，实验 NAS 待安装）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
-- [剪辑中心首版接入方案](montage-center.md)（proposed，待评审）
+- [剪辑中心](montage-center.md)（draft；实施方案待评审）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 

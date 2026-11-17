@@ -44,13 +44,14 @@
 - 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
 - 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
 - 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，实现已合并，实机待启用）与 [ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
+- 剪辑中心：[ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)、[默认做法](../decisions/2026-11-17-montage-center-default-rules.md)
 - 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
 
 ## 下一步
 
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成全部验收项，全部通过后才打标签。
 2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对；每完成一节，就从手册中删去这一节。成员分享重启窗口修复 [#400](https://github.com/zhongwater123/A-NAS/pull/400) 已部署，补验重启后的首次创建和保存。
-3. 向量索引：相册排序从索引读（[读路径](../architecture/vector-index.md#读路径)），2026-11-10 已部署（#411）；按[手册第 5 步](../runbooks/enable-vector-index.md#步骤)核对。视频分段（#207）与文件分块（#208）的索引设计以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
+3. 向量索引：相册排序从索引读（[读路径](../architecture/vector-index.md#读路径)），2026-11-10 已部署（#411）；按[手册第 5 步](../runbooks/enable-vector-index.md#步骤)核对。
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；#364 的修复已部署（#402），按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。

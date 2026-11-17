@@ -72,6 +72,11 @@
 
 - [2026-10-29：家庭中心规格中补充的默认规则](2026-10-29-family-center-default-rules.md)
 
+### 剪辑中心
+
+- [2026-11-17：剪辑中心首版的范围、数据归属与几项做法](2026-11-17-montage-center-first-version.md)
+- [2026-11-17：剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)
+
 ### 网页搜索
 
 - [2026-11-02：网页搜索像人一样询问引擎](2026-11-02-web-search-pacing.md)
