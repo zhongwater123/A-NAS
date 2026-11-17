@@ -89,14 +89,16 @@ python music.py ~/Music/Forester-Symphony.mp3
 剪辑。每一步的结果按组名和 `CUT_TAG` 保存，已有的步骤直接复用：
 
 ```bash
-CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-time-1 python cut.py pj
+CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-free-1 python cut.py pj
 ```
+
+默认不要求拍摄时间顺序：每张卡片标上当地的拍摄日期和钟点，第一步只要求白天和夜里的画面不来回穿插。按拍摄时间顺序剪（`CUT_ORDER=time`）：
 
 ```bash
-CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-free-1 python cut.py pj
+CUT_ORDER=time CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-time-1 python cut.py pj
 ```
 
-换一条用户指令（`CUT_REQUEST`，替换 `cut.CASES` 里每组的指令；`CUT_ORDER=free` 仍作用于第一步）：
+换一条用户指令（`CUT_REQUEST`，替换 `cut.CASES` 里每组的指令；顺序开关 `CUT_ORDER` 仍作用于第一步）：
 
 ```bash
 CUT_REQUEST="剪辑一个有叙事性的高光集合" CUT_ORDER=free CUT_MUSIC=music-Forester-Symphony.json CUT_TAG=-story-1 python cut.py pj
@@ -112,6 +114,13 @@ python tools/compare_page.py 品杰对比.html pj music-Forester-Symphony.json "
 
 ```bash
 python tools/log_page.py 品杰剪辑日志.html pj "品杰 × Symphony" -time-1=按时间顺序 -free-1=不要求顺序
+```
+
+同一页放另一组卡片的成片（比如拼接前后），写成 `组名:标签`，那组卡片的文件夹放进 `LOG_CARDS`；拼接版的镜头会标出来自哪条原片、原片里第几秒：
+
+```bash
+ANAS_MONTAGE_CARDS=~/A-NAS-datasets/剪辑对比/diving LOG_CARDS=~/A-NAS-datasets/剪辑对比/divingj \
+  python tools/log_page.py 潜水拼接对比.html dv "潜水：拼接前后" -alldays-4=不拼接 dj:-alldays-1=拼接
 ```
 
 新加一组素材：在 `cut.py` 的 `CASES` 里加一行（组名、索引名、剪辑要求、目标秒数、体裁、文件名），然后按上面的顺序跑。

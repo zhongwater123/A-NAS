@@ -3,8 +3,11 @@ in film order (its key frame, the beat, the seconds taken from the source, what 
 two meant it to show) and both steps' whole input. Written beside the cuts (paths.CUTS), so its videos and key
 frames load from there; the cards are read from paths.CARDS (ANAS_MONTAGE_CARDS) for the cards' spans.
 
-  python tools/log_page.py OUT.html CASE "TITLE" TAG=NAME ...
+  python tools/log_page.py OUT.html CASE "TITLE" [OTHER:]TAG=NAME ...
   e.g. python tools/log_page.py 精简描述成片.html pj "精简描述：品杰 × Symphony" -symphony-slim-1=第 1 次
+
+A run written OTHER:TAG is a cut of another case, so one page can set two sets of cards side by side; that case's
+cards are looked for in paths.CARDS and then in each folder of LOG_CARDS (separated like PATH).
 """
 import html
 import json
@@ -57,7 +60,17 @@ def outline(pick):
             + (f"<p><b>第一步说素材里没有的：</b></p><ul>{unmet}</ul>" if unmet else ""))
 
 
-def shots_table(cut, shots, music, cards):
+def source_of(folder):
+    """For joined footage (joined-parts.json beside the cards), where a moment of a joined video is in its files."""
+    parts = read_json(folder / "joined-parts.json") if (folder / "joined-parts.json").exists() else {}
+
+    def where(video, t):
+        inside = [q for q in parts.get(video, []) if q["at"] <= t]
+        return f"；{inside[-1]['file']} 的 {t - inside[-1]['at']:.1f} 秒" if inside else ""
+    return where
+
+
+def shots_table(cut, shots, music, cards, where):
     parts = music["parts"]
     planned = shots["answer"]["parts"]
     rows, t, last = [], 0.0, None
@@ -76,7 +89,7 @@ def shots_table(cut, shots, music, cards):
             f"<tr><td class=t>{t:.1f}–{t + length:.1f}<br><span class=dim>槽 {c['slot'][0]:.1f}–{c['slot'][1]:.1f}</span></td>"
             f"<td><img src='{esc(rel(c['frame']))}' loading=lazy alt=''></td>"
             f"<td><b>{esc(c['beat'])}</b> {esc(c['shotSize'])}<br>{esc(c['what'])}<br>"
-            f"<span class=dim>原片 {c['start']:.1f}–{c['end']:.1f} 秒（卡片 {card['start']:.0f}–{card['end']:.0f}）</span></td>"
+            f"<span class=dim>原片 {c['start']:.1f}–{c['end']:.1f} 秒（卡片 {card['start']:.0f}–{card['end']:.0f}）{esc(where(c['video'], c['start']))}</span></td>"
             f"<td{warn}>{length:.1f} 秒{slow}</td><td>{esc(c['query'])}</td>"
             f"<td class=dim>{esc(pic['shows'])}<br>衔接：{esc(pic['link'])}<br>第二步排的节拍：{esc('、'.join(pic['beats']))}</td></tr>")
         t += length
@@ -86,7 +99,15 @@ def shots_table(cut, shots, music, cards):
             + (f"<p><b>第二步说没找到的：</b></p><ul>{unmet}</ul>" if unmet else ""))
 
 
-def section(case, tag, name, cards):
+def cards_of(case):
+    for folder in [CARDS, *map(Path, filter(None, os.environ.get("LOG_CARDS", "").split(os.pathsep)))]:
+        if (folder / f"cards-{case}.json").exists():
+            return folder, read_json(folder / f"cards-{case}.json")
+    raise SystemExit(f"cards-{case}.json is in neither {CARDS} nor LOG_CARDS")
+
+
+def section(case, tag, name):
+    folder, cards = cards_of(case)
     cut = read_json(CUTS / f"cut-{case}{tag}.json")
     pick = read_json(CUTS / f"pick-{case}{tag}.json")
     shots = read_json(CUTS / f"shots-{case}{tag}.json")
@@ -94,11 +115,11 @@ def section(case, tag, name, cards):
     c1, c2 = pick["cost"], shots["cost"]
     head = (f"成片 {cut['seconds']:.1f} 秒，{len(cut['clips'])} 个镜头；音乐取 {music['excerpt'][0]:.1f}–{music['excerpt'][1]:.1f} 秒，"
             f"{music['tempo']:.0f} BPM，一小节 {music['bar']:.2f} 秒。第一步 {c1['seconds']:.0f} 秒 ${c1['usd']:.2f}，"
-            f"第二步 {c2['seconds']:.0f} 秒 ${c2['usd']:.2f}。描述：{esc(str(CARDS.name))}/{esc(pick.get('descriptions', ''))}"
+            f"第二步 {c2['seconds']:.0f} 秒 ${c2['usd']:.2f}。描述：{esc(folder.name)}/{esc(pick.get('descriptions', ''))}"
             + ("；只用横拍" if pick.get("wide") else "") + ("；带人工精彩度" if pick.get("labels") else "") + "。")
     raw = f"{pick['system']}\n\n{pick['user']}\n\n———— 第二步 ————\n\n{shots['system']}\n\n{shots['user']}"
     return (f"<section><h2>{esc(name)}</h2><p class=dim>{head}</p>{player(cut, music)}{outline(pick)}"
-            f"{shots_table(cut, shots, music, cards)}<details><summary>第一步、第二步的完整输入</summary><pre>{esc(raw)}</pre></details></section>")
+            f"{shots_table(cut, shots, music, cards, source_of(folder))}<details><summary>第一步、第二步的完整输入</summary><pre>{esc(raw)}</pre></details></section>")
 
 
 STYLE = """:root{--bg:#f7f6f3;--card:#fff;--ink:#1f1f1f;--dim:#6b6b6b;--line:#e2e0db;--acc:#9a4b1c;--bad:#b42318}
@@ -132,12 +153,10 @@ SCRIPT = """document.querySelectorAll('.player').forEach(pl=>{
 
 def main():
     out, case, title = sys.argv[1:4]
-    runs = [tuple(x.split("=", 1)) for x in sys.argv[4:]]
-    cards = read_json(CARDS / f"cards-{case}.json")
+    runs = [(*(t.split(":", 1) if ":" in t else (case, t)), name) for t, name in (x.split("=", 1) for x in sys.argv[4:])]
     note = os.environ.get("LOG_NOTE", "")
-    nav = "".join(f"<a href='#run{n}'>{esc(name)}</a>" for n, (_tag, name) in enumerate(runs, 1))
-    body = "".join(section(case, tag, name, cards).replace("<section>", f"<section id=run{n}>", 1)
-                   for n, (tag, name) in enumerate(runs, 1))
+    nav = "".join(f"<a href='#run{n}'>{esc(name)}</a>" for n, (*_, name) in enumerate(runs, 1))
+    body = "".join(section(*run).replace("<section>", f"<section id=run{n}>", 1) for n, run in enumerate(runs, 1))
     page = (f"<!doctype html><html lang=zh><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<title>{esc(title)}</title><style>{STYLE}</style></head><body><main><h1>{esc(title)}</h1>"
             f"<p class=dim><b>视频默认静音。</b>画面左上角显示当前段落，进副歌前 8 秒开始倒数，副歌期间画面外框变红；下面的色条是音乐段落，"

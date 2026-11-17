@@ -32,19 +32,37 @@ class SlotsTest(unittest.TestCase):
         self.assertEqual(cut.one_take([[77.43, 79.36]], "高潮"), [[77.43, 79.36]])
 
     def test_a_pictures_slots_go_in_shooting_order_each_with_its_fills(self):
-        slots = [[0.0, 4.0], [4.0, 8.0]]
-        pieces = [{"card": "dv-020", "start": 13.3, "slot": [0.0, 4.0]},       # step two listed beat 3 first
-                  {"card": "dv-020", "start": 2.1, "slot": [4.0, 8.0]},
-                  {"card": "dv-021", "start": 0.0, "slot": [4.0, 8.0]}]        # the second slot's fill
-        rank = {"dv-020": 20, "dv-021": 21}.get
+        slots = [[0.0, 4.0], [4.0, 8.0], [8.0, 12.0]]
+        pieces = [{"card": "dv-015", "start": 8.0, "slot": [0.0, 4.0]},       # step two's first beat, shot last
+                  {"card": "dv-015", "start": 0.2, "slot": [4.0, 8.0]},
+                  {"card": "dv-015", "start": 4.9, "slot": [8.0, 12.0]},
+                  {"card": "dv-016", "start": 0.0, "slot": [8.0, 12.0]}]      # the third slot's fill
+        rank = {"dv-015": 15, "dv-016": 16}.get
         got = cut.in_shooting_order(pieces, slots, 30, rank)
         self.assertEqual([(x["card"], x["start"], x["slot"]) for x in got],
-                         [("dv-020", 2.1, [0.0, 4.0]), ("dv-021", 0.0, [0.0, 4.0]), ("dv-020", 13.3, [4.0, 8.0])])
+                         [("dv-015", 0.2, [0.0, 4.0]), ("dv-015", 4.9, [4.0, 8.0]), ("dv-016", 0.0, [4.0, 8.0]),
+                          ("dv-015", 8.0, [8.0, 12.0])])
 
-    def test_slots_of_different_lengths_keep_their_order(self):
-        pieces = [{"card": "a", "start": 9.0, "slot": [0.0, 4.0]}, {"card": "a", "start": 1.0, "slot": [4.0, 6.0]}]
-        got = cut.in_shooting_order(pieces, [[0.0, 4.0], [4.0, 6.0]], 30, lambda _c: 0)
-        self.assertEqual([x["start"] for x in got], [9.0, 1.0])
+    def test_what_a_slots_first_beat_leaves_comes_from_another_card_first(self):
+        # 潜水: dv-003/1 held 2.2 s of 3.9; dv-002 and dv-004 are the pictures either side, dv-008 one later on.
+        left = ["dv-003/2", "dv-008/1", "dv-004/1", "dv-009/1", "dv-003/3", "dv-002/1"]
+        got = cut.fill_order(left, "003", lambda b: b[3:6], lambda b: b[:6],
+                             elsewhere={"dv-002", "dv-004", "dv-008"}, beside={"dv-002", "dv-004"})
+        self.assertEqual(got, ["dv-009/1", "dv-004/1", "dv-002/1", "dv-003/2", "dv-003/3", "dv-008/1"])
+
+    def test_slots_a_frame_apart_from_rounding_still_go_in_shooting_order(self):
+        slots = [[27.11, 30.98], [30.98, 34.85], [34.85, 38.72]]       # 116, 117 and 116 frames at 30 fps
+        pieces = [{"card": "dv-008", "start": s, "slot": slot} for s, slot in zip((1.0, 9.5, 5.4), slots, strict=True)]
+        got = cut.in_shooting_order(pieces, slots, 30, lambda _c: 0)
+        self.assertEqual([x["start"] for x in got], [1.0, 5.4, 9.5])
+
+    def test_slots_of_different_lengths_move_with_their_lengths(self):
+        # 潜水 dj-alldays-1's chorus: one recording cut at the six-second cap into 5.8, 5.8 and 3.9 s.
+        slots = [[77.43, 83.24], [83.24, 89.05], [89.05, 92.92]]
+        pieces = [{"card": "dj-009", "start": s, "slot": slot} for s, slot in zip((36.4, 11.1, 0.0), slots, strict=True)]
+        got = cut.in_shooting_order(pieces, slots, 30, lambda _c: 0)
+        self.assertEqual([(x["start"], x["slot"]) for x in got],
+                         [(0.0, [77.43, 81.3]), (11.1, [81.3, 87.11]), (36.4, [87.11, 92.92])])
 
     def test_step_one_reads_each_part_with_its_level_and_shots(self):
         note = cut.music_note(SONG)
