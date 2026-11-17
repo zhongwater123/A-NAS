@@ -207,7 +207,7 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 
 ## 安全扫描
 
-依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查；它只查随产品发布的代码与包，开发用的（`tools/` 下各工具的 Go 模块、Web 的开发依赖、`ai/requirements-dev.txt`）有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：我们注册的解码器不会产生触发它的图片，依据与守住这一点的测试见 [`imagerender_test.go`](../../internal/imagerender/imagerender_test.go)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
+依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查：govulncheck 查产品与 `tools/` 下各 Go 工具的模块，只报代码可达的漏洞；pip-audit 查 AI 与网页搜索运行环境的 Python 锁；`npm audit --omit=dev` 查 Web 的运行依赖。Web 的开发依赖、`tools/` 下 npm 工具（`openapi`、`changelog`）的包和 `ai/requirements-dev.txt` 不在门禁中，有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。助手运行环境按 Hermes 的锁安装（[`build-runtime.sh`](../../ai/assistant-spike/build-runtime.sh)），它和 [`companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 既不在门禁中，GitHub 的依赖图也看不到。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：我们注册的解码器不会产生触发它的图片，依据与守住这一点的测试见 [`imagerender_test.go`](../../internal/imagerender/imagerender_test.go)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
 
 工作流：`make ops-check` 先用 actionlint 检查语法与表达式，再用 zizmor 检查工作流与 Dependabot 配置的安全问题，如模板注入、检出后保留凭据、更新没有冷却期。zizmor 的版本由 `ai/requirements-dev.txt` 按哈希固定，`PATH` 上的版本不同即失败，安装见[静态检查](#静态检查)。设了 `GH_TOKEN` 时它还做在线审计，如固定的 Action 提交是否属于该仓库、Action 是否有已知公告；CI 的 `Project checks` 传入作业的只读令牌，本地没有令牌时只做离线审计。检出都写 `persist-credentials: false`，否则 zizmor 报 `artipacked`。
 
