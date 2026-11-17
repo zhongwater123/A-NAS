@@ -101,7 +101,7 @@ anas-photos
 
 | 数据 | 归属 | 位置 |
 |---|---|---|
-| 原片、成片 | 相册：照片资产，在成员的个人图库 | 相册受管存储与 Catalog |
+| 原片、成片 | 相册：照片资产。上传的原片与成片在成员的个人图库，从相册选入的视频留在原来的图库 | 相册受管存储与 Catalog |
 | 项目授权 | 相册 | Catalog：`montage_grants`、`montage_grant_assets` |
 | 窗口向量、卡片、画质、卡片描述 | 相册：按内容对象，跨项目、跨成员复用 | Catalog（见“剪辑分析”）；窗口向量另同步到相册的 Qdrant |
 | 项目、批次、素材范围、任务、规划、时间线、版本与成片资产的对应 | 剪辑中心 | `montage/montage.db` |
@@ -159,7 +159,8 @@ anas-photos
 | `batches` | id、owner_user_id、request_key、created_at | 一次主动导入；`(owner_user_id, request_key)` 唯一，重复提交返回第一次的结果 |
 | `projects` | id、owner_user_id、name、grant_id、state、song_id、ask、chronological、created_at | `state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
 | `project_assets` | project_id、asset_id、object_id、batch_id、added_at | 素材范围固定到内容对象 |
-| `jobs` | id、owner_user_id、project_id、request_key、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error | 见“持久任务” |
+| `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error | `settings_json` 是任务开始时的歌、要求与是否按拍摄时间，见“持久任务” |
+| `job_assets` | job_id、asset_id、object_id | 任务开始时的素材集合 |
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
 | `rounds` | id、job_id、step、attempt_token、session_id、state、started_at、ended_at | 规划的每一轮 |
 | `plans` | job_id、step、round_id、catalog_key、answer_json、accepted_at、voided_at | 每个任务每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
@@ -199,6 +200,7 @@ montage/
 
 | 操作 | 说明 |
 |---|---|
+| `remove(grantId, assetIds)` | 从授权里去掉资产（成员在任务里去掉素材时），之后剪辑中心读不到它们；不再被任何授权引用的分析按保留规则删除 |
 | `register(session, projectId, assetIds)` | 登记或追加。会话只在这次请求里用，相册经 Host Agent 认出成员，再按上面的受限身份检查：每个资产都是本人能看到、未进回收站的视频。以 `(主人, projectId)` 为幂等键，重试不会多出授权。不存在、看不见、在回收站、不是视频，这四种情况的回答完全相同。一次最多 500 个资产 |
 | `lookup(grantId, assetIds)` | 每个资产的状态 `available`、`trashed` 或 `missing`，以及 `objectId`、时长、宽高、拍摄时间、各项分析的进度 |
 | `analyze(grantId, assetIds, retry)` | 为这些视频排剪辑分析，见“剪辑分析”；`retry` 把失败的分析改回待做 |
@@ -324,7 +326,7 @@ montage/
 - **输出**：按第八版 `domain/describe.py` 的 Schema 校验，不合格记 `invalid_result`。
   - 第八版遇到重复时换重复惩罚、最多重问 3 次，这个重试放在操作内部。
   - 客户端对这个操作的超时设为 15 分钟；`aiworker` 默认的 2 分钟不够。
-- **过滤**：相册把描述存进 Catalog 之前，按 `internal/photos/textread` 的敏感字段规则替换可能出现的号码，规则的版本记在分析身份里。描述只会交给成员的 VNAS，所以相册不保留原文。
+- **过滤**：相册把描述存进 Catalog 之前，用照片文字的号码规则（`textread.MaskNumbers`）替换可能出现的号码：校验位正确的身份证号、通过 Luhn 校验的银行卡号、手机号，以及其他 15 位以上的数字串。车牌、短票号不在规则内，只靠提示词约束。`textread` 没有规则版本号，所以剪辑分析在自己的分析身份里记一个过滤版本。描述只会交给成员的 VNAS，所以相册不保留原文。
 - **运行**：复用现有的 `llama-server`（Qwen3.5-4B Q4_K_M 加 mmproj，`-c 8192 -np 1`），不另起一套模型。
 - **上下文**：沿用第八版（2026-11-17 用户决定“按之前的来”）。
   - 关键帧宽 512 时，一张横拍约 146 个 token，竖拍约 450 个；每次请求的文字约 969 个 token，回答上限 1,800 个。
@@ -483,7 +485,7 @@ montage/
 3. 发现等规划的任务时，调 `POST /jobs/{id}/rounds` 领取一轮。领取是原子的，已有进行中的一轮时回答 409，所以多个标签页只会开一轮。回答里有 `roundId`、`attemptToken`、提示词与标题。
 4. 外壳经助手网关 `/api/v1/assistant/ws` 依次：
    - 调 `session.create`；
-   - 用 `PATCH /rounds/{id}` 记下会话的存储 ID，取消时要用；
+   - 用 `PATCH /rounds/{id}` 记下会话的存储 ID，取消时要用。这一轮已经结束（作废或超时）时回答 409，外壳收到后不再调 `prompt.submit`，所以实例启动慢时旧的一轮不会再调用模型；
    - 调 `session.title`，标题“剪辑：<项目名> · <这一轮的短编号>”。标题在实例内必须唯一，`session.create` 也不收标题；设标题失败时照常提交；
    - 调 `prompt.submit`，成功后用 `PATCH /rounds/{id}` 记下“已提交”。带这一轮 token 的任何 brief 或 submit 调用，也把这一轮记为已提交。
 5. 还没记下会话的存储 ID 就失败了（没有密钥、实例起不来、`session.create` 出错），外壳调 `POST /rounds/{id}/abandon`：这一轮作废，任务回到 `waiting(vnas)` 并写明原因；这时 `prompt.submit` 还没发出，没有调用过模型。连续作废时，下一次领取按 1、2、4……分钟退避，最长 30 分钟。
@@ -493,7 +495,7 @@ montage/
    - 已提交的一轮 30 分钟没有交答案，同样进入 `needs_input(vnas_unknown)`。
 
    超时的一轮由下一次桌面轮询用存储 ID 中断。
-7. 提示框显示：正在规划、成片已存进相册、需要处理。
+7. 提示框的内容见规格“本稿补充的默认规则”的桌面提示。
 
 **VNAS 不可用**：没有密钥、实例起不来或网关报错时，任务停在 `waiting(vnas)`，项目页和提示写明原因。PR [#519](https://github.com/zhongwater123/A-NAS/pull/519) 合并后，VNAS 默认对全部成员开启，管理员填写密钥后可用。
 
@@ -548,7 +550,7 @@ montage/
 
 | 步骤 | `input_key` 的组成 |
 |---|---|
-| 分析 | 排序后的素材 `objectId` 集合，与相册返回的分析身份 |
+| 分析 | `job_assets` 里排序后的 `objectId` 集合，与相册返回的分析身份 |
 | 目录 | 分析步骤的键、`catalog` 的算法版本、选项 |
 | 歌曲 | `song-id`、`music` 的算法版本、目标秒数 |
 | 第一步规划 | 目录步骤的键、要求、顺序、歌曲步骤的键、提示词版本 |
@@ -558,7 +560,7 @@ montage/
 | 存回 | `versionKey` = 任务 ID 加渲染步骤的 `input_key`。重渲染的输出不必逐字节相同，存回也不会重复 |
 
 - 去掉素材后，目录的键变了，所以已收下的规划作废（`plans.voided_at`），两步都重新规划，不会复用含已删素材卡片的旧目录。
-- 任务开始时固定素材范围、歌与要求。任务进行中改项目设置或追加素材，只影响下一次“生成”。
+- 任务开始时把素材集合记进 `job_assets`，把歌、要求与是否按拍摄时间记进 `jobs.settings_json`。各步骤的键只从这份快照取，所以任务进行中改项目设置或追加素材，只影响下一次“生成”，重启后也不会因此重做已收下的规划。
 
 **失败分类**
 
@@ -616,7 +618,7 @@ montage/
 | POST | `/projects/{id}/generate` | `{requestKey}`：回答 202 与任务；项目已有进行中的任务时回答 409 |
 | GET | `/jobs/{id}` | 状态、步骤、进度、排队位置、等待原因 |
 | POST | `/jobs/{id}/cancel` | 取消 |
-| POST | `/jobs/{id}/drop-assets` | `{assetIds}`：从这个任务去掉缺失或分析失败的素材后继续（项目的素材范围随之去掉） |
+| POST | `/jobs/{id}/drop-assets` | `{assetIds}`：从这个任务去掉缺失或分析失败的素材后继续。同时改 `job_assets` 与 `project_assets`，并经 `remove` 从授权里去掉；去掉后素材为空时回答 409，只能取消 |
 | POST | `/jobs/{id}/retry-analysis` | 相册分析失败后重试 |
 | POST | `/jobs/{id}/retry` | 空间不足时腾出空间后，从停下的步骤重试 |
 | POST | `/jobs/{id}/replan` | 规划没有交回或不合格时重新规划 |
