@@ -8,7 +8,11 @@ Runs as root in the spike container with two Unix sockets:
 - the product socket (argv[1]), reachable only by the product service. When
   Hermes asks the member to approve a call of 提交更改, the product service
   prepares the change from the call's arguments: the broker checks the
-  targets, copies the staged files into its own state and returns a preview.
+  submission's size and paths before it looks at any file, as the File
+  Broker's validate does (at most 100 operations and 64 KiB, targets in the
+  member's space or Agent空间 folder but never a .a-nas-* system name, a move
+  only within one of them), then checks the targets, copies the staged files
+  into its own state and returns a preview.
   A copy (a file or folder from wherever the assistant reads) is not staged:
   the card shows what is copied where and its size, and applying copies it
   as the member. The member's own click then approves or rejects it;
@@ -49,6 +53,10 @@ PRODUCT_SOCK, AGENT_SOCK = sys.argv[1], sys.argv[2]
 DATA = Path("/srv/a-nas/data")
 STATE = Path("/var/lib/anas-spike/changes")
 PREVIEW_LIMIT = 64 * 1024
+# A submission's steps, and its summary and paths together in bytes of its canonical form
+# (MaxOperations, MaxSubmission in internal/assistantchanges).
+MAX_OPERATIONS = 100
+MAX_SUBMISSION = 64 << 10
 # An approval is used by the call Hermes makes right after it; a grant nobody
 # used by then is void.
 GRANT_SECONDS = 120
@@ -68,7 +76,8 @@ def areas(account: str) -> tuple:
 
 def clean(raw) -> str:
     """The path as written, made canonical without following links; '..' is refused."""
-    path = PurePosixPath(str(raw or ""))
+    raw = raw or ""
+    path = PurePosixPath(str(raw))
     if not path.is_absolute():
         raise ValueError(f"{raw}: 需要绝对路径")
     if ".." in path.parts:
@@ -77,13 +86,26 @@ def clean(raw) -> str:
 
 
 def volume_path(account: str, sandbox_path: str, *, target: bool) -> str:
-    """Where a sandbox path is, relative to the data volume."""
+    """Where a sandbox path is, relative to the data volume. A target is never a system name
+    (.a-nas-*, such as the recycle bin) or anything in one."""
     for prefix, root, is_target in areas(account):
         if is_target == target and sandbox_path.startswith(prefix + "/"):
-            return root + "/" + sandbox_path[len(prefix) + 1:]
+            inside = sandbox_path[len(prefix) + 1:]
+            if target and any(part.startswith(".a-nas-") for part in inside.split("/")):
+                raise ValueError(f"{sandbox_path}：不能更改系统文件夹")
+            return root + "/" + inside
     if target:
         raise ValueError(f"{sandbox_path}: 只能更改 /nas/个人空间 或 /nas/共享空间/Agent空间/{account} 中的文件")
     raise ValueError(f"{sandbox_path}: source 必须是 {STAGING} 中已写好的文件")
+
+
+def same_area(account: str, a: str, b: str) -> bool:
+    """Whether two targets are in the same place. The member's space and the shared space are
+    separate Btrfs subvolumes, and a rename between them fails (sameArea in the File Broker)."""
+    for prefix, _, is_target in areas(account):
+        if is_target and a.startswith(prefix + "/"):
+            return b.startswith(prefix + "/")
+    return False
 
 
 def source_path(account: str, sandbox_path: str) -> str:
@@ -108,11 +130,30 @@ def trash_for(account: str, sandbox_path: str) -> str:
     return bin_ if parent == "." else f"{bin_}/{parent}"
 
 
+def text(value) -> str:
+    """One argument as the File Broker reads it (text in ParseSubmission): a string as it is,
+    anything else as its JSON, nothing as empty."""
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
 def submission(summary, operations) -> dict:
-    """The arguments of one call of 提交更改 in canonical form; the grant is bound to their digest."""
-    ops = [{key: op.get(key) for key in ("op", "path", "to", "source") if op.get(key) is not None}
+    """The arguments of one call of 提交更改 in canonical form, the File Broker's Submission: its
+    keys in their order, empty ones left out. The grant is bound to their digest."""
+    ops = [{key: text(op.get(key)) for key in ("op", "path", "to", "source") if text(op.get(key))}
            for op in operations or [] if isinstance(op, dict)]
-    return {"summary": str(summary or ""), "operations": ops}
+    return {"summary": text(summary), "operations": ops}
+
+
+def canonical(sub: dict) -> bytes:
+    """A submission as the File Broker's json.Marshal writes it, which MAX_SUBMISSION bounds: Go
+    escapes <, > and & and U+2028/U+2029, and reads a lone surrogate as U+FFFD (three bytes, as the
+    surrogate passed through here)."""
+    data = json.dumps(sub, ensure_ascii=False, separators=(",", ":"))
+    for char in "<>&\u2028\u2029":
+        data = data.replace(char, f"\\u{ord(char):04x}")
+    return data.encode("utf-8", "surrogatepass")
 
 
 def digest(sub: dict) -> str:
@@ -466,8 +507,14 @@ def text_of(data: bytes | None) -> str | None:
 def check(account: str, sub: dict) -> tuple[list[dict], list[str]]:
     """Validate a submission against what the member's paths hold now; returns the planned steps and the problems."""
     steps, errors, items = [], [], []
-    if not sub["operations"]:
-        errors.append("没有任何操作")
+    # Bounded before any path is looked at, as the File Broker's validate does.
+    count = len(sub["operations"])
+    if count == 0:
+        return [], ["没有任何操作"]
+    if count > MAX_OPERATIONS:
+        return [], [f"一批最多 {MAX_OPERATIONS} 项操作，这批有 {count} 项"]
+    if len(canonical(sub)) > MAX_SUBMISSION:
+        return [], [f"说明与路径合计超过 {MAX_SUBMISSION >> 10} KiB"]
     for i, op in enumerate(sub["operations"], 1):
         kind = op.get("op")
         if kind not in ("write", "copy", "delete", "move", "mkdir"):
@@ -481,6 +528,8 @@ def check(account: str, sub: dict) -> tuple[list[dict], list[str]]:
             if kind == "move":
                 step["to"] = clean(op.get("to"))
                 step["toRel"] = volume_path(account, step["to"], target=True)
+                if not same_area(account, step["path"], step["to"]):
+                    raise ValueError(f"{step['path']} 与 {step['to']} 不在同一个空间，不能移动：先 copy 到新位置，再 delete 原来的")
                 items.append({"kind": "target", "rel": step["toRel"], "path": step["to"]})
             if kind == "write":
                 step["source"] = clean(op.get("source"))

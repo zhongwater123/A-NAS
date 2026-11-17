@@ -181,6 +181,60 @@ product("POST", f"/changes/{change['id']}/approve")
 as_alice(f"printf 'v2, rewritten after the card' > '{OWN}/素材/a.txt'")
 result = agent("alice", "POST", "/apply", sub)
 check("a source changed after the card is not copied", "被改动过" in result and not os.path.exists(f"{MINE}/a副本.txt"), result)
+
+# Refused by its size and paths before any file is looked at: at most 100 operations and 64 KiB
+# (summary and paths in the File Broker's JSON, in bytes), never a .a-nas-* system name, a move
+# only within the personal space or within Agent空间/<account>.
+
+
+def card(sub):
+    """Prepare a submission and reject its card, so it is never applied; status and reply."""
+    status, change = product("POST", "/changes/prepare", sub)
+    if status == 200:
+        product("POST", f"/changes/{change['id']}/reject")
+    return status, change if isinstance(change, dict) else {"error": str(change)}
+
+
+def said(change):
+    return json.dumps(change, ensure_ascii=False)[:300]
+
+
+folders = {"summary": "建文件夹", "operations": [{"op": "mkdir", "path": f"/nas/个人空间/批量/{n}"} for n in range(101)]}
+status, change = card(folders)
+check("more than 100 operations are refused", status == 422 and "一批最多 100 项操作，这批有 101 项" in change.get("error", ""), said(change))
+folders["operations"].pop()
+status, change = card(folders)
+check("100 operations are one card", status == 200 and len(change.get("operations", [])) == 100, said(change))
+one = [{"op": "mkdir", "path": "/nas/个人空间/说明很长"}]
+bare = len(json.dumps({"summary": "", "operations": one}, ensure_ascii=False, separators=(",", ":")).encode())
+status, change = card({"summary": "a" * (65536 - bare), "operations": one})
+check("a submission of exactly 64 KiB is one card", status == 200, str(status))
+status, change = card({"summary": "a" * (65537 - bare), "operations": one})
+check("one byte more is refused", status == 422 and "说明与路径合计超过 64 KiB" in change.get("error", ""), said(change))
+status, change = card({"summary": "改" * 22000, "operations": one})
+check("the size is in bytes: 22000 Chinese characters are over", status == 422 and "64 KiB" in change.get("error", ""), said(change))
+
+status, change = card({"summary": "x", "operations": [{"op": "delete", "path": "/nas/个人空间/.a-nas-trash"}]})
+check("the recycle bin is not a target", status == 422 and "/nas/个人空间/.a-nas-trash：不能更改系统文件夹" in change.get("error", ""), said(change))
+status, change = card({"summary": "x", "operations": [
+    {"op": "write", "path": "/nas/共享空间/Agent空间/alice/子/.a-nas-x/a.md", "source": "/nas/助手/待确认/个人空间/计划.md"},
+    {"op": "move", "path": "/nas/个人空间/计划.md", "to": "/nas/个人空间/.a-nas-trash/alice/计划.md"}]})
+error = change.get("error", "")
+check("nothing is written or moved into a system folder", status == 422 and "第 1 项：/nas/共享空间/Agent空间/alice/子/.a-nas-x/a.md：不能更改系统文件夹" in error
+      and "第 2 项：/nas/个人空间/.a-nas-trash/alice/计划.md：不能更改系统文件夹" in error, said(change))
+
+across = {"summary": "挪到 Agent空间", "operations": [
+    {"op": "move", "path": "/nas/个人空间/计划.md", "to": "/nas/共享空间/Agent空间/alice/计划.md"},
+    {"op": "move", "path": "/nas/共享空间/Agent空间/alice/report.md", "to": "/nas/个人空间/report.md"}]}
+status, change = card(across)
+error = change.get("error", "")
+check("a move between the personal space and Agent空间 is refused, either way", status == 422 and os.path.exists(PLAN)
+      and "第 1 项：/nas/个人空间/计划.md 与 /nas/共享空间/Agent空间/alice/计划.md 不在同一个空间，不能移动：先 copy 到新位置，再 delete 原来的" in error
+      and "第 2 项：/nas/共享空间/Agent空间/alice/report.md 与 /nas/个人空间/report.md 不在同一个空间" in error, said(change))
+result = agent("alice", "POST", "/apply", across)
+check("the assistant reads why, and to copy then delete", "什么都没有改变" in result and "先 copy 到新位置，再 delete 原来的" in result, result)
+status, change = card({"summary": "x", "operations": [{"op": "move", "path": "/nas/个人空间/secret.txt", "to": "/nas/个人空间/归档/secret.txt"}]})
+check("a move within the personal space is still one card", status == 200, said(change))
 state ="/srv/a-nas/data/assistant/.changes" if os.environ.get("EXECUTOR") == "host-agent" else "/var/lib/anas-spike/changes"
 print("INFO state dir mode", oct(os.stat(state).st_mode & 0o777))
 PY
