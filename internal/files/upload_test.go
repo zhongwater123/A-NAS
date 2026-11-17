@@ -199,6 +199,63 @@ func TestUploadConflictPolicies(t *testing.T) {
 	}
 }
 
+// Replacing removes only the file the user agreed to replace: a file that
+// took the name, or replaced it, while the bytes arrived is kept, and the
+// upload is saved beside it (transfer-center spec, 同名文件; #487 R3).
+func TestReplaceKeepsAFileThatTookTheNameDuringTheUpload(t *testing.T) {
+	f := newUploadFixture(t)
+	commit := func(upload *files.PendingUpload) files.CommittedUpload {
+		t.Helper()
+		if _, err := f.service.WriteUpload(f.ctx, upload, 0, strings.NewReader("mine")); err != nil {
+			t.Fatalf("WriteUpload() error = %v", err)
+		}
+		got, err := f.service.CommitUpload(f.ctx, f.alice, upload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	// The name was free as the upload began.
+	upload := f.begin(t, files.UploadRequest{Name: "late.txt", Size: 4, Conflict: files.ConflictReplace})
+	f.send(t, files.UploadRequest{Name: "late.txt"}, "newcomer")
+	if got := commit(upload); got.Replaced || got.Entry.Name != "late (1).txt" {
+		t.Fatalf("late conflict replaced=%v saved=%s; want false, late (1).txt", got.Replaced, got.Entry.Name)
+	}
+
+	// Someone else replaced the file the upload was to replace.
+	f.send(t, files.UploadRequest{Name: "changed.txt"}, "original")
+	upload = f.begin(t, files.UploadRequest{Name: "changed.txt", Size: 4, Conflict: files.ConflictReplace})
+	f.send(t, files.UploadRequest{Name: "changed.txt", Conflict: files.ConflictReplace}, "newcomer")
+	if got := commit(upload); got.Replaced || got.Entry.Name != "changed (1).txt" {
+		t.Fatalf("changed target replaced=%v saved=%s; want false, changed (1).txt", got.Replaced, got.Entry.Name)
+	}
+	if content, _ := os.ReadFile(filepath.Join(f.root, "changed.txt")); string(content) != "newcomer" {
+		t.Fatalf("the other upload's file now holds %q", content)
+	}
+
+	// The file the upload began with is still replaced, also when it is
+	// the same file under another letter case.
+	f.send(t, files.UploadRequest{Name: "Same.TXT"}, "original")
+	upload = f.begin(t, files.UploadRequest{Name: "same.txt", Size: 4, Conflict: files.ConflictReplace})
+	if got := commit(upload); !got.Replaced || got.Entry.Name != "same.txt" {
+		t.Fatalf("the original replaced=%v saved=%s; want true, same.txt", got.Replaced, got.Entry.Name)
+	}
+	trash, err := f.service.ListTrash(f.ctx, f.alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trashed []string
+	for _, item := range trash {
+		trashed = append(trashed, item.Name)
+	}
+	slices.Sort(trashed)
+	// changed.txt is the original the other upload replaced.
+	if want := []string{"Same.TXT", "changed.txt"}; !slices.Equal(trashed, want) {
+		t.Fatalf("trash holds %v, want %v", trashed, want)
+	}
+}
+
 func TestFolderUploadCreatesAndReusesFolders(t *testing.T) {
 	f := newUploadFixture(t)
 	first := f.send(t, files.UploadRequest{Directories: []string{"旅行", "2026"}, Name: "a.jpg"}, "aaaa")

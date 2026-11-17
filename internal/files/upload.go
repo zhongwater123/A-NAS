@@ -31,7 +31,10 @@ const (
 	// ConflictRename keeps both: the upload takes the first free "name (n)".
 	ConflictRename ConflictPolicy = "rename"
 	// ConflictReplace moves the existing file to the trash, where it can be
-	// restored, and puts the upload in its place. A folder is never replaced.
+	// restored, and puts the upload in its place. Only the file that held
+	// the name as the upload began is replaced: one that took the name while
+	// the bytes arrived, for example someone else's upload, is kept beside
+	// the upload, as with ConflictAsk. A folder is never replaced.
 	ConflictReplace ConflictPolicy = "replace"
 )
 
@@ -90,6 +93,16 @@ type PendingUpload struct {
 	temporary string
 	path      string
 	written   atomic.Int64
+	// replacing is the file ConflictReplace may replace: the one that held
+	// the name as the upload began, if any.
+	replacing *replaceTarget
+}
+
+// replaceTarget is a file under an upload's name, or its twin in another
+// letter case, told apart from a later file of that name by its inode.
+type replaceTarget struct {
+	name  string
+	inode uint64
 }
 
 // Offset is how many bytes have been written.
@@ -156,13 +169,19 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 			return nil, err
 		}
 	}
+	var replacing *replaceTarget
+	if request.Conflict == ConflictReplace {
+		if replacing, err = s.replaceable(ctx, space.ID, parentID, parentPath, request.Name); err != nil {
+			return nil, err
+		}
+	}
 	file, temporaryPath, err := s.fs.CreateTemp(ctx, parentPath, uploadTemporaryPrefix)
 	if err != nil {
 		return nil, err
 	}
 	upload := &PendingUpload{
 		SpaceID: space.ID, ParentID: parentID, Name: request.Name, Size: request.Size, Conflict: request.Conflict,
-		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath,
+		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath, replacing: replacing,
 	}
 	s.holdTemporary(upload.temporary, true)
 	return upload, nil
@@ -250,15 +269,17 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	temporary := filepath.Join(parentPath, upload.temporary)
 	s.keepModTime(ctx, temporary, upload.modTime)
 	replaced := false
-	if upload.Conflict == ConflictReplace {
-		existing := upload.Name
-		if twin, found, err := s.caseTwin(ctx, space.ID, upload.ParentID, upload.Name, ""); err != nil {
+	if upload.Conflict == ConflictReplace && upload.replacing != nil {
+		// Only the file the user agreed to replace goes: one that took the
+		// name since, or replaced it, stays, and the upload keeps both.
+		current, err := s.replaceable(ctx, space.ID, upload.ParentID, parentPath, upload.Name)
+		if err != nil {
 			return CommittedUpload{}, err
-		} else if found && twin.Kind == EntryKindFile {
-			existing = twin.Name
 		}
-		if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, existing)); err != nil {
-			return CommittedUpload{}, err
+		if current != nil && *current == *upload.replacing {
+			if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, current.name)); err != nil {
+				return CommittedUpload{}, err
+			}
 		}
 	}
 	// Renames never replace, so a name taken in the meantime keeps both.
@@ -432,6 +453,29 @@ func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, 
 		return false, err
 	}
 	return true, nil
+}
+
+// replaceable finds the file a replacing upload of name would replace in the
+// folder at parentPath: the file under that name, or its twin in another
+// letter case. It is nil when the name is free or a folder has it.
+func (s *Service) replaceable(ctx context.Context, spaceID, parentID, parentPath, name string) (*replaceTarget, error) {
+	existing := name
+	if twin, found, err := s.caseTwin(ctx, spaceID, parentID, name, ""); err != nil {
+		return nil, err
+	} else if found && twin.Kind == EntryKindFile {
+		existing = twin.Name
+	}
+	info, err := s.fs.Lstat(ctx, filepath.Join(parentPath, existing))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Kind != KindFile {
+		return nil, nil
+	}
+	return &replaceTarget{name: existing, inode: info.Inode}, nil
 }
 
 // holdTemporary marks a temporary as owned by a pending upload or a copy in
