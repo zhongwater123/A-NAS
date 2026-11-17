@@ -39,6 +39,7 @@ llm-rubric judge (vnas_eval/judge.py).
 """
 import argparse
 import asyncio
+import functools
 import hashlib
 import http.client
 import json
@@ -50,9 +51,13 @@ import sys
 import time
 from pathlib import Path
 
+from vnas_eval.member import clarify_reply, described
+
 parser = argparse.ArgumentParser()
 parser.add_argument("file")
 parser.add_argument("--answer", default="deny")
+parser.add_argument("--clarify", default="cancel", help="how the member answers a clarify request in a .txt file "
+                    "(cancel, wait, first or the answer's text; vnas_eval/member.py)")
 parser.add_argument("--user", default="alice")
 parser.add_argument("--case", action="append", default=[], help="only this case of a .yaml suite (repeatable)")
 parser.add_argument("--repeat", type=int, help="runs per case, instead of the kind's")
@@ -141,15 +146,25 @@ class Turn:
     Hermes and says whether the approval was still pending, stop() stops the turn. record is
     the turn's evidence for scoring (vnas_eval.asserts)."""
 
-    def __init__(self, session, said, answers):
-        self.session, self.said, self.answers = session, said, list(answers)
+    def __init__(self, session, said, answers, clarify=("cancel",)):
+        self.session, self.said, self.answers, self.clarifies = session, said, list(answers), list(clarify)
         self.submissions = {}   # session or run -> arguments of the last 提交更改 started in it
         self.changes, self.late = [], []
         self.record = {"say": said, "answers": list(answers), "tools": [], "approvals": [], "changes": [],
-                       "answer": "", "status": "complete"}
+                       "clarifications": [], "answer": "", "status": "complete"}
 
     def answer(self):
         return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+    async def clarify(self, questions, reply):
+        """The member's part of a clarify request (vnas_eval.member): reply(result) answers it."""
+        how = self.clarifies.pop(0) if len(self.clarifies) > 1 else self.clarifies[0]
+        response = clarify_reply(how, questions)
+        print(f"  ? clarify {short([q.get('question') for q in questions], 200)}")
+        print(f"    member: {how} → {short(response, 160)}")
+        self.record["clarifications"].append({"how": how, "questions": described(questions, response)})
+        if response is not None:
+            await reply(response)
 
     def started(self, key, name, args):
         print(f"  → {name} {short(args)}")
@@ -236,6 +251,9 @@ async def serve_turn(gw, sid, turn):
             params = payload.get("params") or {}
             if payload.get("method") == "approval" and params.get("session_id") == sid:
                 await turn.approval(sid, params.get("request_id"), params, approval_answer(params.get("request_id")), stop)
+            elif payload.get("method") == "clarify" and params.get("session_id") == sid:
+                # Answered as a response to the request's own id, not through an RPC like approvals.
+                await turn.clarify(params.get("questions") or [], functools.partial(gw.reply, payload.get("id")))
             continue
         if frame.get("session_id") not in (None, sid):
             continue
@@ -264,8 +282,8 @@ async def serve_conversation(lines):
         # Without this Hermes withdraws every approval at once: this client answers server requests.
         await gw.call("client.capabilities", {"server_requests": True})
         sid = await gw.new_session()
-        for answers, said in lines:
-            yield sid, Turn(sid, said, answers), lambda turn: serve_turn(gw, sid, turn)
+        for answers, said, clarify in lines:
+            yield sid, Turn(sid, said, answers, clarify), lambda turn: serve_turn(gw, sid, turn)
 
 
 # ---- API Server: session stream, /v1/runs/{id}/approval ----
@@ -336,8 +354,9 @@ async def api_turn(session, turn):
 async def api_conversation(lines):
     _, created = hermes("POST", "/api/sessions", {})
     session = created["session"]["id"]
-    for answers, said in lines:
-        yield session, Turn(session, said, answers), lambda turn: api_turn(session, turn)
+    # The API Server has no clarify request: Turn.clarifies goes unused there.
+    for answers, said, clarify in lines:
+        yield session, Turn(session, said, answers, clarify), lambda turn: api_turn(session, turn)
 
 
 # ---- one conversation ----
@@ -399,7 +418,7 @@ async def print_only(path):
         lines = []
         for line in paragraph:
             answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
-            lines.append(([a.strip() for a in answers.split(",")], said.strip()))
+            lines.append(([a.strip() for a in answers.split(",")], said.strip(), [opts.clarify]))
         await converse(lines)
 
 
@@ -505,7 +524,7 @@ async def run_suite(path):
                     seed.restore()
                 skills_before = skill_files(layout)
                 print(f"\n======== {case.id} ({case.kind}) run {len(outcomes) + 1}")
-                turns, errors = await converse([(t.answers, t.say) for t in case.turns])
+                turns, errors = await converse([(t.answers, t.say, t.clarify) for t in case.turns])
                 result = score_run(case, {"turns": turns, "errors": errors}, HostWorld(layout, skills_before), judge)
                 record = {"schema": 1, "suite": case.suite, "case": case.id, "run": len(outcomes) + 1,
                           "env": env, "turns": turns, "errors": errors + result.get("errors", []), "result": result}

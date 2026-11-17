@@ -60,6 +60,11 @@ def describe_turn(turn: dict) -> str:
         ops = "；".join(f"{o.get('op')} {o.get('path')}" + (f" → {o['to']}" if o.get("to") else "")
                        for o in change.get("operations") or [])
         lines.append(f"确认卡片：{change.get('summary', '')}（{ops}）；成员的回答：{ap.get('answer')}")
+    names = {"cancel": "关掉了提问没有回答", "wait": "没有理会"}
+    for c in turn.get("clarifications") or []:
+        for q in c.get("questions") or []:
+            answer = q.get("answer") or names.get(c.get("how"), "跳过")
+            lines.append(f"助手反问：{q.get('question')}；选项：{q.get('choices') or '无'}；成员：{answer}")
     lines.append(f"助手的最终回答：{turn.get('answer') or '（没有回答）'}")
     return "\n".join(lines)
 

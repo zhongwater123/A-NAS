@@ -18,13 +18,14 @@ TURN_TYPES = {
     "trajectory:tool-used", "trajectory:tool-args-match", "trajectory:tool-sequence", "trajectory:step-count",
     "contains", "icontains", "contains-any", "contains-all", "regex", "llm-rubric",
     "vnas:approvals", "vnas:change", "vnas:consent", "vnas:status", "latency", "vnas:tokens", "vnas:requests",
+    "vnas:questions",
 }
 AFTER_TYPES = {"vnas:file", "vnas:memory", "vnas:skills-created"}
 # Short names usable in the one-key form.
 ALIASES = {
     "tool-used": "trajectory:tool-used", "tool-args": "trajectory:tool-args-match",
     "tool-sequence": "trajectory:tool-sequence", "steps": "trajectory:step-count",
-    **{n: f"vnas:{n}" for n in ("approvals", "change", "consent", "status", "tokens", "requests",
+    **{n: f"vnas:{n}" for n in ("approvals", "change", "consent", "status", "tokens", "requests", "questions",
                                  "file", "memory", "skills-created")},
 }
 SHOULD_BY_DEFAULT = {"llm-rubric", "latency", "vnas:tokens", "vnas:requests"}
@@ -57,6 +58,9 @@ class Turn:
     say: str
     answers: list[str]
     asserts: list[Assertion]
+    # How the member answers each clarify request of the turn, in order, the last repeating
+    # (vnas_eval.member.clarify_reply): cancel, wait, first, or the answer's text.
+    clarify: list[str] = field(default_factory=lambda: ["cancel"])
 
 
 @dataclass
@@ -114,17 +118,29 @@ def answers_of(raw: Any, default: Any, where: str) -> list[str]:
     return items
 
 
-def turn_of(raw: Any, default_answer: Any, inv: list[Assertion], where: str) -> Turn:
+def clarify_of(raw: Any, default: Any, where: str) -> list[str]:
+    raw = default if raw is None else raw
+    items = [str(a).strip() for a in (raw if isinstance(raw, list) else [raw]) if str(a).strip()]
+    if not items:
+        raise ValueError(f"{where}: clarify needs cancel, wait, first or an answer")
+    return items
+
+
+TURN_FIELDS = ("say", "answer", "answers", "assert", "clarify")
+
+
+def turn_of(raw: Any, default_answer: Any, default_clarify: Any, inv: list[Assertion], where: str) -> Turn:
     if isinstance(raw, str):
         raw = {"say": raw}
-    unknown = set(raw) - {"say", "answer", "answers", "assert"}
+    unknown = set(raw) - set(TURN_FIELDS)
     if unknown:
         raise ValueError(f"{where}: unknown fields {sorted(unknown)}")
     if not raw.get("say"):
         raise ValueError(f"{where}: say is empty")
     own = [parse_assertion(a, where, TURN_TYPES) for a in raw.get("assert") or []]
     answer = raw.get("answer", raw.get("answers"))
-    return Turn(raw["say"], answers_of(answer, default_answer, where), own + inv)
+    return Turn(raw["say"], answers_of(answer, default_answer, where), own + inv,
+                clarify_of(raw.get("clarify"), default_clarify, where))
 
 
 def load_suite(data: dict) -> list[Case]:
@@ -138,6 +154,7 @@ def load_suite(data: dict) -> list[Case]:
     inv_turn = defaults + [parse_assertion(a, f"{suite}/invariants.turn", TURN_TYPES) for a in inv.get("turn") or []]
     inv_after = [parse_assertion(a, f"{suite}/invariants.after", AFTER_TYPES) for a in inv.get("after") or []]
     default_answer = data.get("answer", "deny")
+    default_clarify = data.get("clarify", "cancel")
     cases, seen = [], set()
     for raw in data.get("cases") or []:
         cid = raw.get("id") or ""
@@ -145,13 +162,13 @@ def load_suite(data: dict) -> list[Case]:
             raise ValueError(f"{suite}: every case needs a unique id (got {cid!r})")
         seen.add(cid)
         where = f"{suite}/{cid}"
-        single = {k: raw[k] for k in ("say", "answer", "answers", "assert") if k in raw}
+        single = {k: raw[k] for k in TURN_FIELDS if k in raw}
         if single and "turns" in raw:
-            raise ValueError(f"{where}: write say/answer/assert on the case or use turns, not both")
+            raise ValueError(f"{where}: write say/answer/assert/clarify on the case or use turns, not both")
         raws = [single] if single else raw.get("turns") or []
         if not raws:
             raise ValueError(f"{where}: no turns")
-        turns = [turn_of(t, default_answer, inv_turn, f"{where}/turn {i}") for i, t in enumerate(raws, 1)]
+        turns = [turn_of(t, default_answer, default_clarify, inv_turn, f"{where}/turn {i}") for i, t in enumerate(raws, 1)]
         kind = raw.get("kind", suite_kind)
         if kind not in KINDS:
             raise ValueError(f"{where}: kind is safety or quality, not {kind!r}")
@@ -275,6 +292,9 @@ def check_turn(a: Assertion, turn: dict) -> tuple[bool | None, str]:
         return m is not None, f"matched {m.group(0)!r}" if m else "no match"
     if t == "llm-rubric":
         return None, "unjudged"
+    if t == "vnas:questions":
+        n = sum(len(c.get("questions") or []) for c in turn.get("clarifications") or [])
+        return in_range(n, v), f"{n} questions asked"
     if t == "vnas:approvals":
         n = len(_change_rows(turn))
         return in_range(n, v), f"{n} cards"

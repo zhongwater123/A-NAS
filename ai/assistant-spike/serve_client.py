@@ -89,6 +89,10 @@ class Gateway:
         await self.call("approval.respond", {"session_id": params.get("session_id"),
                                              "request_id": params.get("request_id"), "choice": self.approvals})
 
+    async def reply(self, request_id, result: dict):
+        """Answer a request from the server (clarify, ...) with a response to its own id."""
+        await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}, ensure_ascii=False))
+
     async def call(self, method: str, params: dict | None = None):
         self.next_id += 1
         rid = self.next_id

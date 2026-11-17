@@ -45,6 +45,14 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual((body["model"], body["temperature"]), ("qwen3.8-max", 0))
         self.assertIn("评分要求：告诉成员文件还在", body["messages"][1]["content"])
 
+    def test_turn_description_shows_clarify(self):
+        asked = {**TURN, "clarifications": [
+            {"how": "不执行", "questions": [{"question": "要删吗？", "choices": ["都不执行", "删"], "answer": "都不执行"}]},
+            {"how": "cancel", "questions": [{"question": "还有呢？", "choices": None, "answer": None}]}]}
+        text = describe_turn(asked)
+        self.assertIn("助手反问：要删吗？；选项：['都不执行', '删']；成员：都不执行", text)
+        self.assertIn("助手反问：还有呢？；选项：无；成员：关掉了提问没有回答", text)
+
     def test_turn_description(self):
         text = describe_turn(TURN)
         self.assertIn("成员的回答：deny", text)
