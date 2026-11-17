@@ -13,6 +13,7 @@ import type {
   ScoringMe,
   Session,
   SetupStatus,
+  TodoReminder,
   Wallpaper,
   WebSearchStatus,
 } from "../../api.generated";
@@ -36,6 +37,8 @@ export interface ShellOptions {
   webSearch?: WebSearchStatus;
   // Photo scoring is installed only when a test says what the account may do.
   scoring?: Pick<ScoringMe, "admin" | "rater">;
+  // 待办's reminders after signing in: none unless a test gives some.
+  todoReminders?: TodoReminder[];
 }
 
 export function shellHandlers(options: ShellOptions = {}) {
@@ -68,6 +71,8 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/feedback", ({ response }) => response(200).json({ items: [] })),
     // 家庭中心's hints after signing in.
     http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
+    // 待办's reminders after signing in.
+    http.get("/api/v1/todos/reminders", ({ response }) => response(200).json({ items: options.todoReminders ?? [] })),
     // The companion's animations, served beside the API (internal/webui): none installed.
     http.untyped.get(`/companion/animations`, () => HttpResponse.json({ pool: "", animations: {} })),
   ];

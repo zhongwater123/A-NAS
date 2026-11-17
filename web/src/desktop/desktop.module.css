@@ -937,6 +937,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .app-window-family .window-app-icon {
   background: linear-gradient(155deg, #ffad7a, #e8573a);
 }
+/* 待办: a white checklist on green, as on its reminder. */
+.icon-todos,
+.app-window-todos .window-app-icon {
+  background: linear-gradient(155deg, #4fd19c, #14875f);
+}
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
 .icon-ai {
@@ -1460,6 +1465,26 @@ button.net-rates {
 .window-content-family {
   overflow: hidden;
   background: #fbf7f2;
+}
+/* 待办 */
+.window-content-todos {
+  overflow: hidden;
+  background: var(--color-bg);
+}
+/* The notices of VNAS's scheduled tasks, 家庭中心 and 待办, one under another
+   below the status bar. Between them the wallpaper takes the pointer. */
+.notice-stack {
+  position: absolute;
+  z-index: 78;
+  top: 78px;
+  right: 22px;
+  width: min(352px, calc(100% - 140px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+.notice-stack:empty {
+  display: none;
 }
 /* 分享 */
 .app-window-shares .window-app-icon {

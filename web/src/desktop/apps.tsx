@@ -1,4 +1,4 @@
-import { FolderClosed, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
+import { FolderClosed, ListTodo, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -35,6 +35,7 @@ const ScoringPanel = lazyCode(() => import("../scoring/ScoringPanel").then((modu
 const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
 const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
 const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
+const TodosPanel = lazyCode(() => import("../todos/TodosPanel").then((module) => module.TodosPanel));
 const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 const WebSearchPanel = lazyCode(() => import("../websearch/WebSearchPanel").then((module) => module.WebSearchPanel));
 
@@ -46,6 +47,8 @@ export interface WindowIntentPayloads {
   photos: { assetId: string };
   // A baby's channel that photos from 相册 joined.
   family: { babyId: string };
+  // A to-do the desktop's reminder points at.
+  todos: { todoId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
   // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
@@ -296,6 +299,17 @@ const definitions = {
         intent={intents.family}
         onIntentHandled={(handled) => intentHandled("family", handled)}
       />
+    ),
+  },
+  todos: {
+    title: "待办",
+    icon: ListTodo,
+    tone: "todos",
+    // A narrow list; on a phone the window fills the page as every window does.
+    bounds: { x: 320, y: 64, width: 720, height: 640 },
+    launcher: { id: "todos", keywords: "待办 提醒 截止 到期 账单 缴费 续保 复查 证件 todo" },
+    render: ({ intents, intentHandled }) => (
+      <TodosPanel intent={intents.todos} onIntentHandled={(handled) => intentHandled("todos", handled)} />
     ),
   },
   scoring: {

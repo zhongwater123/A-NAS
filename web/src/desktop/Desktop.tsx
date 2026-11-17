@@ -49,6 +49,7 @@ import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import styles from "./desktop.module.css";
 import { publishFocusedWindow } from "./focusedWindow";
+import { isLocalConsole, onLocalConsoleDismissed } from "./LocalConsoleScreenSaver";
 import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
@@ -59,6 +60,8 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint loads after the desktop, so its code and styles stay out of
 // the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
+// So does 待办's reminder.
+const TodoNotices = lazyCode(() => import("../todos/TodoNotices").then((module) => module.TodoNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -351,9 +354,25 @@ export function Desktop({
         <ShellPart name="transfer toasts">
           <TransferToasts hidden={focusedID === "transfers"} onOpen={() => open("transfers")} />
         </ShellPart>
-        <ShellPart name="task toasts">
-          <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
-        </ShellPart>
+        <div className={styles.noticeStack}>
+          <ShellPart name="task toasts">
+            <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+          </ShellPart>
+          <ShellPart name="family hints">
+            <Suspense fallback={null}>
+              <FamilyNotices onOpen={() => open("family")} />
+            </Suspense>
+          </ShellPart>
+          <ShellPart name="todo reminders">
+            <Suspense fallback={null}>
+              <TodoNotices
+                shared={isLocalConsole()}
+                onWake={isLocalConsole() ? onLocalConsoleDismissed : undefined}
+                onOpen={(todoId) => open("todos", { todoId })}
+              />
+            </Suspense>
+          </ShellPart>
+        </div>
         <ShellPart name="companion">
           <Companion
             onOpenVnas={(atCards) =>
@@ -361,11 +380,6 @@ export function Desktop({
             }
             onOpenTaskRun={showTaskRun}
           />
-        </ShellPart>
-        <ShellPart name="family hints">
-          <Suspense fallback={null}>
-            <FamilyNotices onOpen={() => open("family")} />
-          </Suspense>
         </ShellPart>
         <ShellPart name="feedback">
           <FeedbackChannel />

@@ -4,6 +4,11 @@
 // recordings on the data volume. Photos and videos stay in the shared photo
 // library: a channel stores only their asset IDs and asks Photos, as the
 // person reading, which of them that person can still see.
+//
+// The same store keeps 家庭待办 (docs/specs/family-todos.md). To-dos are not
+// family-center content: they are authorized as shared, for every active
+// account whether or not it joined the family, or as one account's own,
+// never by membership or guardianship.
 package family
 
 import (
@@ -251,7 +256,36 @@ CREATE TABLE reactions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (record_id, account_id, reaction)
 );
-`}, {Up: activity.IndexStatement}}
+`}, {Up: activity.IndexStatement}, {Up: `
+CREATE TABLE todos (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    due_on TEXT,
+    owner_id TEXT NOT NULL DEFAULT '',
+    owner_name TEXT NOT NULL DEFAULT '',
+    amount_cents INTEGER,
+    viewer_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    snoozed_until TEXT,
+    remind_round INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by TEXT NOT NULL,
+    created_by_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    closed_at TEXT,
+    closed_by TEXT,
+    closed_by_name TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    request_key TEXT
+);
+CREATE INDEX todos_visible ON todos(viewer_id, status, due_on);
+CREATE UNIQUE INDEX todos_request ON todos(created_by, request_key) WHERE request_key IS NOT NULL;
+`, Down: `
+DROP TABLE todos;
+DELETE FROM hints_seen WHERE hint_key LIKE 'todo:%';
+`}}
 
 func (s *Store) migrate(ctx context.Context) error {
 	return sqlitedb.Migrate(ctx, s.db, databaseSchema)
@@ -297,9 +331,15 @@ func parseOptionalTime(value sql.NullString) *time.Time {
 // audit records an action in the family's audit trail, which the activity
 // log reads like every module's audit_events table.
 func (s *Store) audit(ctx context.Context, q queryer, actor Actor, action, resourceID, detail string) error {
+	return s.auditAs(ctx, q, actor, "family", action, resourceID, detail)
+}
+
+// auditAs records an action on a resource of another type than the family
+// center's, such as a to-do.
+func (s *Store) auditAs(ctx context.Context, q queryer, actor Actor, resourceType, action, resourceID, detail string) error {
 	_, err := q.ExecContext(ctx,
 		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?, ?, ?, ?, ?, ?, ?)",
-		newID("audit"), actor.AccountID, action, "family", resourceID, formatTime(s.now()), detail)
+		newID("audit"), actor.AccountID, action, resourceType, resourceID, formatTime(s.now()), detail)
 	return err
 }
 

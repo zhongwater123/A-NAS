@@ -215,6 +215,13 @@ const familyActions: Record<string, string> = {
   "family.record_restored": "恢复了家庭记录",
   "family.comment_deleted": "删除了家庭留言",
   "family.vaccine_plan_changed": "修改了接种计划",
+  // 家庭待办 keeps its events with the family service's.
+  "family.todo_added": "新建了待办",
+  "family.todo_updated": "修改了待办",
+  "family.todo_done": "把待办标为已处理",
+  "family.todo_ignored": "忽略了待办",
+  "family.todo_reopened": "重新打开了待办",
+  "family.todo_snoozed": "推迟了待办",
 };
 
 // describeSystemUpdate: an administrator's request, such as

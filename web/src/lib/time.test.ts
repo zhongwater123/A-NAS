@@ -5,10 +5,31 @@ import {
   calendarDays,
   calendarLabel,
   calendarMoment,
+  dateOnly,
+  daysUntil,
   formatClock,
   formatDate,
+  isoDate,
   relativeTime,
+  untilNextDay,
 } from "./time";
+
+describe("date-only values", () => {
+  it("read as the local calendar day, not midnight UTC", () => {
+    const date = dateOnly("2026-03-01");
+    expect([date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()]).toEqual([2026, 2, 1, 0]);
+    expect(isoDate(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+  it("count calendar days from now, whatever the hour", () => {
+    expect(daysUntil("2026-01-02", new Date(2026, 0, 1, 23, 59))).toBe(1);
+    expect(daysUntil("2026-01-01", new Date(2026, 0, 1, 0, 1))).toBe(0);
+    expect(daysUntil("2025-12-30", new Date(2026, 0, 1, 12))).toBe(-2);
+  });
+  it("tell how long until just after the next midnight", () => {
+    expect(untilNextDay(new Date(2026, 0, 1, 23, 59), 60_000)).toBe(120_000);
+    expect(untilNextDay(new Date(2026, 0, 1, 0, 0), 0)).toBe(86_400_000);
+  });
+});
 
 describe("shared local time formatting", () => {
   const now = new Date(2026, 0, 1, 0, 5);

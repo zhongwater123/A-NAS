@@ -61,11 +61,11 @@
      - 删除 Samba 账号、Linux 账号与同名私有组。
   4. **其他服务**：
      - 分享：删除她发出的分享及其内容与对话，把她从别人分享的收件人中移除；
-     - 家庭：移除她的成员资格、加入申请与只给她看的审计，她发的内容和留言保留；
+     - 家庭：移除她的成员资格、加入申请、“知道了”的记录与只给她看的审计，删除只给她看的[家庭待办](family-todos.md)；她发的内容和留言保留，共享的待办保留；
      - 音乐、影视中心、传输：删除她的收藏、播放记录、歌单、个人空间中的媒体库与传输记录。
   5. **账号**：在一个事务中删除她的账号、会话、头像、通知、查看授权记录与个人空间记录，审计记录 `user.deleted`。有内容转给管理员时，给管理员一条通知，写明文件夹与相册实际得到的名字（含重名时的序号）；名字由做转移的一步报回，随这一步记下，后面的步骤重试也不丢。什么都没转（例如图库里只有回收站中的照片）时不提这一项。
 - 她的 UID 保留，永不分配给别人；账号名从此可以再用，新账号拿到新 UID，看不到她的任何东西。
-- 留下的：她在 Shared 中建的文件（属主仍是她的 UID，其他成员照常读写）、共享图库中她上传的照片（由管理员管理）、家庭频道的内容与留言（显示原名字）、问题反馈、活动日志（显示为“已删除的账号”）。
+- 留下的：她在 Shared 中建的文件（属主仍是她的 UID，其他成员照常读写）、共享图库中她上传的照片（由管理员管理）、家庭频道的内容与留言（显示原名字）、共享的家庭待办（她关的、“谁的”是她的，显示原名字）、问题反馈、活动日志（显示为“已删除的账号”）。
 
 ## 边界与失败
 
@@ -94,7 +94,7 @@
 ## 关联
 
 - 决定：[账号删除的做法](../decisions/2026-11-16-account-deletion.md)
-- 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)、[相册](photo-library.md)、[成员文件分享](member-sharing.md)、[家庭中心](family-center.md)
+- 规格：[统一身份与文件授权](unified-identity-and-file-acl.md)、[相册](photo-library.md)、[成员文件分享](member-sharing.md)、[家庭中心](family-center.md)、[家庭待办](family-todos.md)
 - ADR：[0008 统一 Linux 身份与文件系统 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0024 每个成员一个沙箱中的 Hermes](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 代码：[`lifecycle.go`](../../internal/accounts/lifecycle.go)、[`deletion.go`](../../internal/accounts/deletion.go)、[`account.go`](../../internal/hostops/linux/account.go)、[`accountremoval`](../../internal/accountremoval/accountremoval.go)、[`deletion.go`](../../cmd/anas-api/deletion.go)、[`UsersSection.tsx`](../../web/src/settings/UsersSection.tsx)
 - 问题：[#26](https://github.com/zhongwater123/A-NAS/issues/26)

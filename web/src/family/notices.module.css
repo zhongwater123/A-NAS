@@ -1,11 +1,8 @@
-/* 家庭中心's hint on the desktop, under the status bar, in the window's warm
-   coral. Kept apart from the window's styles, which load with the window. */
+/* 家庭中心's hint on the desktop, in the desktop's stack of notices under the
+   status bar (desktop.module.css .notice-stack), in the window's warm coral.
+   Kept apart from the window's styles, which load with the window. */
 .fn-holder {
-  position: absolute;
-  z-index: 77;
-  top: 78px;
-  right: 22px;
-  width: min(340px, calc(100% - 140px));
+  pointer-events: auto;
 }
 .fn-toast {
   position: relative;
