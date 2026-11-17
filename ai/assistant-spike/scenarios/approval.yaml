@@ -25,7 +25,10 @@ cases:
     assert:
       - tool-used: mcp__anas__submit_changes
       - change: {status: applied, op: write, path: /nas/个人空间/计划.md}
-      - tokens: {max: 60000}
+      - tokens: {max: 200000}
+        note: >-
+          只拦失控：qwen3.8-flash 实测每遍 8.4–16.9 万（常见 10.4 万、5 个请求）；
+          技能没加载时一次修改要 20–26 万（研究文档）。日常漂移看基线的花费对比
     after:
       - file: {path: /nas/个人空间/计划.md, contains: [买菜, 交电费]}
 
