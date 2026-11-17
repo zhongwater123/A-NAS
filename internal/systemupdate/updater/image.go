@@ -1219,24 +1219,30 @@ func (s *ImageService) retire(base string) error {
 
 // waitForBoot waits for boot-complete.target, which the boot health check
 // holds back on a base's counted boots; one that fails restarts the device.
-func (s *ImageService) waitForBoot(ctx context.Context) bool {
+// A boot of a UKI without a counter, one that passed its check before, is
+// not counted: nothing reaches that target, and nothing is left to wait for.
+func (s *ImageService) waitForBoot(ctx context.Context, base string) bool {
+	if s.ukiTries(base) == ukiBlessed {
+		return true
+	}
 	wait := s.BootWait
 	if wait <= 0 {
 		wait = bootWait
 	}
-	deadline := s.now().Add(wait)
+	// The boot takes real time, whatever clock the records use.
+	deadline := time.Now().Add(wait)
 	for {
 		output, _ := s.Commands.Run(ctx, "systemctl", "is-active", "boot-complete.target")
 		if strings.TrimSpace(string(output)) == "active" {
 			return true
 		}
-		if !s.now().Before(deadline) {
+		if !time.Now().Before(deadline) {
 			return false
 		}
 		select {
 		case <-ctx.Done():
 			return false
-		case <-time.After(5 * time.Second):
+		case <-time.After(min(5*time.Second, wait)):
 		}
 	}
 }
@@ -1297,7 +1303,7 @@ func (s *ImageService) afterRestart(ctx context.Context, state *State) error {
 	img := state.Image
 	now, _ := s.running()
 	if now.base == img.TargetBase {
-		if !s.waitForBoot(ctx) {
+		if !s.waitForBoot(ctx, now.base) {
 			return nil // the boot health check is still running; the next run looks again
 		}
 		if now.product != img.TargetProduct {

@@ -32,6 +32,11 @@ type fakeImage struct {
 	merged   string
 	bootID   string
 	boots    int
+	// counted: this boot's UKI had a boot counter, so boot-complete.target
+	// is part of it; a boot of a UKI without one never reaches that target.
+	counted bool
+	// checking: the boot health check of a counted boot still runs.
+	checking bool
 }
 
 func (h *fakeImage) Run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -62,6 +67,9 @@ func (h *fakeImage) Run(_ context.Context, name string, args ...string) ([]byte,
 		uki := filepath.Join(s.ESP, "EFI", "Linux", "a-nas_"+args[1]+"+3-0.efi")
 		return nil, os.WriteFile(uki, []byte("uki"), 0o644)
 	case "systemctl":
+		if args[0] == "is-active" && args[1] == "boot-complete.target" && (!h.counted || h.checking) {
+			return []byte("inactive\n"), errors.New("exit status 3")
+		}
 		if args[0] == "is-active" {
 			return []byte("active\n"), nil
 		}
@@ -89,6 +97,7 @@ func (h *fakeImage) boot(base string) {
 	s := h.service
 	h.boots++
 	h.bootID = fmt.Sprintf("boot-%d", h.boots)
+	h.counted = s.ukiTries(base) != ukiBlessed
 	if err := os.WriteFile(s.OSRelease, []byte("ID=debian\nIMAGE_ID=\"a-nas\"\nIMAGE_VERSION=\""+base+"\"\n"), 0o644); err != nil {
 		panic(err)
 	}
@@ -333,6 +342,23 @@ func TestImageNewBaseWaitsForARestartAndIsKeptOnceItBoots(t *testing.T) {
 	}
 	if state.Records[0].Kind != RecordUpdated || state.Records[0].Version != "1.0.3" {
 		t.Fatalf("records = %+v", state.Records)
+	}
+}
+
+func TestImageNewBaseIsKeptOnlyOnceItsBootCompletes(t *testing.T) {
+	s, host := newImageService(t)
+	installBase(t, s, host, "owner")
+	runImage(t, s, RequestRestart, "owner")
+	host.boot("1003")
+	host.checking = true
+	state := runImage(t, s, RequestTick, "")
+	if state.Phase != PhaseRestartPending || state.Current != "1.0.1" || len(state.Records) != 0 {
+		t.Fatalf("settled before the boot check passed: %+v", state)
+	}
+	host.checking = false
+	state = runImage(t, s, RequestTick, "")
+	if state.Phase != PhaseUpToDate || state.Current != "1.0.3" {
+		t.Fatalf("state = %+v", state)
 	}
 }
 
