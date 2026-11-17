@@ -8,10 +8,8 @@ import type { operations, ScoringBatch, ScoringExportField, ScoringRatingInput }
 // only the API speaks points with two decimals.
 export const maxScore = 500;
 
-// overall is 总分, which every batch scores first.
+// overall is 总分. A batch of it alone shows no item names.
 export const overall = "overall";
-// sharpness is the 打分项 judged on the photo at its full size.
-export const sharpness = "sharpness";
 
 export type StageAction =
   | { kind: "set"; score: number }
@@ -21,16 +19,20 @@ export type StageAction =
   | { kind: "skip" }
   | { kind: "flag" }
   | { kind: "undo" }
+  | { kind: "previous" }
+  | { kind: "next" }
   | { kind: "zoom" }
+  | { kind: "fullscreen" }
   | { kind: "guide" }
   | { kind: "cancel" };
 
 // stageAction reads a key of the rating stage: 0–5 move to that whole
 // score, ← and → by 0.1 and with Shift by 0.01, ↑ and ↓ to the 打分项 before
 // and after, Enter confirms, S skips (cannot judge), X marks a problem,
-// Backspace goes back to the last photo, Z shows the photo at 100% while
-// held, ? shows the guide and Escape leaves what is open. A key with Ctrl,
-// Alt or the command key is the browser's.
+// Backspace takes one step back, [ and ] go to the photo before and after,
+// Z shows the photo at 100% while held, F fills the screen, ? shows the
+// guide and Escape leaves what is open. A key with Ctrl, Alt or the command
+// key is the browser's.
 export function stageAction(
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey">,
 ): StageAction | undefined {
@@ -51,6 +53,13 @@ export function stageAction(
     case "z":
     case "Z":
       return { kind: "zoom" };
+    case "f":
+    case "F":
+      return { kind: "fullscreen" };
+    case "[":
+      return { kind: "previous" };
+    case "]":
+      return { kind: "next" };
     case "s":
     case "S":
       return { kind: "skip" };

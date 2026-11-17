@@ -1,0 +1,8 @@
+# The persistent root keeps this file across image updates. x-systemd.growfs
+# grows its ext4 to the partition that systemd-repart grew to the end of the
+# disk at the first boot: the partition's grow-file-system flag counts only
+# for a root that systemd-gpt-auto-generator mounts, and the kernel command
+# line names this one. The ESP is mounted when used; fsck checks it, since a
+# power cut leaves it unclean.
+PARTLABEL=a-nas-state / ext4 rw,x-systemd.growfs 0 0
+PARTLABEL=esp /efi vfat umask=0077,noauto,x-systemd.automount,x-systemd.idle-timeout=1min 0 2

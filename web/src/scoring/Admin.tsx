@@ -11,7 +11,19 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { type FormEvent, Fragment, type ReactNode, useCallback, useEffect, useId, useState } from "react";
+import {
+  type Dispatch,
+  type FormEvent,
+  Fragment,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import { displayName } from "../people/people";
 import { Dialog, EmptyState, Notice, Spinner } from "../ui/workspace";
@@ -19,6 +31,7 @@ import {
   batchStats,
   coverURL,
   createBatch,
+  createDimension,
   deleteBatch,
   type ExportChoice,
   exportSummary,
@@ -53,7 +66,6 @@ import {
   formatPoints,
   formatSeconds,
   formatWhen,
-  overall,
   repeatGood,
   repeatPoor,
   sameRunAlert,
@@ -275,7 +287,7 @@ function BatchDetail({
 }) {
   const [stats, setStats] = useState<ScoringRaterStats[]>();
   const [statsFailure, setStatsFailure] = useState("");
-  const [shownDimension, setShownDimension] = useState(overall);
+  const [shownDimension, setShownDimension] = useState(batch.dimensions[0].id);
   const [editing, setEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -658,7 +670,11 @@ function StatsTable({
 
 type DimensionID = ScoringDimension["id"];
 
-// useCatalogue is every 打分项 a batch can choose, from the module.
+// A batch scores at most this many 打分项; the module refuses more.
+const mostDimensions = 8;
+
+// useCatalogue is every 打分项 a batch can choose, from the module, and a
+// way to add one made here.
 function useCatalogue() {
   const [catalogue, setCatalogue] = useState<ScoringDimension[]>();
   useEffect(() => {
@@ -671,18 +687,22 @@ function useCatalogue() {
       live = false;
     };
   }, []);
-  return catalogue;
+  const add = useCallback(
+    (dimension: ScoringDimension) => setCatalogue((current) => [...(current ?? []), dimension]),
+    [],
+  );
+  return { catalogue, add };
 }
 
 function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (batch: ScoringBatch) => void }) {
-  const catalogue = useCatalogue();
+  const { catalogue, add } = useCatalogue();
   const [sources, setSources] = useState<string[]>();
   const [failure, setFailure] = useState("");
   const [source, setSource] = useState("");
   const [name, setName] = useState("");
   const [required, setRequired] = useState(3);
   const [rubric, setRubric] = useState("");
-  const [dimensions, setDimensions] = useState<DimensionID[]>([overall]);
+  const [dimensions, setDimensions] = useState<DimensionID[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
@@ -726,7 +746,7 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
             type="submit"
             form="scoring-new-batch"
             className={styles.scPrimary}
-            disabled={busy || !source || !name.trim()}
+            disabled={busy || !source || !name.trim() || dimensions.length === 0}
           >
             新建
           </button>
@@ -769,7 +789,13 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
               rubric={rubric}
               setRubric={setRubric}
               items={
-                <DimensionPicker catalogue={catalogue} chosen={dimensions} setChosen={setDimensions} locked={false} />
+                <DimensionPicker
+                  catalogue={catalogue}
+                  onMade={add}
+                  chosen={dimensions}
+                  setChosen={setDimensions}
+                  locked={false}
+                />
               }
             />
             <MinimumNote />
@@ -780,54 +806,168 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   );
 }
 
-// DimensionPicker chooses a batch's 打分项: 总分 always, the others as the
-// administrator likes, scored in the catalogue's order. A batch with an
-// answer keeps the ones it has.
+// DimensionPicker chooses a batch's 打分项. The order they are picked in is
+// the order raters score them, shown as the number on each; another click
+// takes one out and the later ones move up. One made here is picked at once.
+// A batch with an answer keeps the ones it has.
 function DimensionPicker({
   catalogue,
+  onMade,
   chosen,
   setChosen,
   locked,
 }: {
   catalogue: ScoringDimension[] | undefined;
+  onMade: (dimension: ScoringDimension) => void;
   chosen: DimensionID[];
-  setChosen: (ids: DimensionID[]) => void;
+  setChosen: Dispatch<SetStateAction<DimensionID[]>>;
   locked: boolean;
 }) {
   const label = useId();
   const hint = useId();
+  const [making, setMaking] = useState(false);
   if (!catalogue) return <Spinner small />;
-  const toggle = (id: DimensionID) => {
-    const next = chosen.includes(id) ? chosen.filter((other) => other !== id) : [...chosen, id];
-    setChosen(catalogue.map((dimension) => dimension.id).filter((other) => next.includes(other)));
-  };
+  const full = chosen.length >= mostDimensions;
+  // Each click builds on the one before, however quick they come.
+  const toggle = (id: DimensionID) =>
+    setChosen((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
   return (
     <div className={styles.scField}>
-      <span id={label} className={styles.scFieldLabel}>
-        打分项
-      </span>
+      <div className={styles.scFieldHead}>
+        <span id={label} className={styles.scFieldLabel}>
+          打分项
+        </span>
+        <small>
+          {chosen.length} / {mostDimensions}
+        </small>
+      </div>
       <div className={styles.scChips} role="group" aria-labelledby={label} aria-describedby={hint}>
         {catalogue.map((dimension) => {
-          const fixed = dimension.id === overall;
+          const at = chosen.indexOf(dimension.id);
           return (
             <button
               key={dimension.id}
               type="button"
-              className={styles.scChip}
-              aria-pressed={chosen.includes(dimension.id)}
-              disabled={locked || fixed}
+              className={`${styles.scChip} ${styles.scPick}`}
+              aria-pressed={at >= 0}
+              aria-label={at >= 0 ? `${dimension.name}，第 ${at + 1} 项` : dimension.name}
+              title={dimension.description || undefined}
+              disabled={locked || (at < 0 && full)}
               onClick={() => toggle(dimension.id)}
             >
-              <i aria-hidden="true" />
+              <i aria-hidden="true">{at >= 0 ? at + 1 : ""}</i>
               {dimension.name}
-              {fixed && <small>必打</small>}
+              {dimension.custom && <small>自定义</small>}
             </button>
           );
         })}
+        {!locked && !making && (
+          <button
+            type="button"
+            className={`${styles.scChip} ${styles.scMake}`}
+            disabled={full}
+            onClick={() => setMaking(true)}
+          >
+            <Plus aria-hidden="true" />
+            自定义…
+          </button>
+        )}
       </div>
-      <p id={hint} className={styles.scHint}>
-        {locked ? "批次已有打分，打分项不能再改。" : "每张照片按上面的顺序逐项打分。有人打过分后不能再改。"}
+      {making && (
+        <DimensionMaker
+          onCancel={() => setMaking(false)}
+          onMade={(dimension) => {
+            onMade(dimension);
+            setChosen((current) => [...current, dimension.id]);
+            setMaking(false);
+          }}
+        />
+      )}
+      <p id={hint} className={`${styles.scHint}${!locked && chosen.length === 0 ? ` ${styles.warn}` : ""}`}>
+        {locked
+          ? "批次已有打分，打分项与顺序不能再改。"
+          : chosen.length === 0
+            ? "至少选一项。按点选的先后顺序打分，再点一次取消。"
+            : "按点选的先后顺序打分，再点一次取消。有人打过分后不能再改。"}
       </p>
+    </div>
+  );
+}
+
+// A custom 打分项's name and description, in characters, as the module
+// allows them.
+const longestDimensionName = 8;
+const longestDimensionDescription = 40;
+
+// DimensionMaker makes a custom 打分项, which every later batch can choose
+// too. It sits inside the batch's form, so Enter adds it instead of
+// submitting the batch.
+function DimensionMaker({ onCancel, onMade }: { onCancel: () => void; onMade: (dimension: ScoringDimension) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [failure, setFailure] = useState("");
+  const [busy, setBusy] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => nameInput.current?.focus(), []);
+  const ready = name.trim() !== "" && !busy;
+  const add = async () => {
+    if (!ready) return;
+    setBusy(true);
+    setFailure("");
+    try {
+      onMade(await createDimension({ name: name.trim(), description: description.trim() }));
+    } catch (caught) {
+      setFailure(scoringError(caught));
+      setBusy(false);
+    }
+  };
+  const enter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void add();
+  };
+  return (
+    <div className={styles.scMaker} role="group" aria-label="新的打分项">
+      <label className={styles.scMakerField}>
+        <span>名称</span>
+        <span className={styles.scInput}>
+          <input
+            ref={nameInput}
+            value={name}
+            maxLength={longestDimensionName}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={enter}
+          />
+          <small aria-hidden="true">
+            {[...name].length} / {longestDimensionName}
+          </small>
+        </span>
+      </label>
+      <label className={styles.scMakerField}>
+        <span>说明（打分人会看到，可不填）</span>
+        <span className={styles.scInput}>
+          <input
+            value={description}
+            maxLength={longestDimensionDescription}
+            placeholder="例如：前景、中景、远景是否分明"
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={enter}
+          />
+        </span>
+      </label>
+      <span className={styles.scMakerGo}>
+        <button type="button" className={styles.scQuiet} disabled={busy} onClick={onCancel}>
+          取消
+        </button>
+        <button type="button" className={styles.scPrimary} disabled={!ready} onClick={() => void add()}>
+          添加并选上
+        </button>
+      </span>
+      {failure && (
+        <p className={styles.scMakerFailure} role="alert">
+          {failure}
+        </p>
+      )}
     </div>
   );
 }
@@ -946,7 +1086,7 @@ function EditBatchDialog({
   onClose: () => void;
   onSaved: (batch: ScoringBatch) => void;
 }) {
-  const catalogue = useCatalogue();
+  const { catalogue, add } = useCatalogue();
   const [name, setName] = useState(batch.name);
   const [required, setRequired] = useState(batch.required);
   const [rubric, setRubric] = useState(batch.rubric);
@@ -983,7 +1123,12 @@ function EditBatchDialog({
           <button type="button" className={styles.scQuiet} disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="submit" form="scoring-edit-batch" className={styles.scPrimary} disabled={busy || !name.trim()}>
+          <button
+            type="submit"
+            form="scoring-edit-batch"
+            className={styles.scPrimary}
+            disabled={busy || !name.trim() || dimensions.length === 0}
+          >
             保存
           </button>
         </>
@@ -999,7 +1144,13 @@ function EditBatchDialog({
           rubric={rubric}
           setRubric={setRubric}
           items={
-            <DimensionPicker catalogue={catalogue} chosen={dimensions} setChosen={setDimensions} locked={locked} />
+            <DimensionPicker
+              catalogue={catalogue}
+              onMade={add}
+              chosen={dimensions}
+              setChosen={setDimensions}
+              locked={locked}
+            />
           }
         />
       </form>

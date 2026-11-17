@@ -86,8 +86,8 @@ type BatchInput struct {
 	Source   string
 	Required int
 	Rubric   string
-	// Dimensions are the 打分项 to score, overall among them; none is
-	// overall alone.
+	// Dimensions are the 打分项 to score, one at least, in the order raters
+	// score them.
 	Dimensions []string
 }
 
@@ -109,9 +109,16 @@ func (input *BatchInput) normalize() error {
 	case utf8.RuneCountInString(input.Rubric) > maxRubricRunes:
 		return invalid("the scoring guide has at most %d characters", maxRubricRunes)
 	}
-	dimensions, err := normalizeDimensions(input.Dimensions)
-	input.Dimensions = dimensions
-	return err
+	return nil
+}
+
+// checkDimensions checks a batch's 打分项 against the catalogue.
+func (s *Store) checkDimensions(ctx context.Context, ids []string) error {
+	catalogue, err := s.Catalogue(ctx)
+	if err != nil {
+		return err
+	}
+	return catalogue.check(ids)
 }
 
 // Batch is a batch as administrators see it.
@@ -141,6 +148,9 @@ func (s *Store) CreateBatch(ctx context.Context, by string, input BatchInput) (B
 	if err := input.normalize(); err != nil {
 		return Batch{}, err
 	}
+	if err := s.checkDimensions(ctx, input.Dimensions); err != nil {
+		return Batch{}, err
+	}
 	if info, err := os.Stat(filepath.Join(s.photosDir, input.Source)); err != nil || !info.IsDir() {
 		return Batch{}, invalid("folder %q is not in the scoring folder", input.Source)
 	}
@@ -160,8 +170,8 @@ type BatchPatch struct {
 	Name     *string
 	Rubric   *string
 	Required *int
-	// Dimensions change only while the batch has no answer: an answer
-	// scores the dimensions there were.
+	// Dimensions, in their new order, change only while the batch has no
+	// answer: an answer scores the dimensions there were.
 	Dimensions []string
 	// State is "open" or "closed"; a batch that is importing opens itself.
 	State *string
@@ -189,8 +199,13 @@ func (s *Store) UpdateBatch(ctx context.Context, id string, patch BatchPatch) (B
 	if err := input.normalize(); err != nil {
 		return Batch{}, err
 	}
-	if !slices.Equal(input.Dimensions, current.Dimensions) && current.Answers > 0 {
-		return Batch{}, ErrInUse
+	if !slices.Equal(input.Dimensions, current.Dimensions) {
+		if current.Answers > 0 {
+			return Batch{}, ErrInUse
+		}
+		if err := s.checkDimensions(ctx, input.Dimensions); err != nil {
+			return Batch{}, err
+		}
 	}
 	state := current.State
 	if patch.State != nil {

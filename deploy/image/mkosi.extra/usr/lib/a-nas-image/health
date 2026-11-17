@@ -1,0 +1,55 @@
+#!/bin/bash
+# The boot health check of an image version: a-nas-check, from the product's
+# extension, which names each check that fails (--failed).
+#
+#   health record   what fails now becomes the baseline; never fails itself.
+#                   a-nas-health-baseline.service runs it on each boot that
+#                   systemd-boot does not count, and an update runs it before
+#                   it writes a new base.
+#   health assess   on a version's counted boot: fails when a check fails that
+#                   did not fail in the baseline. A new version is judged by
+#                   what it breaks, not by a setting or a disk that failed
+#                   before it; without a baseline, every failure counts.
+set -uo pipefail
+baseline=/var/lib/a-nas-health/baseline
+
+# failed FILE: the names of the checks that fail now. An a-nas-check that
+# cannot run or name its failures, as when no product is merged, is a failure
+# of its own.
+failed() {
+  local status
+  : >"$1"
+  if [[ ! -x /usr/sbin/a-nas-check ]]; then
+    echo a-nas-check >"$1"
+    return
+  fi
+  /usr/sbin/a-nas-check --failed "$1"
+  status=$?
+  if ((status > 1)) || { ((status == 1)) && [[ ! -s "$1" ]]; }; then echo a-nas-check >>"$1"; fi
+}
+
+now=$(mktemp)
+trap 'rm -f -- "$now"' EXIT
+case "${1:-}" in
+  record)
+    failed "$now"
+    install -d -m 0700 "${baseline%/*}"
+    LC_ALL=C sort -u "$now" >"$baseline.new" && mv -f -- "$baseline.new" "$baseline"
+    echo "a-nas-health: the baseline fails: $(paste -sd ' ' "$baseline")"
+    exit 0
+    ;;
+  assess)
+    failed "$now"
+    new=$(LC_ALL=C comm -23 <(LC_ALL=C sort -u "$now") <(LC_ALL=C sort -u "$baseline" 2>/dev/null))
+    if [[ -z "$new" ]]; then
+      echo "a-nas-health: no check fails that passed before this version"
+      exit 0
+    fi
+    echo "a-nas-health: this version fails: $(paste -sd ' ' <<<"$new")"
+    exit 1
+    ;;
+  *)
+    echo "usage: $0 record|assess" >&2
+    exit 2
+    ;;
+esac

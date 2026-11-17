@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
-import { sharpness } from "./model";
+import { overall } from "./model";
 import styles from "./scoring.module.css";
 
 // GuideContent is what raters see before scoring a batch and whenever they
@@ -11,7 +11,8 @@ import styles from "./scoring.module.css";
 // score, and the reference photos, lowest score first, each with its score.
 export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | "rubric" | "dimensions"> }) {
   const several = batch.dimensions.length > 1;
-  const zoomable = batch.dimensions.some((dimension) => dimension.id === sharpness);
+  // A batch of 总分 alone has nothing to list.
+  const named = several || batch.dimensions[0].id !== overall;
   const [anchors, setAnchors] = useState<ScoringAnchor[]>();
   const [failure, setFailure] = useState("");
   useEffect(() => {
@@ -33,13 +34,18 @@ export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | 
           <p className={styles.scMuted}>管理员没有写打分标准。</p>
         )}
       </section>
-      {several && (
+      {named && (
         <section>
           <h3>打分项</h3>
-          <p className={styles.scRubric}>
-            每张照片依次打 {batch.dimensions.length} 项：
-            {batch.dimensions.map((dimension) => dimension.name).join("、")}。
-          </p>
+          <ol className={styles.scGuideItems}>
+            {batch.dimensions.map((dimension, index) => (
+              <li key={dimension.id}>
+                <span>{index + 1}</span>
+                <b>{dimension.name}</b>
+                {dimension.description && <span>{dimension.description}</span>}
+              </li>
+            ))}
+          </ol>
         </section>
       )}
       <section>
@@ -52,34 +58,33 @@ export function GuideContent({ batch }: { batch: Pick<ScoringRaterBatch, "id" | 
           {several ? (
             <>
               <li>
-                在数轴上点选或拖动后松开，自动进入下一项；用键盘时按 <kbd>Enter</kbd> 进入下一项
+                在数轴上点选或拖动后松开，自动进入下一项，最后一项松开后进入下一张；用键盘时按 <kbd>Enter</kbd>
               </li>
               <li>
                 <kbd>↑</kbd> <kbd>↓</kbd> 或点上方的项回到已打的项
               </li>
-              <li>
-                最后一项按 <kbd>Enter</kbd> 或“确定”提交，下一张随即出现
-              </li>
             </>
           ) : (
             <li>
-              <kbd>Enter</kbd> 或“确定”提交，下一张随即出现
+              在数轴上点选或拖动后松开，或按 <kbd>Enter</kbd>，提交并进入下一张
             </li>
           )}
-          {zoomable && (
-            <li>
-              按住 <kbd>Z</kbd> 看照片的 100% 局部，移动鼠标换位置，松开恢复
-            </li>
-          )}
+          <li>每张照片开始时没有分数；数轴上淡黄色的点是上一张的分数</li>
+          <li>
+            单击照片看原图 100%，移动鼠标换位置，右下角小窗显示看的是哪一块，再单击返回；按住 <kbd>Z</kbd> 也可以
+          </li>
+          <li>
+            照片两侧的箭头或 <kbd>[</kbd> <kbd>]</kbd> 切换上一张、下一张；这一张打完才能到下一张，只能回到上一张
+          </li>
           <li>数轴上方是你最近打过分的 12 张照片；鼠标停在一张上，它会并排放到正在打分的照片旁边</li>
           <li>
             <kbd>S</kbd> 无法判断，<kbd>X</kbd> 图片有问题，都不计分
           </li>
           <li>
-            <kbd>⌫</kbd> 回到上一张重新打分
+            <kbd>⌫</kbd> 撤销一步：回到上一项，在第一项时回到上一张的最后一项
           </li>
           <li>
-            <kbd>?</kbd> 再看打分标准
+            <kbd>F</kbd> 全屏，<kbd>?</kbd> 再看打分标准
           </li>
         </ul>
       </section>
