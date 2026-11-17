@@ -178,29 +178,6 @@ func TestNothingIsAppliedWithoutAFreshGrant(t *testing.T) {
 	}
 }
 
-// A write whose new content is not text says so on the card, which shows
-// none of it; a small text write is shown whole (#172).
-func TestTheCardSaysWhatAWriteDoesNotShow(t *testing.T) {
-	f := newFixture(t)
-	f.put("assistant/alice/files/待确认/计划.md", "\xff\xd8\xff\xe0 不是文本")
-	card, err := f.prepare(editPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	op := card["operations"].([]any)[0].(map[string]any)
-	if op["binary"] != true || op["after"] != nil || op["partial"] != nil {
-		t.Fatalf("a binary write = %v", op)
-	}
-	f.put("assistant/alice/files/待确认/计划.md", "# 计划\n")
-	if card, err = f.prepare(editPlan); err != nil {
-		t.Fatal(err)
-	}
-	op = card["operations"].([]any)[0].(map[string]any)
-	if op["binary"] != nil || op["partial"] != nil || op["beforePartial"] != nil || op["size"] != float64(len("# 计划\n")) {
-		t.Fatalf("a small text write = %v", op)
-	}
-}
-
 func TestATargetChangedAfterTheCardIsNotOverwritten(t *testing.T) {
 	f := newFixture(t)
 	f.put("assistant/alice/files/待确认/计划.md", "助手的版本\n")
@@ -938,5 +915,28 @@ func TestRefusalReasonsAreInTheReplyNotInTheError(t *testing.T) {
 	}
 	if got := Reasons(errors.New("other")); got != "" {
 		t.Fatalf("Reasons() of another error = %q, want none", got)
+	}
+}
+
+// A write whose new content is not text says so on the card, which shows
+// none of it; a small text write is shown whole (#172).
+func TestTheCardSaysWhatAWriteDoesNotShow(t *testing.T) {
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", "\xff\xd8\xff\xe0 不是文本")
+	card, err := f.prepare(editPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := card["operations"].([]any)[0].(map[string]any)
+	if op["binary"] != true || op["after"] != nil || op["partial"] != nil {
+		t.Fatalf("a binary write = %v", op)
+	}
+	f.put("assistant/alice/files/待确认/计划.md", "# 计划\n")
+	if card, err = f.prepare(editPlan); err != nil {
+		t.Fatal(err)
+	}
+	op = card["operations"].([]any)[0].(map[string]any)
+	if op["binary"] != nil || op["partial"] != nil || op["beforePartial"] != nil || op["size"] != float64(len("# 计划\n")) {
+		t.Fatalf("a small text write = %v", op)
 	}
 }
