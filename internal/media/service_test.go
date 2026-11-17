@@ -644,6 +644,18 @@ func waitUntil(t *testing.T, what string, done func() bool) {
 	}
 }
 
+func TestArtworkWithAPixelOutsideThePaletteIsNotFound(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	env := newTestEnv(t, nil)
+	id := postered(t, env, map[string][]byte{"Heat (1995)": imagetest.OutsidePalettePicture()})["Heat"]
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
+	}
+	if logged := panics(); len(logged) != 0 {
+		t.Errorf("logged %+v, want no panic", logged)
+	}
+}
+
 func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
 	panics := imagetest.LoggedPanics(t)
 	env := newTestEnv(t, nil)
