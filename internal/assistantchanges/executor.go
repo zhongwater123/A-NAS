@@ -22,6 +22,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
@@ -76,6 +77,9 @@ type Executor struct {
 	Root   string
 	Volume string
 	Now    func() time.Time
+	// Admits checks the data volume's reserve before a change writes to it;
+	// nil uses capacity.Admits.
+	Admits func(path string, incoming int64) (bool, error)
 
 	mu       sync.Mutex
 	accounts map[string]*ledger
@@ -209,6 +213,45 @@ func staged(steps []step) int64 {
 	return size
 }
 
+// adds is what the steps add to the data volume: the files they write and
+// the files and folders they copy. A file a step replaces goes to the
+// recycle bin, which frees nothing.
+func adds(steps []step) int64 {
+	var size int64
+	for _, s := range steps {
+		if s.Op == "write" || s.Op == "copy" {
+			size += s.SourceSize
+		}
+	}
+	return size
+}
+
+// noRoom is why a change that would take the data volume below its reserve
+// is refused.
+const noRoom = "数据卷剩余空间不足：这些写入会让它低于保留容量，先腾出空间再提交"
+
+// room refuses steps whose writes would leave the data volume under the
+// reserve that the files, photos and family center keep too (#181), so
+// that the assistant cannot fill the volume everything shares.
+func (e *Executor) room(steps []step) error {
+	incoming := adds(steps)
+	if incoming == 0 {
+		return nil
+	}
+	admits := e.Admits
+	if admits == nil {
+		admits = capacity.Admits
+	}
+	admitted, err := admits(e.Volume, incoming)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return invalid{noRoom}
+	}
+	return nil
+}
+
 func (e *Executor) now() time.Time {
 	if e.Now != nil {
 		return e.Now()
@@ -240,6 +283,9 @@ func (e *Executor) Prepare(ctx context.Context, account string, member filesyste
 	}
 	if err == nil {
 		err = e.inspect(ctx, member, c.Steps)
+	}
+	if err == nil {
+		err = e.room(c.Steps)
 	}
 	var dir string
 	if err == nil {
@@ -669,6 +715,12 @@ func (e *Executor) apply(ctx context.Context, account string, member filesystem.
 				return 0, s.Source + " 在用户确认前后被改动过，请重新提交"
 			}
 		}
+	}
+	// The space may have gone since the card; nothing is changed then.
+	if err := e.room(c.Steps); errors.Is(err, ErrInvalid) {
+		return 0, noRoom
+	} else if err != nil {
+		return 0, describe(err, "数据卷")
 	}
 	for n, s := range c.Steps {
 		var err error

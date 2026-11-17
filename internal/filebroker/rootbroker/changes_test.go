@@ -115,7 +115,10 @@ func newChangesHarness(t *testing.T) *changesHarness {
 		Accounts:   accounts,
 		VolumeRoot: volume, VolumeReady: func() bool { return true },
 		AssistantChanges: filepath.Join(t.TempDir(), "changes"),
-		Command:          func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
+		// The volume is a temporary folder, perhaps on a small tmpfs; the
+		// reserve itself is the executor's own tests' business.
+		AssistantChangesAdmit: func(string, int64) (bool, error) { return true, nil },
+		Command:               func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
 		LookupUID: func(username string) (int, error) {
 			if username == "alice" {
 				return 20101, nil
@@ -316,8 +319,9 @@ func TestTheAssistantSocketChecksTheUIDRange(t *testing.T) {
 		}),
 		Accounts:   directory,
 		VolumeRoot: t.TempDir(), VolumeReady: func() bool { return true },
-		AssistantChanges: t.TempDir(),
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		AssistantChanges:      t.TempDir(),
+		AssistantChangesAdmit: func(string, int64) (bool, error) { return true, nil },
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
