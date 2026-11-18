@@ -1189,6 +1189,32 @@ check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied a-nas ls "$data/photos"
 
+# --- The montage center's project grants (ADR 0038): a socket systemd holds
+# for the montage account alone, and the photo service checks the peer's UID.
+cat > /usr/local/lib/photo-grants.py <<'PY'
+import json, socket, struct, sys
+conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+conn.connect("/run/a-nas-photos-grants/grants.sock")
+body = json.dumps({"op": "list"}).encode()
+conn.sendall(struct.pack(">I", len(body)) + body)
+header = conn.recv(4)
+if len(header) < 4:
+    sys.exit("closed without an answer")
+length = struct.unpack(">I", header)[0]
+answer = b""
+while len(answer) < length:
+    answer += conn.recv(length - len(answer))
+reply = json.loads(answer)
+print(reply)
+sys.exit(0 if reply.get("ok") else 1)
+PY
+check "the grant socket is the montage account's alone" \
+  test "$(stat -c '%a %U' /run/a-nas-photos-grants/grants.sock):$(stat -c '%a %U' /run/a-nas-photos-grants)" = "600 a-nas-montage:755 root"
+check "the photo service answers the montage account on it" \
+  setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py
+check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
+check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
+
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
 check "family store belongs to the family service alone" \

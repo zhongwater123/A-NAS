@@ -146,6 +146,47 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 	}
 }
 
+// undoMontageGrants is what a build before the montage center's grants does
+// with migration 17's stored Down when it opens the Catalog; the statements
+// that undo older migrations by hand come after it.
+var undoMontageGrants = []string{
+	"DROP TABLE montage_grant_assets",
+	"DROP TABLE montage_grants",
+	"DELETE FROM schema_downgrades WHERE version = 17",
+	"PRAGMA user_version = 16",
+}
+
+// A build before the montage center's grants takes migration 17 back with
+// the Down the newer build stored, and a later build adds the tables again.
+func TestMontageGrantsMigrationGoesBackWithItsDown(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:16], WithoutDown: migrationsWithoutDown}
+	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
+		t.Fatalf("the older build's migration: %v", err)
+	}
+	var version, tables int
+	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 16 {
+		t.Fatalf("user_version after going back = %d, %v", version, err)
+	}
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'montage_grant%'").Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("grant tables left after going back = %d, %v", tables, err)
+	}
+	_ = service.Close()
+	service, err = Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	if _, err := service.db.ExecContext(ctx, "SELECT COUNT(*) FROM montage_grant_assets"); err != nil {
+		t.Fatalf("grant tables after migrating again: %v", err)
+	}
+}
+
 // undoTextCorrections are the statements of docs/architecture/photo-ocr.md#交付
 // that take the Catalog back to migration 15, before corrections belonged to
 // the content object.
@@ -174,7 +215,7 @@ func TestTextCorrectionsMigrationCanBeUndone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range undoTextCorrections {
+	for _, statement := range append(slices.Clone(undoMontageGrants), undoTextCorrections...) {
 		if _, err := service.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
@@ -211,7 +252,7 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range append(slices.Clone(undoTextCorrections),
+	for _, statement := range append(append(slices.Clone(undoMontageGrants), undoTextCorrections...),
 		// Migrations 16 and 15 first, as docs/architecture/photo-ocr.md#交付 says.
 		"DROP TABLE text_corrections",
 		"DROP TABLE texts",

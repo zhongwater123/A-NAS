@@ -66,6 +66,13 @@ type Principal struct {
 	// and never acts as an administrator or through a viewing grant, even
 	// when the member could.
 	Assistant bool
+	// Grant marks the montage center acting for the member under a project
+	// grant (ADR 0038 decision 3), while the member may be away. It sees the
+	// member's own private library and the shared library, videos included,
+	// opens originals, adds only to the member's private library and changes
+	// nothing else; it never acts as an administrator or through a viewing
+	// grant, even when the member could.
+	Grant bool
 }
 
 type ViewingGrant struct {

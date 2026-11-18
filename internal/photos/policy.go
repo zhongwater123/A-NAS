@@ -25,9 +25,10 @@ import (
 func (p Principal) valid() bool { return p.UserID != "" }
 
 // viewing returns the caller's unexpired grant on a member's private library
-// that lasts longest. An assistant never views through a grant.
+// that lasts longest. An assistant or a project grant never views through a
+// viewing grant.
 func (p Principal) viewing(ownerUserID string, now time.Time) (ViewingGrant, bool) {
-	if p.Assistant {
+	if p.Assistant || p.Grant {
 		return ViewingGrant{}, false
 	}
 	var found ViewingGrant
@@ -47,7 +48,7 @@ func canView(p Principal, lib library, now time.Time) bool {
 		return true
 	}
 	_, viewing := p.viewing(lib.ownerUserID, now)
-	return p.Admin && viewing
+	return p.Admin && !p.Grant && viewing
 }
 
 // viewingOnly reports whether p sees lib only through Administrative Viewing
@@ -61,6 +62,10 @@ func canAdd(p Principal, lib library) bool {
 	if p.Assistant {
 		return false
 	}
+	if p.Grant {
+		// The montage center saves films to the member's own private library.
+		return lib.kind == LibraryKindPrivate && lib.ownerUserID == p.UserID
+	}
 	if lib.kind == LibraryKindShared {
 		return true
 	}
@@ -70,7 +75,7 @@ func canAdd(p Principal, lib library) bool {
 // canChange covers renaming, moving, trashing, restoring and purging an item
 // that createdBy uploaded or created in lib.
 func canChange(p Principal, lib library, createdBy string) bool {
-	if p.Assistant {
+	if p.Assistant || p.Grant {
 		return false
 	}
 	if lib.kind == LibraryKindShared {

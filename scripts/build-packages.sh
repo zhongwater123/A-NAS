@@ -147,6 +147,7 @@ for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-mo
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket
+wants sockets.target anas-photos-grants.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path

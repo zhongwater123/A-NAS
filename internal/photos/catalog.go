@@ -432,6 +432,33 @@ CREATE TABLE text_handles (
     UNIQUE (account, asset_id, key)
 );
 `},
+	// 17: project grants of the montage center (ADR 0038 decision 3). A
+	// member registers a project's videos while present; the montage center
+	// then reaches them under the grant, and the Policy decides again on
+	// every use. A grant is one per (owner, project); an asset leaves it when
+	// it is purged. Revoked grants stay, marked, until the owner's account is
+	// removed.
+	{Up: `
+CREATE TABLE montage_grants (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    UNIQUE (owner_user_id, project_id)
+);
+
+CREATE TABLE montage_grant_assets (
+    grant_id TEXT NOT NULL REFERENCES montage_grants(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (grant_id, asset_id)
+);
+CREATE INDEX montage_grant_assets_by_asset ON montage_grant_assets(asset_id);
+`, Down: `
+DROP TABLE montage_grant_assets;
+DROP TABLE montage_grants;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

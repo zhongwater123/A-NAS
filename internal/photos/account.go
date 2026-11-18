@@ -89,10 +89,12 @@ func (s *Service) RemoveAccount(ctx context.Context, removal AccountRemoval) (st
 }
 
 // forgetAccount removes what the catalog keeps of an account outside any
-// library: the handles its assistant was given and its audit.
+// library: the handles its assistant was given, the montage center's grants
+// on its behalf and its audit.
 func (s *Service) forgetAccount(ctx context.Context, tx *sql.Tx, userID string) error {
 	for _, statement := range []string{
 		"DELETE FROM text_handles WHERE account = ?",
+		"DELETE FROM montage_grants WHERE owner_user_id = ?",
 		"DELETE FROM audit_events WHERE actor_user_id = ?",
 	} {
 		if _, err := tx.ExecContext(ctx, statement, userID); err != nil {
