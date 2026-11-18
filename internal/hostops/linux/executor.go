@@ -147,6 +147,9 @@ type Executor struct {
 	// updateMu orders the system update service's request and settings
 	// files with the check that no run is in progress.
 	updateMu sync.Mutex
+	// assistantMu orders saving and deleting the assistant's key with preparing,
+	// enabling and disabling members' assistants, so the units always follow the key.
+	assistantMu sync.Mutex
 	// operations is the journal of data-volume operations by plan ID.
 	operationsMu    sync.Mutex
 	operations      map[string]*volumeOperation

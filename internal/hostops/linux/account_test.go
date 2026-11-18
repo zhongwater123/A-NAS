@@ -14,16 +14,16 @@ import (
 )
 
 // disabledAlice is an executor that knows alice as a disabled member, with
-// the assistant installed and, when prepared, alice's instance secret.
-func disabledAlice(t *testing.T, prepared bool) (*linux.Executor, *fakeHost) {
+// the assistant installed and, when keyed, the administrator's model key saved.
+func disabledAlice(t *testing.T, keyed bool) (*linux.Executor, *fakeHost) {
 	t.Helper()
 	root := installedAssistant(t)
-	if prepared {
-		tokens := filepath.Join(root, "etc", "a-nas-assistant", "tokens")
-		if err := os.MkdirAll(tokens, 0o700); err != nil {
+	if keyed {
+		store := filepath.Join(root, "etc", "credstore.encrypted")
+		if err := os.MkdirAll(store, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(tokens, "alice.env"), []byte("HERMES_DASHBOARD_SESSION_TOKEN=x\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(store, "a-nas-assistant-deepseek"), []byte("encrypted"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -54,7 +54,7 @@ func TestEnablingAnAccountUnlocksItAndGivesBackSMBAndTheAssistant(t *testing.T) 
 	}
 }
 
-func TestEnablingAnUnpreparedAssistantOnlyUnmasksIt(t *testing.T) {
+func TestEnablingAnAssistantWithoutTheKeyOnlyUnmasksIt(t *testing.T) {
 	executor, host := disabledAlice(t, false)
 	if err := executor.EnableCredential(context.Background(), accountid.EnableRequest{Username: "alice", SMB: true}); err != nil {
 		t.Fatal(err)
