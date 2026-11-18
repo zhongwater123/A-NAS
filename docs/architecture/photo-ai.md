@@ -110,6 +110,9 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - **结果**：存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用。写入前确认任务还在，块进行中视频被清除或分析被删除时丢弃这一块。同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
   - **交给剪辑中心**：`analysis` 的 JSON 只有状态、身份、窗口数与维数；窗口放在封口的 memfd 里，先是全部向量（小端 float32），再是每个窗口的起止毫秒与标记（各一个小端 uint32），所以应答大小与视频长短无关。`lookup` 一次读出全部资产的分析进度。
   - **换模型**：只重排仍被未撤销的授权引用的对象；授权撤销后在 7 天内再次授权的，由入队时的身份判断重排。没有授权引用满 7 天的分析由每小时的维护删除。
+  - 窗口完成后排 `montage-cards/v1`，再按卡片逐张排 `montage-quality/v1`。Catalog 第 19 步建 `video_cards`、`video_card_quality` 与 `montage_card_results`，并记录回滚步骤。完成身份包含上游分析身份，也记录零卡片和零画质的成功结果。授权的 `analysis` 返回两项身份，`analyze(retry=true)` 重排失败的任务。
+  - **卡片与画质的调度**：每轮先于 AI Worker 的门控做，不问 AI Worker。先用只读查询确认有到期的任务，再删掉已没有授权引用、也没人在做的卡片与画质任务，然后领一个；再次授权并请求分析时补排缺的任务。门控挂断或服务停止时任务退回原位、不耗尝试次数，本轮结束，按原因卸载模型。计算 Worker 或 FFmpeg Worker 连不上时任务等 1 分钟、不耗尝试次数，本轮接着做照片的 AI 工作；每次都结束本轮的话，Worker 不在期间照片的工作会一直等。计算 Worker 执行中失败或超时、读 Catalog 或原始文件出错记 `io`，最多试 3 次；请求被拒绝记 `invalid_result`，原始文件不存在记 `missing_original`，都不再重试。
+  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。相册进入前台或内存不足时中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
 
 ### 存储（Catalog migration 4–7）
 

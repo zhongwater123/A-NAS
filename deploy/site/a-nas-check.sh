@@ -132,7 +132,7 @@ else
 fi
 
 for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service \
-  anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-vectors-proxy@a-nas-photos.socket smbd.service; do
+  anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-montage-compute.socket anas-vectors-proxy@a-nas-photos.socket smbd.service; do
   # A unit that is starting or restarting, as smbd does when the Host Agent
   # writes Samba's configuration, gets time to finish.
   for _ in $(seq 1 30); do

@@ -173,8 +173,8 @@ systemctl daemon-reload
 # A running Worker and vector index belong to the previous release; the next
 # connection starts this release's. Clients reconnect to this release's
 # FFmpeg worker and its shared admission slots.
-systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
-systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
+systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' anas-montage-compute.socket anas-montage-compute.service || true
+systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-montage-compute.socket
 # This machine's settings, with the credential key that encrypts the
 # assistant's model key: failures leave the product running and are reported
 # below.

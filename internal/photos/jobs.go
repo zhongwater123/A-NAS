@@ -205,6 +205,10 @@ func (s *Service) claimObjectJob(ctx context.Context, derivation, objectID strin
 // claimJobIn leases a ready job as claimObjectJob does, the first in order,
 // an SQL ORDER BY over the job j.
 func (s *Service) claimJobIn(ctx context.Context, derivation, objectID, order string) (claimedJob, error) {
+	return s.claimJobWhere(ctx, derivation, objectID, order, "TRUE")
+}
+
+func (s *Service) claimJobWhere(ctx context.Context, derivation, objectID, order, ready string) (claimedJob, error) {
 	// Every claim counts as an attempt, so a job that never finishes stops
 	// being reclaimed once its attempts are used up.
 	if _, err := s.db.ExecContext(ctx, `
@@ -220,7 +224,7 @@ WHERE derivation = ? AND state = 'running' AND lease_until <= ? AND attempts >= 
 SELECT j.object_id, j.derivation, j.attempts, o.orientation, v.object_id IS NOT NULL, IFNULL(v.duration, 0)
 FROM jobs j JOIN objects o ON o.id = j.object_id LEFT JOIN videos v ON v.object_id = j.object_id
 WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
-  AND (? = '' OR j.object_id = ?)
+  AND (? = '' OR j.object_id = ?) AND (`+ready+`)
 ORDER BY `+order+`
 LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation, &job.video, &job.duration); err != nil {
 			return err

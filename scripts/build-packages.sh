@@ -100,7 +100,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -120,6 +120,9 @@ install -m 0755 "$repo/scripts/run-kiosk.sh" "$lib/kiosk-launcher"
 # The AI Worker (ADR 0016): its code, each model role's manifest and a link
 # to the role's file in its content package, the runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
+# The montage center's compute Worker runs in the same runtime (ADR 0038).
+install -m 0644 "$repo"/ai/anas_montage/*.py "$lib/ai/anas_montage/"
+install -m 0644 "$repo"/ai/anas_montage/domain/*.py "$lib/ai/anas_montage/domain/"
 for role in "${ai_roles[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
@@ -172,6 +175,7 @@ for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-mo
 done
 wants sockets.target anas-ai.socket
 wants sockets.target anas-photos-grants.socket
+wants sockets.target anas-montage-compute.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-photos-assistant.socket
 wants sockets.target anas-companion-assistant.socket

@@ -270,6 +270,9 @@ ops-check:
 	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket

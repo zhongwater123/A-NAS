@@ -50,6 +50,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -160,8 +161,9 @@ func runPhotoService(logger *slog.Logger) error {
 		Logger:              logger,
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
-		Photos:              photos.Options{Media: config.Media.client(), Release: version},
-		Vectors:             vectors,
+		Photos: photos.Options{Media: config.Media.client(), Release: version,
+			Compute: photoservice.MontageCompute(montagecompute.Client{SocketPath: config.ComputeSocket})},
+		Vectors: vectors,
 	})
 }
 
