@@ -164,10 +164,7 @@ func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest)
 			var analysis photos.GrantAnalysis
 			var vectors []byte
 			if analysis, vectors, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
-				response.Analysis = &analysis
-				if len(vectors) > 0 {
-					opened, err = vectorFile(vectors)
-				}
+				response, opened, err = analysisFile(analysis, vectors)
 			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
@@ -218,21 +215,20 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 	}}
 }
 
-// vectorFile holds a video's window vectors for the montage center: a sealed
-// memfd it reads, so a large answer does not pass through the JSON message.
-func vectorFile(vectors []byte) (*os.File, error) {
-	fd, err := unix.MemfdCreate("anas-window-vectors", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+// analysisFile seals the analysis before passing its descriptor to the montage center.
+func analysisFile(analysis photos.GrantAnalysis, vectors []byte) (photosapi.GrantResponse, *os.File, error) {
+	fd, err := unix.MemfdCreate("anas-grant-analysis", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
-		return nil, err
+		return photosapi.GrantResponse{}, nil, err
 	}
-	file := os.NewFile(uintptr(fd), "anas-window-vectors")
-	if _, err := file.Write(vectors); err != nil {
+	file := os.NewFile(uintptr(fd), "anas-grant-analysis")
+	response, err := photosapi.WriteAnalysis(file, analysis, vectors)
+	if err == nil {
+		_, err = unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL)
+	}
+	if err != nil {
 		_ = file.Close()
-		return nil, err
+		return photosapi.GrantResponse{}, nil, err
 	}
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
+	return response, file, nil
 }

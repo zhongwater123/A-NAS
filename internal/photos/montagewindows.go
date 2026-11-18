@@ -110,6 +110,7 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 	if err != nil || len(objects) == 0 {
 		return err
 	}
+	reader, _ := s.ai.descriptionReader()
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
 		for _, object := range objects {
@@ -118,6 +119,10 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 				return err
 			}
 			if retry {
+				// Retain successful descriptions when a member retries the failed cards.
+				if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id=? AND result IS NULL", object); err != nil {
+					return err
+				}
 				// Whichever step of the analysis failed starts over.
 				if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
 					WHERE object_id = ? AND derivation LIKE 'montage-%' AND state = 'failed'`, now, object); err != nil {
@@ -128,6 +133,9 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 			if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 				SELECT ?, ?, 'pending', ?, ? WHERE NOT EXISTS (SELECT 1 FROM video_windows WHERE object_id = ?)
 				ON CONFLICT DO NOTHING`, object, windowsDerivation, now, now, object); err != nil {
+				return err
+			}
+			if err := s.queueMissingDescriptions(ctx, tx, reader, false, "?", object); err != nil {
 				return err
 			}
 		}
@@ -173,8 +181,9 @@ type GrantAnalysis struct {
 	CardList []CardAnalysis `json:"cards,omitempty"`
 	// Described is where the card descriptions stand; Descriptions holds
 	// them once done, a card that could not be described with its error.
-	Described    AnalysisState     `json:"descriptionsState,omitempty"`
-	Descriptions []CardDescription `json:"descriptions,omitempty"`
+	Described            AnalysisState     `json:"descriptionsState,omitempty"`
+	DescriptionsIdentity string            `json:"descriptionsIdentity,omitempty"`
+	Descriptions         []CardDescription `json:"descriptions,omitempty"`
 }
 
 // AnalysisOfGrant returns the analysis of a granted video and, once its
@@ -188,9 +197,9 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 	if len(looked) != 1 || looked[0].Status != GrantAvailable {
 		return GrantAnalysis{}, nil, ErrNotFound
 	}
-	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID, Described: looked[0].Descriptions}
+	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID, Described: looked[0].Descriptions, DescriptionsIdentity: looked[0].descriptionIdentity}
 	if analysis.Described == AnalysisDone {
-		if analysis.Descriptions, err = s.cardDescriptions(ctx, analysis.ObjectID); err != nil {
+		if analysis.Descriptions, err = s.cardDescriptions(ctx, analysis.ObjectID, analysis.DescriptionsIdentity); err != nil {
 			return GrantAnalysis{}, nil, err
 		}
 	}
@@ -294,10 +303,31 @@ func lumaDeviation(data []byte) (float64, error) {
 	return math.Sqrt(max(0, squares/n-mean*mean)), nil
 }
 
-// closesForeground reports whether a reason to stop is someone using the
+// RunningGate is a Gate that also tells work already running whether it may
+// go on: it stops at once while someone uses the photo library or memory is
+// short, but not while the device's other work waits on the processor or
+// the disk, which only holds the next item back. Unlike Open, the answer
+// does not depend on whether the processor is busy at the same time.
+type RunningGate interface {
+	Gate
+	Continue(ctx context.Context, need uint64) (open bool, reason string)
+}
+
+// continuing is how a running montage chunk asks gate whether to go on.
+func continuing(gate Gate) func(context.Context, uint64) (bool, string) {
+	if running, ok := gate.(RunningGate); ok {
+		return running.Continue
+	}
+	return func(ctx context.Context, need uint64) (bool, string) {
+		open, reason := gate.Open(ctx, need)
+		return open || !stopsRunningWork(reason), reason
+	}
+}
+
+// stopsRunningWork reports whether a reason to stop is someone using the
 // library or short memory, which stop a chunk at once; pressure from other
 // work waits for the chunk to end.
-func closesForeground(reason string) bool {
+func stopsRunningWork(reason string) bool {
 	return reason == "foreground" || reason == "memory_low" || reason == "memory_for_models" || reason == "memory_pressure"
 }
 
@@ -348,7 +378,7 @@ func (r *aiRunner) montageWindows(ctx context.Context, embedder Embedder, gate G
 			case <-working.Done():
 				return
 			case <-ticker.C:
-				if open, reason := gate.Open(working, r.memoryNeed()); !open && closesForeground(reason) {
+				if open, reason := gate.Open(working, r.memoryNeed()); !open && stopsRunningWork(reason) {
 					r.progress.set(AIPaused, reason, "")
 					hungUp.Store(true)
 					cancel()

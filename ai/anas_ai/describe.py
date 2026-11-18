@@ -9,8 +9,8 @@ The caller sends frames, never a prompt.
 
 import itertools
 import json
-import math
 import re
+import sys
 
 TEMPLATE = "montage-card/v1"
 # The genre is fixed: the analysis is shared across projects and members.
@@ -196,7 +196,7 @@ def valid_layout(offsets, groups, duration):
     card's seconds, not before the last frame.
     """
     def number(value):
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        return type(value) in (int, float) and -sys.float_info.max <= value <= sys.float_info.max
 
     if not isinstance(offsets, list) or not isinstance(groups, list) or not number(duration):
         return False

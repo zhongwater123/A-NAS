@@ -438,7 +438,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		return false, nil
 	}
 	detectCtx, cancel := context.WithCancel(ctx)
-	stopWatching := watchGate(detectCtx, gate, info.MemoryBytes, cancel)
+	stopWatching := watchGate(detectCtx, gate.Open, info.MemoryBytes, cancel)
 	ahead := make(chan *detectionInput, 1)
 	go func() {
 		// A fault shows again at the next claim.
@@ -549,7 +549,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 // watchGate cancels a running detection when gate closes for work whose
 // models take need. stop ends the watch and returns why gate closed, or ""
 // when it stayed open.
-func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc) (stop func() string) {
+func watchGate(ctx context.Context, check func(context.Context, uint64) (bool, string), need uint64, cancel context.CancelFunc) (stop func() string) {
 	done := make(chan struct{})
 	var reason string
 	var watcher sync.WaitGroup
@@ -563,7 +563,7 @@ func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.Cance
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if open, why := gate.Open(ctx, need); !open {
+				if open, why := check(ctx, need); !open {
 					reason = why
 					cancel()
 					return
@@ -733,7 +733,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 			return err
 		}
 		// The montage center's descriptions: only those a grant still refers to.
-		if err := lib.requeueStaleDescriptions(ctx, info.OCR); err != nil {
+		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
 			return err
 		}
 		if record.Reader != info.OCR {

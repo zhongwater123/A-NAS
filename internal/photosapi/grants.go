@@ -2,6 +2,7 @@ package photosapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -78,6 +79,10 @@ type GrantResponse struct {
 	Grants   []photos.Grant        `json:"grants,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
 	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
+	// BulkAnalysis carries the variable-length lists in a sealed descriptor
+	// after VectorBytes of raw window vectors.
+	BulkAnalysis bool `json:"bulkAnalysis,omitempty"`
+	VectorBytes  int  `json:"vectorBytes,omitempty"`
 }
 
 // GrantError is a refused request.
@@ -193,6 +198,9 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 	if response.Analysis == nil {
 		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
 	}
+	if response.BulkAnalysis {
+		return readBulkAnalysis(response, file)
+	}
 	var vectors []byte
 	if file != nil {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -208,9 +216,76 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 	return *response.Analysis, vectors, nil
 }
 
+// The arrays can exceed the grant socket's 256 KiB frame. The descriptor
+// contains vectors followed by one JSON document holding the arrays. The
+// socket frame carries only the state, identities and the split position.
+type analysisLists struct {
+	Windows      []photos.Window          `json:"windows,omitempty"`
+	Cards        []photos.CardAnalysis    `json:"cards,omitempty"`
+	Descriptions []photos.CardDescription `json:"descriptions,omitempty"`
+}
+
+// WriteAnalysis writes a grant analysis descriptor and returns its envelope.
+func WriteAnalysis(w io.Writer, analysis photos.GrantAnalysis, vectors []byte) (GrantResponse, error) {
+	if len(vectors) > maxAnalysisBytes || len(vectors) != len(analysis.List)*4*windowDimensions {
+		return GrantResponse{}, errors.New("photo grant: invalid vector count")
+	}
+	lists := analysisLists{analysis.List, analysis.CardList, analysis.Descriptions}
+	metadata, err := json.Marshal(lists)
+	if err != nil {
+		return GrantResponse{}, err
+	}
+	if len(metadata) > maxAnalysisJSON {
+		return GrantResponse{}, errors.New("photo grant: analysis lists exceed limit")
+	}
+	if _, err = w.Write(vectors); err != nil {
+		return GrantResponse{}, err
+	}
+	if _, err = w.Write(metadata); err != nil {
+		return GrantResponse{}, err
+	}
+	analysis.List, analysis.CardList, analysis.Descriptions = nil, nil, nil
+	return GrantResponse{Analysis: &analysis, BulkAnalysis: true, VectorBytes: len(vectors)}, nil
+}
+
+func readBulkAnalysis(response GrantResponse, file *os.File) (photos.GrantAnalysis, []byte, error) {
+	if file == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: missing analysis descriptor")
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	n := response.VectorBytes
+	size := info.Size() - int64(n)
+	if n < 0 || n > maxAnalysisBytes || n%(4*windowDimensions) != 0 || size <= 0 || size > maxAnalysisJSON {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: invalid analysis descriptor size")
+	}
+	metadata := make([]byte, int(size))
+	if _, err := file.ReadAt(metadata, int64(n)); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	var lists analysisLists
+	if err := json.Unmarshal(metadata, &lists); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	if len(lists.Windows) != n/(4*windowDimensions) {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: invalid window count")
+	}
+	vectors := make([]byte, n)
+	if _, err := file.ReadAt(vectors, 0); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	analysis := *response.Analysis
+	analysis.List, analysis.CardList, analysis.Descriptions = lists.Windows, lists.Cards, lists.Descriptions
+	return analysis, vectors, nil
+}
+
 // The window vectors of one video: 768 float32 each, and no more than a
 // 4 GiB video holds windows (6 hours, 10,800 windows, 33 MB).
 const (
+	// At most one card per 2-second window, with at most 20 short beats.
+	maxAnalysisJSON  = 256 << 20
 	windowDimensions = 768
 	maxAnalysisBytes = 10800 * 4 * windowDimensions
 )

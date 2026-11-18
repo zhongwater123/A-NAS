@@ -133,7 +133,10 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_quality WHERE object_id = ?", job.objectID); err != nil {
 			return err
 		}
-		// New cards are described anew.
+		// New cards are described anew, even if the old job exhausted its retries.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, describeDerivation); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id = ?", job.objectID); err != nil {
 			return err
 		}

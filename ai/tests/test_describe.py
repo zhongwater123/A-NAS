@@ -30,6 +30,20 @@ class DescribeTest(unittest.TestCase):
         self.assertEqual(spans, [[1, 2], [3, 4]])
         self.assertEqual(schema["properties"]["beats"]["maxItems"], 2)
 
+    def test_the_answer_checker_covers_the_entire_prompt_schema(self):
+        supported = {
+            "object": {"type", "properties", "required"},
+            "array": {"type", "minItems", "maxItems", "items"},
+            "string": {"type", "minLength", "maxLength", "enum"},
+        }
+        remaining = [describe.schema(3)]
+        while remaining:
+            node = remaining.pop()
+            self.assertLessEqual(set(node), supported[node["type"]])
+            remaining.extend(node.get("properties", {}).values())
+            if "items" in node:
+                remaining.append(node["items"])
+
     def answer(self, **change):
         answer = {"camera": "船上", "beats": [{"shot_size": "远景", "what": "峡湾"}, {"shot_size": "近景", "what": "栏杆"}],
                   "process": ["出航"], "summary": "游船驶过峡湾", "scene": "峡湾"}

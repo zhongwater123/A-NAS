@@ -33,16 +33,16 @@ class LlamaReaderTest(unittest.TestCase):
         self.environ = {"FAKE_LLAMA_RECORD": self.record}
         for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE",
                      "FAKE_LLAMA_PIECE_DELAY", "FAKE_LLAMA_ERROR", "FAKE_LLAMA_NO_FINISH", "FAKE_LLAMA_START_DELAY",
-                     "FAKE_LLAMA_EXIT", "FAKE_LLAMA_ANSWERS"):
+                     "FAKE_LLAMA_EXIT", "FAKE_LLAMA_ANSWERS", "FAKE_LLAMA_FINISH", "FAKE_LLAMA_PROMPT_TOKENS"):
             self.environ[name] = None
 
     def reader(self, sha=None, cache_dir=None):
+        self.addCleanup(self.restore_environ, dict(os.environ))
         for name, value in self.environ.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-        self.addCleanup(self.restore_environ, dict(os.environ))
         files = []
         for name, content in (("model.gguf", b"language"), ("mmproj.gguf", b"vision")):
             path = os.path.join(self.directory, name)
@@ -198,7 +198,7 @@ class LlamaReaderTest(unittest.TestCase):
         self.assertEqual(images, ["data:image/jpeg;base64," + base64.b64encode(frame).decode() for frame in frames])
         self.assertEqual(parts[1]["text"], "第 1 张（第 1 组，第 0 秒）")
         self.assertEqual((body["temperature"], body["repeat_penalty"], body["max_tokens"], body["cache_prompt"]),
-                         (0.2, 1.1, 1800, False))
+                         (0.2, 1.1, 1800, True))
         self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}})
         self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
 
@@ -218,6 +218,14 @@ class LlamaReaderTest(unittest.TestCase):
         self.assertIn("repeat_penalty=1.3", str(raised.exception))
         with open(self.record, encoding="utf-8") as file:
             self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.3)
+
+    def test_a_card_that_runs_out_of_context_is_not_reencoded(self):
+        self.environ.update(FAKE_LLAMA_FINISH="length", FAKE_LLAMA_PROMPT_TOKENS="7400")
+        reader = self.reader()
+        with self.assertRaises(providers.InvalidInput):
+            reader.describe([b"1", b"2", b"3"], [0, 1, 2], [1, 2, 3], 3, reader.run_options())
+        with open(self.record, encoding="utf-8") as file:
+            self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.1)
 
     def test_a_card_past_the_context_is_refused(self):
         self.environ["FAKE_LLAMA_STATUS"] = "400"
