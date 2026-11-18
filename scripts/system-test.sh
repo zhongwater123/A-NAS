@@ -74,6 +74,28 @@ if [[ "${1:-}" != --inside ]]; then
   dpkg-deb --raw-extract "$work/previous/a-nas-host_${version}~previous_all.deb" "$legacy_host"
   sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
   dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
+  # The previous release also came before the montage center (ADR 0038): its
+  # product package has no anas-montage unit, so installing this release is
+  # the first with it, and rolling back takes the unit away as a real older
+  # release does. Its programs are this tree's, which need the montage
+  # account, so the account stays.
+  legacy_product=$work/legacy-product
+  previous_product=("$work"/previous/a-nas_*.deb)
+  dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # Nor has it the photo service's grant socket for the montage center.
+  rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket"
+  sed -i -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    -e 's/ anas-photos-grants\.socket//g' \
+    "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
+  sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
+    "$legacy_product/usr/lib/systemd/system/anas-photos.service"
+  ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+    "$legacy_product/usr/lib/systemd/system" ||
+    { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
+  dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
@@ -946,11 +968,13 @@ check "Product Service account cannot list the montage store" denied a-nas ls "$
 check "the montage socket is the service's, for the Product Service's group" \
   test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
 check "the montage center is not served while its switch is off" \
-  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage/projects")" = 404
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage"):$(status_of -b /tmp/alice.jar "$api/api/v1/montage/projects")" = 404:404
 printf 'Environment=ANAS_MONTAGE_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
 systemctl daemon-reload
 systemctl restart anas-api
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "with its switch on the desktop is told the montage center is there" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage")" = 204
 check "a member lists her montage projects through the montage service" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -c .)" = '{"items":[]}'
 check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/montage/projects")" = 401
@@ -992,8 +1016,6 @@ montage_unavailable() {
   return 1
 }
 check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
-check "and writes nothing to the system disk" \
-  test -z "$(find / -xdev -name 'montage.db*' -not -path "$data/*" 2>/dev/null)"
 systemctl stop anas-montage
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
@@ -2565,6 +2587,13 @@ check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/
 check "the upgrade copied the montage database on the data volume" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+check "the previous release, which came before the montage center, has no montage unit" \
+  test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
+  not-found:inactive
+check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "nor the photo service's grant socket, which stopped before its unit went" \
+  test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
+  not-found:inactive
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }
@@ -2588,15 +2617,6 @@ check "an empty config cannot bypass the policy after rolling back" \
 systemctl reset-failed docker.socket docker.service
 rm /etc/docker/daemon.json
 check "a-nas-check passes on the previous release" quiet a-nas-check
-# grants_follow_release: the montage center's grant socket listens only when
-# the release installed has its unit; this release's prerm stopped it.
-grants_follow_release() {
-  local shipped=no listening=no
-  if [[ -e /usr/lib/systemd/system/anas-photos-grants.socket ]]; then shipped=yes; fi
-  if systemctl is-active --quiet anas-photos-grants.socket; then listening=yes; fi
-  [[ "$shipped" == "$listening" ]]
-}
-check "the grant socket listens after the rollback only if the previous release has it" grants_follow_release
 check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check

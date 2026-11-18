@@ -2133,6 +2133,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        get: operations["getMontage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/projects": {
         parameters: {
             query?: never;
@@ -12522,6 +12539,25 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getMontage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The montage center is on */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             404: components["responses"]["ProductError"];
         };
     };
