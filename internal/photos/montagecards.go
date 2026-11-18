@@ -77,7 +77,60 @@ type MontageCompute interface {
 
 // ErrComputeUnavailable: the compute Worker could not be reached; the work
 // waits for it.
-var ErrComputeUnavailable = errors.New("the montage compute worker is not available")
+var (
+	ErrComputeUnavailable   = errors.New("the montage compute worker is not available")
+	ErrComputeFailed        = errors.New("the montage compute worker failed")
+	ErrComputeInvalidResult = errors.New("the montage compute worker refused the request")
+)
+
+// A successor may only use completed inputs. A failed predecessor also
+// blocks its successors until the user retries that analysis.
+const cardsReady = "NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + windowsDerivation + "')"
+const qualityReady = cardsReady + " AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + cardsDerivation + "')"
+
+func cardsVersion(window string) string  { return cardsIdentity + "|input=" + window }
+func qualityVersion(cards string) string { return qualityIdentity + "|input=" + cards }
+
+func (s *Service) finishMontageError(ctx context.Context, job claimedJob, err error) (bool, error) {
+	switch {
+	case ctx.Err() != nil:
+		return false, s.returnJob(context.WithoutCancel(ctx), job)
+	case errors.Is(err, ErrComputeUnavailable), errors.Is(err, ffmpegworker.ErrUnavailable):
+		return false, s.releaseJob(ctx, job)
+	case errors.Is(err, ErrComputeInvalidResult):
+		return true, s.failJob(ctx, job, jobErrorInvalidResult)
+	case errors.Is(err, ErrComputeFailed), errors.Is(err, context.DeadlineExceeded):
+		return true, s.failJob(ctx, job, jobErrorIO)
+	case errors.Is(err, fs.ErrNotExist):
+		return true, s.failJob(ctx, job, jobErrorMissingOriginal)
+	default:
+		return true, s.failJob(ctx, job, decodeFailure(err))
+	}
+}
+
+// enqueueMissingCards also covers videos whose windows completed on M5.
+func (s *Service) enqueueMissingCards(ctx context.Context, tx *sql.Tx, object, now string) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+        SELECT j.object_id, ?, 'pending', ?, ? FROM montage_objects j
+        JOIN video_windows w ON w.object_id = j.object_id AND w.idx = 0
+        LEFT JOIN montage_card_results m USING (object_id)
+        WHERE j.object_id = ? AND `+cardsReady+` AND COALESCE(m.cards_identity, '') <> ? || w.identity
+        ON CONFLICT DO NOTHING`, cardsDerivation, now, now, object, cardsVersion("")); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+        SELECT j.object_id, ?, 'pending', ?, ? FROM montage_card_results j
+        WHERE j.object_id = ? AND `+qualityReady+` AND quality_identity <> ? || cards_identity
+        ON CONFLICT DO NOTHING`, qualityDerivation, now, now, object, qualityVersion(""))
+	return err
+}
+
+func resetMontageJob(ctx context.Context, tx *sql.Tx, object, derivation, now string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at) VALUES (?, ?, 'pending', ?, ?)
+        ON CONFLICT(object_id, derivation) DO UPDATE SET state = 'pending', attempts = 0, lease_until = NULL,
+            not_before = excluded.not_before, error_class = '' WHERE jobs.state <> 'running'`, object, derivation, now, now)
+	return err
+}
 
 // cardOf is a stored card.
 type cardOf struct {
@@ -88,45 +141,72 @@ type cardOf struct {
 
 // montageCards runs a due card or quality job, one card's quality a round,
 // and reports whether it did any work.
-func (r *aiRunner) montageCards(ctx context.Context) (bool, error) {
+func (r *aiRunner) montageCards(ctx context.Context, gate Gate) (bool, error) {
 	lib := r.lib
 	if lib.compute == nil {
 		return false, nil
 	}
-	if worked, err := lib.cutCards(ctx); worked || err != nil {
+	if open, _ := gate.Open(ctx, 0); !open {
+		return false, nil
+	}
+	now := formatTime(lib.now())
+	var due bool
+	err := lib.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs j
+        WHERE ((j.derivation = ? AND `+cardsReady+`) OR (j.derivation = ? AND `+qualityReady+`))
+        AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?)))`,
+		cardsDerivation, qualityDerivation, now, now).Scan(&due)
+	if err != nil || !due {
+		return false, err
+	}
+	working, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := watchGateWhile(working, gate, 0, cancel, closesForeground)
+	defer func() {
+		if reason := stop(); reason != "" {
+			r.progress.set(AIPaused, reason, "")
+		}
+	}()
+	if worked, err := lib.cutCards(working); worked || err != nil || working.Err() != nil {
 		return worked, err
 	}
-	return lib.measureCard(ctx, r)
+	return lib.measureCard(working, r)
 }
 
 // cutCards cuts the cards of a video whose windows are done.
 func (s *Service) cutCards(ctx context.Context) (bool, error) {
-	job, err := s.claimJob(ctx, cardsDerivation)
+	job, err := s.claimJobWhere(ctx, cardsDerivation, "", "j.not_before, j.object_id", cardsReady)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	windows, vectors, flat, dimensions, err := s.windowsOf(ctx, job.objectID)
+	stopLease := s.keepLease(ctx, job)
+	defer stopLease()
+	windows, vectors, flat, dimensions, identity, err := s.windowsOf(ctx, job.objectID)
 	if err != nil {
-		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
+		return s.finishMontageError(ctx, job, errors.Join(ErrComputeFailed, err))
 	}
 	if len(windows) == 0 {
-		// The windows went, as when a newer model is computing them again.
-		return true, s.withTx(ctx, func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-			return err
-		})
+		return s.finishMontageError(ctx, job, ErrComputeFailed)
 	}
 	cards, err := s.compute.Cards(ctx, windows, vectors, dimensions, flat)
-	switch {
-	case errors.Is(err, ErrComputeUnavailable):
-		return false, s.releaseJob(ctx, job)
-	case err != nil:
-		return true, s.failJob(ctx, job, jobErrorInvalidResult)
+	if err != nil || ctx.Err() != nil {
+		return s.finishMontageError(ctx, job, err)
 	}
-	return true, s.withTx(ctx, func(tx *sql.Tx) error {
+	version := cardsVersion(identity)
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		var current bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = ? AND j.derivation = ? AND "+cardsReady+
+			" AND EXISTS (SELECT 1 FROM video_windows w WHERE w.object_id = j.object_id AND w.identity = ?))",
+			job.objectID, cardsDerivation, identity).Scan(&current); err != nil {
+			return err
+		}
+		if !current {
+			_, err := tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL WHERE object_id = ? AND derivation = ?",
+				job.objectID, job.derivation)
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_cards WHERE object_id = ?", job.objectID); err != nil {
 			return err
 		}
@@ -136,40 +216,51 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 		for n, card := range cards {
 			times, _ := json.Marshal(card.Times)
 			if _, err := tx.ExecContext(ctx, "INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, identity) VALUES(?, ?, ?, ?, ?, ?)",
-				job.objectID, n+1, int(math.Round(card.Start*1000)), int(math.Round(card.End*1000)), string(times), cardsIdentity); err != nil {
+				job.objectID, n+1, int(math.Round(card.Start*1000)), int(math.Round(card.End*1000)), string(times), version); err != nil {
 				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO montage_card_results(object_id, cards_identity) VALUES (?, ?)
+            ON CONFLICT(object_id) DO UPDATE SET cards_identity = excluded.cards_identity, quality_identity = ''`, job.objectID, version); err != nil {
+			return err
+		}
 		now := formatTime(s.now())
-		_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at) VALUES(?, ?, 'pending', ?, ?)
-			ON CONFLICT DO NOTHING`, job.objectID, qualityDerivation, now, now)
-		return err
+		return resetMontageJob(ctx, tx, job.objectID, qualityDerivation, now)
 	})
+	if err != nil {
+		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
+	}
+	return true, nil
 }
 
 // windowsOf reads a video's windows for cutting its cards.
-func (s *Service) windowsOf(ctx context.Context, object string) (windows []CardWindow, vectors []float32, flat []bool, dimensions int, err error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT start_ms, end_ms, flat, vector FROM video_windows WHERE object_id = ? ORDER BY idx", object)
+func (s *Service) windowsOf(ctx context.Context, object string) (windows []CardWindow, vectors []float32, flat []bool, dimensions int, identity string, err error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT start_ms, end_ms, flat, vector, identity FROM video_windows WHERE object_id = ? ORDER BY idx", object)
 	if err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, "", err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var start, end int
 		var isFlat bool
 		var vector []byte
-		if err := rows.Scan(&start, &end, &isFlat, &vector); err != nil {
-			return nil, nil, nil, 0, err
+		var windowIdentity string
+		if err := rows.Scan(&start, &end, &isFlat, &vector, &windowIdentity); err != nil {
+			return nil, nil, nil, 0, "", err
 		}
 		decoded := decodeVector(vector)
-		dimensions = len(decoded)
+		if len(windows) == 0 {
+			dimensions, identity = len(decoded), windowIdentity
+		} else if identity != windowIdentity || dimensions != len(decoded) {
+			return nil, nil, nil, 0, "", ErrComputeFailed
+		}
 		windows, vectors, flat = append(windows, CardWindow{Start: float64(start) / 1000, End: float64(end) / 1000}),
 			append(vectors, decoded...), append(flat, isFlat)
 	}
-	return windows, vectors, flat, dimensions, rows.Err()
+	return windows, vectors, flat, dimensions, identity, rows.Err()
 }
 
 // nextUnmeasured is the first card of object without its quality.
@@ -197,7 +288,7 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	job, err := s.claimJob(ctx, qualityDerivation)
+	job, err := s.claimJobWhere(ctx, qualityDerivation, "", "j.not_before, j.object_id", qualityReady)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -208,8 +299,16 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 	if err != nil {
 		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
 	}
+	var version string
+	if err := s.db.QueryRowContext(ctx, "SELECT cards_identity FROM montage_card_results WHERE object_id = ?", job.objectID).Scan(&version); err != nil {
+		return s.finishMontageError(ctx, job, errors.Join(ErrComputeFailed, err))
+	}
 	if !found {
 		return true, s.withTx(ctx, func(tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, "UPDATE montage_card_results SET quality_identity = ? WHERE object_id = ? AND cards_identity = ?",
+				qualityVersion(version), job.objectID, version); err != nil {
+				return err
+			}
 			_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 			return err
 		})
@@ -218,44 +317,48 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 	defer stopLease()
 	r.progress.set(AIWorking, "", "")
 	quality, err := s.cardQuality(ffmpegworker.WithPriority(ctx, ffmpegworker.Background), taker, job, card)
-	switch {
-	case ctx.Err() != nil:
-		return false, s.returnJob(context.WithoutCancel(ctx), job)
-	case errors.Is(err, ErrComputeUnavailable):
-		return false, s.releaseJob(ctx, job)
-	case err != nil:
-		if class := decodeFailure(err); class == jobWaiting {
-			return false, s.releaseJob(ctx, job)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return true, s.failJob(ctx, job, class)
-		}
-		return true, s.failJob(ctx, job, jobErrorMissingOriginal)
+	if err != nil || ctx.Err() != nil {
+		return s.finishMontageError(ctx, job, err)
 	}
 	result, err := json.Marshal(quality)
 	if err != nil {
-		return false, err
+		return s.finishMontageError(ctx, job, errors.Join(ErrComputeInvalidResult, err))
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO video_card_quality(object_id, card, result, identity) VALUES(?, ?, ?, ?)
-		ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, identity = excluded.identity`,
-		job.objectID, card.index, string(result), qualityIdentity); err != nil {
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		stored, err := tx.ExecContext(ctx, `INSERT INTO video_card_quality(object_id, card, result, identity)
+            SELECT ?, ?, ?, ? FROM jobs j JOIN montage_card_results m USING (object_id)
+            WHERE j.object_id = ? AND j.derivation = ? AND m.cards_identity = ? AND `+qualityReady+`
+            ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, identity = excluded.identity`,
+			job.objectID, card.index, string(result), qualityVersion(version), job.objectID, job.derivation, version)
+		if err != nil {
+			return err
+		}
+		if count, err := stored.RowsAffected(); err != nil || count == 0 {
+			return err
+		}
+		// The next card comes in the next round, after the gate.
+		_, err = tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, error_class = '' WHERE object_id = ? AND derivation = ?",
+			job.objectID, job.derivation)
+		return err
+	})
+	if err != nil {
 		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
 	}
-	// The next card comes in the next round, after the gate.
-	return true, s.returnJob(ctx, job)
+	return true, nil
 }
 
 // cardQuality takes a card's frames and has the compute Worker judge them.
 func (s *Service) cardQuality(ctx context.Context, taker FrameTaker, job claimedJob, card cardOf) (CardQuality, error) {
 	var width, height int
 	if err := s.db.QueryRowContext(ctx, "SELECT width, height FROM objects WHERE id = ?", job.objectID).Scan(&width, &height); err != nil {
-		return CardQuality{}, err
+		return CardQuality{}, errors.Join(ErrComputeFailed, err)
 	}
 	original, err := s.openObject(job.objectID)
 	if err != nil {
 		return CardQuality{}, err
 	}
 	defer func() { _ = original.Close() }()
-	measures := CardMeasures{}
+	measures := CardMeasures{Moves: make([][2]float64, 0)}
 	// Keyframes: 512 wide, blurdetect on the JPEG.
 	var keyframes [][]byte
 	result, err := taker.Frames(ctx, original, ffmpegworker.FramesRequest{Times: card.times, Format: ffmpegworker.FormatJPEG,
@@ -266,7 +369,7 @@ func (s *Service) cardQuality(ctx context.Context, taker FrameTaker, job claimed
 	if err != nil {
 		return CardQuality{}, err
 	}
-	if len(result.Blur) != len(keyframes) || len(keyframes) != len(card.times) {
+	if len(result.Times) != len(keyframes) || len(result.Blur) != len(keyframes) || len(keyframes) != len(card.times) {
 		return CardQuality{}, fmt.Errorf("%w: %d keyframes for %d instants", ffmpegworker.ErrFailed, len(keyframes), len(card.times))
 	}
 	measures.Blurs = result.Blur
@@ -370,41 +473,30 @@ func (s *Service) cardsOf(ctx context.Context, object string) ([]CardAnalysis, e
 	return cards, rows.Err()
 }
 
-// derivationState says where one montage derivation of object stands.
-func (s *Service) derivationState(ctx context.Context, object, derivation, done string) (AnalysisState, error) {
-	var state string
-	err := s.db.QueryRowContext(ctx, "SELECT state FROM jobs WHERE object_id = ? AND derivation = ?", object, derivation).Scan(&state)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		var exists bool
-		if err := s.db.QueryRowContext(ctx, "SELECT EXISTS ("+done+")", object).Scan(&exists); err != nil || !exists {
-			return AnalysisNone, err
-		}
-		return AnalysisDone, nil
-	case err != nil:
-		return AnalysisNone, err
-	case state == "failed":
-		return AnalysisFailed, nil
-	case state == "running":
-		return AnalysisWorking, nil
-	}
-	return AnalysisQueued, nil
+// montageCardState reads both stage states and their completed identities in
+// one snapshot. Empty results still have a completion identity.
+func (s *Service) montageCardState(ctx context.Context, q queryer, object string) (cards, quality AnalysisState, cardsID, qualityID string, err error) {
+	var cardJob, qualityJob string
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(m.cards_identity, ''), COALESCE(m.quality_identity, ''),
+        COALESCE(c.state, ''), COALESCE(q.state, '') FROM (SELECT ? AS object_id) o
+        LEFT JOIN montage_card_results m USING (object_id)
+        LEFT JOIN jobs c ON c.object_id = o.object_id AND c.derivation = ?
+        LEFT JOIN jobs q ON q.object_id = o.object_id AND q.derivation = ?`,
+		object, cardsDerivation, qualityDerivation).Scan(&cardsID, &qualityID, &cardJob, &qualityJob)
+	return montageStageState(cardJob, cardsID), montageStageState(qualityJob, qualityID), cardsID, qualityID, err
 }
 
-func (s *Service) cardsState(ctx context.Context, object string) (AnalysisState, error) {
-	return s.derivationState(ctx, object, cardsDerivation, "SELECT 1 FROM video_cards WHERE object_id = ?")
-}
-
-func (s *Service) qualityState(ctx context.Context, object string) (AnalysisState, error) {
-	state, err := s.derivationState(ctx, object, qualityDerivation, "SELECT 1 FROM video_card_quality WHERE object_id = ?")
-	if err == nil && state == AnalysisDone {
-		// Done only once every card has its quality.
-		var missing bool
-		err = s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM video_cards c WHERE c.object_id = ?
-			AND NOT EXISTS (SELECT 1 FROM video_card_quality q WHERE q.object_id = c.object_id AND q.card = c.card))`, object).Scan(&missing)
-		if missing {
-			state = AnalysisQueued
-		}
+func montageStageState(job, identity string) AnalysisState {
+	switch job {
+	case "failed":
+		return AnalysisFailed
+	case "running":
+		return AnalysisWorking
+	case "pending":
+		return AnalysisQueued
 	}
-	return state, err
+	if identity != "" {
+		return AnalysisDone
+	}
+	return AnalysisNone
 }

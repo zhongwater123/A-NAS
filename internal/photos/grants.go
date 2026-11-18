@@ -226,10 +226,8 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 			if entry.Windows, err = s.windowsState(ctx, s.db, record.objectID); err != nil {
 				return nil, err
 			}
-			if entry.Cards, err = s.cardsState(ctx, record.objectID); err != nil {
-				return nil, err
-			}
-			if entry.Quality, err = s.qualityState(ctx, record.objectID); err != nil {
+			entry.Cards, entry.Quality, _, _, err = s.montageCardState(ctx, s.db, record.objectID)
+			if err != nil {
 				return nil, err
 			}
 		}

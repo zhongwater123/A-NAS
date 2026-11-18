@@ -169,12 +169,13 @@ def op_quality_part(request, arrays):
 
 
 def op_quality(request, _arrays):
-    blurs = [float("nan") if b is None else float(b) for b in request["blurs"]]
+    blurs = request["blurs"]
     blocked = [float(b) for b in request["blocked"]]
     points = request["points"]
     if not blurs or len(blocked) != len(blurs) or len(points) != len(blurs):
         raise Refused("a card's keyframes differ in number")
-    q = {"blur": round(float(statistics.median(blurs)), 3), "shake": shake(request["moves"]),
+    blur = float("nan") if any(b is None for b in blurs) else round(statistics.median(map(float, blurs)), 3)
+    q = {"blur": blur, "shake": shake(request["moves"] or []),
          "blocked": float(statistics.median(blocked)), "points": points}
     reasons = qualityrules.reasons(q)
     return {**q, "blur": None if math.isnan(q["blur"]) else q["blur"], "reasons": reasons}
@@ -182,7 +183,9 @@ def op_quality(request, _arrays):
 
 def op_catalog(request, _arrays):
     described = request["cards"]
-    usable = catalogrules.usable(described, request.get("measures", {}), set(request.get("kept", [])),
+    measures = {key: {**value, "blur": float("nan")} if value["blur"] is None else value
+                for key, value in request.get("measures", {}).items()}
+    usable = catalogrules.usable(described, measures, set(request.get("kept", [])),
                                  request.get("excluded", []), quality=request.get("quality", True))
     return {"cards": [c["id"] for c in usable]}
 

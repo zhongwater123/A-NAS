@@ -201,6 +201,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
+	if worked, err := r.montageCards(ctx, gate); worked || err != nil {
+		return worked, err
+	}
 	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {
 		r.progress.set(AIPaused, reason, "")
 		r.releaseModels(ctx, detector, reason)
@@ -275,9 +278,6 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	}
 	// The montage center's analysis comes first: a member waits for it.
 	if worked, err := r.montageWindows(ctx, embedder, gate, info); worked || err != nil {
-		return worked, err
-	}
-	if worked, err := r.montageCards(ctx); worked || err != nil {
 		return worked, err
 	}
 	// Query texts, the labels' and the text route's, are few and short; they
@@ -546,6 +546,10 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 // models take need. stop ends the watch and returns why gate closed, or ""
 // when it stayed open.
 func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc) (stop func() string) {
+	return watchGateWhile(ctx, gate, need, cancel, func(string) bool { return true })
+}
+
+func watchGateWhile(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc, stopFor func(string) bool) (stop func() string) {
 	done := make(chan struct{})
 	var reason string
 	var watcher sync.WaitGroup
@@ -559,7 +563,7 @@ func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.Cance
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if open, why := gate.Open(ctx, need); !open {
+				if open, why := gate.Open(ctx, need); !open && stopFor(why) {
 					reason = why
 					cancel()
 					return

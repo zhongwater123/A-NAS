@@ -119,7 +119,8 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 			}
 			if retry {
 				if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-					WHERE object_id = ? AND derivation = ? AND state = 'failed'`, now, object, windowsDerivation); err != nil {
+					WHERE object_id = ? AND derivation IN (?, ?, ?) AND state = 'failed'`, now, object,
+					windowsDerivation, cardsDerivation, qualityDerivation); err != nil {
 					return err
 				}
 			}
@@ -128,6 +129,11 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 				SELECT ?, ?, 'pending', ?, ? WHERE NOT EXISTS (SELECT 1 FROM video_windows WHERE object_id = ?)
 				ON CONFLICT DO NOTHING`, object, windowsDerivation, now, now, object); err != nil {
 				return err
+			}
+			if s.compute != nil {
+				if err := s.enqueueMissingCards(ctx, tx, object, now); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -167,9 +173,11 @@ type GrantAnalysis struct {
 	List     []Window      `json:"windows,omitempty"`
 	// Cards and Quality say where the cards and their quality stand;
 	// CardList holds the cards cut so far, with the quality measured.
-	Cards    AnalysisState  `json:"cardsState"`
-	Quality  AnalysisState  `json:"qualityState"`
-	CardList []CardAnalysis `json:"cards,omitempty"`
+	Cards           AnalysisState  `json:"cardsState"`
+	Quality         AnalysisState  `json:"qualityState"`
+	CardsIdentity   string         `json:"cardsIdentity,omitempty"`
+	QualityIdentity string         `json:"qualityIdentity,omitempty"`
+	CardList        []CardAnalysis `json:"cards,omitempty"`
 }
 
 // AnalysisOfGrant returns the analysis of a granted video and, once its
@@ -184,10 +192,9 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 		return GrantAnalysis{}, nil, ErrNotFound
 	}
 	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID}
-	if analysis.Cards, err = s.cardsState(ctx, analysis.ObjectID); err != nil {
-		return GrantAnalysis{}, nil, err
-	}
-	if analysis.Quality, err = s.qualityState(ctx, analysis.ObjectID); err != nil {
+	analysis.Cards, analysis.Quality, analysis.CardsIdentity, analysis.QualityIdentity, err =
+		s.montageCardState(ctx, s.db, analysis.ObjectID)
+	if err != nil {
 		return GrantAnalysis{}, nil, err
 	}
 	if analysis.CardList, err = s.cardsOf(ctx, analysis.ObjectID); err != nil {
@@ -217,9 +224,9 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 func (s *Service) montageWorkWaiting(ctx context.Context) (bool, error) {
 	now := formatTime(s.now())
 	var due bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation IN (?, ?, ?)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation = ?
 		AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
-		windowsDerivation, cardsDerivation, qualityDerivation, now, now).Scan(&due)
+		windowsDerivation, now, now).Scan(&due)
 	return due, err
 }
 
@@ -453,12 +460,12 @@ func (s *Service) completeWindows(ctx context.Context, job claimedJob, identity 
 		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
 			return err
 		}
-		// The cards follow the windows: new windows, new cards.
-		now := formatTime(s.now())
-		_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at) VALUES(?, ?, 'pending', ?, ?)
-			ON CONFLICT(object_id, derivation) DO UPDATE SET state = 'pending', attempts = 0, lease_until = NULL, not_before = excluded.not_before, error_class = ''`,
-			job.objectID, cardsDerivation, now, now)
-		return err
+		if s.compute == nil {
+			return nil
+		}
+		// Keep a running card job's lease until it notices that its
+		// windows were replaced and gives the job back.
+		return resetMontageJob(ctx, tx, job.objectID, cardsDerivation, formatTime(s.now()))
 	})
 }
 

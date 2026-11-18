@@ -25,11 +25,15 @@ import (
 // which the AI runtime has: ANAS_MONTAGE_PYTHON names its python, or the
 // test looks for one on PATH that imports them.
 func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
-	python := os.Getenv("ANAS_MONTAGE_PYTHON")
+	configured := os.Getenv("ANAS_MONTAGE_PYTHON")
+	python := configured
 	if python == "" {
 		python = "python3"
 	}
-	if err := exec.Command(python, "-c", "import numpy, PIL").Run(); err != nil {
+	if output, err := exec.Command(python, "-c", "import numpy, PIL").CombinedOutput(); err != nil {
+		if configured != "" {
+			t.Fatalf("%s must import NumPy and Pillow: %v\n%s", python, err, output)
+		}
 		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_MONTAGE_PYTHON)", python)
 	}
 	dir, err := os.MkdirTemp("", "compute")

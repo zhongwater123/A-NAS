@@ -538,6 +538,12 @@ DELETE FROM vector_index_state WHERE name = 'windows';
 	// montage compute Worker from the windows; per content object, like the
 	// windows.
 	{Up: `
+CREATE TABLE montage_card_results (
+    object_id TEXT PRIMARY KEY REFERENCES montage_objects(object_id) ON DELETE CASCADE,
+    cards_identity TEXT NOT NULL,
+    quality_identity TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE video_cards (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
     card INTEGER NOT NULL,
@@ -558,6 +564,7 @@ CREATE TABLE video_card_quality (
 `, Down: `
 DROP TABLE video_card_quality;
 DROP TABLE video_cards;
+DROP TABLE montage_card_results;
 DELETE FROM jobs WHERE derivation IN ('montage-cards/v1', 'montage-quality/v1');
 `},
 }
