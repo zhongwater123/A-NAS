@@ -265,7 +265,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	request.Header.Set("X-Forwarded-For", asAlice.forwardedFor)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusForbidden {
+	if !refusedForCSRF(recorder) {
 		t.Fatalf("confirm without CSRF token = %d", recorder.Code)
 	}
 

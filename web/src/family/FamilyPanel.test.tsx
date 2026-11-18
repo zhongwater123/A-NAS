@@ -8,9 +8,12 @@ import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
 import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import { summarize } from "./FamilyNotices";
 import { FamilyPanel } from "./FamilyPanel";
 import { isoDate } from "./format";
+
+fixToday();
 
 // daysFromToday is a date relative to the day the test runs.
 const daysFromToday = (days: number) => {
@@ -253,7 +256,7 @@ describe("FamilyPanel", () => {
     );
     await userEvent.keyboard("{Control>}{Enter}{/Control}");
     await waitFor(() =>
-      expect(added).toMatchObject({ kind: "journal", text: "第一次自己翻身", occurredOn: isoDate(new Date()) }),
+      expect(added).toMatchObject({ kind: "journal", text: "第一次自己翻身", occurredOn: "2026-10-12" }),
     );
     expect(await screen.findByText("第一次自己翻身", { selector: "blockquote" })).toBeTruthy();
   });
