@@ -30,3 +30,6 @@ func (s *Store) Claim(ctx context.Context) string {
 func (s *Store) SetRoom(room bool) {
 	s.admits = func(string, int64) (bool, error) { return room, nil }
 }
+
+// UseMusic makes jobs take their songs from music rather than the store.
+func (s *Store) UseMusic(music Music) { s.jobMusic = music }

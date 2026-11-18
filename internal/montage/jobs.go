@@ -488,5 +488,5 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 
 // runsJobs reports whether the store has what jobs work with.
 func (s *Store) runsJobs() bool {
-	return s.compute != nil && s.editing != nil && s.planner != nil && s.jobMusic != nil
+	return s.jobCompute != nil && s.editing != nil && s.planner != nil && s.jobMusic != nil
 }

@@ -110,10 +110,12 @@ type ProjectPage struct {
 }
 
 // ProjectChange changes a project's name and settings; nil leaves one.
+// SongStart moves the song's excerpt to the downbeat nearest it.
 type ProjectChange struct {
-	Name          *string `json:"name,omitempty"`
-	Ask           *string `json:"ask,omitempty"`
-	Chronological *bool   `json:"chronological,omitempty"`
+	Name          *string  `json:"name,omitempty"`
+	Ask           *string  `json:"ask,omitempty"`
+	Chronological *bool    `json:"chronological,omitempty"`
+	SongStart     *float64 `json:"songStart,omitempty"`
 }
 
 func newID(prefix string) string {
@@ -507,8 +509,18 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 	if change.Chronological != nil {
 		sets, args = append(sets, "chronological = ?"), append(args, *change.Chronological)
 	}
-	if len(sets) == 0 {
+	if len(sets) == 0 && change.SongStart == nil {
 		return ProjectDetail{}, ErrInvalid
+	}
+	if change.SongStart != nil {
+		// The start is checked against the song first: a start that leaves
+		// no usable excerpt changes nothing.
+		if _, err := s.SongStart(ctx, owner, projectID, *change.SongStart); err != nil {
+			return ProjectDetail{}, err
+		}
+		if len(sets) == 0 {
+			return s.Project(ctx, owner, projectID)
+		}
 	}
 	sets, args = append(sets, "updated_at = ?"), append(args, sqlitedb.FormatTime(s.now()), projectID, owner)
 	result, err := s.db.ExecContext(ctx, "UPDATE projects SET "+strings.Join(sets, ", ")+
@@ -544,8 +556,10 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", projectID)
-		return err
+		if _, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", projectID); err != nil {
+			return err
+		}
+		return forgetUnusedSongs(ctx, tx, owner)
 	})
 	if err != nil {
 		return err
@@ -554,6 +568,9 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		s.cancelRunning(id)
 		s.removeJobFiles(id)
 	}
+	s.songs.Lock()
+	s.removeUnusedCopies(ctx)
+	s.songs.Unlock()
 	if grantID.Valid {
 		s.revoke(ctx, grantID.String)
 	}
@@ -696,8 +713,20 @@ func (s *Store) knownProjects(ctx context.Context) (map[string]knownProject, err
 // RemoveAccount forgets a deleted account's projects. Its grants went with
 // the photo library's own step, which runs first.
 func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID)
-	return err
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ?", userID)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	s.songs.Lock()
+	defer s.songs.Unlock()
+	s.removeUnusedCopies(ctx)
+	return nil
 }
 
 // versions lists a project's films, newest first.

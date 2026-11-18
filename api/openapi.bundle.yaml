@@ -3793,6 +3793,11 @@ paths:
                   maxLength: 200
                 chronological:
                   type: boolean
+                songStart:
+                  type: number
+                  minimum: 0
+                  maximum: 900
+                  description: 'Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music''s end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing.'
       responses:
         '200':
           description: The project
@@ -3803,6 +3808,12 @@ paths:
         '400':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
           $ref: '#/components/responses/ProductError'
     delete:
       operationId: deleteMontageProject
@@ -4022,6 +4033,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MontageNotices'
+  /api/v1/montage/projects/{projectId}/song:
+    put:
+      operationId: putMontageSong
+      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 15 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - trackId
+              properties:
+                trackId:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                  description: A track of GET /api/v1/music/tracks.
+      responses:
+        '200':
+          description: The song, being analysed or as analysed before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageSong'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    get:
+      operationId: getMontageSong
+      summary: 'The project''s song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404)'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+      responses:
+        '200':
+          description: The song
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageSong'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/song/audio:
+    get:
+      operationId: getMontageSongAudio
+      description: 'The montage center''s copy of the project''s song, to listen to: with Range support when browsers play its format, otherwise (the song''s transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start.'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+        - name: start
+          in: query
+          description: Seconds to start a decoded song from; ignored for other songs.
+          schema:
+            type: number
+            minimum: 0
+      responses:
+        '200':
+          description: Audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the song.
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules:
     get:
       operationId: listModules
@@ -16820,6 +16927,171 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MontageNotice'
+    MontageSongSection:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - label
+      properties:
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
+        label:
+          type: string
+          enum:
+            - start
+            - end
+            - intro
+            - outro
+            - break
+            - bridge
+            - inst
+            - solo
+            - verse
+            - chorus
+          description: allin1's label.
+    MontageSongPart:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - level
+        - label
+        - slots
+      properties:
+        start:
+          type: number
+          minimum: 0
+          description: Seconds from the excerpt's start.
+        end:
+          type: number
+          minimum: 0
+        level:
+          type: string
+          enum:
+            - 安静
+            - 中等
+            - 高潮
+          description: 'The part''s level in the film: quiet, middle or climax.'
+        label:
+          type: string
+        allin1:
+          type: string
+          description: 'allin1''s own label when the part was relabelled: a chorus quieter than the section after it is the build to it.'
+        slots:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+              minimum: 0
+          description: The shots' slots, cut on the bar lines, in seconds from the excerpt's start.
+    MontageSongSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - tempo
+        - bar
+        - excerpt
+        - seconds
+        - parts
+        - chorus
+      properties:
+        tempo:
+          type: number
+        bar:
+          type: number
+          minimum: 0
+        excerpt:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: number
+            minimum: 0
+          description: Its start and end in the song, in seconds. The film starts there and lasts as long.
+        seconds:
+          type: number
+          minimum: 0
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageSongPart'
+        chorus:
+          type: boolean
+          description: 'false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen.'
+    MontageSong:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - duration
+        - transcode
+        - state
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        duration:
+          type: number
+          minimum: 0
+        transcode:
+          type: boolean
+          description: 'Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range.'
+        state:
+          type: string
+          enum:
+            - analyzing
+            - ready
+            - unusable
+        reason:
+          type: string
+          enum:
+            - undecodable
+            - few_bars
+            - no_excerpt
+            - long_slot
+          description: 'Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last.'
+        waiting:
+          type: string
+          enum:
+            - analyzer_unavailable
+            - compute_unavailable
+            - media_unavailable
+          description: What the analysis waits for; it is tried again every few minutes.
+        tempo:
+          type: number
+        beats:
+          type: array
+          items:
+            type: number
+            minimum: 0
+        downbeats:
+          type: array
+          items:
+            type: number
+            minimum: 0
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageSongSection'
+        defaultStart:
+          type: number
+          minimum: 0
+          description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
+        selection:
+          $ref: '#/components/schemas/MontageSongSelection'
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

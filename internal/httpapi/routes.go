@@ -117,6 +117,14 @@ func (h *productHandler) mounts() []apiroute.Route {
 	}
 	if h.Montage != nil {
 		mount(montageapi.PathPrefix, apiroute.Session, withUser(withoutAssistantHeader(h.Montage)), montageapi.Endpoints())
+		// Choosing a song copies it from the member's music library here
+		// first (docs/specs/montage-center.md, 配乐).
+		var tracks montageapi.Tracks
+		if h.Music != nil {
+			tracks = h.Music
+		}
+		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
+			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
@@ -248,12 +256,14 @@ func serve(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
 }
 
-// withoutAssistantHeader drops montageapi.AssistantHeader from the browser's
-// request: only the Product Service may say that a request registered a
-// planning grant, and the forwarding proxy passes other headers on.
+// withoutAssistantHeader drops montageapi.AssistantHeader and
+// montageapi.SongHeader from the browser's request: only the Product Service
+// may say that a request registered a planning grant, or what a song it
+// copies is, and the forwarding proxy passes other headers on.
 func withoutAssistantHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del(montageapi.AssistantHeader)
+		r.Header.Del(montageapi.SongHeader)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -71,7 +71,41 @@ DROP TABLE project_assets;
 DROP TABLE batches;
 DROP TABLE projects;
 `},
-		// 2: jobs, the videos they started with, each step's input key and
+		// 2: the songs members chose, with their analysis, and each
+		// project's song and the excerpt's start (docs/specs/montage-center.md,
+		// 配乐). A song row is a member's; its copy, songs/<sha256>/audio,
+		// is shared by content.
+		{Up: `
+CREATE TABLE songs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    title TEXT NOT NULL,
+    duration REAL NOT NULL,
+    content_type TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('analyzing', 'ready', 'unusable')),
+    reason TEXT NOT NULL DEFAULT '',
+    waiting TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_try TEXT,
+    analysis_version TEXT NOT NULL DEFAULT '',
+    analysis_json TEXT,
+    loudness BLOB,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_user_id, sha256)
+);
+CREATE INDEX songs_by_content ON songs(sha256, state);
+ALTER TABLE projects ADD COLUMN song_id TEXT;
+ALTER TABLE projects ADD COLUMN song_start REAL;
+ALTER TABLE projects ADD COLUMN song_selection TEXT;
+`, Down: `
+ALTER TABLE projects DROP COLUMN song_selection;
+ALTER TABLE projects DROP COLUMN song_start;
+ALTER TABLE projects DROP COLUMN song_id;
+DROP TABLE songs;
+`},
+		// 3: jobs, the videos they started with, each step's input key and
 		// result, the plans and the planning rounds (M9), and the versions
 		// saved into the photo library (docs/architecture/montage-center.md,
 		// 持久任务).
@@ -169,15 +203,26 @@ DROP TABLE jobs;
 // Store is the montage center's database. Every record names the member it
 // belongs to, and every read is for one member.
 type Store struct {
-	db       *sql.DB
-	root     string
-	grants   Grants
-	compute  Compute
-	editing  Editing
-	planner  Planner
-	jobMusic Music
-	now      func() time.Time
-	logger   *slog.Logger
+	db      *sql.DB
+	root    string
+	grants  Grants
+	media   Media
+	music   MusicAnalyzer
+	compute MusicComputer
+	now     func() time.Time
+	logger  *slog.Logger
+	// songs serialises the song copies: a copy arriving and the copies
+	// no row names any more being removed.
+	songs sync.Mutex
+	// wake tells AnalyzeSongs a song arrived.
+	wake chan struct{}
+	// What jobs work with: the compute Worker's montage operations, the
+	// FFmpeg worker's editing, the planner, and the songs (the store's
+	// own, Chosen, Excerpt and Audio, unless a test sets another).
+	jobCompute Compute
+	editing    Editing
+	planner    Planner
+	jobMusic   Music
 	// jobWake tells RunJobs a job is due; running holds the running job's
 	// cancel.
 	jobWake chan struct{}
@@ -193,14 +238,21 @@ type Store struct {
 type Options struct {
 	// Grants reaches the photo library's project grants.
 	Grants Grants
-	// Compute, Editing, Planner and Music are what jobs work with; a
-	// store without them keeps projects but runs no job.
-	Compute Compute
-	Editing Editing
-	Planner Planner
-	Music   Music
-	Now     func() time.Time
-	Logger  *slog.Logger
+	// Media decodes songs (the FFmpeg worker); Music finds their structure
+	// (the music analysis Worker); Compute picks their excerpts (the
+	// compute Worker). Without them songs wait.
+	Media   Media
+	Music   MusicAnalyzer
+	Compute MusicComputer
+	// JobCompute, Editing and Planner are what jobs work with besides the
+	// songs: the compute Worker's montage operations, the FFmpeg worker's
+	// editing and the planner. A store without them keeps projects and
+	// songs but makes no film.
+	JobCompute Compute
+	Editing    Editing
+	Planner    Planner
+	Now        func() time.Time
+	Logger     *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -217,10 +269,11 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if err := sqlitedb.Migrate(ctx, db, schema); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
-	store := &Store{db: db, root: root, grants: options.Grants, compute: options.Compute, editing: options.Editing,
-		planner: options.Planner, jobMusic: options.Music, now: options.Now, logger: options.Logger,
-		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat,
-		admits: capacity.Admits}
+	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
+		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
+		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
+		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits}
+	store.jobMusic = store
 	if store.now == nil {
 		store.now = time.Now
 	}

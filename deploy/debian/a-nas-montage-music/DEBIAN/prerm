@@ -1,0 +1,10 @@
+#!/bin/bash
+# prerm of a-nas-montage-music: the Worker and its socket stop before their
+# files go. The montage service keeps its songs waiting for the analysis.
+set -euo pipefail
+
+[[ -d /run/systemd/system ]] || exit 0
+case "${1:-}" in
+  remove | deconfigure) systemctl stop anas-montage-music.socket anas-montage-music.service || true ;;
+esac
+exit 0

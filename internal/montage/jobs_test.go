@@ -333,13 +333,14 @@ type jobEnv struct {
 
 func (e *jobEnv) open(t *testing.T) {
 	t.Helper()
-	store, err := montage.Open(context.Background(), e.root, montage.Options{Grants: e.lib, Compute: e.compute, Editing: e.editing,
-		Planner: e.planner, Music: music{}, Now: e.clock.now})
+	store, err := montage.Open(context.Background(), e.root, montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing,
+		Planner: e.planner, Now: e.clock.now})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	store.SetRoom(true)
+	store.UseMusic(music{})
 	e.store = store
 }
 

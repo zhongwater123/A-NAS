@@ -1,0 +1,104 @@
+# 剪辑中心的配乐
+
+状态：M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)）已实现选歌复制、配乐分析 Worker、`music` 选段、试听与起点；allin1 的商业版权待议，待议期间配乐分析只在开发机与实验 NAS 上运行，见“版权待议期间”
+更新时间：2026-11-18
+
+本文是[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)为准。
+
+## 数据流
+
+```text
+浏览器 ──PUT /projects/{id}/song {trackId}──▶ anas-api
+                                               │ 音乐功能播放的同一条路径：经文件代理以成员身份打开文件
+                                               ▼
+                                     anas-montage（流式收下）
+   songs/<sha256>/audio ◀── 按内容摘要存一份；FFmpeg Worker probe：要有音频，30 秒到 15 分钟
+        │ 后台，一次一首
+        ├─ FFmpeg Worker audio PCM：立体声 44.1 kHz ─┐  两条管道，依次写
+        ├─ FFmpeg Worker audio PCM：单声道 22050 Hz ─┤
+        │                                            ▼
+        │                         配乐分析 Worker（allin1）：节拍、重拍、段落与标签，响度曲线
+        ▼
+   剪辑计算 Worker 的 music：第八版的选段与小节槽 → songs 行：ready 或 unusable（原因）
+```
+
+- **复制**：`montageapi.CopySong` 是 anas-api 对 `PUT /api/v1/montage/projects/{id}/song` 的专门处理（[`internal/montageapi/song.go`](../../internal/montageapi/song.go)）。它调 `music.Service.OpenTrack`，与音乐播放相同，看不到的曲目（包括别人个人空间里的）回答 404；音乐库已知的大小与时长先挡掉超限的，不复制。歌曲经 `X-A-NAS-Song` 头带上标题与能否直接播放（音乐功能的 `Transcode`），这个头只由 anas-api 设置，浏览器发来的在挂载层就被去掉。
+- **收下**：剪辑服务边收边算 SHA-256，超过 100 MiB 回答 413；再请 FFmpeg Worker probe，没有音频或时长不在 30 秒到 15 分钟回答 422（[`internal/montage/songs.go`](../../internal/montage/songs.go)）。副本按内容存成 `songs/<sha256>/audio`，几位成员选同一首共用一份。
+- **表**：`montage.db` 第 2 步加 `songs`（每位成员一行：摘要、标题、时长、状态、不可用的原因、等待的原因、分析结果与响度）与 `projects.song_id`、`song_start`、`song_selection`，带 Down（[`internal/montage/store.go`](../../internal/montage/store.go)）。`song_selection` 是成员拖动起点后那一段的选段，免得每次读项目都要算。
+- **回收**：删除项目、换歌、删除账号后，删掉没有项目再用的 `songs` 行，再删掉没有行引用的副本目录；服务启动时对一次账，并清掉没收完的 `songs/.incoming/`。持久任务（M8a）加入后，进行中的任务也要算作引用。
+- **分析**：同一内容只分析一次，结果写进所有在等它的行；新的一行遇到别人已经分析好的同一首，直接取用（[`internal/montage/analysis.go`](../../internal/montage/analysis.go)）。allin1 的结构先存下，算选段的计算 Worker 不在时只重试选段。Worker 不在时这首歌停在 `analyzing`，写明在等谁（`analyzer_unavailable`、`compute_unavailable`、`media_unavailable`），5 分钟后再试。
+
+## 选段
+
+`music` 是剪辑计算 Worker 的一个操作（[`ai/anas_montage/music_ops.py`](../../ai/anas_montage/music_ops.py)），输入 allin1 的结构、响度曲线、目标 90 秒与起点：
+
+- **默认选段**：原样调用第八版的 `domain.music.from_structure`。黄金比对：用第八版的 10 个 allin1 结构文件，选段与小节槽和第八版逐个相同，见“验证”。
+- **没找到副歌**：`from_structure` 找不到副歌时，把两小节以上、平均响度最高的段落当作副歌再选，回答 `chorus: false`，配乐页提示“没找到副歌，请试听确认”。
+- **拖动起点**：剪辑服务先把起点吸附到最近的重拍（`montage.nearest`），`music` 用第八版同样的段落整理与切槽，从起点切到目标时长附近的重拍，没那么长就到音乐结束。成片从新起点开始，时长等于选段。
+- **不可用**：有效小节少于 16 个（`few_bars`）；选段不在 30–150 秒（`no_excerpt`）；最长的槽超过 12 秒（`long_slot`，`segment` 的上限）；解码失败或 allin1 拒收（`undecodable`）。
+- **登记**：`worker.py` 由 M6 维护，本票不改它；合并时在它的 `OPS` 里加 `"music": music_ops.op_music`。Go 侧的调用在 [`internal/montagecompute/music.go`](../../internal/montagecompute/music.go)。
+
+## 配乐分析 Worker
+
+[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py) 把 `allin1.analyze` 的步骤留在内存里做，不写文件：
+
+1. Demucs `htdemucs` 分离四个音轨，参数与 `demucs.separate` 的默认相同（shifts 1、overlap 0.25、分块、溢出时按比例缩小、写成 16 位）。Demucs 的随机平移固定种子，同一首歌每次结果相同；开发机上的结构文件当年没有固定种子，所以对照时允许误差。
+2. 每个音轨按 madmom 读 16 位 WAV 的方式混成单声道，算 allin1 的对数滤波谱。
+3. 8 个分折模型的集成推理，madmom 的 DBN 找重拍。
+4. 响度是第八版的 RMS 曲线（2048 点一帧、每 512 点，22050 Hz）。
+
+单元 [`anas-montage-music.socket`](../../deploy/montage-music/anas-montage-music.socket) 与 [`.service`](../../deploy/montage-music/anas-montage-music.service)：
+
+- 套接字 `/run/a-nas-montage-music/music.sock`，`SocketUser=a-nas-montage`、0600，只有剪辑服务能连；
+- DynamicUser，`PrivateNetwork`，`InaccessiblePaths=-/srv/a-nas`，`HF_HUB_OFFLINE=1`；歌曲只经两条管道进来；
+- 放在 `anas.slice` 之下；空闲 5 分钟退出，下一首再由套接字启动；
+- 权重按清单的 SHA-256 逐个核对后才加载（`checked_files`）。
+
+## 运行环境与交付
+
+2026-11-18 用户选定：照 AI 运行环境与模型的做法（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)）做成内容包，NAS 上不跑 pip、不联网。考虑过的另两种：运行环境自带一份 Python 3.12 以直接用 NATTEN 的预编译轮子（多一份解释器要单独跟安全更新）；待议期间只写实验 NAS 的联网安装脚本（偏离“NAS 不跑 pip”，交付要做两次）。
+
+- **锁文件**：[`deploy/montage-music/requirements.in`](../../deploy/montage-music/requirements.in) 由 `scripts/build-montage-music-runtime.sh --lock` 解析成按哈希锁定的 `requirements.txt`，目标同 AI 运行环境：Debian 13 的 Python 3.13、x86_64。PyTorch 取 PyTorch 自己的 CPU 版索引（`torch==2.6.0+cpu`）。Hydra 与 OmegaConf 限定新版本，否则解析器会退到 Hydra 0.11；它们依赖的 antlr4 运行时只有源码包，是纯 Python，锁文件按源码包的哈希装。
+- **没有轮子的两个包**：NATTEN 与 madmom 没有 Python 3.13 的轮子，[`deploy/montage-music/sources.json`](../../deploy/montage-music/sources.json) 固定它们的源码与 SHA-256，构建时下载、核对、编译：
+  - NATTEN 用 0.17.1（开发机的 allin1 环境就是这一版）。0.17.5 在导入时就向 CUDA 查询设备，只有 CPU 的 PyTorch 上直接失败。NATTEN 的 CPU 算子按构建机的处理器编译，所以 NAS 用的运行环境要在 x86_64 的机器上构建；单个源文件编译时约占 2 GiB，8 GB 的机器上开 4 个并行会被内存不足杀掉，默认 2 个。
+  - madmom 用 GitHub 上一个提交的压缩包。它的模型与数据文件（CC BY-NC-SA 4.0）是 git 子模块，压缩包里没有；构建写一个空的 `madmom/models/__init__.py` 占位，最后检查运行环境里没有任何这类文件。allin1 只用 madmom 的谱处理与 DBN，不加载这些文件。
+- **运行环境**：`scripts/build-montage-music-runtime.sh` 在 Debian 13 的构建镜像里建虚拟环境、按锁文件装、编出两个包，压成 `build/montage-music-runtime/<id>.tar.gz`。ID 由锁文件、`sources.json` 与 Python 版本算出（`scripts/lib/content.sh` 的 `montage_music_runtime_id`）。`scripts/build-content-packages.sh --montage-music` 把它打成内容包 `a-nas-montage-music-runtime-<id>`，装到 `/opt/a-nas/montage-music-runtimes/<id>`。
+- **权重**：清单 [`allin1-harmonix-all.json`](../../deploy/models/allin1-harmonix-all.json)（8 个分折模型，每个按 `parts` 记大小与 SHA-256，整体的 SHA-256 是这 8 行摘要清单的摘要）与 [`htdemucs.json`](../../deploy/models/htdemucs.json)，各自固定 Hugging Face 的提交。同一脚本把它们打成模型内容包，装到 `/opt/a-nas/models/<sha256>/`。Worker 启动时逐个核对。
+- **可选软件包**：`scripts/build-packages.sh --montage-music` 另打 `a-nas-montage-music`：Worker 的代码、两个单元、清单，以及指向运行环境与权重的链接。它依赖同版本的 `a-nas` 与上面的内容包。`a-nas` 不依赖它，`make packages` 与 release 都不打它。
+
+### 版权待议期间
+
+许可的核对与要议的问题见[决定记录](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)。
+
+- allin1、Demucs 的权重与这个运行环境都不进任何 release，只在开发机与实验 NAS 上按[启用手册](../runbooks/enable-montage-music.md)手动装；
+- 没装时剪辑中心照常运行，选的歌停在 `analyzing`，写明在等配乐分析；
+- 结论是不能随产品分发时，按实施方案退回 beat_this 与色度自相似，`music` 的输入格式不变。
+
+## 验证
+
+**选段的黄金比对**（开发机 C，[`ai/eval/montage_music_golden.py`](../../ai/eval/montage_music_golden.py)）：第八版的 10 个 allin1 结构文件，经剪辑服务发出的 JSON 与 float32 响度交给 `op_music`，选段与小节槽和第八版的 `Allin1.music` 逐个相同（10/10）；第八版那次运行留下的 5 个 `music-*.json` 也逐个相同。
+
+**allin1 与开发机结构文件的对照**（[`ai/eval/montage_music_allin1.py`](../../ai/eval/montage_music_allin1.py)，每首起一个 Worker，经套接字与两条管道交歌，与剪辑服务相同）。本票定的误差范围：
+
+| 项 | 要求 | 理由 |
+|---|---|---|
+| 节拍、重拍 | ±70 毫秒内的 F 值 ≥ 0.99 | 镜头卡在小节线上，重拍错一个就错一个槽 |
+| `music` 的选段 | 段落与槽的个数相同，每个切点相差不超过 0.05 秒 | 成片 30 帧，0.05 秒不到 2 帧 |
+| 段落边界、标签 | 只记录，不设门槛 | Demucs 的随机平移让同一首歌两次的边界有出入；选段上面已经要求 |
+
+开发机 C（macOS，Apple 芯片 10 核，开发机原有的 allin1 环境：Python 3.11、PyTorch 2.4.1、NATTEN 0.17.1），2026-11-18：
+
+| 歌 | 时长（秒） | 节拍 F | 重拍 F | 边界 F | 标签一致 | 选段最大偏差（秒） |
+|---|---|---|---|---|---|---|
+| bad guy | 194.1 | 1.000 | 1.000 | 1.000 | 1.000 | 0.01 |
+| you should see me in a crown | 181.0 | 1.000 | 1.000 | 1.000 | 0.999 | 0.02 |
+| All My Days | 224.6 | 1.000 | 1.000 | 0.966 | 1.000 | 0.00 |
+| Symphony | 202.3 | 1.000 | 1.000 | 0.963 | 0.998 | 0.03 |
+| Fire | 228.5 | 1.000 | 1.000 | 1.000 | 1.000 | 0.00 |
+| Apartment No. 2 | 183.5 | 1.000 | 1.000 | 0.769 | 0.918 | 0.01 |
+| Alone | 170.3 | 1.000 | 1.000 | 1.000 | 1.000 | 0.01 |
+| Fortnight | 229.0 | 0.999 | 1.000 | 0.957 | 1.000 | 0.00 |
+| STAY | 141.8 | 1.000 | 1.000 | 1.000 | 1.000 | 0.00 |
+| Forever | 171.4 | 1.000 | 1.000 | 1.000 | 1.000 | 0.01 |
+
+10 首都在范围内：段落与槽的个数全部相同。Apartment No. 2 的边界差得最多：结尾 144–177 秒的副歌，这次在 168 秒处分出了一段尾奏（开发机文件里是副歌一直到 177 秒）。选段在 84 秒结束，不受影响。

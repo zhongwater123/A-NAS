@@ -22,9 +22,9 @@ import (
 const (
 	// heartbeat renews a running job's lease.
 	heartbeat = 30 * time.Second
-	// analysisPoll is how often a job waiting for the photo library's
-	// analysis or the song's looks again.
-	analysisPoll = time.Minute
+	// waitPoll is how often a job waiting for the photo library's
+	// analysis, the song's or the plan looks again.
+	waitPoll = time.Minute
 	// idlePoll bounds how long the scheduler sleeps with nothing due.
 	idlePoll = 10 * time.Minute
 	// tmpDir holds each job's intermediate files, tmp/<job-id>/.

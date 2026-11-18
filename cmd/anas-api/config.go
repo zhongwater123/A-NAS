@@ -91,6 +91,11 @@ type Config struct {
 	// shows no entry, and hiding the entry alone would not stop the API.
 	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
 	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	// MontageMusicSocket and MontageComputeSocket reach the montage
+	// center's Workers in development, where the montage center runs in
+	// this process; without them its songs wait.
+	MontageMusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET"`
+	MontageComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET"`
 	// ModuleSocketDir holds the API sockets of installed removable modules
 	// (ADR 0037).
 	ModuleSocketDir string `env:"ANAS_MODULE_SOCKET_DIR" envDefault:"/run/a-nas-modules"`
@@ -477,14 +482,18 @@ type montageServiceConfig struct {
 	// GrantSocket is the photo library's socket for project grants, which
 	// only this service's account reaches (ADR 0038 decision 3).
 	GrantSocket string `env:"ANAS_PHOTOS_GRANT_SOCKET" envDefault:"/run/a-nas-photos-grants/grants.sock"`
-	// ComputeSocket is the montage compute Worker; Media the FFmpeg worker
-	// that renders the films.
+	// Media decodes and probes the songs and renders the films.
+	Media MediaConfig
+	// MusicSocket reaches the music analysis Worker, allin1 in a runtime of
+	// its own (anas-montage-music.socket); ComputeSocket the compute
+	// Worker (anas-montage-compute.socket). While either is missing, songs
+	// wait.
+	MusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET" envDefault:"/run/a-nas-montage-music/music.sock"`
 	ComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET" envDefault:"/run/a-nas-montage-compute/compute.sock"`
-	Media         MediaConfig
 	// PlanAnswers names a directory of fixed plans (pick.json, shots.json)
 	// that stand in for the AI assistant's planning, which is not shipped
 	// yet (M9): the development machine and the system test only. Without
-	// it, and until the songs (M8b) are in, the montage center makes no film.
+	// it the montage center makes no film.
 	PlanAnswers string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
 }
 
@@ -497,8 +506,8 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 	}
 	problems := absolutePaths(map[string]*string{
 		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
-		"ANAS_PHOTOS_GRANT_SOCKET": &c.GrantSocket, "ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
-		"ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots, "ANAS_MONTAGE_PLAN_ANSWERS": &c.PlanAnswers,
+		"ANAS_PHOTOS_GRANT_SOCKET": &c.GrantSocket, "ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
+		"ANAS_MONTAGE_MUSIC_SOCKET": &c.MusicSocket, "ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket, "ANAS_MONTAGE_PLAN_ANSWERS": &c.PlanAnswers,
 	})
 	if len(problems) > 0 {
 		return montageServiceConfig{}, errors.Join(problems...)

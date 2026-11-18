@@ -150,18 +150,6 @@ var (
 	ErrPlanInvalid = errors.New("the plan failed its checks")
 )
 
-// Excerpt is the part of the song the film is cut to.
-type Excerpt struct {
-	// Key names the song's copy, its analysis and the excerpt's start.
-	Key string `json:"key"`
-	// Music is the excerpt as the compute Worker's domain reads it.
-	Music json.RawMessage `json:"music"`
-	// Start is where the excerpt starts in the song, in seconds; Frames
-	// is how long the film is, at FilmRate.
-	Start  float64 `json:"start"`
-	Frames int     `json:"frames"`
-}
-
 // Music is what jobs ask of the project's song (M8b).
 type Music interface {
 	// Chosen is the project's song and the excerpt's start; no song is "".
@@ -171,14 +159,6 @@ type Music interface {
 	// Audio opens the song's copy.
 	Audio(ctx context.Context, owner, songID string) (*os.File, error)
 }
-
-// Song errors.
-var (
-	// ErrSongAnalyzing: the song's analysis is not done yet.
-	ErrSongAnalyzing = errors.New("the song is still being analysed")
-	// ErrSongUnusable: the song cannot be used, or none was chosen.
-	ErrSongUnusable = errors.New("the song cannot be used")
-)
 
 // The film: 1920 × 1080 at 30 frames a second, with the song.
 const (

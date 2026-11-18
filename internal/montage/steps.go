@@ -412,7 +412,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		if err := s.grants.Analyze(ctx, run.grantID, pending, false); err != nil {
 			return "", fmt.Errorf("asking for the analysis: %w", err)
 		}
-		return "", &stepWait{reason: WaitAnalysis, delay: analysisPoll}
+		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 	}
 	result := analysisResult{}
 	for n, asset := range run.assets {
@@ -490,7 +490,7 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 		}
 		maps.Copy(request.Measures, video.Measures)
 	}
-	usable, err := s.compute.Catalog(ctx, request)
+	usable, err := s.jobCompute.Catalog(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +515,7 @@ func (s *Store) songKey(ctx context.Context, run *jobRun) (string, error) {
 	excerpt, err := s.jobMusic.Excerpt(ctx, run.owner, run.settings.SongID, run.settings.SongStart)
 	switch {
 	case errors.Is(err, ErrSongAnalyzing):
-		return "", &stepWait{reason: WaitAnalysis, delay: analysisPoll}
+		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 	case errors.Is(err, ErrSongUnusable):
 		return "", &stepNeeds{reason: NeedMusic, err: err}
 	case err != nil:
@@ -564,7 +564,7 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	answer, err := ask(ctx, s.planInput(run))
 	switch {
 	case errors.Is(err, ErrPlanPending):
-		return nil, &stepWait{reason: WaitVNAS, delay: analysisPoll}
+		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll}
 	case errors.Is(err, ErrPlanUnknown):
 		return nil, &stepNeeds{reason: NeedVNASUnknown, err: err}
 	case errors.Is(err, ErrPlanInvalid):

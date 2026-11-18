@@ -70,7 +70,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 		request.Cards[id] = run.catalog.Cards[id]
 	}
 	for range maxNeeds {
-		answer, err := s.compute.Fill(ctx, request, vectors, windowDimensions)
+		answer, err := s.jobCompute.Fill(ctx, request, vectors, windowDimensions)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func (s *Store) clearSpan(ctx context.Context, run *jobRun, need FillNeed) ([2]f
 			return [2]float64{}, err
 		}
 	}
-	return s.compute.Clear(ctx, ClearRequest{Key: need.Key, Lo: need.Lo, Hi: need.Hi}, key, after, before, afterCount, beforeCount)
+	return s.jobCompute.Clear(ctx, ClearRequest{Key: need.Key, Lo: need.Lo, Hi: need.Hi}, key, after, before, afterCount, beforeCount)
 }
 
 // openVideo opens a job's video through the grant, still the content the

@@ -76,7 +76,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
 		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
-			Compute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}, Music: chosenSong{}})
+			JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	}
 }
 
-// idleCompute and chosenSong let jobs be queued; no job runs in this test.
+// idleCompute lets jobs be queued; no job runs in this test.
 type idleCompute struct{}
 
 func (idleCompute) Catalog(context.Context, montage.CatalogRequest) ([]string, error) {
@@ -220,18 +220,4 @@ func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (m
 
 func (idleCompute) Clear(context.Context, montage.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
 	return [2]float64{}, errors.New("no job runs here")
-}
-
-type chosenSong struct{}
-
-func (chosenSong) Chosen(context.Context, string, string) (string, float64, error) {
-	return "song:1", 0, nil
-}
-
-func (chosenSong) Excerpt(context.Context, string, string, float64) (montage.Excerpt, error) {
-	return montage.Excerpt{}, montage.ErrSongAnalyzing
-}
-
-func (chosenSong) Audio(context.Context, string, string) (*os.File, error) {
-	return nil, montage.ErrSongAnalyzing
 }
