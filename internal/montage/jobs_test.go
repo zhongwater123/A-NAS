@@ -191,12 +191,25 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	return montage.FillAnswer{Clips: clips}, nil
 }
 
-func (c *compute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {
-	return montage.PlanBrief{}, errors.New("no brief here")
+// PlanBrief briefs either step with a schema that wants a non-empty list of
+// parts, each a name of at most the catalog's card ids.
+func (c *compute) PlanBrief(_ context.Context, request montage.PlanBriefRequest) (montage.PlanBrief, error) {
+	ids := make([]string, len(request.Cards))
+	for i, card := range request.Cards {
+		ids[i] = card.ID
+	}
+	enum, _ := json.Marshal(ids)
+	schema := `{"type":"object","required":["parts"],"properties":{"parts":{"type":"array","minItems":1,"items":{"type":"object",
+		"required":["name","cards"],"properties":{"name":{"type":"string"},"cards":{"type":"array","items":{"enum":` + string(enum) + `}}}}}}}`
+	brief := montage.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v1"}
+	if request.Step == "shots" {
+		brief.Slots, brief.Pictures = json.RawMessage(`[[[[0,2],[2,4]]]]`), []int{1}
+	}
+	return brief, nil
 }
 
-func (c *compute) ShotsAnswer(context.Context, json.RawMessage, json.RawMessage, []int) (json.RawMessage, error) {
-	return nil, errors.New("no answer here")
+func (c *compute) ShotsAnswer(_ context.Context, answer, _ json.RawMessage, _ []int) (json.RawMessage, error) {
+	return answer, nil
 }
 
 func (c *compute) Clear(_ context.Context, request montage.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
@@ -337,12 +350,19 @@ type jobEnv struct {
 	clock   *clock
 	root    string
 	project montage.ProjectDetail
+	// markers, when set, has the member's VNAS plan, leaving markers here.
+	markers string
 }
 
 func (e *jobEnv) open(t *testing.T) {
 	t.Helper()
-	store, err := montage.Open(context.Background(), e.root, montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing,
-		Planner: e.planner, Now: e.clock.now})
+	options := montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing, Now: e.clock.now}
+	if e.markers != "" {
+		options.PlanMarkers = e.markers
+	} else {
+		options.Planner = e.planner
+	}
+	store, err := montage.Open(context.Background(), e.root, options)
 	if err != nil {
 		t.Fatal(err)
 	}

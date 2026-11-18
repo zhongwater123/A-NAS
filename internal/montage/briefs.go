@@ -210,8 +210,10 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 			jobID, step, pc.roundID, pc.catalogKey, string(kept), sqlitedb.FormatTime(s.now())); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID)
-		return err
+		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
+			return err
+		}
+		return s.dueNow(ctx, tx, jobID)
 	})
 	if err != nil {
 		return ToolAnswer{}, err
@@ -230,6 +232,9 @@ func (s *Store) refuse(ctx context.Context, jobID string, reasons []string) (Too
 		return ToolAnswer{}, err
 	}
 	if rejections >= maxPlanRejections {
+		if err := s.dueNow(ctx, s.db, jobID); err != nil {
+			return ToolAnswer{}, err
+		}
 		s.wakeJobs()
 		reasons = append(reasons, "连续 3 次不合格，这一轮到此为止")
 	}

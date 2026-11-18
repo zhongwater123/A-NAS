@@ -423,7 +423,11 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 		if err != nil {
 			return err
 		}
-		if r.state != RoundClaimed || s.cancelRequested(ctx, r.jobID) {
+		var cancelled bool
+		if err := tx.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", r.jobID).Scan(&cancelled); err != nil {
+			return err
+		}
+		if r.state != RoundClaimed || cancelled {
 			return ErrRoundOver
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'started', run_ref = ?, started_at = ? WHERE id = ?",
@@ -444,9 +448,11 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason string)
 			return ErrRoundOver
 		}
 		now := sqlitedb.FormatTime(s.now())
-		_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ? WHERE id = ?",
-			now, now, truncate(reason, 500), roundID)
-		return err
+		if _, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ? WHERE id = ?",
+			now, now, truncate(reason, 500), roundID); err != nil {
+			return err
+		}
+		return s.dueNow(ctx, tx, r.jobID)
 	})
 	if err == nil {
 		s.wakeJobs()
@@ -473,7 +479,10 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome string) er
 		default:
 			_, err = tx.ExecContext(ctx, "UPDATE rounds SET reported_at = COALESCE(reported_at, ?) WHERE id = ?", now, roundID)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return s.dueNow(ctx, tx, r.jobID)
 	})
 	if err == nil {
 		s.wakeJobs()
@@ -523,6 +532,10 @@ func (s *Store) CleanedRounds(ctx context.Context, owner string, roundIDs []stri
 func (s *Store) SweepRounds(ctx context.Context) error {
 	now := s.now()
 	at := sqlitedb.FormatTime(now)
+	if err := s.roundsDueNow(ctx, s.db, `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND started_at <= ?)`,
+		sqlitedb.FormatTime(now.Add(-claimTimeout)), sqlitedb.FormatTime(now.Add(-roundTimeout))); err != nil {
+		return err
+	}
 	claimed, err := s.db.ExecContext(ctx, `UPDATE rounds SET state = 'abandoned', ended_at = ?, outcome = 'not started in time'
 		WHERE state = 'claimed' AND claimed_at <= ?`, at, sqlitedb.FormatTime(now.Add(-claimTimeout)))
 	if err != nil {
@@ -551,4 +564,18 @@ func truncate(text string, most int) string {
 		cut--
 	}
 	return text[:cut]
+}
+
+// dueNow makes a job waiting for its plan due at once: the round it waited
+// on moved.
+func (s *Store) dueNow(ctx context.Context, q queryer, jobID string) error {
+	_, err := q.ExecContext(ctx, "UPDATE jobs SET not_before = ? WHERE id = ? AND state = 'waiting'", sqlitedb.FormatTime(s.now()), jobID)
+	return err
+}
+
+// roundsDueNow makes the jobs of rounds that just moved due at once.
+func (s *Store) roundsDueNow(ctx context.Context, q queryer, condition string, args ...any) error {
+	_, err := q.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+condition+")",
+		append([]any{sqlitedb.FormatTime(s.now())}, args...)...)
+	return err
 }

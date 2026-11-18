@@ -7,6 +7,9 @@ import (
 
 // RunOnce runs the job due first, if one is, as RunJobs would.
 func (s *Store) RunOnce(ctx context.Context) bool {
+	if err := s.SweepRounds(ctx); err != nil {
+		return false
+	}
 	job, found, err := s.claim(ctx)
 	if err != nil || !found {
 		return false
