@@ -369,7 +369,8 @@ func (e *jobEnv) settle(t *testing.T, jobID string) montage.Job {
 	for range 20 {
 		if !e.store.RunOnce(context.Background()) {
 			job := e.job(t, jobID)
-			if job.State != montage.JobQueued && !(job.State == montage.JobWaiting && job.WaitReason == montage.WaitPhotos) {
+			waitingForPhotos := job.State == montage.JobWaiting && job.WaitReason == montage.WaitPhotos
+			if job.State != montage.JobQueued && !waitingForPhotos {
 				return job
 			}
 			e.clock.advance(3 * time.Minute)

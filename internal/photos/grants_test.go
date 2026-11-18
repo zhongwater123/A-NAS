@@ -340,8 +340,8 @@ func TestRevokingAGrantWhileStagingAFilmPreventsPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	saved := make(chan error, 1)
 	go func() {
 		_, err := s.SaveFilm(ctx, granting(namedAlice), grant.ID, "job:1/render", "film.mp4", reader)

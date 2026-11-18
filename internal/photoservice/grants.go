@@ -167,10 +167,6 @@ func (g *grantServer) owner(ctx context.Context, service *photos.Service, grantI
 
 var errInactiveOwner = errors.New("the grant's owner is not an active account")
 
-func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File) {
-	return g.handleWith(ctx, request, nil)
-}
-
 // handleWith answers request; given is the descriptor that came with it.
 func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantRequest, given *os.File) (photosapi.GrantResponse, *os.File) {
 	service := g.service.Load()
