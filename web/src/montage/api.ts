@@ -13,12 +13,12 @@ const job = (jobId: string) => ({ params: { path: { jobId } } });
 // A request key per action: the same click retried repeats nothing.
 const key = () => crypto.randomUUID();
 
-export async function listProjects(): Promise<MontageProject[]> {
-  return (await call(client.GET("/api/v1/montage/projects"))).items;
+export async function listProjects(signal?: AbortSignal): Promise<MontageProject[]> {
+  return (await call(client.GET("/api/v1/montage/projects", { signal }))).items;
 }
 
-export const getProject = (projectId: string) =>
-  call(client.GET("/api/v1/montage/projects/{projectId}", project(projectId)));
+export const getProject = (projectId: string, signal?: AbortSignal) =>
+  call(client.GET("/api/v1/montage/projects/{projectId}", { ...project(projectId), signal }));
 
 export const createProject = (assetIds: string[], name = "") =>
   call(client.POST("/api/v1/montage/projects", { body: { requestKey: key(), name, assetIds } }));
@@ -47,7 +47,8 @@ export const generate = (projectId: string) =>
     }),
   );
 
-export const getJob = (jobId: string) => call(client.GET("/api/v1/montage/jobs/{jobId}", job(jobId)));
+export const getJob = (jobId: string, signal?: AbortSignal) =>
+  call(client.GET("/api/v1/montage/jobs/{jobId}", { ...job(jobId), signal }));
 export const cancelJob = (jobId: string) => call(client.POST("/api/v1/montage/jobs/{jobId}/cancel", job(jobId)));
 export const dropAssets = (jobId: string, assetIds: string[]) =>
   call(client.POST("/api/v1/montage/jobs/{jobId}/drop-assets", { ...job(jobId), body: { assetIds } }));
@@ -56,13 +57,13 @@ export const retryAnalysis = (jobId: string) =>
 export const retryJob = (jobId: string) => call(client.POST("/api/v1/montage/jobs/{jobId}/retry", job(jobId)));
 export const replan = (jobId: string) => call(client.POST("/api/v1/montage/jobs/{jobId}/replan", job(jobId)));
 
-export const getSong = (projectId: string) =>
-  call(client.GET("/api/v1/montage/projects/{projectId}/song", project(projectId)));
+export const getSong = (projectId: string, signal?: AbortSignal) =>
+  call(client.GET("/api/v1/montage/projects/{projectId}/song", { ...project(projectId), signal }));
 export const chooseSong = (projectId: string, trackId: string) =>
   call(client.PUT("/api/v1/montage/projects/{projectId}/song", { ...project(projectId), body: { trackId } }));
 export const songAudioURL = (projectId: string, start?: number) =>
   `/api/v1/montage/projects/${encodeURIComponent(projectId)}/song/audio${start === undefined ? "" : `?start=${start.toFixed(2)}`}`;
 
-export async function listNotices(): Promise<MontageNotice[]> {
-  return (await call(client.GET("/api/v1/montage/notices"))).items;
+export async function listNotices(signal?: AbortSignal): Promise<MontageNotice[]> {
+  return (await call(client.GET("/api/v1/montage/notices", { signal }))).items;
 }
