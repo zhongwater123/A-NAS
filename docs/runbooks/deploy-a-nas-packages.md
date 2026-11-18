@@ -86,7 +86,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    ```
    - 至少写 `ANAS_SMB_INTERFACE=<网卡>`。可写的键与说明见 `/usr/share/a-nas/site.conf.example`（装包后才有，内容同 [`deploy/site/site.conf`](../../deploy/site/site.conf)）。
    - 由开发机推送新版本的机器另写 `ANAS_UPDATE_STAGING=/home/anas-dev/apps/a-nas/repository`（第 2 步的暂存目录）：之后的版本由“设置 → 系统更新”取用推送、安装，见下面“以后的版本”。已装好的机器随时可以加上这一行，系统更新每次运行时读取，不用运行 `a-nas-site`。
-6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`，装了助手试用的加 `a-nas-assistant-trial`。
+6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`。装过助手试用的设备升级到 2026-11-18 之后的第一个版本时也加 `a-nas-assistant-trial`（空的过渡包，[接管试用](enable-ai-assistant.md#从试用接管)），之后不再需要。
    ```bash
    apt-get update
    apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本> a-nas-docker-policy

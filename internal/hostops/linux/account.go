@@ -46,7 +46,8 @@ func (e *Executor) EnableCredential(ctx context.Context, request accountid.Enabl
 	if err := e.setIdentityEnabled(request.Username, true); err != nil {
 		return err
 	}
-	return errors.Join(e.mirrorIdentityManifest(), e.enableAssistant(ctx, request.Username))
+	uid, _ := e.identityUID(request.Username)
+	return errors.Join(e.mirrorIdentityManifest(), e.enableAssistant(ctx, request.Username, uid))
 }
 
 // handoverPrefix names the directory a transferred personal space is copied
@@ -536,8 +537,7 @@ func isSubvolume(path string) bool {
 
 // removeAssistant removes the account's assistant for good: its units stop
 // and lose their mask, so an account given the name later starts clean, and
-// its data, secret and settings are deleted, as assistant-layout.sh remove
-// does.
+// its data, secret and settings are deleted.
 func (e *Executor) removeAssistant(ctx context.Context, username string) error {
 	for _, path := range []string{
 		filepath.Join(e.mountPoint, "assistant", username),
@@ -551,7 +551,7 @@ func (e *Executor) removeAssistant(ctx context.Context, username string) error {
 	// cannot write; it goes at the next boot.
 	for _, path := range []string{
 		e.assistantTokenPath(username),
-		filepath.Join(e.systemRoot, "etc", "a-nas-assistant", "members", username),
+		e.assistantMemberDir(username),
 		filepath.Join(e.systemRoot, "run", "a-nas", "assistant-runs", username),
 	} {
 		if err := os.RemoveAll(path); err != nil {
