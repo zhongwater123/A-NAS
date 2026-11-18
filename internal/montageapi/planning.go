@@ -49,7 +49,9 @@ func RegisterPlan(registrar PlanRegistrar, next http.Handler, logger *slog.Logge
 		r.Header.Del(SongHeader)
 		on := "off"
 		if registrar != nil {
-			plan, err := registrar.RegisterAssistantPlan(accounts.WithSessionToken(r.Context(), session.Token))
+			// The route puts the session's token on the request's context;
+			// a resolved Session does not carry it.
+			plan, err := registrar.RegisterAssistantPlan(r.Context())
 			if err != nil {
 				logger.WarnContext(r.Context(), "planning grant not registered", "error", err)
 				httpjson.WriteError(w, http.StatusServiceUnavailable, "assistant_unavailable", "VNAS cannot take the plan right now; try again later")

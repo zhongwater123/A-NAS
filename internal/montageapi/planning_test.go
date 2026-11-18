@@ -31,7 +31,9 @@ func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get(montageapi.AssistantHeader))
 	})
-	session := accounts.Session{Token: "session-token", User: accounts.User{ID: "user:alice", Username: "alice"}}
+	// As the Product Service's routes give it: the Session resolved from the
+	// cookie has no Token, which is on the request's context alone.
+	session := accounts.Session{User: accounts.User{ID: "user:alice", Username: "alice"}}
 	for _, c := range []struct {
 		name   string
 		reg    *registrar
@@ -46,6 +48,7 @@ func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			seen = nil
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/montage/jobs/job:1/replan", nil)
+			request = request.WithContext(accounts.WithSessionToken(request.Context(), "session-token"))
 			// The browser's own header is never believed.
 			request.Header.Set(montageapi.AssistantHeader, "on")
 			recorder := httptest.NewRecorder()
