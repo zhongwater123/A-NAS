@@ -139,6 +139,7 @@ schemas:
       projectId: { type: string }
       project: { type: string, description: The project's name. }
       reason: { type: string }
+      detail: { type: string, description: "Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet." }
       filmAssetId: { type: string, description: "The film saved, for saved." }
       at: { type: string, format: date-time }
   MontageNotices:

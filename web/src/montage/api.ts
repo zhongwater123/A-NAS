@@ -9,6 +9,6 @@ export async function listProjects(signal?: AbortSignal): Promise<MontageProject
 
 export type MontageNotice = components["schemas"]["MontageNotice"];
 
-export async function listNotices(): Promise<MontageNotice[]> {
-  return (await call(client.GET("/api/v1/montage/notices"))).items;
+export async function listNotices(signal?: AbortSignal): Promise<MontageNotice[]> {
+  return (await call(client.GET("/api/v1/montage/notices", { signal }))).items;
 }

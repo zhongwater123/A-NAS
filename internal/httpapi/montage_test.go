@@ -18,12 +18,14 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // shortVideos reads every file as a short video.
@@ -90,9 +92,12 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		served++
 		api.ServeHTTP(w, r)
 	})
+	// The File Broker's part: a planning grant for the member behind the request.
+	grants := &planGrants{plan: wire.PlanRegistered}
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users,
-		Montage: counted, Logger: logger,
+		// The headers the montage center gets are those its socket would carry.
+		Montage: serviceproxy.Local(counted), PlanGrants: grants, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
@@ -173,6 +178,28 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g2"}`, nil, http.StatusConflict)
 	bob.do(http.MethodPost, path+"/generate", `{"requestKey":"g3"}`, nil, http.StatusNotFound)
 	jobPath := "/api/v1/montage/jobs/" + job.ID
+	// The requests that may lead to planning registered a grant behind the
+	// member's session first. While the broker cannot register one they
+	// answer assistant_unavailable, and the montage center is not asked.
+	if grants.registered == 0 {
+		t.Fatal("generating registered no planning grant")
+	}
+	grants.err = errors.New("the File Broker is restarting")
+	before := served
+	for route, body := range map[string]string{
+		path + "/generate": `{"requestKey":"g4"}`, jobPath + "/replan": "", jobPath + "/retry-analysis": "",
+		jobPath + "/drop-assets": `{"assetIds":["` + videos[1] + `"]}`,
+	} {
+		response := owner.do(http.MethodPost, route, body, nil, http.StatusServiceUnavailable)
+		if !strings.Contains(response.Body.String(), `"assistant_unavailable"`) {
+			t.Fatalf("%s without a planning grant: %s", route, response.Body.String())
+		}
+	}
+	if served != before {
+		t.Fatal("a request whose planning grant was not registered reached the montage center")
+	}
+	grants.err = nil
+	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)
 	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
 	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
@@ -224,6 +251,24 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 			t.Fatalf("switched off, %s: %d %s", path, recorder.Code, recorder.Body)
 		}
 	}
+}
+
+// planGrants stands in for the File Broker's assistant_plan.
+type planGrants struct {
+	plan       string
+	err        error
+	registered int
+}
+
+func (g *planGrants) RegisterAssistantPlan(ctx context.Context) (string, error) {
+	if accounts.SessionToken(ctx) == "" {
+		return "", errors.New("no session for the planning grant")
+	}
+	if g.err != nil {
+		return "", g.err
+	}
+	g.registered++
+	return g.plan, nil
 }
 
 // idleCompute lets jobs be queued; no job runs in this test.

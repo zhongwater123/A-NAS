@@ -1,19 +1,20 @@
 // 剪辑中心 tells a member on the desktop how their films go
-// (docs/specs/montage-center.md, 桌面提示): a job waiting for VNAS to plan it,
-// planning, needing them, or a film just saved into the photo library. The
-// desktop only shows these; planning runs on the device whether it is open or
-// not. Each notice shows once on this device until the job moves on.
-import { ChevronRight, Clapperboard, X } from "lucide-react";
+// (docs/specs/montage-center.md, 桌面提示): a job waiting for VNAS to plan it
+// and why, a round of VNAS planning it, a job needing them, or a film just
+// saved into the photo library. The desktop only shows these; planning runs
+// on the device whether it is open or not. Each notice shows once on this
+// device until the job moves on, or the reason it waits changes.
+import { Clapperboard } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { DeskNotice } from "../ui/DeskNotice";
 import { listNotices, type MontageNotice } from "./api";
 import styles from "./notices.module.css";
 
-const HIDE_MS = 15_000;
 const POLL_MS = 60_000;
 const SEEN = "montage-notices-seen";
 
-const key = (notice: MontageNotice) => `${notice.jobId}:${notice.kind}`;
+const key = (notice: MontageNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
 
 function seen(): Set<string> {
   try {
@@ -34,24 +35,28 @@ function remember(keys: string[]) {
 
 export function MontageNotices({ onOpen }: { onOpen: () => void }) {
   const [notices, setNotices] = useState<MontageNotice[]>([]);
-  const [held, setHeld] = useState(false);
 
+  // Asked once a minute while the page is visible, and when it becomes
+  // visible again; a hidden page asks nothing.
   useEffect(() => {
-    let live = true;
-    const load = () =>
-      listNotices().then(
+    const leaving = new AbortController();
+    const load = () => {
+      if (document.visibilityState !== "visible") return;
+      listNotices(leaving.signal).then(
         (items) => {
-          if (!live) return;
           const told = seen();
           setNotices(items.filter((notice) => !told.has(key(notice))));
         },
         () => undefined,
       );
-    void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    };
+    load();
+    const timer = window.setInterval(load, POLL_MS);
+    document.addEventListener("visibilitychange", load);
     return () => {
-      live = false;
+      leaving.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
     };
   }, []);
 
@@ -60,58 +65,27 @@ export function MontageNotices({ onOpen }: { onOpen: () => void }) {
     setNotices([]);
   };
 
-  useEffect(() => {
-    if (!notices.length || held) return;
-    const timer = window.setTimeout(dismiss, HIDE_MS);
-    return () => window.clearTimeout(timer);
-  });
-
-  if (!notices.length) return null;
   return (
-    <div
-      className={styles.mnHolder}
-      data-vnas-overlay=""
-      onPointerEnter={() => setHeld(true)}
-      onPointerLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
-    >
-      <section className={styles.mnToast} role="status" aria-label="剪辑中心提醒">
-        <span className={styles.mnMark} aria-hidden="true">
-          <Clapperboard />
-        </span>
-        <div className={styles.mnCopy}>
-          <small>剪辑中心</small>
-          {summarize(notices).map((line) => (
-            <strong key={line}>{line}</strong>
-          ))}
-          <button
-            type="button"
-            className={styles.mnOpen}
-            onClick={() => {
-              dismiss();
-              onOpen();
-            }}
-          >
-            去看看
-            <ChevronRight />
-          </button>
-        </div>
-        <button type="button" className={styles.mnClose} aria-label="关闭" onClick={dismiss}>
-          <X />
-        </button>
-      </section>
-    </div>
+    <DeskNotice
+      className={styles.mnNotice}
+      label="剪辑中心提醒"
+      source="剪辑中心"
+      icon={<Clapperboard />}
+      lines={summarize(notices)}
+      onOpen={onOpen}
+      onDismiss={dismiss}
+    />
   );
 }
 
-// summarize says each notice in a line, the projects named.
+// summarize says each notice in a line, the projects named; a job that still
+// waits for VNAS says why, when the montage center gave a reason.
 export function summarize(notices: MontageNotice[]): string[] {
   return notices.map((notice) => {
     const project = `「${notice.project}」`;
     switch (notice.kind) {
       case "waiting_for_planning":
-        return `${project}在等 VNAS 规划`;
+        return `${project}在等 VNAS 规划${notice.detail ? `：${notice.detail}` : ""}`;
       case "planning":
         return `${project}正在由 VNAS 规划`;
       case "needs_input":
