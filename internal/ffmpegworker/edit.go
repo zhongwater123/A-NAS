@@ -65,7 +65,6 @@ const (
 	backgroundNice = 10
 	segmentTimeout = 5 * time.Minute
 	filmTimeout    = 10 * time.Minute
-	blurTimeout    = 30 * time.Second
 	// boundary separates the JPEG frames of a run of frames.
 	boundary = "anas-frame"
 )
@@ -181,9 +180,7 @@ func (r FramesRequest) count() (int, error) {
 		if !finiteIn(r.Start, 0, 1e6) || !finiteIn(r.End, 0, 1e6) || r.End <= r.Start || !finiteIn(r.Rate, 0.01, FilmRate) {
 			return invalid("bad range")
 		}
-		// The fps filter gives about (End-Start)×Rate frames; one more covers
-		// where its rounding lands.
-		estimate := math.Ceil((r.End-r.Start)*r.Rate) + 1
+		estimate := math.Ceil((r.End - r.Start) * r.Rate)
 		if estimate > maxFrames {
 			return invalid("too many frames")
 		}
@@ -217,6 +214,18 @@ func (r FramesRequest) count() (int, error) {
 	return count, nil
 }
 
+func (r FramesRequest) outputLimit(count int) int {
+	if len(r.Times) > 0 {
+		return count
+	}
+	// Allow one extra frame for FFmpeg's timestamp rounding, within the
+	// format's hard limits.
+	if r.Format == FormatGray {
+		return min(count+1, maxFrames, maxGrayBytes/(r.Width*r.Height))
+	}
+	return min(count+1, maxJPEGFrames)
+}
+
 // timeout bounds a frames request by the length of video it covers: a
 // minute, and three seconds for each second of video, at most half an
 // hour. Each instant of Times counts a second, for the decoding from the
@@ -231,7 +240,7 @@ func (r FramesRequest) timeout() time.Duration {
 
 func (r SegmentRequest) validate() error {
 	if !finiteIn(r.Start, 0, 1e6) || r.Frames < 1 || r.Frames > maxSegment || r.Slow != 0 && !finiteIn(r.Slow, 1, slowest) ||
-		r.FadeFrames < 0 || r.FadeFrames > r.Frames || r.Offset < 0 || r.Offset+r.Frames > maxFilm {
+		r.FadeFrames < 0 || r.FadeFrames > r.Frames || r.Offset < 0 || r.Offset > maxFilm-r.Frames {
 		return errors.New("invalid segment request")
 	}
 	return nil
@@ -253,13 +262,17 @@ func decodeStrict(body []byte, value any) error {
 	if err := decoder.Decode(value); err != nil {
 		return err
 	}
-	if decoder.More() {
+	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
 		return errors.New("data after the request")
 	}
 	return nil
 }
 
 func quiet() []string { return []string{"-nostdin", "-hide_banner", "-v", "error"} }
+
+func editingFilters() []string {
+	return append(quiet(), "-filter_threads", editThreads, "-threads", editThreads)
+}
 
 func turn(turned bool) string {
 	if turned {
@@ -282,11 +295,11 @@ func (r FramesRequest) scaled() string {
 
 // frameCommand takes the first frame at or after at.
 func (t Tools) frameCommand(r FramesRequest, at float64) (string, []string) {
-	args := append(quiet(), "-threads", editThreads)
+	args := editingFilters()
 	if at > 0 {
 		args = append(args, "-ss", seconds(at))
 	}
-	args = append(args, "-i", "fd:", "-map", "0:v:0", "-an", "-sn", "-dn", "-frames:v", "1", "-vf", turn(r.Turned)+r.scaled())
+	args = append(args, "-i", "fd:", "-map", "0:v:0", "-an", "-sn", "-dn", "-frames:v", "1", "-vf", turn(r.Turned)+r.scaled(), "-threads", editThreads)
 	if r.Format == FormatGray {
 		return t.FFmpeg, append(args, "-f", "rawvideo", "pipe:1")
 	}
@@ -295,22 +308,23 @@ func (t Tools) frameCommand(r FramesRequest, at float64) (string, []string) {
 
 // rangeCommand takes Rate frames a second from Start to End in one run.
 func (t Tools) rangeCommand(r FramesRequest) (string, []string) {
-	args := append(quiet(), "-threads", editThreads)
+	args := editingFilters()
 	if r.Start > 0 {
 		args = append(args, "-ss", seconds(r.Start))
 	}
 	args = append(args, "-t", seconds(r.End-r.Start), "-i", "fd:", "-map", "0:v:0", "-an", "-sn", "-dn",
-		"-vf", turn(r.Turned)+"fps="+strconv.FormatFloat(r.Rate, 'f', -1, 64)+","+r.scaled())
+		"-vf", turn(r.Turned)+"fps="+strconv.FormatFloat(r.Rate, 'f', -1, 64)+","+r.scaled(), "-threads", editThreads)
 	if r.Format == FormatGray {
 		return t.FFmpeg, append(args, "-f", "rawvideo", "pipe:1")
 	}
 	return t.FFmpeg, append(args, "-q:v", strconv.Itoa(r.Quality), "-c:v", "mjpeg", "-f", "mpjpeg", "-boundary_tag", boundary, "pipe:1")
 }
 
-// blurCommand measures one encoded JPEG on standard input, as the cards were
-// calibrated: on the JPEG, not on the decoded frame.
+// blurCommand measures the encoded JPEGs on standard input using the same
+// representation as the prototype's blur thresholds.
 func (t Tools) blurCommand() (string, []string) {
-	return t.FFmpeg, append(quiet(), "-f", "jpeg_pipe", "-i", "fd:", "-vf", "blurdetect,metadata=print:file=-", "-f", "null", "-")
+	return t.FFmpeg, append(editingFilters(), "-f", "image2pipe", "-c:v", "mjpeg", "-i", "pipe:0",
+		"-vf", "blurdetect,metadata=print:file=-", "-f", "null", "-")
 }
 
 // The pictures of a film: fitted inside 1920×1080, on black or on a dimmed,
@@ -344,7 +358,7 @@ func (t Tools) segmentCommand(r SegmentRequest) (string, []string) {
 	// Two frames more of source than needed: the frames land on 1/30 s.
 	input := float64(r.Frames)/FilmRate/slow + 2.0/FilmRate
 	offset := strconv.FormatFloat(float64(r.Offset)/FilmRate, 'f', 6, 64)
-	args := append(quiet(), "-threads", editThreads)
+	args := editingFilters()
 	if r.Start > 0 {
 		args = append(args, "-ss", seconds(r.Start))
 	}
@@ -377,28 +391,37 @@ func (t Tools) assembleCommand(r AssembleRequest, created time.Time) (string, []
 	return t.FFmpeg, args
 }
 
-// background starts a command below playback's priority.
-func background(command *exec.Cmd) error {
-	if err := command.Start(); err != nil {
-		return err
+func newCommand(ctx context.Context, program string, args []string, background bool) (*exec.Cmd, *limitedBuffer) {
+	var command *exec.Cmd
+	if background {
+		// nice execs the decoder in the same process, so its first thread and
+		// any threads it creates inherit the lower priority.
+		path, err := exec.LookPath(program)
+		command = exec.CommandContext(ctx, "/usr/bin/nice", append([]string{"-n", strconv.Itoa(backgroundNice), "--", path}, args...)...)
+		if err != nil {
+			command.Err = err
+		}
+	} else {
+		command = exec.CommandContext(ctx, program, args...)
 	}
-	_ = unix.Setpriority(unix.PRIO_PROCESS, command.Process.Pid, backgroundNice)
-	return nil
-}
-
-func runBackground(command *exec.Cmd) error {
-	if err := background(command); err != nil {
-		return err
-	}
-	return command.Wait()
-}
-
-func newCommand(ctx context.Context, program string, args []string) (*exec.Cmd, *limitedBuffer) {
-	command := exec.CommandContext(ctx, program, args...)
 	command.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"}
 	stderr := &limitedBuffer{limit: 8 << 10}
 	command.Stderr = stderr
 	return command, stderr
+}
+
+func editDeadline(ctx context.Context, conn *net.UnixConn, limit time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	deadline, _ := ctx.Deadline()
+	_ = conn.SetWriteDeadline(deadline)
+	return ctx, cancel
+}
+
+func allowEditStatus(ctx context.Context, conn *net.UnixConn) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// Give the terminal status a short window after the work deadline.
+		_ = conn.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
+	}
 }
 
 // serveEditing answers an editing request. files are the descriptors that
@@ -427,7 +450,7 @@ func serveEditing(ctx context.Context, conn *net.UnixConn, tools Tools, op strin
 		if err != nil {
 			return invalid(err)
 		}
-		return serveFrames(ctx, conn, tools, request.FramesRequest, count, files[0])
+		return serveFrames(ctx, conn, tools, request.FramesRequest, request.outputLimit(count), files[0])
 	case OpSegment:
 		var request segmentWire
 		if err := decodeStrict(body, &request); err != nil {
@@ -436,16 +459,22 @@ func serveEditing(ctx context.Context, conn *net.UnixConn, tools Tools, op strin
 		if err := request.validate(); err != nil {
 			return invalid(err)
 		}
-		ctx, stop := context.WithTimeout(ctx, segmentTimeout)
+		ctx, stop := editDeadline(ctx, conn, segmentTimeout)
 		defer stop()
 		program, args := tools.segmentCommand(request.SegmentRequest)
-		command, stderr := newCommand(ctx, program, args)
+		command, stderr := newCommand(ctx, program, args, true)
 		command.Stdin = files[0]
 		stdout := &limitedBuffer{limit: maxSegmentSize}
 		command.Stdout = stdout
-		err := runBackground(command)
-		if err != nil || stdout.overflow || stdout.Len() == 0 {
-			return writeFrame(conn, editFailure(err, stderr, stdout.overflow), nil)
+		err := command.Run()
+		if stdout.overflow {
+			err = errTooLarge
+		} else if err == nil && stdout.Len() == 0 {
+			err = ErrUnreadable
+		}
+		if response := outcome(ctx, err, stderr); !response.OK {
+			allowEditStatus(ctx, conn)
+			return writeFrame(conn, response, nil)
 		}
 		if err := writeFrame(conn, Response{OK: true, Size: int64(stdout.Len())}, nil); err != nil {
 			return err
@@ -465,30 +494,22 @@ func serveEditing(ctx context.Context, conn *net.UnixConn, tools Tools, op strin
 	}
 }
 
-// editFailure is the response for a failed editing command: output past its
-// limit is too large, never unreadable.
-func editFailure(err error, stderr *limitedBuffer, overflow bool) Response {
-	if overflow {
-		return Response{Code: CodeTooLarge, Message: "output is too large"}
-	}
-	return failure(err, stderr, false)
-}
-
 func serveAssemble(ctx context.Context, conn *net.UnixConn, tools Tools, request AssembleRequest, created time.Time, files []*os.File) error {
+	ctx, stop := editDeadline(ctx, conn, filmTimeout)
+	defer stop()
 	fd, err := unix.MemfdCreate("anas-film", unix.MFD_CLOEXEC)
 	if err != nil {
 		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
 	}
 	film := os.NewFile(uintptr(fd), "anas-film")
 	defer func() { _ = film.Close() }()
-	ctx, stop := context.WithTimeout(ctx, filmTimeout)
-	defer stop()
 	program, args := tools.assembleCommand(request, created)
-	command, stderr := newCommand(ctx, program, args)
+	command, stderr := newCommand(ctx, program, args, true)
 	command.Stdin = files[0]
 	command.ExtraFiles = []*os.File{files[1], film}
-	if err := runBackground(command); err != nil {
-		return writeFrame(conn, editFailure(err, stderr, false), nil)
+	if response := outcome(ctx, command.Run(), stderr); !response.OK {
+		allowEditStatus(ctx, conn)
+		return writeFrame(conn, response, nil)
 	}
 	size, err := film.Seek(0, io.SeekEnd)
 	switch {
@@ -503,6 +524,13 @@ func serveAssemble(ctx context.Context, conn *net.UnixConn, tools Tools, request
 	if _, err := film.Seek(0, io.SeekStart); err != nil {
 		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
 	}
+	if response := checkFilm(ctx, tools, film, request.Frames); !response.OK {
+		allowEditStatus(ctx, conn)
+		return writeFrame(conn, response, nil)
+	}
+	if _, err := film.Seek(0, io.SeekStart); err != nil {
+		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
+	}
 	if err := writeFrame(conn, Response{OK: true, Size: size}, nil); err != nil {
 		return err
 	}
@@ -510,29 +538,101 @@ func serveAssemble(ctx context.Context, conn *net.UnixConn, tools Tools, request
 	return err
 }
 
+func checkFilm(ctx context.Context, tools Tools, film *os.File, want int) Response {
+	command, stderr := newCommand(ctx, tools.FFprobe, []string{"-v", "error", "-show_entries",
+		"stream=codec_type,codec_name,channels,duration,nb_frames", "-of", "json", "-i", "fd:"}, true)
+	command.Stdin = film
+	stdout := &limitedBuffer{limit: 4 << 10}
+	command.Stdout = stdout
+	if err := command.Run(); err != nil {
+		response := outcome(ctx, err, stderr)
+		if response.Code == CodeUnreadable {
+			response.Code = CodeFailed
+		}
+		return response
+	}
+	var info struct {
+		Streams []struct {
+			Type     string `json:"codec_type"`
+			Codec    string `json:"codec_name"`
+			Channels int    `json:"channels"`
+			Duration string `json:"duration"`
+			Frames   string `json:"nb_frames"`
+		} `json:"streams"`
+	}
+	if stdout.overflow || json.Unmarshal(stdout.Bytes(), &info) != nil {
+		return Response{Code: CodeFailed, Message: "could not verify the film's tracks"}
+	}
+	var video, audio bool
+	for _, stream := range info.Streams {
+		switch stream.Type {
+		case "video":
+			video = stream.Frames == strconv.Itoa(want)
+		case "audio":
+			length, err := strconv.ParseFloat(stream.Duration, 64)
+			audio = stream.Codec == "aac" && stream.Channels == 2 && err == nil && length > 0 &&
+				math.Abs(length-float64(want)/FilmRate) <= 0.1
+		}
+	}
+	if !video {
+		return Response{Code: CodeFailed, Message: fmt.Sprintf("film does not have the requested %d video frames", want)}
+	}
+	if !audio {
+		return Response{Code: CodeFailed, Message: "the soundtrack does not cover the film"}
+	}
+	return outcome(ctx, nil, nil)
+}
+
 // serveFrames answers at once, then sends each frame as a message, an empty
 // message, and the trailer that says whether they all came. A frames
 // request can fail after the first frames went out; the trailer says so,
 // and the caller drops what it received.
 func serveFrames(ctx context.Context, conn *net.UnixConn, tools Tools, request FramesRequest, count int, file *os.File) error {
-	ctx, stop := context.WithTimeout(ctx, request.timeout())
+	ctx, stop := editDeadline(ctx, conn, request.timeout())
 	defer stop()
 	if err := writeFrame(conn, Response{OK: true}, nil); err != nil {
 		return err
 	}
 	sender := frameSender{conn: conn, tools: tools, request: request, most: count}
-	var outcome Response
-	if len(request.Times) > 0 {
-		outcome = sender.atTimes(ctx, file)
-	} else {
-		outcome = sender.inRange(ctx, file)
+	var result Response
+	if request.Blur {
+		batch, err := startBlur(ctx, tools)
+		if err != nil {
+			return writeFramesTrailer(ctx, conn, outcome(ctx, err, nil), FramesResult{})
+		}
+		sender.blur = batch
 	}
+	if len(request.Times) > 0 {
+		result = sender.atTimes(ctx, file)
+	} else {
+		result = sender.inRange(ctx, file)
+	}
+	if sender.blur != nil {
+		if sender.blurInputFailed || result.OK && sender.sent > 0 {
+			values, response := sender.blur.finish(ctx, sender.sent)
+			if !response.OK {
+				result = response
+			}
+			sender.result.Blur = values
+		} else {
+			sender.blur.abort()
+		}
+	}
+	if sender.writeErr != nil {
+		// A partially sent message cannot be followed by a protocol trailer.
+		return sender.writeErr
+	}
+	return writeFramesTrailer(ctx, conn, result, sender.result)
+}
+
+func writeFramesTrailer(ctx context.Context, conn *net.UnixConn, result Response, frames FramesResult) error {
+	allowEditStatus(ctx, conn)
 	if err := unixmsg.WriteBody(conn, nil, nil); err != nil {
 		return err
 	}
-	trailer := framesTrailer{Response: outcome}
-	if outcome.OK {
-		trailer.FramesResult = sender.result
+	trailer := framesTrailer{Response: result}
+	if result.OK {
+		trailer.FramesResult = frames
 	}
 	body, err := unixmsg.Encode(trailer, maxFrame)
 	if err != nil {
@@ -542,30 +642,32 @@ func serveFrames(ctx context.Context, conn *net.UnixConn, tools Tools, request F
 }
 
 type frameSender struct {
-	conn    *net.UnixConn
-	tools   Tools
-	request FramesRequest
-	most    int
-	sent    int
-	result  FramesResult
+	conn            *net.UnixConn
+	tools           Tools
+	request         FramesRequest
+	most            int
+	sent            int
+	result          FramesResult
+	blur            *blurBatch
+	blurInputFailed bool
+	writeErr        error
 }
 
 var errTooLarge = errors.New("output is too large")
 
-// send measures a frame if asked and sends it.
-func (s *frameSender) send(ctx context.Context, frame []byte) error {
+func (s *frameSender) send(frame []byte) error {
 	s.sent++
 	if s.sent > s.most || len(frame) > maxFrameBytes {
 		return errTooLarge
 	}
-	if s.request.Blur {
-		blur, err := s.tools.blur(ctx, frame)
-		if err != nil {
+	if s.blur != nil {
+		if _, err := s.blur.input.Write(frame); err != nil {
+			s.blurInputFailed = true
 			return err
 		}
-		s.result.Blur = append(s.result.Blur, blur)
 	}
-	return unixmsg.WriteBody(s.conn, frame, nil)
+	s.writeErr = unixmsg.WriteBody(s.conn, frame, nil)
+	return s.writeErr
 }
 
 // outcome turns how the frames ended into the trailer's response.
@@ -575,12 +677,12 @@ func outcome(ctx context.Context, err error, stderr *limitedBuffer) Response {
 	}
 	var exitError *exec.ExitError
 	switch {
-	case err == nil:
-		return Response{OK: true}
 	case errors.Is(err, errTooLarge):
 		return Response{Code: CodeTooLarge, Message: err.Error()}
 	case errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil:
 		return Response{Code: CodeFailed, Message: "timed out or cancelled"}
+	case err == nil:
+		return Response{OK: true}
 	case errors.As(err, &exitError), errors.Is(err, os.ErrNotExist), errors.Is(err, exec.ErrNotFound):
 		return failure(err, stderr, false)
 	case errors.Is(err, ErrUnreadable):
@@ -600,14 +702,14 @@ func (s *frameSender) atTimes(ctx context.Context, file *os.File) Response {
 			err = fmt.Errorf("gray frame of %d bytes", len(frame))
 		}
 		if err == nil {
-			err = s.send(ctx, frame)
+			err = s.send(frame)
 		}
 		if err != nil {
 			return outcome(ctx, err, stderr)
 		}
 		s.result.Times = append(s.result.Times, used)
 	}
-	return Response{OK: true}
+	return outcome(ctx, nil, nil)
 }
 
 // near takes the frame at at, or the nearest earlier one FFmpeg finds. Past
@@ -629,7 +731,7 @@ func (s *frameSender) near(ctx context.Context, file *os.File, at float64) ([]by
 		case err == nil && len(frame) > 0:
 			return frame, used, stderr, nil
 		case ctx.Err() != nil, errors.Is(err, errTooLarge):
-			return nil, used, stderr, err
+			return nil, used, stderr, errors.Join(err, ctx.Err())
 		case err != nil && failed == nil:
 			failed, failedStderr = err, stderr
 		}
@@ -646,34 +748,32 @@ func (s *frameSender) one(ctx context.Context, file *os.File, at float64) ([]byt
 		return nil, nil, fmt.Errorf("%w: the file cannot seek", ErrUnreadable)
 	}
 	program, args := s.tools.frameCommand(s.request, at)
-	command, stderr := newCommand(ctx, program, args)
+	command, stderr := newCommand(ctx, program, args, true)
 	command.Stdin = file
 	stdout := &limitedBuffer{limit: maxFrameBytes}
 	command.Stdout = stdout
-	if err := runBackground(command); err != nil {
-		return nil, stderr, err
-	}
+	err := command.Run()
 	if stdout.overflow {
 		return nil, stderr, errTooLarge
 	}
-	return stdout.Bytes(), stderr, nil
+	return stdout.Bytes(), stderr, err
 }
 
 func (s *frameSender) inRange(ctx context.Context, file *os.File) Response {
 	program, args := s.tools.rangeCommand(s.request)
-	command, stderr := newCommand(ctx, program, args)
+	command, stderr := newCommand(ctx, program, args, true)
 	command.Stdin = file
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return Response{Code: CodeFailed, Message: err.Error()}
 	}
-	if err := background(command); err != nil {
+	if err := command.Start(); err != nil {
 		return outcome(ctx, err, stderr)
 	}
 	if s.request.Format == FormatGray {
-		err = s.grayFrames(ctx, stdout)
+		err = s.grayFrames(stdout)
 	} else {
-		err = s.jpegFrames(ctx, stdout)
+		err = s.jpegFrames(stdout)
 	}
 	if err != nil {
 		_ = command.Process.Kill()
@@ -683,7 +783,7 @@ func (s *frameSender) inRange(ctx context.Context, file *os.File) Response {
 	return outcome(ctx, command.Wait(), stderr)
 }
 
-func (s *frameSender) grayFrames(ctx context.Context, stdout io.Reader) error {
+func (s *frameSender) grayFrames(stdout io.Reader) error {
 	size := s.request.Width * s.request.Height
 	for {
 		frame := make([]byte, size)
@@ -696,14 +796,14 @@ func (s *frameSender) grayFrames(ctx context.Context, stdout io.Reader) error {
 		case err != nil:
 			return err
 		}
-		if err := s.send(ctx, frame); err != nil {
+		if err := s.send(frame); err != nil {
 			return err
 		}
 	}
 }
 
 // jpegFrames splits FFmpeg's multipart JPEG stream.
-func (s *frameSender) jpegFrames(ctx context.Context, stdout io.Reader) error {
+func (s *frameSender) jpegFrames(stdout io.Reader) error {
 	parts := multipart.NewReader(stdout, boundary)
 	for {
 		part, err := parts.NextPart()
@@ -717,37 +817,81 @@ func (s *frameSender) jpegFrames(ctx context.Context, stdout io.Reader) error {
 		if err != nil {
 			return fmt.Errorf("frames stream: %w", err)
 		}
-		if err := s.send(ctx, frame); err != nil {
+		if err := s.send(frame); err != nil {
 			return err
 		}
 	}
 }
 
-// blur runs blurdetect on one encoded JPEG. Its value for a flat picture is
-// nan, which comes back as nil.
-func (t Tools) blur(ctx context.Context, frame []byte) (*float64, error) {
-	ctx, stop := context.WithTimeout(ctx, blurTimeout)
-	defer stop()
-	program, args := t.blurCommand()
-	command, _ := newCommand(ctx, program, args)
-	command.Stdin = bytes.NewReader(frame)
-	stdout := &limitedBuffer{limit: 64 << 10}
-	command.Stdout = stdout
-	if err := runBackground(command); err != nil {
-		return nil, fmt.Errorf("%w: blurdetect: %v", ErrUnreadable, err)
+// blurBatch streams JPEGs into a single FFmpeg process and saves only the
+// metadata it prints. The caller's frames deadline also bounds this process.
+type blurBatch struct {
+	command *exec.Cmd
+	input   *os.File
+	stdout  *limitedBuffer
+	stderr  *limitedBuffer
+}
+
+func startBlur(ctx context.Context, t Tools) (*blurBatch, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
 	}
-	lines := bufio.NewScanner(bytes.NewReader(stdout.Bytes()))
+	defer func() { _ = reader.Close() }()
+	program, args := t.blurCommand()
+	command, stderr := newCommand(ctx, program, args, true)
+	command.Stdin = reader
+	stdout := &limitedBuffer{limit: maxJPEGFrames * 256}
+	command.Stdout = stdout
+	if err := command.Start(); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	return &blurBatch{command: command, input: writer, stdout: stdout, stderr: stderr}, nil
+}
+
+func (b *blurBatch) abort() {
+	_ = b.command.Process.Kill()
+	_ = b.input.Close()
+	_ = b.command.Wait()
+}
+
+func (b *blurBatch) finish(ctx context.Context, want int) ([]*float64, Response) {
+	_ = b.input.Close()
+	if err := b.command.Wait(); err != nil {
+		message := b.stderr.String()
+		if ctx.Err() == nil && (strings.Contains(message, "No such filter: 'blurdetect'") || strings.Contains(message, "Filter not found")) {
+			return nil, Response{Code: CodeUnavailable, Message: "blurdetect is unavailable"}
+		}
+		response := outcome(ctx, err, b.stderr)
+		response.Code = CodeFailed
+		response.Message = "blurdetect: " + response.Message
+		return nil, response
+	}
+	if response := outcome(ctx, nil, nil); !response.OK {
+		return nil, response
+	}
+	values := make([]*float64, 0, want)
+	lines := bufio.NewScanner(bytes.NewReader(b.stdout.Bytes()))
 	for lines.Scan() {
 		if value, ok := strings.CutPrefix(strings.TrimSpace(lines.Text()), "lavfi.blur="); ok {
-			blur, err := strconv.ParseFloat(value, 64)
-			switch {
-			case err != nil:
-			case math.IsNaN(blur) || math.IsInf(blur, 0):
-				return nil, nil
-			default:
-				return &blur, nil
+			// FFmpeg's C formatter can print a signed NaN for flat images.
+			if strings.EqualFold(strings.TrimLeft(value, "+-"), "nan") {
+				values = append(values, nil)
+				continue
 			}
+			blur, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return nil, Response{Code: CodeFailed, Message: "blurdetect gave an invalid value"}
+			}
+			if math.IsInf(blur, 0) {
+				return nil, Response{Code: CodeFailed, Message: "blurdetect gave an invalid value"}
+			}
+			values = append(values, &blur)
 		}
 	}
-	return nil, fmt.Errorf("%w: blurdetect gave no value", ErrUnreadable)
+	if lines.Err() != nil || b.stdout.overflow || len(values) != want {
+		return nil, Response{Code: CodeFailed, Message: "blurdetect did not report one value per frame"}
+	}
+	return values, Response{OK: true}
 }
