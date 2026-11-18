@@ -289,7 +289,7 @@ func (e *Executor) SetCredential(ctx context.Context, request accountid.Credenti
 	}
 	// A member who had to choose a new password had the assistant masked by
 	// every identity synchronization until now.
-	return e.enableAssistant(ctx, request.Username)
+	return e.enableAssistant(ctx, request.Username, request.UID)
 }
 
 // DataVolumeReady reports whether the intended Btrfs data volume, with its

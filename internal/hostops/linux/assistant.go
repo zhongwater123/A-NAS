@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"go.yaml.in/yaml/v4"
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/sys/unix"
 
@@ -75,10 +76,22 @@ const (
 	assistantSecret  = "HERMES_DASHBOARD_SESSION_TOKEN="
 )
 
-var (
-	assistantSecretPattern = regexp.MustCompile(`^` + assistantSecret + `[0-9a-f]{64}\n?$`)
-	hermesHashPattern      = regexp.MustCompile(`(?m)^    password_hash: "(scrypt\$[^"\n]+)"$`)
-)
+var assistantSecretPattern = regexp.MustCompile(`^` + assistantSecret + `[0-9a-f]{64}\n?$`)
+
+// hermesSettings is the member's config.yaml: the skill folders, the managed policy's MCP
+// servers again (serve's discovery reads the raw user config) and Hermes's login.
+type hermesSettings struct {
+	Skills struct {
+		ExternalDirs []string `yaml:"external_dirs,flow"`
+	} `yaml:"skills"`
+	MCPServers map[string]any `yaml:"mcp_servers,omitempty"`
+	Dashboard  struct {
+		BasicAuth struct {
+			Username     string `yaml:"username"`
+			PasswordHash string `yaml:"password_hash"`
+		} `yaml:"basic_auth"`
+	} `yaml:"dashboard"`
+}
 
 // assistantUnits names username's instances of the installed templates among
 // templates; none when the assistant is not installed.
@@ -106,10 +119,15 @@ func (e *Executor) assistantState() string {
 	return filepath.Join(e.systemRoot, "var", "lib", stateDirectoryName, "assistant")
 }
 
-// assistantTokenPath is the member's instance secret: the password of Hermes's login, with
-// which the File Broker signs in for the member's live session (decision 10).
+// AssistantTokenDir holds the members' instance secrets: each the password of Hermes's login,
+// with which the File Broker signs in for the member's live session (decision 10).
+func (e *Executor) AssistantTokenDir() string {
+	return filepath.Join(e.assistantState(), "tokens")
+}
+
+// assistantTokenPath is the member's instance secret in AssistantTokenDir.
 func (e *Executor) assistantTokenPath(username string) string {
-	return filepath.Join(e.assistantState(), "tokens", username+".env")
+	return filepath.Join(e.AssistantTokenDir(), username+".env")
 }
 
 // assistantMemberDir holds the member's Hermes settings and skill, which their sandbox binds.
@@ -175,22 +193,20 @@ func (e *Executor) SetAssistantKey(ctx context.Context, key string) (assistantke
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return assistantkey.State{}, fmt.Errorf("prepare the credential store: %w", err)
 	}
-	incoming := path + ".incoming"
-	_ = os.Remove(incoming)
-	// The key reaches systemd-creds on its standard input, never on a command line. The
-	// machine's own credential key (/var/lib/systemd/credential.secret, which the a-nas
-	// package makes) encrypts it; a TPM would tie it to the firmware's state too, and a
-	// firmware update would then lose it.
-	if output, err := e.runner.Run(ctx, "systemd-creds", []string{"encrypt", "--name=" + assistantCredential, "--with-key=host", "-", incoming}, key); err != nil {
-		_ = os.Remove(incoming)
-		return assistantkey.State{}, commandError("encrypt the assistant's key", err, output)
+	// The key reaches systemd-creds on its standard input, never on a command line, and the
+	// credential comes back on its standard output. The machine's own credential key
+	// (/var/lib/systemd/credential.secret, which anas-site.service makes on the machine itself)
+	// encrypts it; a TPM would tie it to the firmware's state too, and a firmware update would
+	// then lose it.
+	encrypted, err := e.runner.Output(ctx, "systemd-creds", []string{"encrypt", "--name=" + assistantCredential, "--with-key=host", "-", "-"}, key)
+	if err != nil {
+		return assistantkey.State{}, fmt.Errorf("encrypt the assistant's key: %w", err)
 	}
-	if err := os.Chmod(incoming, 0o600); err != nil {
-		_ = os.Remove(incoming)
-		return assistantkey.State{}, fmt.Errorf("protect the assistant's key: %w", err)
+	if len(encrypted) == 0 {
+		return assistantkey.State{}, errors.New("encrypt the assistant's key: systemd-creds wrote nothing")
 	}
-	if err := os.Rename(incoming, path); err != nil {
-		_ = os.Remove(incoming)
+	// Whole on disk before the gateway restarts with it, also across a power cut.
+	if err := writeAtomic(path, encrypted, 0o600); err != nil {
 		return assistantkey.State{}, fmt.Errorf("save the assistant's key: %w", err)
 	}
 	var failures []error
@@ -199,9 +215,9 @@ func (e *Executor) SetAssistantKey(ctx context.Context, key string) (assistantke
 			failures = append(failures, commandError(command[0]+" "+command[2], err, output))
 		}
 	}
-	for _, username := range e.activeIdentities() {
-		if err := e.prepareAssistant(ctx, username); err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", username, err))
+	for _, member := range e.activeMembers() {
+		if err := e.prepareAssistant(ctx, member.username, member.uid); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", member.username, err))
 		}
 	}
 	if err := errors.Join(failures...); err != nil {
@@ -220,29 +236,29 @@ func (e *Executor) DeleteAssistantKey(ctx context.Context) (assistantkey.State, 
 		return assistantkey.State{}, fmt.Errorf("delete the assistant's key: %w", err)
 	}
 	var failures []error
-	if output, err := e.runner.Run(ctx, "systemctl", []string{"stop", assistantWakerUnit, assistantGatewayUnit}, ""); err != nil {
+	if output, err := e.systemctlWithoutKey(ctx, "stop", assistantWakerUnit, assistantGatewayUnit); err != nil {
 		failures = append(failures, commandError("stop the model gateway", err, output))
 	}
 	// A disabled member's units are masked and stopped already (disableAssistant).
-	for _, username := range e.activeIdentities() {
-		entries, err := e.assistantUnits(username, assistantEntries)
+	for _, member := range e.activeMembers() {
+		entries, err := e.assistantUnits(member.username, assistantEntries)
 		if err != nil {
 			failures = append(failures, err)
 			continue
 		}
-		services, err := e.assistantUnits(username, assistantServices)
+		services, err := e.assistantUnits(member.username, assistantServices)
 		if err != nil {
 			failures = append(failures, err)
 			continue
 		}
 		if len(entries) > 0 {
-			if output, err := e.runner.Run(ctx, "systemctl", append([]string{"disable", "--now", "--quiet"}, entries...), ""); err != nil {
-				failures = append(failures, commandError("turn off "+username+"'s assistant", err, output))
+			if output, err := e.systemctlWithoutKey(ctx, append([]string{"disable", "--now", "--quiet"}, entries...)...); err != nil {
+				failures = append(failures, commandError("turn off "+member.username+"'s assistant", err, output))
 			}
 		}
 		if len(services) > 0 {
-			if output, err := e.runner.Run(ctx, "systemctl", append([]string{"stop"}, services...), ""); err != nil {
-				failures = append(failures, commandError("stop "+username+"'s assistant", err, output))
+			if output, err := e.systemctlWithoutKey(ctx, append([]string{"stop"}, services...)...); err != nil {
+				failures = append(failures, commandError("stop "+member.username+"'s assistant", err, output))
 			}
 		}
 	}
@@ -250,6 +266,26 @@ func (e *Executor) DeleteAssistantKey(ctx context.Context) (assistantkey.State, 
 		return assistantkey.State{}, err
 	}
 	return e.AssistantKey(ctx)
+}
+
+// systemctlWithoutKey runs systemctl on units that need the key, once it is deleted. A start
+// queued while their stop job runs (the File Broker's 立即运行, a socket the Product Service
+// still connects to) replaces that job, and systemctl then fails with "Job for … canceled".
+// Without the key such a start runs nothing (the units' ConditionPathExists=), so the same
+// command, run once more, finds them stopped.
+func (e *Executor) systemctlWithoutKey(ctx context.Context, args ...string) ([]byte, error) {
+	output, err := e.runner.Run(ctx, "systemctl", args, "")
+	if err != nil {
+		output, err = e.runner.Run(ctx, "systemctl", args, "")
+	}
+	return output, err
+}
+
+// AssistantOn reports whether the administrator's key is saved, which every member's
+// assistant needs: the File Broker starts no round of scheduled tasks without it.
+func (e *Executor) AssistantOn() bool {
+	saved, err := e.assistantKeySaved()
+	return err == nil && saved
 }
 
 // disableAssistant stops every way an assistant can run for a disabled member.
@@ -262,9 +298,11 @@ func (e *Executor) DeleteAssistantKey(ctx context.Context) (assistantkey.State, 
 // refuses those starts, and the stop jobs complete. Disabling, which starts no
 // jobs, comes first: systemctl leaves the boot and timer links of a unit that
 // is already masked.
+//
+// It does not wait for assistantMu, which saving the key holds while it prepares every
+// member: a mask wins in either order against preparing the member's assistant, whose
+// enabling a mask refuses, so an account is closed at once.
 func (e *Executor) disableAssistant(ctx context.Context, username string) error {
-	e.assistantMu.Lock()
-	defer e.assistantMu.Unlock()
 	units, err := e.assistantUnits(username, assistantTemplates)
 	if err != nil || len(units) == 0 {
 		return err
@@ -278,10 +316,13 @@ func (e *Executor) disableAssistant(ctx context.Context, username string) error 
 	return errors.Join(failures...)
 }
 
-// enableAssistant undoes disableAssistant for an active member: it unmasks the units and,
-// while the administrator's key is saved, prepares the member's assistant and enables its
-// entry points. Without the key the member gets them when it is saved.
-func (e *Executor) enableAssistant(ctx context.Context, username string) error {
+// enableAssistant undoes disableAssistant for the active member username, whose account is
+// uid: it unmasks the units and, while the administrator's key is saved, prepares the
+// member's assistant and enables its entry points. Without the key the member gets them when
+// it is saved. The assistant is not part of the account: one that cannot be prepared is
+// logged and tried again with the next synchronization, the next saving of the key or the
+// data volume's reconciliation, and the account is enabled all the same.
+func (e *Executor) enableAssistant(ctx context.Context, username string, uid int) error {
 	e.assistantMu.Lock()
 	defer e.assistantMu.Unlock()
 	units, err := e.assistantUnits(username, assistantTemplates)
@@ -291,21 +332,54 @@ func (e *Executor) enableAssistant(ctx context.Context, username string) error {
 	if output, err := e.runner.Run(ctx, "systemctl", append([]string{"unmask"}, units...), ""); err != nil {
 		return commandError("unmask assistant units", err, output)
 	}
-	return e.prepareAssistant(ctx, username)
+	if err := e.prepareAssistant(ctx, username, uid); err != nil {
+		e.logger.ErrorContext(ctx, "the member's assistant is not ready", "username", username, "error", err)
+	}
+	return nil
 }
 
-// activeIdentities are the accounts the identity registry holds as enabled.
-func (e *Executor) activeIdentities() []string {
-	e.identitiesMu.Lock()
-	defer e.identitiesMu.Unlock()
-	var usernames []string
-	for username, record := range e.identities {
-		if record.Enabled {
-			usernames = append(usernames, username)
+// PrepareAssistants prepares, while the key is saved, the assistant of every active member
+// whose folders the data volume lacks: one prepared while the volume was not mounted, or a
+// volume made or mounted since. The Host Agent's reconciliation of the data volume calls it.
+func (e *Executor) PrepareAssistants(ctx context.Context) error {
+	if !e.dataVolumeReady() {
+		return nil
+	}
+	e.assistantMu.Lock()
+	defer e.assistantMu.Unlock()
+	if saved, err := e.assistantKeySaved(); err != nil || !saved {
+		return err
+	}
+	var failures []error
+	for _, member := range e.activeMembers() {
+		if _, err := os.Lstat(filepath.Join(e.mountPoint, "assistant", member.username, "hermes")); !errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err := e.prepareAssistant(ctx, member.username, member.uid); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", member.username, err))
 		}
 	}
-	slices.Sort(usernames)
-	return usernames
+	return errors.Join(failures...)
+}
+
+// assistantMember is an account the identity registry holds as enabled.
+type assistantMember struct {
+	username string
+	uid      int
+}
+
+// activeMembers are the accounts the identity registry holds as enabled, by name.
+func (e *Executor) activeMembers() []assistantMember {
+	e.identitiesMu.Lock()
+	defer e.identitiesMu.Unlock()
+	var members []assistantMember
+	for username, record := range e.identities {
+		if record.Enabled {
+			members = append(members, assistantMember{username: username, uid: record.UID})
+		}
+	}
+	slices.SortFunc(members, func(a, b assistantMember) int { return strings.Compare(a.username, b.username) })
+	return members
 }
 
 func (e *Executor) identityUID(username string) (int, bool) {
@@ -315,10 +389,10 @@ func (e *Executor) identityUID(username string) (int, bool) {
 	return record.UID, ok
 }
 
-// prepareAssistant makes the member's assistant ready to start and enables its entry points,
-// while the key is saved and the data volume is mounted; the caller holds assistantMu. Each
-// step is the same when it is done already.
-func (e *Executor) prepareAssistant(ctx context.Context, username string) error {
+// prepareAssistant makes the assistant of username, whose account is uid, ready to start and
+// enables its entry points, while the key is saved; the caller holds assistantMu. Each step
+// is the same when it is done already.
+func (e *Executor) prepareAssistant(ctx context.Context, username string, uid int) error {
 	saved, err := e.assistantKeySaved()
 	if err != nil || !saved {
 		return err
@@ -327,15 +401,11 @@ func (e *Executor) prepareAssistant(ctx context.Context, username string) error 
 	if err != nil || len(entries) == 0 {
 		return err
 	}
-	uid, known := e.identityUID(username)
-	if !known {
-		return fmt.Errorf("no identity for %s", username)
-	}
 	if err := e.prepareAssistantSettings(username); err != nil {
 		return err
 	}
-	// Without the volume the sandbox has nothing to bind and cannot start; the next identity
-	// synchronization or saving of the key makes its folders.
+	// Without the volume the sandbox has nothing to bind and cannot start; the reconciliation
+	// of the data volume makes its folders once it is mounted (PrepareAssistants).
 	if e.dataVolumeReady() {
 		if err := e.prepareAssistantFolders(ctx, username, uid); err != nil {
 			return err
@@ -475,10 +545,13 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	}
 	member := e.assistantMemberDir(username)
 	configPath := filepath.Join(member, "config.yaml")
+	// The hash already written stays while it is the secret's: a new salt would rewrite the
+	// file, and a running sandbox keeps the copy it bound.
 	hash := ""
 	if current, err := os.ReadFile(configPath); err == nil {
-		if match := hermesHashPattern.FindSubmatch(current); match != nil && hermesHashMatches(string(match[1]), password) {
-			hash = string(match[1])
+		var settings hermesSettings
+		if yaml.Unmarshal(current, &settings) == nil && hermesHashMatches(settings.Dashboard.BasicAuth.PasswordHash, password) {
+			hash = settings.Dashboard.BasicAuth.PasswordHash
 		}
 	}
 	if hash == "" {
@@ -486,7 +559,10 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 			return err
 		}
 	}
-	config := memberConfig(username, hash, managed)
+	config, err := memberConfig(username, hash, managed)
+	if err != nil {
+		return err
+	}
 	skillPath := filepath.Join(member, "skills", "anas-member", "SKILL.md")
 	for path, contents := range map[string][]byte{
 		configPath: config,
@@ -513,26 +589,26 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	return nil
 }
 
-// memberConfig is the member's config.yaml: the skill folders, the managed policy's MCP
-// servers again (serve's discovery reads the raw user config) and Hermes's login.
-func memberConfig(username, hash string, managed []byte) []byte {
-	var config strings.Builder
-	config.WriteString("# Written by the Host Agent (ADR 0024); read-only in the member's sandbox.\n")
-	config.WriteString("skills:\n  external_dirs: [/usr/lib/a-nas/assistant/skills, /run/anas-assistant-skills]\n")
-	inServers := false
-	for line := range strings.Lines(string(managed)) {
-		switch {
-		case strings.HasPrefix(line, "mcp_servers:"):
-			inServers = true
-		case inServers && line != "\n" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "#"):
-			inServers = false
-		}
-		if inServers && line != "\n" {
-			config.WriteString(line)
-		}
+// memberConfig is the member's config.yaml (hermesSettings), with the MCP servers of the
+// managed policy. The YAML encoder quotes a name such as yes, off or null, which Hermes's
+// YAML 1.1 reader would otherwise take for a boolean or nothing.
+func memberConfig(username, hash string, managed []byte) ([]byte, error) {
+	var policy struct {
+		MCPServers map[string]any `yaml:"mcp_servers"`
 	}
-	fmt.Fprintf(&config, "dashboard:\n  basic_auth:\n    username: %s\n    password_hash: %q\n", username, hash)
-	return []byte(config.String())
+	if err := yaml.Unmarshal(managed, &policy); err != nil {
+		return nil, fmt.Errorf("read the assistant's managed policy: %w", err)
+	}
+	var settings hermesSettings
+	settings.Skills.ExternalDirs = []string{"/usr/lib/a-nas/assistant/skills", "/run/anas-assistant-skills"}
+	settings.MCPServers = policy.MCPServers
+	settings.Dashboard.BasicAuth.Username = username
+	settings.Dashboard.BasicAuth.PasswordHash = hash
+	body, err := yaml.Dump(&settings, yaml.WithV4Defaults(), yaml.WithLineWidth(-1))
+	if err != nil {
+		return nil, fmt.Errorf("write the member's Hermes settings: %w", err)
+	}
+	return append([]byte("# Written by the Host Agent (ADR 0024); read-only in the member's sandbox.\n"), body...), nil
 }
 
 func hermesHash(password string) (string, error) {

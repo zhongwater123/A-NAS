@@ -46,7 +46,8 @@ func (e *Executor) EnableCredential(ctx context.Context, request accountid.Enabl
 	if err := e.setIdentityEnabled(request.Username, true); err != nil {
 		return err
 	}
-	return errors.Join(e.mirrorIdentityManifest(), e.enableAssistant(ctx, request.Username))
+	uid, _ := e.identityUID(request.Username)
+	return errors.Join(e.mirrorIdentityManifest(), e.enableAssistant(ctx, request.Username, uid))
 }
 
 // handoverPrefix names the directory a transferred personal space is copied

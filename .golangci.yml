@@ -77,6 +77,8 @@ linters:
             - "github.com/google/renameio/v2$"
             - "github.com/landlock-lsm/go-landlock/landlock"
             - "github.com/mattn/go-sqlite3"
+            # The member's Hermes settings (internal/hostops/linux/assistant.go).
+            - "go.yaml.in/yaml/v4"
             - "golang.org/x/crypto/scrypt"
             - "golang.org/x/sync/singleflight"
             - "golang.org/x/sys/unix"

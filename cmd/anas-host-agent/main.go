@@ -92,10 +92,10 @@ type config struct {
 	// the executor of its changes, which keeps the copies the members' cards
 	// show beside the assistant directories (by default assistant/.changes on
 	// the data volume), where only root may read them. The instance secrets
-	// are the Host Agent's own, written when it prepares a member's assistant.
+	// are the Host Agent's own, written where the executor prepares a member's
+	// assistant (Executor.AssistantTokenDir), so they have no setting.
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
-	AssistantTokens        string `env:"ANAS_ASSISTANT_TOKEN_DIR" envDefault:"/var/lib/a-nas-host/assistant/tokens"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
 	// The scheduled tasks members asked to run now wait here for a round of
 	// their cron unit (ai/assistant/run-requests.sh reads the same place).
@@ -212,9 +212,10 @@ func run(logger *slog.Logger) error {
 	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
-		AssistantTokens:  config.AssistantTokens,
+		AssistantTokens:  executor.AssistantTokenDir(),
 		AssistantChanges: assistantChanges,
 		AssistantRuns:    config.AssistantRuns,
+		AssistantOn:      executor.AssistantOn,
 		Accounts:         sessions,
 		Scopes:           scopes,
 	})
@@ -400,6 +401,11 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, module
 		logRepairs(logger, repaired)
 		ensureManagedStores(ctx, executor, logger)
 		ensureModuleStores(ctx, executor, moduleManifests, logger, nil)
+		// A member whose assistant was prepared while the volume was not mounted gets its
+		// folders once it is (ADR 0024).
+		if err := executor.PrepareAssistants(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "members' assistants not prepared on the data volume", "error", err)
+		}
 		continueConversion(ctx, executor, logger)
 		restoreRedundancy(ctx, executor, logger)
 	}

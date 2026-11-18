@@ -73,7 +73,7 @@ func (e *Executor) syncIdentity(ctx context.Context, identity accountid.Identity
 	if identity.Enabled {
 		// Enabling an account again may have stopped part way; this finishes it.
 		if err := errors.Join(e.unlockAccount(ctx, identity.Username), e.enableSambaIfPresent(ctx, identity.Username),
-			e.enableAssistant(ctx, identity.Username)); err != nil {
+			e.enableAssistant(ctx, identity.Username, identity.UID)); err != nil {
 			return err
 		}
 	} else if err := errors.Join(e.disableSambaIfPresent(ctx, identity.Username), e.disableAssistant(ctx, identity.Username)); err != nil {

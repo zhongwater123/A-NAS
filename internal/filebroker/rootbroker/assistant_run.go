@@ -61,6 +61,11 @@ func (s *Server) serveAssistantRun(req wire.Request) wire.Response {
 	if s.config.AssistantSockets == "" || s.config.AssistantRuns == "" {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is not enabled"}}
 	}
+	// Without the administrator's key the round would find no model, and a request left
+	// waiting would run whenever a key is saved again.
+	if s.config.AssistantOn != nil && !s.config.AssistantOn() {
+		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is off: no model key is saved"}}
+	}
 	if !accountid.ValidAssistantAccount(identity.Username) {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeForbidden, Message: "this account has no assistant"}}
 	}

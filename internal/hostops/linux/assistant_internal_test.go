@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v4"
 )
 
 // Hermes's own hash_password with this salt (Python's hashlib.scrypt, n=2**14, r=8, p=1,
@@ -34,12 +37,12 @@ const managedPolicy = `model:
 mcp_servers:
   anas:
     command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
-    # A comment inside the block stays.
+    # A comment inside the block.
     args: [/usr/lib/a-nas/assistant/anas_mcp.py]
 
   desktop:
     trust: full
-# The comment before the next key stays too, as the trial's sed kept it.
+# The policy's own skills, which the member's settings do not repeat.
 skills:
   external_dirs: [/usr/lib/a-nas/assistant/skills]
 `
@@ -74,17 +77,31 @@ func TestMemberSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "skills:\n  external_dirs: [/usr/lib/a-nas/assistant/skills, /run/anas-assistant-skills]\n" +
-		"mcp_servers:\n  anas:\n    command: /usr/lib/a-nas/assistant/runtime/venv/bin/python\n    # A comment inside the block stays.\n" +
-		"    args: [/usr/lib/a-nas/assistant/anas_mcp.py]\n  desktop:\n    trust: full\n" +
-		"# The comment before the next key stays too, as the trial's sed kept it.\n" +
-		"dashboard:\n  basic_auth:\n    username: alice\n    password_hash: \""
-	if !strings.Contains(string(config), want) || strings.Contains(string(config), "deepseek-flash") {
+	// What Hermes reads: the skill folders, the managed policy's MCP servers and nothing else
+	// of it, and the login.
+	var settings struct {
+		Skills struct {
+			ExternalDirs []string `yaml:"external_dirs"`
+		} `yaml:"skills"`
+		MCPServers map[string]map[string]any `yaml:"mcp_servers"`
+		Model      any                       `yaml:"model"`
+		Dashboard  struct {
+			BasicAuth struct {
+				Username     string `yaml:"username"`
+				PasswordHash string `yaml:"password_hash"`
+			} `yaml:"basic_auth"`
+		} `yaml:"dashboard"`
+	}
+	if err := yaml.Unmarshal(config, &settings); err != nil {
+		t.Fatalf("config.yaml does not read as YAML: %v\n%s", err, config)
+	}
+	if !slices.Equal(settings.Skills.ExternalDirs, []string{"/usr/lib/a-nas/assistant/skills", "/run/anas-assistant-skills"}) ||
+		settings.MCPServers["anas"]["command"] != "/usr/lib/a-nas/assistant/runtime/venv/bin/python" ||
+		settings.MCPServers["desktop"]["trust"] != "full" || settings.Model != nil || settings.Dashboard.BasicAuth.Username != "alice" {
 		t.Fatalf("config.yaml:\n%s", config)
 	}
-	match := hermesHashPattern.FindSubmatch(config)
 	password := strings.TrimSpace(strings.TrimPrefix(string(secret), assistantSecret))
-	if match == nil || !hermesHashMatches(string(match[1]), password) {
+	if !hermesHashMatches(settings.Dashboard.BasicAuth.PasswordHash, password) {
 		t.Fatalf("the login does not take the instance's secret:\n%s", config)
 	}
 	skill, err := os.ReadFile(filepath.Join(executor.assistantMemberDir("alice"), "skills", "anas-member", "SKILL.md"))
@@ -100,5 +117,30 @@ func TestMemberSettings(t *testing.T) {
 	again, _ := os.ReadFile(executor.assistantTokenPath("alice"))
 	if !os.SameFile(before, after) || !bytes.Equal(secret, again) {
 		t.Fatal("preparing again replaced the settings")
+	}
+}
+
+// Hermes reads config.yaml as YAML 1.1, where yes, off and the like are booleans and null is
+// nothing: account names that are such words must reach its login as the names they are.
+func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
+	for _, username := range []string{"yes", "off", "null", "true", "false", "on1", "y-1"} {
+		config, err := memberConfig(username, "scrypt$16384$8$1$c2FsdA==$a2V5", []byte(managedPolicy))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var line string
+		for candidate := range strings.Lines(string(config)) {
+			if trimmed := strings.TrimSpace(candidate); strings.HasPrefix(trimmed, "username:") {
+				line = trimmed
+			}
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "username:"))
+		// A plain scalar is read by YAML 1.1's rules; a quoted one is always a string.
+		if value != username && value != "'"+username+"'" && value != `"`+username+`"` {
+			t.Fatalf("%s: %q", username, line)
+		}
+		if value == username && slices.Contains([]string{"yes", "off", "null", "true", "false"}, username) {
+			t.Fatalf("%s is written plain, which Hermes reads as no name: %q", username, line)
+		}
 	}
 }

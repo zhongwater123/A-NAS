@@ -222,20 +222,30 @@ func TestDisablingReportsAUnitThatDidNotStop(t *testing.T) {
 	}
 }
 
-// credsHost is the fake host with systemd-creds, which writes what it encrypts, and
-// systemctl show, which reports the model gateway running.
-type credsHost struct{ *fakeHost }
+// credsHost is the fake host with systemd-creds, which answers what it encrypts, systemctl
+// show, which reports the model gateway running, and systemctl commands that fail as many
+// times as cancelled says, as a stop does whose job a start replaced.
+type credsHost struct {
+	*fakeHost
+	cancelled map[string]int
+}
 
 func (h credsHost) Run(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
-	if name == "systemd-creds" {
-		h.commands = append(h.commands, name+" "+strings.Join(args, " "))
-		return nil, os.WriteFile(args[len(args)-1], []byte("encrypted:"+stdin), 0o644)
+	command := name + " " + strings.Join(args, " ")
+	if h.cancelled[command] > 0 {
+		h.cancelled[command]--
+		h.commands = append(h.commands, command)
+		return []byte("Job for anas-assistant@alice.service canceled."), errors.New("exit status 1")
 	}
 	return h.fakeHost.Run(ctx, name, args, stdin)
 }
 
 func (h credsHost) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
-	if name == "systemctl" && args[0] == "show" {
+	switch {
+	case name == "systemd-creds":
+		h.commands = append(h.commands, name+" "+strings.Join(args, " "))
+		return []byte("encrypted:" + stdin), nil
+	case name == "systemctl" && args[0] == "show":
 		h.commands = append(h.commands, name+" "+strings.Join(args, " "))
 		return []byte("active\n"), nil
 	}
@@ -244,7 +254,7 @@ func (h credsHost) Output(ctx context.Context, name string, args []string, stdin
 
 func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 	root := installedAssistant(t)
-	host := credsHost{newFakeHost()}
+	host := credsHost{newFakeHost(), map[string]int{}}
 	executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
 	ctx := context.Background()
 	if err := executor.SyncIdentities(ctx, []accounts.Identity{
@@ -277,7 +287,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		t.Fatalf("credential mode %v", info.Mode())
 	}
 	for _, command := range []string{
-		"systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - " + credential + ".incoming",
+		"systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - -",
 		"systemctl restart --no-block anas-assistant-gateway.service",
 		"systemctl start --no-block anas-assistant-cron-waker.service",
 		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
@@ -291,6 +301,10 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 			t.Fatalf("the key is on a command line: %s", command)
 		}
 	}
+	// A start queued while alice's assistant stops (立即运行, her socket) replaces the stop
+	// job once; without the key it runs nothing, and stopping again finds it stopped.
+	stopAlice := "systemctl stop anas-assistant@alice.service anas-assistant-api@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service anas-assistant-net@alice.service"
+	host.cancelled[stopAlice] = 1
 	state, err = executor.DeleteAssistantKey(ctx)
 	if err != nil || state.Configured {
 		t.Fatalf("DeleteAssistantKey() = %+v, %v", state, err)
@@ -301,11 +315,20 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 	for _, command := range []string{
 		"systemctl stop anas-assistant-cron-waker.service anas-assistant-gateway.service",
 		"systemctl disable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
-		"systemctl stop anas-assistant@alice.service anas-assistant-api@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service anas-assistant-net@alice.service",
+		stopAlice,
 	} {
 		if !host.ran(command) {
 			t.Errorf("did not run %q:\n%s", command, strings.Join(host.commands, "\n"))
 		}
+	}
+	stops := 0
+	for _, command := range host.commands {
+		if command == stopAlice {
+			stops++
+		}
+	}
+	if stops != 2 {
+		t.Errorf("alice's assistant was stopped %d times, want again after the cancelled stop", stops)
 	}
 	for _, command := range host.commands {
 		if strings.Contains(command, "@bob.") && !strings.HasPrefix(command, "systemctl disable anas-") && !strings.HasPrefix(command, "systemctl mask") {
