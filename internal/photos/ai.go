@@ -80,14 +80,18 @@ type TextReader interface {
 }
 
 // CardDescriber is the AI Worker's text reader describing a montage card
-// from its key frames (docs/architecture/montage-center.md#卡片描述). An
+// from its key frames (docs/architecture/photo-ai.md, 剪辑中心的分析). An
 // Embedder that is also a CardDescriber describes the cards of the videos a
 // montage grant asked for while its Info names a text reader.
 type CardDescriber interface {
 	// DescribeFrames describes one card from its key frames, in order, as
 	// card lays them out. It returns the reader's model, the prompt's
-	// template and the description, JSON the template's schema allows.
-	// Cancelling ctx stops it in the Worker.
+	// template and the description, JSON the template's schema allows. Each
+	// beat's "frames" there are the first and last of its key frames,
+	// counted from 1 among frames; the Worker describes a card with more
+	// than its reader's context holds from some of them, so a description
+	// may have fewer beats than the card has key frames. Cancelling ctx
+	// stops it in the Worker.
 	DescribeFrames(ctx context.Context, frames []*os.File, card CardLayout) (model, template string, description json.RawMessage, err error)
 }
 

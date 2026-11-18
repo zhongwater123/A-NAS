@@ -45,12 +45,15 @@ OP_EMBED_ANIMALS = "embed_animals"
 # answer; "logprobs", [token, log probability] for each token; "finish", why
 # the answer ended: "stop", "length" or "repetition"}. Hanging up cancels it.
 OP_READ_TEXT = "read_text"
-# Describes a montage card (docs/architecture/montage-center.md#卡片描述) from
+# Describes a montage card (docs/architecture/photo-ai.md, 剪辑中心的分析) from
 # its key frames, one descriptor each, 3 to MAX_FDS: "offsets", each frame's
 # seconds from the card's start; "groups", the beat each frame belongs to,
 # counted from 1 in order; "duration", the card's seconds. The prompt, the
 # genre and the schema are the Worker's own, "template" in the answer;
 # answers "model", "template" and "description", the JSON the schema allows.
+# Each of its beats has "frames", the first and last of its key frames
+# counted from 1 among those sent; a card with more than the reader's context
+# holds is described from some of them, so it has fewer beats than frames.
 # Hanging up cancels it.
 OP_DESCRIBE_FRAMES = "describe_frames"
 # Frees memory: "what" is "detector" to drop the background models (the
