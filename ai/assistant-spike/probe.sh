@@ -31,7 +31,7 @@ echo "INFO caps: $(grep CapEff /proc/self/status)"
 if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
   # Streamed, not held: an empty listing proves nothing, so getfacl must have listed files.
   expect_ok "nothing in the sandbox grants a-nas-admins" sh -c \
-    'getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null |
+    'getfacl -R -p /nas /var/lib/hermes-home /run /usr/lib/a-nas/assistant /opt/a-nas 2>/dev/null |
       awk "/^# file: /{n++} /^(# group: |(default:)?group:)a-nas-admins(:|\$)/{bad=1} END{exit !(n > 0 && !bad)}"'
   exit 0
 fi
@@ -65,13 +65,15 @@ expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待
 # The directories below are made inaccessible when they exist outside the sandbox
 # (InaccessiblePaths=-), so inside it their contents cannot be told apart from nothing.
 connect='import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])'
-if [ -e /etc/anas-spike ]; then
-  expect_hidden "read the gateway's model key" 'Permission denied' cat /etc/anas-spike/model.key
+if [ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]; then
+  expect_hidden "read the gateway's model key" 'Permission denied' cat /etc/credstore.encrypted/a-nas-assistant-deepseek
+elif [ -e /etc/anas-spike ]; then
+  expect_hidden "read the spike gateway's model key" 'Permission denied' cat /etc/anas-spike/model.key
 else
   echo "INFO model key: none here (the scripted model)"
 fi
-expect_hidden "read its own serve session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/alice.env
-expect_hidden "read another member's session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/bob.env
+expect_hidden "read its own serve session token" 'Permission denied' cat /var/lib/a-nas-host/assistant/tokens/alice.env
+expect_hidden "read another member's session token" 'Permission denied' cat /var/lib/a-nas-host/assistant/tokens/bob.env
 if [ -e /run/anas-spike-broker ]; then
   expect_hidden "reach the change broker's product socket" 'Permission denied' python3 -c "$connect" /run/anas-spike-broker/broker.sock
 else
@@ -88,8 +90,8 @@ expect_refused "add a Hermes plugin"                'Read-only file system' mkdi
 expect_refused "add a Hermes profile"               'Read-only file system' mkdir /var/lib/hermes-home/profiles/x
 expect_refused "set a sticky Hermes profile"        'Read-only file system' sh -c 'echo x > /var/lib/hermes-home/active_profile'
 expect_ok   "write Hermes state"                 sh -c 'echo x > /var/lib/hermes-home/probe-state'
-expect_refused "write into /etc/hermes policy"      'Permission denied' sh -c 'echo x >> /etc/hermes/config.yaml'
-expect_refused "write into the system skills"   'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-skills/x'
+expect_refused "write into the managed policy"  'Permission denied' sh -c 'echo x >> /usr/lib/a-nas/assistant/managed/config.yaml'
+expect_refused "write into the system skills"   'Read-only file system' sh -c 'echo x > /usr/lib/a-nas/assistant/skills/x'
 if [ -d /opt/a-nas/assistant-runtimes/spike ]; then
   expect_refused "write into /opt runtime"       'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
 else
@@ -114,7 +116,7 @@ expect_refused "setuid to root"                  'Operation not permitted' pytho
 expect_refused "unshare a user namespace"        'Operation not permitted' unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
 # The photo service's assistant socket (#113): the spike's photo service (SPIKE_PHOTOS) or,
-# on the real installer's layout, A-NAS's own with product-settings.sh.
+# on an A-NAS, the photo service's own (anas-photos-assistant.socket).
 photos=/run/anas-assistant-photos/photos.sock
 if [ -S "$photos" ]; then
   expect_ok   "read own and shared photo libraries" sh -c "python3 /spike/photos_peer.py $photos libraries | grep -q 'private:.*shared:'"
@@ -141,7 +143,7 @@ else
 fi
 # Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
 # Hermes upgrade that adds one fails here (toolsets-check.py).
-if [ ! -x /opt/a-nas/assistant-runtimes/spike/venv/bin/python ]; then
+if [ ! -x /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes ]; then
   echo "INFO toolsets check skipped: no Hermes runtime"
 elif out=$(/opt/a-nas/assistant-runtimes/spike/venv/bin/python /spike/toolsets-check.py 2>&1); then
   ok "every Hermes toolset allowed or disabled ($(tail -n 1 <<<"$out"))"

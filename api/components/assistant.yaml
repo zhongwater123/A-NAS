@@ -10,6 +10,21 @@ schemas:
     required: [available]
     properties:
       available: { type: boolean, description: The member has an assistant instance. }
+      reason: { type: string, enum: [no_key], description: "Why not, when it is known: no_key while no administrator has saved the DeepSeek key." }
+  AssistantKeyState:
+    type: object
+    additionalProperties: false
+    required: [configured, gateway]
+    properties:
+      configured: { type: boolean, description: A key is saved; every active member has VNAS. }
+      gateway: { type: string, enum: [running, starting, stopped, failed], description: "What systemd reports of the model gateway, which holds the key." }
+  AssistantKeyRequest:
+    type: object
+    additionalProperties: false
+    required: [key, acknowledged]
+    properties:
+      key: { type: string, minLength: 16, maxLength: 512, description: "The DeepSeek API key (printable ASCII, no spaces)." }
+      acknowledged: { type: boolean, description: "The administrator confirmed that what VNAS handles goes to DeepSeek; must be true." }
   AssistantSession:
     type: object
     additionalProperties: false
@@ -167,8 +182,15 @@ schemas:
             path: { type: string, description: "Path as the assistant sees it, under /nas." }
             to: { type: string, description: Destination of a move. }
             from: { type: string, description: "What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder)." }
-            size: { type: integer, description: "Bytes a copy copies; a folder's files together." }
+            size: { type: integer, description: "Bytes a copy copies, a folder's files together, or a write leaves." }
             folder: { type: boolean, description: A copy of a whole folder. }
             exists: { type: boolean, description: The target existed when the card was made. }
             before: { type: string, description: "Text of a written file when the card was made; absent when it is new or not text." }
-            after: { type: string, description: "Text the write leaves; absent when it is not text." }
+            after: { type: string, description: "Text the write leaves, at most its first 64 KiB; absent when it is not text." }
+            beforeSize: { type: integer, description: "Bytes of the file a write replaces." }
+            partial: { type: boolean, description: "after is only the start of what the write leaves: the member has not seen all of it." }
+            binary: { type: boolean, description: "What the write leaves is not text, so the card shows none of it." }
+            beforePartial: { type: boolean, description: "before is only the start of the file the write replaces." }
+            beforeBinary: { type: boolean, description: "The old file's preview is not UTF-8 text and is not displayed." }
+            hiddenSize: { type: integer, description: "Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary." }
+            beforeHiddenSize: { type: integer, description: "Bytes of old content omitted from before." }

@@ -1,5 +1,5 @@
 [Unit]
-Description=A-NAS assistant API bridge for %i (spike)
+Description=A-NAS assistant API bridge for %i
 Requires=anas-assistant@%i.service anas-assistant-api@%i.socket
 After=anas-assistant@%i.service anas-assistant-api@%i.socket
 # Enters the assistant's private network namespace, so 127.0.0.1:9119 is its

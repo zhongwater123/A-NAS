@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bot,
   ChevronRight,
   CircleFadingArrowUp,
   Globe,
@@ -32,6 +33,7 @@ import { displayName } from "../people/people";
 import { hasNewVersion, useSystemUpdate, waitsForRestart } from "../systemupdate/status";
 import { useToasts } from "../ui/feedback";
 import { AccountSection } from "./AccountSection";
+import { AssistantSection } from "./AssistantSection";
 import { roleLabel } from "./labels";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
 import { OverviewSection } from "./OverviewSection";
@@ -61,7 +63,8 @@ export type SettingsSection =
   | "logs"
   | "terminal"
   | "task-manager"
-  | "web-search";
+  | "web-search"
+  | "assistant";
 
 interface SectionLink {
   id: SettingsSection;
@@ -82,6 +85,7 @@ const sectionGroups: SectionLink[][] = [
     { id: "users", label: "用户与权限", icon: UsersRound, adminOnly: true },
     { id: "personalization", label: "个性化", icon: Palette, adminOnly: true },
     { id: "web-search", label: "网页搜索", icon: Globe, adminOnly: true },
+    { id: "assistant", label: "VNAS", icon: Bot, adminOnly: true },
   ],
   [
     { id: "logs", label: "日志", icon: ScrollText },
@@ -107,6 +111,7 @@ export function SettingsPanel({
   storagePlan,
   onUserChange,
   onLogout,
+  onAssistantKeyChange,
 }: {
   session: Session;
   host: HostStateView;
@@ -116,6 +121,8 @@ export function SettingsPanel({
   // onUserChange receives the account after its owner changed the nickname or avatar.
   onUserChange: (user: User) => void;
   onLogout: () => void;
+  // onAssistantKeyChange tells the desktop that VNAS was turned on or off for everyone.
+  onAssistantKeyChange?: () => void;
 }) {
   const { user } = session;
   const isAdmin = user.role === "admin";
@@ -257,6 +264,7 @@ export function SettingsPanel({
               {current === "system-update" && <SystemUpdateSection onOpenLogs={() => openLogs("system")} />}
               {current === "personalization" && <PersonalizationSection />}
               {current === "web-search" && <WebSearchSection />}
+              {current === "assistant" && <AssistantSection onKeyChange={onAssistantKeyChange} />}
               {current === "users" && (
                 <UsersSection
                   currentUser={user}
