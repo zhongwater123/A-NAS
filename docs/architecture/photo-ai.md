@@ -105,6 +105,8 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 每轮先做它：一个视频一个任务，每轮只做 30 个窗口（一块），没做完就放回队首、不耗尝试次数，下一轮先问门控；块内每 30 秒续一次租约。
   - 取帧用 FFmpeg Worker 的 `frames`（后台优先级），按缩略图的流程转成长边 512、质量 82 的 JPEG，灰度标准差小于 8 记为纯色，再交给 `embed_image`。前台有人用或内存不足时立即挂断，已算完的窗口保留；CPU、I/O 压力只在块与块之间生效。
   - 结果存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用；同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
+  - 窗口完成后排 `montage-cards/v1`，再按卡片逐张排 `montage-quality/v1`。Catalog 第 19 步建 `video_cards`、`video_card_quality` 与 `montage_card_results`，并记录回滚步骤。完成身份包含上游分析身份，也记录零卡片和零画质的成功结果。授权的 `analysis` 返回两项身份，`analyze(retry=true)` 重排失败的任务。
+  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。相册进入前台或内存不足时中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
   - 换模型时只重排仍被未撤销的授权引用的对象；没有授权引用满 7 天的分析由每小时的维护删除。
 
 ### 存储（Catalog migration 4–7）

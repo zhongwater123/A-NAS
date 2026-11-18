@@ -123,6 +123,79 @@ func TestValidateDocumentationNamesOneDeployedCommit(t *testing.T) {
 	}
 }
 
+func TestValidateDocumentationKeepsNextStepsToWhatIsLeft(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		currentDocument: "# 当前状态\n\n更新时间：2026-11-18\n\n## 实验 NAS 上运行什么\n\n" +
+			"- 已部署：`c738affa140b`；相册排序从索引读，2026-11-10 已部署（#411）。\n\n" +
+			"## 下一步\n\n" +
+			"1. 按[已部署功能的实机验收手册](../runbooks/accept.md)逐模块核对。\n" +
+			"2. 向量索引：2026-11-10 已部署（#411）；按手册核对。\n" +
+			"3. 家庭中心 M2：认领、隐藏；数据修复已随 `61744597719c` 部署。\n" +
+			"- 核对已部署的容器有没有日志上限。<!-- doccheck: not a status -->\n" +
+			"4. " + strings.Repeat("长", nextStepMaxRunes-2) + "[链接](../specs/" + strings.Repeat("x", 200) + ".md)\n" +
+			"5. " + strings.Repeat("长", nextStepMaxRunes-1) + "[链接](../specs/long.md)\n" +
+			"\n这一段不是条目，" + strings.Repeat("长", nextStepMaxRunes) + "。\n" +
+			"\n## 备注\n\n- 这里可以写已部署。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		currentDocument + ":12: a next step says 已部署",
+		currentDocument + ":13: a next step says 已随 `61744597719c` 部署",
+		fmt.Sprintf("%s:16: a next step is %d characters without its link targets, over %d", currentDocument, nextStepMaxRunes+1, nextStepMaxRunes),
+	})
+}
+
+func TestValidateDocumentationChainsStatusSnapshots(t *testing.T) {
+	current := "# 当前状态\n\n更新时间：2026-11-18\n\n- 已部署：`c738affa140b`，软件包\n"
+	snapshot := func(deployed, next string) string {
+		return "# 状态快照\n\n本页是历史快照，现状见[当前状态](CURRENT.md)。\n\n下一次部署：`" + next + "`\n\n" +
+			"- 已部署：`" + deployed + "`（尚未部署的 #245 随下一次部署）\n"
+	}
+	tests := map[string]struct {
+		documents map[string]string
+		want      []string
+	}{
+		"chain": {documents: map[string]string{
+			"docs/status/2026-11-04.md":   snapshot("70853075ca40", "61744597"),
+			"docs/status/2026-11-10.md":   snapshot("61744597719c", "0f04f74e"),
+			"docs/status/2026-11-10-2.md": snapshot("0f04f74e", "c738affa140b"),
+		}},
+		"deploy without a snapshot": {
+			documents: map[string]string{"docs/status/2026-11-04.md": snapshot("70853075ca40", "61744597719c")},
+			want:      []string{currentDocument + " names c738affa140b as deployed, but the newest snapshot docs/status/2026-11-04.md says the next deploy was 61744597719c"},
+		},
+		"gap": {
+			documents: map[string]string{
+				"docs/status/2026-11-04.md": snapshot("70853075ca40", "61744597719c"),
+				"docs/status/2026-11-16.md": snapshot("bfb8f04b", "c738affa140b"),
+			},
+			want: []string{"docs/status/2026-11-04.md says the next deploy was 61744597719c, but docs/status/2026-11-16.md records bfb8f04b as deployed"},
+		},
+		"unmarked": {
+			documents: map[string]string{
+				"docs/status/2026-11-04.md": "# 当前状态\n\n- 已部署：`70853075ca40`\n",
+				"docs/status/2026-11-10.md": "# 状态快照\n\n下一次部署：`c738affa140b`\n\n- 已部署：`61744597719c`\n",
+				"docs/status/notes.md":      "# 说明\n",
+			},
+			want: []string{
+				"docs/status/2026-11-04.md needs exactly one line starting with 下一次部署：`<commit>`",
+				"docs/status/2026-11-10.md: say that it is a snapshot and link " + currentDocument,
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: current})
+			writeDocuments(t, root, test.documents)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
 func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)

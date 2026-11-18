@@ -49,6 +49,17 @@ for tool in "${required_tools[@]}"; do
   fi
 done
 
+# make ai-sdk-test builds a virtual environment and runs pip in it. Debian and
+# Ubuntu ship ensurepip in python3-venv, not with python3 itself.
+if command -v python3 >/dev/null 2>&1; then
+  if python3 -c 'import ensurepip' >/dev/null 2>&1; then
+    printf '  [ok]      python3 ensurepip\n'
+  else
+    printf '  [missing] python3 ensurepip (install python3-venv)\n'
+    missing=1
+  fi
+fi
+
 printf '\nOptional or pending-decision tools:\n'
 for tool in "${optional_tools[@]}"; do
   if command -v "$tool" >/dev/null 2>&1; then

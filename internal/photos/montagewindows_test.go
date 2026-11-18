@@ -130,12 +130,18 @@ func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegwork
 // fakeCompute stands in for the montage compute Worker: two cards per video,
 // halves of its windows, and every card good.
 type fakeCompute struct {
-	mu        sync.Mutex
-	qualities int
-	moves     []int
+	mu         sync.Mutex
+	qualities  int
+	moves      []int
+	empty      bool
+	cardsErr   error
+	qualityErr error
 }
 
 func (c *fakeCompute) Cards(_ context.Context, windows []photos.CardWindow, _ []float32, _ int, _ []bool) ([]photos.ComputedCard, error) {
+	if c.empty || c.cardsErr != nil {
+		return nil, c.cardsErr
+	}
 	half := len(windows) / 2
 	card := func(from, to int) photos.ComputedCard {
 		start, end := windows[from].Start, windows[to-1].End
@@ -158,6 +164,9 @@ func (c *fakeCompute) SharpPoints(context.Context, []byte, int, int) (float64, e
 func (c *fakeCompute) Quality(_ context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.qualityErr != nil {
+		return photos.CardQuality{}, c.qualityErr
+	}
 	c.qualities++
 	c.moves = append(c.moves, len(measures.Moves))
 	return photos.CardQuality{Blur: measures.Blurs[0], Blocked: 0.1, Points: measures.Points, Reasons: []string{}}, nil
@@ -477,6 +486,76 @@ func TestCardsAndTheirQualityFollowTheWindows(t *testing.T) {
 	if f.compute.moves[0] != 34*10-1 {
 		t.Fatalf("moves of the first card = %d, want one between each pair of its 340 frames", f.compute.moves[0])
 	}
+}
+
+func TestMontageAnalysisBackfillsAndFinishesAnEmptyResult(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	f.compute.empty = true
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	owner := granting(namedAlice)
+	grant, err := f.service.RegisterGrant(ctx, owner, "project:empty", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); !worked || err != nil {
+			t.Fatalf("process windows = %v, %v", worked, err)
+		}
+	}
+	// Simulate a result made on M5, where the windows left no card job.
+	if _, err := catalog(t, f.root).Exec("DELETE FROM jobs WHERE derivation = 'montage-cards/v1'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	analysis, _, err := f.service.AnalysisOfGrant(ctx, owner, grant.ID, video.ID)
+	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone ||
+		analysis.CardsIdentity == "" || analysis.QualityIdentity == "" || len(analysis.CardList) != 0 {
+		t.Fatalf("empty analysis = %+v, %v", analysis, err)
+	}
+}
+
+func TestMontageAnalysisRetriesBothDownstreamStages(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	owner := granting(namedAlice)
+	grant, err := f.service.RegisterGrant(ctx, owner, "project:retry", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyze := func(retry bool) {
+		t.Helper()
+		if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, retry); err != nil {
+			t.Fatal(err)
+		}
+		processAI(t, f.service, f.embedder, f.gate)
+	}
+	state := func(cards, quality photos.AnalysisState) {
+		t.Helper()
+		asset, err := f.service.LookupGrant(ctx, owner, grant.ID, []string{video.ID})
+		if err != nil || len(asset) != 1 || asset[0].Cards != cards || asset[0].Quality != quality {
+			t.Fatalf("lookup = %+v, %v; want %q and %q", asset, err, cards, quality)
+		}
+	}
+	f.compute.cardsErr = photos.ErrComputeInvalidResult
+	analyze(false)
+	state(photos.AnalysisFailed, photos.AnalysisNone)
+	f.compute.cardsErr = nil
+	f.compute.qualityErr = photos.ErrComputeInvalidResult
+	analyze(true)
+	state(photos.AnalysisDone, photos.AnalysisFailed)
+	f.compute.qualityErr = nil
+	analyze(true)
+	state(photos.AnalysisDone, photos.AnalysisDone)
 }
 
 // A video queued for the window index when no video has windows any more,

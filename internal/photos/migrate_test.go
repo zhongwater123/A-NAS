@@ -152,6 +152,7 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 var undoMontageGrants = []string{
 	"DROP TABLE video_card_quality",
 	"DROP TABLE video_cards",
+	"DROP TABLE montage_card_results",
 	"DELETE FROM schema_downgrades WHERE version = 19",
 	"DROP TRIGGER assets_window_outbox_update",
 	"DROP TRIGGER assets_window_outbox_delete",

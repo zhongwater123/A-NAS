@@ -95,7 +95,7 @@ func (s *Service) finishMontageError(ctx context.Context, job claimedJob, err er
 	switch {
 	case ctx.Err() != nil:
 		return false, s.returnJob(context.WithoutCancel(ctx), job)
-	case errors.Is(err, ErrComputeUnavailable), errors.Is(err, ffmpegworker.ErrUnavailable):
+	case errors.Is(err, ErrComputeUnavailable), errors.Is(err, ffmpegworker.ErrUnavailable), errors.Is(err, context.Canceled):
 		return false, s.releaseJob(ctx, job)
 	case errors.Is(err, ErrComputeInvalidResult):
 		return true, s.failJob(ctx, job, jobErrorInvalidResult)
@@ -197,14 +197,14 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 	version := cardsVersion(identity)
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var current bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = ? AND j.derivation = ? AND "+cardsReady+
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = ? AND j.derivation = ? AND j.state = 'running' AND j.attempts = ? AND "+cardsReady+
 			" AND EXISTS (SELECT 1 FROM video_windows w WHERE w.object_id = j.object_id AND w.identity = ?))",
-			job.objectID, cardsDerivation, identity).Scan(&current); err != nil {
+			job.objectID, cardsDerivation, job.attempts, identity).Scan(&current); err != nil {
 			return err
 		}
 		if !current {
-			_, err := tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL WHERE object_id = ? AND derivation = ?",
-				job.objectID, job.derivation)
+			_, err := tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL WHERE object_id = ? AND derivation = ? AND state = 'running' AND attempts = ?",
+				job.objectID, job.derivation, job.attempts)
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_cards WHERE object_id = ?", job.objectID); err != nil {
@@ -264,13 +264,14 @@ func (s *Service) windowsOf(ctx context.Context, object string) (windows []CardW
 }
 
 // nextUnmeasured is the first card of object without its quality.
-func (s *Service) nextUnmeasured(ctx context.Context, object string) (cardOf, bool, error) {
+func (s *Service) nextUnmeasured(ctx context.Context, object, cardsID string) (cardOf, bool, error) {
 	var card cardOf
 	var startMs, endMs int
 	var times string
 	err := s.db.QueryRowContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes FROM video_cards c
-		WHERE c.object_id = ? AND NOT EXISTS (SELECT 1 FROM video_card_quality q WHERE q.object_id = c.object_id AND q.card = c.card)
-		ORDER BY c.card LIMIT 1`, object).Scan(&card.index, &startMs, &endMs, &times)
+		WHERE c.object_id = ? AND c.identity = ? AND NOT EXISTS (
+            SELECT 1 FROM video_card_quality q WHERE q.object_id = c.object_id AND q.card = c.card AND q.identity = ?)
+		ORDER BY c.card LIMIT 1`, object, cardsID, qualityVersion(cardsID)).Scan(&card.index, &startMs, &endMs, &times)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cardOf{}, false, nil
 	}
@@ -295,23 +296,34 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	card, found, err := s.nextUnmeasured(ctx, job.objectID)
-	if err != nil {
-		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
-	}
 	var version string
 	if err := s.db.QueryRowContext(ctx, "SELECT cards_identity FROM montage_card_results WHERE object_id = ?", job.objectID).Scan(&version); err != nil {
 		return s.finishMontageError(ctx, job, errors.Join(ErrComputeFailed, err))
 	}
+	card, found, err := s.nextUnmeasured(ctx, job.objectID, version)
+	if err != nil {
+		return s.finishMontageError(ctx, job, errors.Join(ErrComputeFailed, err))
+	}
 	if !found {
-		return true, s.withTx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, "UPDATE montage_card_results SET quality_identity = ? WHERE object_id = ? AND cards_identity = ?",
-				qualityVersion(version), job.objectID, version); err != nil {
+		err := s.withTx(ctx, func(tx *sql.Tx) error {
+			updated, err := tx.ExecContext(ctx, `UPDATE montage_card_results SET quality_identity = ?
+                WHERE object_id = ? AND cards_identity = ? AND EXISTS (SELECT 1 FROM jobs j WHERE
+                    j.object_id = montage_card_results.object_id AND j.derivation = ? AND
+                    j.state = 'running' AND j.attempts = ? AND `+qualityReady+`)`,
+				qualityVersion(version), job.objectID, version, job.derivation, job.attempts)
+			if err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+			if count, err := updated.RowsAffected(); err != nil || count == 0 {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 			return err
 		})
+		if err != nil {
+			return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
+		}
+		return true, nil
 	}
 	stopLease := s.keepLease(ctx, job)
 	defer stopLease()
@@ -327,18 +339,19 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		stored, err := tx.ExecContext(ctx, `INSERT INTO video_card_quality(object_id, card, result, identity)
             SELECT ?, ?, ?, ? FROM jobs j JOIN montage_card_results m USING (object_id)
-            WHERE j.object_id = ? AND j.derivation = ? AND m.cards_identity = ? AND `+qualityReady+`
+            WHERE j.object_id = ? AND j.derivation = ? AND j.state = 'running' AND j.attempts = ?
+                AND m.cards_identity = ? AND `+qualityReady+`
             ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, identity = excluded.identity`,
-			job.objectID, card.index, string(result), qualityVersion(version), job.objectID, job.derivation, version)
+			job.objectID, card.index, string(result), qualityVersion(version), job.objectID, job.derivation, job.attempts, version)
 		if err != nil {
 			return err
 		}
-		if count, err := stored.RowsAffected(); err != nil || count == 0 {
+		if _, err := stored.RowsAffected(); err != nil {
 			return err
 		}
 		// The next card comes in the next round, after the gate.
-		_, err = tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, error_class = '' WHERE object_id = ? AND derivation = ?",
-			job.objectID, job.derivation)
+		_, err = tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, error_class = '' WHERE object_id = ? AND derivation = ? AND state = 'running' AND attempts = ?",
+			job.objectID, job.derivation, job.attempts)
 		return err
 	})
 	if err != nil {
@@ -395,9 +408,14 @@ func (s *Service) cardQuality(ctx context.Context, taker FrameTaker, job claimed
 		end := min(card.end, at+shakeChunk)
 		var frames []byte
 		count := 0
+		// The range is half-open. FFmpeg may emit one extra frame at an
+		// exact boundary, which would duplicate the overlap of two chunks.
+		limit := int(math.Ceil((end-at)*shakeRate - 1e-6))
 		if _, err := taker.Frames(ctx, original, ffmpegworker.FramesRequest{Start: at, End: end, Rate: shakeRate,
 			Format: ffmpegworker.FormatGray, Width: 320, Height: 180}, func(frame []byte) error {
-			frames, count = append(frames, frame...), count+1
+			if count < limit {
+				frames, count = append(frames, frame...), count+1
+			}
 			return nil
 		}); err != nil {
 			return CardQuality{}, err

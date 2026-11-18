@@ -866,13 +866,18 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	if backup == "" {
 		return errors.New("no copy of the databases from before the install")
 	}
+	// The montage service came later (ADR 0038): a release before it has no
+	// unit to stop or start, which systemctl says with exit status 5. Any
+	// other failure may leave it writing montage.db, so nothing is restored.
+	// It stops first: a request of its on the photo service's grant socket
+	// would start the photo service again.
+	if output, err := s.Commands.Run(ctx, "systemctl", "stop", "anas-montage"); err != nil && !unitNotLoaded(err) {
+		return fmt.Errorf("stop the montage service: %w: %s", err, lastLines(string(output), 3))
+	}
 	services := []string{"anas-api", "anas-photos", "anas-shares", "anas-family", "anas-host-agent"}
 	if output, err := s.Commands.Run(ctx, "systemctl", append([]string{"stop"}, services...)...); err != nil {
 		return fmt.Errorf("stop the services: %w: %s", err, lastLines(string(output), 3))
 	}
-	// The montage service came later (ADR 0038): a release before it has no
-	// unit to stop or start.
-	_, _ = s.Commands.Run(ctx, "systemctl", "stop", "anas-montage")
 	script := `set -e
 name=$1
 rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
@@ -894,6 +899,14 @@ done`
 		return fmt.Errorf("restore the databases: %w: %s", err, lastLines(string(output), 3))
 	}
 	return nil
+}
+
+// unitNotLoaded reports systemctl's exit status 5: the unit is not loaded,
+// so nothing of it runs. A unit whose file went while its process still
+// runs stays loaded, and stopping it succeeds.
+func unitNotLoaded(err error) bool {
+	var exit interface{ ExitCode() int }
+	return errors.As(err, &exit) && exit.ExitCode() == 5
 }
 
 // keepContent removes the content packages neither the version installed
