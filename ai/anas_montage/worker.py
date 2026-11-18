@@ -48,12 +48,14 @@ import numpy as np
 
 from anas_ai import protocol
 
-from .domain import cards as cardrules
-from .domain import catalog as catalogrules
-from .domain import fill as fillrules
-from .domain import picture
-from .domain import plan as planrules
-from .domain import quality as qualityrules
+from .domain import (
+    cards as cardrules,
+    catalog as catalogrules,
+    fill as fillrules,
+    picture,
+    plan as planrules,
+    quality as qualityrules,
+)
 from .domain.options import Case, CutOptions
 
 log = logging.getLogger("anas_montage")

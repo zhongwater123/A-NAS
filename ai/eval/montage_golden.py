@@ -22,9 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from anas_montage import worker
-from anas_montage.domain import cards as cardrules
-from anas_montage.domain import catalog as catalogrules
-from anas_montage.domain import fill as fillrules
+from anas_montage.domain import cards as cardrules, catalog as catalogrules, fill as fillrules
 
 CASES = {"pj": "pinjie", "ne": "newzealand", "ch": "chuanxi"}
 CUTS = "剪辑对比/第四版/剪法24（2026-11-08）"
@@ -106,7 +104,7 @@ def fill_case(root, key, index):
 
 
 def cards_case(root, key, index):
-    meta, rows, vectors, flat = window_index(root, index)
+    _, rows, vectors, flat = window_index(root, index)
     want = load(root / CARDS / f"cards-{key}.json")
     # pj's cards were cut again by hand around the dolphins afterwards.
     if (root / CARDS / f"cards-{key}.before-dolphins.json").exists():

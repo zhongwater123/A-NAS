@@ -21,8 +21,7 @@ if RUNTIME:
     import numpy as np
 
     from anas_montage import worker
-    from anas_montage.domain import cards as cardrules
-    from anas_montage.domain import picture
+    from anas_montage.domain import cards as cardrules, picture
 
 
 def memfd(array):
