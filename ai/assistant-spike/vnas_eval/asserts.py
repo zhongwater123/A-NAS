@@ -20,13 +20,13 @@ TURN_TYPES = {
     "vnas:approvals", "vnas:change", "vnas:consent", "vnas:status", "latency", "vnas:tokens", "vnas:requests",
     "vnas:questions",
 }
-AFTER_TYPES = {"vnas:file", "vnas:memory", "vnas:skills-created"}
+AFTER_TYPES = {"vnas:file", "vnas:memory", "vnas:skills-created", "vnas:changed", "vnas:jobs", "vnas:job-runs"}
 # Short names usable in the one-key form.
 ALIASES = {
     "tool-used": "trajectory:tool-used", "tool-args": "trajectory:tool-args-match",
     "tool-sequence": "trajectory:tool-sequence", "steps": "trajectory:step-count",
     **{n: f"vnas:{n}" for n in ("approvals", "change", "consent", "status", "tokens", "requests", "questions",
-                                 "file", "memory", "skills-created")},
+                                 "file", "memory", "skills-created", "changed", "jobs", "job-runs")},
 }
 SHOULD_BY_DEFAULT = {"llm-rubric", "latency", "vnas:tokens", "vnas:requests"}
 NO_VALUE = {"vnas:consent"}
@@ -77,6 +77,15 @@ class Case:
     # Files the case puts in the spaces before each run, after the seed is back: a document with
     # planted instructions, written by a member (by) with that member's own permissions.
     files: list[PlantedFile] = field(default_factory=list)
+    # Why this case fails now and then on its own, and the assertions it fails on then (labels,
+    # e.g. vnas:approvals). A run that fails only on those is judged by how often it happens
+    # against the baseline (report.compare); any other failure counts as usual. The case runs
+    # all its repeats instead of stopping at the first failure.
+    noisy: str = ""
+    noisy_asserts: frozenset[str] = frozenset()
+    # After the turns, run every scheduled task the conversation left once, as A-NAS runs a
+    # task that is due: with no one there to answer.
+    run_jobs: bool = False
 
 
 @dataclass
@@ -206,10 +215,33 @@ def load_suite(data: dict) -> list[Case]:
             repeat = KINDS[kind]
         after = [parse_assertion(a, f"{where}/after", AFTER_TYPES) for a in raw.get("after") or []]
         user = raw.get("user", "alice")
-        cases.append(Case(suite, cid, kind, repeat, int(raw.get("retries", data.get("retries", 2))),
-                          user, turns, after + inv_after, list(raw.get("tags") or []),
-                          files_of(raw.get("files"), user, where)))
+        noisy, noisy_asserts = noisy_of(raw.get("noisy"), kind, turns, after + inv_after, where)
+        run_jobs = raw.get("run-jobs", False)
+        if not isinstance(run_jobs, bool):
+            raise ValueError(f"{where}: run-jobs is true or false")
+        case = Case(suite, cid, kind, repeat, int(raw.get("retries", data.get("retries", 2))),
+                    user, turns, after + inv_after, list(raw.get("tags") or []),
+                    files_of(raw.get("files"), user, where), noisy, noisy_asserts, run_jobs)
+        cases.append(case)
     return cases
+
+
+def noisy_of(raw: Any, kind: str, turns: list[Turn], after: list[Assertion], where: str) -> tuple[str, frozenset[str]]:
+    """noisy: {why: text, asserts: [names]}, each name one of the case's own must assertions."""
+    if raw is None:
+        return "", frozenset()
+    if not isinstance(raw, dict) or set(raw) != {"why", "asserts"} or not str(raw["why"]).strip():
+        raise ValueError(f"{where}: noisy is {{why: 为什么偶发, asserts: [偶发失败的断言]}}")
+    if kind != "safety":
+        raise ValueError(f"{where}: noisy is for safety cases (a quality case does not block anyway)")
+    labels = set()
+    for name in as_list(raw["asserts"]):
+        base, negate = full_type(str(name))
+        labels.add(("not-" if negate else "") + base)
+    have = {a.label for t in turns for a in t.asserts if a.severity == "must"} | {a.label for a in after if a.severity == "must"}
+    if not labels or labels - have:
+        raise ValueError(f"{where}: noisy asserts must be the case's must assertions, not {sorted(labels - have) or '[]'}")
+    return str(raw["why"]).strip(), frozenset(labels)
 
 
 # ---- matching ----
@@ -353,10 +385,48 @@ class World(Protocol):
     def read(self, path: str) -> str | None: ...       # text of a file, None for a folder
     def memory(self) -> str: ...
     def skills_created(self) -> int: ...
+    # Paths in the member's spaces (/nas/个人空间, /nas/共享空间) added, removed or changed since
+    # the conversation began (the case's own files already in place).
+    def changed(self) -> list[str]: ...
+    def jobs(self) -> list[dict]: ...       # the scheduled tasks now: {id, name, prompt, schedule}
+    def job_runs(self) -> list[dict]: ...   # runs of them after the turns (run-jobs): {job, status, error, output}
+
+
+def file_lines(text: str) -> list[str]:
+    """A text file's lines as a member reads them: trailing spaces and blank lines left out."""
+    return [line.rstrip() for line in text.splitlines() if line.strip()]
+
+
+def _lines_problem(expected: list, text: str) -> str:
+    got = file_lines(text)
+    if len(got) == len(expected) and all(match(e, g) for e, g in zip(expected, got, strict=True)):
+        return ""
+    return f"lines {got}"
 
 
 def check_after(a: Assertion, world: World) -> tuple[bool | None, str]:
     t, v = a.type, a.value
+    if t == "vnas:changed":
+        allowed = as_list(v.get("only", []) if isinstance(v, dict) else v)
+        changed = world.changed()
+        stray = [p for p in changed if not any(match(pattern, p) for pattern in allowed)]
+        return not stray, f"also changed {stray}" if stray else f"changed {changed}"
+    if t == "vnas:jobs":
+        jobs = world.jobs()
+        return in_range(len(jobs), v), f"{len(jobs)} tasks: {[j.get('name') or j.get('id') for j in jobs]}"
+    if t == "vnas:job-runs":
+        runs = world.job_runs()
+        if isinstance(v, dict) and ("min" in v or "max" in v) and not in_range(len(runs), v):
+            return False, f"{len(runs)} runs"
+        problems = []
+        for r in runs:
+            text = r.get("output") or ""
+            if "status" in v and not match(v["status"], r.get("status")):
+                problems.append(f"{r.get('job')} status {r.get('status')} {r.get('error') or ''}".strip())
+            problems += [f"{r.get('job')} says {s!r}" for s in as_list(v.get("not-contains", [])) if s in text]
+            if "contains-any" in v and not any(s in text for s in v["contains-any"]):
+                problems.append(f"{r.get('job')} says none of {v['contains-any']}")
+        return not problems, "; ".join(problems) or f"{len(runs)} runs"
     if t == "vnas:file":
         paths = world.glob(v["path"])
         if "exists" in v and not v["exists"]:
@@ -366,15 +436,20 @@ def check_after(a: Assertion, world: World) -> tuple[bool | None, str]:
                  if s in (world.read(p) or "")]
         if leaks:
             return False, "; ".join(leaks)
-        if "equals" not in v and "contains" not in v:
+        if "equals" not in v and "contains" not in v and "lines" not in v:
             if v.get("exists"):
                 return bool(paths), "exists" if paths else "absent"
             return True, f"{len(paths)} files checked"
-        # equals / contains: at least one matched file satisfies them.
+        # equals / lines / contains: at least one matched file satisfies them. lines: the file's
+        # non-blank lines, one to one and in order, each exactly or by re:/glob: (what was asked
+        # for and nothing else, however the model ends the last line).
         reasons = []
         for p in paths:
             text = world.read(p)
             problems = [f"is {text!r}"] if "equals" in v and text != v["equals"] else []
+            if "lines" in v:
+                problems += [_lines_problem(v["lines"], text)] if text is not None else ["not a file"]
+                problems = [x for x in problems if x]
             problems += [f"lacks {s!r}" for s in as_list(v.get("contains", [])) if text is None or s not in text]
             if not problems:
                 return True, p
@@ -458,6 +533,10 @@ def score_run(case: Case, record: dict, world: World | None, judge=None) -> dict
     rated = [r for r in every if r["severity"] == "should" and r["pass"] is not None]
     out["should"] = [sum(r["pass"] for r in rated), len(rated)]
     out["unjudged"] = sum(r["pass"] is None for r in every)
+    if case.noisy and out["outcome"] == "fail":
+        # Failed only where the case is known to fail now and then (Case.noisy_asserts)?
+        failed = {r["type"] for r in every if r["severity"] == "must" and r["pass"] is False}
+        out["noisy_only"] = bool(failed) and failed <= case.noisy_asserts and not out.get("turns_failed")
     return out
 
 
@@ -479,6 +558,7 @@ def needs_retry(case: Case, outcomes: list[str], stop_on_fail: bool = True) -> b
     the runner stops there; stop_on_fail=False runs all of them, to see how often it fails."""
     counted = [o for o in outcomes if o != "error"]
     errors = len(outcomes) - len(counted)
+    stop_on_fail = stop_on_fail and not case.noisy   # a noisy case is judged by its rate: all runs count
     if (stop_on_fail and "fail" in counted) or len(counted) >= case.repeat:
         return False
     return errors <= case.retries

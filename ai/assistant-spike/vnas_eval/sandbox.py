@@ -7,12 +7,17 @@ exist in both stay, because the units bind some of them (the recycle bins) on th
 from __future__ import annotations
 
 import glob
+import hashlib
+import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 DATA = Path("/srv/a-nas/data")
+# The member's spaces, where a change needs the member's card; /nas/助手 is the assistant's own.
+SPACES = ("/nas/个人空间", "/nas/共享空间")
 
 
 class Layout:
@@ -44,11 +49,98 @@ def skill_files(layout: Layout) -> set[str]:
     return {str(p) for p in root.rglob("SKILL.md")} if root.is_dir() else set()
 
 
+def snapshot(layout: Layout) -> dict[str, str]:
+    """What is in the member's spaces: sandbox path -> "dir", "link:<target>" or the content's sha256."""
+    out = {}
+    for space in SPACES:
+        root = layout.host(space)
+        if root is None or not root.is_dir():
+            continue
+        for folder, dirs, files in os.walk(root):
+            for name in dirs + files:
+                p = Path(folder) / name
+                key = layout.sandbox(p)
+                if p.is_symlink():
+                    out[key] = "link:" + os.readlink(p)
+                elif p.is_dir():
+                    out[key] = "dir"
+                else:
+                    out[key] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return out
+
+
+def jobs_file(layout: Layout) -> Path:
+    return layout.hermes / "cron" / "jobs.json"
+
+
+def read_jobs(layout: Layout) -> list[dict]:
+    try:
+        return json.loads(jobs_file(layout).read_text(encoding="utf-8")).get("jobs") or []
+    except (OSError, ValueError):
+        return []
+
+
+PROMPT_FRAME = re.compile(r"(?m)^\*\*Prompt Characters:\*\* (\d+)\n## Prompt\n\n")
+RESPONSE_FRAME = re.compile(r"\*\*Response Characters:\*\* (\d+)\n## Response\n\n")
+
+
+def answer_of(archive: str) -> str:
+    """The task's answer from the run's record (cron/output/<job>/<time>.md), without the prompt
+    it was given, which holds the member's own words. Read by the length frames Hermes writes
+    around both (cron/scheduler_prompt.py _archive_answer), else after the last "## Response"."""
+    prompt = PROMPT_FRAME.search(archive)
+    if prompt:
+        response = RESPONSE_FRAME.match(archive, prompt.end() + int(prompt.group(1)) + 2)
+        if response:
+            return archive[response.end():response.end() + int(response.group(1))].strip()
+    return archive.rpartition("## Response")[2].strip() if "## Response" in archive else archive.strip()
+
+
+def run_jobs(layout: Layout, run=subprocess.run, requests: Path = Path("/run/a-nas/assistant-runs")) -> list[dict]:
+    """Run each scheduled task once, as A-NAS runs a task the member asked to run now (#469):
+    a request per task in /run/a-nas/assistant-runs/<member> (run-now.sh), then one round of the
+    cron unit (cron_round.py), with no one there to answer. Each task's run: {job, status, error,
+    output}, "not run" for a task the round did not take up."""
+    jobs = read_jobs(layout)
+    if not jobs:
+        return []
+    waiting = requests / layout.user
+    waiting.mkdir(mode=0o700, parents=True, exist_ok=True)
+    before = {j["id"]: j.get("last_run_at") for j in jobs}
+    for j in jobs:
+        (waiting / j["id"]).touch()
+    run(["/usr/bin/systemctl", "start", f"anas-assistant-cron@{layout.user}.service"], check=False, timeout=1800)
+    runs = []
+    for j in read_jobs(layout):
+        if j["id"] not in before or j.get("last_run_at") == before[j["id"]]:
+            runs.append({"job": j.get("name") or j["id"], "status": "not run", "error": j.get("last_error"), "output": ""})
+            continue
+        outputs = sorted((layout.hermes / "cron" / "output" / j["id"]).glob("*.md"))
+        text = answer_of(outputs[-1].read_text(encoding="utf-8", errors="replace")) if outputs else ""
+        runs.append({"job": j.get("name") or j["id"], "status": j.get("last_status"), "error": j.get("last_error"),
+                     "output": text})
+    return runs
+
+
 class HostWorld:
     """vnas_eval.asserts.World on the data volume, after a conversation."""
 
-    def __init__(self, layout: Layout, skills_before: set[str]):
+    def __init__(self, layout: Layout, skills_before: set[str], files_before: dict[str, str] | None = None,
+                 runs: list[dict] | None = None):
         self.layout, self.skills_before = layout, skills_before
+        self.files_before, self.runs = files_before, runs or []
+
+    def changed(self) -> list[str]:
+        if self.files_before is None:
+            raise ValueError("no snapshot of the spaces from before the conversation")
+        now = snapshot(self.layout)
+        return sorted(p for p in set(now) | set(self.files_before) if now.get(p) != self.files_before.get(p))
+
+    def jobs(self) -> list[dict]:
+        return [{k: j.get(k) for k in ("id", "name", "prompt", "schedule")} for j in read_jobs(self.layout)]
+
+    def job_runs(self) -> list[dict]:
+        return self.runs
 
     def glob(self, pattern: str) -> list[str]:
         host = self.layout.host(pattern)
@@ -127,30 +219,40 @@ def restore_tree(src: Path, dst: Path) -> None:
 
 
 class Seed:
-    """The spaces and the member's Hermes memory and skills as they were before the first run.
+    """The spaces and the member's Hermes state as they were before the first run: memory,
+    skills, scheduled tasks and past conversations (sessions/ and state.db, which session_search
+    reads), so that no run finds what an earlier one said, scheduled or remembered.
 
     The skills folder goes back whole, .bundled_manifest included: Hermes records each bundled
     skill it copied there, and one missing from the folder but in the manifest counts as deleted
     by the member and is never copied again (tools/skills_sync.py). Removing only what a run
     added would therefore lose the bundled skills for every later run."""
 
+    DB = ("state.db", "state.db-wal", "state.db-shm")
+
     def __init__(self, layout: Layout, store: Path):
         self.layout, self.store = layout, store
-        self.trees = [(layout.data / "spaces", store / "spaces"), (layout.hermes / "memories", store / "memories"),
-                      (layout.hermes / "skills", store / "skills")]
+        self.trees = [(layout.data / "spaces", store / "spaces")] + [
+            (layout.hermes / name, store / name) for name in ("memories", "skills", "cron", "sessions")]
+        self.files = [(layout.hermes / name, store / "hermes-files" / name) for name in self.DB]
 
     def take(self) -> None:
         _remove(self.store)
         self.store.mkdir(parents=True, mode=0o700)
-        for live, copy in self.trees:
-            if live.is_dir():
+        (self.store / "hermes-files").mkdir(mode=0o700)
+        for live, copy in self.trees + self.files:
+            if live.exists():
                 _copy(live, copy)
 
     def restore(self) -> None:
-        """With the member's instance stopped: the seed back, memory and skills as they were."""
+        """With the member's instance stopped: the seed back, and the member's Hermes state as it was."""
         for live, copy in self.trees:
             if copy.is_dir():
                 live.mkdir(parents=True, exist_ok=True)
                 restore_tree(copy, live)
             else:
                 _remove(live)
+        for live, copy in self.files:
+            _remove(live)
+            if copy.exists():
+                _copy(copy, live)

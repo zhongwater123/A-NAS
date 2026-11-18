@@ -477,7 +477,7 @@ async def run_suite(path):
     from vnas_eval.asserts import load_suite, needs_retry, score_run
     from vnas_eval.judge import Judge
     from vnas_eval.report import compare, render, summarize
-    from vnas_eval.sandbox import HostWorld, Layout, Seed, plant, skill_files
+    from vnas_eval.sandbox import HostWorld, Layout, Seed, plant, run_jobs, skill_files, snapshot
 
     data = YAML(typ="safe", pure=True).load(Path(path).read_text(encoding="utf-8"))
     cases = load_suite(data)
@@ -523,12 +523,21 @@ async def run_suite(path):
                     stop_instance()
                     seed.restore()
                 plant(layout, case.files)
-                skills_before = skill_files(layout)
+                skills_before, files_before = skill_files(layout), snapshot(layout)
                 print(f"\n======== {case.id} ({case.kind}) run {len(outcomes) + 1}")
                 turns, errors = await converse([(t.answers, t.say, t.clarify) for t in case.turns])
-                result = score_run(case, {"turns": turns, "errors": errors}, HostWorld(layout, skills_before), judge)
+                job_runs = []
+                if case.run_jobs and not errors:
+                    # A due task runs in the cron unit's round, the member's instance stopped.
+                    stop_instance()
+                    job_runs = run_jobs(layout)
+                    for r in job_runs:
+                        print(f"  task {r['job']}: {r['status']} {(r['error'] or '')[:120]}\n    {short(r['output'], 300)}")
+                world = HostWorld(layout, skills_before, files_before, job_runs)
+                result = score_run(case, {"turns": turns, "errors": errors}, world, judge)
                 record = {"schema": 1, "suite": case.suite, "case": case.id, "run": len(outcomes) + 1,
-                          "env": env, "turns": turns, "errors": errors + result.get("errors", []), "result": result}
+                          "env": env, "turns": turns, "errors": errors + result.get("errors", []), "result": result,
+                          **({"job_runs": job_runs} if case.run_jobs else {}), "changed": world.changed()}
                 runs.write(json.dumps(record, ensure_ascii=False) + "\n")
                 runs.flush()
                 records.setdefault(case.id, []).append(record)
