@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -26,10 +27,11 @@ func TestEditingRequestsAreBoundedBeforeFFmpegRuns(t *testing.T) {
 		jpeg(FramesRequest{Times: []float64{0, 1.5, 3}, Width: 512, Blur: true}),
 		jpeg(FramesRequest{Times: []float64{1}, LongEdge: 512}),
 		jpeg(FramesRequest{Start: 2, End: 62, Rate: 0.5, LongEdge: 1920}),
+		jpeg(FramesRequest{End: 300, Rate: 2, Width: 64}),
 		gray(FramesRequest{Start: 0, End: 30, Rate: 10, Width: 320, Height: 180}),
 		gray(FramesRequest{Times: []float64{4.25}, Width: 1920, Height: 3414, Turned: true}),
 		// 64 MiB of gray frames exactly: 1,024 frames of 256×256.
-		gray(FramesRequest{Start: 0, End: 1023, Rate: 1, Width: 256, Height: 256}),
+		gray(FramesRequest{End: 1024, Rate: 1, Width: 256, Height: 256}),
 	}
 	for _, request := range valid {
 		if _, err := request.count(); err != nil {
@@ -55,8 +57,9 @@ func TestEditingRequestsAreBoundedBeforeFFmpegRuns(t *testing.T) {
 		{Times: []float64{1}, Width: 512, Format: FormatJPEG, Quality: 100},
 		jpeg(FramesRequest{Start: 5, End: 5, Rate: 1, Width: 512}),
 		jpeg(FramesRequest{Start: 0, End: 10, Rate: 120, Width: 512}),
+		jpeg(FramesRequest{End: 300.5, Rate: 2, Width: 64}),
 		gray(FramesRequest{Times: many, Width: 16, Height: 16}),
-		gray(FramesRequest{Start: 0, End: 1024, Rate: 1, Width: 256, Height: 256}),
+		gray(FramesRequest{End: 1025, Rate: 1, Width: 256, Height: 256}),
 		gray(FramesRequest{Times: []float64{1}, Width: 320}),
 		gray(FramesRequest{Times: []float64{1}, Width: 320, Height: 180, Blur: true}),
 		gray(FramesRequest{Times: []float64{1}, Width: 5000, Height: 180}),
@@ -77,7 +80,7 @@ func TestEditingRequestsAreBoundedBeforeFFmpegRuns(t *testing.T) {
 	}
 	for _, request := range []SegmentRequest{
 		{Frames: 0}, {Frames: 361}, {Start: -1, Frames: 30}, {Frames: 30, Slow: 0.5}, {Frames: 30, Slow: 3},
-		{Frames: 30, FadeFrames: 31}, {Frames: 30, Offset: -1}, {Frames: 30, Offset: 4471},
+		{Frames: 30, FadeFrames: 31}, {Frames: 30, Offset: -1}, {Frames: 30, Offset: 4471}, {Frames: 30, Offset: math.MaxInt},
 	} {
 		if err := request.validate(); err == nil {
 			t.Errorf("validate(%+v) accepted the request", request)
@@ -100,7 +103,7 @@ func TestEditingCommandsAreBuiltFromNumbers(t *testing.T) {
 	tools := Tools{FFmpeg: "/usr/bin/ffmpeg"}
 	_, args := tools.frameCommand(FramesRequest{Format: FormatJPEG, Width: 512, Quality: 3, Turned: true}, 2.5)
 	if joined := strings.Join(args, " "); !strings.Contains(joined, "-ss 2.500 -i fd:") || !strings.Contains(joined, "-vf hflip,vflip,scale=512:-2") ||
-		!strings.HasSuffix(joined, "-q:v 3 -c:v mjpeg -f image2 pipe:1") || !strings.Contains(joined, "-threads 4") {
+		!strings.HasSuffix(joined, "-q:v 3 -c:v mjpeg -f image2 pipe:1") || !strings.Contains(joined, "-filter_threads 4 -threads 4") {
 		t.Errorf("frame command = %s", joined)
 	}
 	_, args = tools.rangeCommand(FramesRequest{Format: FormatGray, Start: 1, End: 3, Rate: 10, Width: 320, Height: 180})
@@ -110,7 +113,7 @@ func TestEditingCommandsAreBuiltFromNumbers(t *testing.T) {
 	}
 	_, args = tools.segmentCommand(SegmentRequest{Start: 3, Frames: 75, Slow: 2.5, Blurred: true, FadeFrames: 30, Offset: 150})
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-ss 3.000 -t 1.066667 -i fd:", "gblur=sigma=12", ",setpts=2.5*PTS,fps=30,tpad=stop_mode=clone:stop=-1,setpts=PTS-STARTPTS,trim=end_frame=75",
+	for _, want := range []string{"-filter_threads 4", "-ss 3.000 -t 1.066667 -i fd:", "gblur=sigma=12", ",setpts=2.5*PTS,fps=30,tpad=stop_mode=clone:stop=-1,setpts=PTS-STARTPTS,trim=end_frame=75",
 		"fade=t=out:start_frame=45:nb_frames=30", "-frames:v 75", "-crf 23", "-maxrate 16M -bufsize 16M", "-avoid_negative_ts disabled",
 		"-output_ts_offset 5.000000 -f mpegts pipe:1"} {
 		if !strings.Contains(joined, want) {
@@ -197,6 +200,9 @@ func TestEditingRequestsRefuseFieldsTheyDoNotKnow(t *testing.T) {
 	if err := raw(t, local, OpAssemble, map[string]any{"frames": 30, "created": "2026-08-04T10:30:00Z"}, input); !errors.Is(err, ErrInvalid) {
 		t.Errorf("assemble with one descriptor = %v", err)
 	}
+	if err := raw(t, local, OpAudio, map[string]any{"pcm": true, "bits": 32, "sampleRate": 22050, "channels": 1, "filter": "x"}, song); !errors.Is(err, ErrInvalid) {
+		t.Errorf("PCM with filter = %v", err)
+	}
 	// Over a limit: refused before FFmpeg starts.
 	ctx := context.Background()
 	_, err := local.Frames(ctx, input, FramesRequest{Format: FormatGray, Start: 0, End: 2000, Rate: 1, Width: 256, Height: 256}, func([]byte) error { return nil })
@@ -253,8 +259,8 @@ func TestFramesArriveOneByOneAndOverflowIsAnError(t *testing.T) {
 }
 
 func TestEditingRunsBelowPlaybackAndChecksItsLength(t *testing.T) {
-	// The stand-in prints its own nice value once the worker has lowered it.
-	local := Local{Tools: Tools{FFmpeg: script(t, "sleep 0.3; awk '{print $19}' /proc/$$/stat")}}
+	// The first command in the stand-in already runs at the intended nice.
+	local := Local{Tools: Tools{FFmpeg: script(t, "awk '{print $19}' /proc/$$/stat")}}
 	piece, err := local.Segment(context.Background(), openFile(t, "video"), SegmentRequest{Frames: 30})
 	if err != nil {
 		t.Fatalf("Segment() error = %v", err)
@@ -266,6 +272,54 @@ func TestEditingRunsBelowPlaybackAndChecksItsLength(t *testing.T) {
 	}
 	if priorityOf(context.Background(), OpSegment) != Background || priorityOf(context.Background(), OpFrames) != Background {
 		t.Fatal("editing does not default to background slots")
+	}
+}
+
+func TestEditingDeadlineReportsFailed(t *testing.T) {
+	for _, op := range []string{OpFrames, OpSegment, OpAssemble} {
+		t.Run(op, func(t *testing.T) {
+			worker := Tools{FFmpeg: script(t, "exec sleep 30")}
+			client := fakeWorker(t, func(conn *net.UnixConn) {
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+				defer cancel()
+				_ = Serve(ctx, conn, worker)
+			})
+			ctx := context.Background()
+			video := openFile(t, "video")
+			var err error
+			switch op {
+			case OpFrames:
+				_, err = client.Frames(ctx, video, FramesRequest{Format: FormatGray, Times: []float64{0}, Width: 16, Height: 16}, func([]byte) error { return nil })
+			case OpSegment:
+				_, err = client.Segment(ctx, video, SegmentRequest{Frames: 30})
+			case OpAssemble:
+				_, err = client.Assemble(ctx, video, openFile(t, "song"), AssembleRequest{Frames: 30, Created: "2026-08-04T18:30:00Z"})
+			}
+			if !errors.Is(err, ErrFailed) || errors.Is(err, ErrUnreadable) {
+				t.Fatalf("%s on worker deadline: %v", op, err)
+			}
+		})
+	}
+}
+
+func TestBlurBatchFailures(t *testing.T) {
+	for _, test := range []struct {
+		name, blur string
+		want       error
+	}{
+		{"worker failure", "cat >/dev/null; exit 1", ErrFailed},
+		{"missing filter", "cat >/dev/null; echo \"No such filter: 'blurdetect'\" >&2; exit 1", ErrUnavailable},
+		{"missing value", "cat >/dev/null", ErrFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worker := script(t, "case \"$*\" in *blurdetect*) "+test.blur+";; *) printf jpeg;; esac")
+			local := Local{Tools: Tools{FFmpeg: worker}}
+			request := FramesRequest{Format: FormatJPEG, Times: []float64{0, 1}, Width: 64, Quality: 3, Blur: true}
+			_, err := local.Frames(context.Background(), openFile(t, "video"), request, func([]byte) error { return nil })
+			if !errors.Is(err, test.want) || errors.Is(err, ErrUnreadable) {
+				t.Fatalf("Frames(blur) error = %v, want %v", err, test.want)
+			}
+		})
 	}
 }
 
@@ -371,7 +425,7 @@ func TestRealFFmpegFrames(t *testing.T) {
 		t.Fatalf("Frames(gray range) = %d frames, %v", grays, err)
 	}
 	var parts int
-	_, err = local.Frames(ctx, video, FramesRequest{Format: FormatJPEG, Start: 0, End: 4, Rate: 2, LongEdge: 256, Quality: 5},
+	result, err = local.Frames(ctx, video, FramesRequest{Format: FormatJPEG, Start: 0, End: 4, Rate: 2, LongEdge: 256, Quality: 5, Blur: true},
 		func(frame []byte) error {
 			if !bytes.HasPrefix(frame, []byte{0xff, 0xd8}) || !bytes.HasSuffix(frame, []byte{0xff, 0xd9}) {
 				t.Errorf("JPEG part of %d bytes", len(frame))
@@ -379,8 +433,8 @@ func TestRealFFmpegFrames(t *testing.T) {
 			parts++
 			return nil
 		})
-	if err != nil || parts < 8 || parts > 9 {
-		t.Fatalf("Frames(jpeg range) = %d frames, %v", parts, err)
+	if err != nil || parts < 8 || parts > 9 || len(result.Blur) != parts {
+		t.Fatalf("Frames(jpeg range) = %d frames, %d blur values, %v", parts, len(result.Blur), err)
 	}
 }
 
@@ -433,6 +487,18 @@ func TestRealFFmpegFilm(t *testing.T) {
 	_ = film.Close()
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, request := range []AssembleRequest{
+		{SongStart: 3, Frames: offset + 30, Created: "2026-08-04T18:30:00Z"},
+		{SongStart: 29, Frames: offset, Created: "2026-08-04T18:30:00Z"},
+	} {
+		body, err := local.Assemble(ctx, joined, song, request)
+		if body != nil {
+			_ = body.Close()
+		}
+		if !errors.Is(err, ErrFailed) {
+			t.Fatalf("Assemble(%+v) with incomplete input = %v, want ErrFailed", request, err)
+		}
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
