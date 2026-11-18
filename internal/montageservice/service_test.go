@@ -46,6 +46,16 @@ func (noGrants) Lookup(context.Context, string, []string) ([]photos.GrantedAsset
 func (noGrants) Remove(context.Context, string, []string) error { return nil }
 func (noGrants) List(context.Context) ([]photos.Grant, error)   { return nil, nil }
 func (noGrants) Revoke(context.Context, string) error           { return nil }
+func (noGrants) Open(context.Context, string, string) (*os.File, string, error) {
+	return nil, "", errors.New("no grant")
+}
+func (noGrants) Analyze(context.Context, string, []string, bool) error { return nil }
+func (noGrants) Analysis(context.Context, string, string) (photos.GrantAnalysis, []byte, error) {
+	return photos.GrantAnalysis{}, nil, errors.New("no grant")
+}
+func (noGrants) SaveFilm(context.Context, string, string, string, *os.File) (string, error) {
+	return "", errors.New("no grant")
+}
 
 func get(t *testing.T, socket, token string) (int, string) {
 	t.Helper()

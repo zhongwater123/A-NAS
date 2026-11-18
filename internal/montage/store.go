@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/keylock"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -111,6 +113,99 @@ ALTER TABLE projects DROP COLUMN song_start;
 ALTER TABLE projects DROP COLUMN song_id;
 DROP TABLE songs;
 `},
+		// 3: jobs, the videos they started with, each step's input key and
+		// result, the plans and the planning rounds (M9), and the versions
+		// saved into the photo library (docs/architecture/montage-center.md,
+		// 持久任务).
+		{Up: `
+CREATE TABLE jobs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    request_key TEXT NOT NULL,
+    settings_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'waiting', 'needs_input', 'done', 'failed', 'cancelled')),
+    step TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    not_before TEXT NOT NULL,
+    lease_until TEXT,
+    heartbeat_at TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    wait_reason TEXT NOT NULL DEFAULT '',
+    error_class TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    missing_json TEXT,
+    plan_rejections INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE (owner_user_id, request_key)
+);
+CREATE INDEX jobs_by_state ON jobs(state, not_before);
+CREATE INDEX jobs_by_project ON jobs(project_id, created_at);
+
+CREATE TABLE job_assets (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    PRIMARY KEY (job_id, asset_id)
+);
+
+CREATE TABLE steps (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    input_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('running', 'done')),
+    result_json TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    PRIMARY KEY (job_id, name)
+);
+
+CREATE TABLE rounds (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    owner_user_id TEXT NOT NULL,
+    attempt_token TEXT NOT NULL,
+    run_ref TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL CHECK (state IN ('claimed', 'started', 'ended', 'abandoned')),
+    claimed_at TEXT NOT NULL,
+    started_at TEXT,
+    ended_at TEXT,
+    reported_at TEXT,
+    outcome TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE plans (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL CHECK (step IN ('pick', 'shots')),
+    round_id TEXT,
+    catalog_key TEXT NOT NULL,
+    answer_json TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    voided_at TEXT
+);
+CREATE INDEX plans_by_job ON plans(job_id, step, voided_at);
+
+CREATE TABLE versions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    job_id TEXT NOT NULL UNIQUE,
+    version_key TEXT NOT NULL UNIQUE,
+    film_asset_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (project_id, number)
+);
+`, Down: `
+DROP TABLE versions;
+DROP TABLE plans;
+DROP TABLE rounds;
+DROP TABLE steps;
+DROP TABLE job_assets;
+DROP TABLE jobs;
+`},
+		{Up: "ALTER TABLE jobs ADD COLUMN save_started INTEGER NOT NULL DEFAULT 0", Down: "ALTER TABLE jobs DROP COLUMN save_started"},
 	},
 }
 
@@ -130,9 +225,25 @@ type Store struct {
 	songs sync.Mutex
 	// wake tells AnalyzeSongs a song arrived.
 	wake chan struct{}
+	// What jobs work with: the compute Worker's montage operations, the
+	// FFmpeg worker's editing, the planner, and the songs (the store's
+	// own, Chosen, Excerpt and Audio, unless a test sets another).
+	jobCompute Compute
+	editing    Editing
+	planner    Planner
+	jobMusic   Music
+	// jobWake tells RunJobs a job is due; running holds the running job's
+	// cancel.
+	jobWake chan struct{}
+	runMu   sync.Mutex
+	running map[string]context.CancelCauseFunc
+	// beat is how often a running job's lease is renewed (heartbeat).
+	beat time.Duration
+	// admits is capacity.Admits, which tests replace.
+	admits func(path string, incoming int64) (bool, error)
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
-	members memberLocks
+	members keylock.Map[string]
 	// reconciling runs one round of Reconcile at a time. reconciled is set
 	// once a round went through; seen are the unfinished batches the last
 	// round found, which the next one settles.
@@ -158,8 +269,15 @@ type Options struct {
 	Media   Media
 	Music   MusicAnalyzer
 	Compute MusicComputer
-	Now     func() time.Time
-	Logger  *slog.Logger
+	// JobCompute, Editing and Planner are what jobs work with besides the
+	// songs: the compute Worker's montage operations, the FFmpeg worker's
+	// editing and the planner. A store without them keeps projects and
+	// songs but makes no film.
+	JobCompute Compute
+	Editing    Editing
+	Planner    Planner
+	Now        func() time.Time
+	Logger     *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -177,7 +295,10 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 		return nil, errors.Join(err, db.Close())
 	}
 	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
-		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1)}
+		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
+		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
+		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits}
+	store.jobMusic = store
 	if store.now == nil {
 		store.now = time.Now
 	}
@@ -191,15 +312,19 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 // StartWorkers recovers durable work before accepting requests. Close cancels
 // and joins the workers before closing their database.
 func (s *Store) StartWorkers(ctx context.Context) error {
+	if err := s.RecoverJobs(ctx); err != nil {
+		return err
+	}
 	if err := s.ReclaimSongs(ctx); err != nil {
 		return err
 	}
 	s.soon(s.AnalyzeSongs)
+	s.soon(s.RunJobs)
 	return nil
 }
 
-// Close stops the revocations and the song analysis still running, which
-// stay queued, and closes the database.
+// Close stops the revocations, the song analysis and the job still running,
+// which stay queued, and closes the database.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	s.closed = true

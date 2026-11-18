@@ -2204,6 +2204,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/projects/{projectId}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409) */
+        post: operations["generateMontageFilm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found */
+        get: operations["getMontageJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome */
+        post: operations["cancelMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/drop-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled */
+        post: operations["dropMontageJobAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the photo library to analyse again the videos whose analysis failed, and go on */
+        post: operations["retryMontageJobAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
+        post: operations["retryMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/replan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan again from the step not yet taken, when the plan was not handed back or kept failing its checks */
+        post: operations["replanMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The desktop's notices of the caller's jobs: waiting for planning, planning, needing the member, and films saved in the last day */
+        get: operations["listMontageNotices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/projects/{projectId}/song": {
         parameters: {
             query?: never;
@@ -7907,6 +8043,16 @@ export interface components {
             /** Format: date-time */
             addedAt: string;
         };
+        MontageVersion: {
+            /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
+            number: number;
+            /** @description The film in the caller's photo library; play and download it there. */
+            filmAssetId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description The member deleted the film from the photo library. */
+            gone?: boolean;
+        };
         MontageProject: {
             id: string;
             name: string;
@@ -7916,6 +8062,59 @@ export interface components {
             ask: string;
             chronological: boolean;
             assets: components["schemas"]["MontageProjectAsset"][];
+            /** @description The films saved, newest first. */
+            versions: components["schemas"]["MontageVersion"][];
+        };
+        MontageJobStep: {
+            /** @enum {string} */
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save";
+            /**
+             * @description A step that stopped with the job shows the job's state.
+             * @enum {string}
+             */
+            state: "pending" | "running" | "done" | "queued" | "waiting" | "needs_input" | "failed" | "cancelled";
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageJob: {
+            id: string;
+            projectId: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
+            /** @description The step the job is at or stopped at. */
+            step?: string;
+            /**
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.
+             * @enum {string}
+             */
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            error?: string;
+            steps: components["schemas"]["MontageJobStep"][];
+            /** @description The videos missing, too long, or whose analysis failed. */
+            missingAssetIds?: string[];
+            version?: components["schemas"]["MontageVersion"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageNotice: {
+            /** @enum {string} */
+            kind: "waiting_for_planning" | "planning" | "needs_input" | "saved";
+            jobId: string;
+            projectId: string;
+            /** @description The project's name. */
+            project: string;
+            reason?: string;
+            /** @description The film saved, for saved. */
+            filmAssetId?: string;
+            /** Format: date-time */
+            at: string;
+        };
+        MontageNotices: {
+            items: components["schemas"]["MontageNotice"][];
         };
         MontageSongSection: {
             start: number;
@@ -8196,6 +8395,7 @@ export interface components {
         /** @description The `next` of the previous page. */
         MontageCursor: string;
         MontageProjectID: string;
+        MontageJobID: string;
     };
     requestBodies: never;
     headers: never;
@@ -8453,7 +8653,12 @@ export type MontageProjectPage = components['schemas']['MontageProjectPage'];
 export type MontageRequestKey = components['schemas']['MontageRequestKey'];
 export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
 export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
+export type MontageVersion = components['schemas']['MontageVersion'];
 export type MontageProject = components['schemas']['MontageProject'];
+export type MontageJobStep = components['schemas']['MontageJobStep'];
+export type MontageJob = components['schemas']['MontageJob'];
+export type MontageNotice = components['schemas']['MontageNotice'];
+export type MontageNotices = components['schemas']['MontageNotices'];
 export type MontageSongSection = components['schemas']['MontageSongSection'];
 export type MontageSongPart = components['schemas']['MontageSongPart'];
 export type MontageSongSelection = components['schemas']['MontageSongSelection'];
@@ -8521,6 +8726,7 @@ export type ParameterAssistantRequestId = components['parameters']['AssistantReq
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
 export type ParameterMontageCursor = components['parameters']['MontageCursor'];
 export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
+export type ParameterMontageJobId = components['parameters']['MontageJobID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -12928,6 +13134,221 @@ export interface operations {
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    generateMontageFilm: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    cancelMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    dropMontageJobAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJobAnalysis: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    replanMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    listMontageNotices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notices, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageNotices"];
+                };
+            };
         };
     };
     getMontageSong: {

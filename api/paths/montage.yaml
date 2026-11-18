@@ -153,3 +153,95 @@
       "416": { description: The range is outside the song. }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/generate:
+  post:
+    operationId: generateMontageFilm
+    summary: "Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409)"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+    responses:
+      "202": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}:
+  get:
+    operationId: getMontageJob
+    summary: "One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/cancel:
+  post:
+    operationId: cancelMontageJob
+    summary: "Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/drop-assets:
+  post:
+    operationId: dropMontageJobAssets
+    summary: "Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [assetIds]
+            properties:
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/retry-analysis:
+  post:
+    operationId: retryMontageJobAnalysis
+    summary: "Ask the photo library to analyse again the videos whose analysis failed, and go on"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/retry:
+  post:
+    operationId: retryMontageJob
+    summary: "Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/replan:
+  post:
+    operationId: replanMontageJob
+    summary: "Plan again from the step not yet taken, when the plan was not handed back or kept failing its checks"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/notices:
+  get:
+    operationId: listMontageNotices
+    summary: "The desktop's notices of the caller's jobs: waiting for planning, planning, needing the member, and films saved in the last day"
+    responses:
+      "200": { description: "The notices, newest first", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageNotices" } } } }

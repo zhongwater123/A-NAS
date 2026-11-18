@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/keylock"
 	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
@@ -273,6 +274,8 @@ type Service struct {
 	mediaWake chan struct{}
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
+	// filmMu keeps two saves of one film from both importing it.
+	filmMu keylock.Map[filmKey]
 	// compute is Options.Compute.
 	compute MontageCompute
 	// embedder encodes search queries, and detected holds the detector's best

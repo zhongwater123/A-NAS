@@ -42,8 +42,19 @@ func runMontageService(logger *slog.Logger) error {
 		Media:      config.Media.client(),
 		Music:      montage.MusicWorker{Socket: config.MusicSocket},
 		Compute:    montagecompute.Client{SocketPath: config.ComputeSocket},
+		JobCompute: montagecompute.Client{SocketPath: config.ComputeSocket},
+		Editing:    config.Media.client(),
+		Planner:    planner(config.PlanAnswers),
 		Logger:     logger,
 	})
+}
+
+// planner is the stand-in planner when PlanAnswers names one.
+func planner(answers string) montage.Planner {
+	if answers == "" {
+		return nil
+	}
+	return montage.FixedPlanner{Dir: answers}
 }
 
 // configuredMontage returns the montage API, nil while ANAS_MONTAGE_ENABLED
@@ -71,12 +82,14 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	}
 	// Development has no music analysis or compute Worker of its own unless
 	// their sockets are given; songs wait for them.
-	options := montage.Options{Grants: grants, Media: media, Logger: logger}
+	editing, _ := media.(montage.Editing)
+	options := montage.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.MontagePlanAnswers), Logger: logger}
 	if config.MontageMusicSocket != "" {
 		options.Music = montage.MusicWorker{Socket: config.MontageMusicSocket}
 	}
 	if config.MontageComputeSocket != "" {
-		options.Compute = montagecompute.Client{SocketPath: config.MontageComputeSocket}
+		client := montagecompute.Client{SocketPath: config.MontageComputeSocket}
+		options.Compute, options.JobCompute = client, client
 	}
 	store, err := montage.Open(ctx, root, options)
 	if err != nil {

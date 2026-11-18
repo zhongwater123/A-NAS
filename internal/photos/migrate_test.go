@@ -150,6 +150,8 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 // with migration 17's stored Down when it opens the Catalog; the statements
 // that undo older migrations by hand come after it.
 var undoMontageGrants = []string{
+	"DROP TABLE montage_films",
+	"DELETE FROM schema_downgrades WHERE version = 21",
 	"DROP TABLE video_card_descriptions",
 	"DELETE FROM schema_downgrades WHERE version = 20",
 	"DROP TABLE video_card_quality",

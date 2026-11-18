@@ -46,6 +46,14 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"POST /projects/{projectID}/assets":    h.addAssets,
 		"GET /projects/{projectID}/song":       h.song,
 		"GET /projects/{projectID}/song/audio": h.songAudio,
+		"POST /projects/{projectID}/generate":  h.generate,
+		"GET /jobs/{jobID}":                    h.job,
+		"POST /jobs/{jobID}/cancel":            h.cancelJob,
+		"POST /jobs/{jobID}/drop-assets":       h.dropAssets,
+		"POST /jobs/{jobID}/retry-analysis":    h.retryAnalysis,
+		"POST /jobs/{jobID}/retry":             h.retryJob,
+		"POST /jobs/{jobID}/replan":            h.replan,
+		"GET /notices":                         h.notices,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -107,6 +115,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "grant_revoked", "the project can no longer reach its videos")
 	case errors.Is(err, montage.ErrSessionEnded):
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+	case errors.Is(err, montage.ErrJobActive):
+		httpjson.WriteError(w, http.StatusConflict, "job_in_progress", "the project already has a job in progress")
+	case errors.Is(err, montage.ErrJobState):
+		httpjson.WriteError(w, http.StatusConflict, "job_state", "the job cannot do this now")
+	case errors.Is(err, montage.ErrJobsUnavailable):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center cannot make films here")
 	case errors.Is(err, montage.ErrSongTooLarge):
 		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "song_too_large", "the song is larger than 100 MiB")
 	case errors.Is(err, montage.ErrSongLength):

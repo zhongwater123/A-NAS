@@ -125,15 +125,19 @@ func (g *grantServer) answer(conn net.Conn) {
 	unixConn := conn.(*net.UnixConn)
 	deadline := time.Now().Add(grantDeadline)
 	_ = conn.SetDeadline(deadline)
-	ctx, cancel := context.WithDeadline(g.base, deadline)
-	defer cancel()
 	var request photosapi.GrantRequest
 	file, err := unixmsg.Read(unixConn, &request, photosapi.GrantMessageLimit)
-	unixmsg.CloseFile(file)
+	defer unixmsg.CloseFile(file)
 	if err != nil {
 		return
 	}
-	response, opened := g.handle(ctx, request)
+	if request.Op == photosapi.GrantSaveFilm {
+		deadline = time.Now().Add(photosapi.SaveFilmTimeout)
+		_ = conn.SetDeadline(deadline)
+	}
+	ctx, cancel := context.WithDeadline(g.base, deadline)
+	defer cancel()
+	response, opened := g.handleWith(ctx, request, file)
 	if opened != nil {
 		defer func() { _ = opened.Close() }()
 	}
@@ -163,7 +167,8 @@ func (g *grantServer) owner(ctx context.Context, service *photos.Service, grantI
 
 var errInactiveOwner = errors.New("the grant's owner is not an active account")
 
-func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File) {
+// handleWith answers request; given is the descriptor that came with it.
+func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantRequest, given *os.File) (photosapi.GrantResponse, *os.File) {
 	service := g.service.Load()
 	if service == nil {
 		return refused(photosapi.GrantUnavailable, "the photo library is not available"), nil
@@ -185,7 +190,7 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			grant, err = service.RegisterGrant(ctx, photosapi.NewGrantPrincipal(user.UserID, user.Username), request.ProjectID, request.AssetIDs)
 			response.Grant = &grant
 		}
-	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis:
+	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis, photosapi.GrantSaveFilm:
 		var owner photos.Principal
 		if owner, err = g.owner(ctx, service, request.GrantID); err != nil {
 			break
@@ -195,6 +200,11 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			response.Assets, err = service.LookupGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		case photosapi.GrantOpen:
 			opened, response.ObjectID, err = service.OpenGrant(ctx, owner, request.GrantID, request.AssetID)
+		case photosapi.GrantSaveFilm:
+			if given == nil {
+				return refused(photosapi.GrantInvalid, "saveFilm takes the film's descriptor"), nil
+			}
+			response.ObjectID, err = service.SaveFilm(ctx, owner, request.GrantID, request.VersionKey, request.Name, given)
 		case photosapi.GrantAnalyze:
 			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
 		case photosapi.GrantAnalysis:
@@ -229,6 +239,10 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 		return refused(photosapi.GrantTooMany, "too many assets"), nil
 	case errors.Is(err, photos.ErrNotFound):
 		return refused(photosapi.GrantAssetNotFound, "the asset is not available"), nil
+	case errors.Is(err, photos.ErrInsufficientSpace):
+		return refused(photosapi.GrantNoSpace, "not enough space for the film"), nil
+	case errors.Is(err, photos.ErrInvalidName), errors.Is(err, photos.ErrUnsupportedType):
+		return refused(photosapi.GrantInvalid, err.Error()), nil
 	}
 	g.logger.Error("grant request failed", "op", request.Op, "error", err)
 	return refused(photosapi.GrantUnavailable, "the photo library could not answer"), nil
@@ -247,11 +261,17 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 	var opened atomic.Pointer[photos.Service]
 	opened.Store(service)
 	server := &grantServer{service: &opened, sessions: sessions, accounts: sessions, logger: logger}
-	return photosapi.Grants{Call: func(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File, error) {
-		response, file := server.handle(ctx, request)
+	send := func(ctx context.Context, request photosapi.GrantRequest, given *os.File) (photosapi.GrantResponse, *os.File, error) {
+		response, file := server.handleWith(ctx, request, given)
 		if !response.OK {
 			return photosapi.GrantResponse{}, nil, &photosapi.GrantError{Code: response.Code, Message: response.Message}
 		}
 		return response, file, nil
-	}}
+	}
+	return photosapi.Grants{
+		Call: func(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File, error) {
+			return send(ctx, request, nil)
+		},
+		Send: send,
+	}
 }

@@ -32,6 +32,9 @@ const (
 	// beside the answer.
 	GrantAnalyze  = "analyze"
 	GrantAnalysis = "analysis"
+	// GrantSaveFilm imports a film, passed as the request's descriptor,
+	// into the owner's private library, once per version key.
+	GrantSaveFilm = "saveFilm"
 )
 
 // Grant error codes. GrantOwnerInactive is a grant whose owner's account is
@@ -47,8 +50,10 @@ const (
 	GrantTooMany        = "too_many_assets"
 	GrantAssetNotFound  = "not_found"
 	GrantUnavailable    = "photos_unavailable"
+	GrantNoSpace        = "insufficient_storage"
 	grantMessageLimit   = 256 << 10
 	grantRequestTimeout = time.Minute
+	SaveFilmTimeout     = 30 * time.Minute
 )
 
 // GrantListPage is how many grants one list answer carries at most. A grant
@@ -77,6 +82,9 @@ type GrantRequest struct {
 	After     string   `json:"after,omitempty"`
 	// Retry, on analyze, starts a failed analysis over.
 	Retry bool `json:"retry,omitempty"`
+	// VersionKey and Name, on saveFilm.
+	VersionKey string `json:"versionKey,omitempty"`
+	Name       string `json:"name,omitempty"`
 }
 
 // GrantResponse answers a GrantRequest. Next, on list, is set when more
@@ -115,17 +123,28 @@ type GrantCall func(ctx context.Context, request GrantRequest) (GrantResponse, *
 // or, in development, the photo service's own in this process.
 type Grants struct {
 	Call GrantCall
+	// Send is Call with a descriptor beside the request, for saveFilm.
+	Send func(ctx context.Context, request GrantRequest, file *os.File) (GrantResponse, *os.File, error)
 }
 
 // GrantClient reaches the photo library's grant socket.
 func GrantClient(socket string) Grants {
-	return Grants{Call: func(ctx context.Context, request GrantRequest) (GrantResponse, *os.File, error) {
-		return callSocket(ctx, socket, request)
-	}}
+	return Grants{
+		Call: func(ctx context.Context, request GrantRequest) (GrantResponse, *os.File, error) {
+			return callSocket(ctx, socket, request, nil)
+		},
+		Send: func(ctx context.Context, request GrantRequest, file *os.File) (GrantResponse, *os.File, error) {
+			return callSocket(ctx, socket, request, file)
+		},
+	}
 }
 
-func callSocket(ctx context.Context, socket string, request GrantRequest) (GrantResponse, *os.File, error) {
-	ctx, cancel := context.WithTimeout(ctx, grantRequestTimeout)
+func callSocket(ctx context.Context, socket string, request GrantRequest, file *os.File) (GrantResponse, *os.File, error) {
+	timeout := grantRequestTimeout
+	if request.Op == GrantSaveFilm {
+		timeout = SaveFilmTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", socket)
@@ -136,19 +155,19 @@ func callSocket(ctx context.Context, socket string, request GrantRequest) (Grant
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	unix := conn.(*net.UnixConn)
-	if err := unixmsg.Write(unix, request, nil, grantMessageLimit); err != nil {
+	if err := unixmsg.Write(unix, request, file, grantMessageLimit); err != nil {
 		return GrantResponse{}, nil, fmt.Errorf("photo grant request: %w", err)
 	}
 	var response GrantResponse
-	file, err := unixmsg.Read(unix, &response, grantMessageLimit)
+	answered, err := unixmsg.Read(unix, &response, grantMessageLimit)
 	if err != nil {
 		return GrantResponse{}, nil, fmt.Errorf("photo grant answer: %w", err)
 	}
 	if !response.OK {
-		unixmsg.CloseFile(file)
+		unixmsg.CloseFile(answered)
 		return GrantResponse{}, nil, &GrantError{Code: response.Code, Message: response.Message}
 	}
-	return response, file, nil
+	return response, answered, nil
 }
 
 func (g Grants) plain(ctx context.Context, request GrantRequest) (GrantResponse, error) {
@@ -224,6 +243,20 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 		return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %w", err)
 	}
 	return analysis, vectors, nil
+}
+
+// SaveFilm imports film into the grant owner's private library and returns
+// its asset; the same versionKey again returns the film saved before.
+func (g Grants) SaveFilm(ctx context.Context, grantID, versionKey, name string, film *os.File) (string, error) {
+	if g.Send == nil {
+		return "", errors.New("photo grant: saving a film needs a descriptor transport")
+	}
+	response, file, err := g.Send(ctx, GrantRequest{Op: GrantSaveFilm, GrantID: grantID, VersionKey: versionKey, Name: name}, film)
+	unixmsg.CloseFile(file)
+	if err != nil {
+		return "", err
+	}
+	return response.ObjectID, nil
 }
 
 // Remove takes assets out of a grant.

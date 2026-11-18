@@ -586,6 +586,20 @@ CREATE TABLE video_card_descriptions (
 DROP TABLE video_card_descriptions;
 DELETE FROM jobs WHERE derivation = 'montage-describe/v1';
 `},
+	// 21: the films the montage center saved (ADR 0038): one per
+	// (owner, version key), written with the film's asset, so that a save
+	// cut short and tried again never makes a second film.
+	{Up: `
+CREATE TABLE montage_films (
+    owner_user_id TEXT NOT NULL,
+    version_key TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_user_id, version_key)
+);
+`, Down: `
+DROP TABLE montage_films;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

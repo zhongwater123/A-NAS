@@ -32,11 +32,15 @@ type Config struct {
 	// Grants reaches the photo library's project grants.
 	Grants montage.Grants
 	// Media, Music and Compute decode, analyse and cut the songs
-	// (montage.Options).
-	Media   montage.Media
-	Music   montage.MusicAnalyzer
-	Compute montage.MusicComputer
-	Logger  *slog.Logger
+	// (montage.Options); JobCompute, Editing and Planner are what jobs work
+	// with besides them. Without a planner the service makes no film.
+	Media      montage.Media
+	Music      montage.MusicAnalyzer
+	Compute    montage.MusicComputer
+	JobCompute montage.Compute
+	Editing    montage.Editing
+	Planner    montage.Planner
+	Logger     *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -85,7 +89,7 @@ func Run(ctx context.Context, config Config) error {
 		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: montageapi.Unavailable,
 		Open: func(ctx context.Context, root string) (*montage.Store, error) {
-			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute, Logger: config.Logger})
+			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute, JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, Logger: config.Logger})
 			if err == nil {
 				if err = store.StartWorkers(ctx); err != nil {
 					_ = store.Close()

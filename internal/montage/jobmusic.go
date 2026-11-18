@@ -13,9 +13,8 @@ import (
 	"strconv"
 )
 
-// What a job asks of its project's song (M8a, internal/montage/pipeline.go
-// there defines Music, Excerpt and the two errors the same way; whichever
-// lands second drops its copy).
+// What a job asks of its project's song: the store is the jobs' Music
+// (pipeline.go).
 
 // Excerpt is the part of the song the film is cut to.
 type Excerpt struct {
@@ -24,7 +23,7 @@ type Excerpt struct {
 	// Music is the excerpt as the compute Worker's domain reads it.
 	Music json.RawMessage `json:"music"`
 	// Start is where the excerpt starts in the song, in seconds; Frames
-	// is how long the film is, at filmRate.
+	// is how long the film is, at FilmRate.
 	Start  float64 `json:"start"`
 	Frames int     `json:"frames"`
 }
@@ -36,9 +35,6 @@ var (
 	// ErrSongUnusable: the song cannot be used, or none was chosen.
 	ErrSongUnusable = errors.New("the song cannot be used")
 )
-
-// filmRate is the film's frames per second (1920×1080 at 30).
-const filmRate = 30
 
 // DefaultStart stands for the excerpt the eighth version's rule picks: a
 // project whose member never dragged the start follows it, also when the
@@ -212,7 +208,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		return Excerpt{}, err
 	}
 	return Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
-		Frames: int(math.Round(selection.Seconds * filmRate))}, nil
+		Frames: int(math.Round(selection.Seconds * FilmRate))}, nil
 }
 
 // Audio opens owner's song's copy, for the film's sound.

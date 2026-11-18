@@ -36,6 +36,7 @@ Operations:
 import argparse
 import contextlib
 import io
+import json
 import logging
 import math
 import mmap
@@ -260,12 +261,29 @@ OPS = {"cards": op_cards, "quality_part": op_quality_part, "quality": op_quality
        "clear": op_clear, "fill": op_fill, "plan": op_plan, "shots_answer": op_shots_answer, "music": music_ops.op_music}
 
 
+def with_body(request, body):
+    """A request whose fields outgrow a frame (the fill's cards and plans) sends them as a uint8 array "body" of
+    JSON; the fields in the frame win."""
+    if body.dtype != np.uint8 or body.ndim != 1:
+        raise Refused("the body is a uint8 array of JSON")
+    try:
+        fields = json.loads(body.tobytes())
+    except (UnicodeDecodeError, json.JSONDecodeError) as broken:
+        raise Refused(f"the body is not JSON: {broken}") from None
+    if not isinstance(fields, dict):
+        raise Refused("the body is a JSON object")
+    return {**fields, **request}
+
+
 def answer(request, fds):
     op = OPS.get(request.get("op"))
     if op is None:
         return protocol.failure(protocol.CODE_INVALID_INPUT, f"unknown operation {request.get('op')!r}")
     try:
-        return protocol.ok(**op(request, read_arrays(request, fds)))
+        arrays = read_arrays(request, fds)
+        if "body" in arrays:
+            request = with_body(request, arrays.pop("body"))
+        return protocol.ok(**op(request, arrays))
     except Refused as refused:
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(refused))
     except (KeyError, TypeError, ValueError, IndexError) as broken:

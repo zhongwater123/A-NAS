@@ -1,5 +1,6 @@
 parameters:
   MontageProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  MontageJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
 schemas:
   MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
@@ -33,7 +34,7 @@ schemas:
   MontageProject:
     type: object
     additionalProperties: false
-    required: [id, name, assetCount, createdAt, ask, chronological, assets]
+    required: [id, name, assetCount, createdAt, ask, chronological, assets, versions]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }
@@ -42,6 +43,7 @@ schemas:
       ask: { type: string }
       chronological: { type: boolean }
       assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
+      versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/MontageVersion" } }
   MontageSongSection:
     type: object
     additionalProperties: false
@@ -90,3 +92,58 @@ schemas:
       sections: { type: array, items: { $ref: "#/schemas/MontageSongSection" } }
       defaultStart: { type: number, minimum: 0, description: "Where the eighth version's rule starts the excerpt: around the first chorus." }
       selection: { $ref: "#/schemas/MontageSongSelection" }
+  MontageVersion:
+    type: object
+    additionalProperties: false
+    required: [number, filmAssetId, createdAt]
+    properties:
+      number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
+      filmAssetId: { type: string, description: "The film in the caller's photo library; play and download it there." }
+      createdAt: { type: string, format: date-time }
+      gone: { type: boolean, description: "The member deleted the film from the photo library." }
+  MontageJobStep:
+    type: object
+    additionalProperties: false
+    required: [name, state]
+    properties:
+      name: { type: string, enum: [analysis, catalog, song, pick, shots, fill, render, save] }
+      state: { type: string, enum: [pending, running, done, queued, waiting, needs_input, failed, cancelled], description: "A step that stopped with the job shows the job's state." }
+      startedAt: { type: string, format: date-time }
+      finishedAt: { type: string, format: date-time }
+  MontageJob:
+    type: object
+    additionalProperties: false
+    required: [id, projectId, state, steps, createdAt]
+    properties:
+      id: { type: string, minLength: 1 }
+      projectId: { type: string, minLength: 1 }
+      state: { type: string, enum: [queued, running, waiting, needs_input, done, failed, cancelled] }
+      step: { type: string, description: The step the job is at or stopped at. }
+      waitReason:
+        type: string
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full, photos_unavailable, video_too_long, model_unavailable]
+        description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed."
+      error: { type: string }
+      steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
+      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed.", items: { type: string } }
+      version: { $ref: "#/schemas/MontageVersion" }
+      createdAt: { type: string, format: date-time }
+      finishedAt: { type: string, format: date-time }
+  MontageNotice:
+    type: object
+    additionalProperties: false
+    required: [kind, jobId, projectId, project, at]
+    properties:
+      kind: { type: string, enum: [waiting_for_planning, planning, needs_input, saved] }
+      jobId: { type: string }
+      projectId: { type: string }
+      project: { type: string, description: The project's name. }
+      reason: { type: string }
+      filmAssetId: { type: string, description: "The film saved, for saved." }
+      at: { type: string, format: date-time }
+  MontageNotices:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/MontageNotice" } }

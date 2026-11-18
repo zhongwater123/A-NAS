@@ -32,15 +32,31 @@ type library struct {
 	next      int
 	registers int
 	revoked   []string
-	removed   []string
+	// What jobs use (jobs_test.go): each video's analysis state (done
+	// when absent), the films saved by version key, and faults.
+	states   map[string]photos.AnalysisState
+	films    map[string]string
+	saves    int
+	noSpace  bool
+	lostSave int
+	retried  []string
+	removed  []string
+	// asked are the videos an analysis was asked for, other than again.
+	asked []string
+	// described, when set, changes a video's analysis before it is read.
+	described func(assetID string, analysis *photos.GrantAnalysis)
+	// saving, when set, runs when a film arrives, outside the lock.
+	saving func()
 	// registered, when set, runs after a registration, outside the lock.
 	registered func()
 }
 
+// A video lasts ten seconds unless seconds says otherwise.
 type video struct {
 	owner, object string
 	trashed       bool
 	takenAt       time.Time
+	seconds       float64
 }
 
 type grant struct {
@@ -50,7 +66,7 @@ type grant struct {
 }
 
 func newLibrary() *library {
-	return &library{videos: map[string]video{}, grants: map[string]*grant{}}
+	return &library{videos: map[string]video{}, grants: map[string]*grant{}, states: map[string]photos.AnalysisState{}, films: map[string]string{}}
 }
 
 func refused(code string) error { return &photosapi.GrantError{Code: code, Message: code} }
@@ -137,7 +153,16 @@ func (l *library) Lookup(_ context.Context, grantID string, ids []string) ([]pho
 			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantTrashed})
 		default:
 			taken := v.takenAt
-			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: 10, TakenAt: &taken})
+			state, ok := l.states[id]
+			if !ok {
+				state = photos.AnalysisDone
+			}
+			seconds := 10.0
+			if v.seconds > 0 {
+				seconds = v.seconds
+			}
+			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: seconds, TakenAt: &taken,
+				Width: 1920, Height: 1080, Windows: state, Cards: state, Quality: state, Descriptions: state})
 		}
 	}
 	return out, nil

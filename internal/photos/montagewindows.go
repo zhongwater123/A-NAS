@@ -105,6 +105,9 @@ func videoWindows(durationMs int) (windows []Window, middles []int) {
 	return windows, middles
 }
 
+// VideoTooLong reports whether the video exceeds the analysis window limit.
+func VideoTooLong(duration float64) bool { return windowCount(duration) > MaxVideoWindows }
+
 // windowCount is how many windows a video of duration seconds has.
 func windowCount(duration float64) int {
 	durationMs := int(math.Round(duration * 1000))

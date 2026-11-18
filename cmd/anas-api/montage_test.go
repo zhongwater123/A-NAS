@@ -11,6 +11,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 // A deleted account leaves the montage store while the switch is off too:
@@ -69,7 +70,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 }
 
 // idleGrants is a photo library that holds no grants.
-type idleGrants struct{}
+type idleGrants struct{ photosapi.Grants }
 
 func (idleGrants) Register(context.Context, string, string, []string) (photos.Grant, error) {
 	return photos.Grant{}, errors.New("no photo library here")
