@@ -285,6 +285,10 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if worked, ended, err := r.montageWindows(ctx, embedder, gate, info); worked || ended || err != nil {
 		return worked, err
 	}
+	// Then the descriptions, in the reading phase: one card a round.
+	if claimed, described, err := r.montageDescribe(ctx, embedder, gate, info); claimed || err != nil {
+		return described, err
+	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries
 	// had theirs are routed, once.
@@ -733,6 +737,10 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
 		}
+		// The montage center's descriptions: only those a grant still refers to.
+		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
+			return err
+		}
 		if record.Reader != info.OCR {
 			record.Reader = info.OCR
 			if err := lib.storeWorkerRecord(record); err != nil {
@@ -822,11 +830,11 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	}
 	var due bool
 	err := lib.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
-    OR (? AND derivation = ?))
+SELECT EXISTS (SELECT 1 FROM jobs j WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
+    OR (? AND derivation = ?) OR (? AND derivation = ? AND `+describeReady+`))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
 		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation,
-		reading, textDerivation, now, now).Scan(&due)
+		reading, textDerivation, reading, describeDerivation, now, now).Scan(&due)
 	return due, err
 }
 

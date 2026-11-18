@@ -59,9 +59,10 @@ type GrantedAsset struct {
 	Height   int              `json:"height,omitempty"`
 	TakenAt  *time.Time       `json:"takenAt,omitempty"`
 	// Windows, Cards and Quality are where the montage analysis stands.
-	Windows AnalysisState `json:"windows,omitempty"`
-	Cards   AnalysisState `json:"cards,omitempty"`
-	Quality AnalysisState `json:"quality,omitempty"`
+	Windows      AnalysisState `json:"windows,omitempty"`
+	Cards        AnalysisState `json:"cards,omitempty"`
+	Quality      AnalysisState `json:"quality,omitempty"`
+	Descriptions AnalysisState `json:"descriptions,omitempty"`
 }
 
 // grantable reports whether owner may grant record: a video it sees,
@@ -234,7 +235,7 @@ func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID stri
 	for i := range found {
 		if found[i].Status == GrantAvailable {
 			p := progress[found[i].ObjectID]
-			found[i].Windows, found[i].Cards, found[i].Quality = p.windows, p.cards, p.quality
+			found[i].Windows, found[i].Cards, found[i].Quality, found[i].Descriptions = p.windows, p.cards, p.quality, p.described
 		}
 	}
 	return found, progress, nil

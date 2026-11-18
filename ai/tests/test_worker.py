@@ -18,16 +18,17 @@ import weakref
 from anas_ai import protocol, providers, worker
 
 
-def call(path, request, image=None):
+def call(path, request, image=None, images=None):
     """Sends one request the way internal/aiworker does and returns the response."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.connect(path)
         payload = json.dumps(request).encode()
         frame = struct.pack(">I", len(payload)) + payload
-        if image is None:
-            conn.sendall(frame)
+        files = [image] if image is not None else images or []
+        if files:
+            socket.send_fds(conn, [frame], [file.fileno() for file in files])
         else:
-            socket.send_fds(conn, [frame], [image.fileno()])
+            conn.sendall(frame)
         header = b""
         while len(header) < 4:
             header += conn.recv(4 - len(header))
@@ -313,6 +314,88 @@ class WorkerTest(unittest.TestCase):
             conn.connect(path)
             payload = json.dumps({"op": "read_text", "kind": "text"}).encode()
             socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
+
+    def card(self, count=3, content=b"frame"):
+        """A describe_frames request for count key frames, a beat each, and the frames."""
+        request = {"op": "describe_frames", "offsets": [2.0 * k for k in range(count)],
+                   "groups": list(range(1, count + 1)), "duration": 2.0 * count}
+        return request, [self.image(content + str(k).encode()) for k in range(count)]
+
+    def test_describes_a_card_from_its_key_frames(self):
+        fake = providers.FakeReader()
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(fake))
+        request, frames = self.card(4)
+        response = call(path, request, images=frames)
+        self.assertTrue(response["ok"], response)
+        self.assertEqual((response["model"], response["template"]), (fake.model, "montage-card/v1"))
+        description = response["description"]
+        self.assertEqual([beat["frames"] for beat in description["beats"]], [[1, 1], [2, 2], [3, 3], [4, 4]])
+        self.assertEqual(set(description), {"camera", "beats", "process", "summary", "scene"})
+        request, frames = self.card(4)
+        self.assertEqual(call(path, request, images=frames)["description"], description)
+        # Frames grouped two to a beat make two beats.
+        request["groups"] = [1, 1, 2, 2]
+        response = call(path, request, images=self.card(4)[1])
+        self.assertEqual([beat["frames"] for beat in response["description"]["beats"]], [[1, 2], [3, 4]])
+        self.assertTrue(fake.loaded)
+
+    def test_a_card_out_of_bounds_is_an_invalid_request(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(providers.FakeReader()))
+        # More than 20 key frames: the kernel drops the rest, and the request is refused whole.
+        request, frames = self.card(21)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        request, frames = self.card(2)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        request, frames = self.card(20)
+        self.assertTrue(call(path, request, images=frames)["ok"])
+        request, frames = self.card(3)
+        for change in ({"offsets": [0, 2]}, {"offsets": [0, 4, 2]}, {"offsets": [-1, 2, 4]}, {"offsets": [0, "2", 4]},
+                       {"groups": [1, 1]}, {"groups": [2, 2, 3]}, {"groups": [1, 3, 3]}, {"groups": [1, 2, 1]},
+                       {"groups": [1, True, 2]}, {"duration": 3}, {"duration": None}, {"duration": float("nan")},
+                       {"offsets": None}, {"offsets": 5}, {"offsets": True}, {"duration": 10**400}):
+            bad = {**request, **change}
+            self.assertEqual(call(path, bad, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST, change)
+        self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        request, frames = self.card(3, b"")
+        frames[1] = self.image(b"")
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_INPUT)
+        # One descriptor more than an operation takes is refused as it was.
+        self.assertEqual(call(path, {"op": "embed_image"}, images=[self.image(b"a"), self.image(b"b")])["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+
+    def test_an_answer_that_never_fits_the_schema_is_an_invalid_result(self):
+        fake = providers.FakeReader(answers=["{", '{"camera": "海上"}', "```json\n[]\n```"])
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(fake))
+        request, frames = self.card()
+        response = call(path, request, images=frames)
+        self.assertEqual(response["error"]["code"], protocol.CODE_INVALID_RESULT)
+        self.assertEqual(response["error"]["message"].count(";"), 2)
+
+    def test_a_card_past_the_context_is_invalid_input(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(providers.FakeReader()))
+        request, frames = self.card(3, providers.FAKE_REFUSE)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_INPUT)
+
+    def test_describing_is_unavailable_without_a_reader(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(reason="no OCR model"))
+        request, frames = self.card()
+        self.assertEqual(call(path, request, images=frames)["error"],
+                         {"code": protocol.CODE_UNAVAILABLE, "message": "no OCR model"})
+
+    def test_hanging_up_stops_the_description(self):
+        fake = providers.FakeReader(delay=30)
+        path, _ = self.start(providers.FakeProvider(), reader=worker.Detector(fake))
+        request, frames = self.card()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps(request).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [frame.fileno() for frame in frames])
             time.sleep(0.2)
         started = time.monotonic()
         self.assertTrue(call(path, {"op": "info"})["ok"])

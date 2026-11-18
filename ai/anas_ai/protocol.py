@@ -2,7 +2,8 @@
 
 Every connection carries one request and one response. A frame is a 4-byte
 big-endian length followed by JSON of at most MAX_FRAME bytes. An image
-travels as one descriptor in the request's SCM_RIGHTS control message.
+travels as one descriptor in the request's SCM_RIGHTS control message;
+describe_frames sends up to MAX_FDS, one per key frame, in order.
 """
 
 import contextlib
@@ -12,6 +13,8 @@ import socket
 import struct
 
 MAX_FRAME = 1 << 20
+# The most descriptors a request carries: describe_frames' key frames.
+MAX_FDS = 20
 
 # Describes the Worker: "model" and "dimensions" of its image vectors, the
 # "detector", "faceModel" and "animalModel" it can use, and "memoryBytes", what
@@ -42,6 +45,17 @@ OP_EMBED_ANIMALS = "embed_animals"
 # answer; "logprobs", [token, log probability] for each token; "finish", why
 # the answer ended: "stop", "length" or "repetition"}. Hanging up cancels it.
 OP_READ_TEXT = "read_text"
+# Describes a montage card (docs/architecture/photo-ai.md, 剪辑中心的分析) from
+# its key frames, one descriptor each, 3 to MAX_FDS: "offsets", each frame's
+# seconds from the card's start; "groups", the beat each frame belongs to,
+# counted from 1 in order; "duration", the card's seconds. The prompt, the
+# genre and the schema are the Worker's own, "template" in the answer;
+# answers "model", "template" and "description", the JSON the schema allows.
+# Each of its beats has "frames", the first and last of its key frames
+# counted from 1 among those sent; a card with more than the reader's context
+# holds is described from some of them, so it has fewer beats than frames.
+# Hanging up cancels it.
+OP_DESCRIBE_FRAMES = "describe_frames"
 # Frees memory: "what" is "detector" to drop the background models (the
 # object detector, the face models, the animal model and the text reader), or
 # "all" to exit after answering; systemd starts the Worker again when needed.
@@ -51,6 +65,10 @@ OP_RELEASE = "release"
 CODE_INVALID_INPUT = "invalid_input"
 # The Worker runs but cannot serve, for example without its model.
 CODE_UNAVAILABLE = "unavailable"
+# The request is malformed: too many descriptors, or fields out of bounds.
+CODE_INVALID_REQUEST = "invalid_request"
+# The model's answer did not fit the schema however often it was asked again.
+CODE_INVALID_RESULT = "invalid_result"
 # Anything else; the photo service spends an attempt and retries later.
 CODE_INTERNAL = "internal"
 
@@ -59,9 +77,17 @@ class ProtocolError(Exception):
     """The peer broke the framing; the connection is dropped."""
 
 
+class TooManyDescriptors(ProtocolError):
+    """The request came with more descriptors than the receiver takes; it was read whole and can be answered."""
+
+
 def read_request(conn, max_fds=1):
-    """Returns the decoded request and the descriptors that came with it, at most max_fds."""
-    data, fds, _, _ = socket.recv_fds(conn, MAX_FRAME + 4, max_fds)
+    """Returns the decoded request and the descriptors that came with it, at most max_fds.
+
+    The kernel drops the descriptors past max_fds and says so; the request is
+    then read to its end and refused with TooManyDescriptors.
+    """
+    data, fds, flags, _ = socket.recv_fds(conn, MAX_FRAME + 4, max_fds)
     try:
         while len(data) < 4:
             more = conn.recv(4 - len(data))
@@ -79,6 +105,8 @@ def read_request(conn, max_fds=1):
         request = json.loads(data[4 : 4 + length])
         if not isinstance(request, dict):
             raise ProtocolError("request is not a JSON object")
+        if flags & socket.MSG_CTRUNC:
+            raise TooManyDescriptors(f"more than {max_fds} descriptors")
         return request, fds
     except BaseException:
         for fd in fds:

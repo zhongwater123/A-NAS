@@ -49,10 +49,11 @@ type Gate struct {
 	mu sync.Mutex
 	// pressed holds the resources over their limit at the last look, short
 	// whether memory was below the reserve, and waiting whether the models
-	// waited for memory to load.
+	// waited for memory to load, for each need asked about: a round asks for
+	// the photos' models and for the text reader, which takes more.
 	pressed map[string]bool
 	short   bool
-	waiting bool
+	waiting map[uint64]bool
 }
 
 // MemoryReserve is the memory AI work always leaves for the user's next
@@ -166,15 +167,20 @@ func (g *Gate) cannotLoad(free, need uint64) bool {
 	waiting := free < MemoryReserve+load
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if waiting != g.waiting && g.logger != nil {
+	if g.waiting == nil {
+		g.waiting = map[uint64]bool{}
+	}
+	// Each need has its own answer: memory enough for one and not for the
+	// other is not a change every time both are asked about.
+	if waiting != g.waiting[need] && g.logger != nil {
 		if waiting {
-			g.logger.Info("AI work waits for memory to load its models", "available_mib", free>>20,
+			g.logger.Info("AI work waits for memory to load its models", "need_mib", need>>20, "available_mib", free>>20,
 				"load_mib", load>>20, "reserve_mib", MemoryReserve>>20)
 		} else {
-			g.logger.Info("AI work has memory to load its models", "available_mib", free>>20, "load_mib", load>>20)
+			g.logger.Info("AI work has memory to load its models", "need_mib", need>>20, "available_mib", free>>20, "load_mib", load>>20)
 		}
 	}
-	g.waiting = waiting
+	g.waiting[need] = waiting
 	return waiting
 }
 

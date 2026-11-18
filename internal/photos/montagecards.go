@@ -247,6 +247,13 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_quality WHERE object_id = ?", job.objectID); err != nil {
 			return err
 		}
+		// New cards are described anew, even if the old job exhausted its retries.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, describeDerivation); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id = ?", job.objectID); err != nil {
+			return err
+		}
 		for n, card := range cards {
 			times, _ := json.Marshal(card.Times)
 			if _, err := tx.ExecContext(ctx, "INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, identity) VALUES(?, ?, ?, ?, ?, ?)",
@@ -351,8 +358,10 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 			if count, err := updated.RowsAffected(); err != nil || count == 0 {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-			return err
+			if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
+				return err
+			}
+			return s.queueDescribe(ctx, tx, job.objectID)
 		})
 		if err != nil {
 			return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
@@ -490,11 +499,12 @@ func (s *Service) sharpPoints(ctx context.Context, taker FrameTaker, original *o
 
 // CardAnalysis is one card of a video's montage analysis.
 type CardAnalysis struct {
-	Index   int          `json:"card"`
-	StartMs int          `json:"startMs"`
-	EndMs   int          `json:"endMs"`
-	Times   []float64    `json:"times"`
-	Quality *CardQuality `json:"quality,omitempty"`
+	Description *CardDescription `json:"description,omitempty"`
+	Index       int              `json:"card"`
+	StartMs     int              `json:"startMs"`
+	EndMs       int              `json:"endMs"`
+	Times       []float64        `json:"times"`
+	Quality     *CardQuality     `json:"quality,omitempty"`
 }
 
 // cardsOf reads a video's cards and the quality measured so far.
