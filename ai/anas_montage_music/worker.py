@@ -30,6 +30,11 @@ Worker's are (anas_ai.protocol). Operations:
            interleaved. Answers "model", "bpm", "beats", "downbeats",
            "segments" [{start, end, label}], "loudness" (base64 of
            little-endian float32) and "seconds" it took.
+           With "confirm": true the caller sends a second frame once it has
+           written both streams, {"streams": "complete"}, and the song is
+           analysed only then: a stream that ends does not tell a whole song
+           from one whose decoding broke off. A caller that hangs up instead
+           gets no answer, and nothing is analysed.
 """
 
 import argparse
@@ -75,6 +80,10 @@ STEMS = ("bass", "drums", "other", "vocals")
 
 class Refused(Exception):
     """The request cannot be answered as it stands; the same request would fail again."""
+
+
+class Dropped(Exception):
+    """The caller gave the request up; it waits for no answer."""
 
 
 def digest(path):
@@ -182,11 +191,10 @@ def high_water():
 
 
 def rms_curve(y):
-    """The eighth version's loudness: librosa.feature.rms's default framing (centred, zero-padded)."""
-    padded = np.pad(y, FRAME // 2)
-    n = 1 + (len(padded) - FRAME) // HOP
-    frames = np.lib.stride_tricks.as_strided(padded, (n, FRAME), (padded.strides[0] * HOP, padded.strides[0]))
-    return np.sqrt(np.mean(np.abs(frames) ** 2, axis=1))
+    """The eighth version's loudness (its adapters/music.py, rms_curve): frames centred on every HOP-th sample, zero-padded at both ends."""
+    import librosa
+
+    return librosa.feature.rms(y=y, frame_length=FRAME, hop_length=HOP, center=True, pad_mode="constant")[0]
 
 
 def spectrogram_processor():
@@ -315,7 +323,16 @@ def structure(models, stereo):
                          for s in functional]}
 
 
-def op_analyze(models, request, fds):
+def confirmed(conn):
+    """Whether the caller says the streams it wrote are whole, in a frame of its own after them."""
+    try:
+        frame, _ = protocol.read_request(conn, 0)
+    except (protocol.ProtocolError, ValueError, OSError):
+        return False
+    return frame.get("streams") == "complete"
+
+
+def op_analyze(models, request, fds, conn):
     streams = request.get("streams")
     expected = [{"name": "stereo", "channels": 2, "rate": STEREO_RATE}, {"name": "mono", "channels": 1, "rate": MONO_RATE}]
     if streams != expected or len(fds) != 2:
@@ -323,6 +340,8 @@ def op_analyze(models, request, fds):
     started = time.monotonic()
     stereo = read_stream(fds[0], 2, rate=STEREO_RATE)
     mono = read_stream(fds[1], 1, rate=MONO_RATE)[:, 0]
+    if request.get("confirm") and not confirmed(conn):
+        raise Dropped("the streams were not confirmed whole")
     loudness = rms_curve(mono).astype("<f4")
     del mono
     found = structure(models, stereo)
@@ -332,14 +351,14 @@ def op_analyze(models, request, fds):
             "seconds": round(time.monotonic() - started, 1)}
 
 
-def answer(models, request, fds):
+def answer(models, request, fds, conn):
     op = request.get("op")
     try:
         if op == "info":
             models.load()
             return protocol.ok(model=models.identity)
         if op == "analyze":
-            return protocol.ok(**op_analyze(models, request, fds))
+            return protocol.ok(**op_analyze(models, request, fds, conn))
     except Refused as refused:
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(refused))
     return protocol.failure(protocol.CODE_INVALID_INPUT, f"unknown operation {op!r}")
@@ -352,7 +371,10 @@ def handle(models, conn):
         log.warning("dropped a request: %s", broken)
         return
     try:
-        response = answer(models, request, fds)
+        response = answer(models, request, fds, conn)
+    except Dropped as dropped:
+        log.warning("dropped a request: %s", dropped)
+        return
     except MemoryError:
         log.exception("out of memory analysing a song")
         response = protocol.failure(protocol.CODE_INTERNAL, "out of memory")

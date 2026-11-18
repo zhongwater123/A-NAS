@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -25,9 +26,9 @@ import (
 // The photo library's side of jobs: every video is ten seconds, five
 // windows and two described cards.
 
-func (l *library) grantOf(grantID, assetID string) (video, error) {
+func (l *library) grantedVideo(grantID, assetID string) (video, error) {
 	g, ok := l.grants[grantID]
-	if !ok || g.Revoked {
+	if !ok || g.revoked {
 		return video{}, refused(photosapi.GrantNotFound)
 	}
 	v, ok := l.videos[assetID]
@@ -40,7 +41,7 @@ func (l *library) grantOf(grantID, assetID string) (video, error) {
 func (l *library) Open(_ context.Context, grantID, assetID string) (*os.File, string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	v, err := l.grantOf(grantID, assetID)
+	v, err := l.grantedVideo(grantID, assetID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -58,6 +59,14 @@ func (l *library) Analyze(_ context.Context, _ string, ids []string, retry bool)
 				delete(l.states, id)
 			}
 		}
+		return nil
+	}
+	l.asked = append(l.asked, ids...)
+	for _, id := range ids {
+		// Only asking queues what a new grant left out.
+		if state, ok := l.states[id]; ok && state == photos.AnalysisNone {
+			l.states[id] = photos.AnalysisQueued
+		}
 	}
 	return nil
 }
@@ -65,20 +74,23 @@ func (l *library) Analyze(_ context.Context, _ string, ids []string, retry bool)
 func (l *library) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	v, err := l.grantOf(grantID, assetID)
+	v, err := l.grantedVideo(grantID, assetID)
 	if err != nil {
 		return photos.GrantAnalysis{}, nil, err
 	}
 	done := photos.AnalysisDone
-	analysis := photos.GrantAnalysis{ObjectID: v.object, Windows: done, Identity: "model|win", Cards: done, Quality: done, Described: done,
+	analysis := photos.GrantAnalysis{Dimensions: 768, ObjectID: v.object, Windows: done, Identity: "model|win", Cards: done, Quality: done, Described: done,
 		CardList: []photos.CardAnalysis{
 			{Index: 0, StartMs: 0, EndMs: 4000, Times: []float64{1, 3}, Quality: &photos.CardQuality{}},
 			{Index: 1, StartMs: 4000, EndMs: 10000, Times: []float64{5, 8}, Quality: &photos.CardQuality{}},
 		},
 		Descriptions: []photos.CardDescription{
-			{Card: 0, Description: json.RawMessage(`{"beats":[{"shot_size":"远景","what":"海"},{"shot_size":"全景","what":"船"}]}`)},
-			{Card: 1, Description: json.RawMessage(`{"beats":[{"shot_size":"近景","what":"人"},{"shot_size":"特写","what":"手"}]}`)},
+			{Card: 0, Description: json.RawMessage(`{"beats":[{"frames":[1,1],"shot_size":"远景","what":"海"},{"frames":[2,2],"shot_size":"全景","what":"船"}]}`)},
+			{Card: 1, Description: json.RawMessage(`{"beats":[{"frames":[1,1],"shot_size":"近景","what":"人"},{"frames":[2,2],"shot_size":"特写","what":"手"}]}`)},
 		}}
+	if l.described != nil {
+		l.described(assetID, &analysis)
+	}
 	vectors := make([]byte, 5*768*4)
 	for i := range 5 {
 		analysis.List = append(analysis.List, photos.Window{Index: i, StartMs: 2000 * i, EndMs: 2000*i + 2000})
@@ -89,9 +101,15 @@ func (l *library) Analysis(_ context.Context, grantID, assetID string) (photos.G
 
 func (l *library) SaveFilm(_ context.Context, grantID, versionKey, name string, film *os.File) (string, error) {
 	l.mu.Lock()
+	arrived := l.saving
+	l.mu.Unlock()
+	if arrived != nil {
+		arrived()
+	}
+	l.mu.Lock()
 	defer l.mu.Unlock()
 	g, ok := l.grants[grantID]
-	if !ok || g.Revoked {
+	if !ok || g.revoked {
 		return "", refused(photosapi.GrantNotFound)
 	}
 	if l.noSpace {
@@ -139,8 +157,11 @@ func (l *library) set(fn func()) {
 type compute struct {
 	mu       sync.Mutex
 	failFill int
+	refuse   bool
 	external bool
 	fills    int
+	// clears are the frames after and before the key frame of each span.
+	clears [][2]int
 }
 
 func (c *compute) Catalog(_ context.Context, request montage.CatalogRequest) ([]string, error) {
@@ -158,6 +179,9 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	if c.failFill > 0 {
 		c.failFill--
 		return montage.FillAnswer{}, errors.New("the montage compute worker is not available: killed")
+	}
+	if c.refuse {
+		return montage.FillAnswer{}, fmt.Errorf("%w: the arrays are larger than the Worker takes", montage.ErrWorkerRefused)
 	}
 	if dimensions != 768 || len(vectors) != len(request.Rows)*768 {
 		return montage.FillAnswer{}, fmt.Errorf("%d vectors for %d rows", len(vectors), len(request.Rows))
@@ -216,6 +240,9 @@ func (c *compute) Clear(_ context.Context, request montage.ClearRequest, key, af
 	if len(key) != 256*144 || len(after) != afterCount*256*144 || len(before) != beforeCount*256*144 {
 		return [2]float64{}, errors.New("frames of the wrong size")
 	}
+	c.mu.Lock()
+	c.clears = append(c.clears, [2]int{afterCount, beforeCount})
+	c.mu.Unlock()
 	return [2]float64{request.Lo, request.Hi}, nil
 }
 
@@ -227,12 +254,18 @@ type editing struct {
 	onSegment   func(ctx context.Context) error
 	frames      int
 	badFilm     bool
+	// ranges are the ranges of frames asked for: start, end and rate.
+	ranges [][3]float64
 }
 
 func (e *editing) Frames(_ context.Context, _ *os.File, request ffmpegworker.FramesRequest, each func([]byte) error) (ffmpegworker.FramesResult, error) {
 	count := len(request.Times)
 	if count == 0 {
-		count = int((request.End-request.Start)*request.Rate) + 1
+		// A range is half-open: the instants Start + k/Rate before End.
+		count = int(math.Ceil((request.End - request.Start) * request.Rate))
+		e.mu.Lock()
+		e.ranges = append(e.ranges, [3]float64{request.Start, request.End, request.Rate})
+		e.mu.Unlock()
 	}
 	for range count {
 		if err := each(make([]byte, request.Width*request.Height)); err != nil {
@@ -308,7 +341,7 @@ func (p *planner) Shots(_ context.Context, input montage.PlanInput) (json.RawMes
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.shots++
-	return json.RawMessage(`{"answer":{"parts":[]},"slots":[]}`), nil
+	return json.RawMessage(`{"answer":{"parts":[]},"slots":[[[[0,2],[2,4]]]]}`), nil
 }
 
 // music: four seconds of one song.
@@ -318,28 +351,15 @@ func (music) Chosen(context.Context, string, string) (string, float64, error) {
 	return "song:1", 12.5, nil
 }
 
+func (music) ExcerptKey(_ context.Context, _, songID string, start float64) (string, error) {
+	return fmt.Sprintf("%s@%v", songID, start), nil
+}
+
 func (music) Excerpt(_ context.Context, _, songID string, start float64) (montage.Excerpt, error) {
 	return montage.Excerpt{Key: fmt.Sprintf("%s@%v", songID, start), Music: json.RawMessage(`{"parts":[{"level":"主歌"}]}`), Start: start, Frames: 120}, nil
 }
 
 func (music) Audio(context.Context, string, string) (*os.File, error) { return os.Open(os.DevNull) }
-
-type clock struct {
-	mu sync.Mutex
-	at time.Time
-}
-
-func (c *clock) now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *clock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
-}
 
 type jobEnv struct {
 	store   *montage.Store
@@ -410,7 +430,8 @@ func (e *jobEnv) settle(t *testing.T, jobID string) montage.Job {
 	for range 20 {
 		if !e.store.RunOnce(context.Background()) {
 			job := e.job(t, jobID)
-			if job.State != montage.JobQueued {
+			waitingForPhotos := job.State == montage.JobWaiting && job.WaitReason == montage.WaitPhotos
+			if job.State != montage.JobQueued && !waitingForPhotos {
 				return job
 			}
 			e.clock.advance(3 * time.Minute)
@@ -509,8 +530,8 @@ func TestAJobWaitsForTheAnalysisAndNeedsTheMemberWhenItFails(t *testing.T) {
 	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
 		t.Fatalf("Retry() for a failed analysis = %v", err)
 	}
-	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); err != nil {
-		t.Fatal(err)
+	if again, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); err != nil || len(again.Missing) != 0 {
+		t.Fatalf("RetryAnalysis() = %+v, %v", again, err)
 	}
 	if !slices.Equal(env.lib.retried, []string{"asset:a1"}) {
 		t.Fatalf("retried %v", env.lib.retried)
@@ -691,6 +712,17 @@ func TestDroppingAMissingVideoPlansAgainWithoutIt(t *testing.T) {
 	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1", "asset:a2"}); !errors.Is(err, montage.ErrJobState) {
 		t.Fatalf("dropping every video = %v", err)
 	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("dropping a usable video = %v", err)
+	}
+	env.lib.setDown(true)
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); !errors.Is(err, montage.ErrPhotosUnavailable) {
+		t.Fatalf("dropping while the grant service is unavailable = %v", err)
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobNeedsInput || !slices.Equal(got.Missing, []string{"asset:a2"}) {
+		t.Fatalf("after failed removal = %+v", got)
+	}
+	env.lib.setDown(false)
 	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -810,12 +842,410 @@ func TestGeneratingWithTheStoresOwnSongsDoesNotWaitOnItself(t *testing.T) {
 	env.store.UseMusic(env.store)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	job, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1")
-	if err != nil || job.State != montage.JobQueued {
-		t.Fatalf("Generate() = %+v, %v", job, err)
+	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1"); !errors.Is(err, montage.ErrNoSong) {
+		t.Fatalf("Generate without a selected song = %v", err)
 	}
-	// No song was chosen: the job needs one.
-	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedMusic {
+}
+
+func TestCancellationSurvivesARestartAndReleasesTheProject(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	if env.store.Claim(ctx) != job.ID {
+		t.Fatal("job was not claimed")
+	}
+	if _, err := env.store.Cancel(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.open(t)
+	if err := env.store.RecoverJobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobCancelled || got.FinishedAt == nil || env.store.RunOnce(ctx) {
+		t.Fatalf("recovered job = %+v", got)
+	}
+	env.generate(t, "next")
+}
+
+func TestANewStepHasItsOwnRetryBudget(t *testing.T) {
+	env := newJobEnv(t)
+	env.compute.failFill = 2
+	env.editing.failSegment = 1
+	job := env.generate(t, "first")
+	if done := env.settle(t, job.ID); done.State != montage.JobDone || env.editing.segments != 3 {
+		t.Fatalf("job = %+v; %d segment attempts", done, env.editing.segments)
+	}
+}
+
+func TestCancelAfterRunningOutOfSpaceRemovesTheRenderedFilm(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	env.lib.noSpace = true
+	job := env.generate(t, "first")
+	if got := env.settle(t, job.ID); got.WaitReason != montage.NeedStorageFull || !env.jobFiles(job.ID) {
+		t.Fatalf("expected a rendered film waiting for space, got %+v", got)
+	}
+	got, err := env.store.Cancel(ctx, "user:alice", job.ID)
+	if err != nil || got.State != montage.JobCancelled || env.jobFiles(job.ID) {
+		t.Fatalf("after cancellation = %+v, %v; files present = %v", got, err, env.jobFiles(job.ID))
+	}
+}
+
+func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	env.generate(t, "first")
+	project, _, err := env.store.CreateProject(ctx, "user:alice", "alice", "other", "", []string{"asset:a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.store.Generate(ctx, "user:alice", project.ID, "first"); !errors.Is(err, montage.ErrConflict) {
+		t.Fatalf("key reused on a different project: %v", err)
+	}
+}
+
+func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := montage.Open(ctx, env.root, montage.Options{Grants: env.lib, Media: &songMedia{}, JobCompute: env.compute, Editing: env.editing, Planner: env.planner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	env.store = store
+	put := func(name string) montage.SongDetail {
+		t.Helper()
+		song, err := store.PutSong(ctx, "user:alice", env.project.ID, montage.SongSource{Title: name},
+			strings.NewReader("song 200 "+name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return song
+	}
+	first := put("original")
+	job := env.generate(t, "first")
+	put("replacement")
+	if err := store.ReclaimSongs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f, err := store.Audio(ctx, "user:alice", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readAllFrom(f); got != "song 200 original" {
+		t.Fatalf("job holds %q", got)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Cancel(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Audio(ctx, "user:alice", first.ID); !errors.Is(err, montage.ErrSongUnusable) {
+		t.Fatalf("old song after cancellation = %v", err)
+	}
+}
+
+func TestFullProjectStillShowsTheSavedFilmAndItsVideos(t *testing.T) {
+	env := newJobEnv(t)
+	job := env.generate(t, "generate")
+	if done := env.settle(t, job.ID); done.State != montage.JobDone {
+		t.Fatalf("job = %+v", done)
+	}
+	ids := make([]string, montage.MaxAssets-len(env.project.Assets))
+	for i := range ids {
+		ids[i] = fmt.Sprintf("asset:extra-%d", i)
+		env.lib.add(ids[i], "user:alice", fmt.Sprintf("object:extra-%d", i), 1)
+	}
+	project, err := env.store.AddAssets(t.Context(), "user:alice", "alice", env.project.ID, "full-project", ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Assets) != montage.MaxAssets || len(project.Versions) != 1 || project.Versions[0].Gone {
+		t.Fatalf("project: %d videos, versions %+v", len(project.Assets), project.Versions)
+	}
+	for _, asset := range project.Assets {
+		if asset.Status != montage.AssetAvailable {
+			t.Errorf("%s: %s", asset.AssetID, asset.Status)
+		}
+	}
+}
+
+// A crash between a cancellation and its settling, or a release that left
+// one so, has a job queued with its cancellation asked for: nothing claims
+// it, so it must not count as due either.
+func TestACancelledJobLeftQueuedDoesNotKeepTheSchedulerBusy(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	env.store.Exec(t, "UPDATE jobs SET cancel_requested = 1 WHERE id = ?", job.ID)
+	if env.store.RunOnce(ctx) {
+		t.Fatal("a job asked to cancel ran")
+	}
+	if wait := env.store.NextDue(ctx); wait < time.Minute {
+		t.Fatalf("the scheduler would look again in %v", wait)
+	}
+	// Nor does the member put one back in the queue.
+	env.store.Exec(t, "UPDATE jobs SET state = 'needs_input', wait_reason = 'storage_full' WHERE id = ?", job.ID)
+	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("going on with a job asked to cancel = %v", err)
+	}
+	if err := env.store.RecoverJobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobCancelled || got.FinishedAt == nil {
+		t.Fatalf("recovered job = %+v", got)
+	}
+	env.generate(t, "next")
+}
+
+func TestAJobWhoseSettingsCannotBeReadFailsAndLetsTheNextOneRun(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	env.store.Exec(t, "UPDATE jobs SET settings_json = '{' WHERE id = ?", job.ID)
+	if env.store.RunOnce(ctx) {
+		t.Fatal("a job without settings ran")
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobFailed || got.FinishedAt == nil {
+		t.Fatalf("job = %+v", got)
+	}
+	if wait := env.store.NextDue(ctx); wait < time.Minute {
+		t.Fatalf("the scheduler would look again in %v", wait)
+	}
+	if done := env.settle(t, env.generate(t, "next").ID); done.State != montage.JobDone {
+		t.Fatalf("the next job = %+v", done)
+	}
+}
+
+// The same request would be refused again: the job fails at once, without
+// reading every analysis and vector three times.
+func TestARequestTheComputeWorkerRefusesIsNotTriedAgain(t *testing.T) {
+	env := newJobEnv(t)
+	env.compute.refuse = true
+	failed := env.settle(t, env.generate(t, "first").ID)
+	if failed.State != montage.JobFailed || failed.Step != "fill" || env.compute.fills != 1 {
+		t.Fatalf("job = %+v after %d fills", failed, env.compute.fills)
+	}
+}
+
+// Once the film went to the photo library the job cannot be cancelled: the
+// library may already have it, so the job goes on to record the version.
+func TestCancellingOnceTheFilmWentToThePhotoLibraryIsRefused(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	var refusal error
+	asked := 0
+	env.lib.set(func() {
+		env.lib.saving = func() {
+			asked++
+			_, refusal = env.store.Cancel(ctx, "user:alice", job.ID)
+		}
+	})
+	done := env.settle(t, job.ID)
+	if asked != 1 || !errors.Is(refusal, montage.ErrJobState) {
+		t.Fatalf("Cancel() while saving, asked %d times = %v", asked, refusal)
+	}
+	if done.State != montage.JobDone || done.Version == nil || env.lib.saves != 1 || env.jobFiles(job.ID) {
+		t.Fatalf("job = %+v; saved %d", done, env.lib.saves)
+	}
+}
+
+// A video longer than the photo library analyses fails its windows for
+// good: the member is told which videos, and takes them out.
+func TestVideosTooLongToAnalyseAreNamedAndDropped(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	if _, err := env.store.AddAssets(ctx, "user:alice", "alice", env.project.ID, "add", []string{"asset:a3"}); err != nil {
+		t.Fatal(err)
+	}
+	env.lib.set(func() {
+		for _, id := range []string{"asset:a1", "asset:a3"} {
+			v := env.lib.videos[id]
+			v.seconds = 7 * 3600
+			env.lib.videos[id] = v
+			env.lib.states[id] = photos.AnalysisFailed
+		}
+	})
+	job := env.generate(t, "first")
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedTooLong || !slices.Equal(needs.Missing, []string{"asset:a1", "asset:a3"}) {
 		t.Fatalf("job = %+v", needs)
+	}
+	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("RetryAnalysis() of videos too long = %v", err)
+	}
+	if len(env.lib.retried) != 0 {
+		t.Fatalf("asked the photo library to analyse %v again", env.lib.retried)
+	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, needs.Missing); err != nil {
+		t.Fatal(err)
+	}
+	if done := env.settle(t, job.ID); done.State != montage.JobDone || len(done.Missing) != 0 {
+		t.Fatalf("job = %+v", done)
+	}
+	// A failure of a video of ordinary length is still one to try again.
+	env.lib.set(func() { env.lib.states["asset:a2"] = photos.AnalysisFailed })
+	if failed := env.settle(t, env.generate(t, "second").ID); failed.WaitReason != montage.NeedAnalysis {
+		t.Fatalf("job = %+v", failed)
+	}
+}
+
+// A grant registered again leaves the analysis the revocation dropped
+// unqueued until it is asked for; the job asks.
+func TestAJobAsksForTheAnalysisANewGrantLeftOut(t *testing.T) {
+	env := newJobEnv(t)
+	env.lib.set(func() { env.lib.states["asset:a2"] = photos.AnalysisNone })
+	job := env.generate(t, "first")
+	if waiting := env.settle(t, job.ID); waiting.State != montage.JobWaiting || waiting.WaitReason != montage.WaitAnalysis {
+		t.Fatalf("job = %+v", waiting)
+	}
+	env.lib.set(func() {
+		if !slices.Equal(env.lib.asked, []string{"asset:a2"}) || env.lib.states["asset:a2"] != photos.AnalysisQueued {
+			t.Errorf("asked for %v, asset:a2 is %q", env.lib.asked, env.lib.states["asset:a2"])
+		}
+		delete(env.lib.states, "asset:a2")
+	})
+	env.clock.advance(time.Minute)
+	if done := env.settle(t, job.ID); done.State != montage.JobDone {
+		t.Fatalf("job = %+v", done)
+	}
+}
+
+// The photo library describes a card of many key frames from some of them:
+// a beat is placed at the key frame its "frames" name, not at the key frame
+// of its own number.
+func TestABeatIsPlacedAtTheKeyFrameItsDescriptionNames(t *testing.T) {
+	env := newJobEnv(t)
+	env.lib.set(func() {
+		env.lib.described = func(assetID string, analysis *photos.GrantAnalysis) {
+			if assetID != "asset:a1" {
+				return
+			}
+			// Five key frames, three of them described; and a card whose
+			// description names a key frame it does not have.
+			analysis.CardList[0].Times = []float64{0.5, 1, 2, 3, 3.5}
+			analysis.Descriptions[0].Description = json.RawMessage(`{"beats":[{"frames":[1,2],"shot_size":"远景","what":"海"},
+				{"frames":[3,3],"shot_size":"全景","what":"船"},{"frames":[5,5],"shot_size":"近景","what":"岸"}]}`)
+			analysis.Descriptions[1].Description = json.RawMessage(`{"beats":[{"frames":[1,1],"shot_size":"近景","what":"人"},{"frames":[3,3],"shot_size":"特写","what":"手"}]}`)
+		}
+	})
+	if done := env.settle(t, env.generate(t, "first").ID); done.State != montage.JobDone {
+		t.Fatalf("job = %+v", done)
+	}
+	cards := map[string]montage.Card{}
+	for _, card := range env.planner.last.Cards {
+		cards[card.ID] = card
+	}
+	sampled, ok := cards["v1-0"]
+	if !ok || !slices.Equal(sampled.Times, []float64{0.5, 2, 3.5}) || !slices.Equal(sampled.Frames, []string{"v1-0/1", "v1-0/2", "v1-0/3"}) {
+		t.Fatalf("the card described from some of its key frames = %+v", sampled)
+	}
+	if _, ok := cards["v1-1"]; ok || len(cards) != 3 {
+		t.Fatalf("the plan saw %v", slices.Sorted(maps.Keys(cards)))
+	}
+	if whole := cards["v2-0"]; !slices.Equal(whole.Times, []float64{1, 3}) || !slices.Equal(whole.Frames, []string{"v2-0/1", "v2-0/2"}) {
+		t.Fatalf("a card described from every key frame = %+v", whole)
+	}
+}
+
+// The clear span is searched in the frames from the key frame up to the
+// span's end and from its start up to the key frame, both half-open ranges
+// of the FFmpeg Worker: the first frame after is the key frame's instant,
+// and the frames before stop short of it.
+func TestTheClearSpanReadsTheFramesEitherSideOfTheKeyFrame(t *testing.T) {
+	env := newJobEnv(t)
+	if done := env.settle(t, env.generate(t, "first").ID); done.State != montage.JobDone {
+		t.Fatalf("job = %+v", done)
+	}
+	// Each video's first card: key frame at 1 second of a card from 0 to 4.
+	want := [][3]float64{{1, 4, 2}, {0, 1, 2}, {1, 4, 2}, {0, 1, 2}}
+	if !slices.Equal(env.editing.ranges, want) {
+		t.Fatalf("ranges = %v, want %v", env.editing.ranges, want)
+	}
+	if !slices.Equal(env.compute.clears, [][2]int{{6, 2}, {6, 2}}) {
+		t.Fatalf("frames after and before = %v", env.compute.clears)
+	}
+}
+
+// The plan is cut from the cards, their quality and their descriptions: the
+// same videos analysed by another version of any of them are another input,
+// and what was planned from the old one is planned again.
+func TestAnotherAnalysisIdentityPlansAgain(t *testing.T) {
+	for name, change := range map[string]func(*photos.GrantAnalysis){
+		"cards":        func(analysis *photos.GrantAnalysis) { analysis.CardsIdentity = "cards/v2" },
+		"quality":      func(analysis *photos.GrantAnalysis) { analysis.QualityIdentity = "quality/v2" },
+		"descriptions": func(analysis *photos.GrantAnalysis) { analysis.DescriptionsIdentity = "reader:2|filter=2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newJobEnv(t)
+			env.lib.set(func() { env.lib.noSpace = true })
+			job := env.generate(t, "first")
+			if needs := env.settle(t, job.ID); needs.WaitReason != montage.NeedStorageFull || env.planner.picks != 1 || env.planner.shots != 1 {
+				t.Fatalf("job = %+v, picks = %d, shots = %d", needs, env.planner.picks, env.planner.shots)
+			}
+			env.lib.set(func() {
+				env.lib.noSpace = false
+				env.lib.described = func(_ string, analysis *photos.GrantAnalysis) { change(analysis) }
+			})
+			if _, err := env.store.Retry(t.Context(), "user:alice", job.ID); err != nil {
+				t.Fatal(err)
+			}
+			if done := env.settle(t, job.ID); done.State != montage.JobDone || env.planner.picks != 2 || env.planner.shots != 2 {
+				t.Fatalf("job = %+v, picks = %d, shots = %d", done, env.planner.picks, env.planner.shots)
+			}
+		})
+	}
+}
+
+// Videos without a card are analysed, not failed: with none in any of them
+// the job says there is nothing to cut from.
+func TestVideosWithoutCardsLeaveNothingToCutFrom(t *testing.T) {
+	env := newJobEnv(t)
+	env.lib.set(func() {
+		env.lib.described = func(_ string, analysis *photos.GrantAnalysis) { analysis.CardList, analysis.Descriptions = nil, nil }
+	})
+	needs := env.settle(t, env.generate(t, "first").ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedNoFootage || needs.Step != "catalog" || env.planner.picks != 0 {
+		t.Fatalf("job = %+v, picks = %d", needs, env.planner.picks)
+	}
+}
+
+// A deleted account's running job is stopped, and its intermediate files go
+// with its jobs.
+func TestRemovingAnAccountStopsItsRunningJobAndTakesItsFiles(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	stopped := false
+	env.editing.onSegment = func(segmentCtx context.Context) error {
+		if !env.jobFiles(job.ID) {
+			return errors.New("rendering without the job's directory")
+		}
+		if err := env.store.RemoveAccount(ctx, "user:alice"); err != nil {
+			return err
+		}
+		select {
+		case <-segmentCtx.Done():
+			stopped = true
+		case <-time.After(10 * time.Second):
+		}
+		return context.Cause(segmentCtx)
+	}
+	if !env.store.RunOnce(ctx) {
+		t.Fatal("the job did not run")
+	}
+	if !stopped || env.editing.segments != 1 || env.lib.saves != 0 || env.jobFiles(job.ID) {
+		t.Fatalf("stopped %v, %d segments, %d films saved, files left %v", stopped, env.editing.segments, env.lib.saves, env.jobFiles(job.ID))
+	}
+	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("the removed account's job = %v", err)
 	}
 }

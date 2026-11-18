@@ -16,6 +16,7 @@ import http.client
 import importlib.metadata
 import io
 import json
+import logging
 import math
 import os
 import shutil
@@ -27,6 +28,9 @@ import threading
 import time
 
 from anas_ai import describe as montage_card
+
+# The Worker's logger (anas_ai.worker).
+log = logging.getLogger("anas-ai")
 
 
 class InvalidInput(Exception):
@@ -779,6 +783,44 @@ def ocr_prompt(kind, schema):
     return OCR_FIELDS_PROMPT + json.dumps(schema, ensure_ascii=False)
 
 
+# What a card's description takes of the context, as llama-server counted it
+# for this model on the development machine (PR #571: 5,955 prompt tokens for
+# 11 key frames of 512 × 910 and 6,440 for 12): about 620 for the prompts and
+# 485 for each frame, which is its label and a visual token for every 32 × 32
+# pixels. Frames of other shapes are estimated from that and still to be
+# counted on the NAS; describe() logs the estimate beside the server's count.
+DESCRIBE_PROMPT_TOKENS = 620
+DESCRIBE_LABEL_TOKENS = 21
+OCR_TOKEN_PIXELS = 32
+
+
+def frame_size(data):
+    """A key frame's width and height in pixels, or None when they cannot be told.
+
+    Pillow reads them from the JPEG's header. The stand-in server's tests run
+    without Pillow and with frames that are no pictures: they get None.
+    """
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return image.size
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+
+
+def describe_frame_tokens(frames):
+    """The prompt tokens each of a card's key frames takes, estimated from the largest; None when a size is unknown."""
+    sizes = [frame_size(data) for data in frames]
+    if None in sizes:
+        return None
+    return DESCRIBE_LABEL_TOKENS + max(
+        min(OCR_IMAGE_TOKENS, math.ceil(width / OCR_TOKEN_PIXELS) * math.ceil(height / OCR_TOKEN_PIXELS))
+        for width, height in sizes)
+
+
 # A loop repeats its unit over at least this many characters. Documents
 # repeat one character for a line or two: a receipt's separator line, a
 # contents page's leader dots, a form's fill-in line; a table repeats a row a
@@ -921,7 +963,7 @@ class LlamaReader:
             "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
             "stream": True, "chat_template_kwargs": {"enable_thinking": False},
         }
-        text, tokens, finish = self._complete(body, run)
+        text, tokens, finish, _ = self._complete(body, run)
         return {"text": text, "logprobs": tokens, "finish": finish}
 
     def describe(self, frames, offsets, groups, duration, run):
@@ -930,11 +972,28 @@ class LlamaReader:
         The answer is asked for with the schema as llama-server's grammar and
         checked again here; one that does not fit, or repeats itself, is asked
         again with a stronger repeat penalty, three times in all, and then
-        raises InvalidResult. A prompt past the context is refused by the
-        server (InvalidInput): the card goes undescribed.
+        raises InvalidResult.
+
+        The answer may take MAX_TOKENS, which the context must still hold
+        after the prompt. A card whose key frames leave less, such as 12 or
+        more of a video filmed upright, is described from as many of them as
+        fit, spread evenly (montage_card.fitting), and each beat's "frames"
+        still count among all of the card's. A card that fits is asked about
+        exactly as the prototype asks. Should the estimate be too low, the
+        server refuses the prompt or the context cuts the answer short
+        (InvalidInput): the card goes undescribed.
         """
         if any(not data for data in frames):
             raise InvalidInput("empty image")
+        count, each = len(frames), describe_frame_tokens(frames)
+        most, estimate = count, "no"
+        if each is not None:
+            room = OCR_CONTEXT - montage_card.MAX_TOKENS - DESCRIBE_PROMPT_TOKENS
+            most = max(montage_card.FEWEST_FRAMES, room // each)
+        kept, offsets, groups = montage_card.fitting(offsets, groups, most)
+        if each is not None:
+            estimate = DESCRIBE_PROMPT_TOKENS + each * len(kept)
+        frames = [frames[index] for index in kept]
         content, answer_schema, spans = montage_card.request(offsets, groups, duration)
         parts = [{"type": "text", "text": value} if kind == "text" else
                  {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(frames[value]).decode()}}
@@ -945,19 +1004,29 @@ class LlamaReader:
                 "messages": [{"role": "system", "content": montage_card.SYSTEM_PROMPT}, {"role": "user", "content": parts}],
                 "temperature": montage_card.TEMPERATURE, "repeat_penalty": penalty, "max_tokens": montage_card.MAX_TOKENS,
                 "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": answer_schema}},
-                "cache_prompt": False, "stream": True, "chat_template_kwargs": {"enable_thinking": False},
+                "cache_prompt": True, "stream": True, "stream_options": {"include_usage": True},
+                "chat_template_kwargs": {"enable_thinking": False},
             }
-            text, _, finish = self._complete(body, run)
+            text, _, finish, prompt_tokens = self._complete(body, run)
+            if not errors:
+                # Evidence for the estimate, which the NAS has yet to confirm.
+                log.info("card description from %d of %d key frames: %s prompt tokens estimated, %d counted",
+                         len(kept), count, estimate, prompt_tokens)
+            # Frame dimensions determine the image token count. When the
+            # context cut this answer short, retrying the same frames cannot
+            # make room for the requested answer budget.
+            if finish == "length" and prompt_tokens + montage_card.MAX_TOKENS > OCR_CONTEXT:
+                raise InvalidInput(f"{prompt_tokens} prompt tokens leave insufficient room for the card description")
             try:
                 if finish != "stop":
                     raise montage_card.InvalidAnswer(f"the answer ended with {finish}")
-                return montage_card.parse(text, answer_schema, spans)
+                return montage_card.numbered(montage_card.parse(text, answer_schema, spans), kept)
             except montage_card.InvalidAnswer as error:
                 errors.append(f"repeat_penalty={penalty}: {error}")
         raise InvalidResult("; ".join(errors))
 
     def _complete(self, body, run):
-        """Streams body's answer from the server: its text, [token, log probability] pairs, and why it ended.
+        """Streams the text, [token, log probability] pairs, finish reason and reported prompt token count.
 
         Raises Cancelled once run is told to stop, InvalidInput for a request
         the server refuses (4xx), and Failed for a server that fails
@@ -965,6 +1034,7 @@ class LlamaReader:
         """
         path = self._start(run)
         text, tokens, finish, refused, failed = [], [], None, None, None
+        prompt_tokens = 0
         connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
         try:
             connection.connect()
@@ -982,6 +1052,8 @@ class LlamaReader:
                     if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
                         continue
                     event = json.loads(line[6:])
+                    if event.get("usage"):
+                        prompt_tokens = event["usage"].get("prompt_tokens", 0)
                     if "error" in event:
                         # How llama-server reports a failure mid-answer, before it ends the stream.
                         failed = f"llama-server failed mid-answer: {json.dumps(event['error'], ensure_ascii=False)[:500]}"
@@ -1022,7 +1094,7 @@ class LlamaReader:
             # the next reading starts a new one rather than fail at once.
             self.release()
             raise Failed(failed)
-        return "".join(text), tokens, finish
+        return "".join(text), tokens, finish, prompt_tokens
 
     def release(self, kill=False):
         """Stops the server, which frees the model's memory; kill does not wait for it to finish its work."""

@@ -182,6 +182,8 @@ var (
 type Music interface {
 	// Chosen is the project's song and the excerpt's start; no song is "".
 	Chosen(ctx context.Context, owner, projectID string) (string, float64, error)
+	// ExcerptKey reads the identity without running the compute Worker.
+	ExcerptKey(ctx context.Context, owner, songID string, start float64) (string, error)
 	// Excerpt is the song's excerpt from start.
 	Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error)
 	// Audio opens the song's copy.

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -77,35 +78,36 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
 		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
-			JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
+			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = montageStore.Close() })
-	// The header that says a planning grant was registered reaches the
-	// montage center only when the Product Service sets it.
-	var forwarded []string
+	// Whether the switch is on is the Product Service's answer alone.
+	served := 0
 	api := montageapi.New(montageStore, logger)
-	recorded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		forwarded = append(forwarded, r.Header.Get(montageapi.AssistantHeader))
+	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served++
 		api.ServeHTTP(w, r)
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users,
-		Montage: recorded, Logger: logger,
+		Montage: counted, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
 	owner.do(http.MethodPost, "/api/v1/users", `{"username":"bob","password":"bob password for testing"}`, nil, http.StatusCreated)
 	bob := f.signIn("/api/v1/session", "bob", "bob password for testing", "172.18.45.21", http.StatusOK)
-	response := owner.do(http.MethodGet, "/api/v1/montage/projects", "", map[string]string{montageapi.AssistantHeader: "on"}, http.StatusOK)
+	owner.do(http.MethodGet, "/api/v1/montage", "", nil, http.StatusNoContent)
+	if served != 0 {
+		t.Fatal("the montage center was asked whether it is on")
+	}
+	response := owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK)
 	if body := strings.TrimSpace(response.Body.String()); body != `{"items":[]}` {
 		t.Fatalf("projects = %s", body)
 	}
-	if len(forwarded) != 1 || forwarded[0] != "" {
-		t.Fatalf("the montage center saw %s = %q", montageapi.AssistantHeader, forwarded)
-	}
 	anonymous := &contractClient{t: t, handler: handler}
+	anonymous.do(http.MethodGet, "/api/v1/montage", "", nil, http.StatusUnauthorized)
 	anonymous.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusUnauthorized)
 
 	// The owner's two videos, in the private library.
@@ -154,6 +156,13 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		t.Fatalf("projects = %+v", page)
 	}
 
+	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
+		t.Fatalf("generate without a song: %s", response.Body.String())
+	}
+	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, montage.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
+		t.Fatal(err)
+	}
+
 	// A film: 202 and the job to poll; one job at a time.
 	var job montage.Job
 	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
@@ -190,21 +199,30 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if found, err := photoService.Lookup(t.Context(), principal, videos); err != nil || len(found) != 2 {
 		t.Fatalf("the videos after deleting the project = %+v, %v", found, err)
 	}
-	if grants, err := photoService.Grants(t.Context()); err != nil || len(grants) != 1 || !grants[0].Revoked {
-		t.Fatalf("grants after deleting the project = %+v, %v", grants, err)
+	// The grant is revoked right after the answer.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		grants, err := photoService.Grants(t.Context(), "", 10)
+		if err == nil && len(grants) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("grants after deleting the project = %+v, %v", grants, err)
+		}
 	}
 
 	// Switched off, the API is not there at all.
 	off := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Logger: logger,
 	})
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/v1/montage/projects", nil)
-	request.AddCookie(owner.cookie)
-	request.Header.Set("X-Forwarded-For", owner.forwardedFor)
-	recorder := httptest.NewRecorder()
-	off.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("switched off: %d %s", recorder.Code, recorder.Body)
+	for _, path := range []string{"/api/v1/montage", "/api/v1/montage/projects"} {
+		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+path, nil)
+		request.AddCookie(owner.cookie)
+		request.Header.Set("X-Forwarded-For", owner.forwardedFor)
+		recorder := httptest.NewRecorder()
+		off.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("switched off, %s: %d %s", path, recorder.Code, recorder.Body)
+		}
 	}
 }
 

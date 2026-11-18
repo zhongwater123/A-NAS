@@ -8,14 +8,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
+
+const describeJob = "montage-describe/v1"
 
 // describingEmbedder is the reading Worker that also describes montage
 // cards: answer, when set, says what a card gets from the frames' count and
@@ -32,13 +36,21 @@ type describingEmbedder struct {
 	blockDescribing bool
 	describing      chan struct{}
 	infos           int
+	// embedding, when set, is the image model in place of colour-1: a new
+	// one makes the windows again, and with them the cards.
+	embedding string
 }
 
 func (d *describingEmbedder) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 	d.dmu.Lock()
 	d.infos++
+	embedding := d.embedding
 	d.dmu.Unlock()
-	return d.readingEmbedder.Info(ctx)
+	info, err := d.readingEmbedder.Info(ctx)
+	if embedding != "" {
+		info.Model = embedding
+	}
+	return info, err
 }
 
 // EmbedImage derives a unit vector from the bytes, so the windows' black
@@ -121,6 +133,7 @@ func newDescribeFixtureWith(t *testing.T, reader string) describeFixture {
 	t.Helper()
 	ctx := context.Background()
 	f := describeFixture{montageFixture: newMontageFixture(t), embedder: newDescribingEmbedder()}
+	f.enableCompute(t)
 	f.embedder.model = reader
 	private, _ := libraries(t, f.service, namedAlice)
 	f.video = importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
@@ -170,12 +183,16 @@ func (f describeFixture) cards(t *testing.T, cards []standInCard) {
 			t.Fatal(err)
 		}
 	}
+	var cardsID, qualityID string
+	if err := db.QueryRow("SELECT cards_identity,quality_identity FROM montage_card_results WHERE object_id=?", f.object).Scan(&cardsID, &qualityID); err != nil {
+		t.Fatal(err)
+	}
 	for i, card := range cards {
 		keyframes, _ := json.Marshal(card.keyframes)
-		if _, err := db.Exec("INSERT INTO video_cards VALUES(?, ?, ?, ?, ?, 'cards-1')", f.object, i, card.start, card.end, string(keyframes)); err != nil {
+		if _, err := db.Exec("INSERT INTO video_cards VALUES(?, ?, ?, ?, ?, ?)", f.object, i, card.start, card.end, string(keyframes), cardsID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec("INSERT INTO video_card_quality VALUES(?, ?, ?, 'quality-1')", f.object, i, `{"blur":0.1,"reasons":`+card.reasons+`}`); err != nil {
+		if _, err := db.Exec("INSERT INTO video_card_quality VALUES(?, ?, ?, ?)", f.object, i, `{"blur":0.1,"reasons":`+card.reasons+`}`, qualityID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -224,6 +241,18 @@ func (f describeFixture) lookup(t *testing.T) photos.GrantedAsset {
 	return looked[0]
 }
 
+// Read through the descriptor just as the grant client does.
+func (f describeFixture) analysis(t *testing.T) (photos.GrantAnalysis, error) {
+	t.Helper()
+	a, file, err := f.service.AnalysisOfGrant(t.Context(), granting(namedAlice), f.grant.ID, f.video.ID)
+	if err != nil || file == nil {
+		return a, err
+	}
+	defer func() { _ = file.Close() }()
+	_, err = photos.ReadWindows(&a, file)
+	return a, err
+}
+
 func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testing.T) {
 	f := newDescribeFixture(t)
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisQueued {
@@ -239,7 +268,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	// Seconds from the card's start, a beat a frame, the last frame before
 	// the video's end.
 	last := f.embedder.layouts[1]
-	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.9}) || !slices.Equal(last.Groups, []int{1, 2, 3, 4}) || last.Duration != 30 {
+	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.99}) || !slices.Equal(last.Groups, []int{1, 2, 3, 4}) || last.Duration != 30 {
 		t.Fatalf("layout = %+v", last)
 	}
 	stored := f.descriptions(t)
@@ -256,7 +285,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 			t.Fatalf("the stored description lacks %q: %s", label, stored[0].result)
 		}
 	}
-	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.HasSuffix(stored[0].identity, "|cards=cards-1") {
+	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.Contains(stored[0].identity, "|quality=montage-quality/v1") {
 		t.Fatalf("identity = %q", stored[0].identity)
 	}
 	if f.montageJobs(t) != 0 {
@@ -265,7 +294,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
 		t.Fatalf("descriptions after the rounds = %q", state)
 	}
-	analysis, _, err := f.service.AnalysisOfGrant(context.Background(), granting(namedAlice), f.grant.ID, f.video.ID)
+	analysis, err := f.analysis(t)
 	if err != nil || analysis.Described != photos.AnalysisDone || len(analysis.Descriptions) != 2 || analysis.Descriptions[1].Card != 2 {
 		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
 	}
@@ -332,7 +361,7 @@ func TestACardThatCannotBeDescribedLeavesTheOthers(t *testing.T) {
 		stored[2].failure != "" || !strings.Contains(stored[2].result, "湖边") {
 		t.Fatalf("stored = %+v", stored)
 	}
-	analysis, _, err := f.service.AnalysisOfGrant(context.Background(), granting(namedAlice), f.grant.ID, f.video.ID)
+	analysis, err := f.analysis(t)
 	if err != nil || analysis.Described != photos.AnalysisDone || len(analysis.Descriptions) != 3 ||
 		analysis.Descriptions[0].Description != nil || analysis.Descriptions[0].Error == "" || analysis.Descriptions[2].Description == nil {
 		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
@@ -373,6 +402,47 @@ func TestDescriptionsWaitForATextReader(t *testing.T) {
 	}
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
 		t.Fatalf("descriptions with a reader = %q", state)
+	}
+}
+
+func TestGrantReauthorizedAfterReaderChange(t *testing.T) {
+	f := newDescribeFixture(t)
+	ctx := t.Context()
+	processAI(t, f.service, f.embedder, f.gate)
+	if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.embedder.mu.Lock()
+	f.embedder.model = "reader-2"
+	f.embedder.mu.Unlock()
+	_ = f.service.Close()
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, Compute: f.compute, DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	f.service = service
+	processAI(t, service, f.embedder, f.gate)
+	f.grant, err = service.RegisterGrant(ctx, granting(namedAlice), "project:2", []string{f.video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AnalyzeGrant(ctx, granting(namedAlice), f.grant.ID, []string{f.video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, service, f.embedder, f.gate)
+	a, err := f.analysis(t)
+	if err != nil || a.Described != photos.AnalysisDone || !strings.HasPrefix(a.DescriptionsIdentity, "reader-2|") || len(a.Descriptions) != 2 {
+		t.Fatalf("reauthorized analysis: state %s, identity %s, %d descriptions, %v", a.Described, a.DescriptionsIdentity, len(a.Descriptions), err)
+	}
+}
+
+func TestNoEligibleCardsNeedNoReader(t *testing.T) {
+	f := newDescribeFixtureWith(t, "")
+	f.cards(t, []standInCard{{start: 0, end: 70000, keyframes: []float64{1, 3, 5}, reasons: `["blur"]`}})
+	a, err := f.analysis(t)
+	if err != nil || a.Described != photos.AnalysisDone || a.DescriptionsIdentity == "" || len(a.Descriptions) != 0 {
+		t.Fatalf("zero eligible cards: state %s, identity %q, %v", a.Described, a.DescriptionsIdentity, err)
 	}
 }
 
@@ -423,17 +493,20 @@ func TestSomeoneUsingTheLibraryHangsUpADescription(t *testing.T) {
 	}
 }
 
-func TestRetryStartsAFailedDescriptionOver(t *testing.T) {
+func TestRetryStartsOnlyTheFailedCardOver(t *testing.T) {
 	f := newDescribeFixture(t)
-	f.embedder.answer = func(int, photos.CardLayout) (json.RawMessage, error) {
-		return nil, errors.New("the Worker died")
+	f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+		if call <= 3 {
+			return nil, errors.New("the Worker died")
+		}
+		return json.RawMessage(numbersAnswer), nil
 	}
 	for range 3 {
 		processAI(t, f.service, f.embedder, f.gate)
 		f.clock.Advance(time.Hour)
 	}
-	if state := f.lookup(t).Descriptions; state != photos.AnalysisFailed {
-		t.Fatalf("after three crashes: %q", state)
+	if got := f.descriptions(t); len(got) != 2 || got[0].failure == "" || got[1].result == "" {
+		t.Fatalf("after three crashes on the first card: %+v", got)
 	}
 	f.embedder.answer = nil
 	if err := f.service.AnalyzeGrant(context.Background(), granting(namedAlice), f.grant.ID, []string{f.video.ID}, true); err != nil {
@@ -442,6 +515,9 @@ func TestRetryStartsAFailedDescriptionOver(t *testing.T) {
 	processAI(t, f.service, f.embedder, f.gate)
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
 		t.Fatalf("after the retry: %q", state)
+	}
+	if got := f.descriptions(t); len(got) != 2 || got[0].failure != "" || f.embedder.calls() != 5 {
+		t.Fatalf("retry should only repeat the failed card: %+v, %d calls", got, f.embedder.calls())
 	}
 }
 
@@ -463,5 +539,333 @@ func TestDescriptionsGoWithTheirObject(t *testing.T) {
 	}
 	if left := f.descriptions(t); len(left) != 0 {
 		t.Fatalf("descriptions left 7 days after the last grant went = %+v", left)
+	}
+}
+
+func TestWaitingForReaderMemoryLetsPhotosEmbed(t *testing.T) {
+	f := newDescribeFixture(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	importPhoto(t, f.service, namedAlice, private.ID, "", "new.png", pngBytes(t, 37))
+	processAll(t, f.service)
+	processAI(t, f.service, f.embedder, &roomGate{room: 1 << 20})
+	var vectors int
+	if err := catalog(t, f.root).QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&vectors); err != nil || vectors != 1 {
+		t.Fatalf("embeddings while reader waits for memory = %d, %v", vectors, err)
+	}
+	if f.embedder.calls() != 0 || f.lookup(t).Descriptions != photos.AnalysisQueued {
+		t.Fatal("description should remain queued until the reader fits")
+	}
+}
+
+func TestPurgingRunningDescriptionDiscardsLateResult(t *testing.T) {
+	f := newDescribeFixture(t)
+	ctx := t.Context()
+	f.embedder.answer = func(_ int, _ photos.CardLayout) (json.RawMessage, error) {
+		if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.PruneMontageAnalysis(ctx); err != nil {
+			t.Fatal(err)
+		}
+		f.clock.Advance(8 * 24 * time.Hour)
+		if _, err := f.service.PruneMontageAnalysis(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return json.RawMessage(numbersAnswer), nil
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	if got := f.descriptions(t); len(got) != 0 || f.montageJobs(t) != 0 {
+		t.Fatalf("late result for purged video: %+v", got)
+	}
+}
+
+// Cards cut again are described again, under the identity of what they
+// were cut from: the old cards' descriptions go, and so does a description
+// job that had failed, which would keep the new cards' from being queued.
+func TestCardsCutAgainAreDescribedAgain(t *testing.T) {
+	f := newDescribeFixture(t)
+	// The first card is described; then the job fails, as one that a crash
+	// interrupted three times does.
+	if worked, err := f.service.ProcessAIJob(context.Background(), f.embedder, f.gate); !worked || err != nil {
+		t.Fatalf("the first card's round = %v, %v", worked, err)
+	}
+	old := f.descriptions(t)
+	if len(old) != 1 || old[0].card != 0 || !strings.Contains(old[0].identity, "colour-1") {
+		t.Fatalf("descriptions before the job failed = %+v", old)
+	}
+	if _, err := catalog(t, f.root).Exec("UPDATE jobs SET state = 'failed', attempts = 3, error_class = 'interrupted' WHERE derivation = ?", describeJob); err != nil {
+		t.Fatal(err)
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisFailed {
+		t.Fatalf("descriptions with their job failed = %q", state)
+	}
+	// A new image model comes with a release, which restarts the photo
+	// service: the windows are made again, the cards cut and measured again.
+	f.embedder.dmu.Lock()
+	f.embedder.embedding = "colour-2"
+	f.embedder.dmu.Unlock()
+	f.restart(t)
+	for round := 1; f.count(t, "SELECT COUNT(*) FROM video_cards WHERE identity LIKE '%colour-2%'") == 0; round++ {
+		if worked, err := f.service.ProcessAIJob(context.Background(), f.embedder, f.gate); !worked || err != nil || round > 10 {
+			t.Fatalf("round %d before the cards were cut again = %v, %v", round, worked, err)
+		}
+	}
+	// The failed job and the old cards' descriptions went with the old cards.
+	if _, left := f.job(t, describeJob); left || len(f.descriptions(t)) != 0 {
+		t.Fatalf("with the cards cut again: a description job left: %v, descriptions %+v", left, f.descriptions(t))
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone || f.montageJobs(t) != 0 {
+		t.Fatalf("descriptions of the cards cut again = %q, %d montage jobs left", state, f.montageJobs(t))
+	}
+	// The compute stand-in's two cards, numbered from 1; the first round's
+	// card 0 is gone with the cards it described.
+	stored := f.descriptions(t)
+	if len(stored) != 2 || stored[0].card != 1 || stored[1].card != 2 || f.embedder.calls() != 3 {
+		t.Fatalf("stored = %+v after %d descriptions", stored, f.embedder.calls())
+	}
+	for _, d := range stored {
+		if d.result == "" || !strings.HasPrefix(d.identity, "reader-1|") || !strings.Contains(d.identity, "colour-2") {
+			t.Fatalf("a description of the cards cut again = %+v", d)
+		}
+	}
+	analysis, err := f.analysis(t)
+	if err != nil || analysis.Described != photos.AnalysisDone || len(analysis.Descriptions) != 2 ||
+		!strings.HasSuffix(analysis.DescriptionsIdentity, "|quality="+analysis.QualityIdentity) ||
+		!strings.Contains(analysis.QualityIdentity, "colour-2") {
+		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
+	}
+}
+
+// An answer under a template the library does not know comes from a Worker
+// of another release: it is the card's failure, stored once, not a
+// description asked for again every minute.
+func TestAnAnswerUnderAnotherTemplateFailsTheCardOnce(t *testing.T) {
+	f := newDescribeFixture(t)
+	f.embedder.dmu.Lock()
+	f.embedder.template = "montage-card/v2"
+	f.embedder.dmu.Unlock()
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
+		t.Fatalf("%d rounds, %d descriptions; want one for each card", rounds, f.embedder.calls())
+	}
+	stored := f.descriptions(t)
+	if len(stored) != 2 || f.montageJobs(t) != 0 {
+		t.Fatalf("stored = %+v, %d montage jobs left", stored, f.montageJobs(t))
+	}
+	for _, d := range stored {
+		if d.result != "" || !strings.Contains(d.failure, "template") {
+			t.Fatalf("a description under another template = %+v", d)
+		}
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
+		t.Fatalf("descriptions = %q", state)
+	}
+	f.clock.Advance(time.Hour)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
+		t.Fatalf("an hour later: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+	}
+}
+
+// A description job that failed stays failed over a restart, unlike other
+// jobs that failed on storage: a try can take the Worker a quarter of an
+// hour. A reader the library has not seen before tries it again.
+func TestAFailedDescriptionJobWaitsForANewReaderNotARestart(t *testing.T) {
+	f := newDescribeFixture(t)
+	if _, err := catalog(t, f.root).Exec("UPDATE jobs SET state = 'failed', attempts = 3, error_class = 'io' WHERE derivation = ?", describeJob); err != nil {
+		t.Fatal(err)
+	}
+	f.restart(t)
+	if recovery, err := f.service.RecoverJobs(context.Background()); err != nil || recovery.Requeued != 0 {
+		t.Fatalf("RecoverJobs() = %+v, %v; want the description job left failed", recovery, err)
+	}
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 0 {
+		t.Fatalf("after a restart with the same reader: %d rounds, %d descriptions", rounds, f.embedder.calls())
+	}
+	f.wantJob(t, describeJob, jobRow{state: "failed", class: "io", attempts: 3})
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisFailed {
+		t.Fatalf("descriptions after the restart = %q", state)
+	}
+
+	f.embedder.mu.Lock()
+	f.embedder.model = "reader-2"
+	f.embedder.mu.Unlock()
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.montageJobs(t) != 0 {
+		t.Fatalf("with a new reader: %d rounds, %d montage jobs left", rounds, f.montageJobs(t))
+	}
+	stored := f.descriptions(t)
+	if len(stored) != 2 || !strings.HasPrefix(stored[0].identity, "reader-2|") || !strings.HasPrefix(stored[1].identity, "reader-2|") {
+		t.Fatalf("stored with the new reader = %+v", stored)
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
+		t.Fatalf("descriptions with the new reader = %q", state)
+	}
+}
+
+// A description the number filter cannot read is that card's failure: the
+// video's other cards are described.
+func TestADescriptionTheNumberFilterCannotReadLeavesTheOthers(t *testing.T) {
+	f := newDescribeFixture(t)
+	f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+		if call == 1 {
+			return json.RawMessage(`{"camera":"地面","summary":`), nil
+		}
+		return json.RawMessage(numbersAnswer), nil
+	}
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 {
+		t.Fatalf("rounds = %d", rounds)
+	}
+	stored := f.descriptions(t)
+	if len(stored) != 2 || stored[0].result != "" || stored[0].failure != "invalid_result" ||
+		stored[1].failure != "" || !strings.Contains(stored[1].result, "[手机号]") {
+		t.Fatalf("stored = %+v", stored)
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone || f.montageJobs(t) != 0 {
+		t.Fatalf("descriptions = %q, %d montage jobs left", state, f.montageJobs(t))
+	}
+}
+
+// damagedVideo cannot hand over the key frames of the stretch before a
+// second of the video.
+type damagedVideo struct {
+	*framedVideo
+	before  float64
+	failure error
+}
+
+func (v *damagedVideo) Frames(ctx context.Context, file *os.File, request ffmpegworker.FramesRequest, each func([]byte) error) (ffmpegworker.FramesResult, error) {
+	if len(request.Times) > 0 && request.Times[0] < v.before {
+		return ffmpegworker.FramesResult{}, v.failure
+	}
+	return v.framedVideo.Frames(ctx, file, request, each)
+}
+
+// A card whose key frames cannot be taken is that card's failure, after
+// three tries when FFmpeg may do better the next time: the video's other
+// cards are described, with tries of their own.
+func TestACardWhoseFramesCannotBeTakenLeavesTheOthers(t *testing.T) {
+	for name, c := range map[string]struct {
+		failure error
+		class   string
+		tries   int
+	}{
+		"an FFmpeg that fails is tried three times": {ffmpegworker.ErrFailed, "io", 3},
+		"frames that do not decode fail at once":    {ffmpegworker.ErrUnreadable, "undecodable", 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newDescribeFixture(t)
+			// The first card's key frames lie before 20 seconds.
+			f.media = &damagedVideo{framedVideo: f.montageFixture.video, before: 20, failure: c.failure}
+			f.restart(t)
+			for try := 1; try < c.tries; try++ {
+				if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 1 {
+					t.Fatalf("try %d took %d rounds", try, rounds)
+				}
+				f.wantJob(t, describeJob, jobRow{state: "pending", class: c.class, attempts: try})
+				if stored := f.descriptions(t); len(stored) != 0 {
+					t.Fatalf("stored after try %d = %+v", try, stored)
+				}
+				f.clock.Advance(time.Hour)
+			}
+			// The last try stores the failure, and the next card follows.
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 1 {
+				t.Fatalf("the last try: %d rounds, %d descriptions", rounds, f.embedder.calls())
+			}
+			stored := f.descriptions(t)
+			if len(stored) != 2 || stored[0].card != 0 || stored[0].result != "" || stored[0].failure != c.class ||
+				stored[1].card != 2 || stored[1].failure != "" || stored[1].result == "" {
+				t.Fatalf("stored = %+v", stored)
+			}
+			if state := f.lookup(t).Descriptions; state != photos.AnalysisDone || f.montageJobs(t) != 0 {
+				t.Fatalf("descriptions = %q, %d montage jobs left", state, f.montageJobs(t))
+			}
+			analysis, err := f.analysis(t)
+			if err != nil || len(analysis.Descriptions) != 2 || analysis.Descriptions[0].Error != c.class || analysis.Descriptions[1].Description == nil {
+				t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
+			}
+		})
+	}
+}
+
+// An original that cannot be opened for a fault of storage is tried again
+// with an attempt spent, as for the cards' quality; one that is gone fails
+// the descriptions until a retry.
+func TestDescriptionsOfAnOriginalThatCannotBeOpenedAreTriedAgain(t *testing.T) {
+	ctx := context.Background()
+	f := newDescribeFixture(t)
+	original := filepath.Join(f.root, "objects", f.object[0:2], f.object[2:4], f.object)
+	content, err := os.ReadFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A link to itself opens with an error that is not "does not exist".
+	if err := os.Remove(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(original), original); err != nil {
+		t.Fatal(err)
+	}
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 1 {
+		t.Fatalf("rounds with the original unreadable = %d", rounds)
+	}
+	f.wantJob(t, describeJob, jobRow{state: "pending", class: "io", attempts: 1})
+	if err := os.Remove(original); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Hour)
+	processAI(t, f.service, f.embedder, f.gate)
+	f.wantJob(t, describeJob, jobRow{state: "failed", class: "missing_original", attempts: 2})
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisFailed || f.embedder.calls() != 0 {
+		t.Fatalf("descriptions with the original gone = %q after %d descriptions", state, f.embedder.calls())
+	}
+	if err := os.WriteFile(original, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, granting(namedAlice), f.grant.ID, []string{f.video.ID}, true); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone || len(f.descriptions(t)) != 2 {
+		t.Fatalf("descriptions with the original back = %q, %d stored", state, len(f.descriptions(t)))
+	}
+}
+
+// The quality queued for a video goes when its last grant does (#556), and
+// another grant has it finished: the descriptions are queued then, and each
+// card is described once however often grants go and come.
+func TestDescriptionsAreMadeOnceWhenAGrantWentAndAnotherCame(t *testing.T) {
+	ctx := context.Background()
+	f := describeFixture{montageFixture: newMontageFixture(t), embedder: newDescribingEmbedder()}
+	f.enableCompute(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	f.video = importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	f.grant, f.object = f.montageFixture.grant(t, namedAlice, "project:first", f.video)
+	// The grant goes with one of the two cards measured.
+	for round := 1; f.count(t, "SELECT COUNT(*) FROM video_card_quality") == 0; round++ {
+		if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); !worked || err != nil || round > 10 {
+			t.Fatalf("round %d before the first card's quality = %v, %v", round, worked, err)
+		}
+	}
+	if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.montageJobs(t) != 0 || f.embedder.calls() != 0 {
+		t.Fatalf("with no grant: %d rounds, %d montage jobs, %d descriptions", rounds, f.montageJobs(t), f.embedder.calls())
+	}
+	f.grant, _ = f.montageFixture.grant(t, namedAlice, "project:second", f.video)
+	processAI(t, f.service, f.embedder, f.gate)
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone || f.embedder.calls() != 2 || len(f.descriptions(t)) != 2 || f.montageJobs(t) != 0 {
+		t.Fatalf("with the second grant: descriptions %q, %d calls, %d stored, %d montage jobs", state, f.embedder.calls(), len(f.descriptions(t)), f.montageJobs(t))
+	}
+	// A third finds everything done.
+	if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.grant, _ = f.montageFixture.grant(t, namedAlice, "project:third", f.video)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
+		t.Fatalf("with the third grant: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
+		t.Fatalf("descriptions with the third grant = %q", state)
 	}
 }

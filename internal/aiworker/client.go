@@ -46,7 +46,7 @@ const (
 	// fills (docs/architecture/photo-ocr.md). Hanging up cancels it too.
 	OpReadText = "read_text"
 	// OpDescribeFrames describes a montage card from its key frames, one
-	// descriptor each (docs/architecture/montage-center.md#卡片描述):
+	// descriptor each (docs/architecture/photo-ai.md, 剪辑中心的分析):
 	// Offsets, Groups and Duration lay them out; the prompt and schema are
 	// the Worker's, named by the answer's Template. Hanging up cancels it.
 	OpDescribeFrames = "describe_frames"

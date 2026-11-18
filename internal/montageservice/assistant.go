@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/activation"
@@ -18,6 +19,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 )
 
 // The montage center's assistant socket (docs/architecture/montage-center.md,
@@ -98,11 +101,17 @@ func assistantSocket(socketPath string) (net.Listener, bool, error) {
 	return listener, false, os.Chmod(socketPath, 0o666)
 }
 
+// shutdownGrace is how long stopping waits for the assistant socket's open
+// calls.
+const shutdownGrace = 15 * time.Second
+
 // serveAssistant serves handler on listener until ctx ends.
 func serveAssistant(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger) {
 	server := &http.Server{Handler: handler, ConnContext: withPeerUID,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 << 10}
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
 		defer cancel()
@@ -111,4 +120,67 @@ func serveAssistant(ctx context.Context, listener net.Listener, handler http.Han
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.ErrorContext(ctx, "montage assistant socket stopped", "error", err)
 	}
+	<-stopped
+}
+
+// assistantGate answers the assistant socket with the API of the store that
+// is open, and unavailable while none is: the socket is systemd's and
+// outlives every store. Taking a store out of service waits for the calls it
+// is answering, so that none finds its database closed.
+type assistantGate struct {
+	mu  sync.RWMutex
+	api http.Handler
+}
+
+func (g *assistantGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.api == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, montageapi.Unavailable, "the montage center is not available")
+		return
+	}
+	g.api.ServeHTTP(w, r)
+}
+
+// serve makes api what the socket answers with; nil takes it away once the
+// calls in progress are answered.
+func (g *assistantGate) serve(api http.Handler) {
+	g.mu.Lock()
+	g.api = api
+	g.mu.Unlock()
+}
+
+// servedStore is an open store with the assistant socket that answers from
+// it; closing it takes the socket's API away first.
+type servedStore struct {
+	*montage.Store
+	assistant *assistantGate
+}
+
+func (s *servedStore) Close() error {
+	s.assistant.serve(nil)
+	return s.Store.Close()
+}
+
+// listenAssistant serves the assistant socket, when the service resolves
+// members by UID and has a socket, until ctx ends; what it returns waits for
+// that.
+func listenAssistant(ctx context.Context, config Config, gate *assistantGate) (func(), error) {
+	if config.Accounts == nil {
+		return func() {}, nil
+	}
+	listener, _, err := assistantSocket(config.AssistantSocket)
+	if err != nil || listener == nil {
+		return func() {}, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		serveAssistant(ctx, listener, authenticatePeer(config.Accounts, config.Logger, gate), config.Logger)
+	}()
+	return func() {
+		cancel()
+		<-served
+	}, nil
 }

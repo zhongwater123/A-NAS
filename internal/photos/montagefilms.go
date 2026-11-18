@@ -7,6 +7,8 @@ import (
 	"io"
 )
 
+type filmKey struct{ owner, version string }
+
 // SaveFilm imports a film the montage center made into the owner's private
 // library and adds it to the grant, so the center can reach it like the
 // videos it was cut from. A film is saved once per (owner, versionKey): a
@@ -20,10 +22,13 @@ func (s *Service) SaveFilm(ctx context.Context, owner Principal, grantID, versio
 	if versionKey == "" || len(versionKey) > 256 {
 		return "", ErrInvalidName
 	}
-	s.filmMu.Lock()
-	defer s.filmMu.Unlock()
+	release, err := s.filmMu.Lock(ctx, filmKey{owner.UserID, versionKey})
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	var saved string
-	err := s.db.QueryRowContext(ctx, "SELECT asset_id FROM montage_films WHERE owner_user_id = ? AND version_key = ?", owner.UserID, versionKey).Scan(&saved)
+	err = s.db.QueryRowContext(ctx, "SELECT asset_id FROM montage_films WHERE owner_user_id = ? AND version_key = ?", owner.UserID, versionKey).Scan(&saved)
 	if err == nil {
 		return saved, nil
 	}
@@ -44,8 +49,15 @@ func (s *Service) SaveFilm(ctx context.Context, owner Principal, grantID, versio
 				owner.UserID, versionKey, assetID, now); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "INSERT INTO montage_grant_assets(grant_id, asset_id, added_at) VALUES(?, ?, ?) ON CONFLICT DO NOTHING",
-				grantID, assetID, now)
+			result, err := tx.ExecContext(ctx, "INSERT INTO montage_grant_assets(grant_id, asset_id, added_at) SELECT id, ?, ? FROM montage_grants WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL",
+				assetID, now, grantID, owner.UserID)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err == nil && rows == 0 {
+				return ErrGrantNotFound
+			}
 			return err
 		}})
 	if err != nil {

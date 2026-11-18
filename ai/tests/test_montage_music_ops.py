@@ -54,18 +54,15 @@ class MusicTest(unittest.TestCase):
         self.assertTrue(answer["chorus"])
         self.assertNotIn("unusable", answer)
 
-    def test_the_steps_copied_from_the_domain_give_its_parts(self):
-        # sections() and parts() are from_structure's own steps, which a
-        # dragged start needs on their own; with from_structure's start and
-        # end they give its parts.
+    def test_a_dragged_start_cuts_its_slots_by_the_domains_rule(self):
+        # One rule for both excerpts (domain.music.sections and parts): from
+        # the default excerpt's own start and target, a dragged start gives
+        # the default's sections and slots up to where it ends.
         st, rms, times = song()
-        st = {**st, "song": ""}
-        expected = music.from_structure(st, rms, times, 90.0)
-        segs, _ = music_ops.sections(st, rms, times)
-        start, end = expected["excerpt"]
-        i = next(k for k, g in enumerate(segs) if g["end"] > start)
-        j = max(k for k, g in enumerate(segs) if g["start"] < end)
-        self.assertEqual(music_ops.parts(segs, i, j, start, end, st["downbeats"]), expected["parts"])
+        default = music.from_structure({**st, "song": "测试歌"}, rms, times, 90.0)
+        dragged = ask(st, rms, start=default["excerpt"][0], target=default["seconds"])
+        self.assertEqual(dragged["excerpt"], default["excerpt"])
+        self.assertEqual(dragged["parts"], default["parts"])
 
     def test_no_chorus_takes_the_loudest_section_and_asks_to_listen(self):
         layout = [("intro", 0, 8), ("verse", 8, 24), ("bridge", 24, 40), ("verse", 40, 56), ("inst", 56, 72), ("outro", 72, 100)]

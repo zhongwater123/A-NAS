@@ -85,7 +85,7 @@ func TestModulesAuthenticateWithTheHostAgentsAnswerOnly(t *testing.T) {
 		"admin":   {UserID: "user:admin", Username: "admin", Role: accounts.RoleAdmin},
 		"renewal": {UserID: "user:bob", Username: "bob", Role: accounts.RoleMember, MustChangePassword: true},
 	}
-	handler := modules.Authenticate(sessions, "scoring_unavailable", nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := modules.Authenticate(sessions, "scoring", "scoring_unavailable", nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, _ := accounts.UserFrom(r.Context())
 		if user.ActiveAdministrator() {
 			_, _ = io.WriteString(w, "admin")

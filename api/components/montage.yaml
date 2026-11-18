@@ -3,8 +3,8 @@ parameters:
   MontageJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
 schemas:
-  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, description: "Unique per member: the same key again repeats nothing." }
-  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 128 } }
+  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
+  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
   MontageProjectSummary:
     type: object
     additionalProperties: false
@@ -84,8 +84,8 @@ schemas:
       duration: { type: number, minimum: 0 }
       transcode: { type: boolean, description: "Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range." }
       state: { type: string, enum: [analyzing, ready, unusable] }
-      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last." }
-      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes." }
+      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot, analysis_failed], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from." }
+      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times." }
       tempo: { type: number }
       beats: { type: array, items: { type: number, minimum: 0 } }
       downbeats: { type: array, items: { type: number, minimum: 0 } }
@@ -121,11 +121,11 @@ schemas:
       step: { type: string, description: The step the job is at or stopped at. }
       waitReason:
         type: string
-        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full]
-        description: "Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md)."
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full, photos_unavailable, video_too_long, model_unavailable]
+        description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed."
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
-      missingAssetIds: { type: array, description: "The videos missing, or whose analysis failed.", items: { type: string } }
+      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed.", items: { type: string } }
       version: { $ref: "#/schemas/MontageVersion" }
       createdAt: { type: string, format: date-time }
       finishedAt: { type: string, format: date-time }

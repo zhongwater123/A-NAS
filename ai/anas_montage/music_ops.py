@@ -21,7 +21,7 @@ the eighth version's choice), optional "song"; array "loudness" (float32, n),
 the eighth version's RMS curve: frames of 2048 samples every 512 at 22050 Hz
 (adapters/music.py, rms_curve).
 
-worker.py serves it once OPS names it: OPS["music"] = music_ops.op_music.
+worker.py serves it as OPS["music"].
 """
 
 import itertools
@@ -98,51 +98,11 @@ def loudest_as_chorus(st, rms, times):
     return {**st, "segments": segments}
 
 
-def sections(st, rms, times):
-    """from_structure's sections before it picks the excerpt: short ones merged, bounds on downbeats, a quieter chorus before a louder one a build."""
-    bars = st["downbeats"]
-    bar = float(np.median(np.diff(bars)))
-    segs = []
-    for g in (g for g in st["segments"] if g["label"] not in ("start", "end") and g["end"] - g["start"] > 1.0):
-        if segs and segs[-1]["end"] - segs[-1]["start"] < 2 * bar:
-            segs[-1] = {**g, "start": segs[-1]["start"]}
-        else:
-            segs.append(dict(g))
-    for g, nxt in itertools.pairwise(segs):
-        t = min(bars, key=lambda x: abs(x - nxt["start"]))
-        if abs(t - nxt["start"]) <= bar / 2:
-            g["end"] = nxt["start"] = t
-
-    def loudness(g):
-        return 20 * float(np.log10(rms[(times >= g["start"]) & (times < g["end"])].mean() / rms.max()))
-
-    for g, nxt in itertools.pairwise(segs):
-        if g["label"] == "chorus" and loudness(nxt) - loudness(g) >= music.BUILD_RISE:
-            g |= {"allin1": g["label"], "label": "build"}
-            nxt |= {"allin1": nxt["label"], "label": "chorus"}
-    return segs, bar
-
-
-def parts(segs, i, j, start, end, bars):
-    """from_structure's parts of the excerpt from start to end over sections i to j."""
-    out = []
-    for n, g in enumerate(segs[i:j + 1], i):
-        a, b = max(g["start"], start), min(g["end"], end)
-        if b - a < 1.0:
-            continue
-        level = music.LEVELS.get(g["label"], "中等")
-        inside = [t for t in bars if a + 0.5 < t < b - 0.5]
-        lines = inside if level == "高潮" else inside[::-1][1::2][::-1] if n == j else inside[1::2]
-        cuts = [a, *lines, b]
-        out.append({"start": round(a - start, 2), "end": round(b - start, 2), "level": level, "label": g["label"],
-                    **({"allin1": g["allin1"]} if "allin1" in g else {}),
-                    "slots": [[round(x - start, 2), round(y - start, 2)] for x, y in itertools.pairwise(cuts) if y - x > 0.5]})
-    return out
-
-
 def from_start(st, rms, times, target, start):
-    """The excerpt from a downbeat the member chose, to the downbeat nearest target seconds later or the music's end."""
-    segs, bar = sections(st, rms, times)
+    """The excerpt from a downbeat the member chose, to the downbeat nearest target seconds later or the music's end.
+
+    Its sections and slots are the eighth version's own (domain.music.sections and parts), as the default excerpt's."""
+    segs, bar = music.sections(st, rms, times)
     bars = st["downbeats"]
     if not segs:
         return None
@@ -156,7 +116,7 @@ def from_start(st, rms, times, target, start):
     j = next((k for k in range(len(segs) - 1, -1, -1) if segs[k]["start"] < end), i)
     return {"song": st["song"], "tempo": st["bpm"], "bar": round(bar, 2), "structure": st["segments"],
             "excerpt": [round(start, 2), round(end, 2)], "seconds": round(end - start, 2),
-            "parts": parts(segs, i, j, start, end, bars)}
+            "parts": music.parts(segs, i, j, start, end, bars)}
 
 
 def unusable(m):
@@ -204,7 +164,7 @@ def op_music(request, arrays):
     except ValueError:
         # No downbeat to end on near the target.
         m = None
-    if chorus and start is not None and not any(g["label"] == "chorus" for g in sections(st, rms, times)[0]):
+    if chorus and start is not None and not any(g["label"] == "chorus" for g in music.sections(st, rms, times)[0]):
         chorus = False
     reason = unusable(m)
     if m is None:

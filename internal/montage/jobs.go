@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -118,7 +119,7 @@ func scanTime(value sql.NullString) *time.Time {
 // now. The same requestKey again returns the same job; a project with a job
 // in progress answers ErrJobActive.
 func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey string) (Job, bool, error) {
-	if !validKey(requestKey) {
+	if !printable(requestKey, MaxRequestKey) {
 		return Job{}, false, ErrInvalid
 	}
 	if !s.runsJobs() {
@@ -127,7 +128,11 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	var jobID string
 	created := false
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, "SELECT id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&jobID)
+		var priorProject string
+		err := tx.QueryRowContext(ctx, "SELECT id, project_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&jobID, &priorProject)
+		if err == nil && priorProject != projectID {
+			return ErrConflict
+		}
 		if err == nil || !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -155,6 +160,9 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		settings, err := s.settingsOf(ctx, tx, row)
 		if err != nil {
 			return err
+		}
+		if settings.SongID == "" {
+			return ErrNoSong
 		}
 		encoded, err := json.Marshal(settings)
 		if err != nil {
@@ -288,19 +296,25 @@ func (s *Store) versionOf(ctx context.Context, jobID string) (*Version, error) {
 // Cancel stops owner's job: a queued or waiting one at once, a running one
 // once its step can stop; a film it made is not saved.
 func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
-	now := sqlitedb.FormatTime(s.now())
-	result, err := s.db.ExecContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
-		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
-		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
-		WHERE id = ? AND owner_user_id = ? AND `+activeStateQuery, now, now, jobID, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return Job{}, err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
+	defer unlock()
+	now := sqlitedb.FormatTime(s.now())
+	var state string
+	err = s.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
+		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
+		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
+		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+activeStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.Job(ctx, owner, jobID); err != nil {
 			return Job{}, err
 		}
 		return Job{}, ErrJobState
+	}
+	if err != nil {
+		return Job{}, err
 	}
 	// The round in progress is over: its answers are told the job was
 	// cancelled. Its Hermes job is the next round's to remove.
@@ -315,7 +329,12 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 	if err := s.SyncMarkers(ctx); err != nil {
 		s.logger.WarnContext(ctx, "syncing the planning markers failed", "error", err)
 	}
-	s.cancelRunning(jobID)
+	if state == JobRunning {
+		s.cancelRunning(jobID)
+	} else {
+		s.removeJobFiles(jobID)
+		s.releaseSong(ctx, owner)
+	}
 	return s.Job(ctx, owner, jobID)
 }
 
@@ -327,7 +346,7 @@ func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, sta
 		args = append(args, state)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?,
-		wait_reason = '', error_class = '', error = '' WHERE id = ? AND owner_user_id = ? AND state IN (`+marks+")", args...)
+		wait_reason = '', error_class = '', error = '', missing_json = NULL WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
 	if err != nil {
 		return err
 	}
@@ -346,13 +365,38 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	if err != nil {
 		return Job{}, err
 	}
+	unlock, err := s.members.Lock(ctx, owner)
+	if err != nil {
+		return Job{}, err
+	}
+	defer unlock()
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
 	}
+	if job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
+		return Job{}, ErrJobState
+	}
+	for _, id := range ids {
+		if !slices.Contains(job.Missing, id) {
+			return Job{}, ErrJobState
+		}
+	}
+	var count int
 	var grantID sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ?", job.ProjectID).Scan(&grantID); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT grant_id, (SELECT COUNT(*) FROM job_assets WHERE job_id = ?)
+		FROM projects WHERE id = ?`, jobID, job.ProjectID).Scan(&grantID, &count); err != nil {
 		return Job{}, err
+	}
+	if count <= len(ids) {
+		return Job{}, ErrJobState
+	}
+	// Remove is idempotent. If its answer or the local commit is lost, the
+	// job remains in needs_input and repeating the same drop finishes it.
+	if grantID.Valid {
+		if err := s.grants.Remove(ctx, grantID.String, ids); err != nil && photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
+			return Job{}, grantError(err)
+		}
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		for _, id := range ids {
@@ -363,16 +407,6 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 				return err
 			}
 		}
-		var left int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM job_assets WHERE job_id = ?", jobID).Scan(&left); err != nil {
-			return err
-		}
-		if left == 0 {
-			return ErrJobState
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET missing_json = NULL WHERE id = ?", jobID); err != nil {
-			return err
-		}
 		// The catalog changes: plans already taken are void, and both
 		// steps are planned again in a new epoch.
 		if err := voidPlans(ctx, tx, jobID, s.now()); err != nil {
@@ -381,15 +415,10 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
 			return err
 		}
-		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting)
+		return s.resume(ctx, tx, owner, jobID, JobNeedsInput)
 	})
 	if err != nil {
 		return Job{}, err
-	}
-	if grantID.Valid {
-		if err := s.grants.Remove(ctx, grantID.String, ids); err != nil {
-			s.logger.WarnContext(ctx, "removing videos from a grant failed", "job", jobID, "error", err)
-		}
 	}
 	s.wakeJobs()
 	return s.Job(ctx, owner, jobID)
@@ -398,6 +427,11 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 // RetryAnalysis asks the photo library to analyse again the videos whose
 // analysis failed, and goes on.
 func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, error) {
+	unlock, err := s.members.Lock(ctx, owner)
+	if err != nil {
+		return Job{}, err
+	}
+	defer unlock()
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
@@ -405,11 +439,11 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, er
 	if job.WaitReason != NeedAnalysis {
 		return Job{}, ErrJobState
 	}
-	grantID, assets, err := s.jobGrant(ctx, jobID)
+	grantID, _, err := s.jobGrant(ctx, jobID)
 	if err != nil {
 		return Job{}, err
 	}
-	if err := s.grants.Analyze(ctx, grantID, assets, true); err != nil {
+	if err := s.analyzeAssets(ctx, grantID, job.Missing, true); err != nil {
 		return Job{}, grantError(err)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
@@ -420,13 +454,14 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, er
 }
 
 // Retry goes on from the step a job stopped at, once the member has made
-// room or otherwise fixed what it needed.
+// room or otherwise fixed what it needed, or the local model it lacked is
+// installed.
 func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
 	}
-	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic}, job.WaitReason) {
+	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic, NeedModel}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {

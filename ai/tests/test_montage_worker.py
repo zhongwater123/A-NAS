@@ -2,8 +2,7 @@
 prototype's computation gives the prototype's numbers, its fill asks for what
 it lacks in a fixed order, and it speaks the protocol with memfd arrays.
 
-NumPy and Pillow are in the AI runtime only: make ai-test skips these, and the
-runtime's image runs them (docs/development/ai-development.md)."""
+CI installs NumPy and Pillow from the AI runtime lock."""
 
 import importlib.util
 import io
@@ -17,11 +16,14 @@ import unittest
 
 RUNTIME = bool(importlib.util.find_spec("numpy") and importlib.util.find_spec("PIL"))
 
+if not RUNTIME and os.environ.get("ANAS_MONTAGE_PYTHON"):
+    raise RuntimeError("montage Worker tests require NumPy and Pillow")
+
 if RUNTIME:
     import numpy as np
 
     from anas_montage import worker
-    from anas_montage.domain import cards as cardrules, picture
+    from anas_montage.domain import cards as cardrules, fill, picture
 
 
 def memfd(array):
@@ -69,6 +71,23 @@ class ComputationTest(unittest.TestCase):
         self.assertEqual(black["reasons"], ["黑帧"])
         self.assertIsNone(black["blur"])
 
+    def test_catalog_filters_black_cards_and_short_cards_have_no_shake(self):
+        cards = [{"id": key, "video": "v", "start": 0, "end": 2} for key in ("black", "good")]
+        good = worker.op_quality({"blurs": [2.0], "blocked": [0.0], "points": [None], "moves": None}, {})
+        self.assertEqual(good["shake"], 0)
+        for blurs in ([None, 3, 1], [3, None, 1], [3, 1, None]):
+            black = worker.op_quality({"blurs": blurs, "blocked": [0.0] * 3, "points": [None] * 3, "moves": []}, {})
+            catalog = worker.op_catalog({"cards": cards, "measures": {"black": black, "good": good}}, {})
+            self.assertEqual(catalog, {"cards": ["good"]})
+
+    def test_cards_with_no_cut_point_between_two_nonflat_ends(self):
+        windows = [{"start": 2 * i, "end": 2 * i + 2} for i in range(70)]
+        flat = np.ones(70, np.uint8)
+        flat[:5] = flat[-5:] = 0
+        vectors = np.tile(np.array([1, 0], dtype=np.float32), (70, 1))
+        answer = worker.op_cards({"windows": windows}, {"vectors": vectors, "flat": flat})
+        self.assertEqual([(c["start"], c["end"]) for c in answer["cards"]], [(0, 140)])
+
 
 def tiny_case():
     """One part of one picture with two 2-second slots, from a card of two beats."""
@@ -86,6 +105,15 @@ def tiny_case():
 
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
 class FillTest(unittest.TestCase):
+    def test_shooting_order_preserves_each_slots_exact_frame_count(self):
+        slots = [[0, 2.05], [2.05, 4.10]]
+        pieces = [{"card": "later", "start": 0, "slot": slots[0]}, {"card": "earlier", "start": 0, "slot": slots[1]}]
+        ordered = fill.in_shooting_order(pieces, slots, 30, {"earlier": 0, "later": 1}.__getitem__)
+        counts = [round(b * 30) - round(a * 30) for a, b in slots]
+        self.assertNotEqual(*counts)
+        self.assertEqual([c["card"] for c in ordered], ["earlier", "later"])
+        self.assertEqual([round(c["slot"][1] * 30) - round(c["slot"][0] * 30) for c in ordered], counts[::-1])
+
     def test_fill_asks_for_one_span_at_a_time_in_a_fixed_order(self):
         vectors = np.eye(10, 8, dtype=np.float32) + 0.1
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)

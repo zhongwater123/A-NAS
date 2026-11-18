@@ -4,6 +4,7 @@
 package sqlitedb
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -77,3 +78,17 @@ func Placeholders(count int) string {
 
 // FormatTime formats value for a store.
 func FormatTime(value time.Time) string { return value.UTC().Format(TimeLayout) }
+
+// WithTx runs apply in a transaction on db: committed when apply succeeds,
+// rolled back when it fails.
+func WithTx(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := apply(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}

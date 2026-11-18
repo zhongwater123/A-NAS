@@ -5,6 +5,7 @@ package montagecompute
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/zhongwater123/A-NAS/internal/montage"
@@ -21,7 +22,21 @@ func (c Client) withBody(ctx context.Context, op string, request any, arrays []A
 	if err != nil {
 		return err
 	}
-	return c.Call(ctx, op, nil, append(arrays, Array{Name: "body", Shape: []int{len(body)}, Uint8: nonNil(body)}), answer)
+	size := len(body)
+	for _, array := range arrays {
+		size += len(array.Float32)*4 + len(array.Uint8)
+	}
+	if size > montage.MaxComputeArrayBytes {
+		return fmt.Errorf("%w: 素材与规划数据超过 64 MiB", montage.ErrWorkerRefused)
+	}
+	return jobComputeError(c.Call(ctx, op, nil, append(arrays, Array{Name: "body", Shape: []int{len(body)}, Uint8: nonNil(body)}), answer))
+}
+
+func jobComputeError(err error) error {
+	if errors.Is(err, ErrRefused) {
+		return fmt.Errorf("%w: %w", montage.ErrWorkerRefused, err)
+	}
+	return err
 }
 
 func nonNil(b []byte) []byte {
@@ -68,7 +83,7 @@ func (c Client) Clear(ctx context.Context, request montage.ClearRequest, key, af
 		{Name: "after", Shape: []int{afterCount, montage.FrameHeight, montage.FrameWidth}, Uint8: nonNil(after)},
 		{Name: "before", Shape: []int{beforeCount, montage.FrameHeight, montage.FrameWidth}, Uint8: nonNil(before)},
 	}, &answer)
-	return answer.Span, err
+	return answer.Span, jobComputeError(err)
 }
 
 var _ montage.Compute = Client{}

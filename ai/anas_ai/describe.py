@@ -1,16 +1,20 @@
-"""Describes a montage card from its key frames (docs/architecture/montage-center.md#卡片描述).
+"""Describes a montage card from its key frames (docs/architecture/photo-ai.md, 剪辑中心的分析).
 
 The prompts, the genre and the schema are the prototype's, taken unchanged
 from commit 19f2d6db (ai/montage_v8/domain/prompts.py and describe.py) with
 one sentence added: not to copy the numbers the frames show. Their version is
 TEMPLATE; any change to them is another template, and so another analysis.
 The caller sends frames, never a prompt.
+
+The reader's context holds the prompt and the answer. A card with more key
+frames than leave the answer its MAX_TOKENS is described from some of them
+(fitting, numbered; the reader counts, anas_ai.providers.LlamaReader.describe).
 """
 
 import itertools
 import json
-import math
 import re
+import sys
 
 TEMPLATE = "montage-card/v1"
 # The genre is fixed: the analysis is shared across projects and members.
@@ -188,6 +192,29 @@ def check(value, sub, where="answer"):
             raise InvalidAnswer(f"{where} is not one of {sub['enum']}")
 
 
+def fitting(offsets, groups, most):
+    """The layout of the frames a card is described from when only most fit, as (kept, offsets, groups).
+
+    A card with more key frames than fit is described from most of them,
+    spread evenly from its first to its last; kept are their places among the
+    card's frames, counted from 0. A beat that keeps none of its frames is
+    left out, and the beats after it move up. A card that fits is unchanged.
+    """
+    count = len(offsets)
+    if count <= most:
+        return list(range(count)), offsets, groups
+    kept = [(2 * k * (count - 1) + most - 1) // (2 * (most - 1)) for k in range(most)]
+    beats = sorted({groups[i] for i in kept})
+    return kept, [offsets[i] for i in kept], [beats.index(groups[i]) + 1 for i in kept]
+
+
+def numbered(answer, kept):
+    """answer with each beat's "frames" counted among the card's key frames, of which kept were asked about."""
+    for beat in answer["beats"]:
+        beat["frames"] = [kept[k - 1] + 1 for k in beat["frames"]]
+    return answer
+
+
 def valid_layout(offsets, groups, duration):
     """Whether offsets, groups and duration describe 3 to 20 frames of a card in order.
 
@@ -196,7 +223,7 @@ def valid_layout(offsets, groups, duration):
     card's seconds, not before the last frame.
     """
     def number(value):
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        return type(value) in (int, float) and -sys.float_info.max <= value <= sys.float_info.max
 
     if not isinstance(offsets, list) or not isinstance(groups, list) or not number(duration):
         return False
