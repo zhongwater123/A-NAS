@@ -128,9 +128,17 @@ def asked(account):
 
 
 def running(unit):
-    return subprocess.run(
-        ["/usr/bin/systemctl", "is-active", "--quiet", unit], check=False, timeout=COMMAND_TIMEOUT,
-    ).returncode == 0
+    """Whether a round of the unit is under way.
+
+    A round is a oneshot unit: activating for as long as it runs and never
+    active, so the exit status of is-active, which is 0 for active alone,
+    says "not running" throughout the round.
+    """
+    state = subprocess.run(
+        ["/usr/bin/systemctl", "is-active", unit],
+        check=False, timeout=COMMAND_TIMEOUT, capture_output=True, text=True,
+    ).stdout.strip()
+    return state in {"activating", "active", "reloading", "deactivating"}
 
 
 class HostConnection(http.client.HTTPConnection):

@@ -78,6 +78,14 @@ func (c *contractClient) do(method, path, body string, headers map[string]string
 	if recorder.Code != want {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, want, recorder.Body.String())
 	}
+	if want == http.StatusForbidden {
+		// A client without a CSRF token expects the guard's refusal of its
+		// write; any other expects the operation's own.
+		forged := method != http.MethodGet && c.csrf == ""
+		if code := answerCode(recorder); (code == "csrf_failed") != forged || code == "password_change_required" {
+			c.t.Fatalf("%s %s was refused as %q, which is not the refusal this test is about; body=%s", method, path, code, recorder.Body.String())
+		}
+	}
 	if guardAnswer(recorder) {
 		return recorder
 	}
@@ -149,7 +157,7 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/music/library/scan", nil)
 	request.AddCookie(client.cookie)
 	handler.ServeHTTP(missingCSRF, request)
-	if missingCSRF.Code != http.StatusForbidden {
+	if !refusedForCSRF(missingCSRF) {
 		t.Fatalf("scan without CSRF status = %d", missingCSRF.Code)
 	}
 	client.csrf = csrf

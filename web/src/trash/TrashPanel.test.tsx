@@ -6,8 +6,11 @@ import type { Space, TrashItem } from "../api.generated";
 import { filesHandlers, folder } from "../test/handlers/files";
 import { type Restore, restoredAs, trashHandlers, trashItem } from "../test/handlers/trash";
 import { server } from "../test/server";
+import { fixToday } from "../test/today";
 import { expiryOf, groupItems, purgeSchedule, restoredName, sortItems, splitName } from "./model";
 import { TrashPanel } from "./TrashPanel";
+
+fixToday();
 
 // Radix places its menus by watching their size, which jsdom cannot.
 vi.stubGlobal(

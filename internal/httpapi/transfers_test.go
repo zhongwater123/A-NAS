@@ -124,7 +124,7 @@ func TestUploadsResumeOverTusAndShowInTheTransferList(t *testing.T) {
 			"Upload-Metadata": tusMetadata(map[string]string{"filename": name, "spaceId": f.shared.ID, "relativePath": "照片/2026", "batch": "b1", "lastModified": "1760000000000"}),
 		}, "", csrf)
 	}
-	if forged := create(f.member, "a.jpg", 6, false); forged.Code != http.StatusForbidden {
+	if forged := create(f.member, "a.jpg", 6, false); !refusedForCSRF(forged) {
 		t.Fatalf("upload without CSRF = %d", forged.Code)
 	}
 	anonymous := httptest.NewRecorder()
@@ -237,7 +237,7 @@ func TestDownloadsAreFollowedThroughTheTransferAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if forged := feedbackRequest(f.member, http.MethodPost, "/api/v1/transfers/downloads", "application/json", `{"entryIds":["`+entry.ID+`"]}`, false); forged.Code != http.StatusForbidden {
+	if forged := feedbackRequest(f.member, http.MethodPost, "/api/v1/transfers/downloads", "application/json", `{"entryIds":["`+entry.ID+`"]}`, false); !refusedForCSRF(forged) {
 		t.Fatalf("download without CSRF = %d", forged.Code)
 	}
 	created := f.member.call(t, http.MethodPost, "/api/v1/transfers/downloads", `{"entryIds":["`+entry.ID+`"]}`)
