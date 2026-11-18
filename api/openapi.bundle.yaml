@@ -3856,6 +3856,172 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/generate:
+    post:
+      operationId: generateMontageFilm
+      summary: Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey again returns the same job. A project with a job in progress answers job_in_progress (409)
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+      responses:
+        '202':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}:
+    get:
+      operationId: getMontageJob
+      summary: 'One of the caller''s jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member''s job is not_found'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/cancel:
+    post:
+      operationId: cancelMontageJob
+      summary: 'Cancel the job: a queued or waiting one at once, a running one once its step stops. A film it made is not saved. A job that ended is job_state (409)'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/drop-assets:
+    post:
+      operationId: dropMontageJobAssets
+      summary: 'Take videos that are missing, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - assetIds
+              properties:
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/retry-analysis:
+    post:
+      operationId: retryMontageJobAnalysis
+      summary: Ask the photo library to analyse again the videos whose analysis failed, and go on
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/retry:
+    post:
+      operationId: retryMontageJob
+      summary: Go on from the step the job stopped at, once there is room for the film or the song is fixed
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/replan:
+    post:
+      operationId: replanMontageJob
+      summary: Plan again from the step not yet taken, when the plan was not handed back or kept failing its checks
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/notices:
+    get:
+      operationId: listMontageNotices
+      summary: 'The desktop''s notices of the caller''s jobs: waiting for planning, planning, needing the member, and films saved in the last day'
+      responses:
+        '200':
+          description: The notices, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageNotices'
   /api/v1/modules:
     get:
       operationId: listModules
@@ -8951,6 +9117,13 @@ components:
         type: string
     MontageProjectID:
       name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageJobID:
+      name: jobId
       in: path
       required: true
       schema:
@@ -16449,6 +16622,27 @@ components:
         addedAt:
           type: string
           format: date-time
+    MontageVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - filmAssetId
+        - createdAt
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          description: Counts from 1 within the project; the film is named "<project> v<number>.mp4".
+        filmAssetId:
+          type: string
+          description: The film in the caller's photo library; play and download it there.
+        createdAt:
+          type: string
+          format: date-time
+        gone:
+          type: boolean
+          description: The member deleted the film from the photo library.
     MontageProject:
       type: object
       additionalProperties: false
@@ -16460,6 +16654,7 @@ components:
         - ask
         - chronological
         - assets
+        - versions
       properties:
         id:
           type: string
@@ -16480,6 +16675,151 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MontageProjectAsset'
+        versions:
+          type: array
+          description: The films saved, newest first.
+          items:
+            $ref: '#/components/schemas/MontageVersion'
+    MontageJobStep:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - state
+      properties:
+        name:
+          type: string
+          enum:
+            - analysis
+            - catalog
+            - song
+            - pick
+            - shots
+            - fill
+            - render
+            - save
+        state:
+          type: string
+          enum:
+            - pending
+            - running
+            - done
+            - queued
+            - waiting
+            - needs_input
+            - failed
+            - cancelled
+          description: A step that stopped with the job shows the job's state.
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+    MontageJob:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - projectId
+        - state
+        - steps
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        projectId:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+            - queued
+            - running
+            - waiting
+            - needs_input
+            - done
+            - failed
+            - cancelled
+        step:
+          type: string
+          description: The step the job is at or stopped at.
+        waitReason:
+          type: string
+          enum:
+            - analysis
+            - asset_trashed
+            - vnas
+            - asset_missing
+            - analysis_failed
+            - no_usable_footage
+            - music_invalid
+            - vnas_unknown
+            - plan_invalid
+            - storage_full
+          description: Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md).
+        error:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageJobStep'
+        missingAssetIds:
+          type: array
+          description: The videos missing, or whose analysis failed.
+          items:
+            type: string
+        version:
+          $ref: '#/components/schemas/MontageVersion'
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+    MontageNotice:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - jobId
+        - projectId
+        - project
+        - at
+      properties:
+        kind:
+          type: string
+          enum:
+            - waiting_for_planning
+            - planning
+            - needs_input
+            - saved
+        jobId:
+          type: string
+        projectId:
+          type: string
+        project:
+          type: string
+          description: The project's name.
+        reason:
+          type: string
+        filmAssetId:
+          type: string
+          description: The film saved, for saved.
+        at:
+          type: string
+          format: date-time
+    MontageNotices:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageNotice'
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

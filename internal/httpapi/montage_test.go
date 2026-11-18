@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -72,8 +73,10 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "montage"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
-		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger})
+		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
+			Compute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}, Music: chosenSong{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +152,38 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
 		t.Fatalf("projects = %+v", page)
 	}
+
+	// A film: 202 and the job to poll; one job at a time.
+	var job montage.Job
+	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
+	if job.State != montage.JobQueued || len(job.Steps) != len(montage.StepNames) {
+		t.Fatalf("job = %+v", job)
+	}
+	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)
+	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g2"}`, nil, http.StatusConflict)
+	bob.do(http.MethodPost, path+"/generate", `{"requestKey":"g3"}`, nil, http.StatusNotFound)
+	jobPath := "/api/v1/montage/jobs/" + job.ID
+	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
+	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
+	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
+	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
+	var notices struct {
+		Items []montage.Notice `json:"items"`
+	}
+	decode(t, owner.do(http.MethodGet, "/api/v1/montage/notices", "", nil, http.StatusOK).Body, &notices)
+	if len(notices.Items) != 0 {
+		t.Fatalf("notices of a queued job = %+v", notices)
+	}
+	bob.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusNotFound)
+	decode(t, owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusOK).Body, &job)
+	if job.State != montage.JobCancelled {
+		t.Fatalf("cancelled job = %+v", job)
+	}
+	owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusConflict)
+
 	bob.do(http.MethodDelete, path, "", nil, http.StatusNotFound)
 	owner.do(http.MethodDelete, path, "", nil, http.StatusNoContent)
+	owner.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, path, "", nil, http.StatusNotFound)
 	// The videos stay in the photo library.
 	if found, err := photoService.Lookup(t.Context(), principal, videos); err != nil || len(found) != 2 {
@@ -172,4 +205,33 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("switched off: %d %s", recorder.Code, recorder.Body)
 	}
+}
+
+// idleCompute and chosenSong let jobs be queued; no job runs in this test.
+type idleCompute struct{}
+
+func (idleCompute) Catalog(context.Context, montage.CatalogRequest) ([]string, error) {
+	return nil, errors.New("no job runs here")
+}
+
+func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (montage.FillAnswer, error) {
+	return montage.FillAnswer{}, errors.New("no job runs here")
+}
+
+func (idleCompute) Clear(context.Context, montage.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
+	return [2]float64{}, errors.New("no job runs here")
+}
+
+type chosenSong struct{}
+
+func (chosenSong) Chosen(context.Context, string, string) (string, float64, error) {
+	return "song:1", 0, nil
+}
+
+func (chosenSong) Excerpt(context.Context, string, string, float64) (montage.Excerpt, error) {
+	return montage.Excerpt{}, montage.ErrSongAnalyzing
+}
+
+func (chosenSong) Audio(context.Context, string, string) (*os.File, error) {
+	return nil, montage.ErrSongAnalyzing
 }

@@ -38,7 +38,13 @@ type Config struct {
 	Sessions   SessionResolver
 	// Grants reaches the photo library's project grants.
 	Grants montage.Grants
-	Logger *slog.Logger
+	// Compute, Editing, Planner and Music are what jobs work with; without
+	// all four the service keeps projects and makes no film.
+	Compute montage.Compute
+	Editing montage.Editing
+	Planner montage.Planner
+	Music   montage.Music
+	Logger  *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -175,6 +181,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				continue
 			}
 		}
+		jobsDone := runJobs(ctx, store, config.Logger)
 		serve(accountremoval.Route(config.Sessions.AccountDeletion, RemoveAccount(store), config.Logger,
 			montageapi.New(store, config.Logger)))
 		config.Logger.Info(Ready)
@@ -186,6 +193,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			select {
 			case <-ctx.Done():
 				serve(unavailable)
+				jobsDone()
 				_ = store.Close()
 				return
 			case <-ticker.C:
@@ -206,11 +214,32 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			current, err := os.Lstat(config.Root)
 			if err = errors.Join(err, config.CheckStore(config.Root)); err != nil || !os.SameFile(opened, current) {
 				serve(unavailable)
+				jobsDone()
 				_ = store.Close()
 				config.Logger.WarnContext(ctx, "montage store unavailable", "error", err)
 				break
 			}
 		}
+	}
+}
+
+// runJobs puts the jobs a stop cut short back in the queue and runs the
+// jobs until the returned function stops them, which returns once the
+// running step has stopped: the job goes on from it at the next start.
+func runJobs(ctx context.Context, store *montage.Store, logger *slog.Logger) func() {
+	jobsCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := store.RecoverJobs(jobsCtx); err != nil {
+			logger.ErrorContext(jobsCtx, "recovering montage jobs failed; no job runs", "error", err)
+			return
+		}
+		store.RunJobs(jobsCtx)
+	}()
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
@@ -222,7 +251,8 @@ func open(ctx context.Context, config Config) (*montage.Store, os.FileInfo, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Logger: config.Logger})
+	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Compute: config.Compute, Editing: config.Editing,
+		Planner: config.Planner, Music: config.Music, Logger: config.Logger})
 	if err != nil {
 		return nil, nil, err
 	}

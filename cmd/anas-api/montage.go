@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
@@ -36,8 +37,19 @@ func runMontageService(logger *slog.Logger) error {
 		SocketPath: config.Socket,
 		Sessions:   sessionlookup.NewClient(config.SessionSocket),
 		Grants:     photosapi.GrantClient(config.GrantSocket),
+		Compute:    montagecompute.Client{SocketPath: config.ComputeSocket},
+		Editing:    config.Media.client(),
+		Planner:    planner(config.PlanAnswers),
 		Logger:     logger,
 	})
+}
+
+// planner is the stand-in planner when PlanAnswers names one.
+func planner(answers string) montage.Planner {
+	if answers == "" {
+		return nil
+	}
+	return montage.FixedPlanner{Dir: answers}
 }
 
 // configuredMontage returns the montage API, or nil while

@@ -44,12 +44,20 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 	}
 	h := &handler{store: store, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]route{
-		"GET /projects":                     h.projects,
-		"POST /projects":                    h.createProject,
-		"GET /projects/{projectID}":         h.project,
-		"PATCH /projects/{projectID}":       h.updateProject,
-		"DELETE /projects/{projectID}":      h.deleteProject,
-		"POST /projects/{projectID}/assets": h.addAssets,
+		"GET /projects":                       h.projects,
+		"POST /projects":                      h.createProject,
+		"GET /projects/{projectID}":           h.project,
+		"PATCH /projects/{projectID}":         h.updateProject,
+		"DELETE /projects/{projectID}":        h.deleteProject,
+		"POST /projects/{projectID}/assets":   h.addAssets,
+		"POST /projects/{projectID}/generate": h.generate,
+		"GET /jobs/{jobID}":                   h.job,
+		"POST /jobs/{jobID}/cancel":           h.cancelJob,
+		"POST /jobs/{jobID}/drop-assets":      h.dropAssets,
+		"POST /jobs/{jobID}/retry-analysis":   h.retryAnalysis,
+		"POST /jobs/{jobID}/retry":            h.retryJob,
+		"POST /jobs/{jobID}/replan":           h.replan,
+		"GET /notices":                        h.notices,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -102,6 +110,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key belongs to another project")
 	case errors.Is(err, montage.ErrSessionEnded):
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+	case errors.Is(err, montage.ErrJobActive):
+		httpjson.WriteError(w, http.StatusConflict, "job_in_progress", "the project already has a job in progress")
+	case errors.Is(err, montage.ErrJobState):
+		httpjson.WriteError(w, http.StatusConflict, "job_state", "the job cannot do this now")
+	case errors.Is(err, montage.ErrJobsUnavailable):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center cannot make films here")
 	case errors.Is(err, montage.ErrPhotosUnavailable):
 		h.logger.WarnContext(r.Context(), "photo library unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")
