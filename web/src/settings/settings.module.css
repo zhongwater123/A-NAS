@@ -5101,3 +5101,29 @@ button.set-row-command:disabled {
 button.set-row-command:disabled:hover {
   background: transparent;
 }
+
+/* 设置 → VNAS: what goes to DeepSeek, and the administrator's consent before saving the key. */
+.set-disclosure {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--set-warning-soft);
+  color: var(--set-text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.set-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.set-consent input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--set-accent);
+}

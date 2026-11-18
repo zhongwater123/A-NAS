@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # The content a release pins: the AI Worker's models and Python runtime
 # (ADR 0016), web search's runtime (ADR 0030), Qdrant (ADR 0028) and the text
-# reader's llama.cpp. Each is a Debian package of its own whose name carries
+# reader's llama.cpp and the AI assistant's Hermes runtime (ADR 0024). Each is a Debian package of its own whose name carries
 # the content's identity, at version 1 (ADR 0034): a release depends on the
 # names it pins, so apt downloads only content that changed, and the content
 # of an older release stays installed beside a newer one until apt autoremove.
@@ -72,9 +72,9 @@ pinned_package() { echo "a-nas-$2-$(pin_field "$1/$3" sha256 | cut -c1-12)"; }
 qdrant_package() { pinned_package "$1" qdrant deploy/qdrant/qdrant.json; }
 llama_package() { pinned_package "$1" llama deploy/llama/llama.json; }
 
-# assistant_runtime_package REPO: the Hermes runtime of the assistant trial,
-# which a-nas-assistant-trial depends on (ai/assistant-spike/runtime.json).
-assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant-spike/runtime.json; }
+# assistant_runtime_package REPO: the Hermes runtime of the AI assistant
+# (ai/assistant/runtime.json).
+assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant/runtime.json; }
 
 # content_packages REPO: every content package a-nas depends on.
 content_packages() {
@@ -86,6 +86,7 @@ content_packages() {
   echo "a-nas-search-runtime-$(search_runtime_id "$1")"
   qdrant_package "$1"
   llama_package "$1"
+  assistant_runtime_package "$1"
 }
 
 # content_roles REPO: one line per kind of content a release pins: the role,
@@ -100,4 +101,5 @@ content_roles() {
   echo "search-runtime a-nas-search-runtime-$(search_runtime_id "$1")"
   echo "qdrant $(qdrant_package "$1")"
   echo "llama $(llama_package "$1")"
+  echo "assistant-runtime $(assistant_runtime_package "$1")"
 }

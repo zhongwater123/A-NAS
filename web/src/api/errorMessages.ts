@@ -114,6 +114,11 @@ const domains = {
     invalid_query: "搜索内容为空或太长",
     search_interrupted: "搜索中断，请重试",
   },
+  assistantKey: {
+    invalid_key: "这不是 DeepSeek 的 API 密钥，请检查后重新粘贴",
+    acknowledgement_required: "请先确认同意这些内容发往 DeepSeek",
+    assistant_unavailable: "没能完成，请稍后重试",
+  },
   systemUpdate: {
     update_busy: "更新正在进行，请等它结束",
     update_not_ready: "更新的状态已经变化，请看页面上的最新状态",

@@ -3,8 +3,8 @@
 # scripts/release-version.sh gives (the Makefile's VERSION), from this tree and
 # the programs make build-binaries leaves in BUILD (ADR 0034):
 #
-# - a-nas: the programs and the AI Worker's code under /usr/lib/a-nas, the
-#   systemd units with the links that turn them on, the accounts
+# - a-nas: the programs, the AI Worker's code and the AI assistant's scripts
+#   and Hermes policy (ADR 0024) under /usr/lib/a-nas, the systemd units with the links that turn them on, the accounts
 #   (sysusers.d), directories (tmpfiles.d), a-nas-generator, anas-site.service,
 #   a-nas-site and a-nas-check. It depends on the content packages it links
 #   to (scripts/lib/content.sh) and on a-nas-host at its own version.
@@ -13,8 +13,9 @@
 #   versions deploy/upstream/packages.json pins (ADR 0015), so installing a
 #   release upgrades them to the ones its system test ran, and rolling back
 #   leaves them;
-# - a-nas-assistant-trial, the assistant's trial (ADR 0024), at the version of
-#   a-nas, which it depends on with its Hermes runtime's content package.
+# - a-nas-assistant-trial, empty, at the version of a-nas, which it depends on:
+#   the assistant's trial is part of a-nas now, and a device that had the trial
+#   updates to this package before apt removes it (ADR 0034).
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
 #   stay installed when the product rolls back, as Docker itself does.
 #
@@ -50,6 +51,8 @@ for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker
 done
 # shellcheck source=lib/content.sh
 . "$repo/scripts/lib/content.sh"
+# shellcheck source=lib/assistant-units.sh
+. "$repo/scripts/lib/assistant-units.sh"
 
 # The same commit builds the same packages.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
@@ -97,7 +100,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/anas_montage/domain" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -130,6 +133,24 @@ ln -s "/opt/a-nas/ai-runtimes/$(ai_runtime_id "$repo")" "$lib/ai/runtime"
 install -m 0644 "$repo/deploy/llama/llama.json" "$lib/ai/"
 ln -s "/opt/a-nas/llama/$(pin_field "$repo/deploy/llama/llama.json" sha256)" "$lib/ai/llama"
 
+# The AI assistant (ADR 0024): the scripts its units run, the MCP servers and
+# the gateway, Hermes's managed policy and the system skills, the files its
+# sandbox binds over Hermes's home, and a link to the Hermes runtime. The Host
+# Agent writes each member's own settings (/var/lib/a-nas-host/assistant).
+assistant=$repo/ai/assistant
+install -d "$lib/assistant/managed" "$lib/assistant/empty"
+for file in "$assistant"/*.sh "$assistant"/*.py; do
+  install -m 0755 "$file" "$lib/assistant/"
+done
+install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
+install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
+install -m 0644 /dev/null "$lib/assistant/empty.env"
+# Members' sandboxes read the skills, whatever the builder's umask.
+cp -r "$assistant/skills" "$lib/assistant/skills"
+find "$lib/assistant/skills" -type d -exec chmod 0755 {} +
+find "$lib/assistant/skills" -type f -exec chmod 0644 {} +
+ln -s "/opt/a-nas/assistant-runtimes/spike" "$lib/assistant/runtime"
+
 # Web search (ADR 0030) and the vector index (ADR 0028).
 install -m 0644 "$repo"/deploy/search/{settings.yml,searxng.json,anas_search.py} "$lib/search/"
 install -m 0755 "$repo/deploy/search/allow-dns.sh" "$lib/search/"
@@ -142,17 +163,22 @@ ln -s "/opt/a-nas/qdrant/$(pin_field "$repo/deploy/qdrant/qdrant.json" sha256)/q
 # console, the container agent and the internet entry are turned on by their
 # runbooks or by a-nas-generator.
 install -m 0644 "$repo"/deploy/systemd/system/* "$units/"
+# The assistant's scheduled tasks and its curator, made from its sandbox.
+derive_assistant_units "$units"
 wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
-for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-search anas-site; do
+for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-search anas-site \
+  anas-assistant-gateway anas-assistant-cron-waker; do
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket
 wants sockets.target anas-photos-grants.socket
 wants sockets.target anas-montage-compute.socket
 wants sockets.target anas-ffmpeg.socket
+wants sockets.target anas-photos-assistant.socket
+wants sockets.target anas-companion-assistant.socket
 wants sockets.target anas-vectors-proxy@a-nas-photos.socket anas-vectors-proxy@.socket
 wants paths.target anas-search-dns.path
 wants paths.target anas-update.path
@@ -175,18 +201,12 @@ printf '%s\n' 'A-NAS: https://github.com/zhongwater123/A-NAS' \
 chmod 0644 "$root/usr/share/doc/a-nas/copyright"
 build "$root"
 
-# The assistant trial (ADR 0024), at this version of a-nas: the spike's
-# scripts, which its nas-trial.sh sets up and updates, and its Hermes runtime
-# as a content package.
+# The assistant's trial, now part of a-nas: an empty package at this version,
+# so that a device with the trial installed updates it (its scripts there
+# allow it) and a-nas's postinst takes the trial over; apt removes it with the
+# next release that does not list it (internal/systemupdate).
 root=$work/a-nas-assistant-trial
-install -d "$root/DEBIAN" "$root/opt/a-nas/assistant-trial"
-control a-nas-assistant-trial "$(assistant_runtime_package "$repo")" >"$root/DEBIAN/control"
+install -d "$root/DEBIAN"
+control a-nas-assistant-trial '' >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
-install -m 0755 "$repo"/deploy/debian/a-nas-assistant-trial/DEBIAN/{postinst,prerm} "$root/DEBIAN/"
-cp -r "$repo/ai/assistant-spike" "$root/opt/a-nas/assistant-trial/spike"
-find "$root/opt/a-nas/assistant-trial/spike" -name __pycache__ -prune -exec rm -rf {} +
-# Scripts run as root: root's alone to change, and executable as they start.
-while IFS= read -r -d '' file; do
-  if [[ "$(head -c 2 "$file")" == '#!' ]]; then chmod 0755 "$file"; else chmod 0644 "$file"; fi
-done < <(find "$root/opt/a-nas/assistant-trial/spike" -type f -print0)
 build "$root"

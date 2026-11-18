@@ -1,13 +1,15 @@
-# A-NAS managed Hermes policy (spike). Root-owned and read-only inside the
-# sandbox, so the agent cannot re-enable what is switched off here. setup.sh
-# replaces spike-model with the real model's name when SPIKE_MODEL is set.
+# A-NAS managed Hermes policy (ADR 0024), /usr/lib/a-nas/assistant/managed/config.yaml:
+# read-only inside the sandbox, so the agent cannot re-enable what is switched off here.
+# V1 uses DeepSeek's deepseek-flash through the model gateway (decision record
+# docs/decisions/2026-11-17-assistant-v1-cloud-model.md); the spike's setup.sh replaces the
+# name with SPIKE_MODEL.
 model:
   provider: custom
-  default: spike-model
+  default: deepseek-flash
   base_url: http://127.0.0.1:18001/v1
   api_mode: chat_completions
-  # The gateway outside the sandbox adds the real key.
-  api_key: spike-not-a-secret
+  # The gateway outside the sandbox adds the administrator's key.
+  api_key: not-a-secret
   context_length: 128000
 # `hermes serve` builds every session's agent from the cli entry (tui_gateway
 # server._load_enabled_toolsets); api_server is the API Server channel. Hermes's
@@ -15,15 +17,14 @@ model:
 # (ADR 0024 decision 3): the terminal and code run as the member, with the
 # personal space and Shared read-only, no network and nothing of anyone else;
 # dangerous commands wait for the member's approval like 提交更改. vision and
-# video send images and frames to the model: for testing only, until a local
-# model (decision 7). cronjob schedules tasks (user decision, 2026-10-20); they run
+# video send images and frames to DeepSeek, as the V1 decision says (decision 7). cronjob schedules tasks (user decision, 2026-10-20); they run
 # through anas-assistant-cron@.service, with the cron list: no one is there to answer a
 # question, and a job does not schedule more jobs. desktop operates the WebOS desktop the
 # member is talking on, through the member's VNAS window (user decision 2026-10-20; A-NAS's
 # own MCP server since Hermes removed the browser control it was built on), and companion
 # moves the companion there (#412). A scheduled task has no window: it is not given desktop,
 # and lists companion, which tells it that no desktop is in use: its unit has no socket to
-# the product service (assistant-install.sh).
+# the product service (scripts/build-packages.sh).
 platform_toolsets:
   cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, anas, companion, desktop]
   api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, anas, companion, desktop]
@@ -37,7 +38,7 @@ agent:
   # lists only cover the platforms named there, and serve also builds agents for others (a
   # triggered cron job got connections and vision); this list applies to all. Composites
   # (debugging, safe) stay out: a disabled toolset removes every tool it resolves to, and
-  # debugging includes the file tools. toolsets-check.py (run by probe.sh) checks all this.
+  # debugging includes the file tools. ai/assistant-spike/toolsets-check.py (the probe) checks all this.
   disabled_toolsets: [web, search, x_search, image_gen, video_gen, computer_use,
     tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
     kanban, discord, discord_admin, feishu_doc, feishu_drive, coding,
@@ -45,7 +46,7 @@ agent:
   # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
   coding_context: "off"
   # Images in tool results never reach the model as pixels, even with a model configured
-  # as vision-capable: Hermes keeps them as a file path (photos-vision.sh, #113). Showing
+  # as vision-capable: Hermes keeps them as a file path (ai/assistant-spike/photos-vision.sh, #113). Showing
   # photos to a local multimodal model is a decision of its own (ADR 0024 decision 7).
   image_input_mode: text
   # A question the assistant asks waits as long as a confirmation.
@@ -59,8 +60,8 @@ terminal:
 mcp_discovery_timeout: 20
 mcp_servers:
   anas:
-    command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python
-    args: [/spike/anas_mcp.py]
+    command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
+    args: [/usr/lib/a-nas/assistant/anas_mcp.py]
     # Each call of a tool without readOnlyHint (提交更改) waits for the member's
     # in-turn approval; Hermes asks before it reaches the server.
     trust: untrusted
@@ -68,8 +69,8 @@ mcp_servers:
       prompts: false
       resources: false
   companion:
-    command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python
-    args: [/spike/anas_companion_mcp.py]
+    command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
+    args: [/usr/lib/a-nas/assistant/anas_companion_mcp.py]
     # The companion's tools (#412) run without a card: they move and animate the
     # companion on the screen of the conversation that asked, and change none of
     # the member's data. A separate server, so that a call waiting for the window
@@ -89,8 +90,8 @@ mcp_servers:
       prompts: false
       resources: false
   desktop:
-    command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python
-    args: [/spike/anas_desktop_mcp.py]
+    command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
+    args: [/usr/lib/a-nas/assistant/anas_desktop_mcp.py]
     # The tools that operate the member's WebOS desktop run without Hermes's card: the
     # member's VNAS window asks, on the device in use, before the steps that delete, move,
     # share or change settings (web/src/assistant/webosControl.ts), and Hermes's own
@@ -105,7 +106,7 @@ mcp_servers:
       prompts: false
       resources: false
 skills:
-  external_dirs: [/opt/a-nas/assistant-skills]
+  external_dirs: [/usr/lib/a-nas/assistant/skills]
   auto_load: [anas-files, anas-member, anas-scheduled-tasks, anas-desktop]
 tools:
   # List the A-NAS tools directly instead of behind tool_search.
@@ -114,8 +115,8 @@ tools:
 approvals:
   mode: manual
   # A card waits for the member up to a day (user decision, 2026-10-16); the
-  # session gate ends it sooner when the member's session ends. setup.sh
-  # replaces it with SPIKE_APPROVAL_TIMEOUT when set.
+  # session gate ends it sooner when the member's session ends. The spike's
+  # setup.sh replaces it with SPIKE_APPROVAL_TIMEOUT when set.
   timeout: 86400
   # A scheduled task runs with no one there to approve: a dangerous command, a script or
   # 提交更改 in it is refused (Hermes's default, made explicit; user decision, 2026-10-20).

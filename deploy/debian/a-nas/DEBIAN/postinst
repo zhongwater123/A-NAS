@@ -93,10 +93,78 @@ take_over() {
   echo "a-nas: took over from the installer; its files are in $saved, its releases stay in /opt/a-nas/releases"
 }
 
+# The AI assistant's trial (docs/adr/0024), which set itself up in /etc from
+# the a-nas-assistant-trial package before the assistant was part of a-nas. Its
+# units in /etc would override the package's, and its files ran from /spike.
+# Once, its files go to /var/backups/a-nas/assistant-trial; the members'
+# assistant folders, conversations, memory and scheduled tasks stay on the data
+# volume, where the Host Agent finds them, and the key the trial read from
+# /etc/anas-spike becomes the credential the model gateway loads.
+assistant_trial_files=(
+  /etc/systemd/system/anas-assistant@.service /etc/systemd/system/anas-assistant-net@.service
+  /etc/systemd/system/anas-assistant-api@.service /etc/systemd/system/anas-assistant-api@.socket
+  /etc/systemd/system/anas-assistant-cron@.service /etc/systemd/system/anas-assistant-cron-waker.service
+  /etc/systemd/system/anas-assistant-curator@.service /etc/systemd/system/anas-assistant-curator@.timer
+  /etc/systemd/system/anas-assistant-probe@.service /etc/systemd/system/anas-assistant-trial-gateway.service
+  /etc/systemd/system/anas-assistant-token@.service
+  /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
+  /etc/systemd/system/anas-assistant-api@.socket.d
+  /etc/systemd/system/anas-photos-assistant.socket /etc/systemd/system/anas-companion-assistant.socket
+  /etc/systemd/system/anas-host-agent.service.d/assistant-trial.conf
+  /etc/systemd/system/anas-api.service.d/assistant-trial.conf
+  /etc/systemd/system/anas-photos.service.d/assistant-trial.conf
+  /etc/tmpfiles.d/anas-assistant-trial.conf /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills
+  /var/log/anas-assistant-gateway
+)
+
+take_over_assistant_trial() {
+  local saved=/var/backups/a-nas/assistant-trial file credential=/etc/credstore.encrypted/a-nas-assistant-deepseek
+  install -d -m 0700 "$saved"
+  if "$running"; then
+    systemctl stop anas-assistant-cron-waker.service anas-assistant-trial-gateway.service 2>/dev/null || true
+    systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+      'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 'anas-assistant-probe@*.service' 2>/dev/null || true
+  fi
+  # The links that turned the trial's units on name its templates in /etc; the
+  # package's own links and the Host Agent turn them on again. A disabled
+  # member's masks stay.
+  for file in /etc/systemd/system/*.wants/anas-assistant-* /etc/systemd/system/*.wants/anas-photos-assistant.socket \
+    /etc/systemd/system/*.wants/anas-companion-assistant.socket; do
+    if [[ -L "$file" ]]; then rm -f -- "$file"; fi
+  done
+  for file in "${assistant_trial_files[@]}"; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    install -d -m 0700 "$saved$(dirname "$file")"
+    rm -rf -- "${saved:?}$file"
+    mv -f -- "$file" "$saved$file"
+  done
+  for file in anas-host-agent anas-api anas-photos; do
+    rmdir "/etc/systemd/system/$file.service.d" 2>/dev/null || true
+  done
+  if [[ -s /etc/anas-spike/model.key && ! -e "$credential" ]]; then
+    # anas-site.service makes the credential key too, but only after this.
+    systemd-creds setup >/dev/null 2>&1 || true
+    install -d -m 0700 /etc/credstore.encrypted
+    if tr -d '\r\n' </etc/anas-spike/model.key |
+      systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - "$credential.incoming" &&
+      chmod 0600 "$credential.incoming" && mv -f -- "$credential.incoming" "$credential"; then
+      rm -rf -- /etc/anas-spike
+    else
+      rm -f -- "$credential.incoming"
+      echo "a-nas: the trial's key stays in /etc/anas-spike; paste it in 设置 → VNAS" >&2
+    fi
+  fi
+  if [[ -L /spike ]]; then rm -f -- /spike; fi
+  echo "a-nas: took over the assistant's trial; its files are in $saved"
+}
+
 # The accounts come first: the takeover gives site.conf to group a-nas.
 systemd-sysusers a-nas.conf a-nas-kiosk.conf a-nas-search.conf
 if [[ "$1" == configure && -L /opt/a-nas/current ]]; then
   take_over
+fi
+if [[ "$1" == configure && ( -L /spike || -e /etc/systemd/system/anas-assistant@.service ) ]]; then
+  take_over_assistant_trial
 fi
 systemd-tmpfiles --create a-nas.conf
 "$running" || exit 0
@@ -110,15 +178,23 @@ systemctl daemon-reload
 # starts again below with this release's socket.
 systemctl stop anas-ai.service anas-montage-compute.service anas-photos.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
 systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-photos-grants.socket anas-montage-compute.socket
-# This machine's settings: failures leave the product running and are
-# reported below.
+# This machine's settings, with the credential key that encrypts the
+# assistant's model key: failures leave the product running and are reported
+# below.
 systemctl restart anas-site.service || true
 # smbd that waits for the SMB interface's address keeps trying without it,
 # which must not stop the installation halfway.
 systemctl start smbd.service || true
+# Members' assistants run this release's scripts from their next start; the
+# Product Service's restart below ends their connections anyway.
+systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' 2>/dev/null || true
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
   anas-montage.service
 systemctl try-restart 'anas-kiosk@*.service' || true
+# The assistant's model gateway and the waker of its scheduled tasks run only
+# while the administrator's key is saved (their units' condition); the Product
+# Service's identity synchronization prepares each member's assistant.
+systemctl restart anas-assistant-gateway.service anas-assistant-cron-waker.service || true
 # A running container agent keeps its program until the administrator restarts
 # it: stopping it cancels an app installation in progress, which the App
 # Center then rolls back (docs/runbooks/install-container-agent.md). It and
