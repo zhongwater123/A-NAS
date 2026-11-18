@@ -314,10 +314,9 @@ func TestWindowVectorsAreMadeOnceForTheVideosGrantsAskFor(t *testing.T) {
 	if looked[0].Windows != photos.AnalysisQueued {
 		t.Fatalf("before the analysis: %+v", looked[0])
 	}
-	// 70 seconds: 35 windows in two chunks, then the cards, then each of
-	// the two cards' quality, and the job's end.
-	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 6 {
-		t.Fatalf("rounds = %d, want two chunks, the cards, two cards' quality and the end", rounds)
+	// 70 seconds: 35 windows in two chunks, with no compute worker.
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 {
+		t.Fatalf("rounds = %d, want two window chunks", rounds)
 	}
 	analysis, vectors := f.analysis(t, namedBob, bobGrant.ID, video.ID)
 	if analysis.Windows != photos.AnalysisDone || len(analysis.List) != 35 || analysis.WindowCount != 35 || analysis.Dimensions != 4 ||
@@ -746,6 +745,37 @@ func TestMontageAnalysisBackfillsAndFinishesAnEmptyResult(t *testing.T) {
 	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone ||
 		analysis.CardsIdentity == "" || analysis.QualityIdentity == "" || len(analysis.CardList) != 0 {
 		t.Fatalf("empty analysis = %+v, %v", analysis, err)
+	}
+}
+
+func TestMontageQualityPausesForForegroundWithoutSpendingAnAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	f := newMontageFixture(t)
+	f.enableCompute(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	grant, _ := f.grant(t, namedAlice, "project:foreground", video)
+	for range 3 {
+		if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); !worked || err != nil {
+			t.Fatalf("process predecessor = %v, %v", worked, err)
+		}
+	}
+	// Enter the foreground while the quality round is taking keyframes.
+	f.video.stopAfter = f.video.asked
+	if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); worked || err != nil || ctx.Err() != nil {
+		t.Fatalf("quality round = %v, %v; context = %v", worked, err, ctx.Err())
+	}
+	var attempts int
+	if err := catalog(t, f.root).QueryRow("SELECT attempts FROM jobs WHERE derivation = 'montage-quality/v1'").Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("quality attempts after pausing = %d, %v", attempts, err)
+	}
+	f.video.stopAfter = 0
+	f.gate.set(true, "")
+	processAI(t, f.service, f.embedder, f.gate)
+	looked, err := f.service.LookupGrant(ctx, granting(namedAlice), grant.ID, []string{video.ID})
+	if err != nil || len(looked) != 1 || looked[0].Quality != photos.AnalysisDone {
+		t.Fatalf("retrying the quality round = %+v, %v", looked, err)
 	}
 }
 
