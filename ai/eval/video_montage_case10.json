@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "about": "#350: test case case-10's instruction (video-edit-testset-v1), cut with eval.video_planner --about to its target seconds.",
+  "instructions": [
+    {
+      "id": "case-10",
+      "text": "把白天的埃菲尔铁塔航拍和夜晚的巴黎街景合成一条从白天到夜晚的巴黎短片",
+      "seconds": 60,
+      "style": "旅行"
+    }
+  ]
+}

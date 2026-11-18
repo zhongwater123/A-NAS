@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "about": "Two more videos for the montage experiments of #326, Earth filmed from orbit and a short noir film, kept apart from the pilot set, Edinburgh and Paris: no queries, so they only take the frames, embed, index, describe and measure steps, and only the layout the pilot recommends.",
+  "layouts": ["2s1f"],
+  "videos": {
+    "10": {
+      "file": "10_earth_from_space_4k.webm",
+      "sha256": "dc838501a061e39bdd1a2c74180605ff7081d87fa3a07fbb774a3449a5825591",
+      "duration": 612.961
+    },
+    "11": {
+      "file": "11_meridian_4k_hdr.mp4",
+      "sha256": "e14ff5ab8ce4cc90269e8ed45babcf6e25d7a073b71438b3e7ffee5901a7177e",
+      "duration": 718.935
+    }
+  },
+  "queries": []
+}

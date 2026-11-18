@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "about": "#322: the two acceptance instructions on the Edinburgh walk (video_moments_edinburgh.json), for the rule version beside the model's cuts. No on-topic seconds are labelled; the cuts are checked by eye.",
+  "instructions": [
+    {"id": "castle", "text": "城堡和老城的石头街道", "seconds": 30, "topic": ["城堡", "老城的石头街道"], "onTopic": []},
+    {"id": "bus", "text": "公交车和热闹的街头", "seconds": 20, "topic": ["公交车", "热闹的街头"], "onTopic": []}
+  ]
+}

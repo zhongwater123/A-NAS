@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "about": "#326: one instruction for each video of video_moments_earth_meridian.json, for tuning the model version, not scoring it, so unlabelled. 10 is Earth from the space station, ending in black and a NASA card; 11 is a noir short whose last four minutes are credits.",
+  "instructions": [
+    {"id": "earth", "text": "从太空看地球", "seconds": 60},
+    {"id": "noir", "text": "这部侦探片的预告片", "seconds": 60}
+  ]
+}

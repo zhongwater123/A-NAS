@@ -10,7 +10,7 @@ src = [".", "assistant-spike"]
 # bugbear, blind excepts, pyupgrade, comprehensions, simplifications,
 # performance, needless code, bandit's security checks and Ruff's own rules
 # (#278).
-select = ["E", "W", "F", "I", "B", "BLE", "UP", "C4", "SIM", "PERF", "PIE", "S", "RUF"]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "C4", "SIM", "PERF", "PIE", "S", "RUF", "TID251"]
 ignore = [
   # Line length is a formatter's matter, and none runs on ai/: the longest
   # lines are URLs, messages and data.
@@ -27,6 +27,19 @@ ignore = [
 [lint.per-file-ignores]
 # Imports Hermes's modules once its source is on sys.path.
 "assistant-spike/toolsets-check.py" = ["E402"]
+
+# 第八版剪辑的领域层不做输入输出（montage_v8/domain/__init__.py）：只在那里禁止这些模块，
+# 其他文件忽略 TID251。tests/test_montage_v8.py 另外检查领域层只引用标准库、NumPy 和自己。
+"!montage_v8/domain/**" = ["TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"subprocess".msg = "领域层不做输入输出：经 ports.py 的端口"
+"requests".msg = "领域层不做输入输出：经 ports.py 的端口"
+"os".msg = "领域层不做输入输出：经 ports.py 的端口"
+"shutil".msg = "领域层不做输入输出：经 ports.py 的端口"
+"socket".msg = "领域层不做输入输出：经 ports.py 的端口"
+"PIL".msg = "领域层不读图片：经 FrameSource 端口或存储适配器"
+"anthropic".msg = "领域层不调用模型：经 Planner 端口"
 
 [lint.isort]
 combine-as-imports = true

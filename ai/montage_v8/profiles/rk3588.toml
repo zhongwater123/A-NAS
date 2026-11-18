@@ -1,0 +1,34 @@
+# RK3588（aarch64 Linux）。草稿：板子到了实测后再定，标了“待测”的都要在真机上确认。
+
+[paths]
+videos = "~/montage/videos"
+indexes = "~/montage/indexes"
+cards = "~/montage/cards"
+cuts = "~/montage/cuts"
+
+# 待测：需要支持 Rockchip MPP 的 FFmpeg（如 ffmpeg-rockchip），`ffmpeg -hwaccels` 里要有 rkmpp，
+# `ffmpeg -encoders` 里要有 h264_rkmpp。码率控制参数按实际编码器的选项调整。
+[ffmpeg]
+decode = ["-hwaccel", "rkmpp"]
+encode = ["-c:v", "h264_rkmpp", "-rc_mode", "VBR", "-b:v", "12M"]
+
+# 待测：板子上的视觉模型服务。先用 llama-server（CPU，和开发机同一个模型）跑通；
+# 换成 RKLLM（NPU）时，服务多半不支持按 schema 约束输出，把 schema_mode 改成 "prompt"。
+[describer]
+kind = "openai"
+url = "http://127.0.0.1:8094"
+schema_mode = "server"
+timeout = 1800
+
+# 待测：图文向量模型。MediaPipe 在 aarch64 Linux 上跑同一个服务（service/search.py）；编码速度要实测。
+[embedder]
+kind = "http"
+url = "http://127.0.0.1:8766"
+
+[planner]
+kind = "claude-api"
+model = "claude-opus-5-5"
+
+# 曲库的 music-*.json 在开发机上算好，拷到 cuts 目录。
+[music]
+kind = "precomputed"

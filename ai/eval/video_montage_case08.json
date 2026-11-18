@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "about": "#350: test case case-08's instruction (video-edit-testset-v1), cut with eval.video_planner --about to its target seconds.",
+  "instructions": [
+    {
+      "id": "case-08",
+      "text": "剪成一条不剧透结局的电影预告片",
+      "seconds": 60,
+      "style": "预告片"
+    }
+  ]
+}

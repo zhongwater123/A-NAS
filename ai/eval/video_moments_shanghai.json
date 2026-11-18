@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "about": "#350: the Shanghai 24-hour vlog (06_shanghai_24h_vlog.webm) cut by 剪法20 outside the test set; no queries, so only the frames, embed, index, describe, measure and parts steps.",
+  "layouts": [
+    "2s1f"
+  ],
+  "videos": {
+    "01": {
+      "file": "06_shanghai_24h_vlog.webm",
+      "sha256": "0a61b5c925bcbb5e7c93731a200c28acf31d7f8932e1991f143f44cfed76c1b6",
+      "duration": 1177.677
+    }
+  },
+  "queries": []
+}

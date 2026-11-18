@@ -28,7 +28,12 @@ import http.client
 import io
 import json
 import os
+import secrets
 import socket
+import stat
+import sys
+import tempfile
+import time
 import urllib.parse
 
 from mcp.server import MCPServer
@@ -45,13 +50,13 @@ server = MCPServer("anas", instructions=(
 
 
 class UnixHTTP(http.client.HTTPConnection):
-    def __init__(self, path: str):
+    def __init__(self, path: str, seconds: float = 120):
         super().__init__("localhost")
-        self.path = path
+        self.path, self.seconds = path, seconds
 
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.settimeout(120)
+        self.sock.settimeout(self.seconds)
         self.sock.connect(self.path)
 
 
@@ -356,6 +361,357 @@ def look_at_photo(photo_id: str):
         TextContent(type="text", text=f"照片 {photo_id} 的画面如下；用 vision_analyze 看它。"),
         ImageContent(type="image", data=base64.b64encode(data).decode(), mime_type="image/jpeg"),
     ])
+
+
+# Photo-to-video (docs/specs/photo-to-video.md) with ai/montage's renderer, which run.sh
+# mounts at /spike-ai with SPIKE_PHOTOS; without it (the trial bundle) there is no such tool.
+sys.path.append("/spike-ai")
+try:
+    from montage import render as slideshow
+except ImportError:
+    slideshow = None
+VIDEOS = "/nas/助手/视频"
+SLIDESHOW_MAX = 60
+SECONDS_MIN, SECONDS_MAX = 1, 10
+
+
+def slideshow_photos(photo_ids: list[str]) -> None:
+    """Refuses the whole call when any ID is missing, out of reach or a video."""
+    problems: dict[str, list[str]] = {}
+    for photo_id in dict.fromkeys(photo_ids):
+        try:
+            asset = photos(f"/assets/{urllib.parse.quote(photo_id, safe='')}")
+        except PhotoError:
+            problems.setdefault("不存在或看不到", []).append(photo_id)
+            continue
+        if not asset.get("mediaType", "").startswith("image/"):
+            problems.setdefault("是视频，只能拼接照片", []).append(photo_id)
+    if problems:
+        raise PhotoError("；".join(f"{', '.join(ids)} {reason}" for reason, ids in problems.items()))
+
+
+if slideshow:
+    # Not read-only: it adds a file, though only a new one in the assistant's own folder.
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+                 structured_output=False, description=(
+        "把照片按给出的顺序拼成一段 1920×1080 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
+        f"photo_ids：照片的 id（search_photos 等的结果），1–{SLIDESHOW_MAX} 个，按出现顺序；"
+        f"seconds_per_photo：每张的秒数，{SECONDS_MIN}–{SECONDS_MAX}，可带小数，默认 3；总时长 = 张数 × seconds_per_photo，"
+        "要凑出指定总时长时据此选张数与每张秒数。crossfade：相邻两张淡入淡出，默认否，不改变总时长。"
+        "有视频、不存在或看不到的 id 时整次拒绝。成片只在助手目录里；成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
+    def make_slideshow(photo_ids: list[str], seconds_per_photo: float = 3, crossfade: bool = False):
+        if not 1 <= len(photo_ids) <= SLIDESHOW_MAX:
+            return failed(PhotoError(f"photo_ids 要有 1–{SLIDESHOW_MAX} 个，收到 {len(photo_ids)} 个"))
+        if isinstance(seconds_per_photo, bool) or not SECONDS_MIN <= seconds_per_photo <= SECONDS_MAX:
+            return failed(PhotoError(f"seconds_per_photo 要在 {SECONDS_MIN}–{SECONDS_MAX} 秒之间，收到 {seconds_per_photo}"))
+        try:
+            slideshow_photos(photo_ids)
+            with tempfile.TemporaryDirectory(prefix="slideshow-") as work:
+                images = []
+                for i, photo_id in enumerate(photo_ids):
+                    images.append(os.path.join(work, f"{i:03d}.jpg"))
+                    with open(images[-1], "wb") as file:
+                        file.write(photo_view(photo_id))
+                path = slideshow.render(images, seconds_per_photo, crossfade, VIDEOS)
+        except PhotoError as error:
+            return failed(error)
+        except slideshow.RenderError as error:
+            return CallToolResult(content=[TextContent(type="text", text=f"拼接失败：{error}")], is_error=True)
+        return result({"path": path, "seconds": len(photo_ids) * seconds_per_photo, "photos": len(photo_ids)})
+
+
+# Video moments (#322): videos_spike.py, the stand-in for the photo service's video
+# moments, holds the vectors and the videos; these tools only relay, and the model
+# gets text and numbers, never frames: a local vision model looks at them for it. Its socket is bound over an empty file like the
+# photo service's; while the file is still empty (no SPIKE_VIDEOS) there are no such tools.
+VIDEO_MOMENTS = "/run/anas-assistant-videos/videos.sock"
+
+
+def video_moments(path: str, body: dict) -> tuple[int, str, bytes, list]:
+    """Status, content type, body and what the vision model saw of each segment (X-Review)."""
+    # A cut takes a while: the frames are looked at, then FFmpeg decodes and encodes every second.
+    conn = UnixHTTP(VIDEO_MOMENTS, 900)
+    try:
+        conn.request("POST", path, json.dumps(body, ensure_ascii=False).encode(), {"Content-Type": "application/json"})
+        response = conn.getresponse()
+        review = response.getheader("X-Review")
+        return (response.status, response.getheader("Content-Type", ""), response.read(),
+                json.loads(base64.b64decode(review)) if review else [])
+    except OSError:
+        raise PhotoError("视频检索暂时连不上，请稍后再试") from None
+    finally:
+        conn.close()
+
+
+def video_failed(status: int, raw: bytes) -> CallToolResult:
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        body = {"error": f"视频检索返回 {status}"}
+    text = body.get("error", f"视频检索返回 {status}")
+    if body.get("problems"):
+        text += "：\n" + "\n".join(f"- {problem}" for problem in body["problems"])
+    return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)
+
+
+# An experiment (#326): the planner is shown each card's three key frames in place of the local
+# vision model's caption. Frames of the public test videos leave the machine for it; the
+# product sends text only (docs/specs/photo-to-video.md).
+CARD_PICTURES = os.environ.get("ANAS_SPIKE_CARD_PICTURES") == "1"
+SEEING = (
+    "每张卡片随附一张图：这张卡片首、中、尾三帧从左到右拼在一起，图前标着卡片 id；直接看图判断画面是什么。"
+    if CARD_PICTURES else
+    "caption 是本机视觉模型看这张卡片的代表帧写的一句话，比 tags 准，但也可能看错；")
+CHOOSING = "选卡片先看图里是不是要的画面；" if CARD_PICTURES else "选卡片先看 caption 是否就是要的画面；"
+# Another (#326): every probe recalls more cards, the local vision model judges each on its
+# key frames, and only those it passes come back, its best first.
+CARD_SCREEN = os.environ.get("ANAS_SPIKE_CARD_SCREEN") == "1"
+SCREENING = (
+    "检索先为每条探针按分数召回 20 张卡片，本机视觉模型逐张看三帧，判断画面里有没有这条探针并打 0–10 分，"
+    "只返回判为有的，按它的分数排在前面；each 是每条探针最多返回几张通过的，想剪长一些就调大。"
+    "卡片的 screen 按探针给出这个分数 score 和它看到的 seen；refused 是每条探针被判为没有的张数。"
+    if CARD_SCREEN else "")
+# The fourth version's ablation (#350). ANAS_SPIKE_RETRIEVED_ONLY=1: the catalog is as before,
+# but a plan may use only cards search_video_moments returned. ANAS_SPIKE_SPAN=probe or frame
+# as well: the plan gives no seconds, the video service grows each segment from the window
+# the card's probe matched (moments.Index.span). ANAS_SPIKE_LOCATE=probe or frame instead: no
+# retrieval needed, each segment grows from the window of its card its shows matches.
+LOCATE = os.environ.get("ANAS_SPIKE_LOCATE") or None
+# ANAS_SPIKE_FILL=1 as well: the plan says the cut's seconds, and the service sets each
+# segment's to add up to them, its ends from frames every half second (moments.Index.fill).
+FILL = LOCATE is not None and os.environ.get("ANAS_SPIKE_FILL") == "1"
+# ANAS_SPIKE_EDGES=1: before the frames are looked at, a cut near either end of a segment,
+# found at the source's frame rate, trims it (videos_spike.edges).
+EDGES = os.environ.get("ANAS_SPIKE_EDGES") == "1"
+# ANAS_SPIKE_FLOW=1 with LOCATE: the catalog lines leave out the seconds, which the planner no
+# longer sets, and the plan is asked to keep neighbouring segments in one scene or with one person.
+FLOW = LOCATE is not None and os.environ.get("ANAS_SPIKE_FLOW") == "1"
+CATALOG_LINE = ("每行是“卡片 id 光线 描述（亮点：…）毛病：…”，不列秒数：入点出点由程序定。卡片 id 是“视频-镜头序号-段”，"
+                "镜头序号相邻的多半是同一场戏；" if FLOW else
+                "每行是“卡片 id 起止秒数（所在镜头的起止）光线 描述（亮点：…）毛病：…”；")
+CATALOG_SPAN = ("毛病是量出来的（模糊、抖动、过暗、过曝），没有就不写。" if FLOW else
+                "镜头起止是剪这张卡片时不能越出的范围，毛病是量出来的（模糊、抖动、过暗、过曝），没有就不写。")
+STORY = ("每段一句内容、对应的卡片范围，例如侦探片预告写“1947 年洛杉矶街景开场（01-1 到 01-4）→ 警局里交代案子（01-8 到 01-30）"
+         "→ 开车出发 → 雨夜车里出现神秘女人 → …”；" if FLOW else
+         "每段一句内容、对应视频里的大致秒数，例如侦探片预告写“1947 年洛杉矶街景开场（0–30 秒）→ 警局里交代案子（30–200 秒）"
+         "→ 开车出发 → 雨夜车里出现神秘女人 → …”；")
+FLOWING = ("排段时注意前后衔接：相邻两段尽量是同一场景或同一个人物，同一场戏的几段放在一起；换场景时先放一段交代新地点的画面，"
+           "不要在不相干的场景、人物之间来回跳。" if FLOW else "")
+# ANAS_SPIKE_SCENES=1 with FLOW: each catalog line says its card's scene, the catalog names the
+# scenes, and a plan takes varied pictures from a scene.
+SCENES = FLOW and os.environ.get("ANAS_SPIKE_SCENES") == "1"
+SCENE_LINE = ("每行的“场景N”是这张卡片所在的场景，结果的 scenes 写每个场景是什么地方、有几张卡片：同一场景是同一个地方，"
+              "片头片尾的字幕、标志和演职员表也各自成一个场景；" if SCENES else "")
+SCENE_RULES = ("同一场景可以用多段，但画面要有变化；"
+               "字幕、标志和演职员表的场景不用，除非成员要。" if SCENES else "")
+# ANAS_SPIKE_LENGTHS=1 with FILL: each catalog line says the most seconds its card can run, and
+# a plan's cards must be able to run moments.MARGIN times the cut's seconds.
+LENGTHS = FILL and os.environ.get("ANAS_SPIKE_LENGTHS") == "1"
+LENGTH_LINE = "“可剪 X 秒”是这张卡片一段最多能剪多长；" if LENGTHS else ""
+LENGTH_RULE = ("选卡片时把各卡的“可剪”秒数加起来（超过这段 pace 上限的按上限算），至少要到 seconds 的 1.1 倍，"
+               "程序才有余量定每段的长短，不够会被退回；可剪秒数比这段 pace 的下限还短的卡片，换一个慢一点的 pace 或换卡片。"
+               if LENGTHS else "")
+# What the tools say that no longer holds once the program sets the seconds (FILL), no search is
+# needed (LOCATE) or no frames are looked at (NO_LOOK), left out in those modes (#350).
+CATALOG_STEPS = ("读完先在回复里写一条故事线：按指令要的效果，把成片要有的段落按播放顺序列出来，"
+                 if LOCATE else "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，")
+SEARCH_STEP = ("" if LOCATE else "然后按故事线写 search_video_moments 的检索词，每段要的画面各写一条，段落之间的过渡画面也算；"
+               "库里没有的不要硬找。")
+SKIPPING = ("skipped：考虑过但没用的卡片，想说明的列几张 {card, why}，why 一句话，不超过 80 个字；不列就给空列表。" if LOCATE else
+            "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用；直接从目录取卡片时只列考虑过但没用的卡片，"
+            "card 写具体的卡片 id，不写通配或整条视频"
+            "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。")
+LENGTH_SAYS = ("不为凑时长放进不切题的片段，开场和铺垫镜头也要切题；" if FILL else
+               "成片多长由故事线和切题的素材决定，素材少就短，不为凑时长放进不切题的片段，"
+               "开场和铺垫镜头也要切题；成员明确说了时长时才按成员说的剪；")
+# ANAS_SPIKE_NO_LOOK=1: the cut is made without the vision model looking at its frames first.
+NO_LOOK = os.environ.get("ANAS_SPIKE_NO_LOOK") == "1"
+SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
+RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or (SPAN is not None and not LOCATE)
+# The cards search_video_moments returned this session, each with the probe it scored best on.
+RETRIEVED: dict[str, dict] = {}
+FROM_CATALOG = ("剪辑计划只能用 search_video_moments 返回过的卡片：目录只用来了解库里有什么、写故事线和检索词，"
+                "目录里看中的卡片要先检索到才能用。" if RETRIEVED_ONLY else
+                "剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。")
+SEGMENT = (
+    "每段是 {card, shows, pace, reason}，不写 start、end：card 是目录里的卡片 id；入点出点由程序定：从这张卡片里最符合 shows 的 2 秒开始，"
+    "在这张卡片和画面相同的相邻部分里扩展，不越出镜头，不和别的段重叠。pace 是这段的节奏，定这段大约多长："
+    "慢 4–6 秒（交代地点、铺垫情绪、悬念收尾），中 3–4.5 秒（交代人物和情节），快 1.5–2.5 秒（冲突、打斗、追逐，可以几段连着快切）；"
+    "程序按各段的 pace 分配长短，再一起缩放到 seconds。段数和节奏由你定：过渡场景 1–2 段就够，不必每个场景都用满；"
+    "按你定的节奏凑不到 seconds 时会退回，说明差多少。"
+    if FILL else
+    "每段是 {card, shows, reason}，不写 start、end：card 是 list_video_contents 或 search_video_moments 里的卡片 id，"
+    "入点出点由程序定，从这张卡片里最符合 shows 的 2 秒往两边扩展，"
+    + ("后面的秒数与 shows 的分数相差不到 0.02 才扩展" if LOCATE == "probe" else "后面的画面与那 2 秒相似才扩展") +
+    "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
+    if LOCATE else
+    "每段是 {card, shows, reason}，不写 start、end：card 是 search_video_moments 返回过的卡片 id，"
+    "入点出点由程序定，从这张卡片最符合找到它的那条检索词的 2 秒往两边扩展，"
+    + ("后面的秒数与检索词的分数相差不到 0.02 才扩展" if SPAN == "probe" else "后面的画面与那 2 秒相似才扩展") +
+    "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
+    if SPAN else
+    "每段是 {card, start, end, shows, reason}：card 是 "
+    + ("search_video_moments 返回过的" if RETRIEVED_ONLY else "list_video_contents 或 search_video_moments 里的") +
+    "卡片 id，start、end 是秒数，必须落在这张卡片的 shot 范围内，每段 1.5–6 秒，不能含纯黑或纯色画面，各段不能用同一段画面；")
+SHOWS = (
+    "shows 用一句短描述写这段要呈现的画面，例如“雨夜车里后视镜中的女人”“铁塔下的人群”，不超过 40 个字："
+    "程序按它在卡片里定位入点出点，出片前也按它核对；写画面里看得见的东西，不写画面看不出的条件（地点名、年代、情绪）。"
+    if LOCATE else
+    "shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
+    "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
+    "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。")
+TELLING = ("向成员介绍片段时只说你在图里和出片前核对看到的内容。" if CARD_PICTURES else
+           "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。")
+
+# How each kind of cut is told (montage/styles.py); the video tools come only with /spike-ai.
+try:
+    from montage.styles import STYLES
+except ImportError:
+    STYLES = {}
+
+if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mode):
+    @server.tool(annotations=READ_ONLY, structured_output=False, description=(
+        "列出测试视频库里有什么，剪辑前先调用一次。按视频列出每张镜头卡片，按时间先后，" + CATALOG_LINE +
+        "描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错；" + CATALOG_SPAN + SCENE_LINE + LENGTH_LINE +
+        CATALOG_STEPS + STORY +
+        "只放能讲进这条故事线的内容，和它搭不上的不用放。" + SEARCH_STEP + FROM_CATALOG +
+        "videos：只列这些视频，可省略。"
+        "style：成片的体裁，" + "、".join(STYLES) + "之一；成员说了体裁就照说的传，没说就按指令判断，判断不出就不传。"
+        "结果的 style_rules 是这个体裁的剪法（结构、怎么收尾、节奏），写故事线和排段时照着做，并在 make_montage 里传同一个 style。"))
+    def list_video_contents(videos: list[str] | None = None, style: str | None = None):
+        if style is not None and style not in STYLES:
+            return CallToolResult(content=[TextContent(type="text", text=f"style 要是{'、'.join(STYLES)}之一，或不传")],
+                                  is_error=True)
+        try:
+            status, _kind, raw, _review = video_moments("/catalog", ({"videos": videos} if videos else {})
+                                                        | ({"times": False} if FLOW else {})
+                                                        | ({"scenes": True} if SCENES else {})
+                                                        | ({"lengths": True} if LENGTHS else {}))
+        except PhotoError as error:
+            return failed(error)
+        if status != 200:
+            return video_failed(status, raw)
+        return result(json.loads(raw) | ({"style": style, "style_rules": STYLES[style]} if style else {}))
+
+    @server.tool(annotations=READ_ONLY, structured_output=False, description=(
+        "按画面内容在测试视频里找片段，返回镜头卡片。先用 list_video_contents 看过库里有什么再检索。"
+        "probes：1–8 条要找的画面，按你写的故事线每段要的画面各写一条，每条一个主题、一句短描述，例如“城堡和老城的石头街道”写“城堡”“老城的石头街道”两条；"
+        "同一主题的近义说法找回的多是同一批卡片，不必多写。"
+        "条件不要和主题写进同一条检索词：向量检索会只匹配其中一半，“夜晚的城市”会找回白天的城市。条件按下面分层，先筛再排："
+        "lights：只要这些光线的卡片（晴天、阴天、逆光、黄昏、夜晚、室内），例如“夜晚的城市”写 probes [\"城市\"]、lights [\"夜晚\"]；"
+        "words：只要描述或亮点里含其中一个词的卡片，用目录里描述实际用的词，例如“下雨的街道”写 probes [\"街道\"]、words [\"雨\"]；"
+        "目录描述里写到的东西（如“雨”“办公室”“照片”）用 words 找比检索词准；筛完没有卡片，就是库里没有这样的画面，不要换说法硬找；"
+        "videos：只在这些视频里找，指令说的是某一条视频（如“这部侦探片”）时，按目录确定是哪条再限定。"
+        "each：每条探针各取它分数最高的几张卡片，彼此 group 不同，默认 5，条数乘 each 不超过 40；"
+        "这样一个主题的卡片不会被另一个主题的高分挤掉。结果里的 each 按探针列出各自取到的卡片 id，最相关的在前。" + SCREENING +
+        "每张卡片是一个镜头里画面大致不变的一段，最长 20 秒：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
+        "剪的时候不能越出；" + SEEING +
+        "score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
+        "只说明大致内容；group 相同的卡片画面相似，别重复用同一画面。分数低于 threshold 时与“库里没有”分不开。"
+        "light 是光线，highlight 是画面里最吸引人的一样东西，也是本机视觉模型看出来的；"
+        "motion 是量出来的镜头运动（固定、向前走、向后退、向左转、向右转、抬头、低头）；"
+        "flaws 是量出来的画面毛病（模糊、抖动、过暗、过曝），空表示没有。" +
+        CHOOSING + "同样切题时优先 flaws 为空的，但夜景、黑色电影这类本来就暗的画面，过暗和随之而来的抖动多半是有意的，看描述是不是要的画面再定，"
+        "不选 highlight 是垃圾桶、遮挡物这类不好看的东西的，再看分数。"
+        "when：lights 和 words 都表达不了、画面本身能看出的条件，每条是 {is, not}，只留更像 is 的画面，"
+        "例如 {\"is\": \"人很多\", \"not\": \"空无一人\"}；比 lights、words 粗，能用它们时不用 when。" +
+        TELLING))
+    def search_video_moments(probes: list[str], each: int = 5, videos: list[str] | None = None,
+                             lights: list[str] | None = None, words: list[str] | None = None,
+                             when: list[dict] | None = None):
+        body = {"probes": probes, "each": each} | ({"videos": videos} if videos else {}) | (
+            {"lights": lights} if lights else {}) | ({"words": words} if words else {}) | (
+            {"when": when} if when else {}) | ({"pictures": True} if CARD_PICTURES else {}) | (
+            {"screen": True} if CARD_SCREEN else {})
+        try:
+            status, _kind, raw, _review = video_moments("/search", body)
+        except PhotoError as error:
+            return failed(error)
+        if status != 200:
+            return video_failed(status, raw)
+        found = json.loads(raw)
+        for card in found["cards"]:
+            for probe, best in card.get("probes", {}).items():
+                if card["id"] in found.get("each", {}).get(probe, [card["id"]]) and best["score"] > RETRIEVED.get(
+                        card["id"], {}).get("score", -2):
+                    RETRIEVED[card["id"]] = {"probe": probe, "score": best["score"]}
+        if not CARD_PICTURES:
+            return result(found)
+        pictures = [(card["id"], card.pop("picture")) for card in found["cards"]]
+        content = [TextContent(type="text", text=json.dumps(found, ensure_ascii=False))]
+        for card_id, picture in pictures:
+            content += [TextContent(type="text", text=f"卡片 {card_id}："),
+                        ImageContent(type="image", data=picture, mime_type="image/jpeg")]
+        return CallToolResult(content=content)
+
+    # Not read-only: it adds a file, though only a new one in the assistant's own folder.
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+                 structured_output=False, description=(
+        "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的 MP4，每段带原片同一区间的原声（不加配乐和字幕），存进助手目录的“视频”文件夹，返回文件路径与时长。"
+        "segments：按播放顺序排列，" + SEGMENT
+        + ("" if FILL else "成片总长不设上限。") + SHOWS + "reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
+        + SKIPPING +
+        "按故事线排段：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不必每个检索主题都用上，和故事线搭不上的整个不用；"
+        + FLOWING + SCENE_RULES + LENGTH_RULE +
+        "同一场景相邻的几张卡片可以连着用，只有 group 相同才算重复画面。" + LENGTH_SAYS + ("" if NO_LOOK else
+        "出片前本机视觉模型每 0.5 秒看一帧，核对是否呈现 shows：没有连续 1.5 秒符合的段整次退回，说明画面实际是什么，"
+        "请换一张卡片或删掉这段；其余各段收窄到符合的那一截再剪，结果的 trimmed 列出收窄了哪些段。"
+        "被退回或收窄的段，看到的画面若符合指令的另一部分（例如找城堡时退回的一段其实是老街），"
+        "可以把它的 shows 改成那一部分、换到合适的位置再用，不必扔掉。") +
+        "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
+        "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"
+        "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"
+        + ("seconds：成员说的成片时长（秒），程序按它分配各段长短；成员没说时长就按故事线估一个。" if FILL else "")))
+    def make_montage(segments: list[dict], skipped: list[dict], style: str | None = None,
+                     seconds: float | None = None):
+        if RETRIEVED_ONLY:
+            unseen = [f"第 {n} 段的 {s.get('card')} 不是 search_video_moments 返回过的卡片，先检索到它再用"
+                      for n, s in enumerate(segments, 1) if not isinstance(s, dict) or s.get("card") not in RETRIEVED]
+            if unseen:
+                return CallToolResult(content=[TextContent(type="text", text="剪辑计划不合规则：\n" + "\n".join(
+                    f"- {problem}" for problem in unseen))], is_error=True)
+        body = {"segments": segments, "skipped": skipped}
+        if SPAN:
+            body = {"segments": [{k: v for k, v in s.items() if k not in ("start", "end")}
+                                 | {"probe": s.get("shows", "") if LOCATE else RETRIEVED[s["card"]]["probe"]}
+                                 for s in segments],
+                    "skipped": skipped, "span": SPAN}
+            if FILL and seconds:
+                body |= {"seconds": seconds, "style": style} | ({"margin": True} if LENGTHS else {})
+        if EDGES:
+            body["edges"] = True
+        if NO_LOOK:
+            body["look"] = False
+        if SCENES:
+            body["scenes"] = True
+        try:
+            status, kind, raw, review = video_moments("/montage", body)
+        except PhotoError as error:
+            return failed(error)
+        if status != 200 or kind != "video/mp4":
+            return video_failed(status, raw)
+        os.makedirs(VIDEOS, exist_ok=True)
+        name = time.strftime("montage-%Y%m%d-%H%M%S-") + secrets.token_hex(3) + ".mp4"
+        path = os.path.join(VIDEOS, name)
+        # O_EXCL: a new file only, never one the member already has.
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "wb") as file:
+            file.write(raw)
+        # The plan, reasons included, beside the cut: what the model chose and why, what it
+        # left out and why, and the seconds cut after the frames were looked at.
+        if SPAN:  # planned with the seconds the service set
+            segments = [s | {"start": r["planned"][0], "end": r["planned"][1]}
+                        for s, r in zip(body["segments"], review, strict=True)]
+        cut = [segment | {"start": r["start"], "end": r["end"]} for segment, r in zip(segments, review, strict=True)]
+        cut = cut or segments
+        with os.fdopen(os.open(path[:-4] + ".json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "w") as file:
+            json.dump({"style": style, "planned": segments, "segments": cut, "review": review, "skipped": skipped}, file,
+                      ensure_ascii=False, indent=2)
+        trimmed = [{"segment": n, "planned": [s["start"], s["end"]], "cut": [c["start"], c["end"]], "seen": r["seen"]}
+                   for n, (s, c, r) in enumerate(zip(segments, cut, review, strict=True), 1)
+                   if (s["start"], s["end"]) != (c["start"], c["end"])]
+        seconds = round(sum(segment["end"] - segment["start"] for segment in cut), 2)
+        return result({"path": path, "seconds": seconds, "segments": len(cut), "trimmed": trimmed,
+                       "seen": [r["seen"] for r in review]})
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

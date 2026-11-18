@@ -1,0 +1,5 @@
+# 第八版网页服务（python3 -m montage_v8 serve）的依赖，开发机和板子相同。
+# 装在独立的虚拟环境里，例如 python3 -m venv --system-site-packages ~/.venvs/montage-v8
+starlette==0.46.2
+uvicorn==0.34.3
+httpx==0.28.1

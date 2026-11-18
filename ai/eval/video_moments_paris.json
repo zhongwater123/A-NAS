@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "about": "A night walk through Paris for the montage experiments of #326, kept apart from the pilot set and Edinburgh: no queries, so it only takes the frames, embed, index, describe and measure steps, and only the layout the pilot recommends.",
+  "layouts": ["2s1f"],
+  "videos": {
+    "08": {
+      "file": "08_paris_city_of_lights.webm",
+      "sha256": "6b105bdece8ef36b78f3001427d2ea0aa1c5e58cba8c22f8706affa360ab6be6",
+      "duration": 1099.661
+    }
+  },
+  "queries": []
+}
