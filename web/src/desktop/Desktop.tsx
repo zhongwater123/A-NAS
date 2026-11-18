@@ -145,21 +145,31 @@ export function Desktop({
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
-  const openSettings = (section?: SettingsSection) => {
-    if (section) setSettingsSection(section);
-    open("settings");
-  };
+  const openSettings = useCallback(
+    (section?: SettingsSection) => {
+      if (section) setSettingsSection(section);
+      open("settings");
+    },
+    [open],
+  );
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => {
     transferStore.attach(session.user.id);
   }, [session.user.id]);
-  const [assistantReady, setAssistantReady] = useState(false);
-  useEffect(() => {
+  // VNAS opens when this device runs one for this account; without the administrator's key
+  // nobody has one, and the desktop says so (ADR 0024).
+  const [assistant, setAssistant] = useState({ ready: false, needsKey: false });
+  const readAssistant = useCallback(() => {
     void assistantStatus()
-      .then((status) => setAssistantReady(status.available))
-      .catch(() => setAssistantReady(false));
-  }, [session.user.id]);
+      .then((status) =>
+        setAssistant({ ready: status.available, needsKey: !status.available && status.reason === "no_key" }),
+      )
+      .catch(() => setAssistant({ ready: false, needsKey: false }));
+  }, []);
+  useEffect(() => readAssistant(), [session.user.id, readAssistant]);
+  const assistantReady = assistant.ready;
+  const assistantNeedsKey = assistant.needsKey;
   // Only the switch reaches the windows' context, not every minute's read.
   const webSearchEnabled = useWebSearch()?.enabled ?? false;
   // 照片打分 is read when the account signs in and when the page comes back
@@ -199,6 +209,8 @@ export function Desktop({
       session,
       isAdmin,
       assistantReady,
+      assistantNeedsKey,
+      openSettings,
       webSearchEnabled,
       scoring,
       open,
@@ -207,11 +219,30 @@ export function Desktop({
       changeUser,
       logout: onLogout,
     }),
-    [session, isAdmin, assistantReady, webSearchEnabled, scoring, open, intents, intentHandled, changeUser, onLogout],
+    [
+      session,
+      isAdmin,
+      assistantReady,
+      assistantNeedsKey,
+      openSettings,
+      webSearchEnabled,
+      scoring,
+      open,
+      intents,
+      intentHandled,
+      changeUser,
+      onLogout,
+    ],
   );
   const settingsState = useMemo<SettingsState>(
-    () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),
-    [host, settingsSection, storagePlan],
+    () => ({
+      host,
+      section: settingsSection,
+      setSection: setSettingsSection,
+      storagePlan,
+      assistantKeyChanged: readAssistant,
+    }),
+    [host, settingsSection, storagePlan, readAssistant],
   );
   const shortcuts = useAppShortcuts();
   const launcherApps = [

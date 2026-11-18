@@ -77,6 +77,9 @@ export interface WindowContext {
   isAdmin: boolean;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
+  // Without the administrator's DeepSeek key nobody has VNAS; its icon says so.
+  assistantNeedsKey: boolean;
+  openSettings: (section: SettingsSection) => void;
   // Web search shows only while an administrator leaves it on (ADR 0030).
   webSearchEnabled: boolean;
   // 照片打分 shows only where its module is installed, to its administrators
@@ -98,6 +101,8 @@ export interface SettingsState {
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   storagePlan: StoragePlanFlow;
+  // assistantKeyChanged reads again whether this account has VNAS.
+  assistantKeyChanged: () => void;
 }
 export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
 
@@ -113,6 +118,7 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
       storagePlan={state.storagePlan}
       onUserChange={changeUser}
       onLogout={logout}
+      onAssistantKeyChange={state.assistantKeyChanged}
     />
   );
 }
@@ -137,6 +143,8 @@ interface AppDefinition {
     adminOnly?: boolean;
     // An app that is not ready shows a disabled icon marked 规划中.
     ready?: (context: WindowContext) => boolean;
+    // An app that exists but cannot open now says why under its icon.
+    unavailable?: (context: WindowContext) => string | undefined;
     // An app an administrator turned off has no icon at all.
     visible?: (context: WindowContext) => boolean;
   };
@@ -326,7 +334,9 @@ const definitions = {
     launcher: {
       id: "ai",
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
-      ready: ({ assistantReady }) => assistantReady,
+      ready: ({ assistantReady, assistantNeedsKey }) => assistantReady || assistantNeedsKey,
+      unavailable: ({ assistantNeedsKey, isAdmin }) =>
+        assistantNeedsKey ? (isAdmin ? "未填写密钥" : "需管理员设置") : undefined,
     },
     render: ({ session, open, intents, intentHandled }) => (
       <AssistantPanel
@@ -353,6 +363,21 @@ export function desktopApps(context: WindowContext, isOpen: (id: WindowID) => bo
       return [];
     if (launcher.ready && !launcher.ready(context))
       return [{ id: launcher.id, label: title, ariaLabel: `${title}，规划中`, tone, icon: <Icon />, disabled: true }];
+    const note = launcher.unavailable?.(context);
+    if (note)
+      // An administrator goes to where it is set; a member cannot do anything about it.
+      return [
+        {
+          id: launcher.id,
+          label: title,
+          ariaLabel: `${title}，${note}`,
+          tone,
+          icon: <Icon />,
+          unavailable: true,
+          note,
+          onClick: context.isAdmin ? () => context.openSettings("assistant") : undefined,
+        },
+      ];
     return [
       {
         id: launcher.id,
