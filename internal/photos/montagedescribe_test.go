@@ -108,13 +108,20 @@ type describeFixture struct {
 	grant    photos.Grant
 }
 
-// newDescribeFixture grants and analyses a 70-second video of Alice's, its
-// windows done, and stands in for the cards and quality the compute step
-// makes: card 0 and 2 pass the quality check, card 1 is blurred.
+// newDescribeFixture grants and analyses a 70-second video of Alice's
+// through the whole chain, windows, cards, quality and, with a text reader,
+// descriptions; then it sets the cards a test describes: card 0 and 2 pass
+// the quality check, card 1 is blurred.
 func newDescribeFixture(t *testing.T) describeFixture {
+	t.Helper()
+	return newDescribeFixtureWith(t, "reader-1")
+}
+
+func newDescribeFixtureWith(t *testing.T, reader string) describeFixture {
 	t.Helper()
 	ctx := context.Background()
 	f := describeFixture{montageFixture: newMontageFixture(t), embedder: newDescribingEmbedder()}
+	f.embedder.model = reader
 	private, _ := libraries(t, f.service, namedAlice)
 	f.video = importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
 	grant, err := f.service.RegisterGrant(ctx, granting(namedAlice), "project:1", []string{f.video.ID})
@@ -130,32 +137,35 @@ func newDescribeFixture(t *testing.T) describeFixture {
 	if count, _ := f.windows(t, f.object); count != 35 {
 		t.Fatalf("windows = %d", count)
 	}
+	// The compute Worker's two cards, both good, are described once their
+	// quality is measured, or wait for a reader.
+	if want := map[bool]int{true: 2, false: 0}[reader != ""]; len(f.descriptions(t)) != want || f.embedder.calls() != want {
+		t.Fatalf("after the chain: %d descriptions, %d calls, want %d", len(f.descriptions(t)), f.embedder.calls(), want)
+	}
 	f.cards(t, []standInCard{
-		{start: 0, end: 20000, keyframes: []int{1000, 8000, 15000}, reasons: "[]"},
-		{start: 20000, end: 40000, keyframes: []int{21000, 30000, 39000}, reasons: `["模糊"]`},
-		{start: 40000, end: 70000, keyframes: []int{41000, 50000, 60000, 69990}, reasons: "[]"},
+		{start: 0, end: 20000, keyframes: []float64{1, 8, 15}, reasons: "[]"},
+		{start: 20000, end: 40000, keyframes: []float64{21, 30, 39}, reasons: `["模糊"]`},
+		{start: 40000, end: 70000, keyframes: []float64{41, 50, 60, 69.99}, reasons: "[]"},
 	})
 	return f
 }
 
 type standInCard struct {
 	start, end int
-	keyframes  []int
+	keyframes  []float64
 	reasons    string
 }
 
-// cards stands in for montage-cards/v1 and montage-quality/v1 (#556): their
-// rows, and the describe job their last step queues.
+// cards replaces the cards and quality the compute Worker made with these,
+// key frames in seconds as it stores them, and queues their descriptions as
+// the quality step's end does.
 func (f describeFixture) cards(t *testing.T, cards []standInCard) {
 	t.Helper()
 	db := catalog(t, f.root)
-	for _, statement := range []string{
-		`CREATE TABLE IF NOT EXISTS video_cards (object_id TEXT NOT NULL, card INTEGER NOT NULL, start_ms INTEGER NOT NULL,
-			end_ms INTEGER NOT NULL, keyframes TEXT NOT NULL, identity TEXT NOT NULL, PRIMARY KEY (object_id, card))`,
-		`CREATE TABLE IF NOT EXISTS video_card_quality (object_id TEXT NOT NULL, card INTEGER NOT NULL, result TEXT NOT NULL,
-			identity TEXT NOT NULL, PRIMARY KEY (object_id, card))`,
-		`DELETE FROM video_cards`, `DELETE FROM video_card_quality`,
-	} {
+	f.embedder.dmu.Lock()
+	f.embedder.layouts, f.embedder.frames = nil, nil
+	f.embedder.dmu.Unlock()
+	for _, statement := range []string{`DELETE FROM video_cards`, `DELETE FROM video_card_quality`} {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
@@ -283,7 +293,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	f.embedder.model = "reader-2"
 	f.embedder.mu.Unlock()
 	_ = f.service.Close()
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, DisableCapacityReserve: true})
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, Compute: f.compute, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,9 +310,9 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 func TestACardThatCannotBeDescribedLeavesTheOthers(t *testing.T) {
 	f := newDescribeFixture(t)
 	f.cards(t, []standInCard{
-		{start: 0, end: 10000, keyframes: []int{1000, 5000, 9000}, reasons: "[]"},
-		{start: 10000, end: 20000, keyframes: []int{11000, 15000, 19000}, reasons: "[]"},
-		{start: 20000, end: 30000, keyframes: []int{21000, 25000, 29000}, reasons: "[]"},
+		{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
+		{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
+		{start: 20000, end: 30000, keyframes: []float64{21, 25, 29}, reasons: "[]"},
 	})
 	f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
 		switch call {
@@ -330,21 +340,39 @@ func TestACardThatCannotBeDescribedLeavesTheOthers(t *testing.T) {
 }
 
 func TestDescriptionsWaitForATextReader(t *testing.T) {
-	f := newDescribeFixture(t)
-	f.embedder.mu.Lock()
-	f.embedder.model = ""
-	f.embedder.mu.Unlock()
-	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 0 {
-		t.Fatalf("without a reader: %d rounds, %d descriptions", rounds, f.embedder.calls())
+	// The Worker has no text reader: the quality step ends without queueing
+	// the descriptions, and lookup says the local model is unavailable.
+	f := newDescribeFixtureWith(t, "")
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 0 || f.montageJobs(t) != 0 {
+		t.Fatalf("without a reader: %d rounds, %d descriptions, %d montage jobs", rounds, f.embedder.calls(), f.montageJobs(t))
 	}
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisUnavailable {
 		t.Fatalf("descriptions without a reader = %q, want the local model unavailable", state)
 	}
-	// Nothing is due without the reader: the Worker is not asked again.
+	// Nothing is due: the Worker is not asked again.
 	infos := f.embedder.infoCount()
 	processAI(t, f.service, f.embedder, f.gate)
 	if f.embedder.infoCount() != infos {
 		t.Fatalf("a round asked the Worker %d times with nothing it can do", f.embedder.infoCount()-infos)
+	}
+
+	// A reader comes with a release, and so a restart: the descriptions are
+	// queued and written.
+	f.embedder.mu.Lock()
+	f.embedder.model = "reader-1"
+	f.embedder.mu.Unlock()
+	_ = f.service.Close()
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, Compute: f.compute, DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	f.service = service
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || len(f.descriptions(t)) != 2 {
+		t.Fatalf("with a reader: %d rounds, %d descriptions", rounds, len(f.descriptions(t)))
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
+		t.Fatalf("descriptions with a reader = %q", state)
 	}
 }
 

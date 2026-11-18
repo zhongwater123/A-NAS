@@ -133,6 +133,10 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_quality WHERE object_id = ?", job.objectID); err != nil {
 			return err
 		}
+		// New cards are described anew.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id = ?", job.objectID); err != nil {
+			return err
+		}
 		for n, card := range cards {
 			times, _ := json.Marshal(card.Times)
 			if _, err := tx.ExecContext(ctx, "INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, identity) VALUES(?, ?, ?, ?, ?, ?)",
@@ -209,9 +213,12 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 		return false, errors.Join(err, s.returnJob(context.WithoutCancel(ctx), job))
 	}
 	if !found {
+		// Every card has its quality: the descriptions come next.
 		return true, s.withTx(ctx, func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-			return err
+			if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
+				return err
+			}
+			return s.queueDescribe(ctx, tx, job.objectID)
 		})
 	}
 	stopLease := s.keepLease(ctx, job)

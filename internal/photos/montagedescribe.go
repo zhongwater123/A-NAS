@@ -34,8 +34,6 @@ const (
 	// FFmpeg quality 3, the prototype's stills) and the version of the
 	// number filter, which textread does not version itself.
 	describeIdentitySuffix = "|tpl=" + describeTemplate + ",genre=TRAVEL,frame=w512q3,mask=1"
-	keyframeWidth          = 512
-	keyframeQuality        = 3
 )
 
 // AnalysisUnavailable says the analysis waits for a local model the AI
@@ -57,25 +55,42 @@ type CardDescription struct {
 	Error       string          `json:"error,omitempty"`
 }
 
-// queueDescribe queues the descriptions of object, in the transaction that
-// stored its last quality result, unless they are made already.
+// queueDescribe queues the descriptions of object in the transaction that
+// finishes its quality step, when the Worker has a text reader; without
+// one they are not queued, and a reader that comes later queues them
+// (requeueStaleDescriptions). A job whose cards are all described ends in
+// its first round.
 func (s *Service) queueDescribe(ctx context.Context, tx *sql.Tx, object string) error {
+	if !s.ai.hasReader() {
+		return nil
+	}
 	now := formatTime(s.now())
 	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-		SELECT ?, ?, 'pending', ?, ? WHERE NOT EXISTS (SELECT 1 FROM video_card_descriptions WHERE object_id = ?)
-		ON CONFLICT DO NOTHING`, object, describeDerivation, now, now, object)
+		VALUES(?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`, object, describeDerivation, now, now)
 	return err
 }
 
-// describeState says where the descriptions of object stand. A queued one
-// whose Worker has no text reader is AnalysisUnavailable.
+// describeState says where the descriptions of object stand: unavailable
+// while the Worker has no text reader, and done once every card that passed
+// the quality check has its description, or there is none.
 func (s *Service) describeState(ctx context.Context, q queryer, object string) (AnalysisState, error) {
 	var state sql.NullString
 	err := q.QueryRowContext(ctx, "SELECT state FROM jobs WHERE object_id = ? AND derivation = ?", object, describeDerivation).Scan(&state)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		var done bool
-		if err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM video_card_descriptions WHERE object_id = ?)", object).Scan(&done); err != nil || !done {
+		var described bool
+		if err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM video_card_descriptions WHERE object_id = ?)", object).Scan(&described); err != nil || described {
+			return AnalysisDone, err
+		}
+		if quality, err := s.qualityState(ctx, object); err != nil || quality != AnalysisDone {
+			return AnalysisNone, err
+		}
+		if s.ai.withoutReader() {
+			return AnalysisUnavailable, nil
+		}
+		// The quality step is done: only a video without a card that
+		// passed has no description.
+		if cards, _, err := s.cardsToDescribe(ctx, object, ""); err != nil || len(cards) > 0 {
 			return AnalysisNone, err
 		}
 		return AnalysisDone, nil
@@ -114,7 +129,8 @@ func (s *Service) cardDescriptions(ctx context.Context, object string) ([]CardDe
 }
 
 // describeCard is a card to describe: its span and key frames, in
-// milliseconds from the video's start.
+// milliseconds from the video's start (the cards store the key frames in
+// seconds).
 type describeCard struct {
 	card           int
 	startMs, endMs int
@@ -138,14 +154,18 @@ func (s *Service) cardsToDescribe(ctx context.Context, object, reader string) (c
 	for rows.Next() {
 		var card describeCard
 		var keyframes, quality, described string
+		var seconds []float64
 		if err := rows.Scan(&card.card, &card.startMs, &card.endMs, &keyframes, &card.identity, &quality, &described); err != nil {
 			return nil, nil, err
 		}
 		if !passedQuality(quality) {
 			continue
 		}
-		if err := json.Unmarshal([]byte(keyframes), &card.keyframes); err != nil {
+		if err := json.Unmarshal([]byte(keyframes), &seconds); err != nil {
 			return nil, nil, fmt.Errorf("card %d of %s: key frames: %w", card.card, object, err)
+		}
+		for _, at := range seconds {
+			card.keyframes = append(card.keyframes, int(math.Round(at*1000)))
 		}
 		cards = append(cards, card)
 		if described == describeIdentity(reader, card.identity) {
@@ -216,6 +236,13 @@ func (r *aiRunner) withoutReader() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.model != "" && r.reader == ""
+}
+
+// hasReader reports whether the Worker last answered with a text reader.
+func (r *aiRunner) hasReader() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reader != ""
 }
 
 // montageDescribe describes one card of a due description job. It reports
@@ -426,13 +453,19 @@ func (s *Service) completeDescriptions(ctx context.Context, job claimedJob, card
 	})
 }
 
-// requeueStaleDescriptions queues again the descriptions of the objects a
-// grant still refers to that another reader wrote.
+// requeueStaleDescriptions queues the descriptions a text reader that is
+// new to the runner has to write: those of the objects a grant still refers
+// to whose quality step is done, and which have no description, or one
+// another reader wrote. A video without a card that passed is asked again
+// too, and ends in one round.
 func (s *Service) requeueStaleDescriptions(ctx context.Context, reader string) error {
 	now := formatTime(s.now())
 	_, err := s.db.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-		SELECT DISTINCT d.object_id, ?, 'pending', ?, ? FROM video_card_descriptions d
-		WHERE instr(d.identity, ?) <> 1 AND d.object_id IN (`+referencedObjects+`)
-		ON CONFLICT DO NOTHING`, describeDerivation, now, now, reader+describeIdentitySuffix+"|")
+		SELECT DISTINCT q.object_id, ?, 'pending', ?, ? FROM video_card_quality q
+		WHERE q.object_id IN (`+referencedObjects+`)
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = q.object_id AND j.derivation IN (?, ?))
+		  AND (NOT EXISTS (SELECT 1 FROM video_card_descriptions d WHERE d.object_id = q.object_id)
+		    OR EXISTS (SELECT 1 FROM video_card_descriptions d WHERE d.object_id = q.object_id AND instr(d.identity, ?) <> 1))
+		ON CONFLICT DO NOTHING`, describeDerivation, now, now, cardsDerivation, qualityDerivation, reader+describeIdentitySuffix+"|")
 	return err
 }
