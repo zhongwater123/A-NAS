@@ -35,7 +35,8 @@ type video struct {
 
 type grant struct {
 	photos.Grant
-	assets map[string]bool
+	assets  map[string]bool
+	revoked bool
 }
 
 func newLibrary() *library {
@@ -80,7 +81,7 @@ func (l *library) Lookup(_ context.Context, grantID string, ids []string) ([]pho
 		return nil, errors.New("photo grant socket: connection refused")
 	}
 	g, ok := l.grants[grantID]
-	if !ok || g.Revoked {
+	if !ok || g.revoked {
 		return nil, refused(photosapi.GrantNotFound)
 	}
 	var out []photos.GrantedAsset
@@ -109,7 +110,9 @@ func (l *library) List(context.Context) ([]photos.Grant, error) {
 	}
 	var out []photos.Grant
 	for _, g := range l.grants {
-		out = append(out, g.Grant)
+		if !g.revoked {
+			out = append(out, g.Grant)
+		}
 	}
 	return out, nil
 }
@@ -121,7 +124,7 @@ func (l *library) Revoke(_ context.Context, grantID string) error {
 		return errors.New("photo grant socket: connection refused")
 	}
 	if g, ok := l.grants[grantID]; ok {
-		g.Revoked = true
+		g.revoked = true
 	}
 	l.revoked = append(l.revoked, grantID)
 	return nil

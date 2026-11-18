@@ -28,11 +28,15 @@ const (
 	GrantRevoke   = "revoke"
 )
 
-// Grant error codes.
+// Grant error codes. GrantOwnerInactive is a grant whose owner's account is
+// not in use now, as while an administrator has disabled it: the grant
+// works again once the account does, so the montage center waits rather
+// than giving the project up, as it does on GrantNotFound.
 const (
 	GrantInvalid        = "invalid_request"
 	GrantUnauthorized   = "authentication_required"
 	GrantNotFound       = "grant_not_found"
+	GrantOwnerInactive  = "owner_inactive"
 	GrantAssetsRefused  = "assets_not_grantable"
 	GrantTooMany        = "too_many_assets"
 	GrantAssetNotFound  = "not_found"
@@ -40,6 +44,11 @@ const (
 	grantMessageLimit   = 256 << 10
 	grantRequestTimeout = time.Minute
 )
+
+// GrantListPage is how many grants one list answer carries at most. A grant
+// encodes to under 1 KiB even when every byte of its 128-byte project ID
+// needs escaping, so a page stays well inside GrantMessageLimit.
+const GrantListPage = 200
 
 // NewGrantPrincipal builds the photo Principal the montage center acts as
 // for a member under a project grant: it sees videos and opens originals,
@@ -51,6 +60,7 @@ func NewGrantPrincipal(userID, username string) photos.Principal {
 
 // GrantRequest is one request on the grant socket. Session is the member's
 // session token, on register only: it is used for that request and not kept.
+// After, on list, is the Next of the page before.
 type GrantRequest struct {
 	Op        string   `json:"op"`
 	Session   string   `json:"session,omitempty"`
@@ -58,9 +68,11 @@ type GrantRequest struct {
 	GrantID   string   `json:"grantId,omitempty"`
 	AssetIDs  []string `json:"assetIds,omitempty"`
 	AssetID   string   `json:"assetId,omitempty"`
+	After     string   `json:"after,omitempty"`
 }
 
-// GrantResponse answers a GrantRequest.
+// GrantResponse answers a GrantRequest. Next, on list, is set when more
+// grants may follow: the next page is asked for after it.
 type GrantResponse struct {
 	OK       bool                  `json:"ok"`
 	Code     string                `json:"code,omitempty"`
@@ -68,6 +80,7 @@ type GrantResponse struct {
 	Grant    *photos.Grant         `json:"grant,omitempty"`
 	Assets   []photos.GrantedAsset `json:"assets,omitempty"`
 	Grants   []photos.Grant        `json:"grants,omitempty"`
+	Next     string                `json:"next,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
 }
 
@@ -172,10 +185,24 @@ func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) e
 	return err
 }
 
-// List lists every grant, revoked ones included.
+// List lists every grant that is not revoked, a page per request.
 func (g Grants) List(ctx context.Context) ([]photos.Grant, error) {
-	response, err := g.plain(ctx, GrantRequest{Op: GrantList})
-	return response.Grants, err
+	var grants []photos.Grant
+	after := ""
+	for {
+		response, err := g.plain(ctx, GrantRequest{Op: GrantList, After: after})
+		if err != nil {
+			return nil, err
+		}
+		grants = append(grants, response.Grants...)
+		if response.Next == "" {
+			return grants, nil
+		}
+		if response.Next <= after {
+			return nil, errors.New("photo grant: list answered a page that does not move on")
+		}
+		after = response.Next
+	}
 }
 
 // Revoke revokes a grant; revoking again changes nothing.

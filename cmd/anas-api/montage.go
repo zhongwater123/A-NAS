@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
 
@@ -40,20 +41,21 @@ func runMontageService(logger *slog.Logger) error {
 	})
 }
 
-// configuredMontage returns the montage API, or nil while
-// ANAS_MONTAGE_ENABLED is off: then /api/v1/montage is not mounted and the
-// desktop shows no entry. A NAS forwards it to the montage service;
-// development serves it in this process from a directory on the development
-// volume, with grants the photo library in this process holds.
+// configuredMontage returns the montage API, nil while ANAS_MONTAGE_ENABLED
+// is off: then /api/v1/montage is not mounted and the desktop shows no
+// entry. A NAS forwards it to the montage service; development serves it in
+// this process from a directory on the development volume, with the grants
+// of the photo library in this process. Deleted accounts leave the montage store
+// whatever the switch: the service runs either way, and rows from a time it
+// was on must not stay.
 func configuredMontage(ctx context.Context, config Config, grants montage.Grants, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
-	forget := func(context.Context, string) error { return nil }
-	if !config.MontageEnabled {
-		return nil, forget, func() {}, nil
-	}
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
 			_, err := accountremoval.Request(ctx, config.MontageSocket, userID)
 			return err
+		}
+		if !config.MontageEnabled {
+			return nil, remove, func() {}, nil
 		}
 		return montageservice.Proxy(config.MontageSocket, logger), remove, func() {}, nil
 	}
@@ -68,5 +70,10 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	if err := store.Reconcile(ctx); err != nil {
 		logger.Warn("reconciling montage projects with the photo library failed", "error", err)
 	}
-	return montageapi.New(store, logger), store.RemoveAccount, func() { _ = store.Close() }, nil
+	closeStore := func() { _ = store.Close() }
+	if !config.MontageEnabled {
+		return nil, store.RemoveAccount, closeStore, nil
+	}
+	// The headers the service gets are those the socket would carry.
+	return serviceproxy.Local(montageapi.New(store, logger)), store.RemoveAccount, closeStore, nil
 }

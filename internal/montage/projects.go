@@ -589,18 +589,16 @@ func (s *Store) Reconcile(ctx context.Context) error {
 		project, ok := projects[grant.ProjectID]
 		matches := ok && project.owner == grant.OwnerUserID && project.state == "ready" &&
 			(!project.grantID.Valid || project.grantID.String == grant.ID)
-		if matches && !grant.Revoked {
+		if matches {
 			live[grant.ID] = true
 			continue
 		}
-		if !grant.Revoked {
-			s.logger.InfoContext(ctx, "revoking a photo grant no project holds", "grant", grant.ID)
-			if _, err := s.db.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
-				grant.ID, sqlitedb.FormatTime(s.now())); err != nil {
-				return err
-			}
-			s.revoke(ctx, grant.ID)
+		s.logger.InfoContext(ctx, "revoking a photo grant no project holds", "grant", grant.ID)
+		if _, err := s.db.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
+			grant.ID, sqlitedb.FormatTime(s.now())); err != nil {
+			return err
 		}
+		s.revoke(ctx, grant.ID)
 	}
 	for id, project := range projects {
 		switch {

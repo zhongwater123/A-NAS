@@ -3688,6 +3688,15 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage:
+    get:
+      operationId: getMontage
+      summary: 'Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204'
+      responses:
+        '204':
+          description: The montage center is on
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/projects:
     get:
       operationId: listMontageProjects

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -73,10 +74,16 @@ func Local(next http.Handler) http.Handler {
 }
 
 // onlyTheSession replaces what identifies the browser with the session token
-// in ctx.
+// in ctx. The X-A-NAS- headers are the Product Service's to set, so none the
+// browser sent reaches a service.
 func onlyTheSession(ctx context.Context, header http.Header) {
 	header.Del("Cookie")
 	header.Del("X-CSRF-Token")
 	header.Del("Authorization")
+	for name := range header {
+		if strings.HasPrefix(strings.ToLower(name), "x-a-nas-") {
+			header.Del(name)
+		}
+	}
 	header.Set(SessionHeader, accounts.SessionToken(ctx))
 }

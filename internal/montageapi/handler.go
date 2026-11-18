@@ -19,12 +19,6 @@ import (
 
 const PathPrefix = "/api/v1/montage"
 
-// AssistantHeader tells the montage service whether the request registered
-// a planning grant for the member's VNAS (docs/architecture/montage-center.md,
-// 规划授权). Only the Product Service sets it, on the requests that register
-// one; it removes the header from every other request first.
-const AssistantHeader = "X-A-NAS-Assistant"
-
 // Unavailable is the error code while the montage store cannot be used, as
 // when the data volume is offline or read-only.
 const Unavailable = "montage_unavailable"

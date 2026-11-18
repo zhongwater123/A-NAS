@@ -46,7 +46,6 @@ type Grant struct {
 	ID          string `json:"id"`
 	OwnerUserID string `json:"ownerUserId"`
 	ProjectID   string `json:"projectId"`
-	Revoked     bool   `json:"revoked"`
 }
 
 // GrantedAsset is one asset of a grant as the owner sees it now. Only an
@@ -163,30 +162,25 @@ func (s *Service) usableGrant(ctx context.Context, owner Principal, grantID stri
 	return nil
 }
 
-// granted reports which of ids are in the grant.
-func (s *Service) granted(ctx context.Context, grantID string, ids []string) (map[string]bool, error) {
-	in := map[string]bool{}
+// grantedAssets reads, in one query, those of ids that are in the grant.
+func (s *Service) grantedAssets(ctx context.Context, grantID string, ids []string) (map[string]assetRecord, error) {
+	records := map[string]assetRecord{}
 	if len(ids) == 0 {
-		return in, nil
+		return records, nil
 	}
 	args := []any{grantID}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM montage_grant_assets WHERE grant_id = ? AND asset_id IN ("+
-		sqlitedb.Placeholders(len(ids))+")", args...)
+	found, err := s.queryAssets(ctx, s.db, "WHERE a.id IN (SELECT asset_id FROM montage_grant_assets WHERE grant_id = ? AND asset_id IN ("+
+		sqlitedb.Placeholders(len(ids))+"))", args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		in[id] = true
+	for _, record := range found {
+		records[record.ID] = record
 	}
-	return in, rows.Err()
+	return records, nil
 }
 
 // LookupGrant says where each of assetIDs stands for the grant's owner: an
@@ -200,7 +194,7 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 		return nil, ErrTooManyIDs
 	}
 	ids := uniqueIDs(assetIDs)
-	in, err := s.granted(ctx, grantID, ids)
+	records, err := s.grantedAssets(ctx, grantID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -208,11 +202,9 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 	found := make([]GrantedAsset, 0, len(ids))
 	for _, id := range ids {
 		entry := GrantedAsset{AssetID: id, Status: GrantMissing}
-		record, err := s.assetByID(ctx, s.db, id)
+		record, in := records[id]
 		switch {
-		case errors.Is(err, ErrNotFound) || !in[id]:
-		case err != nil:
-			return nil, err
+		case !in:
 		case !canView(owner, record.library, now) || !seesAsset(owner, record) || record.Video == nil:
 		case record.Trash != nil:
 			entry.Status = GrantTrashed
@@ -266,10 +258,15 @@ func (s *Service) RemoveFromGrant(ctx context.Context, owner Principal, grantID 
 	return err
 }
 
-// Grants lists every grant, revoked ones included, for the montage center to
-// reconcile its projects with when it starts.
-func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, owner_user_id, project_id, revoked_at IS NOT NULL FROM montage_grants ORDER BY created_at, id")
+// Grants lists, in ID order, up to limit grants that are not revoked and
+// whose ID comes after after. The montage center pages through them to
+// reconcile its projects when it starts; a revoked grant is gone for it.
+func (s *Service) Grants(ctx context.Context, after string, limit int) ([]Grant, error) {
+	if limit <= 0 {
+		return nil, errors.New("a page of grants needs a limit")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, owner_user_id, project_id FROM montage_grants WHERE revoked_at IS NULL AND id > ? ORDER BY id LIMIT ?", after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +274,7 @@ func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
 	grants := []Grant{}
 	for rows.Next() {
 		var grant Grant
-		if err := rows.Scan(&grant.ID, &grant.OwnerUserID, &grant.ProjectID, &grant.Revoked); err != nil {
+		if err := rows.Scan(&grant.ID, &grant.OwnerUserID, &grant.ProjectID); err != nil {
 			return nil, err
 		}
 		grants = append(grants, grant)
@@ -285,9 +282,17 @@ func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
 	return grants, rows.Err()
 }
 
-// RevokeGrant marks a grant revoked; revoking it again, or a grant already
-// gone with its owner's account, changes nothing.
+// RevokeGrant revokes a grant and lets go of its assets. The grant's row
+// stays, marked, so that its project cannot register again until the owner's
+// account is removed; revoking again, or a grant already gone with its
+// owner's account, changes nothing.
 func (s *Service) RevokeGrant(ctx context.Context, grantID string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE montage_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", formatTime(s.now()), grantID)
-	return err
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE montage_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+			formatTime(s.now()), grantID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM montage_grant_assets WHERE grant_id = ?", grantID)
+		return err
+	})
 }
