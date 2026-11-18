@@ -54,7 +54,7 @@ HOME = Path(f"/srv/a-nas/data/assistant/{USER}/files")
 CHANNEL = "api_server" if Path("/etc/systemd/system/anas-assistant@.service.d/channel.conf").exists() else "serve"
 # The real model's gateway or the fake model, whichever this container runs.
 MODEL_LOG = Path("/var/log/gateway.jsonl" if Path("/etc/anas-spike/model.key").exists() else "/var/log/fake-model.jsonl")
-APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/etc/hermes/config.yaml").read_text().splitlines()
+APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/usr/lib/a-nas/assistant/managed/config.yaml").read_text().splitlines()
                              if line.startswith("  timeout:")), "300"))
 
 

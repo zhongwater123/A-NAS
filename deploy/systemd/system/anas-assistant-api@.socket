@@ -1,5 +1,5 @@
 [Unit]
-Description=A-NAS assistant API socket for %i (spike)
+Description=A-NAS assistant API socket for %i
 
 [Socket]
 ListenStream=/run/a-nas-assistant/%i.sock

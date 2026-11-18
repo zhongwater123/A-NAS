@@ -30,9 +30,9 @@ import (
 // session (ADR 0024 decision 10) it notes the task as an empty file named
 // after it in AssistantRuns/<username>, which only root may enter, and starts
 // the member's cron unit. The round takes what waits there as its own
-// (ai/assistant-spike/run-requests.sh), queues each task with Hermes's own
+// (ai/assistant/run-requests.sh), queues each task with Hermes's own
 // trigger_job and runs it as it runs a task that is due
-// (ai/assistant-spike/cron_round.py). A request that comes while a round runs
+// (ai/assistant/cron_round.py). A request that comes while a round runs
 // stays for the next one, which the waker starts.
 
 var (

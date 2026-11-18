@@ -4,10 +4,7 @@
 # Keep a harmless process in the installed cron sandbox and the owner's instance
 # running, then disable the owner through the Product Service while the instance
 # keeps being started, and verify every activation path is closed.
-# The preceding layout test removed Bob's assistant, while leaving his
-# product account active. Restore its sandbox before starting a real task.
-check "an active member's assistant can be prepared again" \
-  env ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" bob
+check "bob's assistant is ready to start" test -S /run/a-nas-assistant/bob.sock
 host_socket=/run/a-nas/host-agent.sock
 bob_uid=$(id -u bob)
 check "the Host Agent identifies an active scheduled-task owner" \
@@ -76,9 +73,10 @@ for unit in anas-assistant@bob.service anas-assistant-api@bob.service anas-assis
   check "a disabled account cannot restart $unit" fails systemctl start "$unit"
   check "$unit remains masked" test "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = masked
 done
-check "updating member configuration preserves account disable" \
-  env ASSISTANT_GATE=host-agent bash /spike/assistant-layout.sh members "$data" bob
-check "updating does not reactivate the member socket" \
+# Saving the key prepares every active member's assistant, and only those.
+check "saving the key again keeps a disabled account's assistant off" \
+  test "$(save_key /tmp/owner.jar "$owner_csrf" true)" = 200
+check "it does not reactivate the member socket" \
   test "$(systemctl is-enabled anas-assistant-api@bob.socket 2>/dev/null || true)" = masked
-check "updating does not reactivate the curator timer" \
+check "nor the curator timer" \
   test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" = masked

@@ -20,6 +20,10 @@ Environment=ANAS_SHARE_SESSION_GROUP=a-nas-shares
 Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock
 Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family
 Environment=ANAS_DATA_MOUNT=/srv/a-nas/data
+# The AI assistant (ADR 0024): the File Broker is the session gate to members' instances, and
+# the photo service's socket for assistants looks members up by UID here.
+Environment=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
+Environment=ANAS_PHOTO_ASSISTANT_LOOKUP=1
 # This machine's settings, such as ANAS_SMB_INTERFACE (ADR 0034).
 EnvironmentFile=-/etc/a-nas/site.conf
 ExecStart=/usr/lib/a-nas/anas-host-agent
