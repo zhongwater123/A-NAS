@@ -30,6 +30,9 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	body, files, err := unixmsg.ReadBodyFiles(conn, maxFrame, maxFiles)
 	if err != nil {
+		if errors.Is(err, unixmsg.ErrTooManyFiles) {
+			return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
+		}
 		return err
 	}
 	defer unixmsg.CloseFiles(files)
@@ -50,6 +53,9 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 		if err := writeFrame(conn, Response{Accepted: true}, nil); err != nil {
 			return err
 		}
+	}
+	if !isEditing(head.Op) && len(files) != 1 {
+		return writeFrame(conn, Response{Code: CodeInvalid, Message: "the operation takes one file descriptor"}, nil)
 	}
 	// A descriptor shares its offset with the sender's, which an earlier
 	// operation on the same file may have moved; fd: reads from the offset.
