@@ -18,7 +18,7 @@ func TestLargeGrantAnalysisFitsSocketFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	analysis := photos.GrantAnalysis{ObjectID: "video", Windows: photos.AnalysisDone, Described: photos.AnalysisDone, DescriptionsIdentity: "reader", List: []photos.Window{{Index: 0, EndMs: 2000}}}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		analysis.Descriptions = append(analysis.Descriptions, photos.CardDescription{Card: i, Description: description})
 	}
 	vectors := bytes.Repeat([]byte{7}, windowDimensions*4)
