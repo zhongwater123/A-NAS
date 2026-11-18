@@ -150,6 +150,14 @@ class ProtocolTest(unittest.TestCase):
         self.assertTrue(answer["ok"], answer)
         self.assertGreater(answer["light"], 150)
 
+    def test_fields_too_large_for_a_frame_come_as_the_body(self):
+        body = json.dumps({"blurs": [None] * 3, "blocked": [0, 0, 0], "points": [None] * 3, "moves": [],
+                           "padding": "x" * (2 << 20)}).encode()
+        answer = self.call({"op": "quality", "arrays": [{"name": "body", "dtype": "uint8", "shape": [len(body)]}]},
+                           [np.frombuffer(body, np.uint8)])
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["reasons"], ["黑帧"])
+
     def test_an_array_of_another_length_is_refused(self):
         frame = np.zeros((10, 10), np.uint8)
         answer = self.call({"op": "quality_part", "kind": "sharp",
