@@ -108,8 +108,8 @@ systemctl daemon-reload
 # The photo service holds the grant socket's descriptor: systemd refuses to
 # start that socket again while the service runs, so it stops first and
 # starts again below with this release's socket.
-systemctl stop anas-ai.service anas-photos.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
-systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-photos-grants.socket
+systemctl stop anas-ai.service anas-montage-compute.service anas-photos.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
+systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-photos-grants.socket anas-montage-compute.socket
 # This machine's settings: failures leave the product running and are
 # reported below.
 systemctl restart anas-site.service || true
