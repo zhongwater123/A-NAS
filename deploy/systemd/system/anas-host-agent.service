@@ -26,6 +26,8 @@ Environment=ANAS_DATA_MOUNT=/srv/a-nas/data
 # the photo service's socket for assistants looks members up by UID here.
 Environment=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
 Environment=ANAS_PHOTO_ASSISTANT_LOOKUP=1
+# The montage center's socket for members' cron units knows them by UID too.
+Environment=ANAS_MONTAGE_ASSISTANT_LOOKUP=1
 # This machine's settings, such as ANAS_SMB_INTERFACE (ADR 0034).
 EnvironmentFile=-/etc/a-nas/site.conf
 ExecStart=/usr/lib/a-nas/anas-host-agent

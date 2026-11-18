@@ -108,6 +108,34 @@ func TestMemberSettings(t *testing.T) {
 	if err != nil || string(skill) != "You serve alice; alice's files.\n" {
 		t.Fatalf("skill %q, %v", skill, err)
 	}
+	// Without a policy for scheduled tasks, the cron unit's settings are the instance's.
+	cronPath := filepath.Join(executor.assistantMemberDir("alice"), "config-cron.yaml")
+	if cron, err := os.ReadFile(cronPath); err != nil || string(cron) != string(config) {
+		t.Fatalf("config-cron.yaml %q, %v", cron, err)
+	}
+	// With one, they add its servers, the montage center's planning server: only the cron
+	// unit binds them (docs/architecture/montage-center.md).
+	if err := os.MkdirAll(filepath.Join(library, "managed-cron"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cronPolicy := strings.Replace(managedPolicy, "mcp_servers:\n", "mcp_servers:\n  montage:\n    trust: full\n", 1)
+	if err := os.WriteFile(filepath.Join(library, "managed-cron", "config.yaml"), []byte(cronPolicy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.prepareAssistantSettings("alice"); err != nil {
+		t.Fatal(err)
+	}
+	var cronSettings struct {
+		MCPServers map[string]map[string]any `yaml:"mcp_servers"`
+	}
+	cron, err := os.ReadFile(cronPath)
+	if err != nil || yaml.Unmarshal(cron, &cronSettings) != nil || cronSettings.MCPServers["montage"]["trust"] != "full" ||
+		cronSettings.MCPServers["anas"] == nil {
+		t.Fatalf("config-cron.yaml:\n%s", cron)
+	}
+	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "montage") {
+		t.Fatalf("the instance's config.yaml has the montage server:\n%s", again)
+	}
 	// Preparing again keeps the secret and the file a running sandbox bound.
 	before, _ := os.Stat(configPath)
 	if err := executor.prepareAssistantSettings("alice"); err != nil {

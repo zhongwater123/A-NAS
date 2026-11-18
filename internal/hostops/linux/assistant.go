@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -593,10 +594,21 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	if err != nil {
 		return err
 	}
+	// The cron unit's settings add the montage center's planning server from its own policy,
+	// which a conversation's instance never starts (docs/architecture/montage-center.md).
+	cronConfig := config
+	if managedCron, err := os.ReadFile(filepath.Join(library, "managed-cron", "config.yaml")); err == nil {
+		if cronConfig, err = memberConfig(username, hash, managedCron); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the assistant's policy for scheduled tasks: %w", err)
+	}
 	skillPath := filepath.Join(member, "skills", "anas-member", "SKILL.md")
 	for path, contents := range map[string][]byte{
 		configPath: config,
-		skillPath:  bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
+		filepath.Join(member, "config-cron.yaml"): cronConfig,
+		skillPath: bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err

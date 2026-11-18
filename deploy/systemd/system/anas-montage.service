@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS montage center service
 Documentation=https://github.com/zhongwater123/A-NAS
-After=anas-host-agent.service anas-api.service anas-photos.service
-Wants=anas-host-agent.service anas-api.service
+After=anas-host-agent.service anas-api.service anas-photos.service anas-montage-assistant.socket
+Wants=anas-host-agent.service anas-api.service anas-montage-assistant.socket
 
 [Service]
 Type=simple
@@ -17,6 +17,10 @@ Environment=ANAS_MONTAGE_ROOT=/srv/a-nas/data/montage
 Environment=ANAS_MONTAGE_SOCKET=/run/a-nas-montage/montage.sock
 Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
 Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
+# Members' cron units plan with VNAS through a socket systemd holds
+# (anas-montage-assistant.socket); the waker reads who has a job to plan from
+# the markers in /run/a-nas-montage/plans (docs/architecture/montage-center.md).
+Sockets=anas-montage-assistant.socket
 RuntimeDirectory=a-nas-montage
 RuntimeDirectoryMode=0750
 UMask=0077

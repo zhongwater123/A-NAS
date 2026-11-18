@@ -3,6 +3,9 @@
 # (ADR 0024), made from it so that they stay the same: a round of the member's
 # scheduled tasks and the weekly curator, each a oneshot, both without the
 # companion's socket, which only a conversation's window answers (#412). The
+# round alone binds the montage center's socket and reads the policy and the
+# member settings that add its planning server (managed-cron, config-cron.yaml;
+# docs/architecture/montage-center.md, MCP 服务器). The
 # curator also prunes Hermes's image cache, which serve never does
 # (ai/assistant/media-cache.py). scripts/build-packages.sh and the spike's
 # installer (ai/assistant-spike/assistant-install.sh) source this file.
@@ -18,6 +21,9 @@ derive_assistant_units() {
     -e "/^ExecStart=/a ExecStopPost=+/bin/bash $lib/run-requests.sh done %i" \
     -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
     -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
+    -e "s#HERMES_MANAGED_DIR=$lib/managed\\b#HERMES_MANAGED_DIR=$lib/managed-cron#" \
+    -e 's#members/%i/config.yaml:#members/%i/config-cron.yaml:#' \
+    -e '\#anas-assistant-photos/photos.sock#a BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' \
     "$units/anas-assistant@.service" >"$units/anas-assistant-cron@.service"
   sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i#' \
     -e '\#a-nas-companion-assistant#d' \

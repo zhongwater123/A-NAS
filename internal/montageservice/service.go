@@ -123,6 +123,14 @@ func Run(parent context.Context, config Config) error {
 		return err
 	}
 	defer func() { _ = os.Remove(config.SocketPath); _ = listener.Close() }()
+	// The planning markers live in the service's runtime directory, where
+	// root's waker reads them; they come back from the jobs at start.
+	if config.PlanMarkers != "" {
+		if err := os.MkdirAll(config.PlanMarkers, 0o750); err != nil {
+			_ = listener.Close()
+			return err
+		}
+	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
 	var current atomic.Pointer[http.Handler]
