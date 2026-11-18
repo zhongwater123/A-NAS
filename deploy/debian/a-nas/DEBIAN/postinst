@@ -173,11 +173,8 @@ systemctl daemon-reload
 # A running Worker and vector index belong to the previous release; the next
 # connection starts this release's. Clients reconnect to this release's
 # FFmpeg worker and its shared admission slots.
-# The photo service holds the grant socket's descriptor: systemd refuses to
-# start that socket again while the service runs, so it stops first and
-# starts again below with this release's socket.
-systemctl stop anas-ai.service anas-montage-compute.service anas-photos.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
-systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-photos-grants.socket anas-montage-compute.socket
+systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' anas-montage-compute.socket anas-montage-compute.service || true
+systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-montage-compute.socket
 # This machine's settings, with the credential key that encrypts the
 # assistant's model key: failures leave the product running and are reported
 # below.
@@ -188,6 +185,10 @@ systemctl start smbd.service || true
 # Members' assistants run this release's scripts from their next start; the
 # Product Service's restart below ends their connections anyway.
 systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' 2>/dev/null || true
+# The photo service's grant socket starts with it (its Wants=), in the gap
+# its restart leaves: systemd refuses to start a socket while the service it
+# activates runs, and the assistant's socket can start the photo service at
+# any time. The release before stopped the grant socket in its prerm.
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
   anas-montage.service
 systemctl try-restart 'anas-kiosk@*.service' || true

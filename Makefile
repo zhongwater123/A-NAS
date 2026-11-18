@@ -145,6 +145,7 @@ docs-check:
 	@have="$$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"; \
 	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
+	grep -v -E '(^|/)docs/status/[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]+)?\.md$$' | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
 # dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).

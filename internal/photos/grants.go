@@ -46,7 +46,6 @@ type Grant struct {
 	ID          string `json:"id"`
 	OwnerUserID string `json:"ownerUserId"`
 	ProjectID   string `json:"projectId"`
-	Revoked     bool   `json:"revoked"`
 }
 
 // GrantedAsset is one asset of a grant as the owner sees it now. Only an
@@ -59,14 +58,11 @@ type GrantedAsset struct {
 	Width    int              `json:"width,omitempty"`
 	Height   int              `json:"height,omitempty"`
 	TakenAt  *time.Time       `json:"takenAt,omitempty"`
-	// Windows, Cards, Quality and Descriptions are where the montage
-	// analysis stands; Descriptions is AnalysisUnavailable while the AI
-	// Worker has no text reader.
-	Windows             AnalysisState `json:"windows,omitempty"`
-	Cards               AnalysisState `json:"cards,omitempty"`
-	Quality             AnalysisState `json:"quality,omitempty"`
-	Descriptions        AnalysisState `json:"descriptions,omitempty"`
-	descriptionIdentity string
+	// Windows, Cards and Quality are where the montage analysis stands.
+	Windows      AnalysisState `json:"windows,omitempty"`
+	Cards        AnalysisState `json:"cards,omitempty"`
+	Quality      AnalysisState `json:"quality,omitempty"`
+	Descriptions AnalysisState `json:"descriptions,omitempty"`
 }
 
 // grantable reports whether owner may grant record: a video it sees,
@@ -171,75 +167,78 @@ func (s *Service) usableGrant(ctx context.Context, owner Principal, grantID stri
 	return nil
 }
 
-// granted reports which of ids are in the grant.
-func (s *Service) granted(ctx context.Context, grantID string, ids []string) (map[string]bool, error) {
-	in := map[string]bool{}
+// grantedAssets reads, in one query, those of ids that are in the grant.
+func (s *Service) grantedAssets(ctx context.Context, grantID string, ids []string) (map[string]assetRecord, error) {
+	records := map[string]assetRecord{}
 	if len(ids) == 0 {
-		return in, nil
+		return records, nil
 	}
 	args := []any{grantID}
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM montage_grant_assets WHERE grant_id = ? AND asset_id IN ("+
-		sqlitedb.Placeholders(len(ids))+")", args...)
+	found, err := s.queryAssets(ctx, s.db, "WHERE a.id IN (SELECT asset_id FROM montage_grant_assets WHERE grant_id = ? AND asset_id IN ("+
+		sqlitedb.Placeholders(len(ids))+"))", args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		in[id] = true
+	for _, record := range found {
+		records[record.ID] = record
 	}
-	return in, rows.Err()
+	return records, nil
 }
 
 // LookupGrant says where each of assetIDs stands for the grant's owner: an
 // asset outside the grant, gone or no longer seen is missing; one the owner
 // put in the trash is trashed.
 func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID string, assetIDs []string) ([]GrantedAsset, error) {
+	found, _, err := s.lookupGrant(ctx, owner, grantID, assetIDs)
+	return found, err
+}
+
+// lookupGrant is LookupGrant, with where the montage analysis of each
+// available video stands, read for all of them in one go.
+func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID string, assetIDs []string) ([]GrantedAsset, map[string]analysisProgress, error) {
 	if err := s.usableGrant(ctx, owner, grantID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(assetIDs) > MaxGrantAssets {
-		return nil, ErrTooManyIDs
+		return nil, nil, ErrTooManyIDs
 	}
 	ids := uniqueIDs(assetIDs)
-	in, err := s.granted(ctx, grantID, ids)
+	records, err := s.grantedAssets(ctx, grantID, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	videos := map[string]float64{}
 	now := s.now()
 	found := make([]GrantedAsset, 0, len(ids))
 	for _, id := range ids {
 		entry := GrantedAsset{AssetID: id, Status: GrantMissing}
-		record, err := s.assetByID(ctx, s.db, id)
+		record, in := records[id]
 		switch {
-		case errors.Is(err, ErrNotFound) || !in[id]:
-		case err != nil:
-			return nil, err
+		case !in:
 		case !canView(owner, record.library, now) || !seesAsset(owner, record) || record.Video == nil:
 		case record.Trash != nil:
 			entry.Status = GrantTrashed
 		default:
 			entry.Status, entry.ObjectID = GrantAvailable, record.objectID
 			entry.Duration, entry.Width, entry.Height, entry.TakenAt = record.Video.Duration, record.Width, record.Height, record.TakenAt
-			if entry.Windows, err = s.windowsState(ctx, s.db, record.objectID); err != nil {
-				return nil, err
-			}
-			if entry.Cards, err = s.cardsState(ctx, record.objectID); err != nil {
-				return nil, err
-			}
-			if entry.Quality, err = s.qualityState(ctx, record.objectID); err != nil {
-				return nil, err
-			}
+			videos[record.objectID] = record.Video.Duration
 		}
 		found = append(found, entry)
 	}
-	return found, s.fillDescriptionProgress(ctx, found)
+	progress, err := s.progressOf(ctx, videos)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range found {
+		if found[i].Status == GrantAvailable {
+			p := progress[found[i].ObjectID]
+			found[i].Windows, found[i].Cards, found[i].Quality, found[i].Descriptions = p.windows, p.cards, p.quality, p.described
+		}
+	}
+	return found, progress, nil
 }
 
 // OpenGrant opens a granted video's original read-only, with its object.
@@ -283,10 +282,15 @@ func (s *Service) RemoveFromGrant(ctx context.Context, owner Principal, grantID 
 	return err
 }
 
-// Grants lists every grant, revoked ones included, for the montage center to
-// reconcile its projects with when it starts.
-func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, owner_user_id, project_id, revoked_at IS NOT NULL FROM montage_grants ORDER BY created_at, id")
+// Grants lists, in ID order, up to limit grants that are not revoked and
+// whose ID comes after after. The montage center pages through them to
+// reconcile its projects when it starts; a revoked grant is gone for it.
+func (s *Service) Grants(ctx context.Context, after string, limit int) ([]Grant, error) {
+	if limit <= 0 {
+		return nil, errors.New("a page of grants needs a limit")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, owner_user_id, project_id FROM montage_grants WHERE revoked_at IS NULL AND id > ? ORDER BY id LIMIT ?", after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +298,7 @@ func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
 	grants := []Grant{}
 	for rows.Next() {
 		var grant Grant
-		if err := rows.Scan(&grant.ID, &grant.OwnerUserID, &grant.ProjectID, &grant.Revoked); err != nil {
+		if err := rows.Scan(&grant.ID, &grant.OwnerUserID, &grant.ProjectID); err != nil {
 			return nil, err
 		}
 		grants = append(grants, grant)
@@ -302,9 +306,17 @@ func (s *Service) Grants(ctx context.Context) ([]Grant, error) {
 	return grants, rows.Err()
 }
 
-// RevokeGrant marks a grant revoked; revoking it again, or a grant already
-// gone with its owner's account, changes nothing.
+// RevokeGrant revokes a grant and lets go of its assets. The grant's row
+// stays, marked, so that its project cannot register again until the owner's
+// account is removed; revoking again, or a grant already gone with its
+// owner's account, changes nothing.
 func (s *Service) RevokeGrant(ctx context.Context, grantID string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE montage_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", formatTime(s.now()), grantID)
-	return err
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE montage_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+			formatTime(s.now()), grantID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM montage_grant_assets WHERE grant_id = ?", grantID)
+		return err
+	})
 }

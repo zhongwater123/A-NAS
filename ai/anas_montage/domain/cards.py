@@ -70,6 +70,9 @@ def split(ix: WindowIndex, w: list) -> list[list]:
     if ix.rows[w[-1]][2] - t(w[0]) <= LONG:
         return [w]
     cand = [k for k in range(1, len(w)) if t(w[k]) - t(w[0]) >= SIDE and ix.rows[w[-1]][2] - t(w[k]) >= SIDE]
+    if not cand:
+        # A long flat gap can leave the whole middle without a usable cut.
+        return [w]
     k = min(cand, key=lambda k: float(ix.frames[w[k - 1]] @ ix.frames[w[k]]))
     return split(ix, w[:k]) + split(ix, w[k:])
 

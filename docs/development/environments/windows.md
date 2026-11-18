@@ -1,6 +1,6 @@
 # Windows 与 WSL 开发环境
 
-更新时间：2026-11-11
+更新时间：2026-11-18
 
 记录开发机 A、B 的配置与差异。检查目标见[测试与验证](../testing.md)；完整门禁命令统一维护在 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md)，Fake 预览按 [fake-preview](../../../.claude/skills/fake-preview/SKILL.md)。
 
@@ -70,7 +70,7 @@ wsl -d Ubuntu-24.04 -u root
 | WSL 用户 | 日常用户，属于 `docker` 组，没有免密 `sudo`；没有 `anas-dev` |
 | WSL 工作区入口 | 直接使用 `/mnt/d/A-NAS` 或对应工作树 |
 | Git | Git for Windows；仓库内已设置 `core.autocrlf=false`、`core.eol=lf` |
-| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、lychee 0.24.2、jq 与 Ruff（见[静态检查](../testing.md#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译 |
+| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、lychee 0.24.2、jq 与 Ruff（见[静态检查](../testing.md#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译；Python 3.14 与 `python3-venv` 也来自 Ubuntu 软件包，后者 2026-11-18 以 root 安装（`wsl -u root -e apt-get install -y python3-venv`），`make ai-sdk-test` 靠它建虚拟环境 |
 | Docker | WSL 内 Docker Engine 29.1.3，cgroup v2；Docker Hub 不可达，`deb.debian.org` 与 `proxy.golang.org` 可达 |
 | 本地镜像 | `anas-acl-matrix:bookworm`：Debian 12，加装 gcc、acl、btrfs-progs、samba、samba-vfs-modules 与 smbclient，用于 root 集成测试，也可在 Debian 12 中复现 cgo 测试；`anas-systemd:trixie`：由 `scripts/build-system-test-image.sh` 以前者为构建器生成，用于系统测试 |
 
