@@ -1,7 +1,7 @@
 # 停用助手被保活的成员时返回 503
 
 状态：resolved（系统测试在真实 systemd 中确定性复现与回归：旧 Host Agent 失败，修复后通过；竞态只取决于 systemd 的作业语义与命令顺序，实机验收要停用一个不能再启用的账号，没有可补充的证据）
-更新时间：2026-11-03
+更新时间：2026-11-18
 
 ## 症状与影响
 
@@ -73,6 +73,13 @@ systemd 中，一个单元的停止作业还在排队或执行时，同一单元
   - 修复后带 Hermes 运行时（`ai/assistant-spike` 构建的 `runtime.tar.gz`，不带真实 AI 与 SearXNG）：461 项 PASS，0 项 FAIL。
   - 同一副本只换回原来的 `assistant.go` 重新构建 Host Agent，不带运行时，即 CI 的配置：425 项 PASS，1 项 FAIL，正是“disabling a task owner succeeds through the product API”。紧接着的“实例已停止”“再次停用返回 204”与六个单元的屏蔽检查都通过，与 rc.6 的症状一致。
   - `make check-steps` 全部通过。
+
+## 2026-11-18：mask 留下的 socket 文件
+
+- 现象：PR #565 恢复了“删除账号后不留下助手的密钥、配置、套接字与目录”的系统测试检查。它在停用之后删除 bob，检查失败：`/run/a-nas-assistant/bob.sock` 还在。日志在 `mask --now` 时写着 `anas-assistant-api@bob.socket: Socket unit configuration has changed while unit has been running, no open socket file descriptor left`，随后 `Closed anas-assistant-api@bob.socket`。
+- 原因：mask 先把单元换成 `/dev/null` 并重新加载，`--now` 再停止它。停止时用的是 mask 后的空配置，没有 `ListenStream=` 与 `RemoveOnStop=`，所以文件不删。上面“socket 停止后被删除”的说法对停用不成立。以前的检查只用 `disable --now` 删除，没有先 mask，所以没发现。
+- 影响：产品服务按 socket 文件判断成员有没有助手（`/api/v1/assistant/status`）。账号在没有密钥时重新启用，桌面会显示 VNAS 可用，打开时却连不上；同名的新账号在自己的 socket 启动前也一样。
+- 修复：`disableAssistant` 在 mask 与停止都成功后删除这个 socket 文件，只删 socket 类型的文件。Host Agent 的单元为此可写 `/run/a-nas-assistant`。单元测试 `TestDisablingRemovesTheSocketTheMaskLeft`；系统测试中删除 bob 后检查 socket 不在。
 
 ## 后续工作
 

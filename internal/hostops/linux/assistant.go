@@ -313,7 +313,37 @@ func (e *Executor) disableAssistant(ctx context.Context, username string) error 
 			failures = append(failures, commandError(args[0]+" assistant units", err, output))
 		}
 	}
-	return errors.Join(failures...)
+	if len(failures) > 0 {
+		return errors.Join(failures...)
+	}
+	return e.removeStaleAssistantSocket(username)
+}
+
+// assistantSocketPath is the member's API socket, which anas-assistant-api@.socket listens on.
+func (e *Executor) assistantSocketPath(username string) string {
+	return filepath.Join(e.systemRoot, "run", "a-nas-assistant", username+".sock")
+}
+
+// removeStaleAssistantSocket deletes the member's API socket once its units are masked and
+// stopped. Masking a running socket unit replaces its configuration, so its RemoveOnStop= no
+// longer applies when the mask stops it, and the file would stay: the Product Service would
+// then report an assistant that nothing listens for, and a name used again would find it.
+func (e *Executor) removeStaleAssistantSocket(username string) error {
+	path := e.assistantSocketPath(username)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %s's assistant socket: %w", username, err)
+	}
+	if info.Mode().Type() != os.ModeSocket {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s's assistant socket: %w", username, err)
+	}
+	return nil
 }
 
 // enableAssistant undoes disableAssistant for the active member username, whose account is

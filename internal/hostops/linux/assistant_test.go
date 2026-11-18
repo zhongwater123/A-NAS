@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 )
@@ -353,5 +355,34 @@ func TestPackagedAssistantUnitsAreFound(t *testing.T) {
 	}
 	if !host.ran("systemctl mask --now anas-assistant-api@alice.socket") {
 		t.Fatalf("commands: %v", host.commands)
+	}
+}
+
+// Masking a running socket unit replaces its configuration, so its RemoveOnStop= does not
+// apply when the mask stops it: disabling removes the socket file it left, and nothing else.
+func TestDisablingRemovesTheSocketTheMaskLeft(t *testing.T) {
+	root := installedAssistant(t)
+	sockets := filepath.Join(root, "run", "a-nas-assistant")
+	if err := os.MkdirAll(sockets, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mknod(filepath.Join(sockets, "alice.sock"), unix.S_IFSOCK|0o600, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sockets, "bob.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := newFakeHost()
+	executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	for _, username := range []string{"alice", "bob"} {
+		if err := executor.DisableCredential(context.Background(), username); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(sockets, "alice.sock")); !os.IsNotExist(err) {
+		t.Fatalf("alice's socket after disabling her: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(sockets, "bob.sock")); err != nil {
+		t.Fatalf("a file that is no socket was removed: %v", err)
 	}
 }
