@@ -732,6 +732,8 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		s.cancelRunning(id)
 		s.removeJobFiles(id)
 	}
+	// A job that wanted a planning round went with the project.
+	s.syncMarkers(ctx)
 	s.songs.Lock()
 	s.removeUnusedCopies(ctx)
 	s.songs.Unlock()
@@ -827,6 +829,9 @@ func (s *Store) Upkeep(ctx context.Context) {
 	if err := s.RetryRevocations(ctx); err != nil {
 		s.logger.WarnContext(ctx, "retrying grant revocations failed", "error", err)
 	}
+	// A planning grant that ran out, or a marker a failed sync left, does
+	// not keep the waker starting a member's unit.
+	s.syncMarkers(ctx)
 }
 
 // unfinished reports whether a batch is still registering, or the store
@@ -1013,6 +1018,10 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID); err != nil {
 			return err
 		}
+		// Their planning grant goes too: the name may be another member's later.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM plan_grants WHERE owner_user_id = ?", userID); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ?", userID)
 		return err
 	})
@@ -1023,6 +1032,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 		s.cancelRunning(id)
 		s.removeJobFiles(id)
 	}
+	s.syncMarkers(ctx)
 	s.songs.Lock()
 	defer s.songs.Unlock()
 	s.removeUnusedCopies(ctx)

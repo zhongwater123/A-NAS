@@ -318,17 +318,13 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 	}
 	// The round in progress is over: its answers are told the job was
 	// cancelled. Its Hermes job is the next round's to remove.
-	if _, err := s.db.ExecContext(ctx, `UPDATE rounds SET ended_at = ?, outcome = 'cancelled',
-		state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END
-		WHERE job_id = ? AND state IN ('claimed', 'started')`, now, jobID); err != nil {
+	if err := endRounds(ctx, s.db, jobID, s.now(), "cancelled"); err != nil {
 		return Job{}, err
 	}
 	if _, err := s.db.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID); err != nil {
 		return Job{}, err
 	}
-	if err := s.SyncMarkers(ctx); err != nil {
-		s.logger.WarnContext(ctx, "syncing the planning markers failed", "error", err)
-	}
+	s.syncMarkers(ctx)
 	if state == JobRunning {
 		s.cancelRunning(jobID)
 	} else {
@@ -338,7 +334,9 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 	return s.Job(ctx, owner, jobID)
 }
 
-// resume puts a job that waits or needs the member back in the queue.
+// resume puts a job that waits or needs the member back in the queue. It no
+// longer wants a round: a round is claimed only for a job that came to
+// planning and waits there (awaitPlan).
 func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, states ...string) error {
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
 	args := []any{sqlitedb.FormatTime(s.now()), sqlitedb.FormatTime(s.now()), jobID, owner}
@@ -346,7 +344,7 @@ func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, sta
 		args = append(args, state)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?,
-		wait_reason = '', error_class = '', error = '', missing_json = NULL WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
+		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
 	if err != nil {
 		return err
 	}
@@ -407,12 +405,13 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 				return err
 			}
 		}
-		// The catalog changes: plans already taken are void, and both
-		// steps are planned again in a new epoch.
+		// The catalog changes: plans already taken are void, the rounds
+		// planning the old one are over, and both steps are planned again
+		// in a new epoch.
 		if err := voidPlans(ctx, tx, jobID, s.now()); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
+		if err := s.newPlanEpoch(ctx, tx, jobID, "the job's videos changed"); err != nil {
 			return err
 		}
 		return s.resume(ctx, tx, owner, jobID, JobNeedsInput)
@@ -420,6 +419,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	if err != nil {
 		return Job{}, err
 	}
+	s.syncMarkers(ctx)
 	s.wakeJobs()
 	return s.Job(ctx, owner, jobID)
 }
@@ -472,7 +472,9 @@ func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 }
 
 // Replan plans again from the step not yet taken, when the plan was not
-// handed back or kept failing its checks.
+// handed back, kept failing its checks, or waits for a VNAS that has not
+// taken it. A round still in progress is over: what it hands back from now on
+// is not kept, and its refusals do not count against the new epoch.
 func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
@@ -482,8 +484,7 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 		return Job{}, ErrJobState
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		// A new epoch: the rounds before it no longer say the plan is unknown.
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
+		if err := s.newPlanEpoch(ctx, tx, jobID, "planned again"); err != nil {
 			return err
 		}
 		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting)
@@ -491,31 +492,46 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
+	s.syncMarkers(ctx)
 	s.wakeJobs()
 	return s.Job(ctx, owner, jobID)
 }
 
 // Notice is what the desktop tells a member about their jobs.
 type Notice struct {
-	Kind      string    `json:"kind"`
-	JobID     string    `json:"jobId"`
-	ProjectID string    `json:"projectId"`
-	Project   string    `json:"project"`
-	Reason    string    `json:"reason,omitempty"`
-	FilmID    string    `json:"filmAssetId,omitempty"`
-	At        time.Time `json:"at"`
+	Kind      string `json:"kind"`
+	JobID     string `json:"jobId"`
+	ProjectID string `json:"projectId"`
+	Project   string `json:"project"`
+	Reason    string `json:"reason,omitempty"`
+	// Detail says why a job still waits for VNAS, in the project page's
+	// words (DetailVNASOff and the others).
+	Detail string    `json:"detail,omitempty"`
+	FilmID string    `json:"filmAssetId,omitempty"`
+	At     time.Time `json:"at"`
 }
+
+// Kinds of notice.
+const (
+	NoticeWaiting  = "waiting_for_planning"
+	NoticePlanning = "planning"
+	NoticeNeeds    = "needs_input"
+	NoticeSaved    = "saved"
+)
 
 // noticeWindow is how long a saved film stays a notice.
 const noticeWindow = 24 * time.Hour
 
-// Notices lists owner's jobs that wait for planning, plan, need the member,
-// or saved a film lately.
+// Notices lists owner's jobs that wait for planning, are being planned, need
+// the member, or saved a film lately. A job is being planned while a round
+// of its epoch is claimed or started: it waits for VNAS all the while, so
+// its own state does not tell.
 func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.step, j.wait_reason, j.updated_at, IFNULL(v.film_asset_id, '')
+	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
+		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
 		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id
-		WHERE j.owner_user_id = ? AND (j.state IN ('waiting', 'needs_input') OR (j.state = 'running' AND j.step IN ('pick', 'shots'))
-		  OR (j.state = 'done' AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, sqlitedb.FormatTime(s.now().Add(-noticeWindow)))
+		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
+		  OR (j.state = 'done' AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, WaitVNAS, sqlitedb.FormatTime(s.now().Add(-noticeWindow)))
 	if err != nil {
 		return nil, err
 	}
@@ -523,21 +539,20 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 	notices := []Notice{}
 	for rows.Next() {
 		var n Notice
-		var state, step, at string
-		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &state, &step, &n.Reason, &at, &n.FilmID); err != nil {
+		var state, detail, at string
+		var planning bool
+		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &state, &n.Reason, &detail, &at, &n.FilmID, &planning); err != nil {
 			return nil, err
 		}
 		switch {
 		case state == JobDone:
-			n.Kind = "saved"
-		case state == JobWaiting && n.Reason == WaitVNAS:
-			n.Kind = "waiting_for_planning"
-		case state == JobRunning:
-			n.Kind = "planning"
-		case state == JobNeedsInput:
-			n.Kind = "needs_input"
+			n.Kind = NoticeSaved
+		case state == JobWaiting && planning:
+			n.Kind = NoticePlanning
+		case state == JobWaiting:
+			n.Kind, n.Detail = NoticeWaiting, detail
 		default:
-			continue
+			n.Kind = NoticeNeeds
 		}
 		if t := scanTime(sql.NullString{String: at, Valid: true}); t != nil {
 			n.At = *t

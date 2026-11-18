@@ -41,6 +41,16 @@ func (s *Store) UseMusic(music Music) { s.jobMusic = music }
 // NextDue is how long RunJobs would sleep with no job to claim.
 func (s *Store) NextDue(ctx context.Context) time.Duration { return s.nextDue(ctx) }
 
+// Count is the number a query of one row and one column answers.
+func (s *Store) Count(t testing.TB, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRowContext(t.Context(), query, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // Exec changes the database as no request does, for the states only a crash
 // or an earlier release leaves behind.
 func (s *Store) Exec(t testing.TB, query string, args ...any) {
