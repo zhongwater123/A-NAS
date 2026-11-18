@@ -384,8 +384,15 @@ type Service struct {
 	// RunDeletions that a deletion was asked for or cancelled.
 	deletionDelay time.Duration
 	deletionWake  chan struct{}
-	// identityMu keeps a deletion from starting while identity
-	// synchronization sends accounts to the Host Agent (startDeletion).
+	// identityMu orders identity synchronization against what changes its
+	// answer. A synchronization reads every account, then has the Host Agent
+	// make the host match, which takes seconds. Without the order, a change
+	// that lands in between is undone on the host by what was read before
+	// it: an account disabled meanwhile gets its SMB credential and its
+	// assistant back until the next synchronization. So disabling, enabling,
+	// a password reset and a password change hold it from the control
+	// plane's change to the Host Agent's answer, and a deletion does not
+	// start during a synchronization (startDeletion).
 	identityMu sync.Mutex
 }
 
@@ -919,6 +926,10 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if s.credentials == nil {
 		return errors.New("credential provisioner is unavailable")
 	}
+	// A synchronization that read the account as active finishes first, so
+	// that this is the last word the host hears (identityMu).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	if status == UserStatusDisabled {
 		// Disabling again only retries host access and assistant shutdown.
 		return s.disableHostCredential(ctx, username)
@@ -965,6 +976,10 @@ func (s *Service) ResetCredential(ctx context.Context, actor User, userID, passw
 	if err := checkPassword(password); err != nil {
 		return err
 	}
+	// SMB goes off until the member chooses a password; a synchronization
+	// that read the account before must not switch it on again (identityMu).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	var user User
 	var privateSpaceID string
 	var deleting bool
