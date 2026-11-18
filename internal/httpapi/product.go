@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/accountsapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -91,6 +92,9 @@ type ProductDependencies struct {
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
 	WebSearch *websearchapi.API
+	// AssistantKey serves Settings → VNAS, the AI assistant's model key (ADR 0024); nil
+	// leaves its routes out.
+	AssistantKey *assistantkeyapi.API
 	// SystemUpdate serves Settings → 系统更新 (docs/specs/system-update.md);
 	// nil leaves its routes out.
 	SystemUpdate *systemupdateapi.API

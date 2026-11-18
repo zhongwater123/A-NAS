@@ -4444,6 +4444,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assistant-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether the household's DeepSeek key for VNAS is saved (设置 → VNAS, ADR 0024)
+         * @description Administrators only. The key itself is never answered: once saved it can be replaced or deleted, not read.
+         */
+        get: operations["getAssistantKey"];
+        /**
+         * Save or replace the DeepSeek key, which gives every member VNAS
+         * @description Administrators only. acknowledged must be true: the administrator confirms that members' conversations with VNAS, the file contents and photo information it reads to answer, and the photos and desktop screens it looks at go to DeepSeek's servers (400 acknowledgement_required). The Host Agent keeps the key encrypted on the device, where only the model gateway reads it, and prepares every active member's assistant; 400 invalid_key when it cannot be a DeepSeek key. Nothing logs the key.
+         */
+        put: operations["saveAssistantKey"];
+        post?: never;
+        /**
+         * Delete the DeepSeek key, which turns VNAS off for everyone
+         * @description Administrators only. Every member's assistant stops; their conversations, memory, scheduled tasks and files stay and come back when a key is saved again.
+         */
+        delete: operations["deleteAssistantKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assistant/ws": {
         parameters: {
             query?: never;
@@ -7463,6 +7491,26 @@ export interface components {
         AssistantStatus: {
             /** @description The member has an assistant instance. */
             available: boolean;
+            /**
+             * @description Why not, when it is known: no_key while no administrator has saved the DeepSeek key.
+             * @enum {string}
+             */
+            reason?: "no_key";
+        };
+        AssistantKeyState: {
+            /** @description A key is saved; every active member has VNAS. */
+            configured: boolean;
+            /**
+             * @description What systemd reports of the model gateway, which holds the key.
+             * @enum {string}
+             */
+            gateway: "running" | "starting" | "stopped" | "failed";
+        };
+        AssistantKeyRequest: {
+            /** @description The DeepSeek API key (printable ASCII, no spaces). */
+            key: string;
+            /** @description The administrator confirmed that what VNAS handles goes to DeepSeek; must be true. */
+            acknowledged: boolean;
         };
         AssistantSession: {
             id: string;
@@ -8170,6 +8218,8 @@ export type FeedbackItem = components['schemas']['FeedbackItem'];
 export type FeedbackComment = components['schemas']['FeedbackComment'];
 export type FeedbackImage = components['schemas']['FeedbackImage'];
 export type AssistantStatus = components['schemas']['AssistantStatus'];
+export type AssistantKeyState = components['schemas']['AssistantKeyState'];
+export type AssistantKeyRequest = components['schemas']['AssistantKeyRequest'];
 export type AssistantSession = components['schemas']['AssistantSession'];
 export type AssistantTask = components['schemas']['AssistantTask'];
 export type AssistantTaskEnvelope = components['schemas']['AssistantTaskEnvelope'];
@@ -17186,6 +17236,85 @@ export interface operations {
                 };
             };
             401: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getAssistantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key's state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    saveAssistantKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description The key's state after saving */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteAssistantKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key's state after deleting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

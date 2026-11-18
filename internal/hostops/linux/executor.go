@@ -147,6 +147,9 @@ type Executor struct {
 	// updateMu orders the system update service's request and settings
 	// files with the check that no run is in progress.
 	updateMu sync.Mutex
+	// assistantMu orders saving and deleting the assistant's key with preparing,
+	// enabling and disabling members' assistants, so the units always follow the key.
+	assistantMu sync.Mutex
 	// operations is the journal of data-volume operations by plan ID.
 	operationsMu    sync.Mutex
 	operations      map[string]*volumeOperation
@@ -286,7 +289,7 @@ func (e *Executor) SetCredential(ctx context.Context, request accountid.Credenti
 	}
 	// A member who had to choose a new password had the assistant masked by
 	// every identity synchronization until now.
-	return e.enableAssistant(ctx, request.Username)
+	return e.enableAssistant(ctx, request.Username, request.UID)
 }
 
 // DataVolumeReady reports whether the intended Btrfs data volume, with its

@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "cron-waker.py"
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "cron-waker.py"
 SPEC = importlib.util.spec_from_file_location("cron_waker", SOURCE)
 waker = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(waker)

@@ -11,17 +11,17 @@
 #   qdrant/<sha256>/<file>        scripts/fetch-qdrant.sh's tarball
 #   llama/<sha256>/<file>         scripts/fetch-llama.sh's tarball
 #   assistant-runtimes/<sha256>/runtime.tar.gz
-#                                 the assistant trial's Hermes runtime
+#                                 the AI assistant's Hermes runtime
 #   upstream/<sha256>/<file>      Docker and Caddy, which scripts/release.sh
 #                                 fetches there (not content packages)
 # Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
 # pins.
 #
-# With --stand-in, the models and the two runtimes are stand-ins under the
+# With --stand-in, the models and the three runtimes are stand-ins under the
 # same names, for the system test: small random files, and virtual
 # environments around Debian's Python, where web search's holds the system
 # test's stand-in for SearXNG. Qdrant and llama.cpp are the real ones from
-# CONTENT; the assistant trial's runtime is left out. Stand-ins go to a
+# CONTENT. Stand-ins go to a
 # directory of their own, never to a repository.
 #
 # Usage: scripts/build-content-packages.sh [--stand-in] OUT CONTENT
@@ -187,33 +187,35 @@ if ! have "$name" amd64; then
 License: $(pin_field "$pin" license)"
 fi
 
-# The assistant trial's Hermes runtime (ai/assistant-spike/runtime.json). Its
-# scripts name /opt/a-nas/assistant-runtimes/spike, so one is installed at a
-# time: each provides, conflicts with and replaces a-nas-assistant-runtime.
-# Its prerm stops what runs on it before apt replaces it; the trial's postinst
-# starts them again (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm).
-pin=$repo/ai/assistant-spike/runtime.json
+# The AI assistant's Hermes runtime (ai/assistant/runtime.json), which a-nas
+# depends on. Its virtual environment names /opt/a-nas/assistant-runtimes/spike,
+# where it was first built, so one is installed at a time: each provides,
+# conflicts with and replaces a-nas-assistant-runtime. Its prerm stops what runs
+# on it before apt replaces it; a-nas's postinst starts that again
+# (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm). The stand-in holds what
+# the units name, Debian's Python and an empty SOUL.md, and runs none of Hermes;
+# the system test unpacks the real runtime over it when it is given one.
+pin=$repo/ai/assistant/runtime.json
 name=$(assistant_runtime_package "$repo")
-if ! "$stand_in" && ! have "$name" amd64; then
+if ! have "$name" amd64; then
   sha=$(pin_field "$pin" sha256)
-  tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
-  if [[ ! -e "$tarball" ]]; then
-    # A release needs it (scripts/release.sh); the system test does not.
-    echo "note: no $tarball, so no $name" >&2
-  elif ! pinned "$tarball" "$pin"; then
-    echo "not as pinned: $tarball (ai/assistant-spike/runtime.json)" >&2
-    exit 2
+  target=$work/$name/opt/a-nas/assistant-runtimes
+  install -d "$target"
+  if "$stand_in"; then
+    install -d "$target/spike/venv/bin" "$target/spike/src"
+    ln -s /usr/bin/python3 "$target/spike/venv/bin/python"
+    install -m 0644 /dev/null "$target/spike/src/SOUL.md"
   else
-    install -d "$work/$name/opt/a-nas/assistant-runtimes"
-    tar -C "$work/$name/opt/a-nas/assistant-runtimes" --no-same-owner -xzf "$tarball"
-    package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
+    tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
+    pinned "$tarball" "$pin" || { echo "missing or not as pinned: $tarball (ai/assistant/runtime.json)" >&2; exit 2; }
+    tar -C "$target" --no-same-owner -xzf "$tarball"
+  fi
+  package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
 Provides: a-nas-assistant-runtime
 Conflicts: a-nas-assistant-runtime
-Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant trial
- The runtime ai/assistant-spike/runtime.json pins by SHA-256 $sha, in
- /opt/a-nas/assistant-runtimes/spike, for development testing only
- (docs/runbooks/try-ai-assistant-on-experimental-nas.md)." \
-      "Hermes Agent (MIT) with the packages its build installs, each under its own license." \
-      "$repo/deploy/debian/a-nas-assistant-runtime/DEBIAN"
-  fi
+Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant (VNAS)
+ The runtime ai/assistant/runtime.json pins by SHA-256 $sha, in
+ /opt/a-nas/assistant-runtimes/spike (docs/adr/0024).$("$stand_in" && printf '\n .\n A stand-in around Debian'"'"'s Python for the system test.')" \
+    "Hermes Agent (MIT) with the packages its build installs, each under its own license." \
+    "$repo/deploy/debian/a-nas-assistant-runtime/DEBIAN"
 fi

@@ -1,9 +1,9 @@
-"""Stub of the A-NAS MCP tools for the spike.
+"""The A-NAS MCP tools of a member's assistant (ADR 0024 decision 3).
 
-In A-NAS the MCP endpoint is the product service. Here a stdio server inside
-the sandbox forwards each call to the change broker's agent socket, which
-knows the member by the caller's UID and decides everything: it applies a
-submission only when the member approved exactly that call.
+A stdio server inside the sandbox forwards each call of 提交更改 to the Host Agent's
+assistant socket (the change broker's agent socket in the spike), which knows the member
+by the caller's UID and decides everything: it applies a submission only when the member
+approved exactly that call.
 
 Hermes runs this server with `trust: untrusted`, so every call of a tool
 without readOnlyHint waits for the member's in-turn approval first.
