@@ -3,11 +3,14 @@ package photos
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -19,9 +22,10 @@ import (
 
 // TestScaleBaseline seeds the first capacity baseline of the photo library
 // specification, 4 members and 20,000 photos, through the real import path,
-// and times the reads the desktop makes. It takes minutes, so it runs only
-// with ANAS_PHOTO_SCALE=1; the budget catches query plans that grow with the
-// library, while device numbers come from the Experimental NAS.
+// and times the reads the desktop makes, searches included. It takes
+// minutes, so it runs only with ANAS_PHOTO_SCALE=1; the budget catches query
+// plans that grow with the library, while device numbers come from the
+// Experimental NAS.
 func TestScaleBaseline(t *testing.T) {
 	if os.Getenv("ANAS_PHOTO_SCALE") == "" {
 		t.Skip("set ANAS_PHOTO_SCALE=1 to run the 4-member, 20,000-photo baseline")
@@ -34,7 +38,7 @@ func TestScaleBaseline(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
 	now := func() time.Time { return time.Unix(0, clock.Add(int64(time.Minute))).UTC() }
-	service, err := Open(filepath.Join(t.TempDir(), "photos"), Options{Now: now, DisableCapacityReserve: true})
+	service, err := Open(filepath.Join(t.TempDir(), "photos"), Options{Now: now, DisableCapacityReserve: true, AI: scaleEmbedder{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +119,7 @@ func TestScaleBaseline(t *testing.T) {
 	}
 	t.Logf("seeded %d photos in %s (%.1f ms per import), thumbnails in %s",
 		5*perLibrary, imported.Round(time.Second), float64(imported.Milliseconds())/float64(5*perLibrary), (time.Since(seeded) - imported).Round(time.Second))
+	vectors := seedVectors(t, service)
 
 	alice, bob, dave := members[0], members[1], members[3]
 	viewer := dave
@@ -162,6 +167,29 @@ func TestScaleBaseline(t *testing.T) {
 		{"get photo", func() error { _, err := service.Get(ctx, alice, sample[0].ID); return err }},
 		{"trash", func() error { _, err := service.ListTrash(ctx, alice, aliceLibrary.ID); return err }},
 	}
+	// Search ranks every photo in its scope by the query vector. Encoding the
+	// query is the Worker's and does not grow with the library; the stand-in
+	// returns at once, so these times are the service's own. The first search
+	// after a start loads every vector into memory.
+	search := func(p Principal, viewing string) func() error {
+		return func() error {
+			page, err := service.Search(ctx, p, SearchRequest{Query: "傍晚海边散步的一家人", Viewing: viewing, Limit: 120})
+			if err == nil && len(page.Assets) == 0 {
+				err = fmt.Errorf("search by %s found nothing", p.Username)
+			}
+			return err
+		}
+	}
+	firstSearch, _ := measure(t, 1, search(alice, ""))
+	t.Logf("%-36s %9s (loads %d vectors)", "first search after start", firstSearch.Round(10*time.Microsecond), vectors)
+	operations = append(operations, []struct {
+		name string
+		run  func() error
+	}{
+		{"search (private + shared, 8,000)", search(alice, "")},
+		{"search (viewing too, 12,000)", search(viewer, aliceLibrary.ID)},
+	}...)
+
 	var slow []string
 	for _, operation := range operations {
 		median, worst := measure(t, 30, operation.run)
@@ -187,6 +215,75 @@ func measure(t *testing.T, runs int, operation func() error) (median, worst time
 	}
 	slices.Sort(durations)
 	return durations[len(durations)/2], durations[len(durations)-1]
+}
+
+// scaleEmbedder stands in for the AI Worker with the dimensions of the
+// product model: a query becomes one fixed unit vector at once.
+type scaleEmbedder struct{}
+
+const scaleDimensions = 768
+
+func (scaleEmbedder) Info(context.Context) (EmbedderInfo, error) {
+	return EmbedderInfo{Model: "scale-768", Dimensions: scaleDimensions}, nil
+}
+
+func (scaleEmbedder) EmbedImage(context.Context, *os.File) ([]float32, error) {
+	return nil, ErrAIUnavailable
+}
+
+func (scaleEmbedder) EmbedQuery(context.Context, string) ([]float32, error) {
+	return unitVector(rand.New(rand.NewPCG(7, 7))), nil
+}
+
+func unitVector(random *rand.Rand) []float32 {
+	vector := make([]float32, scaleDimensions)
+	var norm float64
+	for i := range vector {
+		vector[i] = float32(random.NormFloat64())
+		norm += float64(vector[i]) * float64(vector[i])
+	}
+	for i := range vector {
+		vector[i] /= float32(math.Sqrt(norm))
+	}
+	return vector
+}
+
+// seedVectors stores a vector of the stand-in model for every original, as
+// the AI runner would after organizing them all, and returns how many.
+func seedVectors(t *testing.T, service *Service) int {
+	t.Helper()
+	random := rand.New(rand.NewPCG(1, 1))
+	var count int
+	err := service.withTx(context.Background(), func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT DISTINCT object_id FROM assets")
+		if err != nil {
+			return err
+		}
+		var objects []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			objects = append(objects, id)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		for _, id := range objects {
+			if _, err := tx.Exec("INSERT INTO embeddings(object_id, derivation, model, vector, created_at) VALUES(?, ?, ?, ?, ?)",
+				id, embeddingDerivation, "scale-768", encodeVector(unitVector(random)), "2026-01-01T00:00:00Z"); err != nil {
+				return err
+			}
+		}
+		count = len(objects)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 // syntheticPNG returns a small PNG whose bytes are unique to n.
