@@ -25,3 +25,9 @@ b4154e17c43dd4944fc836fbe911279c5f02989f:internal/appstore/catalog/linkwarden/do
 # branch (#203), not yet in main.
 8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:164
 8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:165
+
+# The AI assistant's model key (#565): a made-up DeepSeek-shaped key ("sk-" and 32
+# hexadecimal digits counting up) that the Host Agent's and the settings page's tests save
+# and then look for where it must not appear. The system test makes a random one instead.
+a6c1357d3c89aca2aa5a0cb4245972ab59e70303:internal/hostops/linux/assistant_test.go:generic-api-key:266
+723d1436428cd0d1118b3d4140bb3ca50ba1051f:web/src/settings/AssistantSection.test.tsx:generic-api-key:11

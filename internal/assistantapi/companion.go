@@ -30,7 +30,7 @@ import (
 
 // The companion tools of members' assistants (#412) reach the Product Service
 // on a socket of their own, which systemd binds into each assistant's sandbox
-// (ai/assistant-spike/anas-companion-assistant.socket); the scheduled tasks'
+// (deploy/systemd/system/anas-companion-assistant.socket); the scheduled tasks'
 // sandboxes do not have it. The tools move and animate the companion in the
 // VNAS window of the conversation that called them.
 //

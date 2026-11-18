@@ -1,7 +1,7 @@
 """Change broker for in-turn approvals (#111): the stand-in for the File
 Broker's executor (internal/assistantchanges) where there is no File Broker,
 in the spike and the UI prototype. The system test runs the real one
-(assistant-install.sh with ASSISTANT_GATE=host-agent).
+(the system test, and every A-NAS).
 
 Runs as root in the spike container with two Unix sockets:
 

@@ -22,9 +22,11 @@ type Commands interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// The packages of an A-NAS release, at one version; the last two only where
-// they are installed.
-var releasePackages = []string{"a-nas", "a-nas-host", "a-nas-console", "a-nas-assistant-trial"}
+// The packages of an A-NAS release, at one version; the last only where it is
+// installed. a-nas-assistant-trial is no longer one: the assistant is part of
+// a-nas, and apt removes the empty package that replaced the trial when the
+// next release no longer satisfies it.
+var releasePackages = []string{"a-nas", "a-nas-host", "a-nas-console"}
 
 // contentPatterns are the content packages a release depends on
 // (scripts/lib/content.sh): installed at version 1, named by their content.
@@ -349,8 +351,7 @@ func (s *Service) installedVersion(ctx context.Context, name string) string {
 }
 
 // landed reports whether the release is installed whole at version: a-nas
-// and a-nas-host, and a-nas-console and a-nas-assistant-trial where dpkg
-// has them in any status.
+// and a-nas-host, and a-nas-console where dpkg has it in any status.
 func (s *Service) landed(ctx context.Context, version string) bool {
 	for i, name := range releasePackages {
 		status, installed := s.packageState(ctx, name)
@@ -422,9 +423,9 @@ func (s *Service) newer(ctx context.Context, a, b string) bool {
 }
 
 // releaseArguments are the release's packages at a version, as apt-get
-// install takes them: a-nas and a-nas-host always, a-nas-console and
-// a-nas-assistant-trial where dpkg has them. One that a failed install or a
-// cut left unpacked or half installed counts, so that going back rewrites it.
+// install takes them: a-nas and a-nas-host always, a-nas-console where dpkg
+// has it. One that a failed install or a cut left unpacked or half installed
+// counts, so that going back rewrites it.
 func (s *Service) releaseArguments(ctx context.Context, version string) []string {
 	var arguments []string
 	for i, name := range releasePackages {
@@ -904,6 +905,8 @@ func (s *Service) keepContent(ctx context.Context, current, previous string) {
 		if version == "" {
 			continue
 		}
+		// Before the assistant was part of a-nas, a release depended on its
+		// runtime through a-nas-assistant-trial.
 		for _, name := range []string{"a-nas", "a-nas-assistant-trial"} {
 			output, err := s.Commands.Run(ctx, "apt-cache", "depends", "--no-recommends", "--no-suggests",
 				"--no-conflicts", "--no-breaks", "--no-replaces", "--no-enhances", name+"="+version)

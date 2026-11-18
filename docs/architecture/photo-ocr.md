@@ -308,7 +308,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 
 ### 助手的工具
 
-2026-11-10 用户在实验 NAS 上问 VNAS“我身份证号码是多少”，它翻了 11 次文件，再问才去相册，又用 5 次调用逐张取画面，最后拿不到号码：相册服务给助手的文字接口没有任何工具在用。按[工具设计的通行做法](https://www.anthropic.com/engineering/writing-tools-for-agents)（少而精、一次调用带回要用的信息、报错写明下一步），文字并进现有的两个工具，不加新工具（[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py)）：
+2026-11-10 用户在实验 NAS 上问 VNAS“我身份证号码是多少”，它翻了 11 次文件，再问才去相册，又用 5 次调用逐张取画面，最后拿不到号码：相册服务给助手的文字接口没有任何工具在用。按[工具设计的通行做法](https://www.anthropic.com/engineering/writing-tools-for-agents)（少而精、一次调用带回要用的信息、报错写明下一步），文字并进现有的两个工具，不加新工具（[`anas_mcp.py`](../../ai/assistant/anas_mcp.py)）：
 
 - **`search_photos`**：第一页里按名称或文字命中的照片（至多 10 张）带上读出的内容：
   - `document`：文档类型；
@@ -321,7 +321,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - **`look_at_photo`**：说明里写明读字不用它。被拒绝时，工具按相册的错误码告诉模型下一步：`sensitive_photo` 是“用 `photo_details` 读文字，句柄原样写进回答”，`unread_photo` 是“请成员稍后再问”。
 - **句柄怎么用**写在两个带文字的工具的说明里：成员要号码时，把句柄原样写进回答正文，不要说自己看不到。
 
-部署时相册服务、产品服务（含 Web）与助手的 MCP 工具（[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)的 `update`）一起更新：只更新一边时，助手要么拿不到文字，要么窗口换不出号码。
+部署时相册服务、产品服务（含 Web）与助手的 MCP 工具（随 `a-nas`，[手册](../runbooks/enable-ai-assistant.md)）一起更新：只更新一边时，助手要么拿不到文字，要么窗口换不出号码。
 
 评测用例在 [`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 与 [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)，结果见[研究记录](../research/hermes-agent-runtime.md#问证件上的号码2026-11-10)。
 
