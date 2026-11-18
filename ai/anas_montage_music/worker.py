@@ -55,7 +55,7 @@ log = logging.getLogger("anas_montage_music")
 SYSTEMD_FIRST_FD = 3
 IDLE_SECONDS = 300
 # The longest song the montage center takes, with room for the decoder.
-LONGEST_SECONDS = 15 * 60 + 5
+LONGEST_SECONDS = 8 * 60 + 5
 STEREO_RATE, MONO_RATE = 44100, 22050
 # The eighth version's RMS curve (librosa.feature.rms's defaults).
 FRAME, HOP = 2048, 512
@@ -158,7 +158,9 @@ def read_stream(fd, channels, seconds=LONGEST_SECONDS, rate=STEREO_RATE):
             if total > most:
                 raise Refused("the song is longer than the montage center takes")
             chunks.append(chunk)
-    data = b"".join(chunks)
+    # Writable, for PyTorch to take as it is.
+    data = bytearray().join(chunks)
+    del chunks
     if len(data) % (4 * channels):
         raise Refused("the stream is not whole float32 frames")
     samples = np.frombuffer(data, "<f4").reshape(-1, channels)
@@ -167,6 +169,16 @@ def read_stream(fd, channels, seconds=LONGEST_SECONDS, rate=STEREO_RATE):
     if not np.isfinite(samples).all():
         raise Refused("the stream has samples that are not numbers")
     return samples
+
+
+def high_water():
+    """The process's peak resident memory so far in MiB (Linux), or 0 elsewhere."""
+    try:
+        with open("/proc/self/status") as status:
+            line = next(line for line in status if line.startswith("VmHWM:"))
+        return int(line.split()[1]) // 1024
+    except (OSError, StopIteration, ValueError):
+        return 0
 
 
 def rms_curve(y):
@@ -210,6 +222,59 @@ def as_wave_file(stem):
     return Signal(mono, sample_rate=STEREO_RATE, num_channels=1)
 
 
+def separate(separator, stereo):
+    """demucs.api.Separator.separate_tensor with demucs.separate's defaults, number for number, in less memory.
+
+    htdemucs is a bag of one model with weight 1, so the bag's averaging
+    (demucs.apply.apply_model) changes no value; neither does dividing the
+    one shift's output by one. Calling the model's split pass directly with
+    the same random shift, keeping its output as a view and undoing the
+    normalisation in place leaves out three copies of the separated song,
+    some 1.4 MB a second of it each. separation_matches_demucs checks this.
+    """
+    import torch
+    from demucs.apply import TensorChunk, apply_model, tensor_chunk
+
+    (model,) = separator.models
+    random.seed(SEED)
+    torch.manual_seed(SEED)
+    # The samples as (channels, length): a view, not a copy.
+    wav = torch.from_numpy(stereo).T
+    ref = wav.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    del ref
+    with torch.no_grad():
+        mix = ((wav - mean) / std).contiguous()[None]
+        del wav
+        length = mix.shape[-1]
+        max_shift = int(0.5 * model.samplerate)
+        padded = tensor_chunk(mix).padded(length + 2 * max_shift)
+        offset = random.randint(0, max_shift)  # noqa: S311 (demucs' shift, not a secret)
+        shifted = TensorChunk(padded, offset, length + max_shift - offset)
+        out = apply_model(model, shifted, shifts=0, split=True, overlap=0.25, device="cpu", num_workers=0, progress=False)
+        del mix, padded, shifted
+        out = out[..., max_shift - offset:]
+        out.mul_(std).add_(mean)
+    return out
+
+
+def separation_matches_demucs(separator, stereo):
+    """separate's output against demucs' own path, for a short clip (ai/eval)."""
+    import torch
+    from demucs.apply import apply_model
+
+    random.seed(SEED)
+    torch.manual_seed(SEED)
+    wav = torch.from_numpy(np.ascontiguousarray(stereo.T))
+    ref = wav.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    with torch.no_grad():
+        theirs = apply_model(separator, ((wav - mean) / std)[None], segment=None, shifts=1, split=True, overlap=0.25,
+                             device="cpu", num_workers=0, progress=False)
+    theirs = theirs * std + mean
+    return bool(torch.equal(theirs, separate(separator, stereo)))
+
+
 def structure(models, stereo):
     """allin1.analyze for one song held in memory."""
     import torch
@@ -218,35 +283,31 @@ def structure(models, stereo):
         postprocess_functional_structure,
         postprocess_metrical_structure,
     )
-    from demucs.apply import apply_model
-
     ensemble, separator = models.load()
     clock = time.monotonic()
-    # demucs.api.Separator.separate_tensor with demucs.separate's defaults.
-    random.seed(SEED)
-    torch.manual_seed(SEED)
-    wav = torch.from_numpy(np.ascontiguousarray(stereo.T))
-    ref = wav.mean(0)
-    mean, std = ref.mean(), ref.std() + 1e-8
-    with torch.no_grad():
-        out = apply_model(separator, ((wav - mean) / std)[None], segment=None, shifts=1, split=True, overlap=0.25,
-                          device="cpu", num_workers=0, progress=False)
-    out = out * std + mean
-    del wav, ref
+    out = separate(separator, stereo)
     separated, clock = time.monotonic() - clock, time.monotonic()
+    peaks = [high_water()]
     stems = dict(zip(separator.sources, out[0], strict=True))
-    processor = spectrogram_processor()
-    spec = np.stack([processor(as_wave_file(stems[name])) for name in STEMS])
+    # Each stem as the 16-bit mono madmom reads, then the float stems go
+    # before the spectrograms are made: the same numbers in less memory.
+    waves = [as_wave_file(stems[name]) for name in STEMS]
     del out, stems
+    processor = spectrogram_processor()
+    spec = np.stack([processor(wave) for wave in waves])
+    del waves
     spectra, clock = time.monotonic() - clock, time.monotonic()
+    peaks.append(high_water())
     with torch.no_grad():
         logits = ensemble(torch.from_numpy(spec).unsqueeze(0))
     inferred, clock = time.monotonic() - clock, time.monotonic()
+    peaks.append(high_water())
     metrical = postprocess_metrical_structure(logits, ensemble.cfg)
     functional = postprocess_functional_structure(logits, ensemble.cfg)
     bpm = estimate_tempo_from_beats(metrical["beats"])
-    log.info("song of %.0f s: separated in %.1f s, spectrograms %.1f s, allin1 %.1f s, downbeats and sections %.1f s, %d threads",
-             len(stereo) / STEREO_RATE, separated, spectra, inferred, time.monotonic() - clock, torch.get_num_threads())
+    log.info("song of %.0f s: separated in %.1f s, spectrograms %.1f s, allin1 %.1f s, downbeats and sections %.1f s, %d threads; "
+             "peak MiB after each of the first three %s",
+             len(stereo) / STEREO_RATE, separated, spectra, inferred, time.monotonic() - clock, torch.get_num_threads(), peaks)
     # Rounded as the eighth version keeps it (adapters/music.py, Allin1.structure).
     return {"bpm": bpm, "beats": [round(float(t), 3) for t in metrical["beats"]],
             "downbeats": [round(float(t), 3) for t in metrical["downbeats"]],

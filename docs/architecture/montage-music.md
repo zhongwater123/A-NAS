@@ -12,7 +12,7 @@
                                                │ 音乐功能播放的同一条路径：经文件代理以成员身份打开文件
                                                ▼
                                      anas-montage（流式收下）
-   songs/<sha256>/audio ◀── 按内容摘要存一份；FFmpeg Worker probe：要有音频，30 秒到 15 分钟
+   songs/<sha256>/audio ◀── 按内容摘要存一份；FFmpeg Worker probe：要有音频，30 秒到 8 分钟
         │ 后台，一次一首
         ├─ FFmpeg Worker audio PCM：立体声 44.1 kHz ─┐  两条管道，依次写
         ├─ FFmpeg Worker audio PCM：单声道 22050 Hz ─┤
@@ -23,7 +23,7 @@
 ```
 
 - **复制**：`montageapi.CopySong` 是 anas-api 对 `PUT /api/v1/montage/projects/{id}/song` 的专门处理（[`internal/montageapi/song.go`](../../internal/montageapi/song.go)）。它调 `music.Service.OpenTrack`，与音乐播放相同，看不到的曲目（包括别人个人空间里的）回答 404；音乐库已知的大小与时长先挡掉超限的，不复制。歌曲经 `X-A-NAS-Song` 头带上标题与能否直接播放（音乐功能的 `Transcode`），这个头只由 anas-api 设置，浏览器发来的在挂载层就被去掉。
-- **收下**：剪辑服务边收边算 SHA-256，超过 100 MiB 回答 413；再请 FFmpeg Worker probe，没有音频或时长不在 30 秒到 15 分钟回答 422（[`internal/montage/songs.go`](../../internal/montage/songs.go)）。副本按内容存成 `songs/<sha256>/audio`，几位成员选同一首共用一份。
+- **收下**：剪辑服务边收边算 SHA-256，超过 100 MiB 回答 413；再请 FFmpeg Worker probe，没有音频或时长不在 30 秒到 8 分钟回答 422（上限见“用时与内存”）（[`internal/montage/songs.go`](../../internal/montage/songs.go)）。副本按内容存成 `songs/<sha256>/audio`，几位成员选同一首共用一份。
 - **表**：`montage.db` 第 2 步加 `songs`（每位成员一行：摘要、标题、时长、状态、不可用的原因、等待的原因、分析结果与响度）与 `projects.song_id`、`song_start`、`song_selection`，带 Down（[`internal/montage/store.go`](../../internal/montage/store.go)）。`song_selection` 是成员拖动起点后那一段的选段，免得每次读项目都要算。
 - **回收**：删除项目、换歌、删除账号后，删掉没有项目再用的 `songs` 行，再删掉没有行引用的副本目录；服务启动时对一次账，并清掉没收完的 `songs/.incoming/`。持久任务（M8a）加入后，进行中的任务也要算作引用。
 - **分析**：同一内容只分析一次，结果写进所有在等它的行；新的一行遇到别人已经分析好的同一首，直接取用（[`internal/montage/analysis.go`](../../internal/montage/analysis.go)）。allin1 的结构先存下，算选段的计算 Worker 不在时只重试选段。Worker 不在时这首歌停在 `analyzing`，写明在等谁（`analyzer_unavailable`、`compute_unavailable`、`media_unavailable`），5 分钟后再试。
@@ -53,6 +53,7 @@
 - DynamicUser，`PrivateNetwork`，`InaccessiblePaths=-/srv/a-nas`，`HF_HUB_OFFLINE=1`；歌曲只经两条管道进来；
 - 放在 `anas.slice` 之下；空闲 5 分钟退出，下一首再由套接字启动；
 - 权重按清单的 SHA-256 逐个核对后才加载（`checked_files`）。
+- 省内存，数值不变：htdemucs 是只有一个模型、权重为 1 的集成，Worker 直接对它做同一次随机平移与分块，输出留作视图，原地还原归一化，少三份分离结果的拷贝；四个音轨先转成 16 位单声道，再放掉浮点数据，然后才算谱。
 
 ## 运行环境与交付
 
@@ -124,6 +125,19 @@
 - **虚拟机**：开发机 C 上的 Colima `anas` 虚拟机（aarch64，6 核，8 GiB），Debian 13 容器里的 Python 3.13、PyTorch 2.6.0、NATTEN 0.17.1、madmom 按 `sources.json` 的提交，与 NAS 的运行环境同版本，只是处理器不同。两边的节拍、重拍、段落与标签结果逐个相同。
 - **各步用时**：以虚拟机上的 Fortnight 为例，分离音轨 85 秒、谱 2 秒、8 折推理 108 秒、找重拍与段落 2 秒。推理时 NATTEN 的 CPU 算子占大头。
 - **一首 4 分钟的歌**：虚拟机上约 4–4.5 分钟、峰值约 2.5 GiB，是 8 GB 预算的三分之一。
-- **更长的歌**：峰值随歌长增长。把 Fortnight 与 Fire 接成一首 457 秒的歌，虚拟机上用时 411 秒、峰值 4166 MiB；按 229 到 457 秒之间每秒约 7 MiB 外推，15 分钟（规格允许的上限）的歌约 7.3 GiB，接近 8 GB 的全部预算。单元的 `MemoryMax`（暂为 4G）与最长能分析多长的歌待定，见下。
+- **更长的歌**：峰值随歌长增长，主要在找重拍与段落（madmom 的 DBN）和 8 折推理两步。
 
-**待定**：15 分钟的歌按外推要 7 GiB 以上。可选的做法是降低能分析的最长时长、在不改变结果的前提下继续省内存，或放宽这个 Worker 的内存上限；定之前单元先按 4G 限制，超过的歌在分析时内存不足，会写明在等配乐分析并按 5 分钟重试。
+| 歌（虚拟机） | 时长（秒） | 用时（秒） | 峰值（MiB） | 分离后 / 谱后 / 推理后的高水位（MiB） |
+|---|---|---|---|---|
+| Fortnight + Fire | 457.5 | 411 | 4166 | 改动前，没有分步数字 |
+| Fortnight + Fire | 457.5 | 581 | 4379 | 2507 / 3442 / 3783（只改了分离一步） |
+| Fortnight + Fire + STAY 前段 | 480.0 | 423 | 4593 | 2544 / 2955 / 3942 |
+
+这两首长歌是测试歌接起来的，只看用时与内存。457 秒那首两次的用时差别大，原因没有查；虚拟机与其他会话共用。
+
+**最长 8 分钟（2026-11-18，用户决定）**：按 229 到 457 秒之间每秒约 7 MiB 外推，规格原来允许的 15 分钟要约 7.3 GiB，接近 8 GB 的全部预算。可选的做法有三种：降低能分析的最长时长；在结果不变的前提下继续省内存；放宽这个 Worker 的内存上限。用户选了第一种，最长 8 分钟。
+
+- 剪辑服务收歌的上限、`song_length` 的提示、`music` 与 Worker 能接受的长度都改为 8 分钟（`montage.MaxSongSeconds`）。
+- 单元的 `MemoryMax=5632M`：8 分钟的歌实测峰值 4593 MiB，多留约五分之一。
+- 两份模型清单的 `memoryBytes` 记这次实测：allin1 记整个 Worker 的峰值，htdemucs 记分离完的高水位。
+- 分离与谱两步改成少留几份整首大小的数据（`separate`、谱前先放掉浮点音轨），见“配乐分析 Worker”。用 `--check-separation` 核对过分离结果与 Demucs 原写法逐位相同；STAY 的结构与改动前逐个相同。

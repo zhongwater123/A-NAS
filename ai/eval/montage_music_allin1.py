@@ -135,6 +135,20 @@ def analyse(args, song):
     return answer, seconds, peak, len(mono) / 4 / 22050
 
 
+def check_separation(args, song):
+    """separate against demucs' own path (worker.separation_matches_demucs), in this process."""
+    from anas_montage_music import worker
+
+    models = worker.Models(args.allin1_manifest, args.allin1, args.demucs_manifest, args.demucs, args.threads)
+    _, separator = models.load()
+    stereo = np.frombuffer(bytearray(decode(args.ffmpeg, song, 2, 44100)), "<f4").reshape(-1, 2)
+    clip = stereo[: int(args.check_separation * 44100)]
+    same = worker.separation_matches_demucs(separator, np.ascontiguousarray(clip))
+    print(json.dumps({"song": song.stem, "separationMatchesDemucs": same}, ensure_ascii=False), flush=True)
+    if not same:
+        raise SystemExit(f"{song.name}: the Worker's separation differs from demucs'")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--songs", required=True)
@@ -146,6 +160,8 @@ def main():
     parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--only", help="only the songs whose name contains this")
     parser.add_argument("--out")
+    parser.add_argument("--check-separation", type=float, metavar="SECONDS",
+                        help="first check that the Worker separates the first SECONDS of each song number for number as demucs does")
     args = parser.parse_args()
     results = []
     for path in sorted(Path(args.structures).expanduser().glob("structure-*.json")):
@@ -154,6 +170,8 @@ def main():
             continue
         reference = json.loads(path.read_text(encoding="utf-8"))
         song = next(Path(args.songs).expanduser().glob(f"{name}.*"))
+        if args.check_separation:
+            check_separation(args, song)
         answer, seconds, peak, duration = analyse(args, song)
         row = {"song": name, "duration": round(duration, 1), "seconds": round(seconds, 1), "analysis": answer["seconds"],
                "peakMiB": round(peak / 2**20), "bpm": [reference["bpm"], answer["bpm"]],
