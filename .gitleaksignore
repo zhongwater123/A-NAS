@@ -25,3 +25,8 @@ b4154e17c43dd4944fc836fbe911279c5f02989f:internal/appstore/catalog/linkwarden/do
 # branch (#203), not yet in main.
 8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:164
 8441058b8159d2eb43ab831b6d5bbc195b29c4e7:web/src/voice/VoicePanel.test.tsx:generic-api-key:165
+
+# The milestone's installedApiSHA256 is a program-file checksum, not a key.
+# It was verified against the packaged and installed anas-api executable.
+# The public field is now installedProgramSHA256 to avoid repeating the finding.
+e613815002eb4257d8a27ede3140efaf292ad6a6:docs/releases/evidence/rk3588-2026-11-18/verification.json:generic-api-key:7

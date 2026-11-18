@@ -4,7 +4,7 @@
   "board": "ATK-DLRK3588, 8GB RAM / 64GB eMMC / 256GB PCIe NVMe",
   "baseCommit": "5a3ceb79daa9e8c2a1881e890f0ab78f4c21c346",
   "installedVersion": "1.0.1~rc.6+dev20261118.100+g5a3ceb79daa9.rk5.1",
-  "installedApiSHA256": "c3c7f45e35283ae415ac4e7f180e5f9b95a1002b46a3c6414dc1e5c5143f37a8",
+  "installedProgramSHA256": "c3c7f45e35283ae415ac4e7f180e5f9b95a1002b46a3c6414dc1e5c5143f37a8",
   "validatedBaselineSourceArchiveSHA256": "b5c4acc2aeb5da8aafa3891653b249295376b49da81bb220f402c9a7a40aed9a",
   "packageManifestSHA256": "d13ffd193ee16f1cca761afacaeea24a2a884956f381f65c440c3629efbb8fcf",
   "upgradeManifestSHA256": "041de5ea7ffe4fff204ecbe4793075bff675b6a87f7e7f5f73646e5ad0669804",
