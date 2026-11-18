@@ -291,7 +291,12 @@ func TestTwoFacesOfOnePhotoNeverShareAPerson(t *testing.T) {
 		importPhoto(t, service, alice, private.ID, "", string(rune('a'+i))+".png", peoplePhoto(t, uint8(i), 0, 0))
 	}
 	organise(t, service, worker)
-	for _, person := range people(t, service, alice, true) {
+	found := people(t, service, alice, true)
+	// Without this the loop below checks nothing when clustering finds nobody.
+	if len(found) != 2 {
+		t.Fatalf("People() = %+v; want the two faces as two people", found)
+	}
+	for _, person := range found {
 		if person.Photos != len(personPhotos(t, service, alice, person.ID)) {
 			t.Fatalf("person %+v counts photos twice", person)
 		}

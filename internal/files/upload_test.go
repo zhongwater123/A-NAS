@@ -199,6 +199,97 @@ func TestUploadConflictPolicies(t *testing.T) {
 	}
 }
 
+// A replacing upload replaces the file it found when it began. Whatever takes
+// the name while its bytes arrive is someone else's file and stays (#487).
+func TestReplacingUploadKeepsAFileThatArrivedMeanwhile(t *testing.T) {
+	commit := func(t *testing.T, f *uploadFixture, upload *files.PendingUpload) files.CommittedUpload {
+		t.Helper()
+		if _, err := f.service.WriteUpload(f.ctx, upload, 0, strings.NewReader("mine")); err != nil {
+			t.Fatalf("WriteUpload() error = %v", err)
+		}
+		committed, err := f.service.CommitUpload(f.ctx, f.alice, upload)
+		if err != nil {
+			t.Fatalf("CommitUpload() error = %v", err)
+		}
+		return committed
+	}
+	content := func(t *testing.T, f *uploadFixture, name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(f.root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	trashed := func(t *testing.T, f *uploadFixture) []string {
+		t.Helper()
+		trash, err := f.service.ListTrash(f.ctx, f.alice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, item := range trash {
+			names = append(names, item.Name)
+		}
+		return names
+	}
+
+	t.Run("the name was free when the upload began", func(t *testing.T) {
+		f := newUploadFixture(t)
+		upload := f.begin(t, files.UploadRequest{Name: "late.txt", Size: 4, Conflict: files.ConflictReplace})
+		f.send(t, files.UploadRequest{Name: "late.txt"}, "newcomer")
+		got := commit(t, f, upload)
+		if got.Replaced || got.Entry.Name != "late (1).txt" {
+			t.Fatalf("saved %q, replaced = %v; want late (1).txt beside the newcomer", got.Entry.Name, got.Replaced)
+		}
+		if content(t, f, "late.txt") != "newcomer" || len(trashed(t, f)) != 0 {
+			t.Fatalf("the newcomer was touched: late.txt = %q, trash = %v", content(t, f, "late.txt"), trashed(t, f))
+		}
+	})
+
+	t.Run("another upload replaced the file meanwhile", func(t *testing.T) {
+		f := newUploadFixture(t)
+		f.send(t, files.UploadRequest{Name: "late.txt"}, "original")
+		upload := f.begin(t, files.UploadRequest{Name: "late.txt", Size: 4, Conflict: files.ConflictReplace})
+		f.send(t, files.UploadRequest{Name: "late.txt", Conflict: files.ConflictReplace}, "newcomer")
+		got := commit(t, f, upload)
+		if got.Replaced || got.Entry.Name != "late (1).txt" {
+			t.Fatalf("saved %q, replaced = %v; want late (1).txt beside the newcomer", got.Entry.Name, got.Replaced)
+		}
+		// Only the original went to the trash, moved there by the newcomer.
+		if content(t, f, "late.txt") != "newcomer" || !slices.Equal(trashed(t, f), []string{"late.txt"}) {
+			t.Fatalf("late.txt = %q, trash = %v", content(t, f, "late.txt"), trashed(t, f))
+		}
+	})
+
+	t.Run("the file was written meanwhile", func(t *testing.T) {
+		f := newUploadFixture(t)
+		f.send(t, files.UploadRequest{Name: "late.txt"}, "original")
+		upload := f.begin(t, files.UploadRequest{Name: "late.txt", Size: 4, Conflict: files.ConflictReplace})
+		// The same file, as an SMB client saves over it.
+		if err := os.WriteFile(filepath.Join(f.root, "late.txt"), []byte("edited since"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := commit(t, f, upload)
+		if got.Replaced || got.Entry.Name != "late (1).txt" || content(t, f, "late.txt") != "edited since" {
+			t.Fatalf("saved %q, replaced = %v, late.txt = %q", got.Entry.Name, got.Replaced, content(t, f, "late.txt"))
+		}
+	})
+
+	t.Run("the file it found is still replaced, in any letter case", func(t *testing.T) {
+		f := newUploadFixture(t)
+		f.send(t, files.UploadRequest{Name: "Late.TXT"}, "original")
+		upload := f.begin(t, files.UploadRequest{Name: "late.txt", Size: 4, Conflict: files.ConflictReplace})
+		got := commit(t, f, upload)
+		if !got.Replaced || got.Entry.Name != "late.txt" || !slices.Equal(trashed(t, f), []string{"Late.TXT"}) {
+			t.Fatalf("saved %q, replaced = %v, trash = %v", got.Entry.Name, got.Replaced, trashed(t, f))
+		}
+		if got, want := f.names(t, ""), []string{"late.txt"}; !slices.Equal(got, want) {
+			t.Fatalf("names = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestFolderUploadCreatesAndReusesFolders(t *testing.T) {
 	f := newUploadFixture(t)
 	first := f.send(t, files.UploadRequest{Directories: []string{"旅行", "2026"}, Name: "a.jpg"}, "aaaa")
