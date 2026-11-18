@@ -302,6 +302,19 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 		}
 		return Job{}, ErrJobState
 	}
+	// The round in progress is over: its answers are told the job was
+	// cancelled. Its Hermes job is the next round's to remove.
+	if _, err := s.db.ExecContext(ctx, `UPDATE rounds SET ended_at = ?, outcome = 'cancelled',
+		state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END
+		WHERE job_id = ? AND state IN ('claimed', 'started')`, now, jobID); err != nil {
+		return Job{}, err
+	}
+	if _, err := s.db.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID); err != nil {
+		return Job{}, err
+	}
+	if err := s.SyncMarkers(ctx); err != nil {
+		s.logger.WarnContext(ctx, "syncing the planning markers failed", "error", err)
+	}
 	s.cancelRunning(jobID)
 	return s.Job(ctx, owner, jobID)
 }
@@ -360,8 +373,12 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET missing_json = NULL WHERE id = ?", jobID); err != nil {
 			return err
 		}
-		// The catalog changes: plans already taken are void.
+		// The catalog changes: plans already taken are void, and both
+		// steps are planned again in a new epoch.
 		if err := voidPlans(ctx, tx, jobID, s.now()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
 			return err
 		}
 		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting)
@@ -430,7 +447,8 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 		return Job{}, ErrJobState
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
+		// A new epoch: the rounds before it no longer say the plan is unknown.
+		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
 			return err
 		}
 		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting)

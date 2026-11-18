@@ -564,7 +564,7 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	answer, err := ask(ctx, s.planInput(run))
 	switch {
 	case errors.Is(err, ErrPlanPending):
-		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll}
+		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll, detail: planDetail(err)}
 	case errors.Is(err, ErrPlanUnknown):
 		return nil, &stepNeeds{reason: NeedVNASUnknown, err: err}
 	case errors.Is(err, ErrPlanInvalid):

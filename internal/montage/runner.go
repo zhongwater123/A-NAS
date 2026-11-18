@@ -36,6 +36,9 @@ const (
 type stepWait struct {
 	reason string
 	delay  time.Duration
+	// detail says more for the project page, such as why VNAS has not
+	// taken the plan.
+	detail string
 }
 
 func (w *stepWait) Error() string { return "waiting: " + w.reason }
@@ -99,6 +102,10 @@ func (s *Store) RecoverJobs(ctx context.Context) error {
 		WHERE state = 'running'`, now, now); err != nil {
 		return err
 	}
+	// The run directory starts empty: the markers come back from the jobs.
+	if err := s.SyncMarkers(ctx); err != nil {
+		s.logger.WarnContext(ctx, "rebuilding the planning markers failed", "error", err)
+	}
 	return s.removeEndedFiles(ctx)
 }
 
@@ -135,6 +142,9 @@ func (s *Store) removeJobFiles(jobID string) {
 // RunJobs runs the jobs until ctx ends.
 func (s *Store) RunJobs(ctx context.Context) {
 	for ctx.Err() == nil {
+		if err := s.SweepRounds(ctx); err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "ending the planning rounds out of time failed", "error", err)
+		}
 		job, found, err := s.claim(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -290,8 +300,8 @@ func (s *Store) settle(ctx context.Context, job claimed, err error, stopping boo
 		// The service stops: the job goes on from this step at the next start.
 		statement, args = `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ? WHERE id = ?`, []any{at, at, job.id}
 	case errors.As(err, &wait):
-		statement, args = `UPDATE jobs SET state = 'waiting', wait_reason = ?, lease_until = NULL, not_before = ?, updated_at = ? WHERE id = ?`,
-			[]any{wait.reason, sqlitedb.FormatTime(now.Add(wait.delay)), at, job.id}
+		statement, args = `UPDATE jobs SET state = 'waiting', wait_reason = ?, error = ?, lease_until = NULL, not_before = ?, updated_at = ? WHERE id = ?`,
+			[]any{wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay)), at, job.id}
 	case errors.As(err, &needs):
 		var missing any
 		if len(needs.missing) > 0 {

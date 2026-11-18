@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -216,6 +217,14 @@ func (idleCompute) Catalog(context.Context, montage.CatalogRequest) ([]string, e
 
 func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (montage.FillAnswer, error) {
 	return montage.FillAnswer{}, errors.New("no job runs here")
+}
+
+func (idleCompute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {
+	return montage.PlanBrief{}, errors.New("no job runs here")
+}
+
+func (idleCompute) ShotsAnswer(context.Context, json.RawMessage, json.RawMessage, []int) (json.RawMessage, error) {
+	return nil, errors.New("no job runs here")
 }
 
 func (idleCompute) Clear(context.Context, montage.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {

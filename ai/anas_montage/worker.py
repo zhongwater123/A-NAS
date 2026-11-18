@@ -49,7 +49,7 @@ import numpy as np
 
 from anas_ai import protocol
 
-from . import music_ops
+from . import brief, music_ops
 from .domain import (
     cards as cardrules,
     catalog as catalogrules,
@@ -249,13 +249,23 @@ def op_plan(request, _arrays):
     raise Refused("step is pick or shots")
 
 
+def op_plan_brief(request, _arrays):
+    """A step's brief for the member's VNAS: its data and exact schema (brief.py)."""
+    if request.get("step") == "pick":
+        return brief.pick_brief(request)
+    if request.get("step") == "shots":
+        return brief.shots_brief(request)
+    raise Refused("step is pick or shots")
+
+
 def op_shots_answer(request, _arrays):
     raw, answer = planrules.shots_answer(request["answer"], request["pictures"], request["picked"])
     return {"raw": raw, "answer": answer}
 
 
 OPS = {"cards": op_cards, "quality_part": op_quality_part, "quality": op_quality, "catalog": op_catalog,
-       "clear": op_clear, "fill": op_fill, "plan": op_plan, "shots_answer": op_shots_answer, "music": music_ops.op_music}
+       "clear": op_clear, "fill": op_fill, "plan": op_plan, "shots_answer": op_shots_answer, "music": music_ops.op_music,
+       "plan_brief": op_plan_brief}
 
 
 def with_body(request, body):

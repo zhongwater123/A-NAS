@@ -197,6 +197,31 @@ DROP TABLE steps;
 DROP TABLE job_assets;
 DROP TABLE jobs;
 `},
+		// 4: planning by the member's VNAS (docs/architecture/montage-center.md,
+		// 规划): when each member last registered a planning grant, and under
+		// which name the waker knows them; which jobs want a round, and each
+		// round's attempt at planning (epoch: replanning starts a new one).
+		{Up: `
+CREATE TABLE plan_grants (
+    owner_user_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    registered_at TEXT NOT NULL
+);
+ALTER TABLE jobs ADD COLUMN plan_wanted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN plan_epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rounds ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rounds ADD COLUMN template TEXT NOT NULL DEFAULT '';
+CREATE INDEX rounds_by_job ON rounds(job_id, claimed_at);
+CREATE INDEX rounds_by_owner ON rounds(owner_user_id, reported_at);
+`, Down: `
+DROP INDEX rounds_by_owner;
+DROP INDEX rounds_by_job;
+ALTER TABLE rounds DROP COLUMN template;
+ALTER TABLE rounds DROP COLUMN epoch;
+ALTER TABLE jobs DROP COLUMN plan_epoch;
+ALTER TABLE jobs DROP COLUMN plan_wanted;
+DROP TABLE plan_grants;
+`},
 	},
 }
 
@@ -232,6 +257,9 @@ type Store struct {
 	beat time.Duration
 	// admits is capacity.Admits, which tests replace.
 	admits func(path string, incoming int64) (bool, error)
+	// planMarkers is where the planning markers go, one empty file per
+	// member with a job wanting a round (/run/a-nas-montage/plans).
+	planMarkers string
 }
 
 // Options are what a store works with.
@@ -251,8 +279,11 @@ type Options struct {
 	JobCompute Compute
 	Editing    Editing
 	Planner    Planner
-	Now        func() time.Time
-	Logger     *slog.Logger
+	// PlanMarkers is the directory of planning markers the waker reads;
+	// without it no member's VNAS is asked to plan.
+	PlanMarkers string
+	Now         func() time.Time
+	Logger      *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -272,7 +303,8 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
 		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
-		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits}
+		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
+		planMarkers: options.PlanMarkers}
 	store.jobMusic = store
 	if store.now == nil {
 		store.now = time.Now

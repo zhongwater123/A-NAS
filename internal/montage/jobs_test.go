@@ -191,6 +191,14 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	return montage.FillAnswer{Clips: clips}, nil
 }
 
+func (c *compute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {
+	return montage.PlanBrief{}, errors.New("no brief here")
+}
+
+func (c *compute) ShotsAnswer(context.Context, json.RawMessage, json.RawMessage, []int) (json.RawMessage, error) {
+	return nil, errors.New("no answer here")
+}
+
 func (c *compute) Clear(_ context.Context, request montage.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
 	if len(key) != 256*144 || len(after) != afterCount*256*144 || len(before) != beforeCount*256*144 {
 		return [2]float64{}, errors.New("frames of the wrong size")

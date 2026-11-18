@@ -72,3 +72,20 @@ func (c Client) Clear(ctx context.Context, request montage.ClearRequest, key, af
 }
 
 var _ montage.Compute = Client{}
+
+// PlanBrief is a planning step's data and exact schema.
+func (c Client) PlanBrief(ctx context.Context, request montage.PlanBriefRequest) (montage.PlanBrief, error) {
+	var answer montage.PlanBrief
+	err := c.withBody(ctx, "plan_brief", request, nil, &answer)
+	return answer, err
+}
+
+// ShotsAnswer turns the second step's answer back into the outline's
+// pictures.
+func (c Client) ShotsAnswer(ctx context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error) {
+	var turned struct {
+		Answer json.RawMessage `json:"answer"`
+	}
+	err := c.withBody(ctx, "shots_answer", map[string]any{"answer": answer, "picked": picked, "pictures": pictures}, nil, &turned)
+	return turned.Answer, err
+}
