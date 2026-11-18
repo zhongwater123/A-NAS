@@ -44,6 +44,8 @@ describe("网页搜索", () => {
     expect(first).toHaveAttribute("rel", "noopener noreferrer");
     expect(sent.queries).toEqual([{ q: "流浪地球", category: "web", page: 1 }]);
     expect(sent.urls[0]).not.toContain("%E6%B5%81");
+    // VNAS neither reads the results nor types in the window (#359).
+    expect(results.closest("[data-vnas-private]")).toHaveAttribute("data-vnas-private", "网页搜索");
     expect(screen.getByText("2 条结果")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "流浪地球" })).toHaveTextContent("百科摘要");
     expect(screen.getByRole("link", { name: "example.org" })).toHaveAttribute("href", "https://example.org/wiki");

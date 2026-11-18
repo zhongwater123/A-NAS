@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { writeRisk } from "./webosWrites";
+import { writeRefusal, writeRisk } from "./webosWrites";
 
 // What the member is told, as webosWrites.ts words it; undefined: the write goes without asking.
 const GOES = undefined;
@@ -237,6 +237,13 @@ describe("writeRisk", () => {
     expect(writeRisk("POSTS", "/api/v1/spaces/s1/directories")).toBe(ANY);
     expect(writeRisk("XPOST", "/api/v1/spaces/s1/directories")).toBe(ANY);
     expect(writeRisk("DELETED", "/api/v1/music/favorites/k1")).toBe(ANY);
+  });
+
+  it("refuses web search outright and nothing else (#359)", () => {
+    expect(writeRefusal("POST", "/api/v1/web-search/query")).toContain("网页搜索不给 VNAS 使用");
+    expect(writeRefusal("POST", "/api/v1/web-search/query/x")).toBeUndefined();
+    expect(writeRefusal("PUT", "/api/v1/web-search")).toBeUndefined();
+    expect(writeRefusal("POST", "/api/v1/spaces/s1/directories")).toBeUndefined();
   });
 
   it("never asks about VNAS's own window, whose writes are the member's own clicks", () => {

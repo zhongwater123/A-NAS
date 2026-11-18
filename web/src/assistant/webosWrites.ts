@@ -68,6 +68,17 @@ const RULES: Rule[] = [
   route("DELETE", ".*", DELETES),
 ];
 
+// Writes a step of VNAS never causes, whatever the member would answer, with
+// what VNAS is told. VNAS does not use web search (docs/specs/web-search.md,
+// #359): a search sends its text to outside engines and brings their pages'
+// text back into the conversation.
+const REFUSED: Rule[] = [route("POST", "web-search/query", "网页搜索不给 VNAS 使用：搜索会把文字发给外部搜索引擎")];
+
+/** Why a step of VNAS may never cause the write, or undefined when the member may allow it. */
+export function writeRefusal(method: string, path: string): string | undefined {
+  return REFUSED.find((rule) => new RegExp(`^${rule.method}$`).test(method) && rule.path.test(path))?.why;
+}
+
 /**
  * Why the member is asked before the write goes, or undefined for a write that
  * goes without asking. VNAS's own window (the assistant API) is never asked
