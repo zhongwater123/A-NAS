@@ -38,6 +38,21 @@ func TestEditingRequestsAreBoundedBeforeFFmpegRuns(t *testing.T) {
 			t.Errorf("count(%+v) = %v", request, err)
 		}
 	}
+	// A range is half-open: 300 s at 2 a second is 600 frames, and 0.1 to 0.4
+	// at 10 a second three, whatever the floating point.
+	for _, test := range []struct {
+		request FramesRequest
+		want    int
+	}{
+		{jpeg(FramesRequest{End: 300, Rate: 2, Width: 64}), 600},
+		{gray(FramesRequest{Start: 0.1, End: 0.4, Rate: 10, Width: 16, Height: 16}), 3},
+		{gray(FramesRequest{Start: 29.9, End: 59.9, Rate: 10, Width: 16, Height: 16}), 300},
+		{gray(FramesRequest{Start: 1, End: 1.05, Rate: 10, Width: 16, Height: 16}), 1},
+	} {
+		if count, err := test.request.count(); err != nil || count != test.want {
+			t.Errorf("count(%+v) = %d, %v; want %d", test.request, count, err, test.want)
+		}
+	}
 	many := make([]float64, maxFrames+1)
 	for i := range many {
 		many[i] = float64(i)
@@ -106,8 +121,10 @@ func TestEditingCommandsAreBuiltFromNumbers(t *testing.T) {
 		!strings.HasSuffix(joined, "-q:v 3 -c:v mjpeg -f image2 pipe:1") || !strings.Contains(joined, "-filter_threads 4 -threads 4") {
 		t.Errorf("frame command = %s", joined)
 	}
+	// A range reads a step before Start and past End, and stops at its count.
 	_, args = tools.rangeCommand(FramesRequest{Format: FormatGray, Start: 1, End: 3, Rate: 10, Width: 320, Height: 180})
-	if joined := strings.Join(args, " "); !strings.Contains(joined, "-ss 1.000 -t 2.000 -i fd:") || !strings.Contains(joined, "fps=10,scale=320:180,format=gray") ||
+	if joined := strings.Join(args, " "); !strings.Contains(joined, "-ss 0.900000 -t 2.200000 -i fd:") ||
+		!strings.Contains(joined, "setpts=PTS-0.100000/TB,fps=10:start_time=0,scale=320:180,format=gray -frames:v 20") ||
 		!strings.HasSuffix(joined, "-f rawvideo pipe:1") {
 		t.Errorf("range command = %s", joined)
 	}
@@ -235,6 +252,13 @@ func TestFramesArriveOneByOneAndOverflowIsAnError(t *testing.T) {
 		})
 	if err != nil || got != 3 || !slices.Equal(result.Times, []float64{0, 2, 4}) {
 		t.Fatalf("Frames() = %+v, %d frames, %v", result, got, err)
+	}
+	// A range says which instant each frame stands for.
+	two := Local{Tools: Tools{FFmpeg: script(t, "head -c 512 /dev/zero")}}
+	result, err = two.Frames(ctx, openFile(t, "video"), FramesRequest{Format: FormatGray, Start: 0.1, End: 1, Rate: 2, Width: 16, Height: 16},
+		func([]byte) error { return nil })
+	if err != nil || !slices.Equal(result.Times, []float64{0.1, 0.6}) {
+		t.Fatalf("Frames(range) = %+v, %v", result, err)
 	}
 	// A run of frames that goes on past what the request allows is too
 	// large, not cut short and not unreadable.
@@ -427,7 +451,7 @@ func TestRealFFmpegFrames(t *testing.T) {
 			grays++
 			return nil
 		})
-	if err != nil || grays < 10 || grays > 11 {
+	if err != nil || grays != 10 {
 		t.Fatalf("Frames(gray range) = %d frames, %v", grays, err)
 	}
 	var parts int
@@ -439,8 +463,80 @@ func TestRealFFmpegFrames(t *testing.T) {
 			parts++
 			return nil
 		})
-	if err != nil || parts < 8 || parts > 9 || len(result.Blur) != parts {
+	if err != nil || parts != 8 || len(result.Blur) != 8 || len(result.Times) != 8 || result.Times[7] != 3.5 {
 		t.Fatalf("Frames(jpeg range) = %d frames, %d blur values, %v", parts, len(result.Blur), err)
+	}
+}
+
+// TestRealFFmpegRangesJoin takes ranges that follow one another, as the
+// montage center's shake check does: one that ends where the next starts
+// shares no frame with it, one that ends a step later shares that instant's
+// frame, the same source frame in both, and together they give every
+// instant once.
+func TestRealFFmpegRangesJoin(t *testing.T) {
+	tools, ok := LocalTools()
+	if !ok {
+		t.Skip("FFmpeg is not installed")
+	}
+	// Every frame of testsrc2 differs from the one before it.
+	video := realSample(t, tools, "moving.mp4", "-f lavfi -i testsrc2=size=640x360:rate=29.97:duration=7 -c:v libx264 -pix_fmt yuv420p")
+	local := Local{Tools: tools}
+	take := func(video *os.File, request FramesRequest) ([][]byte, []float64) {
+		t.Helper()
+		var frames [][]byte
+		request.Format, request.Width, request.Height = FormatGray, 64, 36
+		result, err := local.Frames(context.Background(), video, request,
+			func(frame []byte) error { frames = append(frames, frame); return nil })
+		if err != nil || len(result.Times) != len(frames) {
+			t.Fatalf("Frames(%+v) = %+v, %d frames, %v", request, result, len(frames), err)
+		}
+		return frames, result.Times
+	}
+	// The boundary, 2.98 s, comes just before a source frame (2.9696 and
+	// 3.0030 s): at 30 a second no source frame lies within half a step after
+	// it, and the range that starts there needs the frames before it.
+	span := func(start, end, rate float64) FramesRequest { return FramesRequest{Start: start, End: end, Rate: rate} }
+	for _, rate := range []float64{2, 10, 30} {
+		step := 1 / rate
+		whole, wholeTimes := take(video, span(0.48, 5.48, rate))
+		if len(whole) != int(math.Round(5*rate)) {
+			t.Fatalf("at %v a second, 0.48 to 5.48 gave %d frames", rate, len(whole))
+		}
+		// Ending where the next starts: every instant once, as one range.
+		first, firstTimes := take(video, span(0.48, 2.98, rate))
+		second, secondTimes := take(video, span(2.98, 5.48, rate))
+		joined, joinedTimes := append(first, second...), append(firstTimes, secondTimes...)
+		if !slices.Equal(joinedTimes, wholeTimes) {
+			t.Fatalf("at %v a second, the joined instants %v differ from %v", rate, joinedTimes, wholeTimes)
+		}
+		for i := range whole {
+			if !bytes.Equal(joined[i], whole[i]) {
+				t.Fatalf("at %v a second, frame %d (%v s) differs between the joined ranges and one range", rate, i, wholeTimes[i])
+			}
+		}
+		// Ending a step later: the instant where the next starts, twice,
+		// the same frame.
+		shared, sharedTimes := take(video, span(0.48, 2.98+step, rate))
+		last := len(shared) - 1
+		if len(shared) != len(first)+1 || sharedTimes[last] != secondTimes[0] || !bytes.Equal(shared[last], second[0]) {
+			t.Fatalf("at %v a second, the shared instant %v and %v: same frame %t", rate, sharedTimes[last], secondTimes[0], bytes.Equal(shared[last], second[0]))
+		}
+		if bytes.Equal(first[len(first)-1], second[0]) {
+			t.Fatalf("at %v a second, ranges that meet repeat a frame", rate)
+		}
+	}
+	// Sampled at its own rate, a video gives frame k at Start + k/Rate: the
+	// frame taken at that instant alone.
+	steady := realSample(t, tools, "steady.mp4", "-f lavfi -i testsrc2=size=640x360:rate=10:duration=4 -c:v libx264 -pix_fmt yuv420p")
+	ranged, rangedTimes := take(steady, span(1, 2, 10))
+	alone, aloneTimes := take(steady, FramesRequest{Times: rangedTimes})
+	if len(ranged) != 10 || !slices.Equal(aloneTimes, rangedTimes) {
+		t.Fatalf("1 to 2 at 10 a second gave %d frames at %v", len(ranged), rangedTimes)
+	}
+	for i := range ranged {
+		if !bytes.Equal(ranged[i], alone[i]) {
+			t.Fatalf("the range's frame for %v s is not the frame at that instant", rangedTimes[i])
+		}
 	}
 }
 
