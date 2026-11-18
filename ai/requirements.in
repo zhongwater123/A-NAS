@@ -12,3 +12,6 @@ mediapipe==1.1.0
 opencv-contrib-python-headless==5.0.0.93
 # Object detection (docs/architecture/photo-objects.md).
 onnxruntime==1.31.0
+# Montage compute Worker. Keep these direct because it imports both.
+numpy==2.5.3
+pillow==13.0.0

@@ -310,3 +310,43 @@ func TestGateStaysClosedWhileARequestIsServed(t *testing.T) {
 		t.Fatal("Open() a quiet period after playing ended = closed")
 	}
 }
+
+// Work already running stops at once for someone using the library or for
+// short memory, whatever the processor does meanwhile; pressure from the
+// device's other work only holds the next item back.
+func TestRunningWorkStopsForUseAndMemoryAlone(t *testing.T) {
+	now := time.Date(2026, 11, 18, 22, 0, 0, 0, time.UTC)
+	cpu, free := 30.0, uint64(MemoryReserve*2)
+	gate := &Gate{
+		quiet: time.Minute,
+		now:   func() time.Time { return now },
+		pressure: func(resource string) (float64, error) {
+			if resource == "cpu" {
+				return cpu, nil
+			}
+			return 0, nil
+		},
+		available: func() (uint64, error) { return free, nil },
+	}
+	gate.lastUse.Store(now.Add(-time.Hour).UnixNano())
+	ctx := context.Background()
+	if ok, reason := gate.Open(ctx, 0); ok || reason != "cpu_pressure" {
+		t.Fatalf("Open() under processor pressure = %v, %q", ok, reason)
+	}
+	if ok, reason := gate.Continue(ctx, 0); !ok {
+		t.Fatalf("Continue() under processor pressure alone = closed (%s)", reason)
+	}
+	free = MemoryReserve - 1
+	if ok, reason := gate.Open(ctx, 0); ok || reason != "cpu_pressure" {
+		t.Fatalf("Open() with both = %v, %q", ok, reason)
+	}
+	if ok, reason := gate.Continue(ctx, 0); ok || reason != "memory_low" {
+		t.Fatalf("Continue() with memory short under processor pressure = %v, %q", ok, reason)
+	}
+	free, cpu = MemoryReserve*2, 0
+	done := gate.Use()
+	defer done()
+	if ok, reason := gate.Continue(ctx, 0); ok || reason != "foreground" {
+		t.Fatalf("Continue() while the library is in use = %v, %q", ok, reason)
+	}
+}

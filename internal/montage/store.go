@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -25,7 +26,10 @@ var schema = sqlitedb.Schema{
 	Baseline: func(context.Context, *sql.DB) error { return nil },
 	Steps: []sqlitedb.Step{
 		// 1: projects, the batches that brought their videos, the videos
-		// fixed to their content, and grants waiting to be revoked.
+		// fixed to their content, and grants waiting to be revoked. A batch
+		// keeps what its request asked for, so that its request key repeats
+		// that request alone, and stays registering until its videos are in
+		// the project.
 		{Up: `
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,
@@ -33,7 +37,6 @@ CREATE TABLE projects (
     name TEXT NOT NULL,
     grant_id TEXT,
     state TEXT NOT NULL CHECK (state IN ('registering', 'ready')),
-    grant_lost INTEGER NOT NULL DEFAULT 0,
     ask TEXT NOT NULL DEFAULT '',
     chronological INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -46,9 +49,13 @@ CREATE TABLE batches (
     owner_user_id TEXT NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     request_key TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'add')),
+    asset_ids TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('registering', 'done')),
     created_at TEXT NOT NULL,
     UNIQUE (owner_user_id, request_key)
 );
+CREATE INDEX batches_unfinished ON batches(owner_user_id) WHERE state = 'registering';
 
 CREATE TABLE project_assets (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -123,6 +130,22 @@ type Store struct {
 	songs sync.Mutex
 	// wake tells AnalyzeSongs a song arrived.
 	wake chan struct{}
+	// members holds a member's lock while a request or reconciling changes
+	// that member's projects and grants.
+	members memberLocks
+	// reconciling runs one round of Reconcile at a time. reconciled is set
+	// once a round went through; seen are the unfinished batches the last
+	// round found, which the next one settles.
+	reconciling sync.Mutex
+	reconciled  atomic.Bool
+	seen        map[string]bool
+
+	// Revocations a request asked for run in the background until Close.
+	mu         sync.Mutex
+	closed     bool
+	base       context.Context
+	stop       context.CancelFunc
+	background sync.WaitGroup
 }
 
 // Options are what a store works with.
@@ -161,8 +184,41 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if store.logger == nil {
 		store.logger = slog.Default()
 	}
+	store.base, store.stop = context.WithCancel(context.Background())
 	return store, nil
 }
 
-// Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+// StartWorkers recovers durable work before accepting requests. Close cancels
+// and joins the workers before closing their database.
+func (s *Store) StartWorkers(ctx context.Context) error {
+	if err := s.ReclaimSongs(ctx); err != nil {
+		return err
+	}
+	s.soon(s.AnalyzeSongs)
+	return nil
+}
+
+// Close stops the revocations and the song analysis still running, which
+// stay queued, and closes the database.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.stop()
+	s.background.Wait()
+	return s.db.Close()
+}
+
+// soon runs work in the background unless the store is closing.
+func (s *Store) soon(work func(context.Context)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.background.Go(func() { work(s.base) })
+}
+
+func (s *Store) withTx(ctx context.Context, apply func(*sql.Tx) error) error {
+	return sqlitedb.WithTx(ctx, s.db, apply)
+}

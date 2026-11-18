@@ -38,6 +38,10 @@ func (c Client) Music(ctx context.Context, request montage.MusicRequest) (montag
 		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
 	case errors.Is(err, ErrRefused):
 		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerRefused, err)
+	case errors.Is(err, ErrFailed):
+		// The Worker took the song and broke on it, or stopped: the montage
+		// center counts these, and gives the song up after a few.
+		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerFailed, err)
 	case err != nil:
 		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
 	case selection.Unusable == "" && (len(selection.Parts) == 0 || selection.Seconds <= 0):
@@ -54,7 +58,7 @@ func decodeSelection(answer map[string]json.RawMessage, selection *montage.Selec
 		return err
 	}
 	if err := json.Unmarshal(encoded, selection); err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %v", ErrFailed, err)
 	}
 	for _, key := range []string{"ok", "chorus", "unusable"} {
 		delete(answer, key)

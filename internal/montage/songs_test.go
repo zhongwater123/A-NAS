@@ -134,8 +134,10 @@ func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-cha
 type cutter struct {
 	mu   sync.Mutex
 	down bool
-	// refuses: the Worker cannot read the structure at all.
+	// refuses: the Worker cannot read the structure at all; fails: it
+	// takes the structure and breaks on it.
 	refuses  bool
+	fails    bool
 	unusable string
 	chorus   bool
 	asked    []montage.MusicRequest
@@ -149,6 +151,9 @@ func (c *cutter) Music(_ context.Context, request montage.MusicRequest) (montage
 	}
 	if c.refuses {
 		return montage.Selection{}, fmt.Errorf("%w: structure has no segments", montage.ErrWorkerRefused)
+	}
+	if c.fails {
+		return montage.Selection{}, fmt.Errorf("%w: internal: the operation failed", montage.ErrWorkerFailed)
 	}
 	c.asked = append(c.asked, request)
 	start := 40.0
@@ -509,6 +514,33 @@ func TestAStructureTheComputeWorkerRefusesIsNotTooFewBars(t *testing.T) {
 	}
 	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongUnusable || song.Reason != montage.UnusableAnalysisFailed {
 		t.Fatalf("song = %+v", song)
+	}
+}
+
+// The compute Worker breaking on a song's structure counts the same way: it
+// may be the Worker's moment or this song's. allin1's structure is found
+// once and kept through the attempts.
+func TestAComputeWorkerThatKeepsFailingMakesTheSongUnusable(t *testing.T) {
+	ctx := context.Background()
+	f := newSongFixture(t)
+	f.compute.fails = true
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := forceDue(t, f); err != nil {
+			t.Fatal(err)
+		}
+		if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongAnalyzing || song.Waiting != montage.WaitCompute {
+			t.Fatalf("after %d failed excerpts: %+v", attempt, song)
+		}
+	}
+	if err := forceDue(t, f); err != nil {
+		t.Fatal(err)
+	}
+	song, _ := f.store.Song(ctx, "user:alice", f.project)
+	if song.State != montage.SongUnusable || song.Reason != montage.UnusableAnalysisFailed || len(song.Downbeats) == 0 || f.music.songs != 1 {
+		t.Fatalf("after three failed excerpts: %+v, analysed %d times", song, f.music.songs)
 	}
 }
 

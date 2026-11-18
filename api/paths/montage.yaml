@@ -1,3 +1,10 @@
+/api/v1/montage:
+  get:
+    operationId: getMontage
+    summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
+    responses:
+      "204": { description: The montage center is on }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/projects:
   get:
     operationId: listMontageProjects
@@ -10,7 +17,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: createMontageProject
-    summary: "Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike"
+    summary: "Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike"
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -29,6 +36,7 @@
       "201": { description: The new project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/projects/{projectId}:
@@ -66,7 +74,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: deleteMontageProject
-    summary: "Delete the project and revoke its grant. The videos and the films stay in the photo library"
+    summary: "Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "204": { description: Deleted }
@@ -74,7 +82,7 @@
 /api/v1/montage/projects/{projectId}/assets:
   post:
     operationId: addMontageProjectAssets
-    summary: "Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew"
+    summary: "Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true

@@ -41,8 +41,8 @@ const (
 // between attempts that failed.
 const analysisRetry = 5 * time.Minute
 
-// analysisAttempts is how many times the music analysis Worker may fail on
-// a song (ErrWorkerFailed) before the song is unusable.
+// analysisAttempts is how many times a Worker may fail on a song
+// (ErrWorkerFailed) before the song is unusable.
 const analysisAttempts = 3
 
 // analysisPoll is how often waiting songs are looked at without a wake-up.
@@ -142,7 +142,7 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 			return
 		case errors.Is(err, ErrWorkerFailed):
 			s.logger.WarnContext(ctx, "the music analysis worker failed on a song", "song", sha, "error", err)
-			s.failed(ctx, sha)
+			s.failed(ctx, sha, WaitAnalyzer, songAnalysis{}, nil)
 			return
 		case err != nil:
 			s.logger.WarnContext(ctx, "the music analysis worker is away; the song waits", "error", err)
@@ -174,6 +174,12 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 		// others arrive in its answer): it cannot read what allin1 found.
 		s.logger.WarnContext(ctx, "the compute worker refused a song's structure", "song", sha, "error", err)
 		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
+		return
+	case errors.Is(err, ErrWorkerFailed):
+		// It took the structure and broke on it, or stopped. That may be
+		// the Worker's moment or this song's, so it counts as an attempt.
+		s.logger.WarnContext(ctx, "the compute worker failed on a song's structure", "song", sha, "error", err)
+		s.failed(ctx, sha, WaitCompute, analysis, loudness)
 		return
 	case err != nil:
 		s.logger.WarnContext(ctx, "the compute worker is away; the song waits", "error", err)
@@ -319,14 +325,16 @@ func (s *Store) wait(ctx context.Context, sha, why string) {
 	}
 }
 
-// failed counts an analysis the music analysis Worker took and could not
-// finish. The content is tried again later, until analysisAttempts of them
-// failed: then it cannot be used, and the Worker is free for other songs.
-func (s *Store) failed(ctx context.Context, sha string) {
+// failed counts an analysis a Worker took and could not finish, and leaves
+// the content waiting for that Worker (why). It is tried again later, until
+// analysisAttempts of them failed: then it cannot be used, and the Worker is
+// free for other songs; analysis and loudness are what was found of it so
+// far.
+func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalysis, loudness []float32) {
 	var attempts int
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE songs SET waiting = ?, attempts = attempts + 1, next_try = ?
-			WHERE sha256 = ? AND state = 'analyzing'`, WaitAnalyzer, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
+			WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
 			return err
 		}
 		// A member who chose the content later joins the count of those
@@ -339,7 +347,7 @@ func (s *Store) failed(ctx context.Context, sha string) {
 	}
 	if attempts >= analysisAttempts {
 		s.logger.WarnContext(ctx, "a song's analysis failed too often; the song cannot be used", "song", sha, "attempts", attempts)
-		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, songAnalysis{}, nil)
+		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
 	}
 }
 

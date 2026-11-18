@@ -21,7 +21,7 @@ import { whenText } from "../assistant/taskTime";
 import { Companion } from "../companion/Companion";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
-import { montageAvailable } from "../montage/status";
+import { montageEnabled } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -197,16 +197,26 @@ export function Desktop({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
-  // 剪辑中心 is read when the account signs in; its switch changes only with
-  // the device's configuration.
+  // 剪辑中心 is read when the account signs in and when the page comes back
+  // into view, so a read that failed is tried again.
   const [montage, setMontage] = useState(false);
   useEffect(() => {
-    let live = true;
-    void montageAvailable()
-      .then((available) => live && setMontage(available))
-      .catch(() => undefined);
+    let controller = new AbortController();
+    const read = () => {
+      controller.abort();
+      controller = new AbortController();
+      montageEnabled(controller.signal)
+        .then(setMontage)
+        .catch(() => undefined);
+    };
+    read();
+    const visible = () => {
+      if (!document.hidden) read();
+    };
+    document.addEventListener("visibilitychange", visible);
     return () => {
-      live = false;
+      controller.abort();
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });

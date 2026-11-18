@@ -99,6 +99,18 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 	}
 }
 
+// A Worker that takes the request and breaks on it has failed on the song,
+// which the montage center counts; it is not a Worker to wait for without
+// end.
+func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
+	client := montagecompute.Client{SocketPath: pythonWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")}
+	structure, loudness := song()
+	_, err := client.Music(context.Background(), montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	if !errors.Is(err, montage.ErrWorkerFailed) {
+		t.Fatalf("Music() from a Worker that breaks = %v; want failed", err)
+	}
+}
+
 // While the device is updated, a compute Worker from before the operation
 // existed may still be running. It is one to wait for: its refusal says
 // nothing of the song.

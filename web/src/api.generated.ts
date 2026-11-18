@@ -2133,6 +2133,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        get: operations["getMontage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/projects": {
         parameters: {
             query?: never;
@@ -2143,7 +2160,7 @@ export interface paths {
         /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
         get: operations["listMontageProjects"];
         put?: never;
-        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
         post: operations["createMontageProject"];
         delete?: never;
         options?: never;
@@ -2162,7 +2179,7 @@ export interface paths {
         get: operations["getMontageProject"];
         put?: never;
         post?: never;
-        /** Delete the project and revoke its grant. The videos and the films stay in the photo library */
+        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
         delete: operations["deleteMontageProject"];
         options?: never;
         head?: never;
@@ -2179,7 +2196,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew */
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
         post: operations["addMontageProjectAssets"];
         delete?: never;
         options?: never;
@@ -7874,7 +7891,7 @@ export interface components {
             items: components["schemas"]["MontageProjectSummary"][];
             next?: string;
         };
-        /** @description Unique per member: the same key again repeats nothing. */
+        /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
         MontageRequestKey: string;
         MontageAssetIDs: string[];
         MontageProjectAsset: {
@@ -12700,6 +12717,25 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
+    getMontage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The montage center is on */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
     listMontageProjects: {
         parameters: {
             query?: {
@@ -12766,6 +12802,7 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };

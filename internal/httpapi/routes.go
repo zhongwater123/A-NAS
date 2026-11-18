@@ -89,6 +89,12 @@ func (h *productHandler) table() []apiroute.Route {
 	if h.AssistantKey != nil {
 		routes = append(routes, h.AssistantKey.Routes()...)
 	}
+	if h.Montage != nil {
+		// The desktop shows 剪辑中心 while this answers. The switch is the
+		// Product Service's, so the montage service is not asked.
+		routes = append(routes, apiroute.Route{Method: get, Pattern: montageapi.PathPrefix, Posture: session,
+			Handler: func(w http.ResponseWriter, _ *http.Request, _ accounts.Session) { w.WriteHeader(http.StatusNoContent) }})
+	}
 	return append(routes, h.mounts()...)
 }
 
@@ -116,7 +122,7 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 	}
 	if h.Montage != nil {
-		mount(montageapi.PathPrefix, apiroute.Session, withUser(withoutAssistantHeader(h.Montage)), montageapi.Endpoints())
+		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.Endpoints())
 		// Choosing a song copies it from the member's music library here
 		// first (docs/specs/montage-center.md, 配乐).
 		var tracks montageapi.Tracks
@@ -254,18 +260,6 @@ func allowedDuringPasswordChange(r *http.Request) bool {
 // the token itself (photoservice.Authenticate).
 func serve(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
-}
-
-// withoutAssistantHeader drops montageapi.AssistantHeader and
-// montageapi.SongHeader from the browser's request: only the Product Service
-// may say that a request registered a planning grant, or what a song it
-// copies is, and the forwarding proxy passes other headers on.
-func withoutAssistantHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Header.Del(montageapi.AssistantHeader)
-		r.Header.Del(montageapi.SongHeader)
-		next.ServeHTTP(w, r)
-	})
 }
 
 // withUser hands an API the signed-in user through attach.

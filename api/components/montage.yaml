@@ -2,8 +2,8 @@ parameters:
   MontageProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
 schemas:
-  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, description: "Unique per member: the same key again repeats nothing." }
-  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 128 } }
+  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
+  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
   MontageProjectSummary:
     type: object
     additionalProperties: false

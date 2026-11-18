@@ -34,11 +34,15 @@ const (
 	GrantAnalysis = "analysis"
 )
 
-// Grant error codes.
+// Grant error codes. GrantOwnerInactive is a grant whose owner's account is
+// not in use now, as while an administrator has disabled it: the grant
+// works again once the account does, so the montage center waits rather
+// than giving the project up, as it does on GrantNotFound.
 const (
 	GrantInvalid        = "invalid_request"
 	GrantUnauthorized   = "authentication_required"
 	GrantNotFound       = "grant_not_found"
+	GrantOwnerInactive  = "owner_inactive"
 	GrantAssetsRefused  = "assets_not_grantable"
 	GrantTooMany        = "too_many_assets"
 	GrantAssetNotFound  = "not_found"
@@ -46,6 +50,11 @@ const (
 	grantMessageLimit   = 256 << 10
 	grantRequestTimeout = time.Minute
 )
+
+// GrantListPage is how many grants one list answer carries at most. A grant
+// encodes to under 1 KiB even when every byte of its 128-byte project ID
+// needs escaping, so a page stays well inside GrantMessageLimit.
+const GrantListPage = 200
 
 // NewGrantPrincipal builds the photo Principal the montage center acts as
 // for a member under a project grant: it sees videos and opens originals,
@@ -57,6 +66,7 @@ func NewGrantPrincipal(userID, username string) photos.Principal {
 
 // GrantRequest is one request on the grant socket. Session is the member's
 // session token, on register only: it is used for that request and not kept.
+// After, on list, is the Next of the page before.
 type GrantRequest struct {
 	Op        string   `json:"op"`
 	Session   string   `json:"session,omitempty"`
@@ -64,11 +74,13 @@ type GrantRequest struct {
 	GrantID   string   `json:"grantId,omitempty"`
 	AssetIDs  []string `json:"assetIds,omitempty"`
 	AssetID   string   `json:"assetId,omitempty"`
+	After     string   `json:"after,omitempty"`
 	// Retry, on analyze, starts a failed analysis over.
 	Retry bool `json:"retry,omitempty"`
 }
 
-// GrantResponse answers a GrantRequest.
+// GrantResponse answers a GrantRequest. Next, on list, is set when more
+// grants may follow: the next page is asked for after it.
 type GrantResponse struct {
 	OK       bool                  `json:"ok"`
 	Code     string                `json:"code,omitempty"`
@@ -76,6 +88,7 @@ type GrantResponse struct {
 	Grant    *photos.Grant         `json:"grant,omitempty"`
 	Assets   []photos.GrantedAsset `json:"assets,omitempty"`
 	Grants   []photos.Grant        `json:"grants,omitempty"`
+	Next     string                `json:"next,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
 	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
 }
@@ -183,7 +196,10 @@ func (g Grants) Analyze(ctx context.Context, grantID string, assetIDs []string, 
 }
 
 // Analysis returns a granted video's montage analysis so far and, once its
-// windows are done, their vectors: n × dimensions little-endian float32.
+// windows are done, their List and vectors: WindowCount × Dimensions
+// little-endian float32 in window order. They come in a sealed memfd beside
+// the answer (photos.GrantAnalysis), so a long video's answer stays within
+// the message limit.
 func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
 	response, file, err := g.Call(ctx, GrantRequest{Op: GrantAnalysis, GrantID: grantID, AssetID: assetID})
 	if err != nil {
@@ -193,27 +209,22 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 	if response.Analysis == nil {
 		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
 	}
-	var vectors []byte
-	if file != nil {
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			return photos.GrantAnalysis{}, nil, err
-		}
-		if vectors, err = io.ReadAll(io.LimitReader(file, maxAnalysisBytes+1)); err != nil {
-			return photos.GrantAnalysis{}, nil, err
-		}
-		if len(vectors) > maxAnalysisBytes || len(vectors) != len(response.Analysis.List)*4*windowDimensions {
-			return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %d bytes of vectors for %d windows", len(vectors), len(response.Analysis.List))
-		}
+	analysis := *response.Analysis
+	if analysis.Windows != photos.AnalysisDone {
+		return analysis, nil, nil
 	}
-	return *response.Analysis, vectors, nil
+	if file == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered no windows")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	vectors, err := photos.ReadWindows(&analysis, file)
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %w", err)
+	}
+	return analysis, vectors, nil
 }
-
-// The window vectors of one video: 768 float32 each, and no more than a
-// 4 GiB video holds windows (6 hours, 10,800 windows, 33 MB).
-const (
-	windowDimensions = 768
-	maxAnalysisBytes = 10800 * 4 * windowDimensions
-)
 
 // Remove takes assets out of a grant.
 func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) error {
@@ -221,10 +232,24 @@ func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) e
 	return err
 }
 
-// List lists every grant, revoked ones included.
+// List lists every grant that is not revoked, a page per request.
 func (g Grants) List(ctx context.Context) ([]photos.Grant, error) {
-	response, err := g.plain(ctx, GrantRequest{Op: GrantList})
-	return response.Grants, err
+	var grants []photos.Grant
+	after := ""
+	for {
+		response, err := g.plain(ctx, GrantRequest{Op: GrantList, After: after})
+		if err != nil {
+			return nil, err
+		}
+		grants = append(grants, response.Grants...)
+		if response.Next == "" {
+			return grants, nil
+		}
+		if response.Next <= after {
+			return nil, errors.New("photo grant: list answered a page that does not move on")
+		}
+		after = response.Next
+	}
 }
 
 // Revoke revokes a grant; revoking again changes nothing.

@@ -51,24 +51,34 @@ var assistantRoutes = []string{
 type peerUIDKey struct{}
 
 // withPeerUID records on each connection the UID of the process at the other
-// end, as the kernel reports it.
+// end.
 func withPeerUID(ctx context.Context, conn net.Conn) context.Context {
-	unixConn, ok := conn.(*net.UnixConn)
+	uid, ok := peerUID(conn)
 	if !ok {
 		return ctx
 	}
+	return context.WithValue(ctx, peerUIDKey{}, uid)
+}
+
+// peerUID is the UID of the process at the other end of a Unix socket, as
+// the kernel reports it.
+func peerUID(conn net.Conn) (int, bool) {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return 0, false
+	}
 	raw, err := unixConn.SyscallConn()
 	if err != nil {
-		return ctx
+		return 0, false
 	}
 	var cred *unix.Ucred
 	var credErr error
 	if err := raw.Control(func(fd uintptr) {
 		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 	}); err != nil || credErr != nil {
-		return ctx
+		return 0, false
 	}
-	return context.WithValue(ctx, peerUIDKey{}, int(cred.Uid))
+	return int(cred.Uid), true
 }
 
 // assistantAPI serves only assistantRoutes, and only for reading; anything
