@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-18：助手确认卡片把非法 UTF-8 后缀与旧二进制内容当成完整预览](2026-11-18-assistant-change-preview.md)
 - [2026-11-17：imaging 在自己的 goroutine 里 panic，服务进程随之退出](2026-11-17-imaging-panics-end-the-process.md)
 - [2026-11-16：更新单元退出时遗漏已受理的请求](2026-11-16-system-update-request-handoff.md)
 - [2026-11-12：Docker 的地址池保护必须跨产品回滚保留](2026-11-12-docker-policy-survives-product-rollback.md)

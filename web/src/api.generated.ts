@@ -7632,6 +7632,12 @@ export interface components {
                 binary?: boolean;
                 /** @description before is only the start of the file the write replaces. */
                 beforePartial?: boolean;
+                /** @description The old file's preview is not UTF-8 text and is not displayed. */
+                beforeBinary?: boolean;
+                /** @description Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary. */
+                hiddenSize?: number;
+                /** @description Bytes of old content omitted from before. */
+                beforeHiddenSize?: number;
             }[];
         } & {
             [key: string]: unknown;

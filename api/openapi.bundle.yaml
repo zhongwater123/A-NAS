@@ -15858,6 +15858,15 @@ components:
               beforePartial:
                 type: boolean
                 description: before is only the start of the file the write replaces.
+              beforeBinary:
+                type: boolean
+                description: The old file's preview is not UTF-8 text and is not displayed.
+              hiddenSize:
+                type: integer
+                description: Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary.
+              beforeHiddenSize:
+                type: integer
+                description: Bytes of old content omitted from before.
     SystemStorage:
       type: object
       description: Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable.

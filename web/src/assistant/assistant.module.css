@@ -1073,9 +1073,9 @@
 }
 .as-change header small {
   display: block;
-  margin-top: 2px;
-  color: var(--as-muted);
-  font-size: 12px;
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: inherit;
 }
 .as-change-mark {
   width: 30px;
@@ -1096,10 +1096,11 @@
 }
 .as-op-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--as-ink-2);
-  font-size: 12.5px;
+  font-size: inherit;
 }
 .as-op-title svg {
   width: 14px;
@@ -1107,43 +1108,53 @@
   color: var(--as-muted);
 }
 .as-op-title span {
+  flex: none;
   font-weight: 600;
   color: var(--as-ink);
 }
 .as-op-title small {
+  flex: none;
   margin-left: auto;
-  color: var(--as-muted);
-  font-size: 11.5px;
+  color: var(--color-muted);
+  font-size: inherit;
+  white-space: nowrap;
 }
 .as-op-note {
-  margin: 4px 0 0 21px;
-  color: var(--as-muted);
-  font-size: 12px;
+  margin: var(--space-1) 0 0 var(--space-5);
+  color: var(--color-muted);
+  font-size: inherit;
 }
 /* What a write puts there that the card does not show (#172). */
 .as-op-warn {
-  margin: 6px 0 0;
-  padding: 6px 10px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: var(--space-1) solid var(--color-danger);
   border-radius: var(--radius-sm);
-  color: var(--as-danger);
-  background: var(--as-danger-soft);
-  font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-danger-soft);
+  font-size: inherit;
 }
 .as-unseen {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 14px 0;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-4) 0;
   color: var(--as-ink-2);
-  font-size: 12.5px;
+  font-size: inherit;
   cursor: pointer;
 }
+.as-unseen input {
+  flex: none;
+}
 .as-op-title code {
-  padding: 1px 6px;
-  border-radius: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
   background: var(--as-bg);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: inherit;
+  overflow-wrap: anywhere;
 }
 .as-diff {
   max-height: 180px;

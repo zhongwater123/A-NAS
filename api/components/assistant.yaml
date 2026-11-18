@@ -176,3 +176,6 @@ schemas:
             partial: { type: boolean, description: "after is only the start of what the write leaves: the member has not seen all of it." }
             binary: { type: boolean, description: "What the write leaves is not text, so the card shows none of it." }
             beforePartial: { type: boolean, description: "before is only the start of the file the write replaces." }
+            beforeBinary: { type: boolean, description: "The old file's preview is not UTF-8 text and is not displayed." }
+            hiddenSize: { type: integer, description: "Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary." }
+            beforeHiddenSize: { type: integer, description: "Bytes of old content omitted from before." }

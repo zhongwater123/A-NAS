@@ -113,7 +113,7 @@ describe("cards for what the assistant asks", () => {
     };
     render(<ApprovalCard approval={approval} onDecide={onDecide} />);
     expect(screen.getByText("1.0 KiB → 2.0 MiB")).toBeTruthy();
-    expect(screen.getByText("新内容只显示了前 64 KiB，还有 1.9 MiB 没有显示")).toBeTruthy();
+    expect(screen.getByText("新内容只显示了开头，还有 1.9 MiB 没有显示")).toBeTruthy();
     expect(screen.getByText("新内容不是文本，这里无法显示")).toBeTruthy();
     const confirm = screen.getByRole("button", { name: "确认更改" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
@@ -148,5 +148,65 @@ describe("cards for what the assistant asks", () => {
     render(<ApprovalCard approval={approval} onDecide={vi.fn(() => Promise.resolve())} />);
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect((screen.getByRole("button", { name: "确认更改" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("explains an old binary file instead of claiming its beginning was displayed", () => {
+    const approval: Approval = {
+      ...base,
+      kind: "change",
+      status: "awaiting",
+      change: {
+        id: "old-binary",
+        summary: "替换照片",
+        status: "awaiting",
+        operations: [
+          {
+            op: "write",
+            path: "/nas/个人空间/照片.jpg",
+            exists: true,
+            beforeSize: 65540,
+            beforeBinary: true,
+            after: "replacement text",
+            size: 16,
+          },
+        ],
+      },
+    };
+    render(<ApprovalCard approval={approval} onDecide={vi.fn(() => Promise.resolve())} />);
+    expect(screen.getByText("原文件不是文本，这里无法显示")).toBeTruthy();
+    expect(screen.queryByText("原文件只显示了开头")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("uses the server's hidden byte count when a multi-byte character crosses the preview limit", () => {
+    const approval: Approval = {
+      ...base,
+      kind: "change",
+      status: "awaiting",
+      change: {
+        id: "utf8-boundary",
+        summary: "写入笔记",
+        status: "awaiting",
+        operations: [
+          {
+            op: "write",
+            path: "/nas/个人空间/笔记.md",
+            exists: false,
+            after: "shown prefix",
+            size: 65538,
+            partial: true,
+            hiddenSize: 3,
+          },
+        ],
+      },
+    };
+    render(<ApprovalCard approval={approval} onDecide={vi.fn(() => Promise.resolve())} />);
+    expect(screen.getByText("新内容只显示了开头，还有 3 B 没有显示")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "确认更改" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(confirm.disabled).toBe(true);
   });
 });

@@ -1791,6 +1791,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
             </small>
           )}
         </div>
+        {operation.beforeBinary && <p className={styles.asOpNote}>原文件不是文本，这里无法显示</p>}
         {operation.binary ? (
           <p className={styles.asOpWarn}>新内容不是文本，这里无法显示</p>
         ) : (
@@ -1798,10 +1799,10 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
         )}
         {operation.partial && operation.size !== undefined && (
           <p className={styles.asOpWarn}>
-            新内容只显示了前 64 KiB，还有 {formatBytes(operation.size - 64 * 1024)} 没有显示
+            新内容只显示了开头，还有 {formatBytes(operation.hiddenSize ?? operation.size - 64 * 1024)} 没有显示
           </p>
         )}
-        {operation.beforePartial && <p className={styles.asOpNote}>原文件只显示了前 64 KiB</p>}
+        {operation.beforePartial && !operation.beforeBinary && <p className={styles.asOpNote}>原文件只显示了开头</p>}
       </li>
     );
   }
