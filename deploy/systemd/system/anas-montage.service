@@ -16,6 +16,7 @@ ExecStart=/usr/lib/a-nas/anas-api montage-service
 Environment=ANAS_MONTAGE_ROOT=/srv/a-nas/data/montage
 Environment=ANAS_MONTAGE_SOCKET=/run/a-nas-montage/montage.sock
 Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
 RuntimeDirectory=a-nas-montage
 RuntimeDirectoryMode=0750
 UMask=0077

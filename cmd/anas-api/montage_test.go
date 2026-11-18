@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
 // A deleted account leaves the montage store while the switch is off too:
@@ -33,7 +36,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{Mode: ModeAgent, MontageEnabled: enabled, MontageSocket: socket}, nil)
+		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{Mode: ModeAgent, MontageEnabled: enabled, MontageSocket: socket}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +54,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 
 	// Development keeps the store in this process, switched off or on.
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{MontageEnabled: enabled, DataMount: dir}, nil)
+		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{MontageEnabled: enabled, DataMount: dir}, idleGrants{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -64,3 +67,16 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 		closeMontage()
 	}
 }
+
+// idleGrants is a photo library that holds no grants.
+type idleGrants struct{}
+
+func (idleGrants) Register(context.Context, string, string, []string) (photos.Grant, error) {
+	return photos.Grant{}, errors.New("no photo library here")
+}
+func (idleGrants) Lookup(context.Context, string, []string) ([]photos.GrantedAsset, error) {
+	return nil, errors.New("no photo library here")
+}
+func (idleGrants) Remove(context.Context, string, []string) error { return nil }
+func (idleGrants) List(context.Context) ([]photos.Grant, error)   { return nil, nil }
+func (idleGrants) Revoke(context.Context, string) error           { return nil }

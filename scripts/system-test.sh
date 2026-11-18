@@ -1240,6 +1240,41 @@ check "the photo service answers the montage account on it" \
 check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
 check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
 
+# --- Montage projects (ADR 0038): a project holds the videos its member
+# handed over, through a grant; another member cannot see it, and deleting
+# it leaves the videos in the photo library.
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25:duration=2 -c:v libx264 -pix_fmt yuv420p /tmp/clip.mp4
+clip=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F file=@/tmp/clip.mp4 \
+  "$api/api/v1/photos/libraries/$alice_library/uploads" | jq -r .id || true)
+project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"requestKey\":\"system-test\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+check "a member makes a montage project of her video" test -n "$clip" -a -n "$project" -a "$project" != null
+# The grant socket lists the grants not revoked; a revoked one is gone.
+project_grant_listed() {
+  local grants
+  grants=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py) || return 2
+  grep -qF "'projectId': '$project'" <<<"$grants"
+}
+check "the photo library holds the project's grant" project_grant_listed
+check "another member's project is not found" \
+  test "$(status_of -b /tmp/owner.jar "$api/api/v1/montage/projects/$project")" = 404
+check "deleting the project answers 204" \
+  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/montage/projects/$project")" = 204
+check "the video stays in the photo library" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/assets/$clip")" = 200
+# The montage service revokes it right after answering the deletion.
+project_grant_revoked() {
+  local _ listed
+  for _ in $(seq 1 50); do
+    listed=0
+    project_grant_listed || listed=$?
+    [[ $listed == 1 ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "and the project's grant is revoked" project_grant_revoked
+
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
 check "family store belongs to the family service alone" \

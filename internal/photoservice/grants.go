@@ -226,3 +226,25 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 	g.logger.Error("grant request failed", "op", request.Op, "error", err)
 	return refused(photosapi.GrantUnavailable, "the photo library could not answer"), nil
 }
+
+// SessionsAndAccounts confirms sessions and lists the accounts in use, as
+// the Host Agent's session lookup does and development's account store.
+type SessionsAndAccounts interface {
+	SessionResolver
+	ActiveAccounts
+}
+
+// LocalGrants serves the grant operations in this process, for development,
+// with the same checks as the grant socket.
+func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *slog.Logger) photosapi.Grants {
+	var opened atomic.Pointer[photos.Service]
+	opened.Store(service)
+	server := &grantServer{service: &opened, sessions: sessions, accounts: sessions, logger: logger}
+	return photosapi.Grants{Call: func(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File, error) {
+		response, file := server.handle(ctx, request)
+		if !response.OK {
+			return photosapi.GrantResponse{}, nil, &photosapi.GrantError{Code: response.Code, Message: response.Message}
+		}
+		return response, file, nil
+	}}
+}

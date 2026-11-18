@@ -1,28 +1,22 @@
-package montage
+package montage_test
 
 import (
 	"context"
 	"path/filepath"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 func TestTheStoreOpensDurablyAndListsNothingYet(t *testing.T) {
 	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
+	store, _, root := newStore(t)
+	page, err := store.Projects(ctx, "user:1", "")
+	if err != nil || page.Items == nil || len(page.Items) != 0 {
+		t.Fatalf("Projects() = %+v, %v; want an empty list", page, err)
 	}
-	projects, err := store.Projects(ctx, "user:1")
-	if err != nil || projects == nil || len(projects) != 0 {
-		t.Fatalf("Projects() = %v, %v; want an empty list", projects, err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, DatabaseName))
+	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, montage.DatabaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +25,4 @@ func TestTheStoreOpensDurablyAndListsNothingYet(t *testing.T) {
 	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode = %q, %v", mode, err)
 	}
-	// Reopening an existing store keeps it.
-	store, err = Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = store.Close()
 }

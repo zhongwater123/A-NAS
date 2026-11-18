@@ -2157,10 +2157,47 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's montage projects (剪辑中心, ADR 0038), newest first. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
+        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
         get: operations["listMontageProjects"];
         put?: never;
+        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        post: operations["createMontageProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found */
+        get: operations["getMontageProject"];
+        put?: never;
         post?: never;
+        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
+        delete: operations["deleteMontageProject"];
+        options?: never;
+        head?: never;
+        /** Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with */
+        patch: operations["updateMontageProject"];
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
+        post: operations["addMontageProjectAssets"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7808,12 +7845,42 @@ export interface components {
         FamilyAssetIDs: {
             assetIds: string[];
         };
+        MontageProjectSummary: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        MontageProjectPage: {
+            items: components["schemas"]["MontageProjectSummary"][];
+            next?: string;
+        };
+        /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
+        MontageRequestKey: string;
+        MontageAssetIDs: string[];
+        MontageProjectAsset: {
+            assetId: string;
+            /**
+             * @description unknown: the photo library did not answer this time.
+             * @enum {string}
+             */
+            status: "available" | "trashed" | "missing" | "unknown";
+            duration?: number;
+            /** Format: date-time */
+            takenAt?: string;
+            /** Format: date-time */
+            addedAt: string;
+        };
         MontageProject: {
             id: string;
             name: string;
-        };
-        MontageProjectList: {
-            items: components["schemas"]["MontageProject"][];
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            ask: string;
+            chronological: boolean;
+            assets: components["schemas"]["MontageProjectAsset"][];
         };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
@@ -8031,6 +8098,9 @@ export interface components {
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
         FamilyReactionName: components["schemas"]["FamilyReactionName"];
+        /** @description The `next` of the previous page. */
+        MontageCursor: string;
+        MontageProjectID: string;
     };
     requestBodies: never;
     headers: never;
@@ -8283,8 +8353,12 @@ export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type MontageProjectSummary = components['schemas']['MontageProjectSummary'];
+export type MontageProjectPage = components['schemas']['MontageProjectPage'];
+export type MontageRequestKey = components['schemas']['MontageRequestKey'];
+export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
+export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
 export type MontageProject = components['schemas']['MontageProject'];
-export type MontageProjectList = components['schemas']['MontageProjectList'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -8346,6 +8420,8 @@ export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
+export type ParameterMontageCursor = components['parameters']['MontageCursor'];
+export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -12563,23 +12639,190 @@ export interface operations {
     };
     listMontageProjects: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The `next` of the previous page. */
+                cursor?: components["parameters"]["MontageCursor"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's projects */
+            /** @description A page of the caller's projects */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MontageProjectList"];
+                    "application/json": components["schemas"]["MontageProjectPage"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    /** @description Empty names the project by its videos' dates. */
+                    name?: string;
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project the same requestKey made before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            /** @description The new project */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
                 };
             };
             404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    updateMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    ask?: string;
+                    chronological?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    addMontageProjectAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

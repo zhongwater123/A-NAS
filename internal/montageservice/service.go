@@ -29,7 +29,9 @@ type Config struct {
 	Root       string
 	SocketPath string
 	Sessions   storeservice.SessionResolver
-	Logger     *slog.Logger
+	// Grants reaches the photo library's project grants.
+	Grants montage.Grants
+	Logger *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -63,18 +65,27 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 
 // Run serves the montage API on SocketPath until ctx ends. While the store
 // cannot be opened, as when the data volume is offline or read-only,
-// requests answer montage_unavailable.
+// requests answer montage_unavailable. Every store it opens is reconciled
+// with the photo library's grants and retries the revocations it missed
+// (montage.Store.Upkeep).
 func Run(ctx context.Context, config Config) error {
+	if config.Grants == nil {
+		return errors.New("the montage service needs the photo library's grants")
+	}
 	if config.CheckStore == nil {
 		config.CheckStore = RequireOwnedStore
 	}
 	return storeservice.Run(ctx, storeservice.Config[*montage.Store]{
 		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: montageapi.Unavailable,
-		Open:        montage.Open,
-		API:         func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
-		Remove:      RemoveAccount,
-		CheckStore:  config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
+		Open: func(ctx context.Context, root string) (*montage.Store, error) {
+			return montage.Open(ctx, root, montage.Options{Grants: config.Grants, Logger: config.Logger})
+		},
+		API:            func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
+		Remove:         RemoveAccount,
+		Upkeep:         func(ctx context.Context, store *montage.Store) { store.Upkeep(ctx) },
+		UpkeepInterval: montage.UpkeepInterval,
+		CheckStore:     config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
 	})
 }
 

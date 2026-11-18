@@ -9,12 +9,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
@@ -35,6 +37,7 @@ func runMontageService(logger *slog.Logger) error {
 		Root:       config.Root,
 		SocketPath: config.Socket,
 		Sessions:   sessionlookup.NewClient(config.SessionSocket),
+		Grants:     photosapi.GrantClient(config.GrantSocket),
 		Logger:     logger,
 	})
 }
@@ -42,10 +45,12 @@ func runMontageService(logger *slog.Logger) error {
 // configuredMontage returns the montage API, nil while ANAS_MONTAGE_ENABLED
 // is off: then /api/v1/montage is not mounted and the desktop shows no
 // entry. A NAS forwards it to the montage service; development serves it in
-// this process from a directory on the development volume. Deleted accounts
-// leave the montage store whatever the switch: the service runs either way,
-// and rows from a time it was on must not stay.
-func configuredMontage(ctx context.Context, config Config, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
+// this process from a directory on the development volume, with the grants
+// of the photo library in this process, and keeps the store as the service
+// does (montage.Store.Upkeep). Deleted accounts leave the montage store
+// whatever the switch: the service runs either way, and rows from a time it
+// was on must not stay.
+func configuredMontage(ctx context.Context, config Config, grants montage.Grants, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
 			_, err := accountremoval.Request(ctx, config.MontageSocket, userID)
@@ -60,11 +65,30 @@ func configuredMontage(ctx context.Context, config Config, logger *slog.Logger) 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, nil, nil, err
 	}
-	store, err := montage.Open(ctx, root)
+	store, err := montage.Open(ctx, root, montage.Options{Grants: grants, Logger: logger})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	closeStore := func() { _ = store.Close() }
+	upkeep, stopUpkeep := context.WithCancel(ctx)
+	upkept := make(chan struct{})
+	go func() {
+		defer close(upkept)
+		ticker := time.NewTicker(montage.UpkeepInterval)
+		defer ticker.Stop()
+		for {
+			store.Upkeep(upkeep)
+			select {
+			case <-upkeep.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	closeStore := func() {
+		stopUpkeep()
+		<-upkept
+		_ = store.Close()
+	}
 	if !config.MontageEnabled {
 		return nil, store.RemoveAccount, closeStore, nil
 	}

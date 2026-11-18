@@ -112,7 +112,7 @@ func TestTheGrantSocketAnswersOnlyTheMontageServiceAsTheOwnerNow(t *testing.T) {
 		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
 	})
 	r.ready.Store(true)
-	client := photosapi.GrantClient{Socket: grantSocket}
+	client := photosapi.GrantClient(grantSocket)
 	var grants []photos.Grant
 	waitFor(t, func() bool { grants, err = client.List(ctx); return err == nil })
 	if len(grants) != 0 {
@@ -230,7 +230,7 @@ func TestTheGrantListComesInPages(t *testing.T) {
 	})
 	r.ready.Store(true)
 	var grants []photos.Grant
-	waitFor(t, func() bool { grants, err = photosapi.GrantClient{Socket: grantSocket}.List(ctx); return err == nil })
+	waitFor(t, func() bool { grants, err = photosapi.GrantClient(grantSocket).List(ctx); return err == nil })
 	listed := make([]string, 0, len(grants))
 	for _, grant := range grants {
 		listed = append(listed, grant.ID)
@@ -280,7 +280,7 @@ func TestAGrantRequestInFlightFinishesBeforeTheCatalogCloses(t *testing.T) {
 		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
 	})
 	r.ready.Store(true)
-	client := photosapi.GrantClient{Socket: grantSocket}
+	client := photosapi.GrantClient(grantSocket)
 	waitFor(t, func() bool { _, err := client.List(ctx); return err == nil })
 
 	type answer struct {
@@ -324,7 +324,7 @@ func TestTheGrantSocketRefusesAnyOtherUID(t *testing.T) {
 	if info, err := os.Stat(grantSocket); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("grant socket mode = %v, %v", info, err)
 	}
-	if _, err := (photosapi.GrantClient{Socket: grantSocket}).List(context.Background()); err == nil || photosapi.GrantErrorCode(err) != "" {
+	if _, err := (photosapi.GrantClient(grantSocket)).List(context.Background()); err == nil || photosapi.GrantErrorCode(err) != "" {
 		t.Fatalf("List() from another UID = %v; want the connection closed unanswered", err)
 	}
 }

@@ -470,6 +470,9 @@ type montageServiceConfig struct {
 	Root          string `env:"ANAS_MONTAGE_ROOT" envDefault:"/srv/a-nas/data/montage"`
 	Socket        string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
 	SessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	// GrantSocket is the photo library's socket for project grants, which
+	// only this service's account reaches (ADR 0038 decision 3).
+	GrantSocket string `env:"ANAS_PHOTOS_GRANT_SOCKET" envDefault:"/run/a-nas-photos-grants/grants.sock"`
 }
 
 // loadMontageServiceConfig resolves and validates the montage service's
@@ -481,6 +484,7 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 	}
 	problems := absolutePaths(map[string]*string{
 		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
+		"ANAS_PHOTOS_GRANT_SOCKET": &c.GrantSocket,
 	})
 	if len(problems) > 0 {
 		return montageServiceConfig{}, errors.Join(problems...)

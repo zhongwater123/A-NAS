@@ -6,6 +6,7 @@
 package montageapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -37,7 +38,12 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 	}
 	h := &handler{store: store, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]route{
-		"GET /projects": h.projects,
+		"GET /projects":                     h.projects,
+		"POST /projects":                    h.createProject,
+		"GET /projects/{projectID}":         h.project,
+		"PATCH /projects/{projectID}":       h.updateProject,
+		"DELETE /projects/{projectID}":      h.deleteProject,
+		"POST /projects/{projectID}/assets": h.addAssets,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -73,15 +79,113 @@ func (h *handler) withUser(next route) http.HandlerFunc {
 	}
 }
 
-type projectList struct {
-	Items []montage.Project `json:"items"`
+// maxJSONBytes bounds a JSON request. The largest the contract allows is
+// about 34 KB: montage.MaxAssets IDs of montage.MaxIDLength printable ASCII
+// characters with their quotes and commas, a request key and a name of
+// montage.MaxNameRunes characters, each escaped to six bytes at most
+// (TestTheLargestRequestFits).
+const maxJSONBytes = 64 << 10
+
+func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, montage.ErrNotFound):
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+	case errors.Is(err, montage.ErrTooManyAssets):
+		httpjson.WriteError(w, http.StatusBadRequest, "too_many_assets", "at most 500 videos at once")
+	case errors.Is(err, montage.ErrInvalid):
+		httpjson.WriteError(w, http.StatusBadRequest, "validation_failed", "the request is not valid")
+	case errors.Is(err, montage.ErrAssetsRefused):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "assets_unavailable", "a video is not one you can add")
+	case errors.Is(err, montage.ErrConflict):
+		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key was used for another request")
+	case errors.Is(err, montage.ErrGrantRevoked):
+		httpjson.WriteError(w, http.StatusConflict, "grant_revoked", "the project can no longer reach its videos")
+	case errors.Is(err, montage.ErrSessionEnded):
+		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+	case errors.Is(err, montage.ErrPhotosUnavailable):
+		h.logger.WarnContext(r.Context(), "photo library unavailable", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")
+	default:
+		httpjson.WriteInternal(w, r, h.logger, err)
+	}
 }
 
 func (h *handler) projects(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	projects, err := h.store.Projects(r.Context(), user.ID)
+	page, err := h.store.Projects(r.Context(), user.ID, r.URL.Query().Get("cursor"))
 	if err != nil {
-		httpjson.WriteInternal(w, r, h.logger, err)
+		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, projectList{Items: projects})
+	httpjson.Write(w, http.StatusOK, page)
+}
+
+type createRequest struct {
+	RequestKey string   `json:"requestKey"`
+	Name       string   `json:"name"`
+	AssetIDs   []string `json:"assetIds"`
+}
+
+func (h *handler) createProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request createRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	detail, created, err := h.store.CreateProject(r.Context(), user.ID, accounts.SessionToken(r.Context()), request.RequestKey, request.Name, request.AssetIDs)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpjson.Write(w, status, detail)
+}
+
+func (h *handler) project(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	detail, err := h.store.Project(r.Context(), user.ID, r.PathValue("projectID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, detail)
+}
+
+func (h *handler) updateProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var change montage.ProjectChange
+	if !httpjson.Read(w, r, maxJSONBytes, &change) {
+		return
+	}
+	detail, err := h.store.UpdateProject(r.Context(), user.ID, r.PathValue("projectID"), change)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, detail)
+}
+
+func (h *handler) deleteProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if err := h.store.DeleteProject(r.Context(), user.ID, r.PathValue("projectID")); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type addRequest struct {
+	RequestKey string   `json:"requestKey"`
+	AssetIDs   []string `json:"assetIds"`
+}
+
+func (h *handler) addAssets(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request addRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	detail, err := h.store.AddAssets(r.Context(), user.ID, accounts.SessionToken(r.Context()), r.PathValue("projectID"), request.RequestKey, request.AssetIDs)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, detail)
 }

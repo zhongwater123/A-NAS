@@ -47,11 +47,15 @@ type service struct {
 	entered chan struct{}
 	release chan struct{}
 	upkept  atomic.Int32
+	// stuck makes upkeep wait until it is stopped, as upkeep waiting on
+	// another service does; closedUnder is set if its store closed first.
+	stuck       bool
+	closedUnder atomic.Bool
 }
 
 // start runs a service whose API answers /quick at once and /slow once
 // release closes, each saying whether its store was still open.
-func start(t *testing.T) *service {
+func start(t *testing.T, stuck bool) *service {
 	t.Helper()
 	// Unix socket paths are short; t.TempDir can exceed the limit.
 	dir, err := os.MkdirTemp("", "store")
@@ -64,7 +68,7 @@ func start(t *testing.T) *service {
 		t.Fatal(err)
 	}
 	s := &service{t: t, socket: filepath.Join(dir, "api.sock"), opened: make(chan *store, 4),
-		entered: make(chan struct{}, 1), release: make(chan struct{})}
+		entered: make(chan struct{}, 1), release: make(chan struct{}), stuck: stuck}
 	s.usable.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -94,7 +98,13 @@ func start(t *testing.T) *service {
 					return accountremoval.Result{}, nil
 				}
 			},
-			Upkeep:         func(context.Context, *store) { s.upkept.Add(1) },
+			Upkeep: func(ctx context.Context, opened *store) {
+				s.upkept.Add(1)
+				if s.stuck {
+					<-ctx.Done()
+					s.closedUnder.Store(opened.closed.Load())
+				}
+			},
 			UpkeepInterval: time.Millisecond,
 			CheckStore: func(string) error {
 				if s.usable.Load() {
@@ -149,7 +159,7 @@ func (s *service) waitFor(want int) string {
 }
 
 func TestAStoreServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
-	s := start(t)
+	s := start(t, false)
 	if body := s.waitFor(http.StatusOK); body != "open" {
 		t.Fatalf("served %q", body)
 	}
@@ -179,7 +189,7 @@ func TestAStoreServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 // store; the store closes after it, and new requests answer unavailable
 // meanwhile.
 func TestTakingAStoreOutOfServiceWaitsForItsRequests(t *testing.T) {
-	s := start(t)
+	s := start(t, false)
 	s.waitFor(http.StatusOK)
 	first := <-s.opened
 	slow := make(chan string, 1)
@@ -208,5 +218,20 @@ func eventually(t *testing.T, what string, done func() bool) {
 			t.Fatal(what)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// Upkeep that waits on another service does not keep a store in service
+// whose data volume went away, and the store closes only once it stopped.
+func TestUpkeepDoesNotHoldAStoreThatWentAway(t *testing.T) {
+	s := start(t, true)
+	s.waitFor(http.StatusOK)
+	first := <-s.opened
+	eventually(t, "the open store gets its upkeep", func() bool { return s.upkept.Load() > 0 })
+	s.usable.Store(false)
+	s.waitFor(http.StatusServiceUnavailable)
+	eventually(t, "the store closes once out of service", first.closed.Load)
+	if s.closedUnder.Load() {
+		t.Fatal("the store closed while its upkeep was running")
 	}
 }
