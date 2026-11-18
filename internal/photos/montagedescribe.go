@@ -18,7 +18,7 @@ import (
 )
 
 // The montage center's card descriptions, montage-describe/v1
-// (docs/architecture/montage-center.md#卡片描述): the text reader writes the
+// (docs/architecture/photo-ai.md, 剪辑中心的分析): the text reader writes the
 // beats, process, scene and camera of every card whose picture passed the
 // quality check, from its key frames. A card a round, in the reading phase:
 // the reader shares llama-server and its memory with the text in photos.
@@ -225,10 +225,11 @@ const describeReady = qualityReady + " AND NOT EXISTS (SELECT 1 FROM jobs p WHER
 
 // montageDescribe describes one card of a due description job. It reports
 // whether it claimed one, which ends the round, and whether it did any
-// work. A card that cannot be described, past the context or with an
-// answer that never fits, is stored as failed and the video goes on. A job
-// with cards left goes back to the head of the queue without spending its
-// attempt.
+// work; a job that only waits for memory to load the reader goes back
+// unclaimed, so that the round goes on with the photos' own work. A card
+// that cannot be described, past the context or with an answer that never
+// fits, is stored as failed and the video goes on. A job with cards left
+// goes back to the head of the queue without spending its attempt.
 func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate Gate, info EmbedderInfo) (claimed, processed bool, err error) {
 	lib := r.lib
 	describer, ok := embedder.(CardDescriber)
@@ -275,7 +276,9 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 		return true, true, lib.failJob(ctx, job, jobErrorMissingOriginal)
 	}
 	if err != nil {
-		return true, false, errors.Join(err, lib.releaseJob(ctx, job))
+		// A fault of storage, as for the card's quality (cardQuality): tried
+		// again with an attempt spent, not once a minute for ever.
+		return true, true, lib.failJob(ctx, job, jobErrorIO)
 	}
 	defer func() { _ = original.Close() }()
 	stopLease := lib.keepLease(ctx, job)
@@ -324,7 +327,8 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 		return true, true, lib.finishDescription(ctx, job, *card, info.OCR, nil, class, 0, !more)
 	}
 
-	// The description: any reason to stop hangs it up, as a reading does.
+	// The description is hung up for the same reasons, within the watch's
+	// interval: it takes minutes on the NAS.
 	describing, stop := context.WithCancel(ctx)
 	defer stop()
 	stopWatching := watchGate(describing, continuing(gate), info.OCRMemoryBytes, stop)
