@@ -33,7 +33,7 @@
 | 素材进回收站或被删除时知道 | 没有事件；`lookup` 只返回可见、未进回收站的资产，不说缺失的原因 | `internal/photos/lookup.go` |
 | 多帧取帧、按时间线渲染 | FFmpeg Worker 每条消息只收一个描述符，只有 probe、frame、image、subtitle、stream、audio 六种操作；正文写到连接关闭为止 | `internal/ffmpegworker/protocol.go`、`internal/unixmsg` |
 | 4B 看多张关键帧写描述 | AI Worker 每条消息最多一个描述符，一次只看一张图；`read_text` 的提示词固定 | `ai/anas_ai/protocol.py` |
-| 让 VNAS 在成员离线时规划并交回结构化结果 | 产品服务只能凭成员在线的会话连 Hermes；JSON-RPC 白名单里没有 Schema 参数；MCP 工具的后端按对端 UID 认成员。成员离线时能跑的只有定时任务：唤醒服务按成员自己建的任务启动定时任务单元，“立即运行”经文件代理核对会话后交给它 | `internal/assistantapi/rpc.go`、`internal/photoservice/assistant.go`、`ai/assistant-spike/cron-waker.py`、`internal/filebroker/rootbroker/assistant_run.go` |
+| 让 VNAS 在成员离线时规划并交回结构化结果 | 产品服务只能凭成员在线的会话连 Hermes；JSON-RPC 白名单里没有 Schema 参数；MCP 工具的后端按对端 UID 认成员。成员离线时能跑的只有定时任务：唤醒服务按成员自己建的任务启动定时任务单元，“立即运行”经文件代理核对会话后交给它 | `internal/assistantapi/rpc.go`、`internal/photoservice/assistant.go`、`ai/assistant/cron-waker.py`、`internal/filebroker/rootbroker/assistant_run.go` |
 | 通用持久任务 | 没有；最接近的是相册的 `jobs` 表（租约 5 分钟、最多 3 次、退避 1 与 2 分钟，启动时收回中断的任务） | `internal/photos/jobs.go` |
 
 ## 首版范围
@@ -478,11 +478,16 @@ montage/
 
 ## 规划
 
-本节的接线按 2026-11-18 主线上的试用包布局写：`ai/assistant-spike/` 下的 `cron-waker.py`、`run-requests.sh`、`cron_round.py`、`assistant-install.sh`、`managed-config.yaml`、`product-settings.sh`。[AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)会把成员移进 Host Agent、单元并进 `a-nas`，这些文件都会搬走。M9 动工前按转正后的布局重写接线；下面的机制不变：规划授权、定时任务单元里的一轮、固定的提示词模板、这一轮只开放 `montage`。
+本节的接线按 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)后的布局写（2026-11-18 合并，M9 按它实施）：
+- 助手的脚本在 `ai/assistant/`，装在 `/usr/lib/a-nas/assistant/`，沙箱里同一路径只读；
+- 定时任务单元 `anas-assistant-cron@` 由 `scripts/lib/assistant-units.sh` 从对话实例的单元生成；
+- 成员的 Hermes 设置由 Host Agent 写在 `/var/lib/a-nas-host/assistant/members/<账号>/`。
+
+机制与转正前的设计相同：规划授权、定时任务单元里的一轮、固定的提示词模板、这一轮只开放 `montage`。
 
 ### MCP 服务器
 
-- 新增 `ai/assistant-spike/anas_montage_mcp.py`，在 `managed-config.yaml` 里照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`。
+- 新增 `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。
   - `untrusted` 不行：每次调用都要审批，而规划跑在定时任务单元里，`approvals.cron_mode` 是 `deny`，没有人能批准。
 - 服务器名不加进任何 `platform_toolsets`。规划这一轮的任务建时带 `enabled_toolsets=["montage"]`：Hermes 让任务自己的工具组优先于 `platform_toolsets.cron`，点名了某个 MCP 服务器时不再把别的服务器并进来（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 1）。成员自己的定时任务和对话都看不到剪辑工具，每次请求也不多带它们的 Schema。
 - **规划这一轮只开放 `montage` 工具组**，是 P1 的必过项（评审人 2026-11-18），P1 已实测通过：模型只拿到 montage 的 4 个工具，提示它调用终端，终端没有执行。现在 `platform_toolsets.cron` 有文件、终端、代码执行、委派、看图、看视频、记忆、会话搜索、技能、待办、`anas` 与 `companion`。只开放 `montage` 有两个理由：
@@ -495,10 +500,15 @@ montage/
   - systemd 的 `anas-montage-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；
   - 只绑定进成员的定时任务单元 `anas-assistant-cron@<账号>`，在沙箱里是 `/run/anas-assistant-montage/montage.sock`；对话实例和整理单元不绑定；
   - 成员自己的定时任务也跑在这个单元里，同一个 UID 分不清调用来自哪一次运行。所以工具调用要带着进行中那一轮的 token，影响只限于本人的任务，答案还要过校验；
-  - 照相册助手套接字的做法：`assistant-install.sh` 建挂载点，`product-settings.sh` 管开、关、状态。
+  - 照相册助手套接字的做法：套接字单元随软件包默认开启，tmpfiles 建沙箱里的挂载点，`assistant-units.sh` 只在定时任务单元的那段 sed 里加这一处绑定。
 - 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号（相册助手套接字用的同一项查询，要为剪辑中心开启），只回答这位成员自己的任务。成员不必在线。
 - 套接字上有两类调用：MCP 服务器的工具（下表），和回合脚本的 `stale`、`claim`、`started`、`abandon`、`end`（见“发起与结束”）。
-- `mcp_servers` 会整段复制进每位成员的配置，所以对话实例里也会起这个子进程，而那里没有剪辑的套接字。P1 实测它这时列零个工具，对话照常，但每个在线实例多占约 78 MiB（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 6）。M9 给定时任务单元单独一份成员配置带上 montage，对话实例的配置不带，并实测内存。沙箱里的终端用的也是同一个 UID，所以套接字限制请求大小与频率。
+- **只有定时任务单元有 montage 服务器**：托管策略的 `mcp_servers` 会整段复制进成员的配置。若对话实例也带上它，就会起这个子进程，而那里没有剪辑的套接字。P1 实测这时它列零个工具，对话照常，但每个在线实例多占约 78 MiB（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 6）。所以定时任务单元单独一份：
+  - 软件包另装一份托管策略 `managed-cron/`，就是原托管策略加上 montage 服务器；
+  - Host Agent 按它另写成员的 `config-cron.yaml`；
+  - 定时任务单元的 `HERMES_MANAGED_DIR` 指向 `managed-cron`，成员配置的绑定也换成 `config-cron.yaml`；
+  - 对话实例与整理单元两样都没有。
+- 沙箱里的终端用的也是同一个 UID，所以套接字限制请求大小（80 KiB）与频率（每位成员每秒 5 次，突发 20 次）。
 
 | 工具 | 输入 | 输出 |
 |---|---|---|
@@ -512,7 +522,7 @@ montage/
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次运行的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名；`assistant-install.sh` 把它装进沙箱里只读的 `/spike/montage/`，与 `cron_round.py` 同处。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（首版 `plan-v1.md`）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 计算 Worker 的 `plan` 输出数据、Schema 与模板版本。两步的规则一开始就给模型（第二步的 system 文字只依赖目标时长，不依赖第一步的答案）；第一步的数据由 `montage_brief` 返回，第二步的数据等大纲收下后再生成。
 - 定时任务的运行里没有人回答审批，需要确认的操作一律拒绝，`clarify` 也不给。提示词仍要求不调用终端与代码、不委派，也不把描述写进记忆。
@@ -524,7 +534,7 @@ montage/
 成员不在线时，规划仍要在成员的 VNAS 里调用模型。[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 的会话闸门不让后台服务凭自己的身份驱动成员的助手；定时任务能在成员离线时运行，是因为任务是成员自己建的。所以后台规划也要成员在场时留下授权，思路与“项目授权”相同。
 
 - **登记**：成员做规格默认规则里列出的几项操作（开始、重新规划、去掉素材、重试分析，之后都可能要规划）时，anas-api 在转发之前，带着这次请求的会话调用文件代理的新操作 `assistant_plan`。
-  - 文件代理照“立即运行”（`assistant_run`）核对会话有效、账号在用；另外核对这个账号有 VNAS，即 `/etc/a-nas-assistant/tokens/<账号>.env` 存在，和唤醒服务认定“有助手”的办法相同。`assistant_run` 本身只查账号名的格式，不查这一项。
+  - 文件代理照“立即运行”（`assistant_run`）核对会话有效、账号在用；另外核对这个账号有 VNAS，即 Host Agent 为它准备的 `/var/lib/a-nas-host/assistant/tokens/<账号>.env` 存在，和唤醒服务认定“有助手”的办法相同。`assistant_run` 本身只查账号名的格式，不查这一项。
   - 核对通过就写 `/var/lib/a-nas/assistant-plans/<账号>`，内容是签发时间与轮数上限 5。只有文件代理写它，再次登记时整个替换。
   - `assistant_plan` 用正常的回答区分三种结果：已登记、设备没有开启 VNAS、这个账号没有 VNAS。错误码 `unavailable` 只留给临时故障（会话目录读不了、记录写不进）。`assistant_run` 把“设备没开”也答成 `unavailable`，这里不照搬，否则 anas-api 分不清。
 
@@ -568,9 +578,9 @@ montage/
    - **只在自己启动 gateway 时领取**：已有别人的 gateway 服务这个主目录（API Server 通道）时不领取，因为那个 gateway 连不到剪辑的套接字。
    - gateway 就绪后调 `claim`。剪辑中心只在这位成员的记号还在时接受：原子地为最早的等规划任务建一轮，回答 `roundId`、`attemptToken`、模板版本与目标秒数，并删掉记号。
 4. **交给 Hermes**：
-   - **先查模型**：经通往模型的桥 `GET /v1/models`，不调用模型、不消耗 token（P1 用替身模型实测回答 200；转正后的模型网关怎样回答，M9 核对）。设备上没有密钥或桥不通时，调 `abandon`，原因写明，不往下走。沙箱看不到密钥，所以只能这样查。
-   - **建任务**：用 Hermes 自己的 `create_job(paused=True, enabled_toolsets=["montage"])` 建成暂停的任务，定时任务的一轮不会运行它（P1 实测）。名字是“剪辑规划 <这一轮的编号>”，提示词按模板拼出。Hermes 在运行开始时把任务的下次运行往后推一个周期，单元中途被杀后它一个周期后还会再跑（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 5），所以第 3 步的清理是必需的；周期取多长，或改用只跑一次的任务（`repeat=1`），在 M9 定。
-   - 建任务、删任务与删会话的脚本以成员身份用 `python -P` 运行：`/spike` 里有 spike 自己的 `gateway.py`，脚本目录排在模块搜索路径最前面时会盖住 Hermes 的 `gateway` 包。模板要求最后只回答 `[SILENT]`，这样 A-NAS 的任务提示把这次运行记为已读，不弹出（`tasknotices.go`）。
+   - **先查模型**：经通往模型的桥 `GET /v1/models`，不调用模型、不消耗 token（P1 用替身模型实测回答 200；转正后的模型网关放行这条，见 `ai/assistant/gateway.py`）。设备上没有密钥或桥不通时，调 `abandon`，原因写明，不往下走。沙箱看不到密钥，所以只能这样查。
+   - **建任务**：用 Hermes 自己的 `create_job(paused=True, enabled_toolsets=["montage"])` 建成暂停的任务，定时任务的一轮不会运行它（P1 实测）。名字是“剪辑规划 <这一轮的编号>”，提示词按模板拼出。Hermes 在运行开始时把任务的下次运行往后推一个周期，单元中途被杀后它一个周期后还会再跑（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 5），所以第 3 步的清理是必需的；M9 定为周期一天、建时暂停、由回合脚本触发，不用 `repeat=1`：这一轮结束时回合脚本连同运行会话删掉它，被杀时留到下一轮的清理；`repeat=1` 跑完会被 Hermes 自己删掉，运行会话却留下，清理还是少不了。
+   - 建任务、删任务与删会话的脚本以成员身份用 `python -P` 运行：助手目录里有模型网关的 `gateway.py`，脚本目录排在模块搜索路径最前面时会盖住 Hermes 的 `gateway` 包。规划这部分是 `montage_round.py`，由 `cron_round.py` 把脚本目录追加到搜索路径末尾后导入。模板要求最后只回答 `[SILENT]`，这样 A-NAS 的任务提示把这次运行记为已读，不弹出（`tasknotices.go`）。
    - **记 `started`**：带上任务编号。这一轮已作废或已结束时剪辑中心拒绝，脚本删掉任务、不再往下走；记下 `started` 之后，剪辑中心不再接受 `abandon`。
    - **使任务到期**：用 `trigger_job`，和到期的定时任务一起由 `hermes cron tick` 交出去。先记 `started` 再使任务到期，所以没有 `started` 的一轮一定没调用过模型。
    - 运行期间，这条任务会出现在成员的“定时任务”里。不按名字隐藏：任务表在成员可写的目录里，对话里的 VNAS 也能建任务，按名字隐藏会让人建出成员看不见的定时任务。
@@ -584,7 +594,7 @@ montage/
    - **等了 10 分钟还没被领取**（没有 VNAS、授权用完或过期、单元起不来、成员自己的定时任务占着单元、别人的规划在跑）：任务仍是 `waiting(vnas)`，页面写“VNAS 还没有接手”，并给出“重新规划”，点了会刷新授权。
 7. **提示**：桌面外壳懒加载的 `MontageNotices` 照家庭中心的 `FamilyNotices` 做，只显示提示，不发起规划。内容见规格“本稿补充的默认规则”的桌面提示。
 
-**VNAS 不可用**：账号或设备没有开启 VNAS、设备上没有密钥、gateway 起不来时，任务停在 `waiting(vnas)`，项目页和提示写明原因。按 [AI 助手 V1 的决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)，VNAS 转正后默认对全部成员开启，管理员填写密钥后可用；转正还没有实施。
+**VNAS 不可用**：账号或设备没有开启 VNAS、设备上没有密钥、gateway 起不来时，任务停在 `waiting(vnas)`，项目页和提示写明原因。按 [AI 助手 V1 的决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)，VNAS 默认对全部成员开启，管理员填写密钥后可用（2026-11-18 合并）。
 
 **取消**：剪辑中心把进行中的一轮记为已结束，之后交来的答案一律回答“任务已取消”，提示词要求见到这句就结束运行。不强行停掉 gateway，因为里面可能还在跑成员自己的定时任务。Hermes 的 `remove_job` 删除正在运行的任务时会中止这次运行（读源码得知），M9 实测后可以由回合脚本在下一次 `stale` 时直接删掉被取消的这一轮。
 
@@ -824,5 +834,5 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 - **代码**：
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；
-  - 助手：[`ai/assistant-spike/managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)、[`internal/assistantapi`](../../internal/assistantapi/rpc.go)；
-  - 后台规划沿用的定时任务：[`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)、[`cron_round.py`](../../ai/assistant-spike/cron_round.py)、[`run-requests.sh`](../../ai/assistant-spike/run-requests.sh)、[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go)、[`tasks.go`](../../internal/assistantapi/tasks.go)。
+  - 助手：[`ai/assistant/managed-config.yaml`](../../ai/assistant/managed-config.yaml)、[`internal/assistantapi`](../../internal/assistantapi/rpc.go)；
+  - 后台规划沿用的定时任务：[`cron-waker.py`](../../ai/assistant/cron-waker.py)、[`cron_round.py`](../../ai/assistant/cron_round.py)、[`run-requests.sh`](../../ai/assistant/run-requests.sh)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go)、[`tasks.go`](../../internal/assistantapi/tasks.go)。

@@ -91,4 +91,4 @@
 - 需求：[#514](https://github.com/zhongwater123/A-NAS/issues/514)；决定：[剪辑中心首版的数据归属与几项做法](../decisions/2026-11-17-montage-center-first-version.md)、[Hermes 的固定提交怎么越过 gateway 运行时](../decisions/2026-11-10-hermes-gateway-runtime.md)（定时任务单元）
 - 设计：[剪辑中心技术设计](../architecture/montage-center.md)、[向量索引](../architecture/vector-index.md)、[相册 AI](../architecture/photo-ai.md)
 - 规格：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)
-- 代码：[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)（按对端 UID 认成员的先例）、[`internal/familyservice`](../../internal/familyservice/service.go)（转发会话与会话查询的先例）、[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go) 与 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)（经文件代理核对会话、由唤醒服务启动定时任务单元的先例）
+- 代码：[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)（按对端 UID 认成员的先例）、[`internal/familyservice`](../../internal/familyservice/service.go)（转发会话与会话查询的先例）、[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go) 与 [`cron-waker.py`](../../ai/assistant/cron-waker.py)（经文件代理核对会话、由唤醒服务启动定时任务单元的先例）

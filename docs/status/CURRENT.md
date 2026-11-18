@@ -62,6 +62,6 @@
 12. 实验 NAS 已换成软件包（见上文）。
 13. 设备镜像已接入系统更新；用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
 14. 照片打分：在第 12 步之后按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
-15. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）已合并；部署后按[手册](../runbooks/enable-ai-assistant.md)核对。实验 NAS 改用镜像以它为前提。
+15. AI 助手 V1 转正已合并；部署后按[手册](../runbooks/enable-ai-assistant.md)核对。实验 NAS 改用镜像以它为前提。
 16. 剪辑中心按[交付](../architecture/montage-center.md#交付)实施；allin1 版权待议。
 17. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
