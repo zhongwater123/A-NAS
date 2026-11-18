@@ -122,6 +122,9 @@ type analysisProgress struct {
 	windowCount                    int
 	cards, quality                 AnalysisState
 	cardsIdentity, qualityIdentity string
+	described                      AnalysisState
+	descriptionIdentity            string
+	describedCount                 int
 }
 
 // progressOf reads, for many videos in one go, where their montage
@@ -220,7 +223,10 @@ func (s *Service) progressOf(ctx context.Context, videos map[string]float64) (ma
 		progress[object] = p
 		return nil
 	})
-	return progress, err
+	if err != nil {
+		return nil, err
+	}
+	return progress, s.fillDescriptionProgress(ctx, progress, in, args[1:])
 }
 
 // grantedVideos are the content objects of assetIDs that the grant holds and
@@ -249,6 +255,7 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 	if err != nil || len(videos) == 0 {
 		return err
 	}
+	reader, _ := s.ai.descriptionReader()
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
 		for _, object := range slices.Sorted(maps.Keys(videos)) {
@@ -257,15 +264,23 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 				return err
 			}
 			if retry {
+				if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id = ? AND result IS NULL", object); err != nil {
+					return err
+				}
 				if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-					WHERE object_id = ? AND derivation IN (?, ?, ?) AND state = 'failed'`, now, object,
-					windowsDerivation, cardsDerivation, qualityDerivation); err != nil {
+					WHERE object_id = ? AND derivation IN (?, ?, ?, ?) AND state = 'failed'`, now, object,
+					windowsDerivation, cardsDerivation, qualityDerivation, describeDerivation); err != nil {
 					return err
 				}
 			}
 			if progress[object].windows == AnalysisDone {
 				if s.compute != nil {
 					if err := s.enqueueMissingCards(ctx, tx, object, now); err != nil {
+						return err
+					}
+				}
+				if progress[object].quality == AnalysisDone {
+					if err := s.queueMissingDescriptions(ctx, tx, reader, false, "?", object); err != nil {
 						return err
 					}
 				}
@@ -293,21 +308,26 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 // window order, then a header for each window, three little-endian uint32:
 // its start and end in milliseconds and its flags, bit 0 set for a flat
 // frame. When there are cards, a JSON array of CardCount cards follows.
-// ReadWindows reads this file into List and CardList. The socket frame
+// Each completed description is embedded in its card.
+// ReadWindows fills List, CardList and Descriptions. The socket frame
 // contains the states, dimensions, counts and analysis identities.
 type GrantAnalysis struct {
-	ObjectID        string         `json:"objectId"`
-	Windows         AnalysisState  `json:"windowsState"`
-	Identity        string         `json:"windowsIdentity,omitempty"`
-	WindowCount     int            `json:"windowCount,omitempty"`
-	Dimensions      int            `json:"dimensions,omitempty"`
-	List            []Window       `json:"-"`
-	Cards           AnalysisState  `json:"cardsState"`
-	Quality         AnalysisState  `json:"qualityState"`
-	CardsIdentity   string         `json:"cardsIdentity,omitempty"`
-	QualityIdentity string         `json:"qualityIdentity,omitempty"`
-	CardCount       int            `json:"cardCount,omitempty"`
-	CardList        []CardAnalysis `json:"-"`
+	ObjectID             string            `json:"objectId"`
+	Windows              AnalysisState     `json:"windowsState"`
+	Identity             string            `json:"windowsIdentity,omitempty"`
+	WindowCount          int               `json:"windowCount,omitempty"`
+	Dimensions           int               `json:"dimensions,omitempty"`
+	List                 []Window          `json:"-"`
+	Cards                AnalysisState     `json:"cardsState"`
+	Quality              AnalysisState     `json:"qualityState"`
+	CardsIdentity        string            `json:"cardsIdentity,omitempty"`
+	QualityIdentity      string            `json:"qualityIdentity,omitempty"`
+	CardCount            int               `json:"cardCount,omitempty"`
+	CardList             []CardAnalysis    `json:"-"`
+	Described            AnalysisState     `json:"descriptionsState,omitempty"`
+	DescriptionsIdentity string            `json:"descriptionsIdentity,omitempty"`
+	DescriptionCount     int               `json:"descriptionCount,omitempty"`
+	Descriptions         []CardDescription `json:"-"`
 }
 
 // windowHeader is a window's header in an analysis answer.
@@ -329,7 +349,7 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 	}
 	done := progress[looked[0].ObjectID]
 	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID, Windows: done.windows,
-		Cards: done.cards, Quality: done.quality, CardsIdentity: done.cardsIdentity, QualityIdentity: done.qualityIdentity}
+		Described: done.described, DescriptionsIdentity: done.descriptionIdentity, Cards: done.cards, Quality: done.quality, CardsIdentity: done.cardsIdentity, QualityIdentity: done.qualityIdentity}
 	if done.windows != AnalysisDone {
 		return analysis, nil, nil
 	}
@@ -341,6 +361,33 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 		}
 		analysis.CardCount = len(analysis.CardList)
 	}
+	if done.describedCount > 0 && done.described == AnalysisDone {
+		descriptions, err := s.cardDescriptions(ctx, analysis.ObjectID, done.descriptionIdentity)
+		if err != nil {
+			return GrantAnalysis{}, nil, err
+		}
+		byCard := make(map[int]*CardDescription, len(descriptions))
+		for i := range descriptions {
+			byCard[descriptions[i].Card] = &descriptions[i]
+		}
+		for i := range analysis.CardList {
+			card := &analysis.CardList[i]
+			card.Description = byCard[card.Index]
+			if card.Description != nil {
+				analysis.DescriptionCount++
+			}
+		}
+		if analysis.DescriptionCount == done.describedCount {
+			analysis.Descriptions = descriptions
+		} else {
+			// A retry or a changed input invalidated descriptions during the read.
+			analysis.Described, analysis.DescriptionsIdentity, analysis.DescriptionCount = AnalysisQueued, "", 0
+			for i := range analysis.CardList {
+				analysis.CardList[i].Description = nil
+			}
+		}
+	}
+
 	file, err := sealedFile("anas-window-vectors", func(w io.Writer) error {
 		headers := make([]windowHeader, 0, analysis.WindowCount)
 		err := s.eachRow(ctx, "SELECT start_ms, end_ms, flat, vector FROM video_windows WHERE object_id = ? AND identity = ? AND idx < ? ORDER BY idx",
@@ -434,8 +481,8 @@ func (s *Service) montageWorkWaiting(ctx context.Context) (bool, error) {
 // up the photos' own work for nothing. What they did goes with
 // PruneMontageAnalysis; a grant asking again queues them again.
 func (s *Service) dropUnreferencedWindows(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE derivation = ? AND state = 'pending'
-		AND object_id NOT IN (`+referencedObjects+`)`, windowsDerivation)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE derivation IN (?, ?) AND state = 'pending'
+		AND object_id NOT IN (`+referencedObjects+`)`, windowsDerivation, describeDerivation)
 	return err
 }
 
@@ -770,6 +817,7 @@ func (s *Service) PruneMontageAnalysis(ctx context.Context) (int, error) {
 		}
 		cutoff := sqlitedb.FormatTime(now.Add(-montageRetention))
 		for _, statement := range []string{
+			"DELETE FROM video_card_descriptions WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_card_quality WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_cards WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_windows WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
@@ -795,6 +843,9 @@ func readGrantCards(analysis *GrantAnalysis, file io.Reader) error {
 	if count < 0 || count > analysis.WindowCount {
 		return fmt.Errorf("card analysis: %d cards for %d windows", count, analysis.WindowCount)
 	}
+	if analysis.DescriptionCount < 0 || analysis.DescriptionCount > count {
+		return fmt.Errorf("card analysis: %d descriptions for %d cards", analysis.DescriptionCount, count)
+	}
 	if count == 0 {
 		if _, err := io.CopyN(io.Discard, file, 1); !errors.Is(err, io.EOF) {
 			return errors.New("window analysis: more than its windows")
@@ -802,7 +853,9 @@ func readGrantCards(analysis *GrantAnalysis, file io.Reader) error {
 		return nil
 	}
 	const maxCardBytes = 4096
-	limit := int64(count * maxCardBytes)
+	// The worker emits up to 20 short beats per description (1,800 tokens).
+	const maxDescriptionBytes = 32 << 10
+	limit := int64(count*maxCardBytes + analysis.DescriptionCount*maxDescriptionBytes)
 	blob, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil || int64(len(blob)) > limit {
 		return errors.New("card analysis: unreadable or oversized payload")
@@ -812,6 +865,19 @@ func readGrantCards(analysis *GrantAnalysis, file io.Reader) error {
 	}
 	if len(analysis.CardList) != count {
 		return fmt.Errorf("card analysis: got %d cards, expected %d", len(analysis.CardList), count)
+	}
+	analysis.Descriptions = nil
+	for _, card := range analysis.CardList {
+		if card.Description == nil {
+			continue
+		}
+		if card.Description.Card != card.Index {
+			return errors.New("card analysis: description belongs to another card")
+		}
+		analysis.Descriptions = append(analysis.Descriptions, *card.Description)
+	}
+	if len(analysis.Descriptions) != analysis.DescriptionCount {
+		return fmt.Errorf("card analysis: got %d descriptions, expected %d", len(analysis.Descriptions), analysis.DescriptionCount)
 	}
 	return nil
 }

@@ -569,6 +569,23 @@ DROP TABLE video_cards;
 DROP TABLE montage_card_results;
 DELETE FROM jobs WHERE derivation IN ('montage-cards/v1', 'montage-quality/v1');
 `},
+	// 20: the montage center's card descriptions (montage-describe/v1). A
+	// card the reader could not describe keeps its error and no result.
+	// millis is how long the description took, for the NAS's measurements.
+	{Up: `
+CREATE TABLE video_card_descriptions (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL,
+    millis INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_descriptions;
+DELETE FROM jobs WHERE derivation = 'montage-describe/v1';
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had
