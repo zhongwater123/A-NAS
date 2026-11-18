@@ -68,6 +68,7 @@ export function shellHandlers(options: ShellOptions = {}) {
         ? response(200).json({ items: [] })
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
+    http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [] })),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/shares/notifications", ({ response }) => response(200).json({ items: [] })),

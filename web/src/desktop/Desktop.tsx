@@ -60,6 +60,7 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint loads after the desktop, so its code and styles stay out of
 // the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
+const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -413,6 +414,13 @@ export function Desktop({
             <FamilyNotices onOpen={() => open("family")} />
           </Suspense>
         </ShellPart>
+        {montage && (
+          <ShellPart name="montage hints">
+            <Suspense fallback={null}>
+              <MontageNotices onOpen={() => open("montage")} />
+            </Suspense>
+          </ShellPart>
+        )}
         <ShellPart name="feedback">
           <FeedbackChannel />
         </ShellPart>
