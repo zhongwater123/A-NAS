@@ -2449,6 +2449,10 @@ ip link del anas-relay
 . /src/ai/assistant-spike/system-test.sh
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/disable-system-test.sh
+# The assistant's tests bound the Host Agent's change socket over the sandboxes' empty mount
+# point on the host itself, to call it as alice; on a device only each sandbox binds it. The
+# package's tmpfiles.d, which every install below applies, wants the empty file there.
+umount /run/anas-change-agent/agent.sock 2>/dev/null || true
 
 # --- Upgrade, roll back and upgrade again (ADR 0034), with apt from the
 # signed repository. The next release adds a step to control.db; rolling back,
