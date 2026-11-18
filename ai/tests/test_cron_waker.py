@@ -216,6 +216,33 @@ class WakeTests(unittest.TestCase):
         (self.runs / "alice" / "a1b2c3d4e5f6").touch()
         self.assertTrue(self.starts(["a"], 31))
 
+    def test_a_round_under_way_is_seen_as_running(self):
+        # systemctl is-active prints the state; its exit status is 0 for
+        # "active" alone, which a oneshot round never is.
+        for state, code, expected in [
+            ("activating", 3, True), ("deactivating", 3, True), ("active", 0, True),
+            ("inactive", 3, False), ("failed", 3, False), ("", 4, False),
+        ]:
+            with self.subTest(state=state):
+                done = subprocess.CompletedProcess([], code, stdout=state + "\n", stderr="")
+                with patch.object(waker.subprocess, "run", return_value=done) as run:
+                    self.assertEqual(waker.running("anas-assistant-cron@alice.service"), expected)
+                self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "is-active", "anas-assistant-cron@alice.service"])
+
+    def test_nothing_is_started_or_noted_while_a_round_runs(self):
+        (self.runs / "alice").mkdir(parents=True)
+        (self.runs / "alice" / "a1b2c3d4e5f6").touch()
+        with patch.object(waker, "due", return_value=["a"]), \
+             patch.object(waker, "running", return_value=True), \
+             patch.object(waker, "active_account", return_value=True) as active, \
+             patch.object(waker.subprocess, "run") as run:
+            waker.wake("alice")
+        run.assert_not_called()
+        active.assert_not_called()
+        # The round's own note stands: the request waits for the next round,
+        # and the jobs that are due keep the wait they had.
+        self.assertEqual(os.listdir(waker.STATE), ["runs"])
+
     def test_a_round_starts_even_when_it_cannot_be_noted(self):
         blocked = Path(waker.STATE) / "a-file"
         blocked.write_text("")
