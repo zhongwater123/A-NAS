@@ -80,7 +80,17 @@ export function ProjectView({
     },
   });
 
-  if (project.error) return <Failed error={project.error} onRetry={() => void project.refetch()} />;
+  if (project.error) {
+    return (
+      <main className={styles.mtMain}>
+        <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onBack}>
+          <ChevronLeft aria-hidden="true" />
+          全部项目
+        </button>
+        <Failed error={project.error} onRetry={() => void project.refetch()} />
+      </main>
+    );
+  }
   if (!project.data) {
     return (
       <div className={styles.mtCentered}>
