@@ -273,6 +273,10 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if err := r.requeueStale(ctx, info); err != nil {
 		return false, err
 	}
+	// The montage center's analysis comes first: a member waits for it.
+	if worked, err := r.montageWindows(ctx, embedder, gate, info); worked || err != nil {
+		return worked, err
+	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries
 	// had theirs are routed, once.
@@ -679,6 +683,11 @@ SELECT object_id, derivation, 'pending', ?, ? FROM embeddings WHERE derivation =
 ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, info.Model); err != nil {
 			return err
 		}
+		// The montage center's window vectors: only those a grant still
+		// refers to (ADR 0038).
+		if err := lib.requeueStaleWindows(ctx, info.Model); err != nil {
+			return err
+		}
 	}
 	if info.Detector != "" && detector != info.Detector {
 		if _, err := lib.db.ExecContext(ctx, `
@@ -791,6 +800,9 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	reading := r.reader != ""
 	r.mu.Unlock()
 	now := formatTime(lib.now())
+	if due, err := lib.montageWorkWaiting(ctx); due || err != nil {
+		return due, err
+	}
 	var due bool
 	err := lib.db.QueryRowContext(ctx, `
 SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)

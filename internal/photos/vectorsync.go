@@ -32,6 +32,7 @@ type VectorIndex interface {
 	DeleteCollection(ctx context.Context, name string) error
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
+	DeleteMatching(ctx context.Context, collection, field string, values []string) error
 	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
 	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
@@ -123,6 +124,11 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 			}
 		} else {
 			worked, err := s.SyncVectors(ctx, index, report)
+			if err == nil && !worked {
+				// The montage center's window vectors, once the photos'
+				// are in line.
+				worked, err = s.SyncWindows(ctx, index, report)
+			}
 			switch {
 			case err != nil:
 				failed(err)
@@ -130,7 +136,7 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 				failures = 0
 				continue
 			case s.now().Sub(reconciled) >= vectorReconcileInterval:
-				if err := s.ReconcileVectors(ctx, index, report); err != nil {
+				if err := errors.Join(s.ReconcileVectors(ctx, index, report), s.ReconcileWindows(ctx, index, report)); err != nil {
 					failed(err)
 				} else {
 					failures, reconciled = 0, s.now()
@@ -494,8 +500,12 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, object); err != nil
 // later is built anew.
 func (s *Service) ForgetVectorIndex(ctx context.Context) error {
 	s.vectorChecked.Store(nil)
+	s.windowsChecked.Store(nil)
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM vector_outbox"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM window_outbox"); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM vector_index_state")

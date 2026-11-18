@@ -498,6 +498,12 @@ func maintain(ctx context.Context, service *photos.Service, logger *slog.Logger)
 		if _, err := service.ExpireTrash(ctx); err != nil && ctx.Err() == nil {
 			logger.ErrorContext(ctx, "photo trash expiry failed", "error", err)
 		}
+		// The montage center's analyses no grant has referred to for a week.
+		if removed, err := service.PruneMontageAnalysis(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "montage analysis pruning failed", "error", err)
+		} else if removed > 0 {
+			logger.InfoContext(ctx, "montage analyses pruned", "videos", removed)
+		}
 		select {
 		case <-ctx.Done():
 			return

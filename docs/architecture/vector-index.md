@@ -122,6 +122,15 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 记录的集合不存在：实例被清空，或版本变化；
   - 名称中的随机部分与 Catalog 记录的不符：例如换了数据卷。
 
+### 剪辑中心的窗口集合
+
+剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 的实施方案“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
+- **名称**：`video_windows_v1_<分析身份的 SHA-256 前 8 位>_<随机 8 位>`；分析身份是模型 ID 加上窗口、取帧与编码的参数。payload 是 `object` 与 `libraries`，两者都建 keyword 索引；点的键是 `<object>#<窗口序号>`。不建 HNSW 图。
+- **outbox**：Catalog migration 18 的 `window_outbox`，触发器建在 `video_windows` 的增删改，以及有窗口的对象的资产增删与图库、回收站变化上。不与 `vector_outbox` 共用：那张表的主键只有 `object_id`，同步只认 `images_*`。
+- **同步**：图片的 outbox 清空后，同一个循环再处理窗口的 outbox，每批 16 个视频。一个视频的点一起换：先按 `object` 过滤删除（`vectorindex.Client.DeleteMatching`，删除时 Catalog 里的窗口行可能已经没了），再从 Catalog 写入当前分析身份的窗口；没有未进回收站的资产时只删除。
+- **对账**：每天随图片集合一起确认窗口集合还在，不在就新建并把全部有窗口的视频排队。Catalog 里没有窗口时删除集合。
+- **读者**：首版没有，剪辑中心从 Catalog 读窗口向量。所以它不受下文“换模型”中改为集合别名的约束；有了检索的读者再满足。
+
 ### 同步循环
 
 `RunVectorSync` 在 `RunBackground` 中运行，与 AI 后台任务共用门控：

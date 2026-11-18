@@ -59,6 +59,8 @@ type GrantedAsset struct {
 	Width    int              `json:"width,omitempty"`
 	Height   int              `json:"height,omitempty"`
 	TakenAt  *time.Time       `json:"takenAt,omitempty"`
+	// Windows is where the montage analysis's window vectors stand.
+	Windows AnalysisState `json:"windows,omitempty"`
 }
 
 // grantable reports whether owner may grant record: a video it sees,
@@ -219,6 +221,9 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 		default:
 			entry.Status, entry.ObjectID = GrantAvailable, record.objectID
 			entry.Duration, entry.Width, entry.Height, entry.TakenAt = record.Video.Duration, record.Width, record.Height, record.TakenAt
+			if entry.Windows, err = s.windowsState(ctx, s.db, record.objectID); err != nil {
+				return nil, err
+			}
 		}
 		found = append(found, entry)
 	}

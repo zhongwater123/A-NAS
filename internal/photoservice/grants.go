@@ -149,7 +149,7 @@ func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest)
 			grant, err = service.RegisterGrant(ctx, photosapi.NewGrantPrincipal(user.UserID, user.Username), request.ProjectID, request.AssetIDs)
 			response.Grant = &grant
 		}
-	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove:
+	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis:
 		var owner photos.Principal
 		if owner, err = g.owner(ctx, service, request.GrantID); err != nil {
 			break
@@ -159,6 +159,17 @@ func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest)
 			response.Assets, err = service.LookupGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		case photosapi.GrantOpen:
 			opened, response.ObjectID, err = service.OpenGrant(ctx, owner, request.GrantID, request.AssetID)
+		case photosapi.GrantAnalyze:
+			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
+		case photosapi.GrantAnalysis:
+			var analysis photos.GrantAnalysis
+			var vectors []byte
+			if analysis, vectors, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
+				response.Analysis = &analysis
+				if len(vectors) > 0 {
+					opened, err = vectorFile(vectors)
+				}
+			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		}
@@ -206,4 +217,23 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 		}
 		return response, file, nil
 	}}
+}
+
+// vectorFile holds a video's window vectors for the montage center: a sealed
+// memfd it reads, so a large answer does not pass through the JSON message.
+func vectorFile(vectors []byte) (*os.File, error) {
+	fd, err := unix.MemfdCreate("anas-window-vectors", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "anas-window-vectors")
+	if _, err := file.Write(vectors); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -26,6 +27,11 @@ const (
 	GrantRemove   = "remove"
 	GrantList     = "list"
 	GrantRevoke   = "revoke"
+	// GrantAnalyze queues the montage analysis of granted videos;
+	// GrantAnalysis returns one video's, its window vectors in a memfd
+	// beside the answer.
+	GrantAnalyze  = "analyze"
+	GrantAnalysis = "analysis"
 )
 
 // Grant error codes.
@@ -58,6 +64,8 @@ type GrantRequest struct {
 	GrantID   string   `json:"grantId,omitempty"`
 	AssetIDs  []string `json:"assetIds,omitempty"`
 	AssetID   string   `json:"assetId,omitempty"`
+	// Retry, on analyze, starts a failed analysis over.
+	Retry bool `json:"retry,omitempty"`
 }
 
 // GrantResponse answers a GrantRequest.
@@ -69,6 +77,7 @@ type GrantResponse struct {
 	Assets   []photos.GrantedAsset `json:"assets,omitempty"`
 	Grants   []photos.Grant        `json:"grants,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
+	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
 }
 
 // GrantError is a refused request.
@@ -165,6 +174,46 @@ func (g Grants) Open(ctx context.Context, grantID, assetID string) (*os.File, st
 	}
 	return file, response.ObjectID, nil
 }
+
+// Analyze queues the montage analysis of granted videos; with retry, a
+// failed analysis starts over.
+func (g Grants) Analyze(ctx context.Context, grantID string, assetIDs []string, retry bool) error {
+	_, err := g.plain(ctx, GrantRequest{Op: GrantAnalyze, GrantID: grantID, AssetIDs: assetIDs, Retry: retry})
+	return err
+}
+
+// Analysis returns a granted video's montage analysis so far and, once its
+// windows are done, their vectors: n × dimensions little-endian float32.
+func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
+	response, file, err := g.Call(ctx, GrantRequest{Op: GrantAnalysis, GrantID: grantID, AssetID: assetID})
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	defer unixmsg.CloseFile(file)
+	if response.Analysis == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
+	}
+	var vectors []byte
+	if file != nil {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return photos.GrantAnalysis{}, nil, err
+		}
+		if vectors, err = io.ReadAll(io.LimitReader(file, maxAnalysisBytes+1)); err != nil {
+			return photos.GrantAnalysis{}, nil, err
+		}
+		if len(vectors) > maxAnalysisBytes || len(vectors) != len(response.Analysis.List)*4*windowDimensions {
+			return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %d bytes of vectors for %d windows", len(vectors), len(response.Analysis.List))
+		}
+	}
+	return *response.Analysis, vectors, nil
+}
+
+// The window vectors of one video: 768 float32 each, and no more than a
+// 4 GiB video holds windows (6 hours, 10,800 windows, 33 MB).
+const (
+	windowDimensions = 768
+	maxAnalysisBytes = 10800 * 4 * windowDimensions
+)
 
 // Remove takes assets out of a grant.
 func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) error {
