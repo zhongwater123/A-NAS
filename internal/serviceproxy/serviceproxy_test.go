@@ -46,6 +46,9 @@ func TestOnlyTheVerifiedSessionTokenReachesTheService(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer untrusted")
 		request.Header.Set(serviceproxy.SessionHeader, "forged")
 		request.Header.Set("X-CSRF-Token", "csrf")
+		// Only the Product Service may say something to a service in an
+		// X-A-NAS- header, such as that a request registered a planning grant.
+		request.Header.Set("X-A-NAS-Assistant", "on")
 		request = request.WithContext(accounts.WithSessionToken(context.Background(), "verified"))
 		recorder := httptest.NewRecorder()
 		proxy.ServeHTTP(recorder, request)
@@ -53,7 +56,8 @@ func TestOnlyTheVerifiedSessionTokenReachesTheService(t *testing.T) {
 			t.Fatalf("%s: status %d", name, recorder.Code)
 		}
 		headers := <-received
-		if headers.Get(serviceproxy.SessionHeader) != "verified" || headers.Get("Cookie") != "" || headers.Get("Authorization") != "" || headers.Get("X-CSRF-Token") != "" {
+		if headers.Get(serviceproxy.SessionHeader) != "verified" || headers.Get("Cookie") != "" || headers.Get("Authorization") != "" || headers.Get("X-CSRF-Token") != "" ||
+			headers.Get("X-A-NAS-Assistant") != "" {
 			t.Fatalf("%s: forwarded headers %+v", name, headers)
 		}
 	}

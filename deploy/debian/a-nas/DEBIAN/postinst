@@ -185,7 +185,8 @@ systemctl start smbd.service || true
 # Members' assistants run this release's scripts from their next start; the
 # Product Service's restart below ends their connections anyway.
 systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' 2>/dev/null || true
-systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
+  anas-montage.service
 systemctl try-restart 'anas-kiosk@*.service' || true
 # The assistant's model gateway and the waker of its scheduled tasks run only
 # while the administrator's key is saved (their units' condition); the Product

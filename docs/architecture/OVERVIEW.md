@@ -23,6 +23,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
   │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
+  ├── /api/v1/montage 转发 ──► 剪辑服务（a-nas-montage，独占数据卷 montage 子卷；`ANAS_MONTAGE_ENABLED` 打开前不挂载；ADR 0038）
   ├── /api/v1/modules/<id> 转发 ──► 可移除模块（自己的脚本安装与移除；独占 module-<id> 子卷；如照片打分 a-nas-scoring；ADR 0037）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
@@ -99,7 +100,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
   处理函数不再自己做这些检查。读操作不能标为 `mutation`，写操作不能只标 `session`；姿态必须显式设置，零值与未知值均非法，表不合规时产品服务在构造时就失败。
 - 管理员专用操作在 `api/paths/` 的 OpenAPI 操作上声明 `x-anas-posture: admin`，路由表也必须标为 `admin`。契约测试逐项核对实际匹配的路由（包括前缀挂载），并用有效成员会话和 CSRF 令牌确认返回 `403 forbidden`。账号管理与存储变更在领域服务入口再次检查操作者是有效管理员；存储的规划、确认、执行、取消与转换重试在读取或改变计划、调用 Host Agent 之前拒绝其他操作者。
 - 两类接口整体挂在一个前缀下，姿态为 `session` 或 `admin`，写请求同样要 CSRF，登录用户经各自包里的 `WithUser` 传入：
-  - 由另一个进程提供的接口：相册与分享，产品服务经 [`internal/serviceproxy`](../../internal/serviceproxy/serviceproxy.go) 转发，只带会话令牌；开发模式在产品进程内以相册服务自己的认证运行相册接口（`photoservice.Local`）；
+  - 由另一个进程提供的接口：相册、分享、家庭与剪辑，产品服务经 [`internal/serviceproxy`](../../internal/serviceproxy/serviceproxy.go) 转发，只带会话令牌；浏览器带来的 `X-A-NAS-` 请求头一律去掉，这类请求头只由产品服务设置；开发模式在产品进程内以相册服务自己的认证运行相册接口（`photoservice.Local`）；
   - 第三方 Handler：tus 上传。
 
   挂载的接口在 [`apiroute.Mux`](../../internal/apiroute/apiroute.go) 上注册，并以 `Endpoints()` 列出自己的每个操作。产品服务按前缀挂载，路由表中再展开为逐个操作，`session` 挂载下的写操作计为 `mutation`（[#273](https://github.com/zhongwater123/A-NAS/issues/273)）。
@@ -156,6 +157,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/ffmpegworker` | FFmpeg Worker：与应用无关的类型化协议（探测、截图、HEIF 图片、字幕、视频流、音频解码）、FFmpeg 与 libheif 命令、按连接服务端（`anas-api ffmpeg-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker`、相册经 `photos.Options.Media` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
 | `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md) |
 | `internal/modules` / `internal/modulemanifest` | 可移除模块的通用部分：产品服务按模块登记表转发并判断是否已安装，模块端确认会话与检查存储；`modulemanifest` 只用标准库，供 Host Agent 读清单（[ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)） | 单元测试与系统测试覆盖 |
+| `internal/storeservice` | 以自己身份运行、记录存在数据卷上自己子卷的服务的通用生命周期：监听套接字，向 Host Agent 确认会话，数据卷可用时提供服务、不可用时回答各自的 `*_unavailable`，撤下存储前等进行中的请求结束；剪辑服务（`internal/montageservice`，ADR 0038）用它，相册、分享与家庭服务仍各有一份自己的 | 单元测试与系统测试覆盖 |
 | `internal/scoring` / `internal/scoringapi` / `cmd/anas-scoring` | 照片打分模块：批次、领取、盲评的回答、统计与导出，独立进程与账号（[技术设计](photo-scoring.md)） | 单元、接口与系统测试覆盖；实验 NAS 待安装 |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单、评论与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/personalization` | “设置 → 个性化”的设备级设置：系统盘上 `personalization.db` 中全体账号共用的桌面壁纸（图片经转正、缩到 3840 px 并重新编码为 JPEG）与样式，以及本机屏幕的息屏时长 | 已实现，单元测试覆盖；`internal/personalizationapi` 提供 `/api/v1/wallpaper`（已登录读取）与 `/api/v1/local-display`（读取无需登录），修改仅管理员，见[个性化规格](../specs/personalization.md) |

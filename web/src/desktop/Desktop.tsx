@@ -21,6 +21,7 @@ import { whenText } from "../assistant/taskTime";
 import { Companion } from "../companion/Companion";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
+import { montageEnabled } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -196,6 +197,28 @@ export function Desktop({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
+  // 剪辑中心 is read when the account signs in and when the page comes back
+  // into view, so a read that failed is tried again.
+  const [montage, setMontage] = useState(false);
+  useEffect(() => {
+    let controller = new AbortController();
+    const read = () => {
+      controller.abort();
+      controller = new AbortController();
+      montageEnabled(controller.signal)
+        .then(setMontage)
+        .catch(() => undefined);
+    };
+    read();
+    const visible = () => {
+      if (!document.hidden) read();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      controller.abort();
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -213,6 +236,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
+      montage,
       open,
       intents,
       intentHandled,
@@ -227,6 +251,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
+      montage,
       open,
       intents,
       intentHandled,

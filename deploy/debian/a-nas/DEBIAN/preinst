@@ -11,10 +11,10 @@ case "${1:-}" in
   *) exit 0 ;;
 esac
 
-# The photo, share and family services own their stores under fixed IDs
+# The photo, share, family and montage services own their stores under fixed IDs
 # (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
 # systemd-sysusers would leave such an account as it is.
-for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003; do
   name=${account%%:*} id=${account#*:}
   if getent passwd "$name" >/dev/null; then
     [[ "$(id -u "$name"):$(id -g "$name")" == "$id:$id" ]] ||
@@ -46,7 +46,7 @@ shopt -s nullglob
 databases=(/var/lib/a-nas/*.db)
 stores=()
 if mountpoint -q /srv/a-nas/data; then
-  for store in photos/catalog.db shares/catalog.db family/family.db; do
+  for store in photos/catalog.db shares/catalog.db family/family.db montage/montage.db; do
     [[ ! -f "/srv/a-nas/data/$store" ]] || stores+=("$store")
   done
 fi
@@ -62,7 +62,7 @@ fi
 # The writers stop first, so that each copy is whole. The new release starts
 # them again; so does the old one if this one fails to unpack.
 if [[ -d /run/systemd/system ]]; then
-  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service 2>/dev/null || true
+  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service 2>/dev/null || true
 fi
 # The system disk's copies go to /var/backups/a-nas; the data volume's stay on
 # it, where a copy shares the database's blocks until either changes. Both

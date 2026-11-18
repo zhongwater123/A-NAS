@@ -42,6 +42,9 @@ const (
 	// FamilyServiceUser owns the family store (ADR 0029).
 	FamilyServiceUser = "a-nas-family"
 	FamilyServiceUID  = 31002
+	// MontageServiceUser owns the montage center's store (ADR 0038).
+	MontageServiceUser = "a-nas-montage"
+	MontageServiceUID  = 31003
 )
 
 type Role string

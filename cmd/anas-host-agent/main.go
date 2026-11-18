@@ -111,6 +111,8 @@ type config struct {
 	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
 	FamilySessionGroup   string `env:"ANAS_FAMILY_SESSION_GROUP"`
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
+	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
+	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
 	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`
@@ -143,6 +145,9 @@ func loadConfig(environment map[string]string) (config, error) {
 	}
 	if c.FamilySessionGroup == "" {
 		c.FamilySessionGroup = accountid.FamilyServiceUser
+	}
+	if c.MontageSessionGroup == "" {
+		c.MontageSessionGroup = accountid.MontageServiceUser
 	}
 	return c, nil
 }
@@ -267,6 +272,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopFamilyLookup()
+	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions, logger)
+	if err != nil {
+		return err
+	}
+	defer stopMontageLookup()
 	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, logger)
 	if err != nil {
 		return err
@@ -460,6 +470,11 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "family store repair failed", "error", familyErr)
 	}
 	logRepairs(logger, familyRepairs)
+	montageRepairs, montageErr := executor.EnsureMontageStore(ctx)
+	if montageErr != nil {
+		logger.ErrorContext(ctx, "montage store repair failed", "error", montageErr)
+	}
+	logRepairs(logger, montageRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)

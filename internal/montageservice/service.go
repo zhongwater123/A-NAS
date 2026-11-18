@@ -1,0 +1,86 @@
+//go:build linux
+
+// Package montageservice runs the montage center as its own service
+// (anas-montage.service, ADR 0038): the Product Service forwards
+// /api/v1/montage with the browser's session token, and the service confirms
+// the session with the Host Agent itself (storeservice).
+package montageservice
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
+	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/storeservice"
+)
+
+type Config struct {
+	Root       string
+	SocketPath string
+	Sessions   storeservice.SessionResolver
+	Logger     *slog.Logger
+	// CheckStore accepts Root as the service's store; RequireOwnedStore
+	// when nil.
+	CheckStore    func(string) error
+	RetryInterval time.Duration
+}
+
+// ErrStoreUnavailable reports a store that is not the service's own on the
+// data volume.
+var ErrStoreUnavailable = errors.New("montage store on the data volume is unavailable")
+
+// RequireOwnedStore accepts root only as this service's own private
+// directory on the writable, verified data volume, so the montage center's
+// records are never written to the system disk.
+func RequireOwnedStore(root string) error {
+	if err := modules.RequireOwnedStore(root); err != nil {
+		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
+		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
+	}
+	return nil
+}
+
+// Proxy forwards the montage API to the service on socketPath; while the
+// service cannot be reached, requests answer montage_unavailable.
+func Proxy(socketPath string, logger *slog.Logger) http.Handler {
+	return serviceproxy.New(socketPath, serviceproxy.Unavailable{
+		Code: montageapi.Unavailable, Message: "the montage center is not available",
+	}, logger)
+}
+
+// Run serves the montage API on SocketPath until ctx ends. While the store
+// cannot be opened, as when the data volume is offline or read-only,
+// requests answer montage_unavailable.
+func Run(ctx context.Context, config Config) error {
+	if config.CheckStore == nil {
+		config.CheckStore = RequireOwnedStore
+	}
+	return storeservice.Run(ctx, storeservice.Config[*montage.Store]{
+		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
+		Unavailable: montageapi.Unavailable,
+		Open:        montage.Open,
+		API:         func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
+		Remove:      RemoveAccount,
+		CheckStore:  config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
+	})
+}
+
+// RemoveAccount forgets a deleted account's projects.
+func RemoveAccount(store *montage.Store) accountremoval.Remove {
+	return func(ctx context.Context, deletion accountid.AccountDeletion) (accountremoval.Result, error) {
+		return accountremoval.Result{}, store.RemoveAccount(ctx, deletion.UserID)
+	}
+}

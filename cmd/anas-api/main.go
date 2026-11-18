@@ -92,6 +92,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == montageServiceCommand {
+		if err := runMontageService(logger); err != nil {
+			logger.Error("A-NAS montage service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == familyServiceCommand {
 		if err := runFamilyService(logger); err != nil {
 			logger.Error("A-NAS family service stopped", "error", err)
@@ -346,6 +353,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
+	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, logger)
+	if err != nil {
+		return err
+	}
+	defer closeMontage()
 	// The assistants' companion tools call from the member's own UID; the
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
@@ -372,6 +384,7 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
+		Montage:      montageAPI,
 		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
@@ -401,7 +414,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
 	// Deleted accounts are removed once their 30 days are over
 	// (docs/specs/account-enable-and-delete.md).
-	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily,
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeMontage,
 		musicService, mediaService, transferService)
 	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A

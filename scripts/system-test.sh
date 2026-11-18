@@ -74,6 +74,21 @@ if [[ "${1:-}" != --inside ]]; then
   dpkg-deb --raw-extract "$work/previous/a-nas-host_${version}~previous_all.deb" "$legacy_host"
   sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
   dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
+  # The previous release also came before the montage center (ADR 0038): its
+  # product package has no anas-montage unit, so installing this release is
+  # the first with it, and rolling back takes the unit away as a real older
+  # release does. Its programs are this tree's, which need the montage
+  # account, so the account stays.
+  legacy_product=$work/legacy-product
+  previous_product=("$work"/previous/a-nas_*.deb)
+  dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service"
+  sed -i -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
+  ! grep -rq anas-montage "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" ||
+    { echo "the previous release still names the montage service" >&2; exit 2; }
+  dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
@@ -553,7 +568,7 @@ check "smbd then listens only on the loopback and SMB interface's addresses" smb
 
 # --- Every service runs under its production unit (issue #38).
 # One unit per check: systemctl is-active A B succeeds when any of them is (#423).
-for unit in anas-host-agent anas-photos anas-api anas-shares anas-family smbd; do
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage smbd; do
   check "services are active: $unit" systemctl is-active --quiet "$unit"
 done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
@@ -937,14 +952,64 @@ check "but not as the Host Agent's" fails journal_has anas-host-agent "$forged_a
 check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
+# --- Montage center (ADR 0038): its own identity and store, and off until
+# ANAS_MONTAGE_ENABLED turns it on: then the Product Service forwards
+# /api/v1/montage and the montage service confirms the session itself.
+check "montage store belongs to the montage service alone" \
+  test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-montage"
+check "Product Service account cannot list the montage store" denied a-nas ls "$data/montage"
+check "the montage socket is the service's, for the Product Service's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
+check "the montage center is not served while its switch is off" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage"):$(status_of -b /tmp/alice.jar "$api/api/v1/montage/projects")" = 404:404
+printf 'Environment=ANAS_MONTAGE_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
+systemctl daemon-reload
+systemctl restart anas-api
+for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "with its switch on the desktop is told the montage center is there" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage")" = 204
+check "a member lists her montage projects through the montage service" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -c .)" = '{"items":[]}'
+check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/montage/projects")" = 401
+cat > /usr/local/lib/anas-montage-probe.py <<'PY'
+import socket, sys
+leaks = []
+for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
+    try:
+        socket.socket(family, kind).close()
+        leaks.append(f"opened a {family.name} socket")
+    except OSError:
+        pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
+  /usr/lib/systemd/system/anas-montage.service > /etc/systemd/system/anas-montage-probe.service
+systemctl daemon-reload
+check "the probe opens network sockets outside the montage service's sandbox" finds /usr/local/lib/anas-montage-probe.py 'opened a AF_INET socket'
+check "the montage service's sandbox opens no network socket" systemctl start anas-montage-probe.service
+rm /etc/systemd/system/anas-montage-probe.service
+systemctl daemon-reload
+
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo, share and family services hold databases open for writing
-# on it, which a read-only remount refuses.
+# in. The photo, share, family and montage services hold databases open for
+# writing on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares anas-family
+systemctl stop anas-photos anas-shares anas-family anas-montage
 check "the data volume remounts read-only" mount -o remount,ro "$data"
+systemctl start anas-montage
+montage_unavailable() {
+  for _ in $(seq 1 50); do
+    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -r .error.code)" == montage_unavailable ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
+systemctl stop anas-montage
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
 for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
@@ -963,12 +1028,14 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares anas-family
+systemctl start anas-photos anas-shares anas-family anas-montage
 check "once the volume is writable, the Host Agent reconciles it" \
   bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
 check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
+check "the montage center recovers on the writable volume" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/montage/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied a-nas ls "$data/spaces/private/alice"
@@ -1596,7 +1663,7 @@ journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -
 search_socket=/run/a-nas-search/search.sock
 # The Product Service holds a-nas-search through its unit's SupplementaryGroups,
 # not as a login group of a-nas.
-as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-search "$@"; }
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -2481,7 +2548,13 @@ check "this release took the database back with the newer release's Down" test "
 check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "the upgrade copied the montage database on the data volume" \
+  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+check "the previous release, which came before the montage center, has no montage unit" \
+  test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
+  not-found:inactive
+check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }
@@ -2508,6 +2581,9 @@ check "a-nas-check passes on the previous release" quiet a-nas-check
 check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
+check "after upgrading again the montage service has its account, store and socket" \
+  test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
+  "active:31003:700 a-nas-montage:660 a-nas-montage"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "two copies of the databases stay, under the same names on both disks" \

@@ -19,6 +19,8 @@ Environment=ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock
 Environment=ANAS_SHARE_SESSION_GROUP=a-nas-shares
 Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock
 Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family
+Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage
 Environment=ANAS_DATA_MOUNT=/srv/a-nas/data
 # The AI assistant (ADR 0024): the File Broker is the session gate to members' instances, and
 # the photo service's socket for assistants looks members up by UID here.
@@ -32,9 +34,9 @@ RestartSec=2s
 # The Host Agent serves at once and reconciles the data volume afterwards, so
 # a volume it cannot reconcile no longer stops it (issue #166).
 TimeoutStopSec=20s
-# Separate session directories preserve the photo, share and family socket
-# group permissions.
-RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions
+# Separate session directories preserve the photo, share, family and montage
+# socket group permissions.
+RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-module-sessions
 RuntimeDirectoryMode=0750
 # The Host Agent's records (spaces, identities, viewing grants, app
 # identities, data-volume operations) live where only root can open them.

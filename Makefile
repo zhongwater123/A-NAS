@@ -235,6 +235,14 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
+	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api montage-service' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
+	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -242,7 +250,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-montage a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
 	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
@@ -252,7 +260,7 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
