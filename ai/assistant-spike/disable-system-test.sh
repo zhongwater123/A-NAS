@@ -80,3 +80,40 @@ check "it does not reactivate the member socket" \
   test "$(systemctl is-enabled anas-assistant-api@bob.socket 2>/dev/null || true)" = masked
 check "nor the curator timer" \
   test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" = masked
+
+# --- Deleting the disabled member removes his assistant for good: its folder, secret and
+# settings go, and its units lose their masks, so an account given the name later starts clean.
+rm -rf /etc/systemd/system/anas-assistant-cron@bob.service.d /etc/systemd/system/anas-assistant@bob.service.d
+systemctl daemon-reload
+check "the administrator deletes bob" test "$(status_of -X PUT -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
+  -H 'Content-Type: application/json' -d "{\"password\":\"$owner_password\",\"personalSpace\":\"delete\",\"library\":\"delete\"}" \
+  "$api/api/v1/users/$bob_user/deletion")" = 200
+for _ in $(seq 1 120); do getent passwd bob >/dev/null || break; sleep 0.5; done
+check "bob is removed once his time is up" bash -c '! getent passwd bob'
+check "his assistant leaves no secret, settings, socket or folder" \
+  test ! -e /var/lib/a-nas-host/assistant/tokens/bob.env -a ! -e /var/lib/a-nas-host/assistant/members/bob \
+  -a ! -e /run/a-nas-assistant/bob.sock -a ! -e "$data/assistant/bob"
+check "and his units are no longer masked" \
+  test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" != masked
+
+# --- Deleting the key turns VNAS off for everyone and keeps what their assistants hold;
+# saving it again brings each back.
+check "the administrator deletes the key" \
+  test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/assistant-key")" = 200
+check "without the key the model gateway and the waker stop" \
+  test "$(systemctl is-active anas-assistant-gateway.service anas-assistant-cron-waker.service | sort -u | paste -sd ' ' || true)" = inactive
+check "alice's assistant is off" test ! -S /run/a-nas-assistant/alice.sock
+check "and alice is told why" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .reason || true)" = no_key
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+start_without_key() {
+  systemctl start anas-assistant-cron@alice.service &&
+    test "$(systemctl show -p ConditionResult --value anas-assistant-cron@alice.service)" = no
+}
+check "a start that still arrives runs none of her assistant" start_without_key
+check "her folder and instance secret stay" \
+  test -d "$data/assistant/alice/hermes" -a -f /var/lib/a-nas-host/assistant/tokens/alice.env
+check "the administrator saves the key again" test "$(save_key /tmp/owner.jar "$owner_csrf" true)" = 200
+for _ in $(seq 1 100); do [[ -S /run/a-nas-assistant/alice.sock ]] && break; sleep 0.2; done
+check "and alice has VNAS again" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available || true)" = true

@@ -11,6 +11,10 @@ StopWhenUnneeded=yes
 Requires=anas-assistant-net@%i.service
 After=anas-assistant-net@%i.service
 JoinsNamespaceOf=anas-assistant-net@%i.service
+# Without the administrator's model key (设置 → VNAS) the assistant is off: a start that
+# still arrives, such as a scheduled task asked to run now while the key is deleted, runs
+# nothing. The units made from this one inherit it.
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
 
 [Service]
 Type=simple

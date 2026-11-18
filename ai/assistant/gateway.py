@@ -7,7 +7,8 @@ member, adds the administrator's DeepSeek key that only this process can read, a
 the two requests Hermes makes of an OpenAI-compatible model to DeepSeek. Every request is
 logged to LOG with the member it came from (the peer's UID), the tools offered, how many
 messages there were and the token usage; the messages themselves carry members' files and
-are not logged.
+are not logged. LOG turns over at 16 MiB and keeps four older files beside it (LOG.1 to
+LOG.4).
 
 The key is the systemd credential a-nas-assistant-deepseek ($CREDENTIALS_DIRECTORY), which
 the Host Agent encrypts when the administrator saves it. The spike and the system test, which
@@ -19,6 +20,8 @@ import contextlib
 import grp
 import http.client
 import json
+import logging
+import logging.handlers
 import os
 import pwd
 import socket
@@ -41,11 +44,23 @@ MEMBERS = "a-nas-users"
 # reaches DeepSeek with the key.
 ALLOWED = {("POST", "/v1/chat/completions"), ("GET", "/v1/models")}
 LIMIT = 64 << 20
+# A body up to this size is read for the log (the model, the tools offered, how many messages);
+# a larger one, mostly pictures, is forwarded unread, so that a few at once keep the gateway
+# within its unit's MemoryMax.
+PARSE_LIMIT = 4 << 20
+
+# One JSON line per request, from every handler thread, in a log that does not outgrow the
+# system disk.
+REQUESTS = logging.getLogger("anas.gateway.requests")
+REQUESTS.propagate = False
+REQUESTS.setLevel(logging.INFO)
+_handler = logging.handlers.RotatingFileHandler(LOG, maxBytes=16 << 20, backupCount=4, encoding="utf-8", delay=True)
+_handler.setFormatter(logging.Formatter("%(message)s"))
+REQUESTS.addHandler(_handler)
 
 
 def log(record):
-    with open(LOG, "a", encoding="utf-8") as out:
-        out.write(json.dumps(record, ensure_ascii=False) + "\n")
+    REQUESTS.info(json.dumps(record, ensure_ascii=False))
 
 
 def peer_account(conn):
@@ -122,12 +137,13 @@ class Handler(BaseHTTPRequestHandler):
             log({**record, "status": "refused"})
             return
         raw = self.rfile.read(length) if length else b""
-        try:
-            body = json.loads(raw or b"{}")
-        except ValueError:
-            body = {}
-        if not isinstance(body, dict):
-            body = {}
+        body = {}
+        # The spike's research logs whole messages, whatever their size.
+        if length <= PARSE_LIMIT or LOG_MESSAGES:
+            with contextlib.suppress(ValueError):
+                body = json.loads(raw or b"{}")
+            if not isinstance(body, dict):
+                body = {}
         try:
             status, usage = self.forward(method, raw)
         except OSError as error:
@@ -137,8 +153,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         tools = body.get("tools") if isinstance(body.get("tools"), list) else []
         messages = body.get("messages") if isinstance(body.get("messages"), list) else []
-        log({**record, "seconds": round(time.time() - started, 2), "status": status, "model": body.get("model"),
-             "stream": bool(body.get("stream")),
+        log({**record, "seconds": round(time.time() - started, 2), "status": status, "bytes": length,
+             "model": body.get("model"), "stream": bool(body.get("stream")),
              "tools": [t.get("function", {}).get("name") for t in tools if isinstance(t, dict)],
              "messages": messages if LOG_MESSAGES else len(messages), "usage": usage})
 

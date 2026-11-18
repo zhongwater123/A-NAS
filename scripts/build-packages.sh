@@ -142,7 +142,9 @@ done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
+# Members' sandboxes read the skills, whatever the builder's umask.
 cp -r "$assistant/skills" "$lib/assistant/skills"
+find "$lib/assistant/skills" -type d -exec chmod 0755 {} +
 find "$lib/assistant/skills" -type f -exec chmod 0644 {} +
 ln -s "/opt/a-nas/assistant-runtimes/spike" "$lib/assistant/runtime"
 

@@ -142,6 +142,7 @@ take_over_assistant_trial() {
     rmdir "/etc/systemd/system/$file.service.d" 2>/dev/null || true
   done
   if [[ -s /etc/anas-spike/model.key && ! -e "$credential" ]]; then
+    # anas-site.service makes the credential key too, but only after this.
     systemd-creds setup >/dev/null 2>&1 || true
     install -d -m 0700 /etc/credstore.encrypted
     if tr -d '\r\n' </etc/anas-spike/model.key |
@@ -167,10 +168,6 @@ if [[ "$1" == configure && ( -L /spike || -e /etc/systemd/system/anas-assistant@
 fi
 systemd-tmpfiles --create a-nas.conf
 "$running" || exit 0
-# The machine's own credential key, which encrypts the assistant's model key:
-# the Host Agent, which saves that key, may not write where systemd keeps it.
-# Only on the machine itself: an image must not carry one key for every device.
-systemd-creds setup >/dev/null 2>&1 || echo "a-nas: systemd-creds setup failed; the assistant's key cannot be saved" >&2
 
 systemctl daemon-reload
 # A running Worker and vector index belong to the previous release; the next
@@ -178,8 +175,9 @@ systemctl daemon-reload
 # FFmpeg worker and its shared admission slots.
 systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' || true
 systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
-# This machine's settings: failures leave the product running and are
-# reported below.
+# This machine's settings, with the credential key that encrypts the
+# assistant's model key: failures leave the product running and are reported
+# below.
 systemctl restart anas-site.service || true
 # smbd that waits for the SMB interface's address keeps trying without it,
 # which must not stop the installation halfway.

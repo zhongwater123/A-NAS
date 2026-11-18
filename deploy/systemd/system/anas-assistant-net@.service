@@ -7,6 +7,8 @@ Description=Private network of the A-NAS assistant of %i, with its bridge to the
 # port. This unit also holds the only way out of that network, the bridge to the model
 # gateway's Unix socket, so that it outlives whichever of them stops first.
 StopWhenUnneeded=yes
+# Off without the administrator's model key, as the units that join it are.
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
 
 [Service]
 Type=simple

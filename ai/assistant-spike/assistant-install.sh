@@ -49,13 +49,14 @@ install -m 0644 "$src"/deploy/systemd/system/anas-assistant{@,-net@,-api@}.servi
   "$src/deploy/systemd/system/anas-assistant-curator@.timer" "$src/deploy/systemd/system/anas-assistant-cron-waker.service" "$units/"
 # The spike's change broker binds no Host Agent socket; the empty file stands in.
 sed -i 's#^BindReadOnlyPaths=/run/a-nas/assistant-changes.sock:#BindReadOnlyPaths=-/run/a-nas/assistant-changes.sock:#' "$units/anas-assistant@.service"
+# The units run while a key is saved; the spike has none.
+sed -i '/^ConditionPathExists=/d' "$units/anas-assistant@.service" "$units/anas-assistant-net@.service" \
+  "$units/anas-assistant-cron-waker.service"
 # shellcheck source=../../scripts/lib/assistant-units.sh
 . "$src/scripts/lib/assistant-units.sh"
 derive_assistant_units "$units"
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
   "$units/anas-assistant@.service" > "$units/anas-assistant-probe@.service"
-# The waker runs while a key is saved; the spike has none.
-sed -i '/^ConditionPathExists=/d' "$units/anas-assistant-cron-waker.service"
 if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
   install -d "$units/anas-assistant@.service.d" "$units/anas-assistant-api@.service.d"
   install -m 0644 "$here/api-server-channel/anas-assistant.conf" "$units/anas-assistant@.service.d/channel.conf"
