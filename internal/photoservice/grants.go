@@ -6,10 +6,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -29,13 +28,34 @@ type ActiveAccounts interface {
 	ActiveProfiles(context.Context) ([]accounts.Profile, error)
 }
 
+// grantDeadline bounds one request on the grant socket, its Host Agent calls
+// included.
+const grantDeadline = 2 * time.Minute
+
 // grantServer answers the grant socket with the store open now.
 type grantServer struct {
+	listener net.Listener
 	service  *atomic.Pointer[photos.Service]
 	sessions SessionResolver
 	accounts ActiveAccounts
 	peerUID  int
 	logger   *slog.Logger
+	// base ends the Host Agent calls of the requests still open when
+	// stopping gives up waiting for them.
+	base   context.Context
+	cancel context.CancelFunc
+	// answers are the requests being answered; serve adds to it until
+	// stopped closes.
+	answers sync.WaitGroup
+	stopped chan struct{}
+	closing sync.Once
+}
+
+func newGrantServer(listener net.Listener, service *atomic.Pointer[photos.Service], sessions SessionResolver,
+	active ActiveAccounts, peerUID int, logger *slog.Logger) *grantServer {
+	base, cancel := context.WithCancel(context.Background())
+	return &grantServer{listener: listener, service: service, sessions: sessions, accounts: active, peerUID: peerUID,
+		logger: logger, base: base, cancel: cancel, stopped: make(chan struct{})}
 }
 
 // grantSocket is the listener systemd hands over by the name "grants", or,
@@ -51,63 +71,80 @@ func grantSocket(socketPath string) (net.Listener, bool, error) {
 	return listener, false, err
 }
 
-func (g grantServer) serve(listener net.Listener) error {
+// serve accepts until the listener closes. As in net/http, a failed accept,
+// such as while the process is out of descriptors, is waited out: it never
+// ends the photo service, which every member uses.
+func (g *grantServer) serve() error {
+	defer close(g.stopped)
+	var delay time.Duration
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return nil
-			}
-			return err
+		conn, err := g.listener.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return nil
 		}
-		go g.answer(conn.(*net.UnixConn))
+		if err != nil {
+			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+			g.logger.Warn("grant socket accept failed; retrying", "error", err, "retry_in", delay)
+			time.Sleep(delay)
+			continue
+		}
+		delay = 0
+		g.answers.Go(func() { g.answer(conn) })
 	}
 }
 
-func peerUID(conn *net.UnixConn) (int, bool) {
-	raw, err := conn.SyscallConn()
-	if err != nil {
-		return 0, false
+// drain stops accepting and waits, until ctx ends, for the requests being
+// answered, so that they finish before the Catalog closes. Requests still
+// open then lose their Host Agent calls.
+func (g *grantServer) drain(ctx context.Context) {
+	g.closing.Do(func() { _ = g.listener.Close() })
+	done := make(chan struct{})
+	go func() {
+		<-g.stopped
+		g.answers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		g.cancel()
+		g.logger.Warn("grant requests were still open when the photo service stopped")
 	}
-	var cred *unix.Ucred
-	var credErr error
-	if err := raw.Control(func(fd uintptr) {
-		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
-	}); err != nil || credErr != nil {
-		return 0, false
-	}
-	return int(cred.Uid), true
 }
 
 func refused(code, message string) photosapi.GrantResponse {
 	return photosapi.GrantResponse{Code: code, Message: message}
 }
 
-func (g grantServer) answer(conn *net.UnixConn) {
+func (g *grantServer) answer(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	if uid, ok := peerUID(conn); !ok || uid != g.peerUID {
 		g.logger.Error("grant socket peer is not the montage service", "uid", uid, "credentials", ok)
 		return
 	}
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Minute))
+	unixConn := conn.(*net.UnixConn)
+	deadline := time.Now().Add(grantDeadline)
+	_ = conn.SetDeadline(deadline)
+	ctx, cancel := context.WithDeadline(g.base, deadline)
+	defer cancel()
 	var request photosapi.GrantRequest
-	file, err := unixmsg.Read(conn, &request, photosapi.GrantMessageLimit)
+	file, err := unixmsg.Read(unixConn, &request, photosapi.GrantMessageLimit)
 	unixmsg.CloseFile(file)
 	if err != nil {
 		return
 	}
-	response, opened := g.handle(context.Background(), request)
+	response, opened := g.handle(ctx, request)
 	if opened != nil {
 		defer func() { _ = opened.Close() }()
 	}
-	if err := unixmsg.Write(conn, response, opened, photosapi.GrantMessageLimit); err != nil {
+	if err := unixmsg.Write(unixConn, response, opened, photosapi.GrantMessageLimit); err != nil {
 		g.logger.Warn("grant answer not sent", "op", request.Op, "error", err)
 	}
 }
 
 // owner is the grant's owner as a grant Principal, while the account is in
 // use.
-func (g grantServer) owner(ctx context.Context, service *photos.Service, grantID string) (photos.Principal, error) {
+func (g *grantServer) owner(ctx context.Context, service *photos.Service, grantID string) (photos.Principal, error) {
 	grant, err := service.GrantOf(ctx, grantID)
 	if err != nil {
 		return photos.Principal{}, err
@@ -126,7 +163,7 @@ func (g grantServer) owner(ctx context.Context, service *photos.Service, grantID
 
 var errInactiveOwner = errors.New("the grant's owner is not an active account")
 
-func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File) {
+func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest) (photosapi.GrantResponse, *os.File) {
 	service := g.service.Load()
 	if service == nil {
 		return refused(photosapi.GrantUnavailable, "the photo library is not available"), nil
@@ -162,7 +199,10 @@ func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest)
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		}
 	case photosapi.GrantList:
-		response.Grants, err = service.Grants(ctx)
+		response.Grants, err = service.Grants(ctx, request.After, photosapi.GrantListPage)
+		if err == nil && len(response.Grants) == photosapi.GrantListPage {
+			response.Next = response.Grants[len(response.Grants)-1].ID
+		}
 	case photosapi.GrantRevoke:
 		err = service.RevokeGrant(ctx, request.GrantID)
 	default:
@@ -172,8 +212,10 @@ func (g grantServer) handle(ctx context.Context, request photosapi.GrantRequest)
 	case err == nil:
 		response.OK = true
 		return response, opened
-	case errors.Is(err, photos.ErrGrantNotFound), errors.Is(err, errInactiveOwner):
+	case errors.Is(err, photos.ErrGrantNotFound):
 		return refused(photosapi.GrantNotFound, "no such grant"), nil
+	case errors.Is(err, errInactiveOwner):
+		return refused(photosapi.GrantOwnerInactive, "the grant's owner is not an active account"), nil
 	case errors.Is(err, photos.ErrGrantAssets), errors.Is(err, photos.ErrForbidden):
 		return refused(photosapi.GrantAssetsRefused, "an asset cannot be granted"), nil
 	case errors.Is(err, photos.ErrTooManyIDs):

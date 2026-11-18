@@ -1044,7 +1044,8 @@ func writeFile(t *testing.T, path, content string) {
 
 // Restoring the copies stops the montage service on its own, since a release
 // before it has no such unit, and brings its database back with the others
-// (ADR 0038).
+// (ADR 0038). It stops first: a request of its on the photo service's grant
+// socket would start the photo service again while the copies go back.
 func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
@@ -1056,5 +1057,12 @@ func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
 	})
 	if !host.ran("systemctl stop anas-montage") || !restored || !host.ran("systemctl start anas-montage") {
 		t.Fatalf("calls = %v; want the montage service stopped, its database restored and the service started", host.calls)
+	}
+	montage := slices.Index(host.calls, "systemctl stop anas-montage")
+	photos := slices.IndexFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "systemctl stop ") && strings.Contains(call, " anas-photos")
+	})
+	if photos < 0 || montage > photos {
+		t.Fatalf("calls = %v; want the montage service stopped before the photo service", host.calls)
 	}
 }

@@ -1203,7 +1203,10 @@ if len(header) < 4:
 length = struct.unpack(">I", header)[0]
 answer = b""
 while len(answer) < length:
-    answer += conn.recv(length - len(answer))
+    chunk = conn.recv(length - len(answer))
+    if not chunk:
+        sys.exit("closed before the whole answer")
+    answer += chunk
 reply = json.loads(answer)
 print(reply)
 sys.exit(0 if reply.get("ok") else 1)
@@ -2585,6 +2588,15 @@ check "an empty config cannot bypass the policy after rolling back" \
 systemctl reset-failed docker.socket docker.service
 rm /etc/docker/daemon.json
 check "a-nas-check passes on the previous release" quiet a-nas-check
+# grants_follow_release: the montage center's grant socket listens only when
+# the release installed has its unit; this release's prerm stopped it.
+grants_follow_release() {
+  local shipped=no listening=no
+  if [[ -e /usr/lib/systemd/system/anas-photos-grants.socket ]]; then shipped=yes; fi
+  if systemctl is-active --quiet anas-photos-grants.socket; then listening=yes; fi
+  [[ "$shipped" == "$listening" ]]
+}
+check "the grant socket listens after the rollback only if the previous release has it" grants_follow_release
 check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check

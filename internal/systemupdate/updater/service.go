@@ -866,13 +866,14 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	if backup == "" {
 		return errors.New("no copy of the databases from before the install")
 	}
+	// The montage service came later (ADR 0038): a release before it has no
+	// unit to stop or start. It stops first, for a request of its on the
+	// photo service's grant socket would start the photo service again.
+	_, _ = s.Commands.Run(ctx, "systemctl", "stop", "anas-montage")
 	services := []string{"anas-api", "anas-photos", "anas-shares", "anas-family", "anas-host-agent"}
 	if output, err := s.Commands.Run(ctx, "systemctl", append([]string{"stop"}, services...)...); err != nil {
 		return fmt.Errorf("stop the services: %w: %s", err, lastLines(string(output), 3))
 	}
-	// The montage service came later (ADR 0038): a release before it has no
-	// unit to stop or start.
-	_, _ = s.Commands.Run(ctx, "systemctl", "stop", "anas-montage")
 	script := `set -e
 name=$1
 rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \

@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -24,11 +27,16 @@ type grantSessions struct {
 	sessions
 	mu     sync.Mutex
 	active map[string]bool
+	// unbounded counts the account lookups asked with no deadline.
+	unbounded int
 }
 
-func (g *grantSessions) ActiveProfiles(context.Context) ([]accounts.Profile, error) {
+func (g *grantSessions) ActiveProfiles(ctx context.Context) ([]accounts.Profile, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if _, ok := ctx.Deadline(); !ok {
+		g.unbounded++
+	}
 	var profiles []accounts.Profile
 	for _, user := range g.sessions {
 		if g.active[user.UserID] {
@@ -141,12 +149,13 @@ func TestTheGrantSocketAnswersOnlyTheMontageServiceAsTheOwnerNow(t *testing.T) {
 		t.Fatalf("Lookup() = %+v, %v", looked, err)
 	}
 
-	// Alice's account stops: her grant reaches nothing.
+	// Alice's account stops: her grant reaches nothing, and says why, so
+	// that the montage center waits rather than giving the project up.
 	known.set("user:alice", false)
-	if _, _, err := client.Open(ctx, grant.ID, videoID); photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
+	if _, _, err := client.Open(ctx, grant.ID, videoID); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive {
 		t.Fatalf("Open() for a disabled owner = %v", err)
 	}
-	if _, err := client.Lookup(ctx, grant.ID, []string{videoID}); photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
+	if _, err := client.Lookup(ctx, grant.ID, []string{videoID}); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive {
 		t.Fatalf("Lookup() for a disabled owner = %v", err)
 	}
 	known.set("user:alice", true)
@@ -156,6 +165,146 @@ func TestTheGrantSocketAnswersOnlyTheMontageServiceAsTheOwnerNow(t *testing.T) {
 	if _, _, err := client.Open(ctx, grant.ID, videoID); photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
 		t.Fatalf("Open() after revoking = %v", err)
 	}
+	if grants, err := client.List(ctx); err != nil || len(grants) != 0 {
+		t.Fatalf("List() after revoking = %+v, %v", grants, err)
+	}
+	known.mu.Lock()
+	defer known.mu.Unlock()
+	if known.unbounded > 0 {
+		t.Fatalf("%d account lookups had no deadline", known.unbounded)
+	}
+}
+
+// grantedStore opens the store at root before the service does, with
+// Alice's video and count grants of it, and returns the video's ID and the
+// grants' IDs.
+func grantedStore(t *testing.T, root string, options photos.Options, count int) (string, []string) {
+	t.Helper()
+	ctx := context.Background()
+	store, err := photos.Open(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	alice := photos.Principal{UserID: "user:alice", Username: "alice"}
+	libraries, err := store.Libraries(ctx, alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var video photos.Asset
+	for _, lib := range libraries {
+		if lib.OwnerUserID == alice.UserID {
+			if video, err = store.Import(ctx, alice, photos.ImportRequest{LibraryID: lib.ID, Name: "beach.mp4", Content: bytes.NewReader(videoBytes(1))}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var grants []string
+	for i := range count {
+		grant, err := store.RegisterGrant(ctx, photosapi.NewGrantPrincipal(alice.UserID, alice.Username), fmt.Sprintf("project:%d", i), []string{video.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		grants = append(grants, grant.ID)
+	}
+	return video.ID, grants
+}
+
+// However many grants there are, the list reaches the montage center whole,
+// a page per answer within the message limit.
+func TestTheGrantListComesInPages(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "grants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	grantSocket := filepath.Join(dir, "grants.sock")
+	options := photos.Options{DisableCapacityReserve: true, Media: probedVideo{}}
+	var registered []string
+	r := start(t, func(config *photoservice.Config) {
+		_, registered = grantedStore(t, config.Root, options, 2*photosapi.GrantListPage+1)
+		config.Sessions = &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
+		config.Photos = options
+		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
+	})
+	r.ready.Store(true)
+	var grants []photos.Grant
+	waitFor(t, func() bool { grants, err = photosapi.GrantClient{Socket: grantSocket}.List(ctx); return err == nil })
+	listed := make([]string, 0, len(grants))
+	for _, grant := range grants {
+		listed = append(listed, grant.ID)
+	}
+	slices.Sort(registered)
+	if !slices.Equal(listed, registered) {
+		t.Fatalf("List() = %d grants; want the %d registered, in ID order", len(listed), len(registered))
+	}
+}
+
+// blockingAccounts holds every account lookup until release closes.
+type blockingAccounts struct {
+	*grantSessions
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingAccounts) ActiveProfiles(ctx context.Context) ([]accounts.Profile, error) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return b.grantSessions.ActiveProfiles(ctx)
+}
+
+// A grant request being answered when the service stops is answered from
+// the open Catalog: the store closes only after it.
+func TestAGrantRequestInFlightFinishesBeforeTheCatalogCloses(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "grants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	grantSocket := filepath.Join(dir, "grants.sock")
+	options := photos.Options{DisableCapacityReserve: true, Media: probedVideo{}}
+	held := blockingAccounts{
+		grantSessions: &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}},
+		entered:       make(chan struct{}, 1), release: make(chan struct{}),
+	}
+	var videoID string
+	var grants []string
+	r := start(t, func(config *photoservice.Config) {
+		videoID, grants = grantedStore(t, config.Root, options, 1)
+		config.Sessions, config.Photos = held, options
+		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
+	})
+	r.ready.Store(true)
+	client := photosapi.GrantClient{Socket: grantSocket}
+	waitFor(t, func() bool { _, err := client.List(ctx); return err == nil })
+
+	type answer struct {
+		assets []photos.GrantedAsset
+		err    error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		assets, err := client.Lookup(ctx, grants[0], []string{videoID})
+		answered <- answer{assets, err}
+	}()
+	<-held.entered
+	r.cancel()
+	// Give the stop time to reach the store, as it did before it waited.
+	time.Sleep(200 * time.Millisecond)
+	close(held.release)
+	got := <-answered
+	if got.err != nil || len(got.assets) != 1 || got.assets[0].Status != photos.GrantAvailable {
+		t.Fatalf("Lookup() while stopping = %+v, %v; want the video available", got.assets, got.err)
+	}
+	if err := <-r.done; err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
+	r.done <- nil
 }
 
 func TestTheGrantSocketRefusesAnyOtherUID(t *testing.T) {

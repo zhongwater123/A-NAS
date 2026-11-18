@@ -10,4 +10,11 @@ if [[ "${1:-}" == remove && -d /run/systemd/system ]]; then
     anas-ai.socket anas-ai.service anas-ffmpeg.socket anas-photos-grants.socket 'anas-vectors-proxy@*.socket' 'anas-vectors-proxy@*.service' \
     'anas-vectors@*.service' anas-container-agent.service anas-internet-firewall.service anas-site.service || true
 fi
+# The montage center's grant socket (ADR 0038) stops before any upgrade or
+# rollback: a release without it would leave it listening for a photo service
+# that no longer reads it. The photo service still holds its copy until it
+# restarts, and the next release's photo service starts the socket again.
+if [[ "${1:-}" == upgrade && -d /run/systemd/system ]]; then
+  systemctl stop anas-photos-grants.socket || true
+fi
 exit 0
