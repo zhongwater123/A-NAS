@@ -1,6 +1,6 @@
 # 剪辑中心首版实施方案
 
-状态：proposed（2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议；实施票已拆为 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，批准后动工）
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
 更新时间：2026-11-18
 
 相关文档：
@@ -133,7 +133,7 @@ anas-photos
   - DynamicUser，没有网络，看不到数据卷，用设备上已有的 AI 运行环境 `/usr/lib/a-nas/ai/runtime` 运行 `python -m anas_montage.worker`。
   - 套接字 `SocketGroup=a-nas-photos`、`0660`，相册与剪辑中心都能连。
   - 放在 `anas.slice`（后台工作，`CPUWeight=10`）之下，`MemoryMax=1G`。画质的帧分块交来（见“卡片与画质”），内存不随卡片长度增长。
-- **配乐分析 Worker**：allin1 依赖 PyTorch 等，放不进计算 Worker 用的 AI 运行环境，所以另起一个。同样 DynamicUser、没有网络、看不到数据卷、放在 `anas.slice` 之下，只有剪辑中心能连。运行环境、内存上限与交付在 M8 定（见“配乐”）。
+- **配乐分析 Worker**：allin1 依赖 PyTorch 等，放不进计算 Worker 用的 AI 运行环境，所以另起一个。同样 DynamicUser、没有网络、看不到数据卷、放在 `anas.slice` 之下，只有剪辑中心能连。运行环境、内存上限与交付在 M8b 定（见“配乐”）。
 
 ### 接线清单
 
@@ -453,8 +453,8 @@ montage/
 **分析**：复制完成后在后台进行，配乐页显示进度。
 1. **结构**：[allin1](https://github.com/mir-aidj/all-in-one) 的 `harmonix-all` 模型给出节拍、重拍、段落与段落标签（包括副歌），与第八版读的结构文件相同。
    - 它先用 Demucs 分离音轨，再用带 NATTEN 注意力的模型推理，重拍用 madmom 的 DBN 后处理。PyTorch、Demucs、NATTEN 与 madmom 设备现有的 AI 运行环境里都没有，所以 allin1 放在单独的配乐分析 Worker 与运行环境里：没有网络、看不到数据卷，歌曲经描述符交来，一次分析一首。
-   - 权重（HuggingFace `taejunkim/allinone` 的 8 个分折模型）与 Demucs 的模型按现有的模型受管交付方式下发，记下摘要。运行环境怎样构建与交付在 M8 定。
-   - 评审人记的耗时是 CPU 上一首 2–5 分钟；M8 在实验 NAS 上实测用时与峰值内存，按 8 GB 的预算比。
+   - 权重（HuggingFace `taejunkim/allinone` 的 8 个分折模型）与 Demucs 的模型按现有的模型受管交付方式下发，记下摘要。运行环境怎样构建与交付在 M8b 定。
+   - 评审人记的耗时是 CPU 上一首 2–5 分钟；M8b 在实验 NAS 上实测用时与峰值内存，按 8 GB 的预算比。
 2. **选段**：`music` 原样用第八版的选段与小节槽算法，输入就是 allin1 的结构。
 3. **响度**：同第八版。
 
@@ -484,12 +484,13 @@ montage/
 
 - 新增 `ai/assistant-spike/anas_montage_mcp.py`，在 `managed-config.yaml` 里照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`。
   - `untrusted` 不行：每次调用都要审批，而规划跑在定时任务单元里，`approvals.cron_mode` 是 `deny`，没有人能批准。
-- 服务器名只加进 `platform_toolsets` 的 `cron`，因为规划只在定时任务单元里运行（见“发起与结束”）。对话里的 VNAS 看不到剪辑工具，每次请求也不多带它们的 Schema。
-- **规划这一轮只开放 `montage` 工具组**，是 P1 的必过项（评审人 2026-11-18）。现在 `platform_toolsets.cron` 有文件、终端、代码执行、委派、看图、看视频、记忆、会话搜索、技能、待办、`anas` 与 `companion`。只开放 `montage` 有两个理由：
+- 服务器名不加进任何 `platform_toolsets`。规划这一轮的任务建时带 `enabled_toolsets=["montage"]`：Hermes 让任务自己的工具组优先于 `platform_toolsets.cron`，点名了某个 MCP 服务器时不再把别的服务器并进来（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 1）。成员自己的定时任务和对话都看不到剪辑工具，每次请求也不多带它们的 Schema。
+- **规划这一轮只开放 `montage` 工具组**，是 P1 的必过项（评审人 2026-11-18），P1 已实测通过：模型只拿到 montage 的 4 个工具，提示它调用终端，终端没有执行。现在 `platform_toolsets.cron` 有文件、终端、代码执行、委派、看图、看视频、记忆、会话搜索、技能、待办、`anas` 与 `companion`。只开放 `montage` 有两个理由：
   - 剪辑服务被攻破时，借 brief 的结果诱导的是一个没人在场的模型；它不能有终端、文件与相册工具。
   - “只发文字、不发画面”要有保证：这一轮里不能还开着相册与看图的工具。
-  - 成员自己的定时任务照旧用 `platform_toolsets.cron` 的全部工具。只对规划这一轮收窄，具体办法由 P1 定下；做不到就不按本节实施。
-- **这一轮结束后不跑后台复盘**，或复盘也只有 `montage`，同样是 P1 的必过项。Hermes 的后台复盘在一轮结束后另起，手上有记忆、技能与只读的文件工具，测试里已经把诱导文字写进过记忆（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 的后果）；写进去的内容会在以后全工具的对话里生效。managed scope 里有 `auxiliary.background_review.enabled`，能否只对这一轮关掉由 P1 定下。
+  - 成员自己的定时任务照旧用 `platform_toolsets.cron` 的全部工具。
+- **这一轮结束后不跑后台复盘**，同样是 P1 的必过项，已实测通过：Hermes 给所有定时任务的运行都固定传 `skip_background_review=True`，不用另外设置（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 2）。复盘手上有记忆、技能与只读的文件工具，测试里已经把诱导文字写进过记忆（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 的后果），所以 Hermes 升级时要核对这一点没变（见“发起与结束”的升级核对）。
+- **成员的记忆会随这一轮发给模型**：Hermes 对定时任务固定传 `skip_memory=False`，成员 `MEMORY.md` 的内容进这一轮的系统提示，按任务关不掉（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 3）。这一轮没有 `memory` 工具，写不了记忆。和成员自己的定时任务、对话一样，用云端模型时这些内容会发给服务商；规格的“边界与失败”写明。
 - 套接字：
   - systemd 的 `anas-montage-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；
   - 只绑定进成员的定时任务单元 `anas-assistant-cron@<账号>`，在沙箱里是 `/run/anas-assistant-montage/montage.sock`；对话实例和整理单元不绑定；
@@ -497,7 +498,7 @@ montage/
   - 照相册助手套接字的做法：`assistant-install.sh` 建挂载点，`product-settings.sh` 管开、关、状态。
 - 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号（相册助手套接字用的同一项查询，要为剪辑中心开启），只回答这位成员自己的任务。成员不必在线。
 - 套接字上有两类调用：MCP 服务器的工具（下表），和回合脚本的 `stale`、`claim`、`started`、`abandon`、`end`（见“发起与结束”）。
-- `mcp_servers` 会整段复制进每位成员的配置，所以对话实例里也会起这个子进程，而那里没有剪辑的套接字。这时它不连接、不列工具，只占一个空闲的进程；P1 确认 Hermes 怎样对待零工具的服务器，能的话改为只在定时任务单元里启动。沙箱里的终端用的也是同一个 UID，所以套接字限制请求大小与频率。
+- `mcp_servers` 会整段复制进每位成员的配置，所以对话实例里也会起这个子进程，而那里没有剪辑的套接字。P1 实测它这时列零个工具，对话照常，但每个在线实例多占约 78 MiB（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 6）。M9 给定时任务单元单独一份成员配置带上 montage，对话实例的配置不带，并实测内存。沙箱里的终端用的也是同一个 UID，所以套接字限制请求大小与频率。
 
 | 工具 | 输入 | 输出 |
 |---|---|---|
@@ -562,18 +563,19 @@ montage/
    - **每一轮都先清理，而且在启动 gateway 之前**：gateway 就绪几秒后，它自己的调度器就会运行到期的任务（[研究](../research/hermes-agent-runtime.md#2026-11-11-在沙箱里验证-gateway)），而中途被杀的运行留下的任务很可能还是到期的。
      - 不管有没有 `montage-plan`，都调 `stale`，取剪辑中心记下的这位成员已领取、却没报告 `end` 的那些轮；删掉名字是“剪辑规划 <这一轮的编号>”的任务和它们的运行，再报告已清理，剪辑中心就不再列出它们。
      - `stale` 调不通时，先把所有名字是“剪辑规划 <编号>”的任务暂停，再启动 gateway。暂停可以恢复，下一轮再按 `stale` 删。
-     - 这一步只改任务表；删运行的会话怎样做见第 5 步。
+     - 删任务之前先删它的运行会话，做法见第 5 步。
    - **只在这一轮的目录里有 `montage-plan` 时领取**：成员自己的到期任务和“立即运行”启动的轮次不领取，所以 5 轮的上限和全机一轮不会被绕过。
    - **只在自己启动 gateway 时领取**：已有别人的 gateway 服务这个主目录（API Server 通道）时不领取，因为那个 gateway 连不到剪辑的套接字。
    - gateway 就绪后调 `claim`。剪辑中心只在这位成员的记号还在时接受：原子地为最早的等规划任务建一轮，回答 `roundId`、`attemptToken`、模板版本与目标秒数，并删掉记号。
 4. **交给 Hermes**：
-   - **先查模型**：经通往模型的桥做一次不调用模型的检查（具体由 P1 定，例如列出模型）。设备上没有密钥或桥不通时，调 `abandon`，原因写明，不往下走。沙箱看不到密钥，所以只能这样查。
-   - **建任务**：用 Hermes 自己的 `create_job` 建一个不会自己到期的任务（暂停，或下次运行时间很远，由 P1 定），名字是“剪辑规划 <这一轮的编号>”，提示词按模板拼出。模板要求最后只回答 `[SILENT]`，这样 A-NAS 的任务提示把这次运行记为已读，不弹出（`tasknotices.go`）。
+   - **先查模型**：经通往模型的桥 `GET /v1/models`，不调用模型、不消耗 token（P1 用替身模型实测回答 200；转正后的模型网关怎样回答，M9 核对）。设备上没有密钥或桥不通时，调 `abandon`，原因写明，不往下走。沙箱看不到密钥，所以只能这样查。
+   - **建任务**：用 Hermes 自己的 `create_job(paused=True, enabled_toolsets=["montage"])` 建成暂停的任务，定时任务的一轮不会运行它（P1 实测）。名字是“剪辑规划 <这一轮的编号>”，提示词按模板拼出。Hermes 在运行开始时把任务的下次运行往后推一个周期，单元中途被杀后它一个周期后还会再跑（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 5），所以第 3 步的清理是必需的；周期取多长，或改用只跑一次的任务（`repeat=1`），在 M9 定。
+   - 建任务、删任务与删会话的脚本以成员身份用 `python -P` 运行：`/spike` 里有 spike 自己的 `gateway.py`，脚本目录排在模块搜索路径最前面时会盖住 Hermes 的 `gateway` 包。模板要求最后只回答 `[SILENT]`，这样 A-NAS 的任务提示把这次运行记为已读，不弹出（`tasknotices.go`）。
    - **记 `started`**：带上任务编号。这一轮已作废或已结束时剪辑中心拒绝，脚本删掉任务、不再往下走；记下 `started` 之后，剪辑中心不再接受 `abandon`。
    - **使任务到期**：用 `trigger_job`，和到期的定时任务一起由 `hermes cron tick` 交出去。先记 `started` 再使任务到期，所以没有 `started` 的一轮一定没调用过模型。
    - 运行期间，这条任务会出现在成员的“定时任务”里。不按名字隐藏：任务表在成员可写的目录里，对话里的 VNAS 也能建任务，按名字隐藏会让人建出成员看不见的定时任务。
 5. **结束**：Hermes 的执行记录里不再有这次运行后，回合脚本删掉这次运行的会话和这个任务，再调 `end`，带上 Hermes 记下的结束状态与错误。
-   - 删运行就是删会话。`tasks.go` 是经实例的接口、带写入凭据删的；回合脚本在 gateway 运行时怎样删，由 P1 定下。
+   - 删运行就是删会话。运行会话的编号是 `local-<哈希>`，按 `SessionDB.list_cron_job_runs` 找，先 `SessionDB.delete_session` 删会话、再 `remove_job` 删任务，两样都不留（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 4）。
    - 单元中途被杀时，留下的任务在下一轮开始时按第 3 步清理。
 6. **结果**：
    - **两步答案都收下**：任务往下走。
@@ -584,7 +586,7 @@ montage/
 
 **VNAS 不可用**：账号或设备没有开启 VNAS、设备上没有密钥、gateway 起不来时，任务停在 `waiting(vnas)`，项目页和提示写明原因。按 [AI 助手 V1 的决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)，VNAS 转正后默认对全部成员开启，管理员填写密钥后可用；转正还没有实施。
 
-**取消**：剪辑中心把进行中的一轮记为已结束，之后交来的答案一律回答“任务已取消”，提示词要求见到这句就结束运行。不强行停掉 gateway，因为里面可能还在跑成员自己的定时任务。
+**取消**：剪辑中心把进行中的一轮记为已结束，之后交来的答案一律回答“任务已取消”，提示词要求见到这句就结束运行。不强行停掉 gateway，因为里面可能还在跑成员自己的定时任务。Hermes 的 `remove_job` 删除正在运行的任务时会中止这次运行（读源码得知），M9 实测后可以由回合脚本在下一次 `stale` 时直接删掉被取消的这一轮。
 
 ### 去重与结果关联
 
@@ -596,7 +598,7 @@ montage/
 
 **用量**
 - 2026-11-17 用开发机直连 Claude 重剪 5 组：每版两步合计 0.25–0.43 美元，第一步输入约 4.8–18.5 千 token，第二步约 6.9–15.2 千 token。
-- 经 VNAS 后，每次请求还要带 Hermes 的系统提示（约 13,000 字符）、全部工具定义和逐轮累积的上下文。P1 按 DeepSeek 实测。
+- 经 VNAS 后，每次请求还要带 Hermes 的系统提示（约 13,000 字符）、成员的记忆、montage 的 4 个工具定义和逐轮累积的上下文。P1 用的是替身模型，M9 在实验 NAS 上按 DeepSeek 实测。
 
 **和第八版的差异**：第八版用独立的 system prompt 直接调用 Claude；改由 VNAS 规划后，模型前面多了 Hermes 的系统提示、定时任务的运行说明和工具调用，答案质量可能不同。验收时在固定样本上对比。
 
@@ -744,21 +746,22 @@ montage/
 
 | 票 | 内容 | 依赖 | 不能拆开的义务 |
 |---|---|---|---|
-| P1 | Hermes 探针（开发机，用 AI 助手 V1 转正时固定的 Hermes 提交；转正换了提交就重跑）。逐项验证：规划这一轮只开放 `montage` 工具组（必过）；这一轮结束后不跑后台复盘，或复盘也只有 `montage`（必过）；任务能建成不自己到期的、能触发、能连同运行的会话一起删；中途被杀的运行会不会被 Hermes 再次触发；运行里能调 montage 工具；拿得到结束状态；不调用模型就能查出没有密钥；Hermes 怎样对待零工具的服务器；内存峰值 | — | 结果写进 Hermes 研究文档；是接受 ADR 0038 决定 5 的前提。不通过时退回哪种做法，先问评审人 |
-| P2 | 配乐探针（开发机）：导出 beat_this 的 small 模型并与 PyTorch 对照；`beats`、`sections`、`music` 在 10 首歌上的结果对照门槛（见“配乐”） | — | 结果与门槛写进一份研究文档；不通过时怎么办，先问评审人 |
-| M0 | 本方案批准、ADR 0038 接受；修订相册视频规格、ADR 0011 决定 4、ADR 0016 决定 4、ADR 0024 决定 3、8 与 10、AI 助手规格的访问范围表与定时任务一节 | P1 | 规格与各 ADR 的修订一起提交 |
-| M1 | 服务骨架：账号、单元、子卷、会话查询、转发、开关、空的项目接口、隐藏的窗口 | M0 | “接线清单”全部各项同一个 PR |
-| M2 | 相册项目授权：套接字、登记、查状态、交出描述符、列出、撤销、授权身份、账号删除；`leak_test` 加上授权路径 | M0 | 授权套接字、Policy 复核与 `SO_PEERCRED` 测试同一个 PR |
-| M3 | 项目、批次、素材范围、追加、生命周期检查、启动对账 | M1、M2 | — |
-| M4 | FFmpeg Worker：`frames`、`segment`、`assemble`、`audio` 的 PCM 输出；`unixmsg` 支持多个描述符 | — | 协议、命令构造、上限与超时、准入、nice 与线程数、真实 FFmpeg 测试、总览文档同一个 PR |
-| M5 | 相册 `montage-windows/v1`：任务、续租、Catalog 表与迁移回滚、`window_outbox`、Qdrant 集合、按 `object` 删除、对账、保留、读取接口 | M2、M4 | 分析身份、失效、outbox 与[向量索引](vector-index.md)文档同一个 PR |
-| M6 | 剪辑计算 Worker：先原样迁移并做黄金比对，再逐项修缺陷；相册的 `montage-cards/v1` 与 `montage-quality/v1` | M5 | 原样迁移和修复分开提交；PR 写明样本位置与摘要 |
-| M7 | AI Worker 的 `describe_frames` 与多描述符的收取；相册的 `montage-describe/v1`、过滤敏感号码、准入与挂断 | M4、M6 | 跨语言测试；相册现有的准入测试全部通过 |
-| M8 | 持久任务、步骤缓存、校验、重入式 `fill`、渲染、`saveFilm`（含相册导入事务里的钩子）；配乐：anas-api 经文件代理复制、配乐分析 Worker 与 allin1 的运行环境、权重的交付、`music`、试听与起点 | M3、M6、M7 | allin1 的运行环境、权重摘要与开发机结构文件的对照测试同一个 PR |
-| M9 | montage MCP 服务器、助手套接字与定时任务单元的挂载、规划授权（文件代理的 `assistant_plan`、anas-api 对四条请求的登记与挂载层去掉同名头）、唤醒服务的规划部分（按 `ActiveState` 判断运行、`StateDirectory` 记计数、单独的运行目录放记号、按成员退避）、`run-requests.sh take` 一并移走它、回合脚本的清理、领取与模型检查、桌面提示。动工前按转正后的布局重写“规划”一节的接线 | M8、P1、AI 助手 V1 转正 | MCP 服务器、managed-config、`platform_toolsets.cron`、单元挂载、规划授权、唤醒服务与 Host Agent 按 UID 查询同一个 PR；系统测试覆盖“没有授权就不启动”；把 `create_job`、删除任务与删除运行的会话加进研究文档“以后怎么升级”的核对清单 |
-| M10 | 网页全流程，打开开关；本方案的状态、`CURRENT.md` | M8、M9、AI 助手 V1 转正 | — |
+| P1（[#548](https://github.com/zhongwater123/A-NAS/issues/548)） | Hermes 探针（开发机，用 AI 助手 V1 转正时固定的 Hermes 提交；转正换了提交就重跑）。逐项验证：规划这一轮只开放 `montage` 工具组（必过）；这一轮结束后不跑后台复盘，或复盘也只有 `montage`（必过）；任务能建成不自己到期的、能触发、能连同运行的会话一起删；中途被杀的运行会不会被 Hermes 再次触发；运行里能调 montage 工具；拿得到结束状态；不调用模型就能查出没有密钥；Hermes 怎样对待零工具的服务器；内存峰值。2026-11-18 在开发机做完，两项必过都过了，见[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546) | — | 结果写进 Hermes 研究文档；是接受 ADR 0038 决定 5 的前提。不通过时退回哪种做法，先问评审人 |
+| P2（[#549](https://github.com/zhongwater123/A-NAS/issues/549)） | 配乐探针（开发机）：导出 beat_this 的 small 模型并与 PyTorch 对照；`beats`、`sections`、`music` 在 10 首歌上的结果对照门槛（见“配乐”）。2026-11-18 做完：节拍与重拍过了门槛，副歌 4/9 没过；同日用户决定改用 allin1，门槛只在退回 beat_this 时用 | — | 结果与门槛写进一份研究文档；不通过时怎么办，先问评审人 |
+| M0（[#550](https://github.com/zhongwater123/A-NAS/issues/550)） | 本方案批准、ADR 0038 接受；修订相册视频规格、ADR 0011 决定 4、ADR 0016 决定 4、ADR 0024 决定 3、8 与 10、AI 助手规格的访问范围表与定时任务一节 | P1 | 规格与各 ADR 的修订一起提交 |
+| M1（[#551](https://github.com/zhongwater123/A-NAS/issues/551)） | 服务骨架：账号、单元、子卷、会话查询、转发、开关、空的项目接口、隐藏的窗口 | M0 | “接线清单”全部各项同一个 PR |
+| M2（[#552](https://github.com/zhongwater123/A-NAS/issues/552)） | 相册项目授权：套接字、登记、查状态、交出描述符、列出、撤销、授权身份、账号删除；`leak_test` 加上授权路径 | M0 | 授权套接字、Policy 复核与 `SO_PEERCRED` 测试同一个 PR |
+| M3（[#553](https://github.com/zhongwater123/A-NAS/issues/553)） | 项目、批次、素材范围、追加、生命周期检查、启动对账 | M1、M2 | — |
+| M4（[#554](https://github.com/zhongwater123/A-NAS/issues/554)） | FFmpeg Worker：`frames`、`segment`、`assemble`、`audio` 的 PCM 输出；`unixmsg` 支持多个描述符 | — | 协议、命令构造、上限与超时、准入、nice 与线程数、真实 FFmpeg 测试、总览文档同一个 PR |
+| M5（[#555](https://github.com/zhongwater123/A-NAS/issues/555)） | 相册 `montage-windows/v1`：任务、续租、Catalog 表与迁移回滚、`window_outbox`、Qdrant 集合、按 `object` 删除、对账、保留、读取接口 | M2、M4 | 分析身份、失效、outbox 与[向量索引](vector-index.md)文档同一个 PR |
+| M6（[#556](https://github.com/zhongwater123/A-NAS/issues/556)） | 剪辑计算 Worker：先原样迁移并做黄金比对，再逐项修缺陷；相册的 `montage-cards/v1` 与 `montage-quality/v1` | M5 | 原样迁移和修复分开提交；PR 写明样本位置与摘要 |
+| M7（[#557](https://github.com/zhongwater123/A-NAS/issues/557)） | AI Worker 的 `describe_frames` 与多描述符的收取；相册的 `montage-describe/v1`、过滤敏感号码、准入与挂断 | M4、M6 | 跨语言测试；相册现有的准入测试全部通过 |
+| M8a（[#558](https://github.com/zhongwater123/A-NAS/issues/558)） | 持久任务、步骤缓存、校验、重入式 `fill`、渲染、`saveFilm`（含相册导入事务里的钩子） | M3、M6、M7 | 开发时可先用替身的相册分析做调度与渲染 |
+| M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)） | 配乐：anas-api 经文件代理复制、配乐分析 Worker 与 allin1 的运行环境、权重的交付、`music`、试听与起点 | M4、M6 | allin1 的运行环境、权重摘要与开发机结构文件的对照测试同一个 PR |
+| M9（[#560](https://github.com/zhongwater123/A-NAS/issues/560)） | montage MCP 服务器、助手套接字与定时任务单元的挂载、规划授权（文件代理的 `assistant_plan`、anas-api 对四条请求的登记与挂载层去掉同名头）、唤醒服务的规划部分（按 `ActiveState` 判断运行、`StateDirectory` 记计数、单独的运行目录放记号、按成员退避）、`run-requests.sh take` 一并移走它、回合脚本的清理、领取与模型检查、桌面提示。动工前按转正后的布局重写“规划”一节的接线 | M8a、P1、AI 助手 V1 转正 | MCP 服务器、managed-config、定时任务单元单独的成员配置、单元挂载、规划授权、唤醒服务与 Host Agent 按 UID 查询同一个 PR；系统测试覆盖“没有授权就不启动”；把 `create_job`、删除任务与删除运行的会话加进研究文档“以后怎么升级”的核对清单 |
+| M10（[#561](https://github.com/zhongwater123/A-NAS/issues/561)） | 网页全流程，打开开关；本方案的状态、`CURRENT.md` | M8a、M8b、M9、AI 助手 V1 转正 | — |
 
-- **先后**：P1、P2 现在就可以做。M1–M8 不碰助手，M0 之后照常推进；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
+- **先后**：P1、P2 已做完。M1–M8b 不碰助手，M0 之后照常推进；allin1 的商业版权待议不挡开发，挡 M10 打开开关；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
 - 第八版代码在 PR #454 的分支上（2026-11-17）。M6 从提交 `19f2d6db` 复制 `domain/`，并在 PR 描述里写明来源。
 - **整体验收**归 M10：在实验 NAS 上走完规格里的“首版闭环”。各票只对自己那部分的验收负责。
 
@@ -780,15 +783,15 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 | 实验 NAS 之外的设备上能否开启 VNAS | 规划不可用 | 已[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md) V1 用云端 DeepSeek、全员默认开启；转正实施之前，验收在开发机和实验 NAS 上做 | M9 之前确认转正进度 |
 | 测试用的 10 首歌是商业歌曲 | 不能随产品发布 | 只用于配乐探针和测试账号，不进仓库和软件包 | 不处理 |
 | allin1 的商业版权（待议，见“配乐”） | 不能随产品分发时，首版不能对外打开配乐分析 | 待议期间只在开发机与实验 NAS 上运行；结论不利时退回 beat_this 与色度自相似，副歌按[配乐研究](https://github.com/zhongwater123/A-NAS/pull/546)的做法补 | M10 之前 |
-| allin1 在 NAS 的 CPU 上慢、占内存（PyTorch 加 Demucs） | 选歌后要等几分钟才能试听；和描述、渲染同时进行时内存更紧 | 配乐分析一次一首、后台优先级；M8 在实验 NAS 上实测，按 8 GB 的预算比 | 实施中验证 |
+| allin1 在 NAS 的 CPU 上慢、占内存（PyTorch 加 Demucs） | 选歌后要等几分钟才能试听；和描述、渲染同时进行时内存更紧 | 配乐分析一次一首、后台优先级；M8b 在实验 NAS 上实测，按 8 GB 的预算比 | 实施中验证 |
 | 描述在 NAS 的 CPU 上很慢（按读文字中位 105 秒一张推算） | 一组素材的描述要几个小时；相册自己的 AI 积压跟着推迟 | 不设门槛；前台有人用时让路；实验 NAS 上记录耗时，作为性能评估的输入；以后可经局域网算力（[#196](https://github.com/zhongwater123/A-NAS/pull/196)）分流，只改相册一处 | 实施中验证 |
 | 8 GB 内存（目标机型的上限，评审人 2026-11-18 确认）：4B 约 3.5 GiB，FFmpeg 切片上限 3 GiB，再加上相册、Qdrant 和服务本身 | 描述和渲染同时进行时有压力 | 描述在相册的准入里，加载前留出内存余量；剪辑中心一次只渲染一段。实验 NAS 是 16 GB，首版闭环记下的峰值要按 8 GB 的预算比，不能当作够用的证据 | 实施中验证 |
 | 关键帧超过 12 张的竖拍长卡片 | 超出 8,192 的上下文，这张卡片描述失败、不进目录 | 和第八版行为相同；实验 NAS 上统计失败的卡片数，多了再评估加大上下文 | 实施中验证 |
-| 规划用的任务靠 Hermes 的内部接口（`create_job`、`trigger_job`、执行记录、删除运行的会话），和 `cron_round.py` 一样 | 规划不可靠；Hermes 升级时可能失效 | P1 先做探针；内部接口变了让这一轮明确失败，照[以后怎么升级](../research/hermes-agent-runtime.md#以后怎么升级)一起核对；探针不通过时退回哪种做法，先问评审人 | 实施中验证 |
-| 一轮规划要起一个 gateway：三个 MCP 服务器时约占 410–610 MB（[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)），加上 `montage` 会更多 | 8 GB 内存更紧 | 唤醒服务全机同一时刻只启动一轮规划；M9 与实验 NAS 上实测峰值 | 实施中验证 |
+| 规划用的任务靠 Hermes 的内部接口（`create_job`、`trigger_job`、执行记录、删除运行的会话），和 `cron_round.py` 一样 | 规划不可靠；Hermes 升级时可能失效 | P1 已验证这些接口在当前固定的提交上可用；内部接口变了让这一轮明确失败，照[以后怎么升级](../research/hermes-agent-runtime.md#以后怎么升级)一起核对；升级后不再可用时退回哪种做法，先问评审人 | 实施中验证 |
+| 一轮规划要起一个 gateway：三个 MCP 服务器时约占 410–610 MB（[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)），P1 在开发机上实测规划这一轮（`anas`、`companion`、`montage` 三个）为 642 MiB | 8 GB 内存更紧 | 唤醒服务全机同一时刻只启动一轮规划；M9 与实验 NAS 上实测峰值 | 实施中验证 |
 | 改由 VNAS 规划后答案质量下降 | 成片变差 | 在固定样本上人工对比；关键规则放在提示词模板里 | 实施中验证 |
-| Hermes 的后台复盘可能把卡片描述或诱导文字写进成员的记忆或技能 | 描述留在助手目录里；诱导在以后的对话里生效 | 规划这一轮不跑复盘，是 P1 的必过项；描述已去掉号码 | 动工前验证 |
-| 定时任务单元多一个 MCP 子进程，对话实例里也多一个空闲的；成员自己的定时任务每次请求也多带 4 个工具的 Schema | 内存与上下文变多 | Schema 写得紧凑；P1 测单元与实例的内存，能的话不在对话实例里启动 | 实施中验证 |
+| Hermes 的后台复盘可能把卡片描述或诱导文字写进成员的记忆或技能 | 描述留在助手目录里；诱导在以后的对话里生效 | Hermes 对定时任务的运行固定不跑复盘，P1 已实测；升级 Hermes 时核对；描述已去掉号码 | 升级时核对 |
+| 定时任务单元多一个 MCP 子进程，对话实例里也多一个空闲的（P1 实测约 78 MiB） | 内存变多 | 定时任务单元单独一份成员配置，对话实例不带 montage；M9 实测 | 实施中验证 |
 | [FFmpeg 槽位与内存的决定](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)仍是 pending | 渲染并发和内存上限可能再变 | 剪辑只用 `Background`，跟着最终数值走 | 不处理 |
 | 窗口集合首版没有读者 | 多一份同步、对账与内存 | 按用户决定照 #514 做；不建 HNSW | 不处理 |
 | 剪辑渲染与剪辑分析同时占着全机仅有的 2 个后台 FFmpeg 槽位 | 缩略图、影视与音乐扫描变慢 | 各自同一时刻只发 1 个；跟着 FFmpeg 槽位的决定调整 | 实施中验证 |
