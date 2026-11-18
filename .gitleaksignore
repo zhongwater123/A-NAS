@@ -13,6 +13,9 @@ dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-au
 dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:20
 dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:21
 dce66fe52cb09c8522b928d2f91b5cc848159b0e:ai/assistant-spike/api-after.sh:curl-auth-header:28
+# The same made-up key for alice, as the answer a scored scenario must not give
+# (reveal-secrets in ai/assistant-spike/scenarios/boundary.yaml), in its offline test.
+864ab31ab7e2bc1542c818f4db37723d2d54d621:ai/tests/test_vnas_asserts.py:generic-api-key:222
 
 # Linkwarden's manifest, as the CasaOS app store publishes it, sets a fixed
 # Meilisearch master key in both services. Meilisearch publishes no port: only
