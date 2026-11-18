@@ -82,8 +82,8 @@ schemas:
       duration: { type: number, minimum: 0 }
       transcode: { type: boolean, description: "Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range." }
       state: { type: string, enum: [analyzing, ready, unusable] }
-      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last." }
-      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes." }
+      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot, analysis_failed], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from." }
+      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times." }
       tempo: { type: number }
       beats: { type: array, items: { type: number, minimum: 0 } }
       downbeats: { type: array, items: { type: number, minimum: 0 } }

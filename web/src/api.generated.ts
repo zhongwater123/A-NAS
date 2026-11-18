@@ -2196,7 +2196,7 @@ export interface paths {
         };
         /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
         get: operations["getMontageSong"];
-        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
         put: operations["putMontageSong"];
         post?: never;
         delete?: never;
@@ -7943,12 +7943,12 @@ export interface components {
             /** @enum {string} */
             state: "analyzing" | "ready" | "unusable";
             /**
-             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last.
+             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
              * @enum {string}
              */
-            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot";
+            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
             /**
-             * @description What the analysis waits for; it is tried again every few minutes.
+             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
              * @enum {string}
              */
             waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
@@ -12834,7 +12834,7 @@ export interface operations {
                     name?: string;
                     ask?: string;
                     chronological?: boolean;
-                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. */
+                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
                     songStart?: number;
                 };
             };
@@ -12947,6 +12947,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];

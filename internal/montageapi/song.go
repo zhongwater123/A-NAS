@@ -13,6 +13,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/music"
@@ -60,8 +61,14 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 		}
 		stream, err := tracks.OpenTrack(r.Context(), session.User, request.TrackID)
 		switch {
-		case errors.Is(err, music.ErrNotFound):
+		// As the music library answers when it plays the track
+		// (musicapi): the file may have gone, or the member's access to
+		// it, since the library was scanned.
+		case errors.Is(err, music.ErrNotFound), errors.Is(err, files.ErrNotFound):
 			httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+			return
+		case errors.Is(err, accounts.ErrForbidden):
+			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
 			return
 		case err != nil:
 			logger.WarnContext(r.Context(), "opening a track for the montage center failed", "error", err)
@@ -80,7 +87,9 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 			httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 8 minutes")
 			return
 		}
-		source := montage.SongSource{TrackID: track.ID, Title: track.Title}
+		// The library does not bound a title; the header's reader does
+		// (decodeSource).
+		source := montage.SongSource{TrackID: track.ID, Title: montage.SongTitle(track.Title)}
 		if !track.Transcode {
 			source.ContentType = track.ContentType()
 		}
@@ -149,14 +158,13 @@ func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user account
 		h.fail(w, r, err)
 		return
 	}
+	defer func() { _ = audio.File.Close() }()
 	if audio.ContentType != "" {
-		defer func() { _ = audio.File.Close() }()
 		w.Header().Set("Content-Type", audio.ContentType)
 		w.Header().Set("Cache-Control", "private, no-cache")
 		http.ServeContent(w, r, "", audio.ModifiedAt, audio.File)
 		return
 	}
-	_ = audio.File.Close()
 	start := 0.0
 	if value := r.URL.Query().Get("start"); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
@@ -166,7 +174,7 @@ func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user account
 		}
 		start = parsed
 	}
-	body, err := h.store.DecodeSong(r.Context(), user.ID, r.PathValue("projectID"), start)
+	body, err := h.store.DecodeSong(r.Context(), audio, start)
 	if err != nil {
 		h.fail(w, r, err)
 		return

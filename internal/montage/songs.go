@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
@@ -90,6 +91,9 @@ const (
 	// UnusableLongSlot: a slot longer than the 12 seconds a segment may
 	// last.
 	UnusableLongSlot = "long_slot"
+	// UnusableAnalysisFailed: the analysis failed analysisAttempts times,
+	// or the compute Worker refuses what allin1 found.
+	UnusableAnalysisFailed = "analysis_failed"
 )
 
 // Why an analysis waits.
@@ -144,9 +148,12 @@ type Analysis struct {
 
 // MusicAnalyzer finds a song's structure in its samples: stereo, 32-bit
 // float at 44.1 kHz for allin1, and mono at 22050 Hz for the loudness. Both
-// arrive as streams; the analyzer reads them in that order.
+// arrive as streams; the analyzer reads them in that order while they are
+// written. whole yields once, when the writing ended: nil when both streams
+// carry the whole song. The analyzer analyses nothing before that, and
+// returns any other error whole yields as it is.
 type MusicAnalyzer interface {
-	Analyze(ctx context.Context, stereo, mono *os.File) (Analysis, error)
+	Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (Analysis, error)
 }
 
 // Part is a section of an excerpt: its level in the film, and the slots the
@@ -198,6 +205,12 @@ type MusicComputer interface {
 // not serve; the montage center tries again later.
 var ErrWorkerUnavailable = errors.New("the worker is not available")
 
+// ErrWorkerFailed reports that a Worker took the request and could not
+// finish it: it reported an error of its own, stopped answering or ran out
+// of time. The same request may work later, but every attempt costs what the
+// work costs, so the montage center counts them.
+var ErrWorkerFailed = errors.New("the worker failed")
+
 // ErrWorkerRefused reports that a Worker refused the input; the same input
 // would fail again.
 var ErrWorkerRefused = errors.New("the worker refused the input")
@@ -237,6 +250,34 @@ type songRow struct {
 	duration                                                            float64
 	analysis                                                            songAnalysis
 	loudness                                                            []byte
+}
+
+// keptSelection is what a project keeps of the excerpt from the start its
+// member dragged it to (projects.song_selection): the selection the page
+// shows, and the excerpt as the domain reads it, which the project's jobs
+// cut the film to without asking the compute Worker again.
+type keptSelection struct {
+	Selection
+	Music json.RawMessage `json:"music,omitempty"`
+}
+
+// SongTitle is a song's title as the montage center keeps it: trimmed, and
+// at most maxTitleRunes long. The Product Service cuts a title the same way
+// before it sends it (montageapi.CopySong), so that a long one fits the
+// header it travels in.
+func SongTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if runes := []rune(title); len(runes) > maxTitleRunes {
+		title = strings.TrimSpace(string(runes[:maxTitleRunes]))
+	}
+	return title
+}
+
+// defaultDownbeat is the downbeat that stands for the default excerpt's
+// start. That start is a section's bound kept to two decimals, and need not
+// be a downbeat itself; a start the member drags always is one.
+func defaultDownbeat(st *Structure, selection *Selection) float64 {
+	return nearest(st.Downbeats, selection.Excerpt[0])
 }
 
 func (s *Store) songsRoot() string { return filepath.Join(s.root, songsDir) }
@@ -321,15 +362,7 @@ func (s *Store) keep(file *os.File, sha string) error {
 	if err := os.Rename(file.Name(), target); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(target))
-}
-
-func syncDir(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	return errors.Join(dir.Sync(), dir.Close())
+	return atomicfile.SyncDir(filepath.Dir(target))
 }
 
 // PutSong copies the song body streams into the montage center for owner's
@@ -344,13 +377,10 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source Son
 	if row.state != "ready" {
 		return SongDetail{}, ErrNotFound
 	}
-	title := strings.TrimSpace(source.Title)
-	if !utf8.ValidString(title) || strings.ContainsRune(title, 0) {
+	if !utf8.ValidString(source.Title) || strings.ContainsRune(source.Title, 0) {
 		return SongDetail{}, ErrInvalid
 	}
-	if runes := []rune(title); len(runes) > maxTitleRunes {
-		title = string(runes[:maxTitleRunes])
-	}
+	title := SongTitle(source.Title)
 	contentType := source.ContentType
 	if contentType != "" && !strings.HasPrefix(contentType, "audio/") {
 		return SongDetail{}, ErrInvalid
@@ -535,11 +565,11 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, 
 		start := selection.Excerpt[0]
 		detail.DefaultStart, detail.Selection = &start, selection
 		if chosen.selection.Valid {
-			var own Selection
+			var own keptSelection
 			if err := json.Unmarshal([]byte(chosen.selection.String), &own); err != nil {
 				return SongDetail{}, err
 			}
-			detail.Selection = &own
+			detail.Selection = &own.Selection
 		}
 	}
 	return detail, nil
@@ -547,7 +577,9 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, 
 
 // SongStart moves owner's project's excerpt to start on the downbeat nearest
 // at, and returns the song with the excerpt from there. The film follows the
-// excerpt: it starts there and lasts as long.
+// excerpt: it starts there and lasts as long. On the default start's
+// downbeat the project follows the default excerpt again, as if its member
+// had never dragged the start.
 func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float64) (SongDetail, error) {
 	chosen, err := s.projectSong(ctx, s.db, owner, projectID)
 	if err != nil {
@@ -565,26 +597,33 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		return SongDetail{}, ErrInvalid
 	}
 	start := nearest(st.Downbeats, at)
-	if s.compute == nil {
-		return SongDetail{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
-	}
-	loudness, err := decodeLoudness(row.loudness)
-	if err != nil {
-		return SongDetail{}, err
-	}
-	selection, err := s.compute.Music(ctx, MusicRequest{Song: row.title, Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
-	if err != nil {
-		return SongDetail{}, err
-	}
-	if selection.Unusable != "" {
-		return SongDetail{}, fmt.Errorf("%w: %s", ErrSongStart, selection.Unusable)
-	}
-	encoded, err := json.Marshal(selection)
-	if err != nil {
-		return SongDetail{}, err
+	// What the project keeps: nothing on the default start, where the
+	// eighth version's rule picks the excerpt, which ends on a section's
+	// bound and not a fixed length after the start.
+	var keptStart, kept any
+	if def := row.analysis.Selection; def == nil || start != defaultDownbeat(st, def) {
+		if s.compute == nil {
+			return SongDetail{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
+		}
+		loudness, err := decodeLoudness(row.loudness)
+		if err != nil {
+			return SongDetail{}, err
+		}
+		selection, err := s.compute.Music(ctx, MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
+		if err != nil {
+			return SongDetail{}, err
+		}
+		if selection.Unusable != "" {
+			return SongDetail{}, fmt.Errorf("%w: %s", ErrSongStart, selection.Unusable)
+		}
+		encoded, err := json.Marshal(keptSelection{Selection: selection, Music: selection.Music})
+		if err != nil {
+			return SongDetail{}, err
+		}
+		keptStart, kept = start, string(encoded)
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE projects SET song_start = ?, song_selection = ?, updated_at = ?
-		WHERE id = ? AND owner_user_id = ? AND song_id = ?`, start, string(encoded), sqlitedb.FormatTime(s.now()), projectID, owner, row.id)
+		WHERE id = ? AND owner_user_id = ? AND song_id = ?`, keptStart, kept, sqlitedb.FormatTime(s.now()), projectID, owner, row.id)
 	if err != nil {
 		return SongDetail{}, err
 	}
@@ -640,16 +679,10 @@ func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (Son
 		Song: SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == ""}}, nil
 }
 
-// DecodeSong streams owner's project's song as FLAC from start seconds, for
-// a copy browsers cannot play.
-func (s *Store) DecodeSong(ctx context.Context, owner, projectID string, start float64) (io.ReadCloser, error) {
-	audio, err := s.OpenSongAudio(ctx, owner, projectID)
-	if err != nil {
-		return nil, err
-	}
-	// The worker receives its own descriptor; this one closes once the
-	// request is sent.
-	defer func() { _ = audio.File.Close() }()
+// DecodeSong streams audio, a song OpenSongAudio opened, as FLAC from start
+// seconds, for a copy browsers cannot play. The media worker receives a
+// descriptor of its own; audio.File stays the caller's to close.
+func (s *Store) DecodeSong(ctx context.Context, audio SongAudio, start float64) (io.ReadCloser, error) {
 	if math.IsNaN(start) || start < 0 || start > audio.Song.Duration {
 		return nil, ErrInvalid
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/montage"
@@ -27,10 +28,26 @@ func songBytes(seconds int, name string) []byte {
 }
 
 type songMedia struct {
-	mu      sync.Mutex
-	down    bool
+	mu   sync.Mutex
+	down bool
+	// cut: the decoding of the mono stream breaks off halfway.
+	cut     bool
 	decoded []ffmpegworker.AudioRequest
 }
+
+// cutShort yields some samples and then fails, as a media worker that
+// stopped in the middle of a song.
+type cutShort struct{ sent bool }
+
+func (c *cutShort) Read(p []byte) (int, error) {
+	if c.sent {
+		return 0, fmt.Errorf("%w: the worker stopped", ffmpegworker.ErrUnavailable)
+	}
+	c.sent = true
+	return copy(p, make([]byte, 128)), nil
+}
+
+func (*cutShort) Close() error { return nil }
 
 func readAllFrom(file *os.File) string {
 	data, _ := io.ReadAll(io.NewSectionReader(file, 0, 1<<20))
@@ -56,7 +73,11 @@ func (m *songMedia) Probe(_ context.Context, file *os.File) (ffmpegworker.Probe,
 func (m *songMedia) Audio(_ context.Context, file *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error) {
 	m.mu.Lock()
 	m.decoded = append(m.decoded, request)
+	cut := m.cut && request.PCM && request.Channels == 1
 	m.mu.Unlock()
+	if cut {
+		return &cutShort{}, nil
+	}
 	content := readAllFrom(file)
 	if strings.Contains(content, "garbled") {
 		return nil, fmt.Errorf("%w: invalid data", ffmpegworker.ErrUnreadable)
@@ -69,15 +90,18 @@ func (m *songMedia) Audio(_ context.Context, file *os.File, request ffmpegworker
 }
 
 // analyzer stands in for allin1: it reads both streams as the Worker does,
-// and finds a downbeat every two seconds.
+// analyses them once they are confirmed whole, and finds a downbeat every
+// two seconds.
 type analyzer struct {
-	mu    sync.Mutex
-	down  bool
+	mu   sync.Mutex
+	down bool
+	// fails: the Worker takes the song and cannot finish it.
+	fails bool
 	songs int
 	read  []int
 }
 
-func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File) (montage.Analysis, error) {
+func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (montage.Analysis, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.down {
@@ -90,7 +114,13 @@ func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File) (montage.An
 		}
 		a.read = append(a.read, len(data))
 	}
+	if err := <-whole; err != nil {
+		return montage.Analysis{}, err
+	}
 	a.songs++
+	if a.fails {
+		return montage.Analysis{}, fmt.Errorf("%w: internal: the operation failed", montage.ErrWorkerFailed)
+	}
 	var downbeats []float64
 	for t := 0.0; t <= 200; t += 2 {
 		downbeats = append(downbeats, t)
@@ -102,8 +132,10 @@ func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File) (montage.An
 
 // cutter stands in for the compute Worker's music operation.
 type cutter struct {
-	mu       sync.Mutex
-	down     bool
+	mu   sync.Mutex
+	down bool
+	// refuses: the Worker cannot read the structure at all.
+	refuses  bool
 	unusable string
 	chorus   bool
 	asked    []montage.MusicRequest
@@ -114,6 +146,9 @@ func (c *cutter) Music(_ context.Context, request montage.MusicRequest) (montage
 	defer c.mu.Unlock()
 	if c.down {
 		return montage.Selection{}, fmt.Errorf("%w: connection refused", montage.ErrWorkerUnavailable)
+	}
+	if c.refuses {
+		return montage.Selection{}, fmt.Errorf("%w: structure has no segments", montage.ErrWorkerRefused)
 	}
 	c.asked = append(c.asked, request)
 	start := 40.0
@@ -315,7 +350,24 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.Selection.Excerpt[0] != 22 {
 		t.Fatalf("after a refused start: %+v", song.Selection)
 	}
-	// Choosing the song again starts from its default.
+	// Dragged back to the default start, the project follows the default
+	// excerpt again: the one the eighth version's rule picked, which the
+	// compute Worker is not asked for a second time.
+	asked, back := len(f.compute.asked), 40.6
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, montage.ProjectChange{SongStart: &back}); err != nil {
+		t.Fatal(err)
+	}
+	song, err = f.store.Song(ctx, "user:alice", f.project)
+	if err != nil || song.Selection.Excerpt != [2]float64{40, 130} || len(f.compute.asked) != asked {
+		t.Fatalf("back on the default start: %+v, %v, asked %d times more", song.Selection, err, len(f.compute.asked)-asked)
+	}
+	if _, start, err := f.store.Chosen(ctx, "user:alice", f.project); err != nil || start != montage.DefaultStart {
+		t.Fatalf("Chosen() back on the default start = %v, %v", start, err)
+	}
+	// Choosing the song again starts from its default too.
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, montage.ProjectChange{SongStart: &start}); err != nil {
+		t.Fatal(err)
+	}
 	if song, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil || song.Selection.Excerpt[0] != 40 {
 		t.Fatalf("the same song again = %+v, %v", song.Selection, err)
 	}
@@ -400,6 +452,136 @@ func TestASongWaitsForAWorkerThatIsAway(t *testing.T) {
 	}
 }
 
+// A Worker that is away costs nothing to ask, and is waited for as long as
+// it takes. One that takes the song and fails costs minutes each time: after
+// three such attempts the song cannot be used, and the Worker is free again.
+func TestAnAnalysisThatKeepsFailingMakesTheSongUnusable(t *testing.T) {
+	ctx := context.Background()
+	f := newSongFixture(t)
+	f.music.down = true
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if err := forceDue(t, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongAnalyzing || song.Waiting != montage.WaitAnalyzer {
+		t.Fatalf("after five tries without a worker: %+v", song)
+	}
+	f.music.down, f.music.fails = false, true
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := forceDue(t, f); err != nil {
+			t.Fatal(err)
+		}
+		if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongAnalyzing || song.Waiting != montage.WaitAnalyzer {
+			t.Fatalf("after %d failed analyses: %+v", attempt, song)
+		}
+	}
+	// Not due before its time, however often the queue is looked at.
+	if err := f.store.AnalyzeWaiting(ctx); err != nil || f.music.songs != 2 {
+		t.Fatalf("analysed %d times, %v; want 2 before the next try is due", f.music.songs, err)
+	}
+	if err := forceDue(t, f); err != nil {
+		t.Fatal(err)
+	}
+	song, _ := f.store.Song(ctx, "user:alice", f.project)
+	if song.State != montage.SongUnusable || song.Reason != montage.UnusableAnalysisFailed || f.music.songs != 3 {
+		t.Fatalf("after three failed analyses: %+v, analysed %d times", song, f.music.songs)
+	}
+	if err := forceDue(t, f); err != nil || f.music.songs != 3 {
+		t.Fatalf("an unusable song was analysed again: %d times, %v", f.music.songs, err)
+	}
+}
+
+// The compute Worker names why an excerpt cannot be used in its answer. A
+// structure it cannot read at all is none of those reasons.
+func TestAStructureTheComputeWorkerRefusesIsNotTooFewBars(t *testing.T) {
+	ctx := context.Background()
+	f := newSongFixture(t)
+	f.compute.refuses = true
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AnalyzeWaiting(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongUnusable || song.Reason != montage.UnusableAnalysisFailed {
+		t.Fatalf("song = %+v", song)
+	}
+}
+
+// A pipe ends the same way whether the decoding finished or broke off. The
+// analyzer is told which, so a song cut short is not analysed as a whole
+// one, nor is the song blamed for the media worker's stop.
+func TestADecodingCutShortIsNotAnalysed(t *testing.T) {
+	ctx := context.Background()
+	f := newSongFixture(t)
+	f.media.cut = true
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AnalyzeWaiting(ctx); err != nil {
+		t.Fatal(err)
+	}
+	song, _ := f.store.Song(ctx, "user:alice", f.project)
+	if song.State != montage.SongAnalyzing || song.Waiting != montage.WaitMedia || f.music.songs != 0 {
+		t.Fatalf("song = %+v after %d analyses; want it waiting for the media worker, not analysed", song, f.music.songs)
+	}
+	// The analyzer did read what arrived: the whole stereo stream, and the
+	// mono one as far as it went.
+	if len(f.music.read) != 2 || f.music.read[0] != 512 || f.music.read[1] != 128 {
+		t.Fatalf("the analyzer read %v bytes", f.music.read)
+	}
+	f.media.cut = false
+	if err := forceDue(t, f); err != nil {
+		t.Fatal(err)
+	}
+	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.State != montage.SongReady || f.music.songs != 1 {
+		t.Fatalf("song = %+v after %d analyses", song, f.music.songs)
+	}
+}
+
+// What a newer analysis changed may be what refused a song, so the songs an
+// earlier version found unusable are analysed again when the service starts.
+func TestSongsAnEarlierVersionRefusedAreAnalysedAgain(t *testing.T) {
+	f := newSongFixture(t)
+	f.compute.unusable = montage.UnusableFewBars
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AnalyzeWaiting(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	analyse := func(patience time.Duration) montage.SongDetail {
+		t.Helper()
+		ctx, stop := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); f.store.AnalyzeSongs(ctx) }()
+		defer func() { stop(); <-done }()
+		var song montage.SongDetail
+		for deadline := time.Now().Add(patience); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			song, _ = f.store.Song(ctx, "user:alice", f.project)
+			if song.State == montage.SongReady {
+				break
+			}
+		}
+		return song
+	}
+	// The same version would find the same.
+	f.compute.unusable = ""
+	if song := analyse(300 * time.Millisecond); song.State != montage.SongUnusable || song.Reason != montage.UnusableFewBars {
+		t.Fatalf("song of this version = %+v", song)
+	}
+	if _, err := openDB(t, f.root).Exec("UPDATE songs SET analysis_version = 'allin1-harmonix-all/music-v7'"); err != nil {
+		t.Fatal(err)
+	}
+	if song := analyse(20 * time.Second); song.State != montage.SongReady || song.Reason != "" || song.Selection == nil {
+		t.Fatalf("song of an earlier version = %+v", song)
+	}
+}
+
 func openDB(t *testing.T, root string) *sql.DB {
 	t.Helper()
 	db, err := sqlitedb.Open(filepath.Join(root, montage.DatabaseName), sqlitedb.Options{})
@@ -433,9 +615,22 @@ func TestTheSameSongIsAnalysedOnceForEveryone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	song, err := f.put(t, "user:bob", bobs.ID, songBytes(200, "shared"))
+	// Bob's copy of the same recording has another name.
+	song, err := f.store.PutSong(ctx, "user:bob", bobs.ID, montage.SongSource{TrackID: "track", Title: "bob-rip-07", ContentType: "audio/mpeg"},
+		bytes.NewReader(songBytes(200, "shared")))
 	if err != nil || song.State != montage.SongReady || f.music.songs != 1 {
 		t.Fatalf("bob's song = %+v, %v after %d analyses", song, err, f.music.songs)
+	}
+	// The analysis is shared; the name each member's plan reads is their own.
+	alices, _, err := f.store.Chosen(ctx, "user:alice", f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for owner, want := range map[string][2]string{"user:alice": {alices, "Symphony"}, "user:bob": {song.ID, "bob-rip-07"}} {
+		excerpt, err := f.store.Excerpt(ctx, owner, want[0], montage.DefaultStart)
+		if err != nil || string(excerpt.Music) != fmt.Sprintf(`{"excerpt":[40,130],"song":%q}`, want[1]) {
+			t.Fatalf("%s's excerpt = %s, %v", owner, excerpt.Music, err)
+		}
 	}
 	if copies := f.copies(t); len(copies) != 1 {
 		t.Fatalf("copies = %v", copies)
@@ -550,7 +745,12 @@ func TestASongBrowsersCannotPlayIsDecodedToFLAC(t *testing.T) {
 	if err != nil || !song.Transcode {
 		t.Fatalf("song = %+v, %v", song, err)
 	}
-	body, err := f.store.DecodeSong(ctx, "user:alice", f.project, 12.5)
+	audio, err := f.store.OpenSongAudio(ctx, "user:alice", f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = audio.File.Close() }()
+	body, err := f.store.DecodeSong(ctx, audio, 12.5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +758,17 @@ func TestASongBrowsersCannotPlayIsDecodedToFLAC(t *testing.T) {
 	if data, _ := io.ReadAll(body); string(data) != "flac from 12.5 of song 200 ape" {
 		t.Fatalf("decoded = %q", data)
 	}
-	if _, err := f.store.DecodeSong(ctx, "user:alice", f.project, 300); !errors.Is(err, montage.ErrInvalid) {
+	if _, err := f.store.DecodeSong(ctx, audio, 300); !errors.Is(err, montage.ErrInvalid) {
 		t.Fatalf("decoding past the end = %v", err)
+	}
+}
+
+func TestATitleIsCutToWhatTheMontageCenterKeeps(t *testing.T) {
+	long := strings.Repeat("长", 1500)
+	if got := montage.SongTitle("  " + long + " "); got != strings.Repeat("长", 200) {
+		t.Fatalf("SongTitle() kept %d runes", len([]rune(got)))
+	}
+	if got := montage.SongTitle("  Symphony\n"); got != "Symphony" {
+		t.Fatalf("SongTitle() = %q", got)
 	}
 }
