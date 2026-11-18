@@ -83,6 +83,9 @@ type Config struct {
 	// AssistantChanges holds what the executor of the assistants' changes
 	// keeps, readable by root alone; empty turns the executor off.
 	AssistantChanges string
+	// AssistantChangesAdmit checks the data volume's reserve before an
+	// assistant's change writes to it; nil uses capacity.Admits.
+	AssistantChangesAdmit func(path string, incoming int64) (bool, error)
 	// AssistantRuns holds, for each member, the scheduled tasks they asked to
 	// run now and no round has taken yet, a file each in <username>; root's
 	// alone. Empty turns running a task now off.
@@ -211,7 +214,7 @@ func NewServer(config Config) (*Server, error) {
 	}
 	server := &Server{config: config, executable: executable, pools: make(map[workerKey]*pool), assistants: make(map[*net.UnixConn]struct{})}
 	if config.AssistantChanges != "" {
-		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot}
+		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot, Admits: config.AssistantChangesAdmit}
 	}
 	return server, nil
 }
