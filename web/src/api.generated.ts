@@ -2213,7 +2213,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409) */
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
         post: operations["generateMontageFilm"];
         delete?: never;
         options?: never;
@@ -2264,7 +2264,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled */
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
         post: operations["dropMontageJobAssets"];
         delete?: never;
         options?: never;
@@ -2281,7 +2281,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ask the photo library to analyse again the videos whose analysis failed, and go on */
+        /** Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
         post: operations["retryMontageJobAnalysis"];
         delete?: never;
         options?: never;
@@ -2315,7 +2315,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Plan again from the step not yet taken, when the plan was not handed back or kept failing its checks */
+        /** Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
         post: operations["replanMontageJob"];
         delete?: never;
         options?: never;
@@ -2330,7 +2330,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The desktop's notices of the caller's jobs: waiting for planning, planning, needing the member, and films saved in the last day */
+        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day */
         get: operations["listMontageNotices"];
         put?: never;
         post?: never;
@@ -8108,6 +8108,8 @@ export interface components {
             /** @description The project's name. */
             project: string;
             reason?: string;
+            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. */
+            detail?: string;
             /** @description The film saved, for saved. */
             filmAssetId?: string;
             /** Format: date-time */
@@ -13250,6 +13252,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     retryMontageJobAnalysis: {
@@ -13329,6 +13332,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listMontageNotices: {

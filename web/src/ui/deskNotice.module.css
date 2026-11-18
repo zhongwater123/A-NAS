@@ -1,0 +1,102 @@
+/* A feature's notice on the desktop, under the status bar (DeskNotice). The
+   feature's own class sets where it sits and its colours:
+   --desk-notice-top, --desk-notice-mark and --desk-notice-link. The paper and
+   ink are the ones 家庭中心's hint has had since it was drawn. */
+@layer ui {
+  .desk-notice {
+    position: absolute;
+    z-index: 77;
+    top: var(--desk-notice-top, 78px);
+    right: 22px;
+    width: min(340px, calc(100% - 140px));
+  }
+  .desk-notice-toast {
+    position: relative;
+    display: flex;
+    gap: 12px;
+    padding: 14px 38px 12px 14px;
+    border-radius: var(--radius-xl);
+    color: #2a221d;
+    background: rgba(255, 251, 247, 0.97);
+    box-shadow:
+      0 0 0 1px rgba(70, 45, 30, 0.08),
+      0 18px 48px rgba(40, 20, 10, 0.25);
+    backdrop-filter: blur(18px);
+    animation: desk-notice-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .desk-notice-mark {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border-radius: var(--radius-md);
+    color: #fff;
+    background: var(--desk-notice-mark, var(--color-accent));
+  }
+  .desk-notice-mark svg {
+    width: 17px;
+    height: 17px;
+  }
+  .desk-notice-copy {
+    min-width: 0;
+    display: grid;
+    justify-items: start;
+    gap: 3px;
+  }
+  .desk-notice-copy small {
+    color: #998b81;
+    font-size: 11px;
+    font-weight: 550;
+  }
+  .desk-notice-copy strong {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+  .desk-notice-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 4px;
+    padding: 0;
+    border: 0;
+    color: var(--desk-notice-link, var(--color-accent));
+    background: none;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .desk-notice-open svg {
+    width: 14px;
+    height: 14px;
+  }
+  .desk-notice-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    color: #998b81;
+    background: none;
+    cursor: pointer;
+  }
+  .desk-notice-close:hover {
+    background: rgba(70, 45, 30, 0.06);
+  }
+  .desk-notice-close svg {
+    width: 15px;
+    height: 15px;
+  }
+  @keyframes desk-notice-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+  }
+}

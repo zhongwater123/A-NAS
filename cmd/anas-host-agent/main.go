@@ -93,7 +93,9 @@ type config struct {
 	// show beside the assistant directories (by default assistant/.changes on
 	// the data volume), where only root may read them. The instance secrets
 	// are the Host Agent's own, written where the executor prepares a member's
-	// assistant (Executor.AssistantTokenDir), so they have no setting.
+	// assistant (Executor.AssistantTokenDir), so they have no setting; nor
+	// have the members' planning grants for the montage center, which the
+	// File Broker keeps beside them (Executor.AssistantPlanDir).
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
@@ -113,6 +115,9 @@ type config struct {
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
 	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
 	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	// MontageAssistantLookup=1 looks accounts up by UID for the montage
+	// center's socket for members' cron units, as the unit sets it.
+	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
 	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`
@@ -214,12 +219,18 @@ func run(logger *slog.Logger) error {
 		defer placer.Close()
 		scopes = placer
 	}
+	// Planning grants are registered only where the assistant is on.
+	assistantPlans := ""
+	if config.AssistantSockets != "" {
+		assistantPlans = executor.AssistantPlanDir()
+	}
 	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
 		AssistantTokens:  executor.AssistantTokenDir(),
 		AssistantChanges: assistantChanges,
 		AssistantRuns:    config.AssistantRuns,
+		AssistantPlans:   assistantPlans,
 		AssistantOn:      executor.AssistantOn,
 		Accounts:         sessions,
 		Scopes:           scopes,
@@ -262,22 +273,23 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopSessionLookup()
-	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, logger)
+	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, false, logger)
 	if err != nil {
 		return err
 	}
 	defer stopShareLookup()
-	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, logger)
+	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, false, logger)
 	if err != nil {
 		return err
 	}
 	defer stopFamilyLookup()
-	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions, logger)
+	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions,
+		config.MontageAssistantLookup == "1", logger)
 	if err != nil {
 		return err
 	}
 	defer stopMontageLookup()
-	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, logger)
+	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, false, logger)
 	if err != nil {
 		return err
 	}
@@ -628,7 +640,7 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 // own identity, such as the share or family service, on socket, which only
 // that service's group reaches. Each service has its own directory, for
 // listen hands the directory to the group.
-func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
+func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, byUID bool, logger *slog.Logger) (func(), error) {
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info(service + " service is not installed; lookup is off")
 		return func() {}, nil
@@ -637,7 +649,13 @@ func serveServiceSessionLookup(service, group, socket string, sessions *sessiond
 	if err != nil {
 		return nil, err
 	}
-	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, nil, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	// Only a service that serves members' assistants by their UID may ask
+	// whose a UID is.
+	var accountsByUID sessionlookup.AccountResolver
+	if byUID {
+		accountsByUID = sessions
+	}
+	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, accountsByUID, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error(service+" session lookup stopped", "error", err)

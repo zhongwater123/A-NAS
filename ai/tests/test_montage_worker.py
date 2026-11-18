@@ -134,6 +134,56 @@ class FillTest(unittest.TestCase):
         self.assertEqual(first["short"], [])
 
 
+def described(cid, video, start, end):
+    """A card as the photo library describes it: the reader's beats name their key frames, not their spans."""
+    return {"id": cid, "video": video, "start": start, "end": end, "times": [start + 1, start + 4], "frames": [f"{cid}/1", f"{cid}/2"],
+            "answer": {"scene": "海边", "summary": "沿海边走", "process": ["走到海边", "望向远处"],
+                       "beats": [{"frames": [1, 1], "shot_size": "全景", "what": "海"},
+                                 {"frames": [2, 2], "shot_size": "近景", "what": "人"}]}}
+
+
+def brief_music():
+    return {"song": "/songs/abc/audio", "seconds": 8.0,
+            "parts": [{"start": 0.0, "end": 4.0, "level": "主歌", "slots": [[0.0, 2.0], [2.0, 4.0]]},
+                      {"start": 4.0, "end": 8.0, "level": "副歌", "slots": [[4.0, 6.0], [6.0, 8.0]]}]}
+
+
+@unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
+class BriefTest(unittest.TestCase):
+    def test_the_briefs_hold_data_and_the_eighth_versions_schemas(self):
+        from anas_montage import brief
+        from anas_montage.domain import plan as planrules
+
+        cards = [described("v1-0", "photo:a", 0.0, 10.0), described("v2-0", "photo:b", 0.0, 12.0)]
+        request = {"step": "pick", "cards": cards, "music": brief_music(), "ask": "多一点海", "chronological": False}
+        pick = worker.op_plan_brief(request, {})
+        self.assertEqual(pick["template"], brief.TEMPLATE)
+        data = pick["data"]
+        self.assertEqual((data["cardCount"], data["partCount"], data["order"], data["targetSeconds"]), (2, 2, "free", 8))
+        self.assertIn("多一点海", data["instruction"])
+        self.assertTrue(data["catalog"][0].startswith("v1-0 视频1 "))
+        # The data carries no rules: the template has them.
+        self.assertNotIn("请按用户的要求", json.dumps(data, ensure_ascii=False))
+        case, opts = brief.case_of(request)
+        _system, _user, schema = planrules.pick_request(case, opts, brief.numbered(cards), brief_music())
+        self.assertEqual(pick["schema"], schema)
+
+        picked = {"design": "从海边开始", "opening": "v1-0", "ending": "v2-0", "unmet": [],
+                  "parts": [{"name": "海", "summary": "海边", "link": "开场", "scenes": [{"query": "海边远景", "cards": ["v1-0"]}]},
+                            {"name": "人", "summary": "人", "link": "走近", "scenes": [{"query": "人望海", "cards": ["v2-0"]}]}]}
+        shots = worker.op_plan_brief({**request, "step": "shots", "picked": picked}, {})
+        self.assertEqual(shots["pictures"], [1, 1])
+        beats = shots["data"]["parts"][0]["pictures"][0]["cards"][0]["beats"]
+        self.assertEqual([b["beat"] for b in beats], ["v1-0/1", "v1-0/2"])
+        # Each beat runs from its key frame to the next (the first from the card's start), as the eighth version's
+        # beat_spans gave them: 0–4 s and 4–10 s, cut at the plan's cap.
+        self.assertEqual([b["seconds"] for b in beats], [round(min(planrules.CAP, 4.0)), round(min(planrules.CAP, 6.0))])
+        answer = {"unmet": [], "parts": {"段落1": {"画面1": {"beats": ["v1-0/1"], "shows": "海", "link": "开场"}},
+                                         "段落2": {"画面1": {"beats": ["v2-0/1"], "shows": "人", "link": "走近"}}}}
+        turned = worker.op_shots_answer({"answer": answer, "pictures": shots["pictures"], "picked": picked}, {})
+        self.assertEqual(turned["answer"]["parts"][1]["pictures"][0]["beats"], ["v2-0/1"])
+
+
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
 class ProtocolTest(unittest.TestCase):
     def setUp(self):

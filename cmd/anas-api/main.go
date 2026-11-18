@@ -50,6 +50,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
@@ -394,6 +395,7 @@ func run(logger *slog.Logger) error {
 		Shares:       shareAPI,
 		Family:       familyAPI,
 		Montage:      montageAPI,
+		PlanGrants:   planGrants(broker),
 		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
@@ -970,4 +972,13 @@ func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool)
 		return nil, "", assistantapi.ErrSessionRejected
 	}
 	return conn, conn.Token, nil
+}
+
+// planGrants registers planning grants through the File Broker, where
+// there is one.
+func planGrants(broker *filebroker.Client) montageapi.PlanRegistrar {
+	if broker == nil {
+		return nil
+	}
+	return broker
 }

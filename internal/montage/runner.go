@@ -37,6 +37,9 @@ const (
 type stepWait struct {
 	reason string
 	delay  time.Duration
+	// detail says more for the project page, such as why VNAS has not
+	// taken the plan.
+	detail string
 }
 
 func (w *stepWait) Error() string { return "waiting: " + w.reason }
@@ -106,6 +109,10 @@ func (s *Store) RecoverJobs(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	// The run directory starts empty: the markers come back from the jobs.
+	if err := s.SyncMarkers(ctx); err != nil {
+		s.logger.WarnContext(ctx, "rebuilding the planning markers failed", "error", err)
+	}
 	return s.removeEndedFiles(ctx)
 }
 
@@ -142,6 +149,9 @@ func (s *Store) removeJobFiles(jobID string) {
 // RunJobs runs the jobs until ctx ends.
 func (s *Store) RunJobs(ctx context.Context) {
 	for ctx.Err() == nil {
+		if err := s.SweepRounds(ctx); err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "ending the planning rounds out of time failed", "error", err)
+		}
 		job, found, err := s.claim(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -322,7 +332,9 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 			// version key until its outcome is known, retaining the rendered film.
 			state, reason, message, next = JobWaiting, WaitPhotos, err.Error(), sqlitedb.FormatTime(now.Add(waitPoll))
 		case errors.As(err, &wait):
-			state, reason, next = JobWaiting, wait.reason, sqlitedb.FormatTime(now.Add(wait.delay))
+			// The detail says more for the project page, such as why VNAS has
+			// not taken the plan.
+			state, reason, message, next = JobWaiting, wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay))
 		case errors.As(err, &needs):
 			state, reason, class, message = JobNeedsInput, needs.reason, "input", needs.Error()
 			if len(needs.missing) != 0 {

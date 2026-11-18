@@ -206,6 +206,62 @@ DROP TABLE job_assets;
 DROP TABLE jobs;
 `},
 		{Up: "ALTER TABLE jobs ADD COLUMN save_started INTEGER NOT NULL DEFAULT 0", Down: "ALTER TABLE jobs DROP COLUMN save_started"},
+		// 5: planning by the member's VNAS (docs/architecture/montage-center.md,
+		// 规划). plan_grants: when each member last registered a planning
+		// grant, and under which name the waker knows them. jobs: which want
+		// a round and since when, and their epoch, which replanning raises.
+		// rounds: the epoch and the pick step's input key a round plans for,
+		// its template, and when its model first called a tool. plan_answers:
+		// the first answer taken for a step's input key, which the job's step
+		// then takes into plans. plan_briefs: the brief built for a step's
+		// input key.
+		{Up: `
+CREATE TABLE plan_grants (
+    owner_user_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    registered_at TEXT NOT NULL
+);
+ALTER TABLE jobs ADD COLUMN plan_wanted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN plan_wanted_at TEXT;
+ALTER TABLE jobs ADD COLUMN plan_epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rounds ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rounds ADD COLUMN template TEXT NOT NULL DEFAULT '';
+ALTER TABLE rounds ADD COLUMN input_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE rounds ADD COLUMN called_at TEXT;
+CREATE INDEX rounds_by_job ON rounds(job_id, claimed_at);
+CREATE INDEX rounds_by_owner ON rounds(owner_user_id, reported_at);
+
+CREATE TABLE plan_answers (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL CHECK (step IN ('pick', 'shots')),
+    input_key TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    answer_json TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, step, input_key)
+);
+
+CREATE TABLE plan_briefs (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL CHECK (step IN ('pick', 'shots')),
+    input_key TEXT NOT NULL,
+    brief_json TEXT NOT NULL,
+    PRIMARY KEY (job_id, step, input_key)
+);
+`, Down: `
+DROP TABLE plan_briefs;
+DROP TABLE plan_answers;
+DROP INDEX rounds_by_owner;
+DROP INDEX rounds_by_job;
+ALTER TABLE rounds DROP COLUMN called_at;
+ALTER TABLE rounds DROP COLUMN input_key;
+ALTER TABLE rounds DROP COLUMN template;
+ALTER TABLE rounds DROP COLUMN epoch;
+ALTER TABLE jobs DROP COLUMN plan_epoch;
+ALTER TABLE jobs DROP COLUMN plan_wanted_at;
+ALTER TABLE jobs DROP COLUMN plan_wanted;
+DROP TABLE plan_grants;
+`},
 	},
 }
 
@@ -241,6 +297,9 @@ type Store struct {
 	beat time.Duration
 	// admits is capacity.Admits, which tests replace.
 	admits func(path string, incoming int64) (bool, error)
+	// planMarkers is where the planning markers go, one empty file per
+	// member with a job wanting a round (/run/a-nas-montage/plans).
+	planMarkers string
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
 	members keylock.Map[string]
@@ -276,8 +335,11 @@ type Options struct {
 	JobCompute Compute
 	Editing    Editing
 	Planner    Planner
-	Now        func() time.Time
-	Logger     *slog.Logger
+	// PlanMarkers is the directory of planning markers the waker reads;
+	// without it no member's VNAS is asked to plan.
+	PlanMarkers string
+	Now         func() time.Time
+	Logger      *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -297,8 +359,13 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
 		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
-		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits}
+		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
+		planMarkers: options.PlanMarkers}
 	store.jobMusic = store
+	// Without a stand-in, the member's VNAS plans, where markers reach it.
+	if store.planner == nil && store.planMarkers != "" {
+		store.planner = store.VNASPlanner()
+	}
 	if store.now == nil {
 		store.now = time.Now
 	}

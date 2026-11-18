@@ -93,7 +93,7 @@ func (s *Store) steps() []step {
 			return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
 		}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
 		{name: "shots", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["pick"], digest(string(run.picked)), promptVersion), nil
+			return shotsKey(run.keys["pick"], run.picked), nil
 		}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
 		{name: "fill", key: func(_ context.Context, run *jobRun) (string, error) {
 			return digest(run.keys["shots"], digest(string(run.planned)), fillVersion), nil
@@ -687,12 +687,13 @@ func (s *Store) excerptOf(ctx context.Context, run *jobRun) (any, error) {
 
 // --- planning ---
 
-func (s *Store) planInput(run *jobRun) PlanInput {
+func (s *Store) planInput(run *jobRun, step string) PlanInput {
 	cards := make([]Card, 0, len(run.catalog.Catalog))
 	for _, id := range run.catalog.Catalog {
 		cards = append(cards, run.catalog.Cards[id])
 	}
-	return PlanInput{JobID: run.id, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked}
+	return PlanInput{JobID: run.id, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked,
+		StepKey: run.keys[step], PickKey: run.keys["pick"]}
 }
 
 // accepted is the job's plan for a step taken for this catalog, not voided.
@@ -716,10 +717,10 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	if answer, ok, err := s.accepted(ctx, run.id, step, run.keys["catalog"]); err != nil || ok {
 		return answer, err
 	}
-	answer, err := ask(ctx, s.planInput(run))
+	answer, err := ask(ctx, s.planInput(run, step))
 	switch {
 	case errors.Is(err, ErrPlanPending):
-		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll}
+		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll, detail: planDetail(err)}
 	case errors.Is(err, ErrPlanUnknown):
 		return nil, &stepNeeds{reason: NeedVNASUnknown, err: err}
 	case errors.Is(err, ErrPlanInvalid):

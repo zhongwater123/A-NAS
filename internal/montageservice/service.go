@@ -40,7 +40,14 @@ type Config struct {
 	JobCompute montage.Compute
 	Editing    montage.Editing
 	Planner    montage.Planner
-	Logger     *slog.Logger
+	// Accounts names the account behind a member's UID; AssistantSocket is
+	// where members' cron units reach the montage center when systemd does
+	// not hold it; PlanMarkers is the directory of planning markers the
+	// waker reads (docs/architecture/montage-center.md, 规划).
+	Accounts        AccountResolver
+	AssistantSocket string
+	PlanMarkers     string
+	Logger          *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -85,21 +92,43 @@ func Run(ctx context.Context, config Config) error {
 	if config.CheckStore == nil {
 		config.CheckStore = RequireOwnedStore
 	}
-	return storeservice.Run(ctx, storeservice.Config[*montage.Store]{
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
+	// The planning markers live in the service's runtime directory, where
+	// root's waker reads them; they come back from the jobs at start.
+	if config.PlanMarkers != "" {
+		if err := os.MkdirAll(config.PlanMarkers, 0o750); err != nil {
+			return err
+		}
+	}
+	// Members' cron units reach the montage center on its assistant socket,
+	// where their UID says who they are. It answers with the store that is
+	// open, and unavailable while none is.
+	assistant := &assistantGate{}
+	stopAssistant, err := listenAssistant(ctx, config, assistant)
+	if err != nil {
+		return err
+	}
+	defer stopAssistant()
+	return storeservice.Run(ctx, storeservice.Config[*servedStore]{
 		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: montageapi.Unavailable,
-		Open: func(ctx context.Context, root string) (*montage.Store, error) {
-			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute, JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, Logger: config.Logger})
-			if err == nil {
-				if err = store.StartWorkers(ctx); err != nil {
-					_ = store.Close()
-				}
+		Open: func(ctx context.Context, root string) (*servedStore, error) {
+			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute,
+				JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, PlanMarkers: config.PlanMarkers, Logger: config.Logger})
+			if err != nil {
+				return nil, err
 			}
-			return store, err
+			if err := store.StartWorkers(ctx); err != nil {
+				return nil, errors.Join(err, store.Close())
+			}
+			assistant.serve(montageapi.Assistant(store, config.Logger))
+			return &servedStore{Store: store, assistant: assistant}, nil
 		},
-		API:            func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
-		Remove:         RemoveAccount,
-		Upkeep:         func(ctx context.Context, store *montage.Store) { store.Upkeep(ctx) },
+		API:            func(store *servedStore) http.Handler { return montageapi.New(store.Store, config.Logger) },
+		Remove:         func(store *servedStore) accountremoval.Remove { return RemoveAccount(store.Store) },
+		Upkeep:         func(ctx context.Context, store *servedStore) { store.Upkeep(ctx) },
 		UpkeepInterval: montage.UpkeepInterval,
 		CheckStore:     config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
 	})

@@ -870,9 +870,14 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	// unit to stop or start, which systemctl says with exit status 5. Any
 	// other failure may leave it writing montage.db, so nothing is restored.
 	// It stops first: a request of its on the photo service's grant socket
-	// would start the photo service again.
-	if output, err := s.Commands.Run(ctx, "systemctl", "stop", "anas-montage"); err != nil && !unitNotLoaded(err) {
-		return fmt.Errorf("stop the montage service: %w: %s", err, lastLines(string(output), 3))
+	// would start the photo service again. And before it its socket for
+	// members' scheduled tasks, through which a round of a member's tasks
+	// would start it again while montage.db is restored; the socket starts
+	// again with the service.
+	for _, unit := range []string{"anas-montage-assistant.socket", "anas-montage"} {
+		if output, err := s.Commands.Run(ctx, "systemctl", "stop", unit); err != nil && !unitNotLoaded(err) {
+			return fmt.Errorf("stop %s: %w: %s", unit, err, lastLines(string(output), 3))
+		}
 	}
 	services := []string{"anas-api", "anas-photos", "anas-shares", "anas-family", "anas-host-agent"}
 	if output, err := s.Commands.Run(ctx, "systemctl", append([]string{"stop"}, services...)...); err != nil {

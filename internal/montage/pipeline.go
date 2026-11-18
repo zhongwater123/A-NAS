@@ -27,6 +27,34 @@ type Compute interface {
 	// from grey frames FrameWidth × FrameHeight: the keyframe, then the
 	// frames every half second after it up to hi, and from lo up to it.
 	Clear(ctx context.Context, request ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error)
+	// PlanBrief is a planning step's data and exact schema for the
+	// member's VNAS (ai/anas_montage/brief.py).
+	PlanBrief(ctx context.Context, request PlanBriefRequest) (PlanBrief, error)
+	// ShotsAnswer turns the second step's answer back into the outline's
+	// pictures, as the fill reads them.
+	ShotsAnswer(ctx context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error)
+}
+
+// PlanBriefRequest asks for a planning step's brief: the catalog's cards in
+// shooting order, the excerpt, the member's settings and, for the second
+// step, the outline taken.
+type PlanBriefRequest struct {
+	Step          string          `json:"step"`
+	Cards         []Card          `json:"cards"`
+	Music         json.RawMessage `json:"music"`
+	Ask           string          `json:"ask"`
+	Chronological bool            `json:"chronological"`
+	Picked        json.RawMessage `json:"picked,omitempty"`
+}
+
+// PlanBrief is a step's brief: Data and Schema go to the model; Slots and
+// Pictures stay here, for the fill and to turn the answer back.
+type PlanBrief struct {
+	Data     json.RawMessage `json:"data"`
+	Schema   json.RawMessage `json:"schema"`
+	Template string          `json:"template"`
+	Slots    json.RawMessage `json:"slots,omitempty"`
+	Pictures []int           `json:"pictures,omitempty"`
 }
 
 // Grey frames for Clear: 256 × 144, two a second (picture.STEP).
@@ -129,6 +157,11 @@ type PlanInput struct {
 	Settings JobSettings     `json:"settings"`
 	// Picked is the first step's answer, for the second step.
 	Picked json.RawMessage `json:"picked,omitempty"`
+	// StepKey is the input key of the step being planned and PickKey the
+	// first step's: a planner that answers later, as the member's VNAS does,
+	// keeps its answers by them, so that one for other inputs is never used.
+	StepKey string `json:"-"`
+	PickKey string `json:"-"`
 }
 
 // Planner makes the two steps of the plan: which scenes go into each part

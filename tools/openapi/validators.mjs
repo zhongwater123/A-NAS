@@ -14,7 +14,8 @@ import { load } from "js-yaml";
 // wallpaper, the app shortcuts, VNAS, the share reminders (SharesProvider),
 // the transfer indicator and toasts (transfers/store.ts, which keeps what
 // downloads, pauses and cancels answer) and the feedback panel with its
-// threads, whose writes answer with the item it lists. Also those whose
+// threads, whose writes answer with the item it lists, and the hints of the
+// family and montage centers. Also those whose
 // clients used to check their shape by hand. A body that breaks the contract
 // fails the call instead of the desktop (docs/investigations/2026-10-07-blank-disk-plan-ui-crash.md).
 // Each needs a Go contract test, so that the server keeps to what is checked.
@@ -55,6 +56,7 @@ const VALIDATED = [
   "getAppInstallPlan",
   "getContainerSnapshot",
   "listFamilyHints",
+  "listMontageNotices",
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);

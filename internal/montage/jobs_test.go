@@ -162,6 +162,10 @@ type compute struct {
 	fills    int
 	// clears are the frames after and before the key frame of each span.
 	clears [][2]int
+	// briefs counts the briefs built, by step; turned are the outlines the
+	// second step's answers were turned back with.
+	briefs map[string]int
+	turned []string
 }
 
 func (c *compute) Catalog(_ context.Context, request montage.CatalogRequest) ([]string, error) {
@@ -213,6 +217,59 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 		clips = append(clips, clip)
 	}
 	return montage.FillAnswer{Clips: clips}, nil
+}
+
+// PlanBrief briefs either step with a schema that wants a non-empty list of
+// parts, each a name of at most the catalog's card ids. As the Worker's
+// plan_brief, it reads each card's beats by their number among the card's
+// times, and the second step's from the outline taken.
+func (c *compute) PlanBrief(_ context.Context, request montage.PlanBriefRequest) (montage.PlanBrief, error) {
+	c.mu.Lock()
+	if c.briefs == nil {
+		c.briefs = map[string]int{}
+	}
+	c.briefs[request.Step]++
+	c.mu.Unlock()
+	ids := make([]string, len(request.Cards))
+	for i, card := range request.Cards {
+		ids[i] = card.ID
+		var answer struct {
+			Beats []json.RawMessage `json:"beats"`
+		}
+		if err := json.Unmarshal(card.Answer, &answer); err != nil || len(answer.Beats) == 0 || len(answer.Beats) != len(card.Times) {
+			return montage.PlanBrief{}, fmt.Errorf("%w: card %s has %d beats for %d times", montage.ErrWorkerRefused, card.ID, len(answer.Beats), len(card.Times))
+		}
+	}
+	if request.Step == "shots" && !outlined(request.Picked) {
+		return montage.PlanBrief{}, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", montage.ErrWorkerRefused)
+	}
+	enum, _ := json.Marshal(ids)
+	schema := `{"type":"object","required":["parts"],"properties":{"parts":{"type":"array","minItems":1,"items":{"type":"object",
+		"required":["name","cards"],"properties":{"name":{"type":"string"},"cards":{"type":"array","items":{"enum":` + string(enum) + `}}}}}}}`
+	brief := montage.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v1"}
+	if request.Step == "shots" {
+		brief.Slots, brief.Pictures = json.RawMessage(`[[[[0,2],[2,4]]]]`), []int{1}
+	}
+	return brief, nil
+}
+
+// outlined reports whether picked is an outline with parts, which the
+// Worker's shots_request and shots_answer subscript.
+func outlined(picked json.RawMessage) bool {
+	var outline struct {
+		Parts []json.RawMessage `json:"parts"`
+	}
+	return json.Unmarshal(picked, &outline) == nil && len(outline.Parts) > 0
+}
+
+func (c *compute) ShotsAnswer(_ context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error) {
+	if !outlined(picked) || len(pictures) == 0 {
+		return nil, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", montage.ErrWorkerRefused)
+	}
+	c.mu.Lock()
+	c.turned = append(c.turned, string(picked))
+	c.mu.Unlock()
+	return answer, nil
 }
 
 func (c *compute) Clear(_ context.Context, request montage.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
@@ -349,12 +406,19 @@ type jobEnv struct {
 	clock   *clock
 	root    string
 	project montage.ProjectDetail
+	// markers, when set, has the member's VNAS plan, leaving markers here.
+	markers string
 }
 
 func (e *jobEnv) open(t *testing.T) {
 	t.Helper()
-	store, err := montage.Open(context.Background(), e.root, montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing,
-		Planner: e.planner, Now: e.clock.now})
+	options := montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing, Now: e.clock.now}
+	if e.markers != "" {
+		options.PlanMarkers = e.markers
+	} else {
+		options.Planner = e.planner
+	}
+	store, err := montage.Open(context.Background(), e.root, options)
 	if err != nil {
 		t.Fatal(err)
 	}

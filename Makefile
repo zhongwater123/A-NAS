@@ -271,6 +271,20 @@ ops-check:
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	@# The montage center's socket for members' scheduled tasks: open to every UID in a directory only root
+	@# enters, bound into the cron unit alone, and stopped before the montage service it would start again.
+	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
+	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
+	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
+	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
+	@# Planning grants are in the Host Agent's own state, never under a service's directory.
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/cron-waker.py
+	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go

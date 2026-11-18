@@ -153,6 +153,12 @@ for file in "$assistant"/*.sh "$assistant"/*.py; do
 done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
+# The cron unit's policy adds the montage center's planning server, which a
+# conversation's instance never starts (docs/architecture/montage-center.md);
+# the fixed prompt templates a planning round fills go beside it.
+install -d "$lib/assistant/managed-cron" "$lib/assistant/montage-prompts"
+derive_cron_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-cron/config.yaml"
+install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
 cp -r "$assistant/skills" "$lib/assistant/skills"
@@ -185,6 +191,7 @@ done
 wants sockets.target anas-ai.socket
 wants sockets.target anas-photos-grants.socket
 wants sockets.target anas-montage-compute.socket
+wants sockets.target anas-montage-assistant.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-photos-assistant.socket
 wants sockets.target anas-companion-assistant.socket
