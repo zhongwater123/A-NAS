@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -26,6 +27,11 @@ const (
 	GrantRemove   = "remove"
 	GrantList     = "list"
 	GrantRevoke   = "revoke"
+	// GrantAnalyze queues the montage analysis of granted videos;
+	// GrantAnalysis returns one video's, its window vectors in a memfd
+	// beside the answer.
+	GrantAnalyze  = "analyze"
+	GrantAnalysis = "analysis"
 )
 
 // Grant error codes. GrantOwnerInactive is a grant whose owner's account is
@@ -69,6 +75,8 @@ type GrantRequest struct {
 	AssetIDs  []string `json:"assetIds,omitempty"`
 	AssetID   string   `json:"assetId,omitempty"`
 	After     string   `json:"after,omitempty"`
+	// Retry, on analyze, starts a failed analysis over.
+	Retry bool `json:"retry,omitempty"`
 }
 
 // GrantResponse answers a GrantRequest. Next, on list, is set when more
@@ -82,6 +90,7 @@ type GrantResponse struct {
 	Grants   []photos.Grant        `json:"grants,omitempty"`
 	Next     string                `json:"next,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
+	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
 }
 
 // GrantError is a refused request.
@@ -177,6 +186,44 @@ func (g Grants) Open(ctx context.Context, grantID, assetID string) (*os.File, st
 		return nil, "", errors.New("photo grant: open answered no descriptor")
 	}
 	return file, response.ObjectID, nil
+}
+
+// Analyze queues the montage analysis of granted videos; with retry, a
+// failed analysis starts over.
+func (g Grants) Analyze(ctx context.Context, grantID string, assetIDs []string, retry bool) error {
+	_, err := g.plain(ctx, GrantRequest{Op: GrantAnalyze, GrantID: grantID, AssetIDs: assetIDs, Retry: retry})
+	return err
+}
+
+// Analysis returns a granted video's montage analysis so far and, once its
+// windows are done, their List and vectors: WindowCount × Dimensions
+// little-endian float32 in window order. They come in a sealed memfd beside
+// the answer (photos.GrantAnalysis), so a long video's answer stays within
+// the message limit.
+func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
+	response, file, err := g.Call(ctx, GrantRequest{Op: GrantAnalysis, GrantID: grantID, AssetID: assetID})
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	defer unixmsg.CloseFile(file)
+	if response.Analysis == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
+	}
+	analysis := *response.Analysis
+	if analysis.Windows != photos.AnalysisDone {
+		return analysis, nil, nil
+	}
+	if file == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered no windows")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	vectors, err := photos.ReadWindows(&analysis, file)
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %w", err)
+	}
+	return analysis, vectors, nil
 }
 
 // Remove takes assets out of a grant.

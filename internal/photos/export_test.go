@@ -1,6 +1,9 @@
 package photos
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // AppleTIFFID and JPEGAPP1 expose the hand-written Exif readers to their fuzz
 // test; imagemeta drops Apple's ContentIdentifier (see appleContentID).
@@ -35,4 +38,10 @@ func UseVectorIndex(s *Service, index VectorIndex) { s.vectors = index }
 // VectorSyncBackoff is how long vector sync waits after failures in a row.
 func VectorSyncBackoff(idle time.Duration, failures int) time.Duration {
 	return vectorSyncBackoff(idle, failures)
+}
+
+// QueueWindows queues object for the window index, as its triggers do.
+func (s *Service) QueueWindows(ctx context.Context, object string) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO window_outbox(object_id) VALUES (?)", object)
+	return err
 }

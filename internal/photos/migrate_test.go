@@ -150,6 +150,16 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 // with migration 17's stored Down when it opens the Catalog; the statements
 // that undo older migrations by hand come after it.
 var undoMontageGrants = []string{
+	"DROP TRIGGER assets_window_outbox_update",
+	"DROP TRIGGER assets_window_outbox_delete",
+	"DROP TRIGGER assets_window_outbox_insert",
+	"DROP TRIGGER video_windows_outbox_delete",
+	"DROP TRIGGER video_windows_outbox_update",
+	"DROP TRIGGER video_windows_outbox_insert",
+	"DROP TABLE window_outbox",
+	"DROP TABLE video_windows",
+	"DROP TABLE montage_objects",
+	"DELETE FROM schema_downgrades WHERE version = 18",
 	"DROP TABLE montage_grant_assets",
 	"DROP TABLE montage_grants",
 	"DELETE FROM schema_downgrades WHERE version = 17",
@@ -166,6 +176,7 @@ func TestMontageGrantsMigrationGoesBackWithItsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:16], WithoutDown: migrationsWithoutDown}
+	// The newer build's steps 17 and 18 go back with their stored Downs.
 	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
 		t.Fatalf("the older build's migration: %v", err)
 	}
@@ -173,7 +184,7 @@ func TestMontageGrantsMigrationGoesBackWithItsDown(t *testing.T) {
 	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 16 {
 		t.Fatalf("user_version after going back = %d, %v", version, err)
 	}
-	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'montage_grant%'").Scan(&tables); err != nil || tables != 0 {
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'montage_%' OR name LIKE '%window%'").Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("grant tables left after going back = %d, %v", tables, err)
 	}
 	_ = service.Close()

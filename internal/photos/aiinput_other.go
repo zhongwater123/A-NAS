@@ -2,17 +2,32 @@
 
 package photos
 
-import "os"
+import (
+	"bufio"
+	"errors"
+	"io"
+	"os"
+)
 
 // memoryFile returns content as an unlinked temporary file read from its
 // start, where in-memory files are not available.
 func memoryFile(content []byte) (*os.File, error) {
-	file, err := os.CreateTemp("", "anas-ai-input-*")
+	return sealedFile("anas-ai-input", func(w io.Writer) error {
+		_, err := w.Write(content)
+		return err
+	})
+}
+
+// sealedFile returns what write writes as an unlinked temporary file read
+// from its start, where in-memory files are not available.
+func sealedFile(name string, write func(io.Writer) error) (*os.File, error) {
+	file, err := os.CreateTemp("", name+"-*")
 	if err != nil {
 		return nil, err
 	}
 	_ = os.Remove(file.Name())
-	if _, err := file.Write(content); err != nil {
+	buffered := bufio.NewWriter(file)
+	if err := errors.Join(write(buffered), buffered.Flush()); err != nil {
 		_ = file.Close()
 		return nil, err
 	}

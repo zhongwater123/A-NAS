@@ -300,7 +300,10 @@ type Service struct {
 	check            chan vectorCheckQuery
 	checking         atomic.Bool
 	vectorChecked    atomic.Pointer[imagesCollection]
-	vectorRecheck    chan struct{}
+	// windowsChecked is the windows collection the sync loop last saw in
+	// the index (windowsync.go).
+	windowsChecked atomic.Pointer[windowsCollection]
+	vectorRecheck  chan struct{}
 	// closed ends background work the service starts itself when it closes.
 	closed       context.Context
 	closeWorkers context.CancelFunc

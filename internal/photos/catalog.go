@@ -459,6 +459,82 @@ CREATE INDEX montage_grant_assets_by_asset ON montage_grant_assets(asset_id);
 DROP TABLE montage_grant_assets;
 DROP TABLE montage_grants;
 `},
+	// 18: the montage center's analysis of the videos its grants asked for
+	// (ADR 0038 decision 4), starting with the window vectors
+	// (montage-windows/v1). Results follow the content object; the vectors
+	// stay here, the record, and reach the vector index through their own
+	// outbox, as the image vectors do (ADR 0028 decision 1).
+	// montage_objects says, per object, which analysis a grant asked for
+	// and since when no grant has referred to it.
+	{Up: `
+CREATE TABLE montage_objects (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    requested_at TEXT NOT NULL,
+    unreferenced_since TEXT
+);
+
+CREATE TABLE video_windows (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    flat INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    identity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, idx)
+);
+CREATE INDEX video_windows_by_created ON video_windows(created_at);
+
+CREATE TABLE window_outbox (
+    object_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TRIGGER video_windows_outbox_insert AFTER INSERT ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_update AFTER UPDATE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_delete AFTER DELETE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_insert AFTER INSERT ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_delete AFTER DELETE ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = OLD.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_update AFTER UPDATE OF trashed_at, library_id ON assets
+WHEN (OLD.trashed_at IS NOT NEW.trashed_at OR OLD.library_id IS NOT NEW.library_id)
+  AND EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+`, Down: `
+DROP TRIGGER assets_window_outbox_update;
+DROP TRIGGER assets_window_outbox_delete;
+DROP TRIGGER assets_window_outbox_insert;
+DROP TRIGGER video_windows_outbox_delete;
+DROP TRIGGER video_windows_outbox_update;
+DROP TRIGGER video_windows_outbox_insert;
+DROP TABLE window_outbox;
+DROP TABLE video_windows;
+DROP TABLE montage_objects;
+DELETE FROM jobs WHERE derivation LIKE 'montage-%';
+DELETE FROM vector_index_state WHERE name = 'windows';
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

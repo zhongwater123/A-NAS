@@ -3,10 +3,12 @@ package photoservice_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -157,6 +159,12 @@ func TestTheGrantSocketAnswersOnlyTheMontageServiceAsTheOwnerNow(t *testing.T) {
 	}
 	if _, err := client.Lookup(ctx, grant.ID, []string{videoID}); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive {
 		t.Fatalf("Lookup() for a disabled owner = %v", err)
+	}
+	if err := client.Analyze(ctx, grant.ID, []string{videoID}, false); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive {
+		t.Fatalf("Analyze() for a disabled owner = %v", err)
+	}
+	if _, _, err := client.Analysis(ctx, grant.ID, videoID); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive {
+		t.Fatalf("Analysis() for a disabled owner = %v", err)
 	}
 	known.set("user:alice", true)
 	if err := client.Revoke(ctx, grant.ID); err != nil {
@@ -357,4 +365,86 @@ func aliceVideoID(t *testing.T, r running) string {
 	}
 	t.Fatal("Alice has no private library")
 	return ""
+}
+
+// threeHourVideo reads every file as a three-hour phone video.
+type threeHourVideo struct{ probedVideo }
+
+func (threeHourVideo) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{
+		Format:  ffmpegworker.ProbeFormat{Name: "mov,mp4,m4a,3gp,3g2,mj2", Duration: 3 * 3600},
+		Streams: []ffmpegworker.ProbeStream{{Type: "video", Codec: "h264", PixelFormat: "yuv420p", Width: 1920, Height: 1080}},
+	}, nil
+}
+
+// seedWindows stores a done window analysis of the one video in the Catalog
+// at root, as the AI runner would: count windows of 2 seconds with vectors
+// of dimensions, every value its window's index.
+func seedWindows(t *testing.T, root string, count, dimensions int) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", filepath.Join(root, "catalog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var object string
+	if err := db.QueryRow("SELECT object_id FROM assets").Scan(&object); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vector := make([]byte, 4*dimensions)
+	for i := range count {
+		for d := range dimensions {
+			binary.LittleEndian.PutUint32(vector[4*d:], math.Float32bits(float32(i)))
+		}
+		if _, err := tx.Exec(`INSERT INTO video_windows(object_id, idx, start_ms, end_ms, flat, vector, identity, created_at)
+VALUES(?, ?, ?, ?, ?, ?, 'model|win', '2026-11-18T00:00:00Z')`, object, i, 2000*i, 2000*(i+1), i%2 == 0, vector); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A long video's analysis reaches the montage center whole: its windows
+// come beside the answer, which stays within the message limit.
+func TestALongVideosAnalysisComesWhole(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "grants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	grantSocket := filepath.Join(dir, "grants.sock")
+	options := photos.Options{DisableCapacityReserve: true, Media: threeHourVideo{}}
+	const windows, dimensions = 5400, 768
+	var videoID string
+	var grants []string
+	r := start(t, func(config *photoservice.Config) {
+		videoID, grants = grantedStore(t, config.Root, options, 1)
+		seedWindows(t, config.Root, windows, dimensions)
+		config.Sessions = &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
+		config.Photos = options
+		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
+	})
+	r.ready.Store(true)
+	client := photosapi.GrantClient(grantSocket)
+	var analysis photos.GrantAnalysis
+	var vectors []byte
+	waitFor(t, func() bool { analysis, vectors, err = client.Analysis(ctx, grants[0], videoID); return err == nil })
+	if analysis.Windows != photos.AnalysisDone || analysis.Dimensions != dimensions || len(analysis.List) != windows ||
+		len(vectors) != windows*dimensions*4 {
+		t.Fatalf("Analysis() = %s, %d windows of %d dimensions, %d bytes", analysis.Windows, len(analysis.List), analysis.Dimensions, len(vectors))
+	}
+	last := analysis.List[windows-1]
+	if last != (photos.Window{Index: windows - 1, StartMs: 2000 * (windows - 1), EndMs: 2000 * windows}) || !analysis.List[0].Flat {
+		t.Fatalf("windows = first %+v, last %+v", analysis.List[0], last)
+	}
+	if value := math.Float32frombits(binary.LittleEndian.Uint32(vectors[len(vectors)-4:])); value != windows-1 {
+		t.Fatalf("the last window's vector holds %v", value)
+	}
 }

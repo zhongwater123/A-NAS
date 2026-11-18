@@ -185,7 +185,7 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			grant, err = service.RegisterGrant(ctx, photosapi.NewGrantPrincipal(user.UserID, user.Username), request.ProjectID, request.AssetIDs)
 			response.Grant = &grant
 		}
-	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove:
+	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis:
 		var owner photos.Principal
 		if owner, err = g.owner(ctx, service, request.GrantID); err != nil {
 			break
@@ -195,6 +195,13 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			response.Assets, err = service.LookupGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		case photosapi.GrantOpen:
 			opened, response.ObjectID, err = service.OpenGrant(ctx, owner, request.GrantID, request.AssetID)
+		case photosapi.GrantAnalyze:
+			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
+		case photosapi.GrantAnalysis:
+			var analysis photos.GrantAnalysis
+			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
+				response.Analysis = &analysis
+			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
 		}
