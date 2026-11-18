@@ -15,8 +15,12 @@ import time
 import unittest
 from unittest import mock
 
-from anas_ai import providers
+from anas_ai import describe, providers
 
+# A description that fits the schema for three beats.
+ANSWER = {"camera": "地面", "beats": [{"shot_size": "远景", "what": "雪山"}, {"shot_size": "全景", "what": "走路"},
+                                    {"shot_size": "特写", "what": "手"}],
+          "process": ["走向雪山"], "summary": "两人走向雪山", "scene": "雪山下"}
 STAND_IN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_llama_server.py")
 AI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,7 +33,7 @@ class LlamaReaderTest(unittest.TestCase):
         self.environ = {"FAKE_LLAMA_RECORD": self.record}
         for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE",
                      "FAKE_LLAMA_PIECE_DELAY", "FAKE_LLAMA_ERROR", "FAKE_LLAMA_NO_FINISH", "FAKE_LLAMA_START_DELAY",
-                     "FAKE_LLAMA_EXIT"):
+                     "FAKE_LLAMA_EXIT", "FAKE_LLAMA_ANSWERS"):
             self.environ[name] = None
 
     def reader(self, sha=None, cache_dir=None):
@@ -173,6 +177,53 @@ class LlamaReaderTest(unittest.TestCase):
             reader.read(b"jpeg", "text", None, run)
         self.assertLess(time.monotonic() - started, 5)
         self.assertIsNone(reader._process.poll())
+
+    def test_describes_a_card_with_the_prototypes_settings(self):
+        self.environ["FAKE_LLAMA_ANSWERS"] = json.dumps([json.dumps(ANSWER, ensure_ascii=False)])
+        reader = self.reader()
+        frames = [b"one", b"two", b"three"]
+        answer = reader.describe(frames, [0, 2.4, 5], [1, 2, 3], 6, reader.run_options())
+        self.assertEqual(answer["summary"], "两人走向雪山")
+        self.assertEqual([beat["frames"] for beat in answer["beats"]], [[1, 1], [2, 2], [3, 3]])
+        with open(self.record, encoding="utf-8") as file:
+            body = json.load(file)["body"]
+        system, user = body["messages"]
+        self.assertEqual(system, {"role": "system", "content": describe.SYSTEM_PROMPT})
+        parts = user["content"]
+        content, schema, _ = describe.request([0, 2.4, 5], [1, 2, 3], 6)
+        self.assertEqual(len(parts), len(content))
+        self.assertEqual(parts[0]["text"], content[0][1])
+        # Each key frame follows its label, in order.
+        images = [part["image_url"]["url"] for part in parts if part["type"] == "image_url"]
+        self.assertEqual(images, ["data:image/jpeg;base64," + base64.b64encode(frame).decode() for frame in frames])
+        self.assertEqual(parts[1]["text"], "第 1 张（第 1 组，第 0 秒）")
+        self.assertEqual((body["temperature"], body["repeat_penalty"], body["max_tokens"], body["cache_prompt"]),
+                         (0.2, 1.1, 1800, False))
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}})
+        self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_an_answer_that_does_not_fit_is_asked_again_three_times(self):
+        good = json.dumps(ANSWER, ensure_ascii=False)
+        self.environ["FAKE_LLAMA_ANSWERS"] = json.dumps(['{"camera": "地面"}', good])
+        reader = self.reader()
+        answer = reader.describe([b"1", b"2", b"3"], [0, 1, 2], [1, 2, 3], 3, reader.run_options())
+        self.assertEqual(answer["scene"], "雪山下")
+        with open(self.record, encoding="utf-8") as file:
+            self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.2)
+
+        self.environ["FAKE_LLAMA_ANSWERS"] = json.dumps(["{", "[]", json.dumps({**ANSWER, "camera": "海上"}), good])
+        reader = self.reader()
+        with self.assertRaises(providers.InvalidResult) as raised:
+            reader.describe([b"1", b"2", b"3"], [0, 1, 2], [1, 2, 3], 3, reader.run_options())
+        self.assertIn("repeat_penalty=1.3", str(raised.exception))
+        with open(self.record, encoding="utf-8") as file:
+            self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.3)
+
+    def test_a_card_past_the_context_is_refused(self):
+        self.environ["FAKE_LLAMA_STATUS"] = "400"
+        reader = self.reader()
+        with self.assertRaises(providers.InvalidInput):
+            reader.describe([b"1", b"2", b"3"], [0, 1, 2], [1, 2, 3], 3, reader.run_options())
 
     def test_a_loop_ends_the_reading(self):
         self.environ["FAKE_LLAMA_REPEAT"] = "2000"

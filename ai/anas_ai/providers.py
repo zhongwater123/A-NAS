@@ -26,6 +26,8 @@ import tempfile
 import threading
 import time
 
+from anas_ai import describe as montage_card
+
 
 class InvalidInput(Exception):
     """The provider cannot process this input; the same input fails again."""
@@ -41,6 +43,10 @@ class Cancelled(Exception):
 
 class Failed(Exception):
     """The provider failed on an input it accepted, for a reason that may pass; the work is tried again later."""
+
+
+class InvalidResult(Exception):
+    """The model's answer did not fit what was asked for, however often it was asked again."""
 
 
 # AI works in idle time with what the device has, but leaves these cores to
@@ -907,7 +913,6 @@ class LlamaReader:
         """
         if not data:
             raise InvalidInput("empty image")
-        path = self._start(run)
         body = {
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(data).decode()}},
@@ -916,6 +921,49 @@ class LlamaReader:
             "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
             "stream": True, "chat_template_kwargs": {"enable_thinking": False},
         }
+        text, tokens, finish = self._complete(body, run)
+        return {"text": text, "logprobs": tokens, "finish": finish}
+
+    def describe(self, frames, offsets, groups, duration, run):
+        """Describes a montage card from its key frames (anas_ai.describe), with the prototype's settings.
+
+        The answer is asked for with the schema as llama-server's grammar and
+        checked again here; one that does not fit, or repeats itself, is asked
+        again with a stronger repeat penalty, three times in all, and then
+        raises InvalidResult. A prompt past the context is refused by the
+        server (InvalidInput): the card goes undescribed.
+        """
+        if any(not data for data in frames):
+            raise InvalidInput("empty image")
+        content, answer_schema, spans = montage_card.request(offsets, groups, duration)
+        parts = [{"type": "text", "text": value} if kind == "text" else
+                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(frames[value]).decode()}}
+                 for kind, value in content]
+        errors = []
+        for penalty in montage_card.REPEAT_PENALTIES:
+            body = {
+                "messages": [{"role": "system", "content": montage_card.SYSTEM_PROMPT}, {"role": "user", "content": parts}],
+                "temperature": montage_card.TEMPERATURE, "repeat_penalty": penalty, "max_tokens": montage_card.MAX_TOKENS,
+                "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": answer_schema}},
+                "cache_prompt": False, "stream": True, "chat_template_kwargs": {"enable_thinking": False},
+            }
+            text, _, finish = self._complete(body, run)
+            try:
+                if finish != "stop":
+                    raise montage_card.InvalidAnswer(f"the answer ended with {finish}")
+                return montage_card.parse(text, answer_schema, spans)
+            except montage_card.InvalidAnswer as error:
+                errors.append(f"repeat_penalty={penalty}: {error}")
+        raise InvalidResult("; ".join(errors))
+
+    def _complete(self, body, run):
+        """Streams body's answer from the server: its text, [token, log probability] pairs, and why it ended.
+
+        Raises Cancelled once run is told to stop, InvalidInput for a request
+        the server refuses (4xx), and Failed for a server that fails
+        otherwise; the server is then stopped, so the next call starts anew.
+        """
+        path = self._start(run)
         text, tokens, finish, refused, failed = [], [], None, None, None
         connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
         try:
@@ -974,7 +1022,7 @@ class LlamaReader:
             # the next reading starts a new one rather than fail at once.
             self.release()
             raise Failed(failed)
-        return {"text": "".join(text), "logprobs": tokens, "finish": finish}
+        return "".join(text), tokens, finish
 
     def release(self, kill=False):
         """Stops the server, which frees the model's memory; kill does not wait for it to finish its work."""
@@ -1100,18 +1148,27 @@ def fake_fields(schema, digest):
     return schema
 
 
-class FakeReader:
-    """A deterministic stand-in: equal images get equal readings.
+# What a fake key frame holds to be refused, to get answers that never fit the
+# schema, or to have a number written into its description.
+FAKE_REFUSE = b"fake:too-long"
+FAKE_INVALID = b"fake:invalid"
+FAKE_NUMBER = b"fake:number="
 
-    delay keeps a reading running for that long, checking whether it was told
-    to stop, so that tests can cancel one.
+
+class FakeReader:
+    """A deterministic stand-in: equal images get equal readings and descriptions.
+
+    delay keeps a reading or description running for that long, checking
+    whether it was told to stop, so that tests can cancel one. answers, when
+    given, are the texts the model answers a description with, one per try.
     """
 
     model = "fake-reader-sha256"
     memory = 0
 
-    def __init__(self, delay=0.0):
+    def __init__(self, delay=0.0, answers=None):
         self.delay = delay
+        self.answers = answers
         self.loaded = False
         self.cancelled = 0
 
@@ -1122,18 +1179,55 @@ class FakeReader:
         if not data:
             raise InvalidInput("empty image")
         self.loaded = True
-        deadline = time.monotonic() + self.delay
-        while time.monotonic() < deadline:
-            if run.terminate:
-                self.cancelled += 1
-                raise Cancelled()
-            time.sleep(0.01)
+        self._wait(run)
         digest = hashlib.sha256(data).hexdigest()
         if kind == "text":
             text = f"fake text {digest[:8]}"
         else:
             text = json.dumps(fake_fields(schema, digest), ensure_ascii=False)
         return {"text": text, "logprobs": [[text, 0.0]], "finish": "stop"}
+
+    def describe(self, frames, offsets, groups, duration, run):
+        """A description that fits the schema, from the frames' digest; with answers, those texts in turn.
+
+        A frame whose bytes hold FAKE_REFUSE is refused as a prompt past the
+        context would be, one holding FAKE_INVALID gets answers that never fit
+        the schema, and one holding FAKE_NUMBER gets that number written into
+        the summary, so that the Go side's tests can see each through the
+        Worker.
+        """
+        if any(not data for data in frames):
+            raise InvalidInput("empty image")
+        self.loaded = True
+        self._wait(run)
+        if any(FAKE_REFUSE in data for data in frames):
+            raise InvalidInput("llama-server answered 400: the request exceeds the available context size")
+        _, answer_schema, spans = montage_card.request(offsets, groups, duration)
+        answers = self.answers or (["{}"] * 3 if any(FAKE_INVALID in data for data in frames) else None)
+        if answers:
+            errors = []
+            for text in answers[:len(montage_card.REPEAT_PENALTIES)]:
+                try:
+                    return montage_card.parse(text, answer_schema, spans)
+                except montage_card.InvalidAnswer as error:
+                    errors.append(str(error))
+            raise InvalidResult("; ".join(errors))
+        digest = hashlib.sha256(b"".join(frames)).hexdigest()
+        number = next((data.split(FAKE_NUMBER, 1)[1][:20].decode(errors="ignore") for data in frames
+                       if FAKE_NUMBER in data), "")
+        answer = {"camera": montage_card.CAMERAS[0],
+                  "beats": [{"shot_size": montage_card.SHOT_SIZES[n % 5], "what": f"画面 {n + 1} {digest[:6]}"}
+                            for n in range(max(groups))],
+                  "process": ["走过"], "summary": f"一段 {duration:.0f} 秒的画面 {digest[:8]}{number}", "scene": "街道"}
+        return montage_card.parse(json.dumps(answer, ensure_ascii=False), answer_schema, spans)
+
+    def _wait(self, run):
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
 
     def release(self):
         self.loaded = False

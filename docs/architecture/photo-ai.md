@@ -81,9 +81,9 @@ M2 交付后，成员可以：
 
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
-- 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。
-- 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
+- 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。一条请求最多 20 个描述符（`describe_frames` 的关键帧）；超出的被内核丢弃，Worker 读完这一帧后答 `invalid_request`。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。`describe_frames` 用同一个读文字模型描述剪辑中心的一张卡片（见下文“剪辑中心的分析”）。
+- 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待；`invalid_request` 表示请求本身越界（描述符太多、字段不合规则）；`invalid_result` 表示模型的回答重问几次仍不合 Schema。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
 ### 输入图片
@@ -106,6 +106,11 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 取帧用 FFmpeg Worker 的 `frames`（后台优先级），按缩略图的流程转成长边 512、质量 82 的 JPEG，灰度标准差小于 8 记为纯色，再交给 `embed_image`。前台有人用或内存不足时立即挂断，已算完的窗口保留；CPU、I/O 压力只在块与块之间生效。
   - 结果存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用；同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
   - 换模型时只重排仍被未撤销的授权引用的对象；没有授权引用满 7 天的分析由每小时的维护删除。
+- **卡片描述**（`describe_frames`，[`describe.py`](../../ai/anas_ai/describe.py)）：
+  - 输入一张卡片的 3–20 张关键帧（每张一个描述符）、每张离卡片开头的秒数（`offsets`）、分组布局（`groups`，从 1 数的节拍）与卡片时长（`duration`）；越界答 `invalid_request`。
+  - 提示词、体裁（旅行，`TRAVEL`）与 Schema 固定在 Worker 里，版本 `montage-card/v1`，随回答的 `template` 返回：第八版（提交 `19f2d6db`）的 `PROMPT`、`CAMERAS` 与 Schema 原样搬来，只加一句不要转写画面里的证件号、票号、车牌等号码。
+  - 用读文字的 llama-server，设置照第八版：系统提示词、`response_format` 按 Schema 约束、温度 0.2、回答上限 1,800 token、不开思考；回答不合 Schema、截断或陷入重复时依次以重复惩罚 1.1、1.2、1.3 重问，三次都不合格答 `invalid_result`。提示超出上下文时 llama-server 拒绝请求，答 `invalid_input`。
+  - 和 `read_text` 一样在线程里运行、调用方挂断即停；客户端对它的超时是 15 分钟。
 
 ### 存储（Catalog migration 4–7）
 

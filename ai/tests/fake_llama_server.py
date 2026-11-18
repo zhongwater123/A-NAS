@@ -10,6 +10,7 @@ token's log probability. Environment variables shape it:
 - FAKE_LLAMA_REPEAT: answer the same piece this many times;
 - FAKE_LLAMA_PIECE: that piece, 回单 unless given;
 - FAKE_LLAMA_PIECE_DELAY: seconds between the answer's pieces;
+- FAKE_LLAMA_ANSWERS: a JSON list of answers, one whole piece for each request in turn, the last for the rest;
 - FAKE_LLAMA_ERROR: after the answer, report this error in the stream and end it without a finish reason,
   as llama-server does when it fails mid-answer;
 - FAKE_LLAMA_NO_FINISH: end the stream without a finish reason;
@@ -25,6 +26,8 @@ import sys
 import time
 
 ANSWER = ["第一行", "\n", "第二行"]
+# Requests answered so far, for FAKE_LLAMA_ANSWERS.
+answered = 0
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -58,9 +61,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
+        global answered  # one server process, one request at a time
         repeat = int(os.environ.get("FAKE_LLAMA_REPEAT", "0"))
         pause = float(os.environ.get("FAKE_LLAMA_PIECE_DELAY", "0"))
         pieces = [os.environ.get("FAKE_LLAMA_PIECE", "回单")] * repeat if repeat else ANSWER
+        answers = json.loads(os.environ.get("FAKE_LLAMA_ANSWERS", "[]"))
+        if answers:
+            pieces = [answers[min(answered, len(answers) - 1)]]
+        answered += 1
         try:
             for piece in pieces:
                 event = {"choices": [{"delta": {"content": piece}, "finish_reason": None,
