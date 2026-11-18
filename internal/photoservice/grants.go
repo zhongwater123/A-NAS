@@ -199,12 +199,8 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
 		case photosapi.GrantAnalysis:
 			var analysis photos.GrantAnalysis
-			var vectors []byte
-			if analysis, vectors, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
+			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
 				response.Analysis = &analysis
-				if len(vectors) > 0 {
-					opened, err = vectorFile(vectors)
-				}
 			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
@@ -258,10 +254,4 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 		}
 		return response, file, nil
 	}}
-}
-
-// vectorFile holds a video's window vectors for the montage center: a sealed
-// memfd it reads, so a large answer does not pass through the JSON message.
-func vectorFile(vectors []byte) (*os.File, error) {
-	return unixmsg.SealedFile("anas-window-vectors", vectors)
 }

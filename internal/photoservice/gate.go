@@ -105,10 +105,27 @@ func (g *Gate) Use() (done func()) {
 // not otherwise; need is the memory the AI Worker's models take, 0 for work
 // that loads none (photos.Gate).
 func (g *Gate) Open(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, false)
+}
+
+// Continue reports whether background AI work already running may go on,
+// and why not otherwise: it stops at once while someone uses the photo
+// library or memory is short, whatever the processor and the disk do, while
+// the device's other work waiting on those only holds the next item back
+// (photos.RunningGate).
+func (g *Gate) Continue(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, true)
+}
+
+// check is Open, or, while running, Continue.
+func (g *Gate) check(need uint64, running bool) (bool, string) {
 	if g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
 		return false, "foreground"
 	}
 	for _, check := range pressureLimits {
+		if running && check.resource != "memory" {
+			continue
+		}
 		value, err := g.pressure(check.resource)
 		if err != nil {
 			// A kernel without pressure stall information leaves only

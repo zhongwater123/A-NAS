@@ -481,8 +481,10 @@ CREATE TABLE video_windows (
     flat INTEGER NOT NULL,
     vector BLOB NOT NULL,
     identity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     PRIMARY KEY (object_id, idx)
 );
+CREATE INDEX video_windows_by_created ON video_windows(created_at);
 
 CREATE TABLE window_outbox (
     object_id TEXT PRIMARY KEY,

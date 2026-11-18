@@ -191,17 +191,25 @@ func (s *Service) grantedAssets(ctx context.Context, grantID string, ids []strin
 // asset outside the grant, gone or no longer seen is missing; one the owner
 // put in the trash is trashed.
 func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID string, assetIDs []string) ([]GrantedAsset, error) {
+	found, _, err := s.lookupGrant(ctx, owner, grantID, assetIDs)
+	return found, err
+}
+
+// lookupGrant is LookupGrant, with where the montage analysis of each
+// available video stands, read for all of them in one go.
+func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID string, assetIDs []string) ([]GrantedAsset, map[string]analysisProgress, error) {
 	if err := s.usableGrant(ctx, owner, grantID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(assetIDs) > MaxGrantAssets {
-		return nil, ErrTooManyIDs
+		return nil, nil, ErrTooManyIDs
 	}
 	ids := uniqueIDs(assetIDs)
 	records, err := s.grantedAssets(ctx, grantID, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	videos := map[string]float64{}
 	now := s.now()
 	found := make([]GrantedAsset, 0, len(ids))
 	for _, id := range ids {
@@ -215,17 +223,21 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 		default:
 			entry.Status, entry.ObjectID = GrantAvailable, record.objectID
 			entry.Duration, entry.Width, entry.Height, entry.TakenAt = record.Video.Duration, record.Width, record.Height, record.TakenAt
-			if entry.Windows, err = s.windowsState(ctx, s.db, record.objectID); err != nil {
-				return nil, err
-			}
-			entry.Cards, entry.Quality, _, _, err = s.montageCardState(ctx, s.db, record.objectID)
-			if err != nil {
-				return nil, err
-			}
+			videos[record.objectID] = record.Video.Duration
 		}
 		found = append(found, entry)
 	}
-	return found, nil
+	progress, err := s.progressOf(ctx, videos)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range found {
+		if found[i].Status == GrantAvailable {
+			p := progress[found[i].ObjectID]
+			found[i].Windows, found[i].Cards, found[i].Quality = p.windows, p.cards, p.quality
+		}
+	}
+	return found, progress, nil
 }
 
 // OpenGrant opens a granted video's original read-only, with its object.

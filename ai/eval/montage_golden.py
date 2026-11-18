@@ -1,7 +1,7 @@
 """Golden comparison of the montage compute Worker with the eighth version (development machine only).
 
 The prototype's results come from real footage and stay out of the repository
-(docs/architecture/montage-center.md, 剪辑计算 Worker, 样本). Point
+(docs/architecture/photo-ai.md, 剪辑计算 Worker, 样本). Point
 ANAS_MONTAGE_SAMPLES at the folder that holds cache/ and 剪辑对比/ (on
 development machine C, ~/A-NAS-datasets) and run, in the AI runtime:
 
@@ -26,9 +26,13 @@ from pathlib import Path
 import numpy as np
 
 from anas_montage import worker
-from anas_montage.domain import cards as cardrules, catalog as catalogrules, fill as fillrules
-from anas_montage.domain import picture
-from anas_montage.domain import quality as qualityrules
+from anas_montage.domain import (
+    cards as cardrules,
+    catalog as catalogrules,
+    fill as fillrules,
+    picture,
+    quality as qualityrules,
+)
 
 CASES = {"pj": "pinjie", "ne": "newzealand", "ch": "chuanxi"}
 CUTS = "剪辑对比/第四版/剪法24（2026-11-08）"

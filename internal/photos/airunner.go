@@ -30,8 +30,9 @@ type aiRunner struct {
 	mu sync.Mutex
 	// model, detector, faces, animals and reader are the Worker's models
 	// whose stale results have already been queued again; empty until a
-	// round asks.
-	model, detector, faces, animals, reader string
+	// round asks. windows is the identity of the window vectors that model
+	// makes.
+	model, detector, faces, animals, reader, windows string
 	// generation counts the times they were forgotten, so that a requeue
 	// running meanwhile does not record them again.
 	generation int
@@ -276,8 +277,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if err := r.requeueStale(ctx, info); err != nil {
 		return false, err
 	}
-	// The montage center's analysis comes first: a member waits for it.
-	if worked, err := r.montageWindows(ctx, embedder, gate, info); worked || err != nil {
+	// The montage center's analysis comes first: a member waits for it. A
+	// chunk the gate hung up ends the round as a paused detection does.
+	if worked, ended, err := r.montageWindows(ctx, embedder, gate, info); worked || ended || err != nil {
 		return worked, err
 	}
 	// Query texts, the labels' and the text route's, are few and short; they
@@ -434,7 +436,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		return false, nil
 	}
 	detectCtx, cancel := context.WithCancel(ctx)
-	stopWatching := watchGate(detectCtx, gate, info.MemoryBytes, cancel)
+	stopWatching := watchGate(detectCtx, gate.Open, info.MemoryBytes, cancel)
 	ahead := make(chan *detectionInput, 1)
 	go func() {
 		// A fault shows again at the next claim.
@@ -542,14 +544,10 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 	return carryOn(err)
 }
 
-// watchGate cancels a running detection when gate closes for work whose
-// models take need. stop ends the watch and returns why gate closed, or ""
-// when it stayed open.
-func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc) (stop func() string) {
-	return watchGateWhile(ctx, gate, need, cancel, func(string) bool { return true })
-}
-
-func watchGateWhile(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc, stopFor func(string) bool) (stop func() string) {
+// watchGate cancels running work when check, a Gate's Open or a
+// RunningGate's Continue, says no for work whose models take need. stop
+// ends the watch and returns why it said no, or "" when it never did.
+func watchGate(ctx context.Context, check func(context.Context, uint64) (bool, string), need uint64, cancel context.CancelFunc) (stop func() string) {
 	done := make(chan struct{})
 	var reason string
 	var watcher sync.WaitGroup
@@ -563,7 +561,7 @@ func watchGateWhile(ctx context.Context, gate Gate, need uint64, cancel context.
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if open, why := gate.Open(ctx, need); !open && stopFor(why) {
+				if open, why := check(ctx, need); !open {
 					reason = why
 					cancel()
 					return
@@ -692,7 +690,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, i
 		}
 		// The montage center's window vectors: only those a grant still
 		// refers to (ADR 0038).
-		if err := lib.requeueStaleWindows(ctx, info.Model); err != nil {
+		if err := lib.requeueStaleWindows(ctx, windowsIdentity(info.Model, info.Dimensions)); err != nil {
 			return err
 		}
 	}
@@ -743,6 +741,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 	defer r.mu.Unlock()
 	if r.generation == generation {
 		r.model, r.detector, r.faces, r.animals, r.reader = info.Model, info.Detector, info.Faces, info.Animals, info.OCR
+		r.windows = windowsIdentity(info.Model, info.Dimensions)
 	}
 	return nil
 }
@@ -751,7 +750,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 func (r *aiRunner) forgetModels() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.model, r.detector, r.faces, r.animals, r.reader = "", "", "", "", ""
+	r.model, r.detector, r.faces, r.animals, r.reader, r.windows = "", "", "", "", "", ""
 	r.generation++
 }
 
@@ -761,6 +760,14 @@ func (r *aiRunner) knownModel() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.model
+}
+
+// knownWindows is the identity of the window vectors the Worker's model
+// makes, or "" while knownModel is.
+func (r *aiRunner) knownWindows() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.windows
 }
 
 // workerModels are the detector, face and animal models the runner last
@@ -777,7 +784,7 @@ func (r *aiRunner) noticeModel(model string) {
 	r.mu.Lock()
 	changed := r.model != "" && r.model != model
 	if changed {
-		r.model = ""
+		r.model, r.windows = "", ""
 		r.generation++
 	}
 	r.mu.Unlock()

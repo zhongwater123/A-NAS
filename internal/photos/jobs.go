@@ -364,7 +364,7 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 }
 
 func (s *Service) failJob(ctx context.Context, job claimedJob, class string) error {
-	permanent := class == jobErrorUndecodable || class == jobErrorMissingOriginal || class == jobErrorInvalidResult
+	permanent := class == jobErrorUndecodable || class == jobErrorMissingOriginal || class == jobErrorInvalidResult || class == jobErrorTooLong
 	if permanent || job.attempts >= jobMaxAttempts {
 		_, err := s.db.ExecContext(ctx,
 			"UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ? WHERE object_id = ? AND derivation = ?",

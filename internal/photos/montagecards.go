@@ -85,7 +85,7 @@ var (
 
 // A successor may only use completed inputs. A failed predecessor also
 // blocks its successors until the user retries that analysis.
-const cardsReady = "NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + windowsDerivation + "')"
+const cardsReady = "j.object_id IN (" + referencedObjects + ") AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + windowsDerivation + "')"
 const qualityReady = cardsReady + " AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + cardsDerivation + "')"
 
 func cardsVersion(window string) string  { return cardsIdentity + "|input=" + window }
@@ -160,7 +160,7 @@ func (r *aiRunner) montageCards(ctx context.Context, gate Gate) (bool, error) {
 	}
 	working, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stop := watchGateWhile(working, gate, 0, cancel, closesForeground)
+	stop := watchGate(working, continuing(gate), 0, cancel)
 	defer func() {
 		if reason := stop(); reason != "" {
 			r.progress.set(AIPaused, reason, "")
@@ -337,16 +337,13 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 		return s.finishMontageError(ctx, job, errors.Join(ErrComputeInvalidResult, err))
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		stored, err := tx.ExecContext(ctx, `INSERT INTO video_card_quality(object_id, card, result, identity)
+		_, err := tx.ExecContext(ctx, `INSERT INTO video_card_quality(object_id, card, result, identity)
             SELECT ?, ?, ?, ? FROM jobs j JOIN montage_card_results m USING (object_id)
             WHERE j.object_id = ? AND j.derivation = ? AND j.state = 'running' AND j.attempts = ?
                 AND m.cards_identity = ? AND `+qualityReady+`
             ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, identity = excluded.identity`,
 			job.objectID, card.index, string(result), qualityVersion(version), job.objectID, job.derivation, job.attempts, version)
 		if err != nil {
-			return err
-		}
-		if _, err := stored.RowsAffected(); err != nil {
 			return err
 		}
 		// The next card comes in the next round, after the gate.
@@ -462,9 +459,10 @@ type CardAnalysis struct {
 }
 
 // cardsOf reads a video's cards and the quality measured so far.
-func (s *Service) cardsOf(ctx context.Context, object string) ([]CardAnalysis, error) {
+func (s *Service) cardsOf(ctx context.Context, object, identity string) ([]CardAnalysis, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes, q.result FROM video_cards c
-		LEFT JOIN video_card_quality q ON q.object_id = c.object_id AND q.card = c.card WHERE c.object_id = ? ORDER BY c.card`, object)
+		LEFT JOIN video_card_quality q ON q.object_id = c.object_id AND q.card = c.card AND q.identity = ?
+        WHERE c.object_id = ? AND c.identity = ? ORDER BY c.card`, qualityVersion(identity), object, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -489,19 +487,6 @@ func (s *Service) cardsOf(ctx context.Context, object string) ([]CardAnalysis, e
 		cards = append(cards, card)
 	}
 	return cards, rows.Err()
-}
-
-// montageCardState reads both stage states and their completed identities in
-// one snapshot. Empty results still have a completion identity.
-func (s *Service) montageCardState(ctx context.Context, q queryer, object string) (cards, quality AnalysisState, cardsID, qualityID string, err error) {
-	var cardJob, qualityJob string
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(m.cards_identity, ''), COALESCE(m.quality_identity, ''),
-        COALESCE(c.state, ''), COALESCE(q.state, '') FROM (SELECT ? AS object_id) o
-        LEFT JOIN montage_card_results m USING (object_id)
-        LEFT JOIN jobs c ON c.object_id = o.object_id AND c.derivation = ?
-        LEFT JOIN jobs q ON q.object_id = o.object_id AND q.derivation = ?`,
-		object, cardsDerivation, qualityDerivation).Scan(&cardsID, &qualityID, &cardJob, &qualityJob)
-	return montageStageState(cardJob, cardsID), montageStageState(qualityJob, qualityID), cardsID, qualityID, err
 }
 
 func montageStageState(job, identity string) AnalysisState {
