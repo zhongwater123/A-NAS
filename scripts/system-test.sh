@@ -1894,6 +1894,69 @@ movies_dir=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Cont
   -d '{"parentId":"","name":"Movies"}' "$api/api/v1/spaces/$shared/directories" | jq -r .id || true)
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25:duration=6 -f lavfi -i sine=duration=6 \
   -c:v libx264 -pix_fmt yuv420p -c:a ac3 /tmp/heat.mkv
+check "the isolated FFmpeg worker takes frames and assembles a faststart film" python3 - <<'PY'
+import json
+import shutil
+import socket
+import struct
+import subprocess
+from contextlib import ExitStack
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+def read_exact(stream, size):
+    data = stream.read(size)
+    assert len(data) == size, (len(data), size)
+    return data
+
+
+def message(stream):
+    size, = struct.unpack("!I", read_exact(stream, 4))
+    return read_exact(stream, size)
+
+
+def request(op, paths, **params):
+    body = json.dumps(dict(op=op, ack=True, **params)).encode()
+    packet = struct.pack("!I", len(body)) + body
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(60)
+        conn.connect("/run/a-nas-ffmpeg/ffmpeg.sock")
+        with ExitStack() as files:
+            fds = [files.enter_context(path.open("rb")).fileno() for path in paths]
+            sent = conn.sendmsg([packet], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, struct.pack(f"{len(fds)}i", *fds))])
+        conn.sendall(packet[sent:])
+        with conn.makefile("rb") as stream:
+            ack = json.loads(message(stream))
+            assert ack.get("accepted"), ack
+            response = json.loads(message(stream))
+            assert response.get("ok"), response
+            if op != "frames":
+                return read_exact(stream, response["size"])
+            for _ in params["times"]:
+                assert message(stream).startswith(b"\xff\xd8")
+            assert message(stream) == b""
+            trailer = json.loads(message(stream))
+            assert trailer.get("ok") and len(trailer["blur"]) == len(params["times"]), trailer
+
+
+with TemporaryDirectory() as temporary:
+    work = Path(temporary)
+    source, segment, film = (work / name for name in ("source.mkv", "segment.ts", "film.mp4"))
+    shutil.copyfile("/tmp/heat.mkv", source)
+    source.chmod(0o600)
+    request("frames", [source], times=[0.5, 1.5], format="jpeg", width=256, quality=3, blur=True)
+    segment.write_bytes(request("segment", [source], start=0.5, frames=30, offset=0))
+    segment.chmod(0o600)
+    data = request("assemble", [segment, source], frames=30, created="2026-08-04T10:30:00Z")
+    assert 0 < data.index(b"moov") < data.index(b"mdat")
+    film.write_bytes(data)
+    probe = subprocess.check_output([
+        "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=nb_frames",
+        "-of", "csv=p=0", str(film),
+    ])
+    assert probe.strip() == b"30", probe
+PY
 curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=$movies_dir" \
   -F "file=@/tmp/heat.mkv;filename=Heat (1995).mkv" "$api/api/v1/spaces/$shared/uploads" || true
 # Ordinary file previews use the same sandbox without creating a media library.
