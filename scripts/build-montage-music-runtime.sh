@@ -91,7 +91,7 @@ if [[ ! -f "$tarball" ]]; then
     runtime=/opt/a-nas/montage-music-runtimes/$id
     python3 -m venv \"\$runtime\"
     uv pip install --quiet --python \"\$runtime/bin/python\" --require-hashes --only-binary :all: \
-      --no-binary antlr4-python3-runtime --compile-bytecode -r /music/requirements.txt
+      ${lock_options[*]} --compile-bytecode -r /music/requirements.txt
     mkdir /tmp/madmom
     tar -C /tmp/madmom --strip-components=1 -xzf /sources/$madmom
     if [[ -n \"\$(ls -A /tmp/madmom/madmom/models)\" ]]; then
