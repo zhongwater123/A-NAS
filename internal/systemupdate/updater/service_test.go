@@ -1056,42 +1056,48 @@ func writeFile(t *testing.T, path, content string) {
 // Restoring the copies stops the montage service on its own, since a release
 // before it has no such unit, and brings its database back with the others
 // (ADR 0038). It stops first: a request of its on the photo service's grant
-// socket would start the photo service again while the copies go back.
+// socket would start the photo service again while the copies go back. And
+// its socket for members' scheduled tasks stops before it: a round of a
+// member's tasks that connects there would start the montage service again
+// while its database is restored.
 func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
 	if err := service.restoreDatabases(context.Background(), "20261118T000000Z-1"); err != nil {
 		t.Fatal(err)
 	}
-	restored := slices.ContainsFunc(host.calls, func(call string) bool {
+	restore := slices.IndexFunc(host.calls, func(call string) bool {
 		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage")
 	})
-	if !host.ran("systemctl stop anas-montage") || !restored || !host.ran("systemctl start anas-montage") {
-		t.Fatalf("calls = %v; want the montage service stopped, its database restored and the service started", host.calls)
-	}
+	socket := slices.Index(host.calls, "systemctl stop anas-montage-assistant.socket")
 	montage := slices.Index(host.calls, "systemctl stop anas-montage")
 	photos := slices.IndexFunc(host.calls, func(call string) bool {
 		return strings.HasPrefix(call, "systemctl stop ") && strings.Contains(call, " anas-photos")
 	})
-	if photos < 0 || montage > photos {
-		t.Fatalf("calls = %v; want the montage service stopped before the photo service", host.calls)
+	started := slices.Index(host.calls, "systemctl start anas-montage")
+	if socket < 0 || socket > montage || montage > photos || photos > restore || restore > started {
+		t.Fatalf("calls = %v; want the montage center's assistant socket stopped, then the montage service, then the photo service, "+
+			"the databases restored and the montage service started", host.calls)
 	}
 }
 
 // Only a montage unit that is not loaded, as on a release before it, lets
-// the restore go on without stopping it; any other failure to stop it stops
-// the restore before a journal is deleted (ADR 0038).
+// the restore go on without stopping it; any other failure to stop the
+// service, or the socket that would start it again, stops the restore before
+// a journal is deleted (ADR 0038).
 func TestRestoringTheDatabasesNeedsTheMontageServiceStopped(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		err      error
+		fails    map[string]error
 		restored bool
 	}{
-		{"no such unit", exitStatus(5), true},
-		{"stop failed", exitStatus(1), false},
+		{"no such units", map[string]error{"systemctl stop anas-montage": exitStatus(5), "systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
+		{"no socket yet", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
+		{"stop failed", map[string]error{"systemctl stop anas-montage": exitStatus(1)}, false},
+		{"the socket did not stop", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(1)}, false},
 	} {
 		host := newFakeHost()
-		host.fails = map[string]error{"systemctl stop anas-montage": tc.err}
+		host.fails = tc.fails
 		service, _ := newService(t, host)
 		err := service.restoreDatabases(context.Background(), "20261118T000000Z-1")
 		if restored := host.ran("sh -c"); (err == nil) != tc.restored || restored != tc.restored {

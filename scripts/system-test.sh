@@ -82,15 +82,19 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
-  # Nor has it the photo service's grant socket for the montage center.
+  # Nor has it the photo service's grant socket for the montage center, or
+  # the montage center's socket for members' scheduled tasks.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-assistant.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-assistant.socket" \
     "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
     "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-compute.socket" \
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
-  sed -i -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+  sed -i -e '/systemctl stop anas-montage-assistant\.socket/d' -e 's/ anas-montage-assistant\.socket//g' \
+    -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
     -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
   sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
@@ -2817,7 +2821,7 @@ check "and the montage service stopped before its unit went" fails pgrep -u a-na
 check "nor the photo service's grant socket, which stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
   not-found:inactive
-for unit in anas-montage-compute.socket anas-montage-compute.service; do
+for unit in anas-montage-compute.socket anas-montage-compute.service anas-montage-assistant.socket; do
   check "rollback removed and stopped $unit" \
     test "$(systemctl show -p LoadState --value "$unit"):$(systemctl show -p ActiveState --value "$unit")" = not-found:inactive
 done
@@ -2851,6 +2855,8 @@ check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
   test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
   "active:31003:700 a-nas-montage:660 a-nas-montage"
+check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
+  test "$(systemctl is-active anas-montage-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "two copies of the databases stay, under the same names on both disks" \

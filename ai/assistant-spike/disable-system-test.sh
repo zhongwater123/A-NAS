@@ -53,8 +53,11 @@ check "bob's assistant is running before he is disabled" systemctl is-active --q
   done
 ) &
 restarts=$!
+check "bob has a planning grant for the montage center before he is disabled" test -f /var/lib/a-nas-host/assistant/plans/bob
 check "disabling a task owner succeeds through the product API" \
   test "$(status_of -X POST -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user/disable")" = 204
+check "disabling him removed his planning grant, and nobody else's" \
+  test ! -e /var/lib/a-nas-host/assistant/plans/bob -a -f /var/lib/a-nas-host/assistant/plans/alice
 kill "$restarts"
 wait "$restarts" 2>/dev/null || true
 check "disabling stops his assistant although it kept being started" \
