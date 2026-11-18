@@ -32,7 +32,6 @@
 # sockets and gets a copy of each instance secret in PRODUCT_TOKENS (default
 # /run/anas-spike-tokens, which run.sh shares with the host in product mode) to log in with.
 set -euo pipefail
-here=$(cd "$(dirname "$0")" && pwd)
 users=a-nas-users
 product_user=${PRODUCT_USER:-a-nas}
 product_tokens=${PRODUCT_TOKENS:-/run/anas-spike-tokens}

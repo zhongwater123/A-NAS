@@ -492,7 +492,7 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 		configPath: config,
 		skillPath:  bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
 	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
 		if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, contents) {
@@ -502,7 +502,9 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
-	// The sandbox reaches these through binds only; the directories stay root's.
+	// The sandbox binds the member's skills folder and config.yaml; it reads them as the
+	// member, so the folders it lists are open to read. The Host Agent's state directory
+	// above them stays root's alone.
 	for _, path := range []string{member, filepath.Join(member, "skills"), filepath.Join(member, "skills", "anas-member")} {
 		if err := os.Chmod(path, 0o755); err != nil {
 			return err
