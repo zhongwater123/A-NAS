@@ -113,19 +113,62 @@ same_host() {
 }
 # no_ordering_cycle: systemd dropped no job of this boot to break a cycle.
 no_ordering_cycle() { [[ "$(g 'journalctl -b --no-pager -o cat')" != *'ordering cycle'* ]]; }
-# image_has_no_host_keys: the persistent root of the disk a new device gets
-# holds no SSH host keys, which every device would share.
-image_has_no_host_keys() {
+# on_the_disk COMMAND...: COMMAND, run while the persistent root of the disk a
+# new device gets is mounted at /mnt/first-root.
+on_the_disk() {
   local offset status
   offset=$(sfdisk --json "$VM/disk.raw" |
     jq -r '.partitiontable as $t | $t.partitions[] | select(.name == "a-nas-state") | .start * ($t.sectorsize // 512)')
   mkdir -p /mnt/first-root
   mount -o ro,loop,offset="$offset" "$VM/disk.raw" /mnt/first-root || return 1
-  test -d /mnt/first-root/etc/ssh && ! compgen -G '/mnt/first-root/etc/ssh/ssh_host_*' >/dev/null
+  "$@"
   status=$?
   umount /mnt/first-root
   return "$status"
 }
+# no_host_keys: the disk holds no SSH host keys, which every device would share.
+no_host_keys() { test -d /mnt/first-root/etc/ssh && ! compgen -G '/mnt/first-root/etc/ssh/ssh_host_*' >/dev/null; }
+# no_credential_key: nor systemd's credential key, which encrypts the AI
+# assistant's model key (ADR 0024) and which anas-site.service makes on the
+# device itself.
+no_credential_key() { test ! -e /mnt/first-root/var/lib/systemd/credential.secret; }
+# The administrator's model key for the AI assistant, made up for this test.
+test_key=sk-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+credential=/etc/credstore.encrypted/a-nas-assistant-deepseek
+# save_key: the key as the Product Service hands it to the Host Agent once an
+# administrator saved it in 设置 → VNAS (PUT /v1/assistant-key); the answer is
+# in the logs.
+save_key() {
+  g python3 - >"$L/key-save.log" 2>&1 <<PY
+import http.client, json, socket
+class Agent(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.connect("/run/a-nas/host-agent.sock")
+agent = Agent("host-agent", timeout=120)
+agent.request("PUT", "/v1/assistant-key", json.dumps({"key": "$test_key"}), {"Content-Type": "application/json"})
+answer = agent.getresponse()
+body = answer.read().decode()
+print(answer.status, body)
+raise SystemExit(0 if answer.status == 200 and json.loads(body).get("configured") else 1)
+PY
+}
+# key_kept: the saved key is encrypted where only root reads it.
+key_kept() {
+  [[ "$(g stat -c "'%a %U'" "$credential")" == "600 root" ]] && g "test -s $credential && ! grep -qF '$test_key' $credential"
+}
+# key_works NAME: the model gateway starts afresh with the saved key, which
+# systemd decrypts with the device's credential key; its journal is in the
+# logs as key-NAME.log when it does not.
+# shellcheck disable=SC2016 # the guest expands these
+key_works() {
+  g 'systemctl restart anas-assistant-gateway.service &&
+    for _ in $(seq 1 50); do test -S /run/anas-assistant-gw/model.sock && exit 0; sleep 0.2; done; exit 1' && return 0
+  g 'systemctl status --no-pager anas-assistant-gateway.service; journalctl -b --no-pager -u anas-assistant-gateway -u anas-site | tail -n 60' \
+    >"$L/key-$1.log" 2>&1
+  return 1
+}
+credential_key() { g sha256sum /var/lib/systemd/credential.secret; }
 # The image has Python, not curl.
 service_answers() { g 'python3 -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5)"' >/dev/null 2>&1; }
 # checked NAME: a-nas-check passes; what it said is in the logs as
@@ -210,7 +253,8 @@ trap cleanup EXIT
 zstd -q -d /small/first-disk.raw.zst -o "$VM/disk.raw" || { note "FAIL the first disk decompresses"; exit 1; }
 truncate -s 40G "$VM/disk.raw"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$VM/vars.fd"
-check "the disk holds no SSH host keys" image_has_no_host_keys
+check "the disk holds no SSH host keys" on_the_disk no_host_keys
+check "the disk holds no credential key, which every device would share" on_the_disk no_credential_key
 boot_until_up 1 || { note "FAIL 1001 boots"; exit 1; }
 g "systemd-sysext status --no-pager; lsblk -o NAME,PARTLABEL,SIZE; df -h /; journalctl -b --no-pager -u systemd-repart -u systemd-growfs-root -u a-nas-product-select -u systemd-sysext -u a-nas-etc -u a-nas-sysext-ready -u a-nas-health-baseline -u sshd-keygen | tail -n 120" >"$L/first-boot.log" 2>&1
 check "1001 boots the base it was written with" test "$(booted)" = 1001
@@ -229,6 +273,15 @@ g "mkdir -p /etc/a-nas /etc/a-nas/image-test /var/lib/a-nas/image-test &&
 for _ in $(seq 1 60); do service_answers && break; sleep 2; done
 check "the Product Service answers" service_answers
 check "a-nas-check passes on the new device" checked 1001
+# The AI assistant's key (ADR 0024): the device made its own credential key, whose
+# product is a system extension that no package script set up, and the Host Agent
+# saves the administrator's key with it; the model gateway reads it.
+check "the device made its own credential key" g test -s /var/lib/systemd/credential.secret
+check "the Host Agent saves the assistant's model key" save_key
+check "the key is encrypted where only root reads it" key_kept
+check "the model gateway starts with the key" key_works 1001
+check "a-nas-check passes with the key saved" checked 1001-key
+key_before=$(credential_key)
 manifest >"$L/manifest-0"
 boot_id=$(g cat /proc/sys/kernel/random/boot_id)
 first=$(product)
@@ -248,6 +301,7 @@ keep 1002-install
 check "the next product installs" test "$(state phase)/$(state current)" = "up-to-date/$first+next"
 check "the next product runs, with its database step" test "$(product)/$(probe_table)" = "$first+next/$((steps + 1)):1"
 check "a-nas-check passes on the next product" checked 1002
+check "the next product's gateway starts with the key saved before" key_works 1002
 check "the product changed without a restart" test "$(g cat /proc/sys/kernel/random/boot_id)" = "$boot_id"
 check "unchanged content and an unchanged base are not written again" \
   test "$(esp)/$(extensions)" = "$esp_before/$extensions_before"
@@ -322,6 +376,8 @@ check "the new base's boot has no ordering cycle" no_ordering_cycle
 check "an /etc file the new base adds reaches the device" g test -e /etc/a-nas-image-test-factory/added-in-1003
 check "an /etc file the device removed stays removed" g test ! -e /etc/a-nas-image-test-factory/removed-by-the-device
 check "state stays across the base update" cmp -s <(manifest) "$L/manifest-0"
+check "the credential key stays across the base update" test "$(credential_key)" = "$key_before"
+check "the new base's gateway starts with the key saved before" key_works 1003
 g "sed -i 's|^\(a-nas-kiosk:.*:\)/bin/sh\$|\1/usr/sbin/nologin|' /etc/passwd"
 
 # --- Back to the version before, on the base before: a restart.
@@ -336,6 +392,7 @@ check "the device is back on the base and product before" \
   test "$(booted)/$(product)/$(state phase)/$(state records.0.kind)" = "1001/$first/up-to-date/reverted"
 check "the product before runs with its database back" test "$(probe_table)" = "$steps:0"
 check "a-nas-check passes after going back to the base before" checked back-base
+check "the base before still starts the gateway with the key" key_works back-base
 
 # --- 1004: a base whose check fails, installed as in the install window: the
 # device restarts at once, and systemd-boot goes back after three tries.
@@ -353,6 +410,8 @@ check "the update service says the new base did not pass its boot check" \
   test "$(state phase)/$(state problem.code)/$(state records.0.kind)" = "rolled-back/boot/rolled-back"
 check "a-nas-check passes after the fallback" checked fallback
 check "state stays after the fallback" cmp -s <(manifest) "$L/manifest-0"
+check "the credential key stays after the fallback" test "$(credential_key)" = "$key_before"
+check "the gateway starts with the key after the fallback" key_works fallback
 
 g systemctl poweroff >/dev/null 2>&1 || true
 wait "$vm" 2>/dev/null || true
