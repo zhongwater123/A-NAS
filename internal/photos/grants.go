@@ -59,10 +59,13 @@ type GrantedAsset struct {
 	Width    int              `json:"width,omitempty"`
 	Height   int              `json:"height,omitempty"`
 	TakenAt  *time.Time       `json:"takenAt,omitempty"`
-	// Windows, Cards and Quality are where the montage analysis stands.
-	Windows AnalysisState `json:"windows,omitempty"`
-	Cards   AnalysisState `json:"cards,omitempty"`
-	Quality AnalysisState `json:"quality,omitempty"`
+	// Windows, Cards, Quality and Descriptions are where the montage
+	// analysis stands; Descriptions is AnalysisUnavailable while the AI
+	// Worker has no text reader.
+	Windows      AnalysisState `json:"windows,omitempty"`
+	Cards        AnalysisState `json:"cards,omitempty"`
+	Quality      AnalysisState `json:"quality,omitempty"`
+	Descriptions AnalysisState `json:"descriptions,omitempty"`
 }
 
 // grantable reports whether owner may grant record: a video it sees,
@@ -230,6 +233,9 @@ func (s *Service) LookupGrant(ctx context.Context, owner Principal, grantID stri
 				return nil, err
 			}
 			if entry.Quality, err = s.qualityState(ctx, record.objectID); err != nil {
+				return nil, err
+			}
+			if entry.Descriptions, err = s.describeState(ctx, s.db, record.objectID); err != nil {
 				return nil, err
 			}
 		}

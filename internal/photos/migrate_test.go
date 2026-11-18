@@ -150,6 +150,8 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 // with migration 17's stored Down when it opens the Catalog; the statements
 // that undo older migrations by hand come after it.
 var undoMontageGrants = []string{
+	"DROP TABLE video_card_descriptions",
+	"DELETE FROM schema_downgrades WHERE version = 20",
 	"DROP TABLE video_card_quality",
 	"DROP TABLE video_cards",
 	"DELETE FROM schema_downgrades WHERE version = 19",
@@ -179,7 +181,7 @@ func TestMontageGrantsMigrationGoesBackWithItsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:16], WithoutDown: migrationsWithoutDown}
-	// The newer build's steps 17 to 19 go back with their stored Downs.
+	// The newer build's steps 17 to 20 go back with their stored Downs.
 	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
 		t.Fatalf("the older build's migration: %v", err)
 	}

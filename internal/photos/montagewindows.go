@@ -118,8 +118,9 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 				return err
 			}
 			if retry {
+				// Whichever step of the analysis failed starts over.
 				if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-					WHERE object_id = ? AND derivation = ? AND state = 'failed'`, now, object, windowsDerivation); err != nil {
+					WHERE object_id = ? AND derivation LIKE 'montage-%' AND state = 'failed'`, now, object); err != nil {
 					return err
 				}
 			}
@@ -170,6 +171,10 @@ type GrantAnalysis struct {
 	Cards    AnalysisState  `json:"cardsState"`
 	Quality  AnalysisState  `json:"qualityState"`
 	CardList []CardAnalysis `json:"cards,omitempty"`
+	// Described is where the card descriptions stand; Descriptions holds
+	// them once done, a card that could not be described with its error.
+	Described    AnalysisState     `json:"descriptionsState,omitempty"`
+	Descriptions []CardDescription `json:"descriptions,omitempty"`
 }
 
 // AnalysisOfGrant returns the analysis of a granted video and, once its
@@ -183,7 +188,12 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 	if len(looked) != 1 || looked[0].Status != GrantAvailable {
 		return GrantAnalysis{}, nil, ErrNotFound
 	}
-	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID}
+	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID, Described: looked[0].Descriptions}
+	if analysis.Described == AnalysisDone {
+		if analysis.Descriptions, err = s.cardDescriptions(ctx, analysis.ObjectID); err != nil {
+			return GrantAnalysis{}, nil, err
+		}
+	}
 	if analysis.Cards, err = s.cardsState(ctx, analysis.ObjectID); err != nil {
 		return GrantAnalysis{}, nil, err
 	}
@@ -213,13 +223,14 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 	return analysis, vectors, rows.Err()
 }
 
-// montageWorkWaiting reports whether a montage analysis is due.
-func (s *Service) montageWorkWaiting(ctx context.Context) (bool, error) {
+// montageWorkWaiting reports whether a montage analysis is due: the
+// descriptions only while the Worker has a text reader.
+func (s *Service) montageWorkWaiting(ctx context.Context, reading bool) (bool, error) {
 	now := formatTime(s.now())
 	var due bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation IN (?, ?, ?)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation IN (?, ?, ?) OR (? AND derivation = ?))
 		AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
-		windowsDerivation, cardsDerivation, qualityDerivation, now, now).Scan(&due)
+		windowsDerivation, cardsDerivation, qualityDerivation, reading, describeDerivation, now, now).Scan(&due)
 	return due, err
 }
 
@@ -499,6 +510,7 @@ func (s *Service) PruneMontageAnalysis(ctx context.Context) (int, error) {
 			"DELETE FROM video_card_quality WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_cards WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_windows WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
+			"DELETE FROM video_card_descriptions WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM jobs WHERE derivation LIKE 'montage-%' AND object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 		} {
 			if _, err := tx.ExecContext(ctx, statement, cutoff); err != nil {

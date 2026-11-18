@@ -111,6 +111,13 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 提示词、体裁（旅行，`TRAVEL`）与 Schema 固定在 Worker 里，版本 `montage-card/v1`，随回答的 `template` 返回：第八版（提交 `19f2d6db`）的 `PROMPT`、`CAMERAS` 与 Schema 原样搬来，只加一句不要转写画面里的证件号、票号、车牌等号码。
   - 用读文字的 llama-server，设置照第八版：系统提示词、`response_format` 按 Schema 约束、温度 0.2、回答上限 1,800 token、不开思考；回答不合 Schema、截断或陷入重复时依次以重复惩罚 1.1、1.2、1.3 重问，三次都不合格答 `invalid_result`。提示超出上下文时 llama-server 拒绝请求，答 `invalid_input`。
   - 和 `read_text` 一样在线程里运行、调用方挂断即停；客户端对它的超时是 15 分钟。
+- **相册的 `montage-describe/v1`**（[`montagedescribe.go`](../../internal/photos/montagedescribe.go)）：在画质步骤（`montage-quality/v1`）完成的事务里排队，只描述画质结果 `reasons` 为空的卡片。
+  - 每轮一张卡片，属于读文字阶段：先释放检测模型，按 `ocrMemoryBytes` 问准入；没描述完的任务放回队首、不耗尝试次数，调用期间每 30 秒续租。
+  - 关键帧由 FFmpeg Worker 的 `frames` 取（宽 512、质量 3，第八版的设置），取帧时只有前台使用或内存不足才挂断；描述时和读文字一样每 200 毫秒查准入，一关就挂断，任务退回原位。
+  - 存进 `video_card_descriptions`（migration 19，带回滚）之前，用 `textread.MaskNumbers` 把每段文字里的身份证号、银行卡号、手机号与 15 位以上数字串换成 `[身份证号]` 一类标签，相册不保留原文。
+  - 超出上下文（`invalid_input`）或回答不合 Schema（`invalid_result`）的卡片只把错误记在这张卡片上，同一段视频的其他卡片照常；Worker 崩溃等其他失败耗一次尝试。
+  - 分析身份是读文字模型、`montage-card/v1`、体裁、关键帧设置、号码过滤版本与卡片的身份；换读文字模型时只重排仍被授权引用的对象。
+  - Worker 没有读文字模型时不排描述（`workWaiting` 不计它），`lookup` 的 `descriptions` 报 `unavailable`（本地模型不可用）。
 
 ### 存储（Catalog migration 4–7）
 

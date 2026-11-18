@@ -280,6 +280,10 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if worked, err := r.montageCards(ctx); worked || err != nil {
 		return worked, err
 	}
+	// Then the descriptions, in the reading phase: one card a round.
+	if claimed, described, err := r.montageDescribe(ctx, embedder, gate, info); claimed || err != nil {
+		return described, err
+	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries
 	// had theirs are routed, once.
@@ -728,6 +732,10 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
 		}
+		// The montage center's descriptions: only those a grant still refers to.
+		if err := lib.requeueStaleDescriptions(ctx, info.OCR); err != nil {
+			return err
+		}
 		if record.Reader != info.OCR {
 			record.Reader = info.OCR
 			if err := lib.storeWorkerRecord(record); err != nil {
@@ -803,7 +811,7 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	reading := r.reader != ""
 	r.mu.Unlock()
 	now := formatTime(lib.now())
-	if due, err := lib.montageWorkWaiting(ctx); due || err != nil {
+	if due, err := lib.montageWorkWaiting(ctx, reading); due || err != nil {
 		return due, err
 	}
 	var due bool
