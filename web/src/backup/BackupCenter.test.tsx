@@ -13,8 +13,11 @@ import {
 } from "../test/handlers/backup";
 import { filesHandlers } from "../test/handlers/files";
 import { apiError, http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./api";
 import { BackupCenter } from "./BackupCenter";
+
+fixToday();
 
 const owner = "user:owner";
 const personal: Space = {
