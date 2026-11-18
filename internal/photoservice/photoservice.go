@@ -561,6 +561,11 @@ func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 // listen opens an API socket. The Product Service's socket is 0660, for its
 // user is a member of this service's group; the runtime directory keeps
 // everyone else out.
+// systemdListeners are the sockets systemd handed over, by name. Reading
+// them clears LISTEN_FDS, so they are read once for the assistant's and
+// the grants' sockets both.
+var systemdListeners = sync.OnceValues(activation.ListenersWithNames)
+
 // assistantSocket is where members' assistants connect; the peer's UID says
 // which member. When systemd holds the socket (a socket unit naming it
 // "assistant"), it outlives restarts of this service, so the socket bound into
@@ -568,7 +573,7 @@ func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 // Otherwise the service makes it, open to every UID, in a directory that must
 // keep out all but the sandboxes systemd binds the socket into.
 func assistantSocket(socketPath string) (net.Listener, bool, error) {
-	if listeners, err := activation.ListenersWithNames(); err == nil && len(listeners["assistant"]) > 0 {
+	if listeners, err := systemdListeners(); err == nil && len(listeners["assistant"]) > 0 {
 		return listeners["assistant"][0], true, nil
 	}
 	if err := requirePrivateDirectory(filepath.Dir(socketPath)); err != nil {

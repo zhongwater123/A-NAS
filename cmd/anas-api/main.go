@@ -29,6 +29,8 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -368,7 +370,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeModules()
-	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
+	assistantKey, err := configuredAssistantKey(config, operations)
+	if err != nil {
+		return err
+	}
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids, assistantKey)
 	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations),
 		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -391,6 +397,7 @@ func run(logger *slog.Logger) error {
 		Assistant:    assistant,
 		// Signing in keeps the member's assistant running (ADR 0024).
 		AssistantKeeper: assistant,
+		AssistantKey:    assistantkeyapi.New(assistantKey, logger),
 		SystemLogs:      systemLogs,
 		WebSearch:       websearchapi.New(webSearch, websearch.NewRelease(config.WebSearch.Release), logger),
 		SystemUpdate:    systemUpdate,
@@ -482,7 +489,7 @@ func listen(config Config, handler http.Handler, logger *slog.Logger) ([]listeni
 
 // companionListener is the socket of the companion tools of members'
 // assistants (#412) when systemd hands it over, named "companion"
-// (ai/assistant-spike/anas-companion-assistant.socket). systemd holds it, so
+// (deploy/systemd/system/anas-companion-assistant.socket). systemd holds it, so
 // it outlives restarts of this service and the copies bound into running
 // sandboxes keep working. Without it those tools answer that no desktop is in
 // use.
@@ -685,6 +692,19 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 	return websearch.New(options), nil
 }
 
+// configuredAssistantKey reaches the AI assistant's model key in the Host Agent on a NAS
+// (ADR 0024); development remembers a key in memory.
+func configuredAssistantKey(config Config, operations productOperations) (assistantkey.Keeper, error) {
+	if !config.Live() {
+		return &assistantkey.Memory{}, nil
+	}
+	keeper, ok := operations.(assistantkey.Keeper)
+	if !ok {
+		return nil, errors.New("host agent client cannot keep the assistant's key")
+	}
+	return keeper, nil
+}
+
 // configuredSystemUpdate reaches the system update service through the Host
 // Agent on a NAS (docs/specs/system-update.md). Development has one in
 // memory with two development builds numbered as scripts/release-version.sh
@@ -854,8 +874,8 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // keeps the notices of the members' scheduled tasks, and uids names the member
 // behind a companion tool's call. Its background work ends with background.
 func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices,
-	uids assistantapi.AccountResolver) *assistantapi.Handler {
-	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Logger: logger, Context: background}
+	uids assistantapi.AccountResolver, key assistantkey.Keeper) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Key: key, Logger: logger, Context: background}
 	switch {
 	case config.SocketDir == "":
 	case broker != nil:

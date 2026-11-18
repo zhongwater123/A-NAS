@@ -30,7 +30,8 @@ import time
 from datetime import UTC, datetime
 
 DATA = os.environ.get("ANAS_ASSISTANT_DATA", "/srv/a-nas/data/assistant")
-TOKENS = "/etc/a-nas-assistant/tokens"
+# The Host Agent's instance secrets, one for each member it prepared an assistant for.
+TOKENS = os.environ.get("ANAS_ASSISTANT_TOKEN_DIR", "/var/lib/a-nas-host/assistant/tokens")
 ACCOUNT = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 INTERVAL = int(os.environ.get("ANAS_CRON_WAKER_INTERVAL", "30"))
 LIMIT = 4 << 20

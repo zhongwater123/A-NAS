@@ -1,0 +1,30 @@
+# shellcheck shell=bash
+# The AI assistant's units that run in the sandbox of anas-assistant@.service
+# (ADR 0024), made from it so that they stay the same: a round of the member's
+# scheduled tasks and the weekly curator, each a oneshot, both without the
+# companion's socket, which only a conversation's window answers (#412). The
+# curator also prunes Hermes's image cache, which serve never does
+# (ai/assistant/media-cache.py). scripts/build-packages.sh and the spike's
+# installer (ai/assistant-spike/assistant-install.sh) source this file.
+
+# derive_assistant_units DIR: anas-assistant-cron@.service and
+# anas-assistant-curator@.service in DIR, from DIR/anas-assistant@.service.
+derive_assistant_units() {
+  local units=$1 lib=/usr/lib/a-nas/assistant
+  sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i#' \
+    -e '\#a-nas-companion-assistant#d' \
+    -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron ANAS_ASSISTANT_RUNS=/run/anas-assistant-run-now/%i' \
+    -e "/^ExecStart=/i ExecStartPre=+/bin/bash $lib/run-requests.sh take %i" \
+    -e "/^ExecStart=/a ExecStopPost=+/bin/bash $lib/run-requests.sh done %i" \
+    -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
+    -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
+    "$units/anas-assistant@.service" >"$units/anas-assistant-cron@.service"
+  sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i#' \
+    -e '\#a-nas-companion-assistant#d' \
+    -e "s#^ExecStart=.*#ExecStart=/usr/bin/tini -- $lib/runtime/venv/bin/hermes curator run#" \
+    -e "/^ExecStart=/a ExecStartPost=$lib/runtime/venv/bin/python -P $lib/media-cache.py" \
+    -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
+    -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
+    "$units/anas-assistant@.service" >"$units/anas-assistant-curator@.service"
+  chmod 0644 "$units/anas-assistant-cron@.service" "$units/anas-assistant-curator@.service"
+}

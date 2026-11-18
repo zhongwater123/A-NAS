@@ -1,7 +1,7 @@
 """Scripted OpenAI-compatible model for the Hermes spike.
 
-Listens on a Unix socket, logs every request (which tools Hermes offered), and
-answers deterministically:
+Listens on a Unix socket, or on tcp:HOST:PORT behind the real model gateway (the system
+test), logs every request (which tools Hermes offered), and answers deterministically:
   user "CALL <tool> <json>"  -> one tool call with those arguments; "{{photo}}" and
                                 "{{album}}" in them become the first such ID in an
                                 earlier tool result of the conversation
@@ -153,6 +153,15 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
+class TCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+if SOCK.startswith("tcp:"):
+    host, port = SOCK[4:].rsplit(":", 1)
+    with TCPServer((host, int(port)), Handler) as server:
+        server.serve_forever()
 if os.path.exists(SOCK):
     os.unlink(SOCK)
 with Server(SOCK, Handler) as server:

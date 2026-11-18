@@ -25,7 +25,7 @@
 
 ### 文件管理、登录与账号
 
-- Agent空间（#177）：更新 Host Agent、产品服务及助手试用包后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
+- Agent空间（#177）：更新 Host Agent 与产品服务后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
 - 跨空间移动（#180）：只用可丢弃目录，在 Web 从 Shared 移到个人空间，复制期间经另一成员的 SMB 新增和覆盖文件；移动者可从源空间回收站恢复这些内容，其他成员不可读取其回收站。用没有并发写入的文件核对移动前后的修改时间一致。源副本在回收站中继续占用容量，验收结束后只清理本次测试数据（[调查](../investigations/2026-10-27-cross-space-move-lost-source-changes.md)）。
 
 - 文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口与资源文件夹跳转；在个人空间与 Shared 上传、删除、恢复（[issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
@@ -114,7 +114,7 @@
 - VNAS 操作桌面（#156、#199）：删除、移动、改名、分享、复制、恢复、反馈与设置类的写入先问，新建、收藏与标签不问；终端、Docker 与应用中心每一步先问。
 - 记忆：复盘自建的 `anas-photos` 出现在该账号“记忆”的“VNAS 自己总结”中（[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。
 - 对话窗口：打开曾经崩溃的那段对话；仍显示“这个对话暂时无法显示”时，把浏览器控制台中 `VNAS conversation render failed` 之后的报错补进[调查](../investigations/2026-10-21-vnas-window-crash-and-stacked-cards.md)。
-- 产品服务部署时同次更新试用 bundle（[试用手册](try-ai-assistant-on-experimental-nas.md)）。
+- 助手随 `a-nas` 一起更新（[启用 AI 助手](enable-ai-assistant.md)）。
 
 ## 验证
 
