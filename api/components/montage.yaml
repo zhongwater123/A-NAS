@@ -96,9 +96,11 @@ schemas:
   MontageVersion:
     type: object
     additionalProperties: false
-    required: [number, filmAssetId, createdAt]
+    required: [number, jobId, plan, filmAssetId, createdAt]
     properties:
       number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
+      jobId: { type: string, description: "The job that made it." }
+      plan: { type: integer, minimum: 1, description: "Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二." }
       filmAssetId: { type: string, description: "The film in the caller's photo library; play and download it there." }
       createdAt: { type: string, format: date-time }
       gone: { type: boolean, description: "The member deleted the film from the photo library." }
@@ -107,7 +109,10 @@ schemas:
     additionalProperties: false
     required: [name, state]
     properties:
-      name: { type: string, enum: [analysis, catalog, song, pick, shots, fill, render, save] }
+      name:
+        type: string
+        description: "The shared steps, then each 方案's: the first 方案's plain, the second's with -2."
+        enum: [analysis, catalog, song, pick, shots, fill, render, save, pick-2, shots-2, fill-2, render-2, save-2]
       state: { type: string, enum: [pending, running, done, queued, waiting, needs_input, failed, cancelled], description: "A step that stopped with the job shows the job's state." }
       startedAt: { type: string, format: date-time }
       finishedAt: { type: string, format: date-time }
@@ -127,7 +132,8 @@ schemas:
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
       missingAssetIds: { type: array, description: "The videos missing, or whose analysis failed.", items: { type: string } }
-      version: { $ref: "#/schemas/MontageVersion" }
+      version: { $ref: "#/schemas/MontageVersion", description: "The first 方案's film." }
+      versions: { type: array, description: "Every 方案's film the job saved, in order.", items: { $ref: "#/schemas/MontageVersion" } }
       createdAt: { type: string, format: date-time }
       finishedAt: { type: string, format: date-time }
   MontageNotice:

@@ -39,7 +39,7 @@ import {
 import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { projectQuery, songQuery } from "./queries";
-import { active, needs, stateText, stepNames } from "./words";
+import { active, needs, planNames, stateText, stepNames } from "./words";
 
 // A job in progress is asked about every two seconds, while the window can be seen.
 const POLL_MS = 2_000;
@@ -372,13 +372,14 @@ function Go({
   );
 }
 
-// Films is the prototype's 完成 page: the film saved, played where the photo
-// library plays its videos, and every version of it.
+// Films is the prototype's 挑一个 page: the latest job's 方案 side by side,
+// each played where the photo library plays its videos, and the films of
+// earlier jobs below.
 function Films({ versions }: { versions: MontageVersion[] }) {
-  const [chosen, setChosen] = useState<number>();
-  const playable = versions.filter((version) => !version.gone);
-  const shown = versions.find((version) => version.number === chosen) ?? playable[0];
   if (!versions.length) return null;
+  const latest = versions[0].jobId;
+  const pair = versions.filter((version) => version.jobId === latest).sort((a, b) => a.plan - b.plan);
+  const earlier = versions.filter((version) => version.jobId !== latest);
   return (
     <section className={`${styles.mtPanel} ${styles.mtFinish}`} aria-label="成片">
       <div className={styles.mtOk}>
@@ -386,42 +387,70 @@ function Films({ versions }: { versions: MontageVersion[] }) {
           <Check />
         </span>
         <div>
-          <h2>成片已存进相册</h2>
+          <h2>{pair.length > 1 ? `${pair.length} 个方案，挑一个` : "成片已存进相册"}</h2>
           <p>
-            {shown
-              ? `第 ${shown.number} 版 · ${when.format(new Date(shown.createdAt))} · 在你的个人图库里`
-              : "成片都已从相册删除"}
+            {pair.length > 1
+              ? "同一批素材、同一首歌，规划了两次。两版都已存进相册：挑喜欢的那版下载，另一版可以在相册里删掉。"
+              : "在你的个人图库里。"}
           </p>
         </div>
       </div>
-      {shown && (
-        <div className={styles.mtFilm}>
-          <FilmPlayer key={shown.filmAssetId} assetId={shown.filmAssetId} />
+      <div className={styles.mtFilms}>
+        {pair.map((version) => (
+          <FilmCard key={version.number} version={version} />
+        ))}
+      </div>
+      {earlier.length > 0 && (
+        <div className={styles.mtActs}>
+          <span className={styles.mtFaint}>更早的版本</span>
+          <div className={styles.mtVersions} role="group" aria-label="更早的版本">
+            {earlier.map((version) =>
+              version.gone ? (
+                <span key={version.number} title="成片已不在相册">
+                  第 {version.number} 版
+                </span>
+              ) : (
+                <a key={version.number} href={originalURL(version.filmAssetId, true)}>
+                  <Download aria-hidden="true" />第 {version.number} 版
+                </a>
+              ),
+            )}
+          </div>
         </div>
       )}
-      <div className={styles.mtActs}>
-        {shown && (
-          <a className={`${styles.mtBtn} ${styles.primary}`} href={originalURL(shown.filmAssetId, true)}>
+    </section>
+  );
+}
+
+// FilmCard is one 方案's film, as the prototype's version card.
+function FilmCard({ version }: { version: MontageVersion }) {
+  const name = planNames[version.plan] ?? `方案 ${version.plan}`;
+  return (
+    <article className={styles.mtFilmCard} aria-label={name}>
+      <div className={styles.mtFilm}>
+        {version.gone ? (
+          <div className={styles.mtCentered}>
+            <Film aria-hidden="true" />
+            成片已不在相册
+          </div>
+        ) : (
+          <FilmPlayer key={version.filmAssetId} assetId={version.filmAssetId} />
+        )}
+      </div>
+      <div className={styles.mtFilmBody}>
+        <div className={styles.mtFilmTitle}>
+          <h3>{name}</h3>
+          <span className={styles.mtTag}>第 {version.number} 版</span>
+        </div>
+        <p className={styles.mtFaint}>{when.format(new Date(version.createdAt))} · 存进了你的个人图库</p>
+        {!version.gone && (
+          <a className={`${styles.mtBtn} ${styles.primary}`} href={originalURL(version.filmAssetId, true)}>
             <Download aria-hidden="true" />
-            下载第 {shown.number} 版
+            下载{name}
           </a>
         )}
-        <div className={styles.mtVersions} role="group" aria-label="版本">
-          {versions.map((version) => (
-            <button
-              key={version.number}
-              type="button"
-              aria-pressed={version.number === shown?.number}
-              disabled={version.gone}
-              title={version.gone ? "成片已不在相册" : undefined}
-              onClick={() => setChosen(version.number)}
-            >
-              第 {version.number} 版
-            </button>
-          ))}
-        </div>
       </div>
-    </section>
+    </article>
   );
 }
 

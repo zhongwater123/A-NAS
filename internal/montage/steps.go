@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,9 @@ type jobRun struct {
 	analysis analysisResult
 	catalog  catalogResult
 	excerpt  Excerpt
+	// plan is the 方案 the steps after the song make, from 1; picked to
+	// render are its own.
+	plan     int
 	picked   json.RawMessage
 	planned  json.RawMessage
 	timeline timelineResult
@@ -77,8 +81,41 @@ type step struct {
 	reusable func(run *jobRun) bool
 }
 
+// planStep names a step of the plan-th 方案: the first keeps the plain
+// names, the others add their number ("pick-2").
+func planStep(name string, plan int) string {
+	if plan <= 1 {
+		return name
+	}
+	return fmt.Sprintf("%s-%d", name, plan)
+}
+
+// planOf is the 方案 a step name belongs to, and the step's plain name.
+func planOf(name string) (string, int) {
+	base, number, found := strings.Cut(name, "-")
+	if !found {
+		return name, 1
+	}
+	plan, err := strconv.Atoi(number)
+	if err != nil || plan < 2 {
+		return name, 1
+	}
+	return base, plan
+}
+
+// stepNames are a job's steps, in order: the shared ones, then each 方案's.
+func (s *Store) stepNames() []string {
+	names := []string{"analysis", "catalog", "song"}
+	for plan := 1; plan <= s.plans; plan++ {
+		for _, name := range []string{"pick", "shots", "fill", "render", "save"} {
+			names = append(names, planStep(name, plan))
+		}
+	}
+	return names
+}
+
 func (s *Store) steps() []step {
-	return []step{
+	steps := []step{
 		{name: "analysis", key: s.analysisKey, do: s.analyse,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.analysis) }},
 		{name: "catalog", key: func(_ context.Context, run *jobRun) (string, error) {
@@ -86,23 +123,44 @@ func (s *Store) steps() []step {
 		}, do: s.makeCatalog, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.catalog) }},
 		{name: "song", key: s.songKey, do: s.excerptOf,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.excerpt) }},
-		{name: "pick", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
-		}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
-		{name: "shots", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["pick"], digest(string(run.picked)), promptVersion), nil
-		}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
-		{name: "fill", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["shots"], digest(string(run.planned)), fillVersion), nil
-		}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
-		{name: "render", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key), nil
-		}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
-			reusable: s.filmKept},
-		{name: "save", key: func(_ context.Context, run *jobRun) (string, error) {
-			return run.id + "|" + run.keys["render"], nil
-		}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
 	}
+	for plan := 1; plan <= s.plans; plan++ {
+		// Every 方案 after the first is planned anew: its keys say which it is.
+		which := ""
+		if plan > 1 {
+			which = fmt.Sprintf("plan %d", plan)
+		}
+		pick, shots, fill, render, save := planStep("pick", plan), planStep("shots", plan), planStep("fill", plan),
+			planStep("render", plan), planStep("save", plan)
+		steps = append(steps,
+			step{name: pick, key: func(_ context.Context, run *jobRun) (string, error) {
+				run.plan = plan
+				parts := []string{run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion}
+				if which != "" {
+					parts = append(parts, which)
+				}
+				return digest(parts...), nil
+			}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
+			step{name: shots, key: func(_ context.Context, run *jobRun) (string, error) {
+				return digest(run.keys[pick], digest(string(run.picked)), promptVersion), nil
+			}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
+			step{name: fill, key: func(_ context.Context, run *jobRun) (string, error) {
+				return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
+			}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
+			step{name: render, key: func(_ context.Context, run *jobRun) (string, error) {
+				parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
+				if which != "" {
+					parts = append(parts, which)
+				}
+				return digest(parts...), nil
+			}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
+				reusable: s.filmKept},
+			step{name: save, key: func(_ context.Context, run *jobRun) (string, error) {
+				return run.id + "|" + run.keys[render], nil
+			}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
+		)
+	}
+	return steps
 }
 
 // runSteps runs job from its first step not done.
@@ -143,8 +201,8 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 		if err != nil {
 			return err
 		}
-		if st.name == "save" {
-			return nil // save records its step with the version and the job's end
+		if name, _ := planOf(st.name); name == "save" {
+			continue // save records its step with the version, and the last one the job's end
 		}
 		encoded, err := json.Marshal(result)
 		if err != nil {
@@ -259,7 +317,8 @@ func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
 		}
 		if stored != key {
 			// A new input: what the steps after it kept is stale.
-			later := StepNames[slices.Index(StepNames, name)+1:]
+			names := s.stepNames()
+			later := names[slices.Index(names, name)+1:]
 			for _, after := range later {
 				if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, after); err != nil {
 					return err
@@ -537,28 +596,28 @@ func (s *Store) planInput(run *jobRun) PlanInput {
 	for _, id := range run.catalog.Catalog {
 		cards = append(cards, run.catalog.Cards[id])
 	}
-	return PlanInput{JobID: run.id, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked}
+	return PlanInput{JobID: run.id, Plan: run.plan, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked}
 }
 
 // accepted is the job's plan for a step taken for this catalog, not voided.
-func (s *Store) accepted(ctx context.Context, jobID, step, catalogKey string) (json.RawMessage, bool, error) {
+func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, catalogKey string) (json.RawMessage, bool, error) {
 	var answer string
-	err := s.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
-		ORDER BY accepted_at DESC LIMIT 1`, jobID, step, catalogKey).Scan(&answer)
+	err := s.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
+		ORDER BY accepted_at DESC LIMIT 1`, jobID, plan, step, catalogKey).Scan(&answer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
 	return json.RawMessage(answer), err == nil, err
 }
 
-func (s *Store) accept(ctx context.Context, jobID, step, catalogKey string, answer json.RawMessage) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO plans(job_id, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?)",
-		jobID, step, catalogKey, string(answer), sqlitedb.FormatTime(s.now()))
+func (s *Store) accept(ctx context.Context, jobID string, plan int, step, catalogKey string, answer json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
+		jobID, plan, step, catalogKey, string(answer), sqlitedb.FormatTime(s.now()))
 	return err
 }
 
 func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, PlanInput) (json.RawMessage, error)) (any, error) {
-	if answer, ok, err := s.accepted(ctx, run.id, step, run.keys["catalog"]); err != nil || ok {
+	if answer, ok, err := s.accepted(ctx, run.id, run.plan, step, run.keys["catalog"]); err != nil || ok {
 		return answer, err
 	}
 	answer, err := ask(ctx, s.planInput(run))
@@ -575,7 +634,7 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	if !json.Valid(answer) {
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: errors.New("the plan is not JSON")}
 	}
-	return answer, s.accept(ctx, run.id, step, run.keys["catalog"], answer)
+	return answer, s.accept(ctx, run.id, run.plan, step, run.keys["catalog"], answer)
 }
 
 func (s *Store) pick(ctx context.Context, run *jobRun) (any, error) {

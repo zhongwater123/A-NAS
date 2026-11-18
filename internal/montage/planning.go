@@ -29,7 +29,7 @@ import (
 // PlanTemplate is the version of the prompt template the round script
 // fills (ai/anas_montage/prompts/); a claim answers it, and a round script
 // that has another refuses the round.
-const PlanTemplate = "plan-v1"
+const PlanTemplate = "plan-v2"
 
 const (
 	// planGrantLife is how long a planning grant lets rounds start.
@@ -126,11 +126,11 @@ func (s *Store) VNASPlanner() Planner { return vnasPlanner{s} }
 type vnasPlanner struct{ s *Store }
 
 func (p vnasPlanner) Pick(ctx context.Context, input PlanInput) (json.RawMessage, error) {
-	return nil, p.s.awaitPlan(ctx, input.JobID, "pick")
+	return nil, p.s.awaitPlan(ctx, input.JobID, planStep("pick", input.Plan))
 }
 
 func (p vnasPlanner) Shots(ctx context.Context, input PlanInput) (json.RawMessage, error) {
-	return nil, p.s.awaitPlan(ctx, input.JobID, "shots")
+	return nil, p.s.awaitPlan(ctx, input.JobID, planStep("shots", input.Plan))
 }
 
 // lastRound is the job's latest round in its current epoch.
@@ -198,8 +198,17 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, step string) error {
 		case RoundClaimed, RoundStarted:
 			return pending("")
 		case RoundEnded:
-			// The model may have been called: never started again on its own (#514).
-			return fmt.Errorf("%w: the round ended without the %s step", ErrPlanUnknown, step)
+			// The model may have been called: never started again on its own
+			// (#514), unless the round handed back a 方案 and ended before
+			// the next; then another round plans the rest.
+			var taken int
+			if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM plans WHERE round_id = ? AND voided_at IS NULL", round.id).
+				Scan(&taken); err != nil {
+				return err
+			}
+			if taken == 0 {
+				return fmt.Errorf("%w: the round ended without the %s step", ErrPlanUnknown, step)
+			}
 		case RoundAbandoned:
 			if wait := planBackoff(round.abandonedRuns); s.now().Before(round.claimed.Add(wait)) {
 				return pending(DetailRetrying)
@@ -234,7 +243,7 @@ func (s *Store) waitingSince(ctx context.Context, jobID string) time.Time {
 	var at sql.NullString
 	_ = s.db.QueryRowContext(ctx, `SELECT MAX(t) FROM (
 		SELECT MAX(claimed_at) AS t FROM rounds WHERE job_id = ?
-		UNION ALL SELECT MAX(started_at) FROM steps WHERE job_id = ? AND name IN ('pick', 'shots'))`, jobID, jobID).Scan(&at)
+		UNION ALL SELECT MAX(started_at) FROM steps WHERE job_id = ? AND (name IN ('pick', 'shots') OR name LIKE 'pick-%' OR name LIKE 'shots-%'))`, jobID, jobID).Scan(&at)
 	if t := scanTime(at); t != nil {
 		return *t
 	}

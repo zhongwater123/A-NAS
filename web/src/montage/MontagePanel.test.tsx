@@ -6,7 +6,21 @@ import { http, server } from "../test/server";
 import type { MontageJob, MontageProjectDetail } from "./api";
 import { MontagePanel } from "./MontagePanel";
 
-const steps = ["analysis", "catalog", "song", "pick", "shots", "fill", "render", "save"];
+const steps = [
+  "analysis",
+  "catalog",
+  "song",
+  "pick",
+  "shots",
+  "fill",
+  "render",
+  "save",
+  "pick-2",
+  "shots-2",
+  "fill-2",
+  "render-2",
+  "save-2",
+];
 
 function job(state: MontageJob["state"], extra: Partial<MontageJob> = {}): MontageJob {
   return {
@@ -135,8 +149,14 @@ async function openProject() {
 
 afterEach(() => server.resetHandlers());
 
+// A job's two 方案, as the job and the project list them.
+const saved: MontageProjectDetail["versions"] = [
+  { number: 1, jobId: "job:1", plan: 1, filmAssetId: "photo:film-1", createdAt: "2026-11-18T10:05:00Z" },
+  { number: 2, jobId: "job:1", plan: 2, filmAssetId: "photo:film-2", createdAt: "2026-11-18T10:08:00Z" },
+];
+
 describe("剪辑中心", () => {
-  it("starts a film, follows its job and shows the version it saved", async () => {
+  it("starts a film, follows its job and shows the two 方案 it saved side by side", async () => {
     const seen = { generated: 0 };
     let state: MontageJob["state"] = "queued";
     let versions: MontageProjectDetail["versions"] = [];
@@ -147,7 +167,8 @@ describe("剪辑中心", () => {
           state,
           state === "done"
             ? {
-                version: { number: 1, filmAssetId: "photo:film", createdAt: "2026-11-18T10:05:00Z" },
+                version: saved[0],
+                versions: saved,
               }
             : {},
         ),
@@ -161,12 +182,18 @@ describe("剪辑中心", () => {
     expect(await within(page).findByText("排队中")).toBeInTheDocument();
     // The job goes on and saves a film: the page asks again and shows it.
     state = "done";
-    versions = [{ number: 1, filmAssetId: "photo:film", createdAt: "2026-11-18T10:05:00Z" }];
-    expect(await within(page).findByText("成片已存进相册", {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(await within(page).findByRole("button", { name: /第 1 版/ })).toHaveAttribute("aria-pressed", "true");
-    expect(within(page).getByRole("link", { name: "下载第 1 版" })).toHaveAttribute(
+    versions = [...saved].reverse();
+    expect(await within(page).findByText("2 个方案，挑一个", {}, { timeout: 4000 })).toBeInTheDocument();
+    const first = within(page).getByRole("article", { name: "方案一" });
+    expect(within(first).getByText("第 1 版")).toBeInTheDocument();
+    expect(within(first).getByRole("link", { name: "下载方案一" })).toHaveAttribute(
       "href",
-      "/api/v1/photos/assets/photo%3Afilm/original?download=1",
+      "/api/v1/photos/assets/photo%3Afilm-1/original?download=1",
+    );
+    const second = within(page).getByRole("article", { name: "方案二" });
+    expect(within(second).getByRole("link", { name: "下载方案二" })).toHaveAttribute(
+      "href",
+      "/api/v1/photos/assets/photo%3Afilm-2/original?download=1",
     );
     expect(within(page).getByRole("button", { name: "再剪一版" })).toBeEnabled();
   });

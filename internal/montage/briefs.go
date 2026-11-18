@@ -40,6 +40,9 @@ const (
 	ToolCancelled    = "cancelled"
 	ToolRoundOver    = "round_over"
 	ToolOutlineFirst = "outline_first"
+	// ToolNextPlan: a 方案 was taken and the job wants another; the model
+	// starts over from the outline.
+	ToolNextPlan = "next_plan"
 )
 
 // ToolAnswer is what a submission, or a brief that cannot be given,
@@ -55,6 +58,7 @@ var toolMessages = map[string]string{
 	ToolCancelled:    "任务已取消",
 	ToolRoundOver:    "这一轮已结束",
 	ToolOutlineFirst: "先交大纲",
+	ToolNextPlan:     "这一版已收下，接着做下一版",
 }
 
 func toolAnswer(status string, reasons ...string) ToolAnswer {
@@ -67,6 +71,9 @@ type planContext struct {
 	roundID    string
 	catalogKey string
 	request    PlanBriefRequest
+	// plan is the 方案 the round works on: the first whose shots are not
+	// taken yet.
+	plan int
 }
 
 // roundFor finds the member's round for jobID with token. A round over,
@@ -123,7 +130,49 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (planC
 		cards = append(cards, catalog.Cards[id])
 	}
 	pc.request = PlanBriefRequest{Cards: cards, Music: excerpt.Music, Ask: js.Ask, Chronological: js.Chronological}
+	if pc.plan, err = s.currentPlan(ctx, jobID, pc.catalogKey); err != nil {
+		return planContext{}, nil, err
+	}
 	return pc, nil, nil
+}
+
+// currentPlan is the job's first 方案 whose shots are not taken; past the
+// last, the last.
+func (s *Store) currentPlan(ctx context.Context, jobID, catalogKey string) (int, error) {
+	for plan := 1; plan < s.plans; plan++ {
+		if _, taken, err := s.accepted(ctx, jobID, plan, StepShots, catalogKey); err != nil || !taken {
+			return plan, err
+		}
+	}
+	return s.plans, nil
+}
+
+// withEarlier adds to a later 方案's outline brief the outlines taken
+// before it, which it should differ from.
+func (s *Store) withEarlier(ctx context.Context, jobID string, pc planContext, data json.RawMessage) (json.RawMessage, error) {
+	if pc.plan <= 1 {
+		return data, nil
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	earlier := []json.RawMessage{}
+	for plan := 1; plan < pc.plan; plan++ {
+		outline, taken, err := s.accepted(ctx, jobID, plan, StepOutline, pc.catalogKey)
+		if err != nil {
+			return nil, err
+		}
+		if taken {
+			earlier = append(earlier, outline)
+		}
+	}
+	encoded, err := json.Marshal(earlier)
+	if err != nil {
+		return nil, err
+	}
+	fields["plan"], fields["earlierOutlines"] = json.RawMessage(fmt.Sprint(pc.plan)), encoded
+	return json.Marshal(fields)
 }
 
 // brief is a step's brief for the job, with the outline taken for the
@@ -132,7 +181,7 @@ func (s *Store) brief(ctx context.Context, jobID, step string, pc planContext) (
 	request := pc.request
 	request.Step = step
 	if step == StepShots {
-		picked, ok, err := s.accepted(ctx, jobID, StepOutline, pc.catalogKey)
+		picked, ok, err := s.accepted(ctx, jobID, pc.plan, StepOutline, pc.catalogKey)
 		if err != nil {
 			return PlanBrief{}, nil, err
 		}
@@ -162,7 +211,13 @@ func (s *Store) Brief(ctx context.Context, owner, jobID, token, step string) (an
 	if err != nil || answer != nil {
 		return answer, err
 	}
-	return map[string]json.RawMessage{"data": brief.Data, "schema": brief.Schema}, nil
+	data := brief.Data
+	if step == StepOutline {
+		if data, err = s.withEarlier(ctx, jobID, pc, data); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]json.RawMessage{"data": data, "schema": brief.Schema}, nil
 }
 
 // Submit checks the answer to a step of owner's round on jobID and keeps
@@ -175,7 +230,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	if over != nil {
 		return *over, nil
 	}
-	if _, taken, err := s.accepted(ctx, jobID, step, pc.catalogKey); err != nil || taken {
+	if _, taken, err := s.accepted(ctx, jobID, pc.plan, step, pc.catalogKey); err != nil || taken {
 		return toolAnswer(ToolAccepted), err
 	}
 	var rejections int
@@ -206,8 +261,8 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 		}
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO plans(job_id, step, round_id, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
-			jobID, step, pc.roundID, pc.catalogKey, string(kept), sqlitedb.FormatTime(s.now())); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, round_id, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+			jobID, pc.plan, step, pc.roundID, pc.catalogKey, string(kept), sqlitedb.FormatTime(s.now())); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
@@ -218,8 +273,11 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	if err != nil {
 		return ToolAnswer{}, err
 	}
-	s.logger.InfoContext(ctx, "planning step taken", "job", jobID, "round", pc.roundID, "step", step)
+	s.logger.InfoContext(ctx, "planning step taken", "job", jobID, "round", pc.roundID, "step", step, "plan", pc.plan)
 	s.wakeJobs()
+	if step == StepShots && pc.plan < s.plans {
+		return toolAnswer(ToolNextPlan), nil
+	}
 	return toolAnswer(ToolAccepted), nil
 }
 

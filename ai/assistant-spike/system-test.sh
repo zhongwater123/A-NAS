@@ -145,7 +145,7 @@ check "only that policy has the montage server" \
   bash -c "grep -q '^  montage:' /usr/lib/a-nas/assistant/managed-cron/config.yaml && ! grep -q '^  montage:' /usr/lib/a-nas/assistant/managed/config.yaml"
 check "the member's settings for scheduled tasks carry it, the instance's do not" \
   bash -c "grep -q 'anas_montage_mcp.py' /var/lib/a-nas-host/assistant/members/alice/config-cron.yaml && ! grep -q 'anas_montage_mcp.py' /var/lib/a-nas-host/assistant/members/alice/config.yaml"
-check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v1.md
+check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v2.md
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true

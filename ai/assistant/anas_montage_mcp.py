@@ -11,7 +11,7 @@ sandbox the server lists none.
 
 Every answer is a result, never an error (is_error stays false): Hermes counts errors towards its circuit breaker,
 which after three in a row makes the server unreachable for a minute, and a refused answer is for the model to
-correct. Its status says what happened: accepted, rejected (with reasons), outline_first, cancelled, round_over,
+correct. Its status says what happened: accepted, rejected (with reasons), outline_first, next_plan, cancelled, round_over,
 not_found or unavailable. The server is the SDK's low-level one, as the companion's: the arguments reach the
 montage center as the model wrote them, and it answers a wrong one as rejected.
 """
@@ -55,6 +55,7 @@ SAID = {
     "accepted": "已收下。",
     "rejected": "不合格，按 reasons 改好再交。",
     "outline_first": "先交大纲，收下后再读第二步。",
+    "next_plan": "这一版已收下，接着做下一版：回到第 1 步重新调 montage_brief，换一种讲法。",
     "cancelled": "任务已取消：立刻停下，只回答 [SILENT]。",
     "round_over": "这一轮已结束：立刻停下，只回答 [SILENT]。",
     "not_found": "任务编号或 token 不对：照提示词里给的写。",

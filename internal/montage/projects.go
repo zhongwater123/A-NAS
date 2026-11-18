@@ -745,22 +745,5 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 
 // versions lists a project's films, newest first.
 func (s *Store) versions(ctx context.Context, projectID string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT number, film_asset_id, created_at FROM versions WHERE project_id = ? ORDER BY number DESC", projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	versions := []Version{}
-	for rows.Next() {
-		var version Version
-		var created string
-		if err := rows.Scan(&version.Number, &version.FilmAssetID, &created); err != nil {
-			return nil, err
-		}
-		if version.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
-			return nil, err
-		}
-		versions = append(versions, version)
-	}
-	return versions, rows.Err()
+	return s.versionsOf(ctx, "project_id", projectID, "number DESC")
 }

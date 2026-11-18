@@ -51,7 +51,7 @@ type timelineResult struct {
 func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	known := map[string][2]float64{}
 	var saved sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'fill'", run.id).Scan(&saved); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ?", run.id, planStep("fill", run.plan)).Scan(&saved); err != nil {
 		return nil, err
 	}
 	if saved.Valid {
@@ -88,7 +88,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 			return nil, err
 		}
 		known[answer.Need.Name] = span
-		if err := s.saveProgress(ctx, run.id, "fill", timelineResult{Known: known}); err != nil {
+		if err := s.saveProgress(ctx, run.id, planStep("fill", run.plan), timelineResult{Known: known}); err != nil {
 			return nil, err
 		}
 	}
@@ -278,8 +278,19 @@ type renderResult struct {
 }
 
 func (s *Store) filmKept(run *jobRun) bool {
-	_, err := os.Stat(filepath.Join(s.jobDir(run.id), filmFile))
+	if run.render.Film == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(s.jobDir(run.id), run.render.Film))
 	return err == nil
+}
+
+// filmFileOf is the plan-th 方案's film in the job's directory.
+func filmFileOf(plan int) string {
+	if plan <= 1 {
+		return filmFile
+	}
+	return fmt.Sprintf("film-%d.mp4", plan)
 }
 
 func noSpace(err error) bool {
@@ -338,13 +349,13 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	if latest := run.latestTakenAt(); latest != nil {
 		created = *latest
 	}
-	result := renderResult{Film: filmFile, Frames: total, Created: created.UTC().Format(time.RFC3339)}
+	result := renderResult{Film: filmFileOf(run.plan), Frames: total, Created: created.UTC().Format(time.RFC3339)}
 	film, err := s.editing.Assemble(ctx, segments, song, ffmpegworker.AssembleRequest{SongStart: run.excerpt.Start, Frames: total, Created: result.Created})
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = film.Close() }()
-	path := filepath.Join(dir, filmFile)
+	path := filepath.Join(dir, result.Film)
 	if err := writeFile(path, film); err != nil {
 		return nil, storage(err)
 	}
@@ -451,9 +462,10 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		return nil, errCancelled
 	}
 	var number int
-	var name string
-	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT IFNULL(MAX(number), 0) + 1 FROM versions WHERE project_id = p.id), p.name
-		FROM projects p WHERE p.id = ?`, run.projectID).Scan(&number, &name); err != nil {
+	var project string
+	if err := s.db.QueryRowContext(ctx, `SELECT IFNULL((SELECT number FROM versions WHERE version_key = ?),
+		(SELECT IFNULL(MAX(number), 0) + 1 FROM versions WHERE project_id = p.id)), p.name
+		FROM projects p WHERE p.id = ?`, run.keys[planStep("save", run.plan)], run.projectID).Scan(&number, &project); err != nil {
 		return nil, err
 	}
 	film, err := os.Open(filepath.Join(s.jobDir(run.id), run.render.Film))
@@ -461,8 +473,9 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		return nil, err
 	}
 	defer func() { _ = film.Close() }()
-	versionKey := run.keys["save"]
-	assetID, err := s.grants.SaveFilm(ctx, run.grantID, versionKey, filmName(name, number), film)
+	name, last := planStep("save", run.plan), run.plan >= s.plans
+	versionKey := run.keys[name]
+	assetID, err := s.grants.SaveFilm(ctx, run.grantID, versionKey, filmName(project, number), film)
 	switch photosapi.GrantErrorCode(err) {
 	case "":
 		if err != nil {
@@ -477,14 +490,17 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	}
 	now := sqlitedb.FormatTime(s.now())
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, version_key, film_asset_id, created_at)
-			VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
-			newID("version"), run.projectID, number, run.id, versionKey, assetID, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
+			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = 'save'",
-			fmt.Sprintf(`{"filmAssetId":%q}`, assetID), now, run.id); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
+			fmt.Sprintf(`{"filmAssetId":%q}`, assetID), now, run.id, name); err != nil {
 			return err
+		}
+		if !last {
+			return nil // the next 方案 goes on
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', attempts = 0, error_class = '', error = '', wait_reason = '',
 			lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, now, now, run.id)
@@ -493,7 +509,9 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.removeJobFiles(run.id)
-	s.logger.InfoContext(ctx, "montage film saved", "job", run.id, "project", run.projectID, "version", number)
+	s.logger.InfoContext(ctx, "montage film saved", "job", run.id, "project", run.projectID, "version", number, "plan", run.plan)
+	if last {
+		s.removeJobFiles(run.id)
+	}
 	return nil, nil
 }

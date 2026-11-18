@@ -16,7 +16,7 @@ from .domain.options import Case, CutOptions
 from .domain.prompts import CARD_MARKS
 
 # The template the data and the schema go with (prompts/<TEMPLATE>.md).
-TEMPLATE = "plan-v1"
+TEMPLATE = "plan-v2"
 # What a member who asked for nothing gets: the eighth version's cases each wrote their own.
 DEFAULT_INSTRUCTION = "按拍摄时间顺序，把这些素材剪成一个有开头、中间和结尾的短片"
 

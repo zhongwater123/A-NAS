@@ -78,30 +78,32 @@ type Step struct {
 
 // Job is a job as the member sees it.
 type Job struct {
-	ID         string     `json:"id"`
-	ProjectID  string     `json:"projectId"`
-	State      string     `json:"state"`
-	Step       string     `json:"step,omitempty"`
-	WaitReason string     `json:"waitReason,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	Steps      []Step     `json:"steps"`
-	Missing    []string   `json:"missingAssetIds,omitempty"`
+	ID         string   `json:"id"`
+	ProjectID  string   `json:"projectId"`
+	State      string   `json:"state"`
+	Step       string   `json:"step,omitempty"`
+	WaitReason string   `json:"waitReason,omitempty"`
+	Error      string   `json:"error,omitempty"`
+	Steps      []Step   `json:"steps"`
+	Missing    []string `json:"missingAssetIds,omitempty"`
+	// Version is the first 方案's film; Versions are every 方案's, in order.
 	Version    *Version   `json:"version,omitempty"`
+	Versions   []Version  `json:"versions,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 // Version is a film a job saved.
 type Version struct {
-	Number      int       `json:"number"`
+	Number int `json:"number"`
+	// JobID and Plan: the job that made it, and which of its 方案 it is.
+	JobID       string    `json:"jobId"`
+	Plan        int       `json:"plan"`
 	FilmAssetID string    `json:"filmAssetId"`
 	CreatedAt   time.Time `json:"createdAt"`
 	// Gone: the member deleted the film from the photo library.
 	Gone bool `json:"gone,omitempty"`
 }
-
-// StepNames are a job's steps, in order.
-var StepNames = []string{"analysis", "catalog", "song", "pick", "shots", "fill", "render", "save"}
 
 func scanTime(value sql.NullString) *time.Time {
 	if !value.Valid {
@@ -241,7 +243,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	if err := rows.Err(); err != nil {
 		return Job{}, err
 	}
-	for _, name := range StepNames {
+	for _, name := range s.stepNames() {
 		st, ok := done[name]
 		if !ok {
 			st = Step{Name: name, State: "pending"}
@@ -251,11 +253,12 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	if job.Missing, err = s.missingOf(ctx, jobID); err != nil {
 		return Job{}, err
 	}
-	version, err := s.versionOf(ctx, jobID)
-	if err != nil {
+	if job.Versions, err = s.versionsOf(ctx, "job_id", jobID, "plan"); err != nil {
 		return Job{}, err
 	}
-	job.Version = version
+	if len(job.Versions) > 0 {
+		job.Version = &job.Versions[0]
+	}
 	return job, nil
 }
 
@@ -268,21 +271,26 @@ func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
 	return missing, json.Unmarshal([]byte(raw.String), &missing)
 }
 
-func (s *Store) versionOf(ctx context.Context, jobID string) (*Version, error) {
-	var version Version
-	var created string
-	err := s.db.QueryRowContext(ctx, "SELECT number, film_asset_id, created_at FROM versions WHERE job_id = ?", jobID).
-		Scan(&version.Number, &version.FilmAssetID, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+// versionsOf lists the versions whose column is value, ordered by order.
+func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]Version, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT number, job_id, plan, film_asset_id, created_at FROM versions WHERE "+column+" = ? ORDER BY "+order, value)
 	if err != nil {
 		return nil, err
 	}
-	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
-		version.CreatedAt = *at
+	defer rows.Close()
+	versions := []Version{}
+	for rows.Next() {
+		var version Version
+		var created string
+		if err := rows.Scan(&version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created); err != nil {
+			return nil, err
+		}
+		if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
+			version.CreatedAt = *at
+		}
+		versions = append(versions, version)
 	}
-	return &version, nil
+	return versions, rows.Err()
 }
 
 // Cancel stops owner's job: a queued or waiting one at once, a running one
@@ -478,8 +486,8 @@ const noticeWindow = 24 * time.Hour
 // or saved a film lately.
 func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.step, j.wait_reason, j.updated_at, IFNULL(v.film_asset_id, '')
-		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id
-		WHERE j.owner_user_id = ? AND (j.state IN ('waiting', 'needs_input') OR (j.state = 'running' AND j.step IN ('pick', 'shots'))
+		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
+		WHERE j.owner_user_id = ? AND (j.state IN ('waiting', 'needs_input') OR (j.state = 'running' AND (j.step IN ('pick', 'shots') OR j.step LIKE 'pick-%' OR j.step LIKE 'shots-%'))
 		  OR (j.state = 'done' AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, sqlitedb.FormatTime(s.now().Add(-noticeWindow)))
 	if err != nil {
 		return nil, err

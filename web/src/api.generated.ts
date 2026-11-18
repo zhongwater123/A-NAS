@@ -8029,6 +8029,10 @@ export interface components {
         MontageVersion: {
             /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
             number: number;
+            /** @description The job that made it. */
+            jobId: string;
+            /** @description Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二. */
+            plan: number;
             /** @description The film in the caller's photo library; play and download it there. */
             filmAssetId: string;
             /** Format: date-time */
@@ -8037,8 +8041,11 @@ export interface components {
             gone?: boolean;
         };
         MontageJobStep: {
-            /** @enum {string} */
-            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save";
+            /**
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @enum {string}
+             */
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
             /**
              * @description A step that stopped with the job shows the job's state.
              * @enum {string}
@@ -8065,7 +8072,10 @@ export interface components {
             steps: components["schemas"]["MontageJobStep"][];
             /** @description The videos missing, or whose analysis failed. */
             missingAssetIds?: string[];
+            /** @description The first 方案's film. */
             version?: components["schemas"]["MontageVersion"];
+            /** @description Every 方案's film the job saved, in order. */
+            versions?: components["schemas"]["MontageVersion"][];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

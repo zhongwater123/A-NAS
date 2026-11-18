@@ -5,12 +5,20 @@ export const stepNames: Record<string, string> = {
   analysis: "分析素材",
   catalog: "整理画面",
   song: "读取配乐",
-  pick: "规划大纲",
-  shots: "规划镜头",
-  fill: "填入镜头",
-  render: "渲染成片",
-  save: "存进相册",
+  pick: "规划方案一的大纲",
+  shots: "挑方案一的镜头",
+  fill: "填入方案一的镜头",
+  render: "渲染方案一",
+  save: "方案一存进相册",
+  "pick-2": "规划方案二的大纲",
+  "shots-2": "挑方案二的镜头",
+  "fill-2": "填入方案二的镜头",
+  "render-2": "渲染方案二",
+  "save-2": "方案二存进相册",
 };
+
+// The 方案 a job makes, by number.
+export const planNames: Record<number, string> = { 1: "方案一", 2: "方案二" };
 
 const waits: Record<string, string> = {
   analysis: "相册正在分析素材，或本地模型暂时不可用",
