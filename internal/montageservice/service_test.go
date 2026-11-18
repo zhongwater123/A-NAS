@@ -17,6 +17,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
@@ -32,6 +33,19 @@ func (sessions) ActiveProfiles(context.Context) ([]accounts.Profile, error) { re
 func (sessions) AccountDeletion(context.Context, string) (accountid.AccountDeletion, error) {
 	return accountid.AccountDeletion{}, errors.New("no deletions")
 }
+
+// noGrants is a photo library that holds no grants yet.
+type noGrants struct{}
+
+func (noGrants) Register(context.Context, string, string, []string) (photos.Grant, error) {
+	return photos.Grant{}, errors.New("not here")
+}
+func (noGrants) Lookup(context.Context, string, []string) ([]photos.GrantedAsset, error) {
+	return nil, errors.New("not here")
+}
+func (noGrants) Remove(context.Context, string, []string) error { return nil }
+func (noGrants) List(context.Context) ([]photos.Grant, error)   { return nil, nil }
+func (noGrants) Revoke(context.Context, string) error           { return nil }
 
 func get(t *testing.T, socket, token string) (int, string) {
 	t.Helper()
@@ -63,7 +77,7 @@ func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{Root: root, SocketPath: socket, Sessions: sessions{}, RetryInterval: 20 * time.Millisecond,
+		done <- Run(ctx, Config{Root: root, SocketPath: socket, Sessions: sessions{}, Grants: noGrants{}, RetryInterval: 20 * time.Millisecond,
 			CheckStore: func(string) error {
 				if usable.Load() {
 					return nil

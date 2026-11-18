@@ -47,6 +47,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -253,6 +254,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
+	var montageGrants montage.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -271,6 +273,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
+		montageGrants = photoservice.LocalGrants(photoService, sessions, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -351,7 +354,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, logger)
+	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, logger)
 	if err != nil {
 		return err
 	}

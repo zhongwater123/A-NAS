@@ -36,7 +36,9 @@ type Config struct {
 	Root       string
 	SocketPath string
 	Sessions   SessionResolver
-	Logger     *slog.Logger
+	// Grants reaches the photo library's project grants.
+	Grants montage.Grants
+	Logger *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -74,12 +76,15 @@ const shutdownGrace = 15 * time.Second
 // Ready is logged once the store is open; the site check waits for it.
 const Ready = "montage service ready"
 
+// upkeepInterval is how often reconciling and revoking are tried.
+const upkeepInterval = time.Minute
+
 // Run serves the montage API on SocketPath until ctx ends. While the store
 // cannot be opened, as when the data volume is offline or read-only,
 // requests answer montage_unavailable.
 func Run(parent context.Context, config Config) error {
-	if config.Root == "" || config.SocketPath == "" || config.Sessions == nil {
-		return errors.New("montage service needs a store, an API socket and sessions")
+	if config.Root == "" || config.SocketPath == "" || config.Sessions == nil || config.Grants == nil {
+		return errors.New("montage service needs a store, an API socket, sessions and the photo library's grants")
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -174,6 +179,9 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			montageapi.New(store, config.Logger)))
 		config.Logger.Info(Ready)
 		warned = false
+		// The projects are reconciled with the photo library's grants once
+		// it answers; revocations it missed are tried again every minute.
+		reconciled, nextUpkeep := false, time.Time{}
 		for {
 			select {
 			case <-ctx.Done():
@@ -181,6 +189,19 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				_ = store.Close()
 				return
 			case <-ticker.C:
+			}
+			if now := time.Now(); now.After(nextUpkeep) {
+				nextUpkeep = now.Add(upkeepInterval)
+				if !reconciled {
+					if err := store.Reconcile(ctx); err != nil {
+						config.Logger.WarnContext(ctx, "reconciling projects with the photo library failed; trying again", "error", err)
+					} else {
+						reconciled = true
+					}
+				}
+				if err := store.RetryRevocations(ctx); err != nil {
+					config.Logger.WarnContext(ctx, "retrying grant revocations failed", "error", err)
+				}
 			}
 			current, err := os.Lstat(config.Root)
 			if err = errors.Join(err, config.CheckStore(config.Root)); err != nil || !os.SameFile(opened, current) {
@@ -201,7 +222,7 @@ func open(ctx context.Context, config Config) (*montage.Store, os.FileInfo, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := montage.Open(ctx, config.Root)
+	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Logger: config.Logger})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -1,14 +1,44 @@
+parameters:
+  MontageProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
 schemas:
-  MontageProject:
+  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, description: "Unique per member: the same key again repeats nothing." }
+  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 128 } }
+  MontageProjectSummary:
     type: object
     additionalProperties: false
-    required: [id, name]
+    required: [id, name, assetCount, createdAt]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }
-  MontageProjectList:
+      assetCount: { type: integer, minimum: 0 }
+      createdAt: { type: string, format: date-time }
+  MontageProjectPage:
     type: object
     additionalProperties: false
     required: [items]
     properties:
-      items: { type: array, items: { $ref: "#/schemas/MontageProject" } }
+      items: { type: array, items: { $ref: "#/schemas/MontageProjectSummary" } }
+      next: { type: string }
+  MontageProjectAsset:
+    type: object
+    additionalProperties: false
+    required: [assetId, status, addedAt]
+    properties:
+      assetId: { type: string }
+      status: { type: string, enum: [available, trashed, missing, unknown], description: "unknown: the photo library did not answer this time." }
+      duration: { type: number, minimum: 0 }
+      takenAt: { type: string, format: date-time }
+      addedAt: { type: string, format: date-time }
+  MontageProject:
+    type: object
+    additionalProperties: false
+    required: [id, name, assetCount, createdAt, ask, chronological, assets]
+    properties:
+      id: { type: string, minLength: 1 }
+      name: { type: string }
+      assetCount: { type: integer, minimum: 0 }
+      createdAt: { type: string, format: date-time }
+      ask: { type: string }
+      chronological: { type: boolean }
+      assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }

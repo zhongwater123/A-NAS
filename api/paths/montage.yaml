@@ -1,8 +1,93 @@
 /api/v1/montage/projects:
   get:
     operationId: listMontageProjects
-    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404"
+    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageCursor" }]
     responses:
-      "200": { description: The caller's projects, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProjectList" } } } }
+      "200": { description: A page of the caller's projects, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProjectPage" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createMontageProject
+    summary: "Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey, assetIds]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+              name: { type: string, maxLength: 64, description: "Empty names the project by its videos' dates." }
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The project the same requestKey made before, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "201": { description: The new project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}:
+  get:
+    operationId: getMontageProject
+    summary: "One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }]
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  patch:
+    operationId: updateMontageProject
+    summary: "Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            minProperties: 1
+            properties:
+              name: { type: string, minLength: 1, maxLength: 64 }
+              ask: { type: string, maxLength: 200 }
+              chronological: { type: boolean }
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteMontageProject
+    summary: "Delete the project and revoke its grant. The videos and the films stay in the photo library"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/assets:
+  post:
+    operationId: addMontageProjectAssets
+    summary: "Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey, assetIds]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }

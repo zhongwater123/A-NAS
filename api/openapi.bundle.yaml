@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -3691,15 +3691,168 @@ paths:
   /api/v1/montage/projects:
     get:
       operationId: listMontageProjects
-      summary: The caller's montage projects (剪辑中心, ADR 0038), newest first. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404
+      summary: The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404
+      parameters:
+        - $ref: '#/components/parameters/MontageCursor'
       responses:
         '200':
-          description: The caller's projects
+          description: A page of the caller's projects
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MontageProjectList'
+                $ref: '#/components/schemas/MontageProjectPage'
+        '400':
+          $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createMontageProject
+      summary: Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - assetIds
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                name:
+                  type: string
+                  maxLength: 64
+                  description: Empty names the project by its videos' dates.
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The project the same requestKey made before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '201':
+          description: The new project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}:
+    get:
+      operationId: getMontageProject
+      summary: One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    patch:
+      operationId: updateMontageProject
+      summary: Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                ask:
+                  type: string
+                  maxLength: 200
+                chronological:
+                  type: boolean
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteMontageProject
+      summary: Delete the project and revoke its grant. The videos and the films stay in the photo library
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/assets:
+    post:
+      operationId: addMontageProjectAssets
+      summary: Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - assetIds
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -8720,6 +8873,20 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/FamilyReactionName'
+    MontageCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `next` of the previous page.
+      schema:
+        type: string
+    MontageProjectID:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
   responses:
     ProductError:
       description: Product operation error.
@@ -16082,19 +16249,27 @@ components:
           maxItems: 500
           items:
             type: string
-    MontageProject:
+    MontageProjectSummary:
       type: object
       additionalProperties: false
       required:
         - id
         - name
+        - assetCount
+        - createdAt
       properties:
         id:
           type: string
           minLength: 1
         name:
           type: string
-    MontageProjectList:
+        assetCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+    MontageProjectPage:
       type: object
       additionalProperties: false
       required:
@@ -16103,7 +16278,80 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/MontageProject'
+            $ref: '#/components/schemas/MontageProjectSummary'
+        next:
+          type: string
+    MontageRequestKey:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: 'Unique per member: the same key again repeats nothing.'
+    MontageAssetIDs:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        type: string
+        minLength: 1
+        maxLength: 128
+    MontageProjectAsset:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - status
+        - addedAt
+      properties:
+        assetId:
+          type: string
+        status:
+          type: string
+          enum:
+            - available
+            - trashed
+            - missing
+            - unknown
+          description: 'unknown: the photo library did not answer this time.'
+        duration:
+          type: number
+          minimum: 0
+        takenAt:
+          type: string
+          format: date-time
+        addedAt:
+          type: string
+          format: date-time
+    MontageProject:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - assetCount
+        - createdAt
+        - ask
+        - chronological
+        - assets
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        assetCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        ask:
+          type: string
+        chronological:
+          type: boolean
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageProjectAsset'
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

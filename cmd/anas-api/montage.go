@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
 
@@ -34,6 +35,7 @@ func runMontageService(logger *slog.Logger) error {
 		Root:       config.Root,
 		SocketPath: config.Socket,
 		Sessions:   sessionlookup.NewClient(config.SessionSocket),
+		Grants:     photosapi.GrantClient(config.GrantSocket),
 		Logger:     logger,
 	})
 }
@@ -42,8 +44,8 @@ func runMontageService(logger *slog.Logger) error {
 // ANAS_MONTAGE_ENABLED is off: then /api/v1/montage is not mounted and the
 // desktop shows no entry. A NAS forwards it to the montage service;
 // development serves it in this process from a directory on the development
-// volume.
-func configuredMontage(ctx context.Context, config Config, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
+// volume, with grants the photo library in this process holds.
+func configuredMontage(ctx context.Context, config Config, grants montage.Grants, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	forget := func(context.Context, string) error { return nil }
 	if !config.MontageEnabled {
 		return nil, forget, func() {}, nil
@@ -59,9 +61,12 @@ func configuredMontage(ctx context.Context, config Config, logger *slog.Logger) 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, nil, nil, err
 	}
-	store, err := montage.Open(ctx, root)
+	store, err := montage.Open(ctx, root, montage.Options{Grants: grants, Logger: logger})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if err := store.Reconcile(ctx); err != nil {
+		logger.Warn("reconciling montage projects with the photo library failed", "error", err)
 	}
 	return montageapi.New(store, logger), store.RemoveAccount, func() { _ = store.Close() }, nil
 }

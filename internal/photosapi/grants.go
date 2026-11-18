@@ -85,16 +85,28 @@ func GrantErrorCode(err error) string {
 	return ""
 }
 
-// GrantClient calls the photo library's grant socket.
-type GrantClient struct {
-	Socket string
+// GrantCall sends one grant request and returns its answer, with the
+// descriptor that came with it. A refused request is a *GrantError.
+type GrantCall func(ctx context.Context, request GrantRequest) (GrantResponse, *os.File, error)
+
+// Grants are the grant operations over a call: the socket's (GrantClient)
+// or, in development, the photo service's own in this process.
+type Grants struct {
+	Call GrantCall
 }
 
-func (c GrantClient) call(ctx context.Context, request GrantRequest) (GrantResponse, *os.File, error) {
+// GrantClient reaches the photo library's grant socket.
+func GrantClient(socket string) Grants {
+	return Grants{Call: func(ctx context.Context, request GrantRequest) (GrantResponse, *os.File, error) {
+		return callSocket(ctx, socket, request)
+	}}
+}
+
+func callSocket(ctx context.Context, socket string, request GrantRequest) (GrantResponse, *os.File, error) {
 	ctx, cancel := context.WithTimeout(ctx, grantRequestTimeout)
 	defer cancel()
 	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
+	conn, err := dialer.DialContext(ctx, "unix", socket)
 	if err != nil {
 		return GrantResponse{}, nil, fmt.Errorf("photo grant socket: %w", err)
 	}
@@ -117,16 +129,16 @@ func (c GrantClient) call(ctx context.Context, request GrantRequest) (GrantRespo
 	return response, file, nil
 }
 
-func (c GrantClient) plain(ctx context.Context, request GrantRequest) (GrantResponse, error) {
-	response, file, err := c.call(ctx, request)
+func (g Grants) plain(ctx context.Context, request GrantRequest) (GrantResponse, error) {
+	response, file, err := g.Call(ctx, request)
 	unixmsg.CloseFile(file)
 	return response, err
 }
 
 // Register registers, or extends, the grant of a member's project with
 // assetIDs, as the member signed in with session.
-func (c GrantClient) Register(ctx context.Context, session, projectID string, assetIDs []string) (photos.Grant, error) {
-	response, err := c.plain(ctx, GrantRequest{Op: GrantRegister, Session: session, ProjectID: projectID, AssetIDs: assetIDs})
+func (g Grants) Register(ctx context.Context, session, projectID string, assetIDs []string) (photos.Grant, error) {
+	response, err := g.plain(ctx, GrantRequest{Op: GrantRegister, Session: session, ProjectID: projectID, AssetIDs: assetIDs})
 	if err != nil {
 		return photos.Grant{}, err
 	}
@@ -137,14 +149,14 @@ func (c GrantClient) Register(ctx context.Context, session, projectID string, as
 }
 
 // Lookup says where each asset of the grant stands.
-func (c GrantClient) Lookup(ctx context.Context, grantID string, assetIDs []string) ([]photos.GrantedAsset, error) {
-	response, err := c.plain(ctx, GrantRequest{Op: GrantLookup, GrantID: grantID, AssetIDs: assetIDs})
+func (g Grants) Lookup(ctx context.Context, grantID string, assetIDs []string) ([]photos.GrantedAsset, error) {
+	response, err := g.plain(ctx, GrantRequest{Op: GrantLookup, GrantID: grantID, AssetIDs: assetIDs})
 	return response.Assets, err
 }
 
 // Open returns a granted video's original, read-only, and its object.
-func (c GrantClient) Open(ctx context.Context, grantID, assetID string) (*os.File, string, error) {
-	response, file, err := c.call(ctx, GrantRequest{Op: GrantOpen, GrantID: grantID, AssetID: assetID})
+func (g Grants) Open(ctx context.Context, grantID, assetID string) (*os.File, string, error) {
+	response, file, err := g.Call(ctx, GrantRequest{Op: GrantOpen, GrantID: grantID, AssetID: assetID})
 	if err != nil {
 		return nil, "", err
 	}
@@ -155,20 +167,20 @@ func (c GrantClient) Open(ctx context.Context, grantID, assetID string) (*os.Fil
 }
 
 // Remove takes assets out of a grant.
-func (c GrantClient) Remove(ctx context.Context, grantID string, assetIDs []string) error {
-	_, err := c.plain(ctx, GrantRequest{Op: GrantRemove, GrantID: grantID, AssetIDs: assetIDs})
+func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) error {
+	_, err := g.plain(ctx, GrantRequest{Op: GrantRemove, GrantID: grantID, AssetIDs: assetIDs})
 	return err
 }
 
 // List lists every grant, revoked ones included.
-func (c GrantClient) List(ctx context.Context) ([]photos.Grant, error) {
-	response, err := c.plain(ctx, GrantRequest{Op: GrantList})
+func (g Grants) List(ctx context.Context) ([]photos.Grant, error) {
+	response, err := g.plain(ctx, GrantRequest{Op: GrantList})
 	return response.Grants, err
 }
 
 // Revoke revokes a grant; revoking again changes nothing.
-func (c GrantClient) Revoke(ctx context.Context, grantID string) error {
-	_, err := c.plain(ctx, GrantRequest{Op: GrantRevoke, GrantID: grantID})
+func (g Grants) Revoke(ctx context.Context, grantID string) error {
+	_, err := g.plain(ctx, GrantRequest{Op: GrantRevoke, GrantID: grantID})
 	return err
 }
 
