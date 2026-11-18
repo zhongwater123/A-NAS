@@ -1093,13 +1093,14 @@ A-NAS 依赖 Hermes 的面，按稳定程度排：
 2. managed scope 的键与工具集名字：工具集核对（[`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)）在升级后新增、改名或删除工具集时失败。
 3. `hermes curator run`、任务表 `cron/jobs.json` 的格式，以及定时任务的一轮（[`cron_round.py`](../../ai/assistant/cron_round.py)）：`hermes gateway run`、`hermes cron tick`、`hermes gateway stop`，加两处上游内部的查询，`hermes_cli.gateway_runtime.discover_gateway_endpoint`（gateway 是否就绪）与 `cron.executions.live_executions`（有没有任务在执行）；“立即运行”另用 `cron.jobs.trigger_job`（排到下一次调度），实例的启动脚本另用 `hermes_cli.gateway_runtime_start.spawn_unmanaged_gateway`（换成拒绝，名字没了实例就起不来）。2026-11-10 的升级卡在这里；内部查询改了名，这一轮会直接失败，系统测试的定时任务一节随之失败。
    - 剪辑中心的规划（[`montage_round.py`](../../ai/assistant/montage_round.py)，剪辑中心方案 `docs/architecture/montage-center.md` 的“发起与结束”）还依赖：
-     - `cron.jobs.create_job` 的 `enabled_toolsets` 与 `paused` 参数：任务自己的工具组优先于 `platform_toolsets.cron`，点名一个 MCP 服务器时不再并入别的服务器；
+     - `cron.jobs.create_job` 的 `enabled_toolsets` 与 `paused` 参数：任务自己的工具组优先于 `platform_toolsets.cron`。任务的清单写 `["montage", "no_mcp"]`：清单点名了配置里有的 MCP 服务器时，Hermes 不再并入别的服务器；可清单里的名字在它读到的配置里找不到时（配置缺 `montage` 这一条），它会并入全部已启用的服务器（`anas`、`companion`、`desktop`），`no_mcp` 关掉这一步（`cron/scheduler.py` 的 `_merge_mcp_into_per_job_toolsets`）；
      - `cron.jobs.remove_job` 与 `pause_job`；
      - `hermes_state.SessionDB` 的 `list_cron_job_runs` 与 `delete_session`：删任务前先删它的运行会话；
+     - `hermes_constants.get_hermes_home`：领取回执写在成员的 Hermes 主目录里，唤醒服务据此计授权的轮数；
      - 定时任务的运行固定 `skip_background_review=True`（这一轮之后不跑后台复盘）；
      - 定时任务的运行固定 `skip_memory=False`（成员的记忆进这一轮的系统提示）。
 
-     升级后用 [P1 探针](https://github.com/zhongwater123/A-NAS/pull/546)的 `montage-plan.sh` 逐项核对。前三项改名，规划这一轮会直接失败。后两项变了，要重新评估：后台复盘在规划这一轮里拿得到记忆与技能工具；而记忆会随这一轮发给云端模型，这一点写在规格里。
+     升级后用 [P1 探针](https://github.com/zhongwater123/A-NAS/pull/546)的 `montage-plan.sh` 逐项核对。带真实运行环境的系统测试也核对其中三项：[`montage-toolsets.py`](../../ai/assistant-spike/montage-toolsets.py) 用 Hermes 自己的解析函数确认规划任务只得到 `montage` 工具组（配置里有没有这一条都一样），并确认 `cron/scheduler.py` 仍传 `skip_background_review=True`；定时任务一节确认一次运行之后模型没有收到复盘请求。改名的几项，规划这一轮会直接失败。`skip_background_review` 与 `skip_memory` 变了，要重新评估：后台复盘在规划这一轮里拿得到记忆与技能工具；而记忆会随这一轮发给云端模型，这一点写在规格里。
 4. `hermes serve` 的 JSON-RPC 与 REST 中白名单放行的部分，以及 Hermes 自己的登录：这是 Desktop 的后端，上游按自己的需要改，没有兼容承诺。
 5. 复制进前端的 Desktop 聊天层。
 6. 带着的补丁。
