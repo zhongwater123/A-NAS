@@ -79,6 +79,33 @@
   text-align: center;
 }
 
+/* A page that could not load: why, and 重试. */
+.mt-failed-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--mt-bad);
+  background: var(--mt-bad-soft);
+}
+.mt-failed-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.mt-failed-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  border-radius: 10px;
+  color: var(--mt-bad);
+  background: var(--mt-bad-soft);
+  font-size: 13px;
+}
+
 /* --- buttons, tags --- */
 .mt-btn {
   display: inline-flex;

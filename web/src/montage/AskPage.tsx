@@ -5,6 +5,7 @@ import { useState } from "react";
 import { errorText } from "../api/errorMessages";
 import { Spinner } from "../ui/workspace";
 import { type MontageProjectDetail, updateProject } from "./api";
+import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { projectQuery } from "./queries";
 import { limitsOf } from "./words";
@@ -23,7 +24,7 @@ export function AskPage({ id, onBack }: { id: string; onBack: () => void }) {
         <ChevronLeft aria-hidden="true" />
         返回项目
       </button>
-      {project.error && <p className={styles.mtError}>{errorText(project.error)}</p>}
+      {project.error && <Failed error={project.error} onRetry={() => void project.refetch()} />}
       {project.data ? <Ask detail={project.data} onBack={onBack} /> : !project.error && <Spinner />}
     </main>
   );

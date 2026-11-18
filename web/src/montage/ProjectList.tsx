@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Clapperboard, Plus } from "lucide-react";
 
-import { errorText } from "../api/errorMessages";
 import { Spinner } from "../ui/workspace";
 import { listProjects } from "./api";
+import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 
 export const projectsQuery = {
@@ -53,7 +53,7 @@ export function Home({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (
             </small>
           )}
         </div>
-        {projects.error && <p className={styles.mtError}>{errorText(projects.error)}</p>}
+        {projects.error && <Failed inline error={projects.error} onRetry={() => void projects.refetch()} />}
         {!projects.data && !projects.error && <Spinner />}
         {projects.data?.length === 0 && <p className={styles.mtFaint}>还没有项目：新建一个，交一批视频开始。</p>}
         <ul className={styles.mtRows}>

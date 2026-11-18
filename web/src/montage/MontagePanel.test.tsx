@@ -229,4 +229,28 @@ describe("剪辑中心", () => {
     await waitFor(() => expect(seen.chosen).toBe("file:forever"));
     expect(await within(songs).findByText("正在分析节拍与段落…")).toBeInTheDocument();
   });
+
+  it("tells why a project could not load, and loads it again on 重试", async () => {
+    let down = true;
+    serve(
+      () => project(),
+      () => job("queued"),
+      { generated: 0 },
+    );
+    server.use(
+      http.get("/api/v1/montage/projects/{projectId}", ({ response }) =>
+        down
+          ? response(503).json({
+              error: { code: "montage_unavailable", message: "the montage service is not running" },
+            })
+          : response(200).json(project()),
+      ),
+    );
+    render(<MontagePanel userId="user:alice" />);
+    await userEvent.click(await screen.findByRole("button", { name: /2026-08-02 至 08-04/ }));
+    const failed = await screen.findByRole("alert", {}, { timeout: 4000 });
+    down = false;
+    await userEvent.click(within(failed).getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("main", { name: "2026-08-02 至 08-04" })).toBeInTheDocument();
+  });
 });

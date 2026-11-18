@@ -36,6 +36,7 @@ import {
   retryJob,
   updateProject,
 } from "./api";
+import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { projectQuery, songQuery } from "./queries";
 import { active, needs, stateText, stepNames } from "./words";
@@ -79,7 +80,7 @@ export function ProjectView({
     },
   });
 
-  if (project.error) return <p className={`${styles.mtCentered} ${styles.mtError}`}>{errorText(project.error)}</p>;
+  if (project.error) return <Failed error={project.error} onRetry={() => void project.refetch()} />;
   if (!project.data) {
     return (
       <div className={styles.mtCentered}>

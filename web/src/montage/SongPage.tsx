@@ -6,6 +6,7 @@ import { errorText } from "../api/errorMessages";
 import { coverURL, listTracks, streamURL } from "../music/api";
 import { Spinner } from "../ui/workspace";
 import { chooseSong, type MontageSong, songAudioURL, updateProject } from "./api";
+import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { clock, songQuery } from "./queries";
 
@@ -78,7 +79,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
           {tracks.data && <small>曲库 {tracks.data.items.length} 首</small>}
         </div>
-        {song.error && <p className={styles.mtError}>{errorText(song.error)}</p>}
+        {song.error && <Failed inline error={song.error} onRetry={() => void song.refetch()} />}
         {song.data && <Chosen projectId={id} song={song.data} />}
         <div className={styles.mtSearch}>
           <Search aria-hidden="true" />
@@ -92,7 +93,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
           />
         </div>
         <div className={styles.mtLabel}>音乐库</div>
-        {tracks.error && <p className={styles.mtError}>{errorText(tracks.error)}</p>}
+        {tracks.error && <Failed inline error={tracks.error} onRetry={() => void tracks.refetch()} />}
         {choose.error && <p className={styles.mtError}>{errorText(choose.error)}</p>}
         {!tracks.data && !tracks.error && <Spinner small />}
         {tracks.data && shown.length === 0 && (
