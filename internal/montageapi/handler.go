@@ -60,6 +60,8 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"POST /jobs/{jobID}/retry":             h.retryJob,
 		"POST /jobs/{jobID}/replan":            h.replan,
 		"GET /notices":                         h.notices,
+		"GET /hero":                            h.hero("film"),
+		"GET /hero/poster":                     h.hero("poster"),
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")

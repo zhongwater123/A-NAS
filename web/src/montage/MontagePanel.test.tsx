@@ -297,10 +297,15 @@ describe("剪辑中心", () => {
       seen,
     );
     render(<MontagePanel userId="user:alice" />);
-    // The newest project is selected; a click on it keeps it selected.
+    // The newest project is selected; a click unselects it, another selects it again.
     const row = await screen.findByRole("button", { name: "选中 2026-08-02 至 08-04" });
     expect(row).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(row);
+    expect(row).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("先在上面选一个项目，再开始剪辑。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始剪辑" })).toBeDisabled();
+    await userEvent.click(row);
+    expect(row).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByRole("button", { name: /配乐 Symphony/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "开始剪辑" }));
     await waitFor(() => expect(seen.generated).toBe(1));

@@ -157,7 +157,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// A film: 202 and the job to poll; one job at a time.
 	var job montage.Job
 	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
-	if job.State != montage.JobQueued || len(job.Steps) != len(montage.StepNames) {
+	if job.State != montage.JobQueued || len(job.Steps) != 3+5*montage.DefaultPlans {
 		t.Fatalf("job = %+v", job)
 	}
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)

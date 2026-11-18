@@ -67,3 +67,7 @@ export const songAudioURL = (projectId: string, start?: number) =>
 export async function listNotices(signal?: AbortSignal): Promise<MontageNotice[]> {
   return (await call(client.GET("/api/v1/montage/notices", { signal }))).items;
 }
+
+// The device's background film for the home page, and its poster; 404 without one.
+export const heroURL = "/api/v1/montage/hero";
+export const heroPosterURL = "/api/v1/montage/hero/poster";

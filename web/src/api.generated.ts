@@ -2358,6 +2358,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/hero": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
+        get: operations["getMontageHero"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The background film's poster (hero/hero.jpg); 404 without one. */
+        get: operations["getMontageHeroPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules": {
         parameters: {
             query?: never;
@@ -8006,7 +8040,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
-            previewAssetIds: string[];
+            previewAssetIds?: string[];
         };
         MontageProjectPage: {
             items: components["schemas"]["MontageProjectSummary"][];
@@ -13432,6 +13466,68 @@ export interface operations {
                 content?: never;
             };
             422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHero: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The film */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            /** @description Part of the film */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the film. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHeroPoster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

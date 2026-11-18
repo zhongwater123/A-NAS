@@ -84,7 +84,7 @@ type Project struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	// PreviewAssetIDs are up to six of its videos, spread over the order
 	// they were added: the list shows their thumbnails.
-	PreviewAssetIDs []string `json:"previewAssetIds"`
+	PreviewAssetIDs []string `json:"previewAssetIds,omitempty"`
 }
 
 // previewCount is how many videos a project in the list shows.

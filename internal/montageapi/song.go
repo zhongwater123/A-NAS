@@ -179,3 +179,20 @@ func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user account
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, body)
 }
+
+// hero serves the device's background film for the home page, or its
+// poster: 404 when the device has none, and the page plays the member's
+// videos instead.
+func (h *handler) hero(which string) route {
+	return func(w http.ResponseWriter, r *http.Request, _ accounts.User) {
+		file, err := h.store.OpenHero(which)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		defer func() { _ = file.File.Close() }()
+		w.Header().Set("Content-Type", file.ContentType)
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		http.ServeContent(w, r, "", file.Info.ModTime(), file.File)
+	}
+}

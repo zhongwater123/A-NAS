@@ -876,3 +876,27 @@ func TestTheProjectListShowsAFewOfEachProjectsVideos(t *testing.T) {
 		t.Fatalf("page = %+v, %v", page, err)
 	}
 }
+
+func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
+	env := newJobEnv(t)
+	if _, err := env.store.OpenHero("film"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("without a hero = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(env.root, "hero"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.root, "hero", "hero.mp4"), []byte("film"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	hero, err := env.store.OpenHero("film")
+	if err != nil || hero.ContentType != "video/mp4" || hero.Info.Size() != 4 {
+		t.Fatalf("hero = %+v, %v", hero, err)
+	}
+	_ = hero.File.Close()
+	if _, err := env.store.OpenHero("poster"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("a poster the device does not have = %v", err)
+	}
+	if _, err := env.store.OpenHero("../montage.db"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("another file = %v", err)
+	}
+}

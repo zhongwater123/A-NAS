@@ -8,7 +8,7 @@ schemas:
   MontageProjectSummary:
     type: object
     additionalProperties: false
-    required: [id, name, assetCount, createdAt, previewAssetIds]
+    required: [id, name, assetCount, createdAt]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }

@@ -21,7 +21,7 @@ function reelOf(projects: MontageProject[]): string[] {
   const reel: string[] = [];
   for (let round = 0; reel.length < 3 && round < 6; round++) {
     for (const project of projects) {
-      const id = project.previewAssetIds[round];
+      const id = project.previewAssetIds?.[round];
       if (id && reel.length < 3) reel.push(id);
     }
   }
@@ -30,8 +30,9 @@ function reelOf(projects: MontageProject[]): string[] {
 
 // Home is the prototype's first page, where editing starts: the hero over
 // the member's own videos; the projects as the footage step's folders,
-// one selected with a click and opened with its arrow; and, for the one
-// selected, the bar that starts the film, the job and its 方案.
+// one selected with a click, unselected with another, and opened with its
+// arrow; and, for the one selected, the bar that starts the film, the job
+// and its 方案. Until the member clicks, the newest is selected.
 export function Home({
   selected,
   onSelect,
@@ -39,15 +40,16 @@ export function Home({
   onPage,
   onNew,
 }: {
-  selected?: string;
-  onSelect: (id: string) => void;
+  // undefined: the newest; null: none.
+  selected?: string | null;
+  onSelect: (id: string | null) => void;
   onOpen: (id: string) => void;
   onPage: (id: string, page: "song" | "ask") => void;
   onNew: () => void;
 }) {
   const projects = useQuery(projectsQuery);
   const list = projects.data ?? [];
-  const chosen = list.find((project) => project.id === selected) ?? list[0];
+  const chosen = selected === null ? undefined : (list.find((project) => project.id === selected) ?? list[0]);
   return (
     <main className={styles.mtMain}>
       <section className={styles.mtHero}>
@@ -90,7 +92,7 @@ export function Home({
                   className={styles.mtPick}
                   aria-pressed={on}
                   aria-label={`选中 ${project.name}`}
-                  onClick={() => onSelect(project.id)}
+                  onClick={() => onSelect(on ? null : project.id)}
                 >
                   <span className={styles.mtTick} aria-hidden="true">
                     <Check />
@@ -106,7 +108,7 @@ export function Home({
                   </span>
                 </button>
                 <ul className={styles.mtStrip} aria-hidden="true">
-                  {project.previewAssetIds.map((id) => (
+                  {(project.previewAssetIds ?? []).map((id) => (
                     <li key={id}>
                       <img src={thumbnailURL(id)} alt="" loading="lazy" />
                     </li>
@@ -130,7 +132,18 @@ export function Home({
           新建项目
         </button>
       </section>
-      {chosen && <Studio key={chosen.id} id={chosen.id} onPage={(page) => onPage(chosen.id, page)} />}
+      {chosen ? (
+        <Studio key={chosen.id} id={chosen.id} onPage={(page) => onPage(chosen.id, page)} />
+      ) : (
+        list.length > 0 && (
+          <section className={`${styles.mtPanel} ${styles.mtGo}`} aria-label="开始剪辑">
+            <p className={styles.mtFaint}>先在上面选一个项目，再开始剪辑。</p>
+            <button type="button" className={`${styles.mtBtn} ${styles.primary} ${styles.big}`} disabled>
+              开始剪辑
+            </button>
+          </section>
+        )
+      )}
     </main>
   );
 }

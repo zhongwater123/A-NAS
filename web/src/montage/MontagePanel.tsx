@@ -26,8 +26,9 @@ export function MontagePanel({ userId }: { userId: string }) {
     () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000, refetchOnWindowFocus: false } } }),
   );
   const [view, setView] = useState<MontageView>({ kind: "home" });
-  // The project selected on the home page; the newest until one is clicked.
-  const [selected, setSelected] = useState<string>();
+  // The project selected on the home page: the newest until one is
+  // clicked (undefined), none once the member unselects it (null).
+  const [selected, setSelected] = useState<string | null>();
   const open = (id: string) => setView({ kind: "project", id });
   const home = () => setView({ kind: "home" });
   return (
