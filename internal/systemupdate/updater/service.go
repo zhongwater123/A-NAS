@@ -97,6 +97,8 @@ func (s *Service) Run(ctx context.Context, request Request) error {
 		err = s.revert(ctx, &state, request.By)
 	case RequestBoot:
 		err = s.boot(ctx, &state)
+	case RequestRestart:
+		// apt installs without a restart.
 	default:
 		return fmt.Errorf("no such update request: %q", request.Kind)
 	}

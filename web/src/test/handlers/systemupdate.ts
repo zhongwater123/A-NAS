@@ -41,7 +41,21 @@ export function systemUpdateHandlers(options: SystemUpdateOptions = {}) {
       sent.actions.push(action);
       if (options.refuse) return response(409).json(apiError(options.refuse, "refused"));
       const at = new Date().toISOString();
-      if (action === "install" && status.candidate) {
+      if (action === "install" && status.candidate && status.image?.restart) {
+        // A device that runs the A-NAS image: the new base waits for a restart.
+        status = { ...status, phase: "restart-pending", target: status.candidate };
+      } else if (action === "restart" && status.phase === "restart-pending" && status.target) {
+        status = {
+          ...status,
+          phase: "up-to-date",
+          previous: status.current,
+          current: status.target,
+          candidate: undefined,
+          target: undefined,
+          image: status.image && { base: status.image.base, restart: false },
+          records: [{ at, kind: "updated", version: status.target, from: status.current, by: "owner" }],
+        };
+      } else if (action === "install" && status.candidate) {
         status = {
           ...status,
           phase: "up-to-date",

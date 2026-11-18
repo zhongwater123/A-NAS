@@ -74,6 +74,37 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	}
 }
 
+func TestTheFirstReadAfterARestartIntoANewBaseStartsTheService(t *testing.T) {
+	root := t.TempDir()
+	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
+	runner := &systemdRunner{activeState: "inactive"}
+	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	bootID := filepath.Join(root, "proc", "sys", "kernel", "random", "boot_id")
+	if err := os.MkdirAll(filepath.Dir(bootID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bootID, []byte("boot-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(systemupdate.State{Phase: systemupdate.PhaseRestartPending, Target: "2", Current: "1",
+		Image: &systemupdate.Image{BootID: "boot-1", TargetBase: "1002"}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// Before the restart: it waits for the administrator.
+	if status, err := executor.SystemUpdate(ctx); err != nil || status.Running ||
+		slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
+		t.Fatalf("before the restart = %+v, %v; commands %v", status, err, runner.commands)
+	}
+	if err := os.WriteFile(bootID, []byte("boot-2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := executor.SystemUpdate(ctx)
+	if err != nil || !status.Running || !slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
+		t.Fatalf("after the restart = %+v, %v; commands %v", status, err, runner.commands)
+	}
+}
+
 func TestARequestIsNotLeftIfTheWatcherDoesNotStart(t *testing.T) {
 	root := t.TempDir()
 	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}

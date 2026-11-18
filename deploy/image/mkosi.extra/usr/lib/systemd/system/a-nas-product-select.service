@@ -1,0 +1,14 @@
+# Links the product that runs on the booted base before systemd-sysext merges
+# it (/usr/lib/a-nas-image/product-select): after systemd-boot goes back to
+# the base before, that base starts with its own product.
+[Unit]
+Description=Choose the A-NAS product for this base image
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-sysext.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/a-nas-image/product-select

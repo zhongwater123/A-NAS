@@ -29,7 +29,7 @@ import type { HostStateView } from "../desktop/useHostState";
 import type { PinyinMatch } from "../music/library";
 import { loadPinyin } from "../music/pinyin";
 import { displayName } from "../people/people";
-import { hasNewVersion, useSystemUpdate } from "../systemupdate/status";
+import { hasNewVersion, useSystemUpdate, waitsForRestart } from "../systemupdate/status";
 import { useToasts } from "../ui/feedback";
 import { AccountSection } from "./AccountSection";
 import { roleLabel } from "./labels";
@@ -215,7 +215,7 @@ export function SettingsPanel({
               groups={links}
               current={current}
               terminalRunning={current !== "terminal" && terminalStatus?.state === "connected"}
-              newVersion={hasNewVersion(update)}
+              updateMark={hasNewVersion(update) ? "有新版本" : waitsForRestart(update) ? "等待重启" : undefined}
               onGo={go}
             />
           </SettingsSearch>
@@ -294,14 +294,15 @@ function SectionNav({
   groups,
   current,
   terminalRunning,
-  newVersion,
+  updateMark,
   onGo,
 }: {
   user: User;
   groups: SectionLink[][];
   current: SettingsSection;
   terminalRunning: boolean;
-  newVersion: boolean;
+  // updateMark says why 系统更新 wants a look: a new version, or one that waits for a restart.
+  updateMark?: string;
   onGo: (section: SettingsSection) => void;
 }) {
   const nav = useRef<HTMLElement>(null);
@@ -347,9 +348,9 @@ function SectionNav({
               {id === "terminal" && terminalRunning && (
                 <span className={styles.setNavLive} title="Shell 正在运行" aria-hidden="true" />
               )}
-              {id === "system-update" && newVersion && (
-                <span className={styles.setNavMark} title="有新版本">
-                  <span className="sr-only">有新版本</span>
+              {id === "system-update" && updateMark && (
+                <span className={styles.setNavMark} title={updateMark}>
+                  <span className="sr-only">{updateMark}</span>
                 </span>
               )}
               <ChevronRight className={styles.setNavGo} aria-hidden="true" />
