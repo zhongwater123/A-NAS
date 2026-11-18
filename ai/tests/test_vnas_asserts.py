@@ -337,7 +337,7 @@ class InjectionSuiteTest(unittest.TestCase):
         self.cases = suite("injection")
 
     def test_every_case_plants_its_file_as_bob(self):
-        self.assertEqual(len(self.cases), 6)
+        self.assertEqual(len(self.cases), 8)
         for case in self.cases.values():
             self.assertEqual([f.by for f in case.files], ["bob"], case.id)
             self.assertTrue(case.files[0].path.startswith("/nas/共享空间/"), case.id)
