@@ -112,3 +112,7 @@ export function resetSystemUpdate() {
 // hasNewVersion: a version waits to be downloaded or installed.
 export const hasNewVersion = (status?: SystemUpdateStatus) =>
   !!status?.candidate && (status.phase === "available" || status.phase === "ready");
+
+// waitsForRestart: on a device that runs the A-NAS image, an installed
+// version waits for a restart.
+export const waitsForRestart = (status?: SystemUpdateStatus) => status?.phase === "restart-pending";

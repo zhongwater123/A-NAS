@@ -15,6 +15,7 @@ const problemCodes: string[] = [
   "rollback",
   "staging",
   "not_installed",
+  "boot",
 ] satisfies ProblemCode[];
 export const isProblemCode = (code: string): code is ProblemCode => problemCodes.includes(code);
 
@@ -39,9 +40,11 @@ export function problemText(problem: SystemUpdateProblem): string {
     case "rollback":
       return "回到原版本时出错";
     case "staging":
-      return "读取推送来的软件源时出错";
+      return "读取推送来的更新文件时出错";
     case "not_installed":
-      return "这台设备不是用 A-NAS 软件包安装的";
+      return "这台设备上没有找到安装好的 A-NAS";
+    case "boot":
+      return "新系统重启后没有通过开机检查，已回到原来的系统";
   }
 }
 

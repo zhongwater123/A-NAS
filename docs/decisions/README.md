@@ -53,6 +53,7 @@
 - [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)
 - [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 - [2026-11-13：VNAS 评分场景用哪个模型当评审](2026-11-13-assistant-eval-judge.md)
+- [2026-11-17：AI 助手 V1 的模型、开启范围、密钥与告知](2026-11-17-assistant-v1-cloud-model.md)
 
 ### 桌面与设置
 
@@ -88,6 +89,11 @@
 ### 照片打分
 
 - [2026-11-12：照片打分用什么做、放在哪里](2026-11-12-photo-scoring.md)
+
+### 仓库与版权
+
+- [2026-11-17：仓库保持公开，声明保留所有权利](2026-11-17-all-rights-reserved.md)
+- [2026-11-17：版权人与贡献者授权](2026-11-17-copyright-holder-and-contributor-grants.md)
 
 ## 状态
 

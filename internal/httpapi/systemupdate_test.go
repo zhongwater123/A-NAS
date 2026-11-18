@@ -42,7 +42,7 @@ func TestSystemUpdateFollowsTheContractForAdministratorsAlone(t *testing.T) {
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// Each operation of the service in memory ends once 100 ms have passed.
-	updater := systemupdate.NewMemory("1.0.1", "1.0.2", 100*time.Millisecond)
+	updater := systemupdate.NewMemory("1.0.1", "1.0.2", 100*time.Millisecond, false)
 	var waiting []string
 	work := func(context.Context) []string { return waiting }
 	handler := checkedProduct(t, httpapi.ProductDependencies{
