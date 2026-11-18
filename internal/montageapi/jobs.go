@@ -15,6 +15,9 @@ type generateRequest struct {
 }
 
 func (h *handler) generate(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
 	var request generateRequest
 	if !httpjson.Read(w, r, maxJSONBytes, &request) {
 		return
@@ -50,6 +53,9 @@ type dropRequest struct {
 }
 
 func (h *handler) dropAssets(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
 	var request dropRequest
 	if !httpjson.Read(w, r, maxJSONBytes, &request) {
 		return
@@ -63,6 +69,9 @@ func (h *handler) dropAssets(w http.ResponseWriter, r *http.Request, user accoun
 }
 
 func (h *handler) retryAnalysis(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
 	job, err := h.store.RetryAnalysis(r.Context(), user.ID, r.PathValue("jobID"))
 	if err != nil {
 		h.fail(w, r, err)
@@ -81,6 +90,9 @@ func (h *handler) retryJob(w http.ResponseWriter, r *http.Request, user accounts
 }
 
 func (h *handler) replan(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
 	job, err := h.store.Replan(r.Context(), user.ID, r.PathValue("jobID"))
 	if err != nil {
 		h.fail(w, r, err)
@@ -100,4 +112,17 @@ func (h *handler) notices(w http.ResponseWriter, r *http.Request, user accounts.
 		return
 	}
 	httpjson.Write(w, http.StatusOK, noticesResponse{Items: notices})
+}
+
+// notePlanGrant records the planning grant the Product Service registered
+// for this request, as AssistantHeader says (planning.go).
+func (h *handler) notePlanGrant(w http.ResponseWriter, r *http.Request, user accounts.User) bool {
+	if r.Header.Get(AssistantHeader) != "on" {
+		return true
+	}
+	if err := h.store.RegisterPlanGrant(r.Context(), user.ID, user.Username); err != nil {
+		h.fail(w, r, err)
+		return false
+	}
+	return true
 }

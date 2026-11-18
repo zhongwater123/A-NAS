@@ -116,7 +116,13 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 	}
 	if h.Montage != nil {
-		mount(montageapi.PathPrefix, apiroute.Session, withUser(withoutAssistantHeader(h.Montage)), montageapi.Endpoints())
+		mount(montageapi.PathPrefix, apiroute.Session, withUser(withoutAssistantHeader(h.Montage)), montageapi.ProductEndpoints())
+		// The requests that may lead to planning register a planning grant
+		// first (docs/architecture/montage-center.md, 规划授权).
+		for _, endpoint := range montageapi.PlanningRoutes {
+			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
+				Handler: montageapi.RegisterPlan(h.PlanGrants, h.Montage, h.Logger)})
+		}
 		// Choosing a song copies it from the member's music library here
 		// first (docs/specs/montage-center.md, 配乐).
 		var tracks montageapi.Tracks

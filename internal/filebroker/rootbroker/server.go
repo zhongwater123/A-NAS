@@ -90,6 +90,9 @@ type Config struct {
 	// run now and no round has taken yet, a file each in <username>; root's
 	// alone. Empty turns running a task now off.
 	AssistantRuns string
+	// AssistantPlans holds each member's planning grant, <username>, for the
+	// montage center (assistant_plan); root's alone. Empty turns it off.
+	AssistantPlans string
 	// AssistantOn reports whether the administrator's model key is saved;
 	// without it no member's task runs now, and nil counts as saved.
 	AssistantOn func() bool
@@ -287,6 +290,11 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	case wire.OpAssistantRun:
 		if err := wire.WriteMessage(conn, s.serveAssistantRun(req), nil); err != nil {
+			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
+		}
+		return
+	case wire.OpAssistantPlan:
+		if err := wire.WriteMessage(conn, s.serveAssistantPlan(req), nil); err != nil {
 			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
 		}
 		return

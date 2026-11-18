@@ -495,6 +495,11 @@ type montageServiceConfig struct {
 	// yet (M9): the development machine and the system test only. Without
 	// it the montage center makes no film.
 	PlanAnswers string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
+	// AssistantSocket is where members' cron units reach the montage
+	// center when systemd does not hold the socket (development);
+	// PlanMarkers is where the waker finds who has a job to plan.
+	AssistantSocket string `env:"ANAS_MONTAGE_ASSISTANT_SOCKET"`
+	PlanMarkers     string `env:"ANAS_MONTAGE_PLAN_MARKERS" envDefault:"/run/a-nas-montage/plans"`
 }
 
 // loadMontageServiceConfig resolves and validates the montage service's
@@ -508,6 +513,7 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
 		"ANAS_PHOTOS_GRANT_SOCKET": &c.GrantSocket, "ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 		"ANAS_MONTAGE_MUSIC_SOCKET": &c.MusicSocket, "ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket, "ANAS_MONTAGE_PLAN_ANSWERS": &c.PlanAnswers,
+		"ANAS_MONTAGE_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_MONTAGE_PLAN_MARKERS": &c.PlanMarkers,
 	})
 	if len(problems) > 0 {
 		return montageServiceConfig{}, errors.Join(problems...)

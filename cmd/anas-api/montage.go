@@ -43,7 +43,11 @@ func runMontageService(logger *slog.Logger) error {
 		JobCompute: montagecompute.Client{SocketPath: config.ComputeSocket},
 		Editing:    config.Media.client(),
 		Planner:    planner(config.PlanAnswers),
-		Logger:     logger,
+		// The member's VNAS plans on the montage center's assistant socket.
+		Accounts:        sessionlookup.NewClient(config.SessionSocket),
+		AssistantSocket: config.AssistantSocket,
+		PlanMarkers:     config.PlanMarkers,
+		Logger:          logger,
 	})
 }
 

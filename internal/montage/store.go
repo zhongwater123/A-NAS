@@ -306,6 +306,10 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
 		planMarkers: options.PlanMarkers}
 	store.jobMusic = store
+	// Without a stand-in, the member's VNAS plans, where markers reach it.
+	if store.planner == nil && store.planMarkers != "" {
+		store.planner = store.VNASPlanner()
+	}
 	if store.now == nil {
 		store.now = time.Now
 	}

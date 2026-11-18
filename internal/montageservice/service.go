@@ -19,6 +19,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
@@ -47,7 +48,14 @@ type Config struct {
 	JobCompute montage.Compute
 	Editing    montage.Editing
 	Planner    montage.Planner
-	Logger     *slog.Logger
+	// Accounts names the account behind a member's UID; AssistantSocket is
+	// where members' cron units reach the montage center when systemd does
+	// not hold it; PlanMarkers is the directory of planning markers the
+	// waker reads (docs/architecture/montage-center.md, 规划).
+	Accounts        AccountResolver
+	AssistantSocket string
+	PlanMarkers     string
+	Logger          *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -134,10 +142,32 @@ func Run(parent context.Context, config Config) error {
 	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
+	// Members' cron units reach the montage center on its assistant socket,
+	// where their UID says who they are.
+	var assistantAPI atomic.Pointer[http.Handler]
+	if config.Accounts != nil {
+		assistantListener, _, err := assistantSocket(config.AssistantSocket)
+		if err != nil {
+			return err
+		}
+		if assistantListener != nil {
+			byStore := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if h := assistantAPI.Load(); h != nil && *h != nil {
+					(*h).ServeHTTP(w, r)
+					return
+				}
+				httpjson.WriteError(w, http.StatusServiceUnavailable, montageapi.Unavailable, "the montage center is not available")
+			})
+			go serveAssistant(ctx, assistantListener, authenticatePeer(config.Accounts, config.Logger, byStore), config.Logger)
+		}
+	}
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
-		supervise(ctx, config, func(h http.Handler) { current.Store(&h) }, unavailable)
+		supervise(ctx, config, func(api, assistant http.Handler) {
+			current.Store(&api)
+			assistantAPI.Store(&assistant)
+		}, unavailable)
 	}()
 	defer func() {
 		cancel()
@@ -166,7 +196,7 @@ func RemoveAccount(store *montage.Store) accountremoval.Remove {
 
 // supervise opens the store when it is ready, serves it, and takes it out of
 // service when the data volume goes away or turns read-only.
-func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
+func supervise(ctx context.Context, config Config, serve func(api, assistant http.Handler), unavailable http.Handler) {
 	ticker := time.NewTicker(config.RetryInterval)
 	defer ticker.Stop()
 	warned := false
@@ -198,7 +228,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			_ = store.Close()
 		}
 		serve(accountremoval.Route(config.Sessions.AccountDeletion, RemoveAccount(store), config.Logger,
-			montageapi.New(store, config.Logger)))
+			montageapi.New(store, config.Logger)), montageapi.Assistant(store, config.Logger))
 		config.Logger.Info(Ready)
 		warned = false
 		// The projects are reconciled with the photo library's grants once
@@ -207,7 +237,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 		for {
 			select {
 			case <-ctx.Done():
-				serve(unavailable)
+				serve(unavailable, nil)
 				closeStore()
 				return
 			case <-ticker.C:
@@ -227,7 +257,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			}
 			current, err := os.Lstat(config.Root)
 			if err = errors.Join(err, config.CheckStore(config.Root)); err != nil || !os.SameFile(opened, current) {
-				serve(unavailable)
+				serve(unavailable, nil)
 				closeStore()
 				config.Logger.WarnContext(ctx, "montage store unavailable", "error", err)
 				break
@@ -265,7 +295,8 @@ func open(ctx context.Context, config Config) (*montage.Store, os.FileInfo, erro
 		return nil, nil, err
 	}
 	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music,
-		Compute: config.Compute, JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, Logger: config.Logger})
+		Compute: config.Compute, JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner,
+		PlanMarkers: config.PlanMarkers, Logger: config.Logger})
 	if err != nil {
 		return nil, nil, err
 	}
