@@ -137,6 +137,7 @@ paths:
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
+  /api/v1/montage: { $ref: "paths/montage.yaml#/~1api~1v1~1montage" }
   /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
