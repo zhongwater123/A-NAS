@@ -133,14 +133,21 @@ def load(world):
         "hermes_cli": types.ModuleType("hermes_cli"),
         "hermes_cli.gateway_runtime": types.ModuleType("hermes_cli.gateway_runtime"),
         "hermes_constants": types.ModuleType("hermes_constants"),
+        # The montage center's planning, which cron_round imports; without its
+        # socket it plans nothing, so these only have to be there.
+        "hermes_state": types.ModuleType("hermes_state"),
+        "montage_round": None,
     }
     stand_ins["cron.executions"].live_executions = world.live_executions
     stand_ins["cron.jobs"].load_jobs = world.load_jobs
     stand_ins["cron.jobs"].trigger_job = world.trigger_job
+    stand_ins["cron.jobs"].create_job = stand_ins["cron.jobs"].remove_job = lambda *_, **__: None
+    stand_ins["hermes_state"].SessionDB = object
     stand_ins["hermes_cli.gateway_runtime"].discover_gateway_endpoint = world.discover
     stand_ins["hermes_constants"].get_hermes_home = lambda: Path("/var/lib/hermes-home")
     saved = {name: sys.modules.get(name) for name in stand_ins}
-    sys.modules.update(stand_ins)
+    sys.modules.update({name: stand_in for name, stand_in in stand_ins.items() if stand_in is not None})
+    sys.modules.pop("montage_round", None)  # imported afresh against these stand-ins
     try:
         spec = importlib.util.spec_from_file_location("cron_round_under_test", SOURCE)
         module = importlib.util.module_from_spec(spec)
