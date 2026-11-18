@@ -59,12 +59,13 @@ func (s *Service) windowsCollection(ctx context.Context, index VectorIndex, repo
 	var identity string
 	err = s.db.QueryRowContext(ctx, "SELECT identity FROM video_windows ORDER BY rowid DESC LIMIT 1").Scan(&identity)
 	if errors.Is(err, sql.ErrNoRows) {
-		if current.name != "" {
-			if err := index.DeleteCollection(ctx, current.name); err != nil {
-				return windowsCollection{}, err
-			}
-			_, err = s.db.ExecContext(ctx, "DELETE FROM vector_index_state WHERE name = ?", windowsIndex)
+		if current.name == "" {
+			return windowsCollection{}, nil
 		}
+		if err := index.DeleteCollection(ctx, current.name); err != nil {
+			return windowsCollection{}, err
+		}
+		_, err = s.db.ExecContext(ctx, "DELETE FROM vector_index_state WHERE name = ?", windowsIndex)
 		return windowsCollection{}, err
 	}
 	if err != nil {

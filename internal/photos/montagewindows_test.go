@@ -362,3 +362,22 @@ func TestWindowVectorsReachTheirOwnCollectionAndGoWithTheirVideo(t *testing.T) {
 		t.Fatalf("points left of a purged video = %d", count)
 	}
 }
+
+// A video queued for the window index when no video has windows any more,
+// as after the last one's analysis was pruned, leaves the queue: there is
+// no collection to bring in line, and the photo index's sync goes on.
+func TestWindowSyncWithNoWindowsLeftEmptiesItsQueue(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	if err := f.service.QueueWindows(ctx, "object:gone"); err != nil {
+		t.Fatal(err)
+	}
+	// No windows and no collection: the index is never asked.
+	worked, err := f.service.SyncWindows(ctx, nil, nil)
+	if err != nil || !worked {
+		t.Fatalf("SyncWindows() = %v, %v", worked, err)
+	}
+	if worked, err = f.service.SyncWindows(ctx, nil, nil); err != nil || worked {
+		t.Fatalf("SyncWindows() again = %v, %v", worked, err)
+	}
+}
