@@ -494,6 +494,7 @@ scoring-module:
 # build/packages; needs dpkg-deb and jq.
 packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
+	scripts/check-no-songs.sh $(BUILD_DIR)/packages
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)

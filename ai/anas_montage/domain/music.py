@@ -17,9 +17,8 @@ LEVELS = {"chorus": "高潮", "verse": "中等", "bridge": "中等", "inst": "�
 BUILD_RISE = 2.0
 
 
-def from_structure(st: dict, rms: np.ndarray, times: np.ndarray, target: float) -> dict:
-    """选段和镜头槽。st：allin1 的结果（song、bpm、downbeats、segments）；rms、times：响度曲线和它的时间。
-    选段是包含第一个副歌的整段，最接近 target，其次最早；超出一个乐句以上时在重拍处截断。副歌每小节一个槽，其余每两小节。"""
+def sections(st: dict, rms: np.ndarray, times: np.ndarray) -> tuple[list[dict], float]:
+    """整理过的段落和一小节的长度：短段落并进下一段，边界挪到重拍上，推向副歌的铺垫改名。选段从这些段落里取。"""
     bars = st["downbeats"]
     bar = float(np.median(np.diff(bars)))
     # 不到两小节的段落并进下一段。
@@ -42,14 +41,12 @@ def from_structure(st: dict, rms: np.ndarray, times: np.ndarray, target: float) 
         if g["label"] == "chorus" and loudness(nxt) - loudness(g) >= BUILD_RISE:
             g |= {"allin1": g["label"], "label": "build"}
             nxt |= {"allin1": nxt["label"], "label": "chorus"}
-    first = next(k for k, g in enumerate(segs) if g["label"] == "chorus")
-    options = [(i, j) for i in range(first + 1) for j in range(first, len(segs))]
-    i, j = min(options, key=lambda o: (max(0.0, abs(segs[o[1]]["end"] - segs[o[0]]["start"] - target) - bar * PHRASE),
-                                       segs[o[0]]["start"]))
-    start, end = segs[i]["start"], segs[j]["end"]
-    if end - start > target + bar * PHRASE:
-        end = min((t for t in bars if t > start + target - bar), key=lambda t: abs(t - start - target))
-    parts = []
+    return segs, bar
+
+
+def parts(segs: list[dict], i: int, j: int, start: float, end: float, bars: list) -> list[dict]:
+    """选段 start 到 end 落在第 i 到第 j 个段落上，各段在选段里的起止、强度和镜头槽。副歌每小节一个槽，其余每两小节。"""
+    out = []
     for n, g in enumerate(segs[i:j + 1], i):
         a, b = max(g["start"], start), min(g["end"], end)
         if b - a < 1.0:
@@ -59,11 +56,27 @@ def from_structure(st: dict, rms: np.ndarray, times: np.ndarray, target: float) 
         inside = [t for t in bars if a + 0.5 < t < b - 0.5]
         lines = inside if level == "高潮" else inside[::-1][1::2][::-1] if n == j else inside[1::2]
         cuts = [a, *lines, b]
-        parts.append({"start": round(a - start, 2), "end": round(b - start, 2), "level": level, "label": g["label"],
-                      **({"allin1": g["allin1"]} if "allin1" in g else {}),
-                      "slots": [[round(x - start, 2), round(y - start, 2)] for x, y in itertools.pairwise(cuts) if y - x > 0.5]})
+        out.append({"start": round(a - start, 2), "end": round(b - start, 2), "level": level, "label": g["label"],
+                    **({"allin1": g["allin1"]} if "allin1" in g else {}),
+                    "slots": [[round(x - start, 2), round(y - start, 2)] for x, y in itertools.pairwise(cuts) if y - x > 0.5]})
+    return out
+
+
+def from_structure(st: dict, rms: np.ndarray, times: np.ndarray, target: float) -> dict:
+    """选段和镜头槽。st：allin1 的结果（song、bpm、downbeats、segments）；rms、times：响度曲线和它的时间。
+    选段是包含第一个副歌的整段，最接近 target，其次最早；超出一个乐句以上时在重拍处截断。副歌每小节一个槽，其余每两小节。"""
+    bars = st["downbeats"]
+    segs, bar = sections(st, rms, times)
+    first = next(k for k, g in enumerate(segs) if g["label"] == "chorus")
+    options = [(i, j) for i in range(first + 1) for j in range(first, len(segs))]
+    i, j = min(options, key=lambda o: (max(0.0, abs(segs[o[1]]["end"] - segs[o[0]]["start"] - target) - bar * PHRASE),
+                                       segs[o[0]]["start"]))
+    start, end = segs[i]["start"], segs[j]["end"]
+    if end - start > target + bar * PHRASE:
+        end = min((t for t in bars if t > start + target - bar), key=lambda t: abs(t - start - target))
     return {"song": st["song"], "tempo": st["bpm"], "bar": round(bar, 2), "structure": st["segments"],
-            "excerpt": [round(start, 2), round(end, 2)], "seconds": round(end - start, 2), "parts": parts}
+            "excerpt": [round(start, 2), round(end, 2)], "seconds": round(end - start, 2),
+            "parts": parts(segs, i, j, start, end, bars)}
 
 
 def music_note(m: dict) -> str:

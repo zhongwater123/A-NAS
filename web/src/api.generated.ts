@@ -2204,6 +2204,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/projects/{projectId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
+        get: operations["getMontageSong"];
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        put: operations["putMontageSong"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/song/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The montage center's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
+        get: operations["getMontageSongAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules": {
         parameters: {
             query?: never;
@@ -7882,6 +7917,66 @@ export interface components {
             chronological: boolean;
             assets: components["schemas"]["MontageProjectAsset"][];
         };
+        MontageSongSection: {
+            start: number;
+            end: number;
+            /**
+             * @description allin1's label.
+             * @enum {string}
+             */
+            label: "start" | "end" | "intro" | "outro" | "break" | "bridge" | "inst" | "solo" | "verse" | "chorus";
+        };
+        MontageSongPart: {
+            /** @description Seconds from the excerpt's start. */
+            start: number;
+            end: number;
+            /**
+             * @description The part's level in the film: quiet, middle or climax.
+             * @enum {string}
+             */
+            level: "安静" | "中等" | "高潮";
+            label: string;
+            /** @description allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it. */
+            allin1?: string;
+            /** @description The shots' slots, cut on the bar lines, in seconds from the excerpt's start. */
+            slots: number[][];
+        };
+        MontageSongSelection: {
+            tempo: number;
+            bar: number;
+            /** @description Its start and end in the song, in seconds. The film starts there and lasts as long. */
+            excerpt: number[];
+            seconds: number;
+            parts: components["schemas"]["MontageSongPart"][];
+            /** @description false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen. */
+            chorus: boolean;
+        };
+        MontageSong: {
+            id: string;
+            title: string;
+            duration: number;
+            /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */
+            transcode: boolean;
+            /** @enum {string} */
+            state: "analyzing" | "ready" | "unusable";
+            /**
+             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
+             * @enum {string}
+             */
+            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
+            /**
+             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
+             * @enum {string}
+             */
+            waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
+            tempo?: number;
+            beats?: number[];
+            downbeats?: number[];
+            sections?: components["schemas"]["MontageSongSection"][];
+            /** @description Where the eighth version's rule starts the excerpt: around the first chorus. */
+            defaultStart?: number;
+            selection?: components["schemas"]["MontageSongSelection"];
+        };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
@@ -8359,6 +8454,10 @@ export type MontageRequestKey = components['schemas']['MontageRequestKey'];
 export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
 export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
 export type MontageProject = components['schemas']['MontageProject'];
+export type MontageSongSection = components['schemas']['MontageSongSection'];
+export type MontageSongPart = components['schemas']['MontageSongPart'];
+export type MontageSongSelection = components['schemas']['MontageSongSelection'];
+export type MontageSong = components['schemas']['MontageSong'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -12772,6 +12871,8 @@ export interface operations {
                     name?: string;
                     ask?: string;
                     chronological?: boolean;
+                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
+                    songStart?: number;
                 };
             };
         };
@@ -12787,6 +12888,9 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     addMontageProjectAssets: {
@@ -12822,6 +12926,114 @@ export interface operations {
             401: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageSong: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The song */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    putMontageSong: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A track of GET /api/v1/music/tracks. */
+                    trackId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The song, being analysed or as analysed before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageSongAudio: {
+        parameters: {
+            query?: {
+                /** @description Seconds to start a decoded song from; ignored for other songs. */
+                start?: number;
+            };
+            header?: {
+                Range?: string;
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };

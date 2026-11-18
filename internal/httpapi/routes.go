@@ -123,6 +123,14 @@ func (h *productHandler) mounts() []apiroute.Route {
 	}
 	if h.Montage != nil {
 		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.Endpoints())
+		// Choosing a song copies it from the member's music library here
+		// first (docs/specs/montage-center.md, 配乐).
+		var tracks montageapi.Tracks
+		if h.Music != nil {
+			tracks = h.Music
+		}
+		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
+			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())

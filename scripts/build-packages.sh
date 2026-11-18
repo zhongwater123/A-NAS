@@ -16,6 +16,10 @@
 # - a-nas-assistant-trial, empty, at the version of a-nas, which it depends on:
 #   the assistant's trial is part of a-nas now, and a device that had the trial
 #   updates to this package before apt removes it (ADR 0034).
+# - a-nas-montage-music, with --montage-music only: the montage center's music
+#   analysis (docs/architecture/montage-music.md) at the version of a-nas,
+#   which it depends on with its runtime's and models' content packages.
+#   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
 #   stay installed when the product rolls back, as Docker itself does.
 #
@@ -26,11 +30,16 @@
 # scripts, so the same files make the product's system extension
 # (docs/research/sysupdate-image-verification.md#第-6-项产品层做成-sysext-时软件包的约束).
 #
-# Usage: scripts/build-packages.sh OUT VERSION [BUILD]
+# Usage: scripts/build-packages.sh [--montage-music] OUT VERSION [BUILD]
 set -euo pipefail
 
+montage_music=false
+if [[ "${1:-}" == --montage-music ]]; then
+  montage_music=true
+  shift
+fi
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "usage: $0 OUT VERSION [BUILD]" >&2
+  echo "usage: $0 [--montage-music] OUT VERSION [BUILD]" >&2
   exit 2
 fi
 mkdir -p "$1"
@@ -46,7 +55,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -210,3 +219,30 @@ install -d "$root/DEBIAN"
 control a-nas-assistant-trial '' >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
 build "$root"
+
+# The montage center's music analysis (docs/architecture/montage-music.md):
+# the Worker's code, its units, each model's manifest and links to the
+# content packages of its models and runtime.
+if "$montage_music"; then
+  root=$work/a-nas-montage-music
+  lib=$root/usr/lib/a-nas/montage-music
+  units=$root/usr/lib/systemd/system
+  install -d "$root/DEBIAN" "$lib/anas_montage_music" "$units/sockets.target.wants" "$root/usr/share/doc/a-nas-montage-music"
+  control a-nas-montage-music "$(montage_music_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
+  chmod 0644 "$root/DEBIAN/control"
+  install -m 0755 "$repo"/deploy/debian/a-nas-montage-music/DEBIAN/{postinst,prerm} "$root/DEBIAN/"
+  install -m 0644 "$repo"/ai/anas_montage_music/*.py "$lib/anas_montage_music/"
+  for role in "${montage_music_roles[@]}"; do
+    manifest=$repo/deploy/models/${role#*:}.json
+    install -m 0644 "$manifest" "$lib/${role%%:*}.json"
+    ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)" "$lib/${role%%:*}"
+  done
+  ln -s "/opt/a-nas/montage-music-runtimes/$(montage_music_runtime_id "$repo")" "$lib/runtime"
+  install -m 0644 "$repo"/deploy/montage-music/anas-montage-music.{socket,service} "$units/"
+  ln -s ../anas-montage-music.socket "$units/sockets.target.wants/anas-montage-music.socket"
+  printf '%s\n' 'A-NAS: https://github.com/zhongwater123/A-NAS' \
+    "allin1's and Demucs' weights and the runtime keep their own licenses; see their content packages." \
+    >"$root/usr/share/doc/a-nas-montage-music/copyright"
+  chmod 0644 "$root/usr/share/doc/a-nas-montage-music/copyright"
+  build "$root"
+fi

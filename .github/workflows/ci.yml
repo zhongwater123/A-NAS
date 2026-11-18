@@ -90,6 +90,14 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only == 'true' }}
         run: make docs-check
 
+      - name: Install package media checks
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
+        run: |
+          if ! command -v ffprobe >/dev/null || ! command -v file >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg file
+          fi
+
       - name: Set up Node.js
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -307,6 +315,13 @@ jobs:
 
       - name: Fetch the pinned Docker and Caddy packages
         run: scripts/fetch-upstream-packages.sh
+
+      - name: Install package media checks
+        run: |
+          if ! command -v ffprobe >/dev/null || ! command -v file >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg file
+          fi
 
       - name: Install the release under systemd and check every entry point
         run: make system-test

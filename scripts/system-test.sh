@@ -2185,6 +2185,50 @@ check "the member's music library holds the WavPack song with its tags" \
 check "the FFmpeg worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
 check "the FFmpeg worker decodes the song to FLAC from a start position" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
+# --- Montage songs (#559): a member chooses a song for a project from her
+# music library; the Product Service opens it through the File Broker as her
+# and the montage service keeps a copy of its own. allin1 is not installed
+# here, so the analysis waits for it.
+for who in alice owner; do
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i sine=frequency=330:duration=40 -c:a libmp3lame \
+    -metadata title="Song of $who" "/tmp/$who-song.mp3"
+done
+curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F "file=@/tmp/alice-song.mp3;filename=song.mp3" \
+  "$api/api/v1/spaces/$alice_private/uploads" || true
+curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "file=@/tmp/owner-song.mp3;filename=song.mp3" \
+  "$api/api/v1/spaces/$owner_private/uploads" || true
+track_of() { # JAR CSRF TITLE -> the track's ID once the library is scanned
+  curl -fsS -o /dev/null -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/music/library/scan" || true
+  for _ in $(seq 1 60); do
+    [[ "$(curl -fsS -b "$1" "$api/api/v1/music/library" | jq -r .scan.state || true)" == idle ]] && break
+    sleep 1
+  done
+  curl -fsS -b "$1" "$api/api/v1/music/tracks" | jq -r --arg title "$3" '[.items[] | select(.title == $title)][0].id'
+}
+alice_track=$(track_of /tmp/alice.jar "$alice_csrf" "Song of alice" || true)
+owner_track=$(track_of /tmp/owner.jar "$owner_csrf" "Song of owner" || true)
+song_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"requestKey\":\"system-test-song\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+put_song() { # JAR CSRF TRACK -> status
+  status_of -X PUT -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d "{\"trackId\":\"$3\"}" \
+    "$api/api/v1/montage/projects/$song_project/song"
+}
+# A track that is not there answers 404 to anyone, so the refusal below says
+# something only once the owner has played this track by its ID himself.
+check "the owner plays his own song by its track ID" \
+  test "$(status_of --max-time 60 -b /tmp/owner.jar "$api/api/v1/music/tracks/$owner_track/stream")" = 200
+check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
+check "a member copies her own song into the montage center" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
+check "the copy is the montage service's alone, named by its content" \
+  bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-montage' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
+check "the song waits for allin1, which is not installed" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects/$song_project/song" | jq -r .state)" = analyzing
+check "she listens to the copy with Range" \
+  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/montage/projects/$song_project/song/audio")" = 206
+check "the montage account cannot read her space" denied a-nas-montage ls "$data/spaces/private/alice"
+check "deleting the project removes the copy no project uses" \
+  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/montage/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
+
 # A probe in the FFmpeg worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'
 import os, socket, sys

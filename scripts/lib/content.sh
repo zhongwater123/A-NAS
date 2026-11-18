@@ -67,6 +67,33 @@ search_runtime_id() {
     sha256sum | cut -c1-16
 }
 
+# The montage center's music analysis (docs/architecture/montage-music.md):
+# its models, each ROLE:MANIFEST under deploy/models, which the
+# a-nas-montage-music package links as /usr/lib/a-nas/montage-music/ROLE, and
+# its runtime. While allin1's commercial licence is pending, no release
+# depends on them: content_packages leaves them out.
+montage_music_roles=(
+  allin1:allin1-harmonix-all
+  demucs:htdemucs
+)
+
+# montage_music_runtime_id REPO: the music analysis runtime, named by its
+# lock, the sources it compiles and Python.
+montage_music_runtime_id() {
+  { cat "$1/deploy/montage-music/requirements.txt" "$1/deploy/montage-music/sources.json"
+    printf 'python=%s\n' "$TARGET_PYTHON"; } | sha256sum | cut -c1-16
+}
+
+# montage_music_packages REPO: the content packages a-nas-montage-music
+# depends on.
+montage_music_packages() {
+  local role
+  for role in "${montage_music_roles[@]}"; do
+    model_files "$1/deploy/models/${role#*:}.json" | cut -f 1
+  done
+  echo "a-nas-montage-music-runtime-$(montage_music_runtime_id "$1")"
+}
+
 # pinned_package REPO KIND MANIFEST: the package of Qdrant or llama.cpp.
 pinned_package() { echo "a-nas-$2-$(pin_field "$1/$3" sha256 | cut -c1-12)"; }
 qdrant_package() { pinned_package "$1" qdrant deploy/qdrant/qdrant.json; }

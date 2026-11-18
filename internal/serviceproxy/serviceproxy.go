@@ -73,6 +73,15 @@ func Local(next http.Handler) http.Handler {
 	})
 }
 
+type trustedHeaderKey struct{}
+type trustedHeader struct{ name, value string }
+
+// WithInternalHeader carries a header constructed by the Product Service
+// through the proxy after browser-supplied internal headers are removed.
+func WithInternalHeader(ctx context.Context, name, value string) context.Context {
+	return context.WithValue(ctx, trustedHeaderKey{}, trustedHeader{name, value})
+}
+
 // onlyTheSession replaces what identifies the browser with the session token
 // in ctx. The X-A-NAS- headers are the Product Service's to set, so none the
 // browser sent reaches a service.
@@ -84,6 +93,9 @@ func onlyTheSession(ctx context.Context, header http.Header) {
 		if strings.HasPrefix(strings.ToLower(name), "x-a-nas-") {
 			header.Del(name)
 		}
+	}
+	if h, ok := ctx.Value(trustedHeaderKey{}).(trustedHeader); ok {
+		header.Set(h.name, h.value)
 	}
 	header.Set(SessionHeader, accounts.SessionToken(ctx))
 }

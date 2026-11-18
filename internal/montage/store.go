@@ -77,17 +77,59 @@ DROP TABLE project_assets;
 DROP TABLE batches;
 DROP TABLE projects;
 `},
+		// 2: the songs members chose, with their analysis, and each
+		// project's song and the excerpt's start (docs/specs/montage-center.md,
+		// 配乐). A song row is a member's; its copy, songs/<sha256>/audio,
+		// is shared by content.
+		{Up: `
+CREATE TABLE songs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    title TEXT NOT NULL,
+    duration REAL NOT NULL,
+    content_type TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('analyzing', 'ready', 'unusable')),
+    reason TEXT NOT NULL DEFAULT '',
+    waiting TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_try TEXT,
+    analysis_version TEXT NOT NULL DEFAULT '',
+    analysis_json TEXT,
+    loudness BLOB,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_user_id, sha256)
+);
+CREATE INDEX songs_by_content ON songs(sha256, state);
+ALTER TABLE projects ADD COLUMN song_id TEXT;
+ALTER TABLE projects ADD COLUMN song_start REAL;
+ALTER TABLE projects ADD COLUMN song_selection TEXT;
+`, Down: `
+ALTER TABLE projects DROP COLUMN song_selection;
+ALTER TABLE projects DROP COLUMN song_start;
+ALTER TABLE projects DROP COLUMN song_id;
+DROP TABLE songs;
+`},
 	},
 }
 
 // Store is the montage center's database. Every record names the member it
 // belongs to, and every read is for one member.
 type Store struct {
-	db     *sql.DB
-	grants Grants
-	now    func() time.Time
-	logger *slog.Logger
-
+	db      *sql.DB
+	root    string
+	grants  Grants
+	media   Media
+	music   MusicAnalyzer
+	compute MusicComputer
+	now     func() time.Time
+	logger  *slog.Logger
+	// songs serialises the song copies: a copy arriving and the copies
+	// no row names any more being removed.
+	songs sync.Mutex
+	// wake tells AnalyzeSongs a song arrived.
+	wake chan struct{}
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
 	members memberLocks
@@ -110,8 +152,14 @@ type Store struct {
 type Options struct {
 	// Grants reaches the photo library's project grants.
 	Grants Grants
-	Now    func() time.Time
-	Logger *slog.Logger
+	// Media decodes songs (the FFmpeg worker); Music finds their structure
+	// (the music analysis Worker); Compute picks their excerpts (the
+	// compute Worker). Without them songs wait.
+	Media   Media
+	Music   MusicAnalyzer
+	Compute MusicComputer
+	Now     func() time.Time
+	Logger  *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -128,7 +176,8 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if err := sqlitedb.Migrate(ctx, db, schema); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
-	store := &Store{db: db, grants: options.Grants, now: options.Now, logger: options.Logger}
+	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
+		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1)}
 	if store.now == nil {
 		store.now = time.Now
 	}
@@ -139,8 +188,18 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	return store, nil
 }
 
-// Close stops the revocations still running, which stay queued, and closes
-// the database.
+// StartWorkers recovers durable work before accepting requests. Close cancels
+// and joins the workers before closing their database.
+func (s *Store) StartWorkers(ctx context.Context) error {
+	if err := s.ReclaimSongs(ctx); err != nil {
+		return err
+	}
+	s.soon(s.AnalyzeSongs)
+	return nil
+}
+
+// Close stops the revocations and the song analysis still running, which
+// stay queued, and closes the database.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	s.closed = true

@@ -36,7 +36,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{Mode: ModeAgent, MontageEnabled: enabled, MontageSocket: socket}, nil, nil)
+		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{Mode: ModeAgent, MontageEnabled: enabled, MontageSocket: socket}, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 
 	// Development keeps the store in this process, switched off or on.
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{MontageEnabled: enabled, DataMount: dir}, idleGrants{}, nil)
+		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{MontageEnabled: enabled, DataMount: dir}, idleGrants{}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

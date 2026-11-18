@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
@@ -38,6 +39,9 @@ func runMontageService(logger *slog.Logger) error {
 		SocketPath: config.Socket,
 		Sessions:   sessionlookup.NewClient(config.SessionSocket),
 		Grants:     photosapi.GrantClient(config.GrantSocket),
+		Media:      config.Media.client(),
+		Music:      montage.MusicWorker{Socket: config.MusicSocket},
+		Compute:    montagecompute.Client{SocketPath: config.ComputeSocket},
 		Logger:     logger,
 	})
 }
@@ -50,7 +54,7 @@ func runMontageService(logger *slog.Logger) error {
 // does (montage.Store.Upkeep). Deleted accounts leave the montage store
 // whatever the switch: the service runs either way, and rows from a time it
 // was on must not stay.
-func configuredMontage(ctx context.Context, config Config, grants montage.Grants, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
+func configuredMontage(ctx context.Context, config Config, grants montage.Grants, media montage.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
 			_, err := accountremoval.Request(ctx, config.MontageSocket, userID)
@@ -65,7 +69,16 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, nil, nil, err
 	}
-	store, err := montage.Open(ctx, root, montage.Options{Grants: grants, Logger: logger})
+	// Development has no music analysis or compute Worker of its own unless
+	// their sockets are given; songs wait for them.
+	options := montage.Options{Grants: grants, Media: media, Logger: logger}
+	if config.MontageMusicSocket != "" {
+		options.Music = montage.MusicWorker{Socket: config.MontageMusicSocket}
+	}
+	if config.MontageComputeSocket != "" {
+		options.Compute = montagecompute.Client{SocketPath: config.MontageComputeSocket}
+	}
+	store, err := montage.Open(ctx, root, options)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -91,6 +104,10 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	}
 	if !config.MontageEnabled {
 		return nil, store.RemoveAccount, closeStore, nil
+	}
+	if err := store.StartWorkers(ctx); err != nil {
+		closeStore()
+		return nil, nil, nil, err
 	}
 	// The headers the service gets are those the socket would carry.
 	return serviceproxy.Local(montageapi.New(store, logger)), store.RemoveAccount, closeStore, nil

@@ -31,7 +31,12 @@ type Config struct {
 	Sessions   storeservice.SessionResolver
 	// Grants reaches the photo library's project grants.
 	Grants montage.Grants
-	Logger *slog.Logger
+	// Media, Music and Compute decode, analyse and cut the songs
+	// (montage.Options).
+	Media   montage.Media
+	Music   montage.MusicAnalyzer
+	Compute montage.MusicComputer
+	Logger  *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -67,7 +72,8 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 // cannot be opened, as when the data volume is offline or read-only,
 // requests answer montage_unavailable. Every store it opens is reconciled
 // with the photo library's grants and retries the revocations it missed
-// (montage.Store.Upkeep).
+// (montage.Store.Upkeep), and analyses the songs waiting in it
+// (montage.Store.StartWorkers).
 func Run(ctx context.Context, config Config) error {
 	if config.Grants == nil {
 		return errors.New("the montage service needs the photo library's grants")
@@ -79,7 +85,13 @@ func Run(ctx context.Context, config Config) error {
 		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: montageapi.Unavailable,
 		Open: func(ctx context.Context, root string) (*montage.Store, error) {
-			return montage.Open(ctx, root, montage.Options{Grants: config.Grants, Logger: config.Logger})
+			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute, Logger: config.Logger})
+			if err == nil {
+				if err = store.StartWorkers(ctx); err != nil {
+					_ = store.Close()
+				}
+			}
+			return store, err
 		},
 		API:            func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
 		Remove:         RemoveAccount,

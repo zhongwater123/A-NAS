@@ -42,3 +42,51 @@ schemas:
       ask: { type: string }
       chronological: { type: boolean }
       assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
+  MontageSongSection:
+    type: object
+    additionalProperties: false
+    required: [start, end, label]
+    properties:
+      start: { type: number, minimum: 0 }
+      end: { type: number, minimum: 0 }
+      label: { type: string, enum: [start, end, intro, outro, break, bridge, inst, solo, verse, chorus], description: "allin1's label." }
+  MontageSongPart:
+    type: object
+    additionalProperties: false
+    required: [start, end, level, label, slots]
+    properties:
+      start: { type: number, minimum: 0, description: Seconds from the excerpt's start. }
+      end: { type: number, minimum: 0 }
+      level: { type: string, enum: [安静, 中等, 高潮], description: "The part's level in the film: quiet, middle or climax." }
+      label: { type: string }
+      allin1: { type: string, description: "allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it." }
+      slots: { type: array, items: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 } }, description: "The shots' slots, cut on the bar lines, in seconds from the excerpt's start." }
+  MontageSongSelection:
+    type: object
+    additionalProperties: false
+    required: [tempo, bar, excerpt, seconds, parts, chorus]
+    properties:
+      tempo: { type: number }
+      bar: { type: number, minimum: 0 }
+      excerpt: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 }, description: "Its start and end in the song, in seconds. The film starts there and lasts as long." }
+      seconds: { type: number, minimum: 0 }
+      parts: { type: array, items: { $ref: "#/schemas/MontageSongPart" } }
+      chorus: { type: boolean, description: "false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen." }
+  MontageSong:
+    type: object
+    additionalProperties: false
+    required: [id, title, duration, transcode, state]
+    properties:
+      id: { type: string, minLength: 1 }
+      title: { type: string }
+      duration: { type: number, minimum: 0 }
+      transcode: { type: boolean, description: "Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range." }
+      state: { type: string, enum: [analyzing, ready, unusable] }
+      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot, analysis_failed], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from." }
+      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times." }
+      tempo: { type: number }
+      beats: { type: array, items: { type: number, minimum: 0 } }
+      downbeats: { type: array, items: { type: number, minimum: 0 } }
+      sections: { type: array, items: { $ref: "#/schemas/MontageSongSection" } }
+      defaultStart: { type: number, minimum: 0, description: "Where the eighth version's rule starts the excerpt: around the first chorus." }
+      selection: { $ref: "#/schemas/MontageSongSelection" }
