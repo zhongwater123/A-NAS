@@ -125,6 +125,27 @@ for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.servi
 done
 check "without the bind, the sandbox's path is the empty mount point" \
   test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
+# The montage center's socket (docs/architecture/montage-center.md, MCP 服务器) is the
+# reverse: only a member's scheduled tasks bind it, with the policy and settings that add the
+# montage server; a conversation's instance and the curator have neither, and outside a bind
+# it is root's alone.
+montage_socket=/run/a-nas-montage-assistant/assistant.sock
+check "the montage service holds its socket for scheduled tasks" systemctl is-active --quiet anas-montage-assistant.socket
+check "the montage center's socket is out of a member's reach outside the sandbox" \
+  denied alice python3 -c "$unix_connect" "$montage_socket"
+check "a member's scheduled tasks bind the montage center's socket" \
+  grep -Fq "$montage_socket:/run/anas-assistant-montage/montage.sock" <<<"$(binds anas-assistant-cron@alice.service)"
+for unit in anas-assistant@alice.service anas-assistant-curator@alice.service; do
+  check "$unit does not bind the montage center's socket" \
+    test -n "$(binds "$unit")" -a "$(grep -cF "$montage_socket" <<<"$(binds "$unit")")" = 0
+done
+check "a member's scheduled tasks read the policy with the montage server" \
+  grep -q 'HERMES_MANAGED_DIR=/usr/lib/a-nas/assistant/managed-cron' <<<"$(systemctl show -p Environment --value anas-assistant-cron@alice.service)"
+check "only that policy has the montage server" \
+  bash -c "grep -q '^  montage:' /usr/lib/a-nas/assistant/managed-cron/config.yaml && ! grep -q '^  montage:' /usr/lib/a-nas/assistant/managed/config.yaml"
+check "the member's settings for scheduled tasks carry it, the instance's do not" \
+  bash -c "grep -q 'anas_montage_mcp.py' /var/lib/a-nas-host/assistant/members/alice/config-cron.yaml && ! grep -q 'anas_montage_mcp.py' /var/lib/a-nas-host/assistant/members/alice/config.yaml"
+check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v1.md
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
