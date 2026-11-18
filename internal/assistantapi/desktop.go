@@ -9,7 +9,7 @@ import (
 
 // VNAS operates the WebOS desktop of the member it is talking with (ADR 0024
 // decision 8): the assistant's `desktop` MCP server
-// (ai/assistant-spike/anas_desktop_mcp.py) has tools that read the page as a
+// (ai/assistant/anas_desktop_mcp.py) has tools that read the page as a
 // list of controls, act on a control and look at a picture of the page. Their
 // calls come the companion tools' way (companion.go) and go, as anas.desktop
 // events, to the window that is the conversation's browser and sent its

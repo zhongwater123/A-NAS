@@ -1,9 +1,10 @@
 #!/bin/bash
-# prerm of the assistant trial's Hermes runtime packages, a-nas-assistant-runtime-*
-# (scripts/build-content-packages.sh). apt replaces the runtime before the trial's
-# postinst runs nas-trial.sh update, so what runs on it stops first: the scheduled
-# tasks' waker, which would start a round on a runtime being replaced, then the
-# assistants, their API, scheduled tasks and curator. update starts them again.
+# prerm of the AI assistant's Hermes runtime packages, a-nas-assistant-runtime-*
+# (scripts/build-content-packages.sh). apt replaces the runtime before a-nas's
+# postinst runs, so what runs on it stops first: the scheduled tasks' waker,
+# which would start a round on a runtime being replaced, then the assistants,
+# their API, scheduled tasks and curator. a-nas's postinst starts the waker
+# again; a member's next connection starts their assistant.
 set -euo pipefail
 
 [[ -d /run/systemd/system ]] || exit 0

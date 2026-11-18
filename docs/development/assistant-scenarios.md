@@ -6,7 +6,7 @@
 
 ## 运行
 
-什么时候跑（2026-11-17 定）：改了下面任何一样，提交前在本机跑一次 approval、boundary 与 injection 全量并带上 `--baseline`，把报告贴进 PR：被测型号或模型中转、Hermes 固定提交、[`skills/`](../../ai/assistant-spike/skills/anas-files/SKILL.md) 下的技能说明、[托管配置](../../ai/assistant-spike/managed-config.yaml)、文件代理。不进 CI，也不定时跑：三个套件一次约 510 万 token（2026-11-18：approval 207 万、boundary 172 万、injection 134 万），算上停实例、还原和等待约两小时，还要真实模型的密钥。
+什么时候跑（2026-11-17 定）：改了下面任何一样，提交前在本机跑一次 approval、boundary 与 injection 全量并带上 `--baseline`，把报告贴进 PR：被测型号或模型中转、Hermes 固定提交、[`ai/assistant/skills/`](../../ai/assistant/skills/anas-files/SKILL.md) 下的技能说明、[托管配置](../../ai/assistant/managed-config.yaml)、文件代理。不进 CI，也不定时跑：三个套件一次约 510 万 token（2026-11-18：approval 207 万、boundary 172 万、injection 134 万），算上停实例、还原和等待约两小时，还要真实模型的密钥。
 
 在 [spike 容器](../../ai/assistant-spike/run.sh)中运行，真实模型的准备与 `.txt` 场景相同：
 
@@ -16,7 +16,7 @@ SPIKE_MODEL=<被测型号> SPIKE_UPSTREAM=<接口主机> SPIKE_KEY_FILE=~/model.
 ai/assistant-spike/run.sh scenarios scenarios/approval.yaml --baseline /spike/baselines/approval.<被测型号>.json
 ```
 
-- `--case ID`（可重复）只跑指定用例，`--repeat N` 改遍数，`--out` 改结果目录，`--model` 在型号不是 `/etc/hermes/config.yaml` 中的那个时指定。
+- `--case ID`（可重复）只跑指定用例，`--repeat N` 改遍数，`--out` 改结果目录，`--model` 在型号不是托管配置（`/usr/lib/a-nas/assistant/managed/config.yaml`）中的那个时指定。
 - 安全类用例第一遍失败就停（pass^k 已经定了）。想知道它多常失败，加 `--all-runs` 跑满遍数，如 `--case X --repeat 5 --all-runs`。写了 `noisy` 的用例总是跑满，见[偶发用例](#偶发用例)。
 - 经 LiteLLM 一类带响应缓存的中转时，`sandbox` 要加 `SPIKE_NO_CACHE=1`：网关在每个请求体里加上 `"cache": {"no-cache": true}`（只加 `Cache-Control` 请求头不起作用）。不加的话，一段对话的第一个请求往往逐字节相同，命中缓存后几遍就是同一个回答，pass^k 与频率都不可信；结果的 `env.upstream_cache` 记下了是否绕过，没绕过时报告开头会提醒。
 - 结果在宿主机的 `$HERMES_SPIKE_DIR/results/<时间>-<套件>-<型号>/`：`runs.jsonl` 每遍一行，`summary.json` 每个用例一行结论，`report.md` 是报告。

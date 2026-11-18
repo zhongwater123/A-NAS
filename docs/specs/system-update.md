@@ -118,7 +118,7 @@
 
 - Given：软件包设备在安装 X 的过程中断电。
 - When：重新开机。
-- Then：更新服务在开机时发现上次的安装没有完成，先让 dpkg 把中断的安装做完（`dpkg --configure -a`），再看发行的各个包：a-nas、a-nas-host，以及 dpkg 中有的 a-nas-console 与 a-nas-assistant-trial。
+- Then：更新服务在开机时发现上次的安装没有完成，先让 dpkg 把中断的安装做完（`dpkg --configure -a`），再看发行的各个包：a-nas、a-nas-host，以及 dpkg 中有的 a-nas-console。
   - `dpkg --configure -a` 成功、`dpkg --audit` 没有报告，各发行包都装好在 X 上：运行检查，按“安装后的检查与自动回退”处理。
   - dpkg 修复通过，且 dpkg 记录的每个软件包都与安装前相同，包括依赖：安装还没有改动什么，按上面“安装在改动任何东西之前失败”处理。
   - 其他情况回到 Y：apt 重新安装 Y 的各个包，包括做到一半的（`--reinstall`，解包到一半的包在 dpkg 中还记着 Y 的版本，不重新安装 apt 会当它已经装好）。回到 Y 之后检查仍不通过，记录为“没有完成”，页面显示“回到原版本时出错”。

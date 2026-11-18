@@ -90,6 +90,9 @@ type Config struct {
 	// run now and no round has taken yet, a file each in <username>; root's
 	// alone. Empty turns running a task now off.
 	AssistantRuns string
+	// AssistantOn reports whether the administrator's model key is saved;
+	// without it no member's task runs now, and nil counts as saved.
+	AssistantOn func() bool
 	// StartAssistantRound starts a round of the member's scheduled tasks.
 	// The default starts the member's cron unit without waiting for it.
 	StartAssistantRound func(ctx context.Context, username string) error

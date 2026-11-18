@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS photo service
 Documentation=https://github.com/zhongwater123/A-NAS
-After=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket
-Wants=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket
+After=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket anas-photos-assistant.socket
+Wants=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket anas-photos-assistant.socket
 
 [Service]
 Type=simple
@@ -14,6 +14,10 @@ ExecStart=/usr/lib/a-nas/anas-api photo-service
 Environment=ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos
 Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
 Environment=ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock
+# Members' AI assistants search and browse photos read-only through a socket systemd holds
+# (anas-photos-assistant.socket, ADR 0024 decision 6); the member is the peer UID.
+Sockets=anas-photos-assistant.socket
+Environment=ANAS_PHOTOS_ASSISTANT_SOCKET=/run/a-nas-photos-assistant/assistant.sock
 # Its own vector index (ADR 0028), a Qdrant instance only this account
 # reaches; a drop-in setting this empty turns the index off.
 Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock

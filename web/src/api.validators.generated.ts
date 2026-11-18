@@ -13765,7 +13765,7 @@ validate274.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false}
 
 export const validate35 = validate279;
 const schema132 = {"$ref":"openapi.json#/paths/~1api~1v1~1assistant~1status/get/responses/200/content/application~1json/schema"};
-const schema133 = {"type":"object","additionalProperties":false,"required":["available"],"properties":{"available":{"type":"boolean","description":"The member has an assistant instance."}}};
+const schema133 = {"type":"object","additionalProperties":false,"required":["available"],"properties":{"available":{"type":"boolean","description":"The member has an assistant instance."},"reason":{"type":"string","enum":["no_key"],"description":"Why not, when it is known: no_key while no administrator has saved the DeepSeek key."}}};
 
 function validate280(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -13787,7 +13787,7 @@ return false;
 else {
 const _errs1 = errors;
 for(const key0 in data){
-if(!(key0 === "available")){
+if(!((key0 === "available") || (key0 === "reason"))){
 validate280.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0}}];
 return false;
 break;
@@ -13795,9 +13795,32 @@ break;
 }
 if(_errs1 === errors){
 if(data.available !== undefined){
+const _errs2 = errors;
 if(typeof data.available !== "boolean"){
 validate280.errors = [{instancePath:instancePath+"/available",schemaPath:"#/properties/available/type",keyword:"type",params:{type: "boolean"}}];
 return false;
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.reason !== undefined){
+let data1 = data.reason;
+const _errs4 = errors;
+if(typeof data1 !== "string"){
+validate280.errors = [{instancePath:instancePath+"/reason",schemaPath:"#/properties/reason/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+if(!(data1 === "no_key")){
+validate280.errors = [{instancePath:instancePath+"/reason",schemaPath:"#/properties/reason/enum",keyword:"enum",params:{allowedValues: schema133.properties.reason.enum}}];
+return false;
+}
+var valid0 = _errs4 === errors;
+}
+else {
+var valid0 = true;
 }
 }
 }

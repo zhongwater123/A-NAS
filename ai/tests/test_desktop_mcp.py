@@ -8,9 +8,9 @@ the runtime runs them and refuses a skip (see test_companion_mcp.py for how to b
 import importlib.util
 import unittest
 
-from tests.test_companion_mcp import SPIKE, _Companion, _exec, load
+from tests.test_companion_mcp import ASSISTANT, _Companion, _exec, load
 
-SOURCE = SPIKE / "anas_desktop_mcp.py"
+SOURCE = ASSISTANT / "anas_desktop_mcp.py"
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 desktop = load("anas_desktop_mcp", SOURCE)

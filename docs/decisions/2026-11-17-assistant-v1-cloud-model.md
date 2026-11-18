@@ -51,5 +51,5 @@ AI 助手在实验 NAS 上以试用包运行，用云端的 DeepSeek，规格与
 
 - [AI 助手规格](../specs/ai-assistant.md)、[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md) 第 6 步
-- [试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)、[`nas-trial.sh`](../../ai/assistant-spike/nas-trial.sh)、[模型网关](../../ai/assistant-spike/gateway.py)
+- 实现（2026-11-18）：[启用 AI 助手](../runbooks/enable-ai-assistant.md)、[设置页](../../web/src/settings/AssistantSection.tsx)、[Host Agent](../../internal/hostops/linux/assistant.go)、[模型网关](../../ai/assistant/gateway.py)
 - [AI 助手看不到证件、票据和文字还没读完的照片的画面](2026-11-10-assistant-view-of-documents.md)

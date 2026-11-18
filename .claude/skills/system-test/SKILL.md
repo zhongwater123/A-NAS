@@ -34,7 +34,7 @@ echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$d
 ## 变体
 
 - 真实内容：`ANAS_SYSTEM_TEST_CONTENT` 指向发布的内容库（如 `/mnt/d/A-NAS-releases/content`，目录结构见 [`scripts/build-content-packages.sh`](../../../scripts/build-content-packages.sh)）时，装真实的模型与两个运行环境，SearXNG 也真实启动；否则用替身内容包。模型位置见 [AI 开发与评估](../../../docs/development/ai-development.md)。
-- AI 助手：`ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 指向 `ai/assistant-spike` 构建的 `runtime.tar.gz` 时，会加上策略检查与一个对接脚本化模型的真实助手。
+- AI 助手：`ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 指向 `ai/assistant/runtime.json` 固定的 `runtime.tar.gz`（`ai/assistant-spike/run.sh build` 构建）时，会把它解到内容包的替身上，加上策略检查与一个对接脚本化模型的真实助手。
 
 ## 结果
 

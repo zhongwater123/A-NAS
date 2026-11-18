@@ -63,7 +63,7 @@ parser.add_argument("--case", action="append", default=[], help="only this case 
 parser.add_argument("--repeat", type=int, help="runs per case, instead of the kind's")
 parser.add_argument("--out", help="where a .yaml suite's results go (default /var/lib/vnas-eval/results/...)")
 parser.add_argument("--baseline", help="the accepted summary of the same suite and model to compare with")
-parser.add_argument("--model", help="the model under test, if not the one in /etc/hermes/config.yaml")
+parser.add_argument("--model", help="the model under test, if not the one in the managed policy")
 parser.add_argument("--all-runs", action="store_true",
                     help="run every one of a case's runs even after one fails, to see how often it fails")
 opts = parser.parse_args()
@@ -80,7 +80,12 @@ CHANNEL = "api_server" if Path("/etc/systemd/system/anas-assistant@.service.d/ch
 # The real model's gateway or the fake model, whichever this container runs.
 REAL_MODEL = Path("/etc/anas-spike/model.key").exists()
 MODEL_LOG = Path("/var/log/gateway.jsonl" if REAL_MODEL else "/var/log/fake-model.jsonl")
-APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in Path("/etc/hermes/config.yaml").read_text().splitlines()
+# Where the a-nas package (here assistant-install.sh) puts the assistant: the managed Hermes
+# policy as installed, and the sources of the system skills and the policy in the checkout.
+LIB = Path("/usr/lib/a-nas/assistant")
+MANAGED = LIB / "managed/config.yaml"
+ASSISTANT_SRC = Path("/src/ai/assistant")
+APPROVAL_TIMEOUT = int(next((line.split(":")[1] for line in MANAGED.read_text().splitlines()
                              if line.startswith("  timeout:")), "300"))
 RESULT_CHARS = 2000   # of a tool's result kept in a run record
 RUNTIME_PYTHON = "/opt/a-nas/assistant-runtimes/spike/venv/bin/python"
@@ -424,11 +429,12 @@ async def print_only(path):
 
 # ---- a scored suite ----
 
-def digest(paths):
-    """One short hash over the files' names and contents, read in chunks (the runtime is ~130 MB)."""
+def digest(paths, root=None):
+    """One short hash over the files' names (below root, so that moving the folder changes
+    nothing) and contents, read in chunks (the runtime is ~130 MB)."""
     h = hashlib.sha256()
     for path in sorted(paths):
-        h.update(str(path).encode() + b"\0")
+        h.update(str(path.relative_to(root) if root else path.name).encode() + b"\0")
         with open(path, "rb") as f:
             while chunk := f.read(1 << 20):
                 h.update(chunk)
@@ -438,15 +444,15 @@ def digest(paths):
 def environment():
     """What a result depends on besides the scenarios, for the report's comparison."""
     from ruamel.yaml import YAML
-    config = YAML(typ="safe", pure=True).load(Path("/etc/hermes/config.yaml").read_text(encoding="utf-8")) or {}
+    config = YAML(typ="safe", pure=True).load(MANAGED.read_text(encoding="utf-8")) or {}
     pin = next((line.split("=", 1)[1] for line in Path("/spike/run.sh").read_text().splitlines()
                 if line.startswith("commit=")), None)
     runtime = Path("/spike-out/runtime.tar.gz")
-    spike = Path("/spike")
+    src = ASSISTANT_SRC
     return {"model": opts.model or (config.get("model") or {}).get("default"), "channel": CHANNEL, "hermes": pin,
             "runtime": digest([runtime]) if runtime.exists() else None,
             "repo": os.environ.get("VNAS_EVAL_REPO"),
-            "skills": digest([*spike.glob("skills/*/SKILL.md"), spike / "member-skill.md", spike / "managed-config.yaml"]),
+            "skills": digest([*src.glob("skills/*/SKILL.md"), src / "member-skill.md", src / "managed-config.yaml"], src),
             "upstream_cache": None if not REAL_MODEL else "bypassed" if Path("/etc/anas-spike/upstream-no-cache").exists() else "allowed",
             "approval_timeout": APPROVAL_TIMEOUT}
 

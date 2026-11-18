@@ -20,6 +20,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -39,6 +40,8 @@ type handler struct {
 	snapshots   filesystem.SnapshotBackend
 	systemLogs  systemlog.Reader
 	webSearch   websearchswitch.Switch
+	// assistantKey keeps the AI assistant's model key (ADR 0024).
+	assistantKey assistantkey.Keeper
 	// systemUpdate is the system update service (docs/specs/system-update.md).
 	systemUpdate systemupdate.Updater
 	// reconcileFailed reports the last reconciliation of the data volume.
@@ -72,6 +75,8 @@ type Services struct {
 	SystemLogs systemlog.Reader
 	// WebSearch is the administrator's switch of web search (ADR 0030).
 	WebSearch websearchswitch.Switch
+	// AssistantKey keeps the administrator's model key of the AI assistant (ADR 0024).
+	AssistantKey assistantkey.Keeper
 	// SystemUpdate starts the system update service and reads its state.
 	SystemUpdate systemupdate.Updater
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
@@ -100,6 +105,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
 		systemLogs: services.SystemLogs, webSearch: services.WebSearch, systemUpdate: services.SystemUpdate,
+		assistantKey:    services.AssistantKey,
 		reconcileFailed: services.ReconcileFailed,
 		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, deletions: services.Deletions,
 		logger: logger,
@@ -161,6 +167,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == wire.WebSearchPath {
 		h.handleWebSearch(w, r)
+		return
+	}
+	if r.URL.Path == wire.AssistantKeyPath {
+		h.handleAssistantKey(w, r)
 		return
 	}
 	if r.URL.Path == wire.SystemUpdatePath || r.URL.Path == wire.SystemUpdateSettingsPath {
