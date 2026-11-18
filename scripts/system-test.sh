@@ -82,12 +82,19 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # Nor has it the photo service's grant socket for the montage center.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
-    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service"
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket"
   sed -i -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    -e 's/ anas-photos-grants\.socket//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
-  ! grep -rq anas-montage "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" ||
-    { echo "the previous release still names the montage service" >&2; exit 2; }
+  sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
+    "$legacy_product/usr/lib/systemd/system/anas-photos.service"
+  ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+    "$legacy_product/usr/lib/systemd/system" ||
+    { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
   dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
@@ -1203,6 +1210,35 @@ check "administrator does not see the member's photo library" \
 check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied a-nas ls "$data/photos"
+
+# --- The montage center's project grants (ADR 0038): a socket systemd holds
+# for the montage account alone, and the photo service checks the peer's UID.
+cat > /usr/local/lib/photo-grants.py <<'PY'
+import json, socket, struct, sys
+conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+conn.connect("/run/a-nas-photos-grants/grants.sock")
+body = json.dumps({"op": "list"}).encode()
+conn.sendall(struct.pack(">I", len(body)) + body)
+header = conn.recv(4)
+if len(header) < 4:
+    sys.exit("closed without an answer")
+length = struct.unpack(">I", header)[0]
+answer = b""
+while len(answer) < length:
+    chunk = conn.recv(length - len(answer))
+    if not chunk:
+        sys.exit("closed before the whole answer")
+    answer += chunk
+reply = json.loads(answer)
+print(reply)
+sys.exit(0 if reply.get("ok") else 1)
+PY
+check "the grant socket is the montage account's alone" \
+  test "$(stat -c '%a %U' /run/a-nas-photos-grants/grants.sock):$(stat -c '%a %U' /run/a-nas-photos-grants)" = "600 a-nas-montage:755 root"
+check "the photo service answers the montage account on it" \
+  setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py
+check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
+check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
 
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
@@ -2555,6 +2591,9 @@ check "the previous release, which came before the montage center, has no montag
   test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
   not-found:inactive
 check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "nor the photo service's grant socket, which stopped before its unit went" \
+  test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
+  not-found:inactive
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }

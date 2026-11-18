@@ -86,7 +86,7 @@ func (s *Service) importTarget(ctx context.Context, p Principal, request ImportR
 	if err != nil {
 		return "", library{}, err
 	}
-	if !canAdd(p, lib) {
+	if !canImport(p, lib) {
 		return "", library{}, ErrForbidden
 	}
 	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {

@@ -869,6 +869,8 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	// The montage service came later (ADR 0038): a release before it has no
 	// unit to stop or start, which systemctl says with exit status 5. Any
 	// other failure may leave it writing montage.db, so nothing is restored.
+	// It stops first: a request of its on the photo service's grant socket
+	// would start the photo service again.
 	if output, err := s.Commands.Run(ctx, "systemctl", "stop", "anas-montage"); err != nil && !unitNotLoaded(err) {
 		return fmt.Errorf("stop the montage service: %w: %s", err, lastLines(string(output), 3))
 	}

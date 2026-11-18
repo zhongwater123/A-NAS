@@ -185,6 +185,10 @@ systemctl start smbd.service || true
 # Members' assistants run this release's scripts from their next start; the
 # Product Service's restart below ends their connections anyway.
 systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' 2>/dev/null || true
+# The photo service's grant socket starts with it (its Wants=), in the gap
+# its restart leaves: systemd refuses to start a socket while the service it
+# activates runs, and the assistant's socket can start the photo service at
+# any time. The release before stopped the grant socket in its prerm.
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
   anas-montage.service
 systemctl try-restart 'anas-kiosk@*.service' || true

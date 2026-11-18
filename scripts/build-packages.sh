@@ -171,6 +171,7 @@ for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-mo
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket
+wants sockets.target anas-photos-grants.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-photos-assistant.socket
 wants sockets.target anas-companion-assistant.socket

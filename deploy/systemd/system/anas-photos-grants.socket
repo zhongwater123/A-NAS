@@ -1,0 +1,19 @@
+[Unit]
+Description=A-NAS photo service socket for the montage center's project grants
+# The montage center reaches members' videos only through grants the photo
+# library holds (ADR 0038 decision 3). Only its account may connect: the
+# Product Service shares its group, so the socket is the account's alone and
+# its directory is root's. The photo service checks the peer's UID as well.
+# systemd holds it, so it outlives restarts of the photo service.
+
+[Socket]
+ListenStream=/run/a-nas-photos-grants/grants.sock
+SocketUser=a-nas-montage
+SocketGroup=a-nas-montage
+SocketMode=0600
+DirectoryMode=0755
+FileDescriptorName=grants
+Service=anas-photos.service
+
+[Install]
+WantedBy=sockets.target
