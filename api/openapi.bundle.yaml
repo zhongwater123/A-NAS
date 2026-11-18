@@ -16665,6 +16665,7 @@ components:
         - name
         - assetCount
         - createdAt
+        - previewAssetIds
       properties:
         id:
           type: string
@@ -16677,6 +16678,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        previewAssetIds:
+          type: array
+          maxItems: 6
+          description: Up to six of its videos, spread over the order they were added, for thumbnails.
+          items:
+            type: string
     MontageProjectPage:
       type: object
       additionalProperties: false

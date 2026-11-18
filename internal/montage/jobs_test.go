@@ -868,3 +868,11 @@ func TestAJobMakesTwoPlansToChooseFrom(t *testing.T) {
 		t.Fatalf("notices = %+v, %v", notices, err)
 	}
 }
+
+func TestTheProjectListShowsAFewOfEachProjectsVideos(t *testing.T) {
+	env := newJobEnv(t)
+	page, err := env.store.Projects(context.Background(), "user:alice", "")
+	if err != nil || len(page.Items) != 1 || !slices.Equal(page.Items[0].PreviewAssetIDs, []string{"asset:a1", "asset:a2"}) {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+}

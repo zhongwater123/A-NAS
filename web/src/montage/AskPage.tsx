@@ -22,7 +22,7 @@ export function AskPage({ id, onBack }: { id: string; onBack: () => void }) {
     <main className={styles.mtSub}>
       <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onBack}>
         <ChevronLeft aria-hidden="true" />
-        返回项目
+        返回
       </button>
       {project.error && <Failed error={project.error} onRetry={() => void project.refetch()} />}
       {project.data ? <Ask detail={project.data} onBack={onBack} /> : !project.error && <Spinner />}

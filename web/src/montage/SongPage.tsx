@@ -66,7 +66,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
     <main className={styles.mtSub}>
       <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onBack}>
         <ChevronLeft aria-hidden="true" />
-        返回项目
+        返回
       </button>
       <section className={`${styles.mtPanel} ${styles.mtStep} ${styles.tune}`} aria-label="配乐">
         <div className={styles.mtStepH}>

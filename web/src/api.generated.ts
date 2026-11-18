@@ -8005,6 +8005,8 @@ export interface components {
             assetCount: number;
             /** Format: date-time */
             createdAt: string;
+            /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
+            previewAssetIds: string[];
         };
         MontageProjectPage: {
             items: components["schemas"]["MontageProjectSummary"][];

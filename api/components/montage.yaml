@@ -8,12 +8,13 @@ schemas:
   MontageProjectSummary:
     type: object
     additionalProperties: false
-    required: [id, name, assetCount, createdAt]
+    required: [id, name, assetCount, createdAt, previewAssetIds]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }
       assetCount: { type: integer, minimum: 0 }
       createdAt: { type: string, format: date-time }
+      previewAssetIds: { type: array, maxItems: 6, description: "Up to six of its videos, spread over the order they were added, for thumbnails.", items: { type: string } }
   MontageProjectPage:
     type: object
     additionalProperties: false

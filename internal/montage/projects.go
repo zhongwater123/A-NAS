@@ -82,7 +82,13 @@ type Project struct {
 	Name       string    `json:"name"`
 	AssetCount int       `json:"assetCount"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// PreviewAssetIDs are up to six of its videos, spread over the order
+	// they were added: the list shows their thumbnails.
+	PreviewAssetIDs []string `json:"previewAssetIds"`
 }
+
+// previewCount is how many videos a project in the list shows.
+const previewCount = 6
 
 // ProjectAsset is a video of a project.
 type ProjectAsset struct {
@@ -407,7 +413,45 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 		}
 		page.Items, lastAt = append(page.Items, project), created
 	}
-	return page, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ProjectPage{}, err
+	}
+	// The store has one connection: the page's rows go before the previews are read.
+	if err := rows.Close(); err != nil {
+		return ProjectPage{}, err
+	}
+	for i := range page.Items {
+		if page.Items[i].PreviewAssetIDs, err = s.previews(ctx, page.Items[i].ID); err != nil {
+			return ProjectPage{}, err
+		}
+	}
+	return page, nil
+}
+
+// previews picks up to previewCount of a project's videos, evenly spread.
+func (s *Store) previews(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var all []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		all = append(all, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	n := min(len(all), previewCount)
+	picked := make([]string, 0, n)
+	for k := range n {
+		picked = append(picked, all[k*len(all)/n])
+	}
+	return picked, nil
 }
 
 // Project returns owner's project with where each video stands now. A video

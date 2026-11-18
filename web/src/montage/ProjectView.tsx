@@ -212,7 +212,7 @@ const labels = { drop: "去掉这些继续", retryAnalysis: "重试分析", retr
 // Go is the prototype's bar under the footage: the song and the request,
 // each opening its own page, and 开始剪辑. The job it starts shows above it
 // as the prototype's processing panel, until the film is saved.
-function Go({
+export function Go({
   detail,
   songTitle,
   songState,
@@ -375,7 +375,7 @@ function Go({
 // Films is the prototype's 挑一个 page: the latest job's 方案 side by side,
 // each played where the photo library plays its videos, and the films of
 // earlier jobs below.
-function Films({ versions }: { versions: MontageVersion[] }) {
+export function Films({ versions }: { versions: MontageVersion[] }) {
   if (!versions.length) return null;
   const latest = versions[0].jobId;
   const pair = versions.filter((version) => version.jobId === latest).sort((a, b) => a.plan - b.plan);

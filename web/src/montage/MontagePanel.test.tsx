@@ -62,7 +62,15 @@ function serve(
   server.use(
     http.get("/api/v1/montage/projects", ({ response }) =>
       response(200).json({
-        items: [{ id: "project:1", name: detail().name, assetCount: 2, createdAt: "2026-11-18T09:00:00Z" }],
+        items: [
+          {
+            id: "project:1",
+            name: detail().name,
+            assetCount: 2,
+            createdAt: "2026-11-18T09:00:00Z",
+            previewAssetIds: [],
+          },
+        ],
       }),
     ),
     http.get("/api/v1/montage/projects/{projectId}", ({ response }) => response(200).json(detail())),
@@ -142,8 +150,8 @@ function serve(
 
 async function openProject() {
   render(<MontagePanel userId="user:alice" />);
-  // The window opens on the member's projects.
-  await userEvent.click(await screen.findByRole("button", { name: /2026-08-02 至 08-04/ }));
+  // The window opens on the member's projects; the arrow opens one.
+  await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
   return screen.findByRole("main", { name: "2026-08-02 至 08-04" });
 }
 
@@ -274,10 +282,28 @@ describe("剪辑中心", () => {
       ),
     );
     render(<MontagePanel userId="user:alice" />);
-    await userEvent.click(await screen.findByRole("button", { name: /2026-08-02 至 08-04/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
     const failed = await screen.findByRole("alert", {}, { timeout: 4000 });
     down = false;
     await userEvent.click(within(failed).getByRole("button", { name: "重试" }));
     expect(await screen.findByRole("main", { name: "2026-08-02 至 08-04" })).toBeInTheDocument();
+  });
+
+  it("starts a film from the home page, for the project selected there", async () => {
+    const seen = { generated: 0 };
+    serve(
+      () => project(),
+      () => job("queued"),
+      seen,
+    );
+    render(<MontagePanel userId="user:alice" />);
+    // The newest project is selected; a click on it keeps it selected.
+    const row = await screen.findByRole("button", { name: "选中 2026-08-02 至 08-04" });
+    expect(row).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(row);
+    expect(await screen.findByRole("button", { name: /配乐 Symphony/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "开始剪辑" }));
+    await waitFor(() => expect(seen.generated).toBe(1));
+    expect(await screen.findByText("排队中")).toBeInTheDocument();
   });
 });
