@@ -66,8 +66,8 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 // Run serves the montage API on SocketPath until ctx ends. While the store
 // cannot be opened, as when the data volume is offline or read-only,
 // requests answer montage_unavailable. Every store it opens is reconciled
-// with the photo library's grants, and revocations it missed are tried
-// again every minute.
+// with the photo library's grants and retries the revocations it missed
+// (montage.Store.Upkeep).
 func Run(ctx context.Context, config Config) error {
 	if config.Grants == nil {
 		return errors.New("the montage service needs the photo library's grants")
@@ -75,33 +75,16 @@ func Run(ctx context.Context, config Config) error {
 	if config.CheckStore == nil {
 		config.CheckStore = RequireOwnedStore
 	}
-	if config.Logger == nil {
-		config.Logger = slog.Default()
-	}
-	// A store opened again, after the data volume came back, is reconciled
-	// again.
-	var reconciled *montage.Store
 	return storeservice.Run(ctx, storeservice.Config[*montage.Store]{
 		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: montageapi.Unavailable,
 		Open: func(ctx context.Context, root string) (*montage.Store, error) {
 			return montage.Open(ctx, root, montage.Options{Grants: config.Grants, Logger: config.Logger})
 		},
-		API:    func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
-		Remove: RemoveAccount,
-		Upkeep: func(ctx context.Context, store *montage.Store) {
-			if reconciled != store {
-				if err := store.Reconcile(ctx); err != nil {
-					config.Logger.WarnContext(ctx, "reconciling projects with the photo library failed; trying again", "error", err)
-				} else {
-					reconciled = store
-				}
-			}
-			if err := store.RetryRevocations(ctx); err != nil {
-				config.Logger.WarnContext(ctx, "retrying grant revocations failed", "error", err)
-			}
-		},
-		UpkeepInterval: time.Minute,
+		API:            func(store *montage.Store) http.Handler { return montageapi.New(store, config.Logger) },
+		Remove:         RemoveAccount,
+		Upkeep:         func(ctx context.Context, store *montage.Store) { store.Upkeep(ctx) },
+		UpkeepInterval: montage.UpkeepInterval,
 		CheckStore:     config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
 	})
 }

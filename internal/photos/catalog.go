@@ -756,13 +756,5 @@ func (s *Service) directoryByID(ctx context.Context, q queryer, directoryID stri
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, fn)
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -157,8 +158,15 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if found, err := photoService.Lookup(t.Context(), principal, videos); err != nil || len(found) != 2 {
 		t.Fatalf("the videos after deleting the project = %+v, %v", found, err)
 	}
-	if grants, err := photoService.Grants(t.Context(), "", 10); err != nil || len(grants) != 0 {
-		t.Fatalf("grants after deleting the project = %+v, %v", grants, err)
+	// The grant is revoked right after the answer.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		grants, err := photoService.Grants(t.Context(), "", 10)
+		if err == nil && len(grants) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("grants after deleting the project = %+v, %v", grants, err)
+		}
 	}
 
 	// Switched off, the API is not there at all.

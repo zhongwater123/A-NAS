@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
@@ -45,7 +46,8 @@ func runMontageService(logger *slog.Logger) error {
 // is off: then /api/v1/montage is not mounted and the desktop shows no
 // entry. A NAS forwards it to the montage service; development serves it in
 // this process from a directory on the development volume, with the grants
-// of the photo library in this process. Deleted accounts leave the montage store
+// of the photo library in this process, and keeps the store as the service
+// does (montage.Store.Upkeep). Deleted accounts leave the montage store
 // whatever the switch: the service runs either way, and rows from a time it
 // was on must not stay.
 func configuredMontage(ctx context.Context, config Config, grants montage.Grants, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
@@ -67,10 +69,26 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err := store.Reconcile(ctx); err != nil {
-		logger.Warn("reconciling montage projects with the photo library failed", "error", err)
+	upkeep, stopUpkeep := context.WithCancel(ctx)
+	upkept := make(chan struct{})
+	go func() {
+		defer close(upkept)
+		ticker := time.NewTicker(montage.UpkeepInterval)
+		defer ticker.Stop()
+		for {
+			store.Upkeep(upkeep)
+			select {
+			case <-upkeep.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	closeStore := func() {
+		stopUpkeep()
+		<-upkept
+		_ = store.Close()
 	}
-	closeStore := func() { _ = store.Close() }
 	if !config.MontageEnabled {
 		return nil, store.RemoveAccount, closeStore, nil
 	}

@@ -50,7 +50,9 @@ type Config[S io.Closer] struct {
 	API    func(S) http.Handler
 	Remove func(S) accountremoval.Remove
 	// Upkeep, when set, runs on the open store as it opens and then every
-	// UpkeepInterval, between the checks of the store.
+	// UpkeepInterval, beside the requests and the checks of the store. Its
+	// context ends when the store is taken out of service, which waits for
+	// it before closing the store.
 	Upkeep         func(context.Context, S)
 	UpkeepInterval time.Duration
 	// CheckStore accepts Root as the service's own store on the writable
@@ -69,6 +71,9 @@ func Run[S io.Closer](parent context.Context, config Config[S]) error {
 	if config.Name == "" || config.Root == "" || config.SocketPath == "" || config.Sessions == nil ||
 		config.Unavailable == "" || config.Open == nil || config.API == nil || config.Remove == nil || config.CheckStore == nil {
 		return errors.New("a store service needs a name, a store, an API socket, sessions and what to serve")
+	}
+	if config.Upkeep != nil && config.UpkeepInterval <= 0 {
+		return errors.New("a store service's upkeep needs an interval")
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -213,17 +218,14 @@ func supervise[S io.Closer](ctx context.Context, config Config[S], current *atom
 		current.Store(serving)
 		config.Logger.InfoContext(ctx, config.Name+" service ready")
 		warned = false
+		stopUpkeep := upkeep(ctx, config, store)
 		takeOut := func() {
 			current.Store(unavailable)
+			stopUpkeep()
 			serving.retire()
 			_ = store.Close()
 		}
-		upkept := time.Time{}
 		for {
-			if config.Upkeep != nil && time.Since(upkept) >= config.UpkeepInterval {
-				config.Upkeep(ctx, store)
-				upkept = time.Now()
-			}
 			select {
 			case <-ctx.Done():
 				takeOut()
@@ -237,6 +239,35 @@ func supervise[S io.Closer](ctx context.Context, config Config[S], current *atom
 				break
 			}
 		}
+	}
+}
+
+// upkeep runs config.Upkeep on store as it opens and every UpkeepInterval,
+// beside the checks of the store, so that upkeep waiting on another service
+// never keeps a store in service that has gone. What it returns ends it
+// and waits for it, before the store closes.
+func upkeep[S io.Closer](ctx context.Context, config Config[S], store S) func() {
+	if config.Upkeep == nil {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(config.UpkeepInterval)
+		defer ticker.Stop()
+		for {
+			config.Upkeep(ctx, store)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
