@@ -14,17 +14,13 @@ export function MontagePanel() {
   const [projects, setProjects] = useState<MontageProject[]>();
   const [failure, setFailure] = useState("");
   useEffect(() => {
-    let live = true;
-    listProjects()
-      .then((items) => {
-        if (live) setProjects(items);
-      })
+    const controller = new AbortController();
+    listProjects(controller.signal)
+      .then(setProjects)
       .catch((error: unknown) => {
-        if (live) setFailure(errorText(error));
+        if (!controller.signal.aborted) setFailure(errorText(error));
       });
-    return () => {
-      live = false;
-    };
+    return () => controller.abort();
   }, []);
   return (
     <div className={`${workspaceStyles.bkApp} ${styles.mtApp}`}>
@@ -33,9 +29,7 @@ export function MontagePanel() {
       ) : projects === undefined ? (
         <Spinner />
       ) : projects.length === 0 ? (
-        <EmptyState icon={<Clapperboard />} title="还没有剪辑项目">
-          把一次旅行或活动拍的视频交给剪辑中心，选一首歌，就能剪成一条成片。
-        </EmptyState>
+        <EmptyState icon={<Clapperboard />} title="还没有剪辑项目" />
       ) : (
         <ul className={styles.mtProjects}>
           {projects.map((project) => (
