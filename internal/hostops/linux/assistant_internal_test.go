@@ -181,6 +181,12 @@ func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
 // text shows to be the YAML it should be: here the package's own function makes it from the
 // files the package ships, and it is read as the Host Agent reads it.
 func TestTheCronPolicyIsThePolicyWithTheMontageServerAlone(t *testing.T) {
+	// The root integration tests run this package's test binary in a container
+	// that has no checkout (scripts/root-integration-test.sh); make test runs it
+	// from the checkout, where the files must be there.
+	if os.Getenv("ANAS_ROOT_INTEGRATION") == "1" {
+		t.Skip("needs the checkout's policy and packaging script; make test runs it")
+	}
 	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
