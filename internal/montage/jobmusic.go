@@ -73,6 +73,50 @@ func (s *Store) ownSong(ctx context.Context, owner, songID string) (songRow, err
 	return row, err
 }
 
+// excerptStart resolves the job's selection against the analysis without
+// asking a worker to cut it. A completed step can therefore be reused
+// while the compute worker is unavailable.
+func (row songRow) excerptStart(start float64) (float64, error) {
+	switch row.state {
+	case SongAnalyzing:
+		return 0, ErrSongAnalyzing
+	case SongUnusable:
+		return 0, fmt.Errorf("%w: %s", ErrSongUnusable, row.reason)
+	}
+	st, selection := row.analysis.Structure, row.analysis.Selection
+	if st == nil || selection == nil || len(row.analysis.Music) == 0 {
+		return 0, ErrSongAnalyzing
+	}
+	if math.IsNaN(start) || math.IsInf(start, 0) {
+		return 0, ErrInvalid
+	}
+	if start < 0 {
+		return selection.Excerpt[0], nil
+	}
+	if len(st.Downbeats) > 0 {
+		start = nearest(st.Downbeats, start)
+	}
+	return start, nil
+}
+
+func (row songRow) excerptKey(start float64) string {
+	sum := sha256.Sum256([]byte(row.sha + "\x00" + row.analysis.Structure.Model + "\x00" + row.version + "\x00" + strconv.FormatFloat(start, 'g', -1, 64)))
+	return "song:" + hex.EncodeToString(sum[:])
+}
+
+// ExcerptKey identifies a selection even when the worker cannot be reached.
+func (s *Store) ExcerptKey(ctx context.Context, owner, songID string, start float64) (string, error) {
+	row, err := s.ownSong(ctx, owner, songID)
+	if err != nil {
+		return "", err
+	}
+	start, err = row.excerptStart(start)
+	if err != nil {
+		return "", err
+	}
+	return row.excerptKey(start), nil
+}
+
 // Excerpt is owner's song's excerpt from start, or the default one for
 // DefaultStart (or any negative start).
 func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error) {
@@ -80,23 +124,12 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 	if err != nil {
 		return Excerpt{}, err
 	}
-	switch row.state {
-	case SongAnalyzing:
-		return Excerpt{}, ErrSongAnalyzing
-	case SongUnusable:
-		return Excerpt{}, fmt.Errorf("%w: %s", ErrSongUnusable, row.reason)
+	start, err = row.excerptStart(start)
+	if err != nil {
+		return Excerpt{}, err
 	}
 	st, selection, music := row.analysis.Structure, row.analysis.Selection, row.analysis.Music
-	if st == nil || selection == nil || len(music) == 0 {
-		return Excerpt{}, ErrSongAnalyzing
-	}
-	if math.IsNaN(start) || math.IsInf(start, 0) {
-		return Excerpt{}, ErrInvalid
-	}
-	if start >= 0 && len(st.Downbeats) > 0 {
-		start = nearest(st.Downbeats, start)
-	}
-	if start >= 0 && start != selection.Excerpt[0] {
+	if start != selection.Excerpt[0] {
 		if s.compute == nil {
 			return Excerpt{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
 		}
@@ -116,10 +149,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		selection, music = &dragged, dragged.Music
 	}
 	from := selection.Excerpt[0]
-	// The key changes with the copy, the models that analysed it, how the
-	// excerpt is picked and where it starts.
-	sum := sha256.Sum256([]byte(row.sha + "\x00" + st.Model + "\x00" + row.version + "\x00" + strconv.FormatFloat(from, 'f', 3, 64)))
-	return Excerpt{Key: "song:" + hex.EncodeToString(sum[:]), Music: music, Start: from,
+	return Excerpt{Key: row.excerptKey(start), Music: music, Start: from,
 		Frames: int(math.Round(selection.Seconds * FilmRate))}, nil
 }
 

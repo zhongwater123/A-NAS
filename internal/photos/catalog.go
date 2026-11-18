@@ -436,8 +436,8 @@ CREATE TABLE text_handles (
 	// member registers a project's videos while present; the montage center
 	// then reaches them under the grant, and the Policy decides again on
 	// every use. A grant is one per (owner, project); an asset leaves it when
-	// it is purged. Revoked grants stay, marked, until the owner's account is
-	// removed.
+	// it is purged. A revoked grant lets go of its assets and keeps only its
+	// row, marked, until the owner's account is removed.
 	{Up: `
 CREATE TABLE montage_grants (
     id TEXT PRIMARY KEY,
@@ -481,8 +481,10 @@ CREATE TABLE video_windows (
     flat INTEGER NOT NULL,
     vector BLOB NOT NULL,
     identity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     PRIMARY KEY (object_id, idx)
 );
+CREATE INDEX video_windows_by_created ON video_windows(created_at);
 
 CREATE TABLE window_outbox (
     object_id TEXT PRIMARY KEY,
@@ -888,13 +890,5 @@ func (s *Service) directoryByID(ctx context.Context, q queryer, directoryID stri
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, fn)
 }

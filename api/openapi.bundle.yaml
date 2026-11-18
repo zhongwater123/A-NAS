@@ -3688,6 +3688,15 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage:
+    get:
+      operationId: getMontage
+      summary: 'Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204'
+      responses:
+        '204':
+          description: The montage center is on
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/projects:
     get:
       operationId: listMontageProjects
@@ -3709,7 +3718,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: createMontageProject
-      summary: Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike
+      summary: Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -3747,6 +3756,8 @@ paths:
         '400':
           $ref: '#/components/responses/ProductError'
         '401':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
@@ -3817,7 +3828,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     delete:
       operationId: deleteMontageProject
-      summary: Delete the project and revoke its grant. The videos and the films stay in the photo library
+      summary: Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library
       parameters:
         - $ref: '#/components/parameters/MontageProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -3829,7 +3840,7 @@ paths:
   /api/v1/montage/projects/{projectId}/assets:
     post:
       operationId: addMontageProjectAssets
-      summary: Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew
+      summary: Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew
       parameters:
         - $ref: '#/components/parameters/MontageProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -3870,7 +3881,7 @@ paths:
   /api/v1/montage/projects/{projectId}/generate:
     post:
       operationId: generateMontageFilm
-      summary: Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey again returns the same job. A project with a job in progress answers job_in_progress (409)
+      summary: Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409)
       parameters:
         - $ref: '#/components/parameters/MontageProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -3919,7 +3930,7 @@ paths:
   /api/v1/montage/jobs/{jobId}/cancel:
     post:
       operationId: cancelMontageJob
-      summary: 'Cancel the job: a queued or waiting one at once, a running one once its step stops. A film it made is not saved. A job that ended is job_state (409)'
+      summary: 'Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome'
       parameters:
         - $ref: '#/components/parameters/MontageJobID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -16693,7 +16704,8 @@ components:
       type: string
       minLength: 1
       maxLength: 128
-      description: 'Unique per member: the same key again repeats nothing.'
+      pattern: ^[!-~]+$
+      description: 'Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict.'
     MontageAssetIDs:
       type: array
       minItems: 1
@@ -16701,7 +16713,8 @@ components:
       items:
         type: string
         minLength: 1
-        maxLength: 128
+        maxLength: 64
+        pattern: ^[!-~]+$
     MontageProjectAsset:
       type: object
       additionalProperties: false
@@ -16865,6 +16878,8 @@ components:
             - vnas_unknown
             - plan_invalid
             - storage_full
+            - photos_unavailable
+            - video_too_long
           description: Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md).
         error:
           type: string

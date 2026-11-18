@@ -3,8 +3,8 @@ parameters:
   MontageJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
 schemas:
-  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, description: "Unique per member: the same key again repeats nothing." }
-  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 128 } }
+  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
+  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
   MontageProjectSummary:
     type: object
     additionalProperties: false
@@ -121,7 +121,7 @@ schemas:
       step: { type: string, description: The step the job is at or stopped at. }
       waitReason:
         type: string
-        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full]
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full, photos_unavailable, video_too_long]
         description: "Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md)."
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }

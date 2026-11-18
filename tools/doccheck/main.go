@@ -35,6 +35,17 @@ const (
 	// page turns back into a journal that every session must read and every
 	// parallel branch conflicts on.
 	currentMaxBytes = 10 << 10
+
+	// The byte cap alone did not keep the page to current facts: for a week
+	// it sat within 200 bytes of the cap while each pull request cut another
+	// one's sentences to fit its own. Its 下一步 kept finished steps with
+	// "已部署" added, and the evidence of each deploy had no other place to
+	// go. So a next step says only what is left to do, in a line or two, and
+	// the page as it stood before each deploy is kept as a dated snapshot
+	// beside it.
+	statusDirectory  = "docs/status"
+	nextStepsHeading = "## 下一步"
+	nextStepMaxRunes = 120
 )
 
 var (
@@ -83,6 +94,21 @@ var (
 	deployedPrefix    = "- 已部署："
 	deployedLine      = regexp.MustCompile("^- 已部署：`[0-9a-f]{7,40}`")
 	pullRequestNumber = regexp.MustCompile(`#\d+|/pull/\d+`)
+
+	// A snapshot is docs/status/<install date>.md, with -2 and so on for a
+	// second deploy on the same day. It keeps the page's own 已部署 line and
+	// names the commit deployed after it, so the snapshots and the current
+	// state form one chain of deploys that this tool can check without Git.
+	snapshotFileName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(-\d+)?\.md$`)
+	deployedCommit   = regexp.MustCompile("(?m)^- 已部署：`([0-9a-f]{7,40})`")
+	nextDeployPrefix = "下一次部署："
+	nextDeployCommit = regexp.MustCompile("(?m)^下一次部署：`([0-9a-f]{7,40})`")
+	currentLink      = "](CURRENT.md)"
+
+	listItem     = regexp.MustCompile(`^\s*(?:[-*]|\d+\.)\s+`)
+	markdownLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	// "已部署" and "已随 `<commit>` 部署": a next step that reports a deploy.
+	deployedPhrase = regexp.MustCompile(`已(?:随[^，。；]*)?部署`)
 
 	// The index lists each ADR as "- [NNNN：title](file)", followed by a
 	// parenthesised marker that starts with proposed or superseded when the
@@ -174,10 +200,12 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 	if err == nil {
 		problems = append(problems, validateDeployedState(string(current))...)
+		problems = append(problems, validateNextSteps(string(current))...)
 	}
 
 	files := 0
 	adrDocuments, investigations, decisions, runbook := map[string]string{}, map[string]string{}, map[string]string{}, ""
+	snapshots := map[string]string{}
 	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -201,10 +229,14 @@ func validateDocumentation(root string) ([]string, int) {
 		if readErr != nil {
 			return readErr
 		}
-		if !statusPhraseKeepers[relativePath] {
+		// A snapshot is an old current-state page, status phrases included.
+		snapshot := path.Dir(relativePath) == statusDirectory && snapshotFileName.MatchString(path.Base(relativePath))
+		if !statusPhraseKeepers[relativePath] && !snapshot {
 			problems = append(problems, findStatusPhrases(relativePath, string(data))...)
 		}
 		switch {
+		case snapshot:
+			snapshots[relativePath] = string(data)
 		case path.Dir(relativePath) == adrDirectory:
 			adrDocuments[relativePath] = string(data)
 		case path.Dir(relativePath) == investigationDirectory:
@@ -224,7 +256,77 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
 	problems = append(problems, validateDecisions(decisions, adrDocuments, string(current))...)
+	problems = append(problems, validateSnapshots(snapshots, string(current))...)
 	return problems, files
+}
+
+// validateNextSteps checks that each item under the current state's 下一步
+// says what is left to do: it reports no deploy, and without its link targets
+// it fits in nextStepMaxRunes characters.
+func validateNextSteps(current string) []string {
+	var problems []string
+	inside := false
+	for number, line := range strings.Split(current, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			inside = strings.TrimSpace(line) == nextStepsHeading
+			continue
+		}
+		marker := listItem.FindString(line)
+		if !inside || marker == "" {
+			continue
+		}
+		item := line[len(marker):]
+		// A link's text may name a document, such as 已部署功能的实机验收手册.
+		if phrase := deployedPhrase.FindString(markdownLink.ReplaceAllString(item, "")); phrase != "" && !strings.Contains(line, statusPhraseAllowed) {
+			problems = append(problems, fmt.Sprintf("%s:%d: a next step says %s: what runs goes under the Experimental NAS heading, and a finished step leaves the list", currentDocument, number+1, phrase))
+		}
+		if length := len([]rune(markdownLink.ReplaceAllString(item, "$1"))); length > nextStepMaxRunes {
+			problems = append(problems, fmt.Sprintf("%s:%d: a next step is %d characters without its link targets, over %d: say what is left to do and link the rest", currentDocument, number+1, length, nextStepMaxRunes))
+		}
+	}
+	return problems
+}
+
+// validateSnapshots checks that each snapshot is marked as one, and that the
+// snapshots in date order and then the current state form a chain: each
+// names the commit deployed after it, which the next one records as deployed.
+// A deploy that rewrites the current state's 已部署 line without saving the
+// page first breaks the chain at its end. snapshots maps the slash-separated
+// paths of the snapshots to their contents; current is the current state's.
+func validateSnapshots(snapshots map[string]string, current string) []string {
+	var problems []string
+	names := slices.SortedFunc(maps.Keys(snapshots), func(a, b string) int {
+		// Without the extension, 2026-11-10 sorts before 2026-11-10-2.
+		return strings.Compare(strings.TrimSuffix(a, ".md"), strings.TrimSuffix(b, ".md"))
+	})
+	previous, expected := "", ""
+	for _, name := range names {
+		content := snapshots[name]
+		deployed, next := deployedCommit.FindAllStringSubmatch(content, -1), nextDeployCommit.FindAllStringSubmatch(content, -1)
+		switch {
+		case len(deployed) != 1:
+			problems = append(problems, fmt.Sprintf("%s needs exactly one line starting with %s`<commit>`, found %d", name, deployedPrefix, len(deployed)))
+			continue
+		case len(next) != 1:
+			problems = append(problems, fmt.Sprintf("%s needs exactly one line starting with %s`<commit>`, the commit deployed after it, found %d", name, nextDeployPrefix, len(next)))
+			continue
+		case !strings.Contains(content, currentLink):
+			problems = append(problems, fmt.Sprintf("%s: say that it is a snapshot and link %s for the present state", name, currentDocument))
+		}
+		if previous != "" && !sameCommit(expected, deployed[0][1]) {
+			problems = append(problems, fmt.Sprintf("%s says the next deploy was %s, but %s records %s as deployed", previous, expected, name, deployed[0][1]))
+		}
+		previous, expected = name, next[0][1]
+	}
+	if match := deployedCommit.FindStringSubmatch(current); previous != "" && match != nil && !sameCommit(expected, match[1]) {
+		problems = append(problems, fmt.Sprintf("%s names %s as deployed, but the newest snapshot %s says the next deploy was %s: before rewriting the 已部署 line, save the page as %s/<install date>.md", currentDocument, match[1], previous, expected, statusDirectory))
+	}
+	return problems
+}
+
+// sameCommit reports whether two abbreviated commit names can be one commit.
+func sameCommit(a, b string) bool {
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
 // validateDecisions checks that the index lists every decision record without

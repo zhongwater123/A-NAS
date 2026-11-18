@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -29,7 +31,7 @@ import (
 const (
 	catalogVersion = "catalog/v1"
 	promptVersion  = "plan/v8"
-	fillVersion    = "fill/v8"
+	fillVersion    = "fill/v9"
 	renderVersion  = "render/v1"
 )
 
@@ -50,9 +52,10 @@ func digestJSON(value any) string {
 // result as the steps go.
 type jobRun struct {
 	claimed
-	grantID string
-	assets  []jobAsset
-	keys    map[string]string
+	grantID       string
+	replayingSave bool
+	assets        []jobAsset
+	keys          map[string]string
 	// The steps' results.
 	analysis analysisResult
 	catalog  catalogResult
@@ -108,6 +111,29 @@ func (s *Store) steps() []step {
 // runSteps runs job from its first step not done.
 func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	run := &jobRun{claimed: job, keys: map[string]string{}}
+	// An interrupted save may already have committed in the photo library.
+	// Replay its exact version key before inspecting changeable upstream inputs.
+	var saving bool
+	if err := s.db.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", job.id).Scan(&saving); err != nil {
+		return err
+	}
+	if saving {
+		var rendered string
+		var key string
+		err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
+			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name='render'
+			JOIN steps w ON w.job_id=j.id AND w.name='save' WHERE j.id=?`, job.id).Scan(&run.grantID, &rendered, &key)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(rendered), &run.render); err != nil {
+			return err
+		}
+		run.replayingSave = true
+		run.keys["save"] = key
+		_, err = s.save(ctx, run)
+		return err
+	}
 	if err := s.loadRun(ctx, run); err != nil {
 		return err
 	}
@@ -140,6 +166,9 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 			return err
 		}
 		result, err := st.do(ctx, run)
+		if errors.Is(err, ErrWorkerRefused) {
+			return failed("计算服务拒绝处理此素材或规划: %v", err)
+		}
 		if err != nil {
 			return err
 		}
@@ -189,9 +218,8 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 // grant is gone has all its videos missing.
 func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, error) {
 	var grantID sql.NullString
-	var lost bool
-	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, p.grant_lost FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
-		Scan(&grantID, &lost)
+	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
+		Scan(&grantID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil, ErrNotFound
 	}
@@ -214,7 +242,7 @@ func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, e
 	if err := rows.Err(); err != nil {
 		return "", nil, err
 	}
-	if lost || !grantID.Valid {
+	if !grantID.Valid {
 		return "", assets, &stepNeeds{reason: NeedMissing, missing: assets}
 	}
 	return grantID.String, assets, nil
@@ -295,6 +323,44 @@ func (s *Store) saveProgress(ctx context.Context, jobID, name string, progress a
 	return err
 }
 
+// The photo library bounds each call, while a project may span several batches.
+func (s *Store) lookupAssets(ctx context.Context, grantID string, ids []string) ([]photos.GrantedAsset, error) {
+	var result []photos.GrantedAsset
+	for batch := range slices.Chunk(ids, photos.MaxGrantAssets) {
+		found, err := s.grants.Lookup(ctx, grantID, batch)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, found...)
+	}
+	return result, nil
+}
+
+func (s *Store) analyzeAssets(ctx context.Context, grantID string, ids []string, retry bool) error {
+	for batch := range slices.Chunk(ids, photos.MaxGrantAssets) {
+		if err := s.grants.Analyze(ctx, grantID, batch, retry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const WaitPhotos = "photos_unavailable"
+
+const NeedTooLong = "video_too_long"
+
+func jobGrantError(err error, ids []string) error {
+	switch photosapi.GrantErrorCode(err) {
+	case photosapi.GrantNotFound, photosapi.GrantAssetNotFound:
+		return &stepNeeds{reason: NeedMissing, missing: ids, err: err}
+	case photosapi.GrantOwnerInactive, photosapi.GrantUnavailable:
+		return &stepWait{reason: WaitPhotos, delay: waitPoll}
+	case photosapi.GrantInvalid, photosapi.GrantTooMany:
+		return failed("photo library refused the job's inputs: %v", err)
+	}
+	return err
+}
+
 // checkAssets looks up the job's videos: a video in the trash makes the job
 // wait, one gone or changed makes it need the member.
 func (s *Store) checkAssets(ctx context.Context, job claimed) error {
@@ -318,12 +384,9 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	looked, err := s.grants.Lookup(ctx, grantID, ids)
-	if photosapi.GrantErrorCode(err) == photosapi.GrantNotFound {
-		return &stepNeeds{reason: NeedMissing, missing: ids}
-	}
+	looked, err := s.lookupAssets(ctx, grantID, ids)
 	if err != nil {
-		return fmt.Errorf("looking up the job's videos: %w", err)
+		return jobGrantError(err, ids)
 	}
 	status := map[string]photos.GrantedAsset{}
 	for _, asset := range looked {
@@ -355,16 +418,20 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 
 // analysedVideo is one video's analysis as the job uses it.
 type analysedVideo struct {
-	AssetID  string                     `json:"assetId"`
-	ObjectID string                     `json:"objectId"`
-	Identity string                     `json:"identity"`
-	Duration float64                    `json:"duration"`
-	Width    int                        `json:"width"`
-	Height   int                        `json:"height"`
-	TakenAt  *time.Time                 `json:"takenAt,omitempty"`
-	Windows  []photos.Window            `json:"windows"`
-	Cards    []Card                     `json:"cards"`
-	Measures map[string]json.RawMessage `json:"measures"`
+	AssetID         string                     `json:"assetId"`
+	ObjectID        string                     `json:"objectId"`
+	Dimensions      int                        `json:"dimensions"`
+	CardsIdentity   string                     `json:"cardsIdentity"`
+	QualityIdentity string                     `json:"qualityIdentity"`
+	DescriptionsKey string                     `json:"descriptionsKey"`
+	Identity        string                     `json:"identity"`
+	Duration        float64                    `json:"duration"`
+	Width           int                        `json:"width"`
+	Height          int                        `json:"height"`
+	TakenAt         *time.Time                 `json:"takenAt,omitempty"`
+	Windows         []photos.Window            `json:"windows"`
+	Cards           []Card                     `json:"cards"`
+	Measures        map[string]json.RawMessage `json:"measures"`
 }
 
 type analysisResult struct {
@@ -380,9 +447,9 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	for i, asset := range run.assets {
 		ids[i] = asset.assetID
 	}
-	looked, err := s.grants.Lookup(ctx, run.grantID, ids)
+	looked, err := s.lookupAssets(ctx, run.grantID, ids)
 	if err != nil {
-		return "", fmt.Errorf("looking up the job's videos: %w", err)
+		return "", jobGrantError(err, ids)
 	}
 	about := map[string]photos.GrantedAsset{}
 	for _, asset := range looked {
@@ -393,11 +460,18 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	var pending, broken []string
 	for _, asset := range run.assets {
 		looked, ok := about[asset.assetID]
+		if ok && looked.Status == photos.GrantTrashed {
+			return "", &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
+		}
 		if !ok || looked.Status != photos.GrantAvailable || looked.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
 		}
 		states := []photos.AnalysisState{looked.Windows, looked.Cards, looked.Quality, looked.Descriptions}
 		switch {
+		case looked.Windows == photos.AnalysisFailed && photos.VideoTooLong(looked.Duration):
+			return "", &stepNeeds{reason: NeedTooLong, missing: []string{asset.assetID}, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
+		case slices.Contains(states, photos.AnalysisUnavailable):
+			return "", &stepNeeds{reason: NeedAnalysis, missing: []string{asset.assetID}, err: errors.New("素材分析所需的本地模型不可用")}
 		case slices.Contains(states, photos.AnalysisFailed):
 			broken = append(broken, asset.assetID)
 		case slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }):
@@ -409,8 +483,8 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	if len(pending) > 0 {
 		// Asking again changes nothing for the videos already queued.
-		if err := s.grants.Analyze(ctx, run.grantID, pending, false); err != nil {
-			return "", fmt.Errorf("asking for the analysis: %w", err)
+		if err := s.analyzeAssets(ctx, run.grantID, pending, false); err != nil {
+			return "", jobGrantError(err, pending)
 		}
 		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 	}
@@ -418,12 +492,13 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	for n, asset := range run.assets {
 		analysis, _, err := s.grants.Analysis(ctx, run.grantID, asset.assetID)
 		if err != nil {
-			return "", fmt.Errorf("reading the analysis of %s: %w", asset.assetID, err)
+			return "", jobGrantError(err, []string{asset.assetID})
 		}
 		if analysis.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
 		}
-		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity,
+		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
+			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsKey: digestJSON(analysis.Descriptions),
 			Duration: about[asset.assetID].Duration, Width: about[asset.assetID].Width, Height: about[asset.assetID].Height,
 			TakenAt: about[asset.assetID].TakenAt, Windows: analysis.List, Measures: map[string]json.RawMessage{}}
 		described := map[int]json.RawMessage{}
@@ -490,6 +565,9 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 		}
 		maps.Copy(request.Measures, video.Measures)
 	}
+	if len(request.Cards) == 0 {
+		return nil, &stepNeeds{reason: NeedNoFootage}
+	}
 	usable, err := s.jobCompute.Catalog(ctx, request)
 	if err != nil {
 		return nil, err
@@ -503,6 +581,18 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 		}
 	}
 	result.Catalog = usable
+	spans := catalogSpans(result)
+	var values int64
+	for _, video := range videos {
+		for _, window := range video.Windows {
+			if overlaps(spans[video.AssetID], float64(window.StartMs)/1000, float64(window.EndMs)/1000) {
+				values += int64(video.Dimensions)
+			}
+		}
+	}
+	if values > MaxComputeArrayBytes/4 {
+		return nil, failed("目录中的素材窗口向量超过计算服务的 64 MiB 上限")
+	}
 	return result, nil
 }
 
@@ -512,23 +602,33 @@ func (s *Store) songKey(ctx context.Context, run *jobRun) (string, error) {
 	if s.jobMusic == nil || run.settings.SongID == "" {
 		return "", &stepNeeds{reason: NeedMusic, err: ErrSongUnusable}
 	}
-	excerpt, err := s.jobMusic.Excerpt(ctx, run.owner, run.settings.SongID, run.settings.SongStart)
-	switch {
-	case errors.Is(err, ErrSongAnalyzing):
-		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
-	case errors.Is(err, ErrSongUnusable):
-		return "", &stepNeeds{reason: NeedMusic, err: err}
-	case err != nil:
-		return "", err
-	}
-	if excerpt.Frames <= 0 {
-		return "", &stepNeeds{reason: NeedMusic, err: ErrSongUnusable}
-	}
-	run.excerpt = excerpt
-	return excerpt.Key, nil
+	key, err := s.jobMusic.ExcerptKey(ctx, run.owner, run.settings.SongID, run.settings.SongStart)
+	return key, songStepError(err)
 }
 
-func (s *Store) excerptOf(_ context.Context, run *jobRun) (any, error) { return run.excerpt, nil }
+func songStepError(err error) error {
+	switch {
+	case errors.Is(err, ErrSongAnalyzing):
+		return &stepWait{reason: WaitAnalysis, delay: waitPoll}
+	case errors.Is(err, ErrSongUnusable):
+		return &stepNeeds{reason: NeedMusic, err: err}
+	}
+	return err
+}
+
+func (s *Store) excerptOf(ctx context.Context, run *jobRun) (any, error) {
+	excerpt, err := s.jobMusic.Excerpt(ctx, run.owner, run.settings.SongID, run.settings.SongStart)
+	if err != nil {
+		return nil, songStepError(err)
+	}
+	if excerpt.Frames <= 0 {
+		return nil, &stepNeeds{reason: NeedMusic, err: ErrSongUnusable}
+	}
+	if excerpt.Key != run.keys["song"] {
+		return nil, errors.New("the song analysis changed while selecting the excerpt")
+	}
+	return excerpt, nil
+}
 
 // --- planning ---
 
@@ -616,9 +716,21 @@ func (run *jobRun) latestTakenAt() *time.Time {
 
 // filmName is the film's name in the photo library.
 func filmName(project string, number int) string {
-	name := strings.TrimSpace(project)
+	suffix := fmt.Sprintf(" v%d.mp4", number)
+	name := strings.Map(func(ch rune) rune {
+		if ch == '/' || ch == '\\' || unicode.IsControl(ch) {
+			return '_'
+		}
+		return ch
+	}, project)
+	name = strings.TrimLeftFunc(name, func(ch rune) bool { return ch == '.' || unicode.IsSpace(ch) })
+	name = strings.TrimSpace(name)
+	for len(name)+len(suffix) > 255 {
+		_, size := utf8.DecodeLastRuneInString(name)
+		name = name[:len(name)-size]
+	}
 	if name == "" {
 		name = "剪辑"
 	}
-	return fmt.Sprintf("%s v%d.mp4", name, number)
+	return name + suffix
 }

@@ -44,8 +44,11 @@ func (s *Service) SaveFilm(ctx context.Context, owner Principal, grantID, versio
 				owner.UserID, versionKey, assetID, now); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "INSERT INTO montage_grant_assets(grant_id, asset_id, added_at) VALUES(?, ?, ?) ON CONFLICT DO NOTHING",
-				grantID, assetID, now)
+			result, err := tx.ExecContext(ctx, "INSERT INTO montage_grant_assets(grant_id, asset_id, added_at) SELECT id, ?, ? FROM montage_grants WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL",
+				assetID, now, grantID, owner.UserID)
+			if err != nil { return err }
+			rows, err := result.RowsAffected()
+			if err == nil && rows == 0 { return ErrGrantNotFound }
 			return err
 		}})
 	if err != nil {

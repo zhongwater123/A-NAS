@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // SongHeader carries what the Product Service tells of the track it copies
@@ -43,8 +44,6 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 		logger = slog.Default()
 	}
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		r.Header.Del(SongHeader)
-		r.Header.Del(AssistantHeader)
 		if tracks == nil {
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "music_unavailable", "music library is unavailable")
 			return
@@ -95,8 +94,8 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 		copied.ContentLength = -1
 		copied.Header.Del("Content-Length")
 		copied.Header.Set("Content-Type", "application/octet-stream")
-		copied.Header.Set(SongHeader, header)
-		next.ServeHTTP(w, copied.WithContext(accounts.WithUser(r.Context(), session.User)))
+		ctx := serviceproxy.WithInternalHeader(accounts.WithUser(r.Context(), session.User), SongHeader, header)
+		next.ServeHTTP(w, copied.WithContext(ctx))
 	}
 }
 

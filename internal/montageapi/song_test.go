@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // tracks stands in for the music library: one track, of Alice's.
@@ -75,7 +76,7 @@ func TestCopySongStreamsTheTrackWithWhatItIs(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	library := tracks{t: t, track: music.Track{ID: "t", Title: "Lossless", Format: "ape", Transcode: true, DurationMs: 60_000}}
-	handler := montageapi.CopySong(library, next, nil)
+	handler := montageapi.CopySong(library, serviceproxy.Local(next), nil)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/montage/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
 	request.Header.Set("Content-Type", "application/json")

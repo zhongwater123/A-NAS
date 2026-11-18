@@ -50,6 +50,7 @@ func describeIdentity(reader, cardsIdentity string) string {
 // card stays out of the montage center's catalog, and its video's other
 // cards go on.
 type CardDescription struct {
+	Identity string `json:"identity,omitempty"`
 	Card        int             `json:"card"`
 	Description json.RawMessage `json:"description,omitempty"`
 	Error       string          `json:"error,omitempty"`
@@ -108,7 +109,7 @@ func (s *Service) describeState(ctx context.Context, q queryer, object string) (
 
 // cardDescriptions are the stored descriptions of object, in card order.
 func (s *Service) cardDescriptions(ctx context.Context, object string) ([]CardDescription, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT card, IFNULL(result, ''), error FROM video_card_descriptions WHERE object_id = ? ORDER BY card", object)
+	rows, err := s.db.QueryContext(ctx, "SELECT card, IFNULL(result, ''), error, identity FROM video_card_descriptions WHERE object_id = ? ORDER BY card", object)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (s *Service) cardDescriptions(ctx context.Context, object string) ([]CardDe
 	for rows.Next() {
 		var card CardDescription
 		var result string
-		if err := rows.Scan(&card.Card, &result, &card.Error); err != nil {
+		if err := rows.Scan(&card.Card, &result, &card.Error, &card.Identity); err != nil {
 			return nil, err
 		}
 		if result != "" {
@@ -319,7 +320,7 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 			case <-working.Done():
 				return
 			case <-ticker.C:
-				if open, reason := gate.Open(working, info.OCRMemoryBytes); !open && closesForeground(reason) {
+				if open, reason := continuing(gate)(working, info.OCRMemoryBytes); !open {
 					hungUp.Store(reason)
 					cancel()
 					return
@@ -367,7 +368,7 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 	// The description: any reason to stop hangs it up, as a reading does.
 	describing, stop := context.WithCancel(ctx)
 	defer stop()
-	stopWatching := watchGate(describing, gate, info.OCRMemoryBytes, stop)
+	stopWatching := watchGate(describing, gate.Open, info.OCRMemoryBytes, stop)
 	r.markReaderLoaded()
 	started := lib.now()
 	model, template, description, err := describer.DescribeFrames(describing, frames, cardLayout(*card, instants))

@@ -25,9 +25,9 @@ import (
 // The photo library's side of jobs: every video is ten seconds, five
 // windows and two described cards.
 
-func (l *library) grantOf(grantID, assetID string) (video, error) {
+func (l *library) grantedVideo(grantID, assetID string) (video, error) {
 	g, ok := l.grants[grantID]
-	if !ok || g.Revoked {
+	if !ok || g.revoked {
 		return video{}, refused(photosapi.GrantNotFound)
 	}
 	v, ok := l.videos[assetID]
@@ -40,7 +40,7 @@ func (l *library) grantOf(grantID, assetID string) (video, error) {
 func (l *library) Open(_ context.Context, grantID, assetID string) (*os.File, string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	v, err := l.grantOf(grantID, assetID)
+	v, err := l.grantedVideo(grantID, assetID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -65,12 +65,12 @@ func (l *library) Analyze(_ context.Context, _ string, ids []string, retry bool)
 func (l *library) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	v, err := l.grantOf(grantID, assetID)
+	v, err := l.grantedVideo(grantID, assetID)
 	if err != nil {
 		return photos.GrantAnalysis{}, nil, err
 	}
 	done := photos.AnalysisDone
-	analysis := photos.GrantAnalysis{ObjectID: v.object, Windows: done, Identity: "model|win", Cards: done, Quality: done, Described: done,
+	analysis := photos.GrantAnalysis{Dimensions: 768, ObjectID: v.object, Windows: done, Identity: "model|win", Cards: done, Quality: done, Described: done,
 		CardList: []photos.CardAnalysis{
 			{Index: 0, StartMs: 0, EndMs: 4000, Times: []float64{1, 3}, Quality: &photos.CardQuality{}},
 			{Index: 1, StartMs: 4000, EndMs: 10000, Times: []float64{5, 8}, Quality: &photos.CardQuality{}},
@@ -91,7 +91,7 @@ func (l *library) SaveFilm(_ context.Context, grantID, versionKey, name string, 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	g, ok := l.grants[grantID]
-	if !ok || g.Revoked {
+	if !ok || g.revoked {
 		return "", refused(photosapi.GrantNotFound)
 	}
 	if l.noSpace {
@@ -287,7 +287,7 @@ func (p *planner) Shots(_ context.Context, input montage.PlanInput) (json.RawMes
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.shots++
-	return json.RawMessage(`{"answer":{"parts":[]},"slots":[]}`), nil
+	return json.RawMessage(`{"answer":{"parts":[]},"slots":[[[[0,2],[2,4]]]]}`), nil
 }
 
 // music: four seconds of one song.
@@ -297,28 +297,15 @@ func (music) Chosen(context.Context, string, string) (string, float64, error) {
 	return "song:1", 12.5, nil
 }
 
+func (music) ExcerptKey(_ context.Context, _, songID string, start float64) (string, error) {
+	return fmt.Sprintf("%s@%v", songID, start), nil
+}
+
 func (music) Excerpt(_ context.Context, _, songID string, start float64) (montage.Excerpt, error) {
 	return montage.Excerpt{Key: fmt.Sprintf("%s@%v", songID, start), Music: json.RawMessage(`{"parts":[{"level":"主歌"}]}`), Start: start, Frames: 120}, nil
 }
 
 func (music) Audio(context.Context, string, string) (*os.File, error) { return os.Open(os.DevNull) }
-
-type clock struct {
-	mu sync.Mutex
-	at time.Time
-}
-
-func (c *clock) now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *clock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
-}
 
 type jobEnv struct {
 	store   *montage.Store
@@ -382,7 +369,7 @@ func (e *jobEnv) settle(t *testing.T, jobID string) montage.Job {
 	for range 20 {
 		if !e.store.RunOnce(context.Background()) {
 			job := e.job(t, jobID)
-			if job.State != montage.JobQueued {
+			if job.State != montage.JobQueued && !(job.State == montage.JobWaiting && job.WaitReason == montage.WaitPhotos) {
 				return job
 			}
 			e.clock.advance(3 * time.Minute)
@@ -663,6 +650,17 @@ func TestDroppingAMissingVideoPlansAgainWithoutIt(t *testing.T) {
 	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1", "asset:a2"}); !errors.Is(err, montage.ErrJobState) {
 		t.Fatalf("dropping every video = %v", err)
 	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("dropping a usable video = %v", err)
+	}
+	env.lib.setDown(true)
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); !errors.Is(err, montage.ErrPhotosUnavailable) {
+		t.Fatalf("dropping while the grant service is unavailable = %v", err)
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobNeedsInput || !slices.Equal(got.Missing, []string{"asset:a2"}) {
+		t.Fatalf("after failed removal = %+v", got)
+	}
+	env.lib.setDown(false)
 	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -782,12 +780,112 @@ func TestGeneratingWithTheStoresOwnSongsDoesNotWaitOnItself(t *testing.T) {
 	env.store.UseMusic(env.store)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	job, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1")
-	if err != nil || job.State != montage.JobQueued {
-		t.Fatalf("Generate() = %+v, %v", job, err)
+	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1"); !errors.Is(err, montage.ErrNoSong) {
+		t.Fatalf("Generate without a selected song = %v", err)
 	}
-	// No song was chosen: the job needs one.
-	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedMusic {
-		t.Fatalf("job = %+v", needs)
+}
+
+func TestCancellationSurvivesARestartAndReleasesTheProject(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	job := env.generate(t, "first")
+	if env.store.Claim(ctx) != job.ID {
+		t.Fatal("job was not claimed")
+	}
+	if _, err := env.store.Cancel(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.open(t)
+	if err := env.store.RecoverJobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.job(t, job.ID); got.State != montage.JobCancelled || got.FinishedAt == nil || env.store.RunOnce(ctx) {
+		t.Fatalf("recovered job = %+v", got)
+	}
+	env.generate(t, "next")
+}
+
+func TestANewStepHasItsOwnRetryBudget(t *testing.T) {
+	env := newJobEnv(t)
+	env.compute.failFill = 2
+	env.editing.failSegment = 1
+	job := env.generate(t, "first")
+	if done := env.settle(t, job.ID); done.State != montage.JobDone || env.editing.segments != 3 {
+		t.Fatalf("job = %+v; %d segment attempts", done, env.editing.segments)
+	}
+}
+
+func TestCancelAfterRunningOutOfSpaceRemovesTheRenderedFilm(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	env.lib.noSpace = true
+	job := env.generate(t, "first")
+	if got := env.settle(t, job.ID); got.WaitReason != montage.NeedStorageFull || !env.jobFiles(job.ID) {
+		t.Fatalf("expected a rendered film waiting for space, got %+v", got)
+	}
+	got, err := env.store.Cancel(ctx, "user:alice", job.ID)
+	if err != nil || got.State != montage.JobCancelled || env.jobFiles(job.ID) {
+		t.Fatalf("after cancellation = %+v, %v; files present = %v", got, err, env.jobFiles(job.ID))
+	}
+}
+
+func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	env.generate(t, "first")
+	project, _, err := env.store.CreateProject(ctx, "user:alice", "alice", "other", "", []string{"asset:a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.store.Generate(ctx, "user:alice", project.ID, "first"); !errors.Is(err, montage.ErrConflict) {
+		t.Fatalf("key reused on a different project: %v", err)
+	}
+}
+
+func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := montage.Open(ctx, env.root, montage.Options{Grants: env.lib, Media: &songMedia{}, JobCompute: env.compute, Editing: env.editing, Planner: env.planner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	env.store = store
+	put := func(name string) montage.SongDetail {
+		t.Helper()
+		song, err := store.PutSong(ctx, "user:alice", env.project.ID, montage.SongSource{Title: name},
+			strings.NewReader("song 200 "+name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return song
+	}
+	first := put("original")
+	job := env.generate(t, "first")
+	put("replacement")
+	if err := store.ReclaimSongs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f, err := store.Audio(ctx, "user:alice", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readAllFrom(f); got != "song 200 original" {
+		t.Fatalf("job holds %q", got)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Cancel(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Audio(ctx, "user:alice", first.ID); !errors.Is(err, montage.ErrSongUnusable) {
+		t.Fatalf("old song after cancellation = %v", err)
 	}
 }
