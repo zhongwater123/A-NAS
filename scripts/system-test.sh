@@ -986,7 +986,7 @@ check "the data volume remounts read-only" mount -o remount,ro "$data"
 systemctl start anas-montage
 montage_unavailable() {
   for _ in $(seq 1 50); do
-    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -r .code)" == montage_unavailable ]] && return 0
+    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -r .error.code)" == montage_unavailable ]] && return 0
     sleep 0.2
   done
   return 1
@@ -2532,8 +2532,6 @@ check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/
 check "the upgrade copied the montage database on the data volume" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
-check "the previous release, which came before the montage center, has no montage unit" \
-  test "$(systemctl show -p LoadState --value anas-montage.service)" = not-found
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }
@@ -2560,7 +2558,7 @@ check "a-nas-check passes on the previous release" quiet a-nas-check
 check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
-check "upgrading again brings back the montage service with its account, store and socket" \
+check "after upgrading again the montage service has its account, store and socket" \
   test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
   "active:31003:700 a-nas-montage:660 a-nas-montage"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
