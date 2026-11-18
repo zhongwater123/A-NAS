@@ -182,7 +182,15 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 func (s *Store) settingsOf(ctx context.Context, q queryer, row projectRow) (JobSettings, error) {
 	settings := JobSettings{Ask: row.ask, Chronological: row.chronological, ProjectName: row.name}
 	if s.jobMusic != nil {
-		id, start, err := s.jobMusic.Chosen(ctx, row.owner, row.id)
+		chosen := s.jobMusic.Chosen
+		if s.jobMusic == Music(s) {
+			// The store's own songs, read in the job's transaction: the
+			// database has one connection.
+			chosen = func(ctx context.Context, owner, projectID string) (string, float64, error) {
+				return s.chosenIn(ctx, q, owner, projectID)
+			}
+		}
+		id, start, err := chosen(ctx, row.owner, row.id)
 		if err != nil {
 			return JobSettings{}, err
 		}

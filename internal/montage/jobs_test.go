@@ -774,3 +774,20 @@ func TestDeletingAProjectTakesItsJobs(t *testing.T) {
 		t.Fatal("a deleted project's job ran")
 	}
 }
+
+// Generating reads the project's song in the job's own transaction: the
+// database has one connection, so a second one would wait forever.
+func TestGeneratingWithTheStoresOwnSongsDoesNotWaitOnItself(t *testing.T) {
+	env := newJobEnv(t)
+	env.store.UseMusic(env.store)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	job, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1")
+	if err != nil || job.State != montage.JobQueued {
+		t.Fatalf("Generate() = %+v, %v", job, err)
+	}
+	// No song was chosen: the job needs one.
+	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedMusic {
+		t.Fatalf("job = %+v", needs)
+	}
+}

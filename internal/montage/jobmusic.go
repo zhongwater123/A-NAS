@@ -43,7 +43,13 @@ const DefaultStart = -1.0
 // Chosen is owner's project's song and the excerpt's start, DefaultStart
 // when the member kept the default; no song is "".
 func (s *Store) Chosen(ctx context.Context, owner, projectID string) (string, float64, error) {
-	chosen, err := s.projectSong(ctx, s.db, owner, projectID)
+	return s.chosenIn(ctx, s.db, owner, projectID)
+}
+
+// chosenIn is Chosen read through q, as a transaction that holds the
+// database's one connection must.
+func (s *Store) chosenIn(ctx context.Context, q queryer, owner, projectID string) (string, float64, error) {
+	chosen, err := s.projectSong(ctx, q, owner, projectID)
 	switch {
 	case errors.Is(err, ErrNoSong):
 		return "", 0, nil
