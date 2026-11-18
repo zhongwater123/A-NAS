@@ -25,6 +25,14 @@ type library struct {
 	grants    map[string]*grant
 	registers int
 	revoked   []string
+	// What jobs use (jobs_test.go): each video's analysis state (done
+	// when absent), the films saved by version key, and faults.
+	states   map[string]photos.AnalysisState
+	films    map[string]string
+	saves    int
+	noSpace  bool
+	lostSave int
+	retried  []string
 }
 
 type video struct {
@@ -39,7 +47,7 @@ type grant struct {
 }
 
 func newLibrary() *library {
-	return &library{videos: map[string]video{}, grants: map[string]*grant{}}
+	return &library{videos: map[string]video{}, grants: map[string]*grant{}, states: map[string]photos.AnalysisState{}, films: map[string]string{}}
 }
 
 func refused(code string) error { return &photosapi.GrantError{Code: code, Message: code} }
@@ -93,7 +101,12 @@ func (l *library) Lookup(_ context.Context, grantID string, ids []string) ([]pho
 			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantTrashed})
 		default:
 			taken := v.takenAt
-			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: 10, TakenAt: &taken})
+			state, ok := l.states[id]
+			if !ok {
+				state = photos.AnalysisDone
+			}
+			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: 10, TakenAt: &taken,
+				Width: 1920, Height: 1080, Windows: state, Cards: state, Quality: state, Descriptions: state})
 		}
 	}
 	return out, nil

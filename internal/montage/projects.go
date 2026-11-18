@@ -7,6 +7,8 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,6 +31,11 @@ type Grants interface {
 	Remove(ctx context.Context, grantID string, assetIDs []string) error
 	List(ctx context.Context) ([]photos.Grant, error)
 	Revoke(ctx context.Context, grantID string) error
+	// What jobs ask: a video's original, its analysis, and saving a film.
+	Open(ctx context.Context, grantID, assetID string) (*os.File, string, error)
+	Analyze(ctx context.Context, grantID string, assetIDs []string, retry bool) error
+	Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error)
+	SaveFilm(ctx context.Context, grantID, versionKey, name string, film *os.File) (string, error)
 }
 
 // Limits of a request (docs/specs/montage-center.md, 本稿补充的默认规则).
@@ -92,6 +99,8 @@ type ProjectDetail struct {
 	Ask           string         `json:"ask"`
 	Chronological bool           `json:"chronological"`
 	Assets        []ProjectAsset `json:"assets"`
+	// Versions are the films saved, newest first.
+	Versions []Version `json:"versions"`
 }
 
 // ProjectPage is a page of projects, newest first.
@@ -431,10 +440,19 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 		return ProjectDetail{}, err
 	}
 	detail.AssetCount = len(detail.Assets)
+	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
+		return ProjectDetail{}, err
+	}
+	// The films were added to the grant when saved: one lookup says where
+	// the videos and the films stand.
+	asked := slices.Clone(ids)
+	for _, version := range detail.Versions {
+		asked = append(asked, version.FilmAssetID)
+	}
 	status := map[string]photos.GrantedAsset{}
 	known := !row.grantLost && row.grantID.Valid
-	if known && len(ids) > 0 {
-		looked, err := s.grants.Lookup(ctx, row.grantID.String, ids)
+	if known && len(asked) > 0 {
+		looked, err := s.grants.Lookup(ctx, row.grantID.String, asked)
 		switch {
 		case photosapi.GrantErrorCode(err) == photosapi.GrantNotFound:
 			// The grant is gone, as after a restore: every video is missing.
@@ -449,6 +467,10 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 				status[asset.AssetID] = asset
 			}
 		}
+	}
+	for i, version := range detail.Versions {
+		looked, ok := status[version.FilmAssetID]
+		detail.Versions[i].Gone = !ok || looked.Status != photos.GrantAvailable
 	}
 	for i, asset := range detail.Assets {
 		looked, ok := status[asset.AssetID]
@@ -505,12 +527,17 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 // answer, the grant is revoked later (RetryRevocations).
 func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) error {
 	var grantID sql.NullString
+	var jobs []string
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		row, err := s.project(ctx, tx, owner, projectID)
 		if err != nil {
 			return err
 		}
 		grantID = row.grantID
+		// The jobs go with the project; a running one is stopped below.
+		if jobs, err = s.projectJobs(ctx, tx, projectID); err != nil {
+			return err
+		}
 		if grantID.Valid {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
 				grantID.String, sqlitedb.FormatTime(s.now())); err != nil {
@@ -520,11 +547,35 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		_, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", projectID)
 		return err
 	})
-	if err != nil || !grantID.Valid {
+	if err != nil {
 		return err
 	}
-	s.revoke(ctx, grantID.String)
+	for _, id := range jobs {
+		s.cancelRunning(id)
+		s.removeJobFiles(id)
+	}
+	if grantID.Valid {
+		s.revoke(ctx, grantID.String)
+	}
 	return nil
+}
+
+// projectJobs lists a project's jobs.
+func (s *Store) projectJobs(ctx context.Context, q queryer, projectID string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // revoke revokes a grant waiting in revocations, and forgets it once the
@@ -647,4 +698,26 @@ func (s *Store) knownProjects(ctx context.Context) (map[string]knownProject, err
 func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID)
 	return err
+}
+
+// versions lists a project's films, newest first.
+func (s *Store) versions(ctx context.Context, projectID string) ([]Version, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT number, film_asset_id, created_at FROM versions WHERE project_id = ? ORDER BY number DESC", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	versions := []Version{}
+	for rows.Next() {
+		var version Version
+		var created string
+		if err := rows.Scan(&version.Number, &version.FilmAssetID, &created); err != nil {
+			return nil, err
+		}
+		if version.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return nil, err
+		}
+		versions = append(versions, version)
+	}
+	return versions, rows.Err()
 }
