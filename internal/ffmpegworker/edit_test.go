@@ -200,6 +200,12 @@ func TestEditingRequestsRefuseFieldsTheyDoNotKnow(t *testing.T) {
 	if err := raw(t, local, OpAssemble, map[string]any{"frames": 30, "created": "2026-08-04T10:30:00Z"}, input); !errors.Is(err, ErrInvalid) {
 		t.Errorf("assemble with one descriptor = %v", err)
 	}
+	if err := raw(t, local, OpAssemble, map[string]any{"frames": 30, "created": "2026-08-04T10:30:00Z"}, input, song, input); !errors.Is(err, ErrInvalid) {
+		t.Errorf("assemble with three descriptors = %v", err)
+	}
+	if err := raw(t, local, OpProbe, map[string]any{}, input, song); !errors.Is(err, ErrInvalid) {
+		t.Errorf("probe with two descriptors = %v", err)
+	}
 	if err := raw(t, local, OpAudio, map[string]any{"pcm": true, "bits": 32, "sampleRate": 22050, "channels": 1, "filter": "x"}, song); !errors.Is(err, ErrInvalid) {
 		t.Errorf("PCM with filter = %v", err)
 	}
