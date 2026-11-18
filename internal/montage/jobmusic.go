@@ -3,6 +3,7 @@ package montage
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -95,6 +96,12 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 	}
 	if len(st.Downbeats) > 0 {
 		start = nearest(st.Downbeats, start)
+		// The default excerpt's start is kept to two decimals and a
+		// downbeat to three, so the two are compared as downbeats: a start
+		// on the default's is the default excerpt, as in SongStart.
+		if start == defaultDownbeat(st, selection) {
+			return selection.Excerpt[0], nil
+		}
 	}
 	return start, nil
 }
@@ -117,6 +124,44 @@ func (s *Store) ExcerptKey(ctx context.Context, owner, songID string, start floa
 	return row.excerptKey(start), nil
 }
 
+// draggedSelection is the excerpt one of owner's projects keeps for the song
+// from start (SongStart), nil when none does.
+func (s *Store) draggedSelection(ctx context.Context, owner, songID string, start float64) (*keptSelection, error) {
+	var text string
+	err := s.db.QueryRowContext(ctx, `SELECT song_selection FROM projects
+		WHERE owner_user_id = ? AND song_id = ? AND song_start = ? AND song_selection IS NOT NULL LIMIT 1`, owner, songID, start).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var kept keptSelection
+	if err := json.Unmarshal([]byte(text), &kept); err != nil {
+		return nil, err
+	}
+	if len(kept.Music) == 0 || len(kept.Parts) == 0 || kept.Seconds <= 0 {
+		return nil, nil
+	}
+	return &kept, nil
+}
+
+// named is the excerpt music as the domain reads it, with title for its
+// song. An analysis is shared by every member who chose the same content, so
+// it names no song; the plan's music note shows each member their own.
+func named(music json.RawMessage, title string) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(music, &fields); err != nil {
+		return nil, err
+	}
+	song, err := json.Marshal(title)
+	if err != nil {
+		return nil, err
+	}
+	fields["song"] = song
+	return json.Marshal(fields)
+}
+
 // Excerpt is owner's song's excerpt from start, or the default one for
 // DefaultStart (or any negative start).
 func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error) {
@@ -130,26 +175,39 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 	}
 	st, selection, music := row.analysis.Structure, row.analysis.Selection, row.analysis.Music
 	if start != selection.Excerpt[0] {
-		if s.compute == nil {
-			return Excerpt{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
-		}
-		loudness, err := decodeLoudness(row.loudness)
+		// The excerpt the member saw when they dragged the start is the
+		// one the film is cut to; the compute Worker is asked only when no
+		// project keeps it any more.
+		kept, err := s.draggedSelection(ctx, owner, songID, start)
 		if err != nil {
 			return Excerpt{}, err
 		}
-		dragged, err := s.compute.Music(ctx, MusicRequest{Song: row.title, Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
-		switch {
-		case errors.Is(err, ErrWorkerRefused):
-			return Excerpt{}, fmt.Errorf("%w: %v", ErrSongUnusable, err)
-		case err != nil:
-			return Excerpt{}, err
-		case dragged.Unusable != "":
-			return Excerpt{}, fmt.Errorf("%w: %s", ErrSongUnusable, dragged.Unusable)
+		if kept == nil {
+			if s.compute == nil {
+				return Excerpt{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
+			}
+			loudness, err := decodeLoudness(row.loudness)
+			if err != nil {
+				return Excerpt{}, err
+			}
+			dragged, err := s.compute.Music(ctx, MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
+			switch {
+			case errors.Is(err, ErrWorkerRefused):
+				return Excerpt{}, fmt.Errorf("%w: %v", ErrSongUnusable, err)
+			case err != nil:
+				return Excerpt{}, err
+			case dragged.Unusable != "":
+				return Excerpt{}, fmt.Errorf("%w: %s", ErrSongUnusable, dragged.Unusable)
+			}
+			kept = &keptSelection{Selection: dragged, Music: dragged.Music}
 		}
-		selection, music = &dragged, dragged.Music
+		selection, music = &kept.Selection, kept.Music
 	}
-	from := selection.Excerpt[0]
-	return Excerpt{Key: row.excerptKey(start), Music: music, Start: from,
+	music, err = named(music, row.title)
+	if err != nil {
+		return Excerpt{}, err
+	}
+	return Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
 		Frames: int(math.Round(selection.Seconds * FilmRate))}, nil
 }
 

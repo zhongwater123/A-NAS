@@ -76,7 +76,8 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 // cannot be opened, as when the data volume is offline or read-only,
 // requests answer montage_unavailable. Every store it opens is reconciled
 // with the photo library's grants and retries the revocations it missed
-// (montage.Store.Upkeep).
+// (montage.Store.Upkeep), and analyses the songs waiting in it
+// (montage.Store.StartWorkers).
 func Run(ctx context.Context, config Config) error {
 	if config.Grants == nil {
 		return errors.New("the montage service needs the photo library's grants")

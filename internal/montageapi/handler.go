@@ -136,7 +136,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, montage.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
-	case errors.Is(err, montage.ErrWorkerUnavailable):
+	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, montage.ErrPhotosUnavailable):

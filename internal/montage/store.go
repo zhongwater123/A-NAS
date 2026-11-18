@@ -323,8 +323,8 @@ func (s *Store) StartWorkers(ctx context.Context) error {
 	return nil
 }
 
-// Close stops the revocations still running, which stay queued, and closes
-// the database.
+// Close stops the revocations, the song analysis and the job still running,
+// which stay queued, and closes the database.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	s.closed = true

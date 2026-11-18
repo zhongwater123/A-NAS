@@ -15,10 +15,11 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 )
 
-// The music operation through the real Worker (ai/anas_montage/music_ops.py),
-// registered as worker.py's OPS will name it. Needs the AI runtime's python,
-// as TestPythonWorkerSpeaksTheProtocol.
-func TestTheMusicOperationAnswersFromPython(t *testing.T) {
+// pythonWorker starts the compute Worker as its unit does, after prelude, and
+// returns its socket. Needs the AI runtime's python, as
+// TestPythonWorkerSpeaksTheProtocol.
+func pythonWorker(t *testing.T, prelude string) string {
+	t.Helper()
 	python := os.Getenv("ANAS_MONTAGE_PYTHON")
 	if python == "" {
 		python = "python3"
@@ -32,10 +33,7 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "compute.sock")
-	worker := exec.Command(python, "-c", `import sys
-from anas_montage import music_ops, worker
-worker.OPS["music"] = music_ops.op_music
-worker.main(["--socket", sys.argv[1]])`, socket)
+	worker := exec.Command(python, "-c", "import sys\nfrom anas_montage import worker\n"+prelude+"\nworker.main(['--socket', sys.argv[1]])", socket)
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	worker.Stderr = os.Stderr
@@ -52,8 +50,11 @@ worker.main(["--socket", sys.argv[1]])`, socket)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	return socket
+}
 
-	// A downbeat every two seconds for 200 seconds; the choruses louder.
+// song is a downbeat every two seconds for 200 seconds, the choruses louder.
+func song() (montage.Structure, []float32) {
 	structure := montage.Structure{BPM: 120}
 	for k := 0; k <= 100; k++ {
 		structure.Downbeats = append(structure.Downbeats, float64(2*k))
@@ -70,7 +71,14 @@ worker.main(["--socket", sys.argv[1]])`, socket)
 			loudness[i] = 0.2
 		}
 	}
-	client := montagecompute.Client{SocketPath: socket}
+	return structure, loudness
+}
+
+// The music operation through the real Worker (ai/anas_montage/music_ops.py),
+// as worker.py's OPS names it.
+func TestTheMusicOperationAnswersFromPython(t *testing.T) {
+	client := montagecompute.Client{SocketPath: pythonWorker(t, "")}
+	structure, loudness := song()
 	ctx := context.Background()
 	selection, err := client.Music(ctx, montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
 	if err != nil {
@@ -88,5 +96,29 @@ worker.main(["--socket", sys.argv[1]])`, socket)
 	broken.Downbeats = []float64{3, 1}
 	if _, err := client.Music(ctx, montage.MusicRequest{Structure: broken, Loudness: loudness, Target: 90}); !errors.Is(err, montage.ErrWorkerRefused) {
 		t.Fatalf("a broken structure = %v; want refused", err)
+	}
+}
+
+// A Worker that takes the request and breaks on it has failed on the song,
+// which the montage center counts; it is not a Worker to wait for without
+// end.
+func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
+	client := montagecompute.Client{SocketPath: pythonWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")}
+	structure, loudness := song()
+	_, err := client.Music(context.Background(), montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	if !errors.Is(err, montage.ErrWorkerFailed) {
+		t.Fatalf("Music() from a Worker that breaks = %v; want failed", err)
+	}
+}
+
+// While the device is updated, a compute Worker from before the operation
+// existed may still be running. It is one to wait for: its refusal says
+// nothing of the song.
+func TestAWorkerWithoutTheMusicOperationIsWaitedFor(t *testing.T) {
+	client := montagecompute.Client{SocketPath: pythonWorker(t, "del worker.OPS['music']")}
+	structure, loudness := song()
+	_, err := client.Music(context.Background(), montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	if !errors.Is(err, montage.ErrWorkerUnavailable) || errors.Is(err, montage.ErrWorkerRefused) {
+		t.Fatalf("Music() without the operation = %v; want unavailable", err)
 	}
 }

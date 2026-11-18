@@ -2213,6 +2213,10 @@ put_song() { # JAR CSRF TRACK -> status
   status_of -X PUT -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d "{\"trackId\":\"$3\"}" \
     "$api/api/v1/montage/projects/$song_project/song"
 }
+# A track that is not there answers 404 to anyone, so the refusal below says
+# something only once the owner has played this track by its ID himself.
+check "the owner plays his own song by its track ID" \
+  test "$(status_of --max-time 60 -b /tmp/owner.jar "$api/api/v1/music/tracks/$owner_track/stream")" = 200
 check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
 check "a member copies her own song into the montage center" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
 check "the copy is the montage service's alone, named by its content" \
