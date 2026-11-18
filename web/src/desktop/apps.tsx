@@ -143,8 +143,9 @@ interface AppDefinition {
     adminOnly?: boolean;
     // An app that is not ready shows a disabled icon marked 规划中.
     ready?: (context: WindowContext) => boolean;
-    // An app that exists but cannot open now says why under its icon.
-    unavailable?: (context: WindowContext) => string | undefined;
+    // An app that exists but cannot open now says why under its icon; settings is the
+    // Settings page that changes that, which the icon opens.
+    unavailable?: (context: WindowContext) => { note: string; settings?: SettingsSection } | undefined;
     // An app an administrator turned off has no icon at all.
     visible?: (context: WindowContext) => boolean;
   };
@@ -335,8 +336,13 @@ const definitions = {
       id: "ai",
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
       ready: ({ assistantReady, assistantNeedsKey }) => assistantReady || assistantNeedsKey,
+      // An administrator goes to where the key is set; a member cannot do anything about it.
       unavailable: ({ assistantNeedsKey, isAdmin }) =>
-        assistantNeedsKey ? (isAdmin ? "未填写密钥" : "需管理员设置") : undefined,
+        !assistantNeedsKey
+          ? undefined
+          : isAdmin
+            ? { note: "未填写密钥", settings: "assistant" }
+            : { note: "需管理员设置" },
     },
     render: ({ session, open, intents, intentHandled }) => (
       <AssistantPanel
@@ -363,28 +369,31 @@ export function desktopApps(context: WindowContext, isOpen: (id: WindowID) => bo
       return [];
     if (launcher.ready && !launcher.ready(context))
       return [{ id: launcher.id, label: title, ariaLabel: `${title}，规划中`, tone, icon: <Icon />, disabled: true }];
-    const note = launcher.unavailable?.(context);
-    if (note)
-      // An administrator goes to where it is set; a member cannot do anything about it.
+    const keywords = typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords;
+    const unavailable = launcher.unavailable?.(context);
+    if (unavailable) {
+      const { note, settings } = unavailable;
       return [
         {
           id: launcher.id,
           label: title,
           ariaLabel: `${title}，${note}`,
+          keywords,
           tone,
           icon: <Icon />,
           unavailable: true,
           note,
-          onClick: context.isAdmin ? () => context.openSettings("assistant") : undefined,
+          onClick: settings ? () => context.openSettings(settings) : undefined,
         },
       ];
+    }
     return [
       {
         id: launcher.id,
         label: title,
         // A Latin name keeps a space after 打开, as in 打开 Docker.
         ariaLabel: `打开${/^[A-Za-z]/.test(title) ? " " : ""}${title}`,
-        keywords: typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords,
+        keywords,
         tone,
         icon: <Icon />,
         active: isOpen(id),

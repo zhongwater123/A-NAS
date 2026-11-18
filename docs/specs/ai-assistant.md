@@ -57,13 +57,13 @@
 
 - Given：设备上有密钥。
 - When：管理员保存密钥，新建成员，或已有的成员登录、被重新启用。
-- Then：这位成员不需要谁开启就有 VNAS，管理员也一样：Host Agent 为每个已启用的成员准备助手目录、实例的密钥与配置，并启用入口；没有按成员关闭的开关。停用的账号不会因为保存密钥而重新有助手；删除账号时它的助手一并删除（[重新启用与删除账号](account-enable-and-delete.md)）。
+- Then：这位成员不需要谁开启就有 VNAS，管理员也一样：Host Agent 为每个已启用的成员准备助手目录、实例的密钥与配置，并启用入口；没有按成员关闭的开关。停用的账号不会因为保存密钥而重新有助手；删除账号时它的助手一并删除（[重新启用与删除账号](account-enable-and-delete.md)）。助手没能准备好不影响账号本身：改密码、重新启用照常完成，下一次同步或保存密钥时再准备。数据卷没有挂载时先准备好配置，挂载后 Host Agent 对数据卷的定期整理（15 分钟内）补上助手目录。
 
 ### 管理员删除密钥
 
 - Given：设备上有密钥。
 - When：管理员在“设置 → VNAS”中点“删除”并确认。
-- Then：密钥从设备上删除，全部成员的 VNAS 停止，桌面回到“没有密钥”；助手目录、对话、记忆与定时任务保留，重新填写密钥后恢复。
+- Then：密钥从设备上删除，全部成员的 VNAS 停止，桌面回到“没有密钥”；助手目录、对话、记忆与定时任务保留，重新填写密钥后恢复。之后仍到达的启动（例如“立即运行”）什么都不运行：文件代理拒绝立即运行，助手的单元没有密钥不启动。
 
 ### 首次打开
 
@@ -338,7 +338,7 @@
 - Hermes 自己的登录：文件代理用实例密钥登录、缓存令牌、实例拒绝后重新登录一次，密钥错误时不可用（[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)、[`internal/assistantlogin`](../../internal/assistantlogin/login_test.go)、[`login_test.go`](../../internal/assistantapi/login_test.go)）。
 - 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
-- 密钥与开启：Host Agent 用 `systemd-creds` 加密保存、重启网关、只为已启用的成员准备助手、删除后停止全部成员的助手而保留数据，实例的登录哈希是 Hermes 文档写明的格式（用 Python 的 `hashlib.scrypt` 生成的向量核对），成员配置再准备时不变（[`assistant_test.go`](../../internal/hostops/linux/assistant_test.go)、[`assistant_internal_test.go`](../../internal/hostops/linux/assistant_internal_test.go)）；接口只给管理员、没有同意不保存（[`routes_test.go`](../../internal/httpapi/routes_test.go)）；设置页见 [`AssistantSection.test.tsx`](../../web/src/settings/AssistantSection.test.tsx)。系统测试从软件包安装：没有密钥时成员的状态是 `no_key`、网关不运行；成员保存被拒、管理员不同意被拒；保存后凭据只有 root 读得到且不是明文、页面与服务日志里没有密钥、网关以成员组的套接字运行并拒绝 Hermes 不会发的请求、三个成员的助手都准备好；停用的账号在再次保存后仍然关着（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)、[`disable-system-test.sh`](../../ai/assistant-spike/disable-system-test.sh)）。
+- 密钥与开启：Host Agent 用 `systemd-creds` 加密保存、重启网关、只为已启用的成员准备助手、删除后停止全部成员的助手而保留数据（停止被新的启动取消时再停一次），实例的登录哈希是 Hermes 文档写明的格式（用 Python 的 `hashlib.scrypt` 生成的向量核对），成员配置再准备时不变，`yes`、`null` 这类账号名在配置里仍是名字（[`assistant_test.go`](../../internal/hostops/linux/assistant_test.go)、[`assistant_internal_test.go`](../../internal/hostops/linux/assistant_internal_test.go)）；同步一个登记表还没有的已启用账号时照样登记，助手准备失败时重新启用账号照常成功（[`account_test.go`](../../internal/hostops/linux/account_test.go)）；没有密钥时文件代理拒绝立即运行（[`assistant_run_test.go`](../../internal/filebroker/rootbroker/assistant_run_test.go)）；接口只给管理员、没有同意不保存（[`routes_test.go`](../../internal/httpapi/routes_test.go)）；设置页见 [`AssistantSection.test.tsx`](../../web/src/settings/AssistantSection.test.tsx)，没有密钥时的桌面图标见 [`apps.test.tsx`](../../web/src/desktop/apps.test.tsx)。系统测试从软件包安装：没有密钥时成员的状态是 `no_key`、网关不运行；成员保存被拒、管理员不同意被拒；保存后凭据只有 root 读得到且不是明文、页面与服务日志里没有密钥、网关以成员组的套接字运行并拒绝 Hermes 不会发的请求、三个成员的助手都准备好；停用的账号在再次保存后仍然关着，删除后它的助手目录、实例密钥、配置与套接字都不在、单元不再屏蔽；删除密钥后网关与唤醒器停止、成员的状态回到 `no_key`、仍到达的启动不运行沙箱、目录与实例密钥保留，再次保存后成员的助手回来（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)、[`disable-system-test.sh`](../../ai/assistant-spike/disable-system-test.sh)）。
 
 ## 关联
 

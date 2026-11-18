@@ -16,7 +16,7 @@
 - 权限：填写、替换、删除密钥只有管理员能做，在 Web 中完成；核对步骤里的命令要 root，由用户执行，只读。
 - 版本：已装的 `a-nas` 带 `/usr/lib/a-nas/assistant`（[部署 A-NAS 软件包](deploy-a-nas-packages.md)）。
 - 隐私：保存密钥前页面写明并要管理员确认：成员与 VNAS 的对话、VNAS 为回答读取的文件内容与照片信息、它查看的照片画面与桌面画面，都会发到 DeepSeek 的服务器处理（[规格](../specs/ai-assistant.md#管理员填写密钥)）。
-- 密钥：由 Host Agent 用 `systemd-creds`（本机的凭据密钥 `/var/lib/systemd/credential.secret`，由 `a-nas` 的 postinst 生成）加密为 `/etc/credstore.encrypted/a-nas-assistant-deepseek`，只有模型网关的单元读取，页面不再显示，日志不记。重装系统盘或丢失 `credential.secret` 后要重新填写。
+- 密钥：由 Host Agent 用 `systemd-creds`（本机的凭据密钥 `/var/lib/systemd/credential.secret`，由 `anas-site.service` 在本机开机与每次安装后生成，产品是系统扩展的设备也一样）加密为 `/etc/credstore.encrypted/a-nas-assistant-deepseek`，只有模型网关的单元读取，页面不再显示，日志不记。重装系统盘或丢失 `credential.secret` 后要重新填写。
 - 数据卷写入：每个成员一个 Btrfs 子卷 `assistant/<账号>`，以及执行方的 `assistant/.changes`；Shared 中的 `Agent空间/<账号>` 由 Host Agent 照常维护。助手目录还没有 10 GiB 上限：ADR 0024 要求先在实验 NAS 上验证 simple quota 对快照与删除的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）。
 - 内存：每个实例上限 2 GiB，没有连接约 45 秒后退出；2026-11-18 实验 NAS 上两个在用的实例各约 400 MB（16 GB 内存）。
 - 停止条件：保存后页面写着“模型网关出错”或“模型网关未运行”，或成员仍看到“需管理员设置”。出现时不要反复保存，按“回滚或恢复”处理并查看下面的核对命令。
@@ -71,7 +71,7 @@ dpkg-query -W -f='${Package} ${Version}\n' a-nas a-nas-assistant-trial
 - 退出登录后 30 秒内，助手窗口的连接断开。
 - “记忆”页能打开，删除一条后不再出现；“定时任务”能新建、立即运行、删除。
 - 闲时整理：`systemctl list-timers 'anas-assistant-curator@*'` 列出每个成员下一次运行的时间。
-- 网关日志（root）：`/var/log/anas-assistant-gateway/requests.jsonl` 每次请求一行，记成员、用时、工具名与 token 用量，不记消息。
+- 网关日志（root）：`/var/log/anas-assistant-gateway/requests.jsonl` 每次请求一行，记成员、用时、请求大小、工具名与 token 用量，不记消息；满 16 MiB 换新文件，另留 `requests.jsonl.1` 到 `.4`。
 
 ## 回滚或恢复
 
