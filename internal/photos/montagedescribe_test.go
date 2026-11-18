@@ -239,7 +239,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	// Seconds from the card's start, a beat a frame, the last frame before
 	// the video's end.
 	last := f.embedder.layouts[1]
-	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.9}) || !slices.Equal(last.Groups, []int{1, 2, 3, 4}) || last.Duration != 30 {
+	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.99}) || !slices.Equal(last.Groups, []int{1, 2, 3, 4}) || last.Duration != 30 {
 		t.Fatalf("layout = %+v", last)
 	}
 	stored := f.descriptions(t)
@@ -256,7 +256,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 			t.Fatalf("the stored description lacks %q: %s", label, stored[0].result)
 		}
 	}
-	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.HasSuffix(stored[0].identity, "|cards=cards-1") {
+	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.HasSuffix(stored[0].identity, "|cards=cards-1|quality=quality-1") {
 		t.Fatalf("identity = %q", stored[0].identity)
 	}
 	if f.montageJobs(t) != 0 {
@@ -376,6 +376,47 @@ func TestDescriptionsWaitForATextReader(t *testing.T) {
 	}
 }
 
+func TestGrantReauthorizedAfterReaderChange(t *testing.T) {
+	f := newDescribeFixture(t)
+	ctx := t.Context()
+	processAI(t, f.service, f.embedder, f.gate)
+	if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.embedder.mu.Lock()
+	f.embedder.model = "reader-2"
+	f.embedder.mu.Unlock()
+	_ = f.service.Close()
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, Compute: f.compute, DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	f.service = service
+	processAI(t, service, f.embedder, f.gate)
+	f.grant, err = service.RegisterGrant(ctx, granting(namedAlice), "project:2", []string{f.video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AnalyzeGrant(ctx, granting(namedAlice), f.grant.ID, []string{f.video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, service, f.embedder, f.gate)
+	a, _, err := service.AnalysisOfGrant(ctx, granting(namedAlice), f.grant.ID, f.video.ID)
+	if err != nil || a.Described != photos.AnalysisDone || !strings.HasPrefix(a.DescriptionsIdentity, "reader-2|") || len(a.Descriptions) != 2 {
+		t.Fatalf("reauthorized analysis: state %s, identity %s, %d descriptions, %v", a.Described, a.DescriptionsIdentity, len(a.Descriptions), err)
+	}
+}
+
+func TestNoEligibleCardsNeedNoReader(t *testing.T) {
+	f := newDescribeFixtureWith(t, "")
+	f.cards(t, []standInCard{{start: 0, end: 70000, keyframes: []float64{1, 3, 5}, reasons: `["blur"]`}})
+	a, _, err := f.service.AnalysisOfGrant(t.Context(), granting(namedAlice), f.grant.ID, f.video.ID)
+	if err != nil || a.Described != photos.AnalysisDone || a.DescriptionsIdentity == "" || len(a.Descriptions) != 0 {
+		t.Fatalf("zero eligible cards: state %s, identity %q, %v", a.Described, a.DescriptionsIdentity, err)
+	}
+}
+
 func TestSomeoneUsingTheLibraryHangsUpADescription(t *testing.T) {
 	f := newDescribeFixture(t)
 	f.embedder.blockDescribing, f.embedder.describing = true, make(chan struct{}, 1)
@@ -423,17 +464,20 @@ func TestSomeoneUsingTheLibraryHangsUpADescription(t *testing.T) {
 	}
 }
 
-func TestRetryStartsAFailedDescriptionOver(t *testing.T) {
+func TestRetryStartsOnlyTheFailedCardOver(t *testing.T) {
 	f := newDescribeFixture(t)
-	f.embedder.answer = func(int, photos.CardLayout) (json.RawMessage, error) {
-		return nil, errors.New("the Worker died")
+	f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+		if call <= 3 {
+			return nil, errors.New("the Worker died")
+		}
+		return json.RawMessage(numbersAnswer), nil
 	}
 	for range 3 {
 		processAI(t, f.service, f.embedder, f.gate)
 		f.clock.Advance(time.Hour)
 	}
-	if state := f.lookup(t).Descriptions; state != photos.AnalysisFailed {
-		t.Fatalf("after three crashes: %q", state)
+	if got := f.descriptions(t); len(got) != 2 || got[0].failure == "" || got[1].result == "" {
+		t.Fatalf("after three crashes on the first card: %+v", got)
 	}
 	f.embedder.answer = nil
 	if err := f.service.AnalyzeGrant(context.Background(), granting(namedAlice), f.grant.ID, []string{f.video.ID}, true); err != nil {
@@ -442,6 +486,9 @@ func TestRetryStartsAFailedDescriptionOver(t *testing.T) {
 	processAI(t, f.service, f.embedder, f.gate)
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
 		t.Fatalf("after the retry: %q", state)
+	}
+	if got := f.descriptions(t); len(got) != 2 || got[0].failure != "" || f.embedder.calls() != 5 {
+		t.Fatalf("retry should only repeat the failed card: %+v, %d calls", got, f.embedder.calls())
 	}
 }
 
@@ -463,5 +510,42 @@ func TestDescriptionsGoWithTheirObject(t *testing.T) {
 	}
 	if left := f.descriptions(t); len(left) != 0 {
 		t.Fatalf("descriptions left 7 days after the last grant went = %+v", left)
+	}
+}
+
+func TestWaitingForReaderMemoryLetsPhotosEmbed(t *testing.T) {
+	f := newDescribeFixture(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	importPhoto(t, f.service, namedAlice, private.ID, "", "new.png", pngBytes(t, 37))
+	processAll(t, f.service)
+	processAI(t, f.service, f.embedder, &roomGate{room: 1 << 20})
+	var vectors int
+	if err := catalog(t, f.root).QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&vectors); err != nil || vectors != 1 {
+		t.Fatalf("embeddings while reader waits for memory = %d, %v", vectors, err)
+	}
+	if f.embedder.calls() != 0 || f.lookup(t).Descriptions != photos.AnalysisQueued {
+		t.Fatal("description should remain queued until the reader fits")
+	}
+}
+
+func TestPurgingRunningDescriptionDiscardsLateResult(t *testing.T) {
+	f := newDescribeFixture(t)
+	ctx := t.Context()
+	f.embedder.answer = func(_ int, _ photos.CardLayout) (json.RawMessage, error) {
+		if err := f.service.RevokeGrant(ctx, f.grant.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.PruneMontageAnalysis(ctx); err != nil {
+			t.Fatal(err)
+		}
+		f.clock.Advance(8 * 24 * time.Hour)
+		if _, err := f.service.PruneMontageAnalysis(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return json.RawMessage(numbersAnswer), nil
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	if got := f.descriptions(t); len(got) != 0 || f.montageJobs(t) != 0 {
+		t.Fatalf("late result for purged video: %+v", got)
 	}
 }

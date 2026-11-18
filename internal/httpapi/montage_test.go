@@ -77,7 +77,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
 		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
-			JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
+			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +154,11 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
 		t.Fatalf("projects = %+v", page)
 	}
+
+	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
+		t.Fatalf("generate without a song: %s", response.Body.String())
+	}
+	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, montage.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil { t.Fatal(err) }
 
 	// A film: 202 and the job to poll; one job at a time.
 	var job montage.Job

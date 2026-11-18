@@ -921,7 +921,7 @@ class LlamaReader:
             "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
             "stream": True, "chat_template_kwargs": {"enable_thinking": False},
         }
-        text, tokens, finish = self._complete(body, run)
+        text, tokens, finish, _ = self._complete(body, run)
         return {"text": text, "logprobs": tokens, "finish": finish}
 
     def describe(self, frames, offsets, groups, duration, run):
@@ -945,9 +945,15 @@ class LlamaReader:
                 "messages": [{"role": "system", "content": montage_card.SYSTEM_PROMPT}, {"role": "user", "content": parts}],
                 "temperature": montage_card.TEMPERATURE, "repeat_penalty": penalty, "max_tokens": montage_card.MAX_TOKENS,
                 "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": answer_schema}},
-                "cache_prompt": False, "stream": True, "chat_template_kwargs": {"enable_thinking": False},
+                "cache_prompt": True, "stream": True, "stream_options": {"include_usage": True},
+                "chat_template_kwargs": {"enable_thinking": False},
             }
-            text, _, finish = self._complete(body, run)
+            text, _, finish, prompt_tokens = self._complete(body, run)
+            # Frame dimensions determine the image token count. When the
+            # context cut this answer short, retrying the same frames cannot
+            # make room for the requested answer budget.
+            if finish == "length" and prompt_tokens + montage_card.MAX_TOKENS > OCR_CONTEXT:
+                raise InvalidInput(f"{prompt_tokens} prompt tokens leave insufficient room for the card description")
             try:
                 if finish != "stop":
                     raise montage_card.InvalidAnswer(f"the answer ended with {finish}")
@@ -957,7 +963,7 @@ class LlamaReader:
         raise InvalidResult("; ".join(errors))
 
     def _complete(self, body, run):
-        """Streams body's answer from the server: its text, [token, log probability] pairs, and why it ended.
+        """Streams the text, [token, log probability] pairs, finish reason and reported prompt token count.
 
         Raises Cancelled once run is told to stop, InvalidInput for a request
         the server refuses (4xx), and Failed for a server that fails
@@ -965,6 +971,7 @@ class LlamaReader:
         """
         path = self._start(run)
         text, tokens, finish, refused, failed = [], [], None, None, None
+        prompt_tokens = 0
         connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
         try:
             connection.connect()
@@ -982,6 +989,8 @@ class LlamaReader:
                     if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
                         continue
                     event = json.loads(line[6:])
+                    if event.get("usage"):
+                        prompt_tokens = event["usage"].get("prompt_tokens", 0)
                     if "error" in event:
                         # How llama-server reports a failure mid-answer, before it ends the stream.
                         failed = f"llama-server failed mid-answer: {json.dumps(event['error'], ensure_ascii=False)[:500]}"
@@ -1022,7 +1031,7 @@ class LlamaReader:
             # the next reading starts a new one rather than fail at once.
             self.release()
             raise Failed(failed)
-        return "".join(text), tokens, finish
+        return "".join(text), tokens, finish, prompt_tokens
 
     def release(self, kill=False):
         """Stops the server, which frees the model's memory; kill does not wait for it to finish its work."""

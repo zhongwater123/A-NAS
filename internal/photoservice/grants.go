@@ -1,6 +1,7 @@
 package photoservice
 
 import (
+	"golang.org/x/sys/unix"
 	"context"
 	"errors"
 	"log/slog"
@@ -215,6 +216,11 @@ func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantReq
 			var analysis photos.GrantAnalysis
 			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
 				response.Analysis = &analysis
+				if len(analysis.CardList) != 0 || len(analysis.Descriptions) != 0 {
+					windows := opened
+					defer unixmsg.CloseFile(windows)
+					response, opened, err = analysisFile(analysis, windows)
+				}
 			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
@@ -278,4 +284,22 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 		},
 		Send: send,
 	}
+}
+
+// analysisFile seals the analysis before passing its descriptor to the montage center.
+func analysisFile(analysis photos.GrantAnalysis, windows *os.File) (photosapi.GrantResponse, *os.File, error) {
+	fd, err := unix.MemfdCreate("anas-grant-analysis", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	if err != nil {
+		return photosapi.GrantResponse{}, nil, err
+	}
+	file := os.NewFile(uintptr(fd), "anas-grant-analysis")
+	response, err := photosapi.WriteAnalysis(file, analysis, windows)
+	if err == nil {
+		_, err = unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL)
+	}
+	if err != nil {
+		_ = file.Close()
+		return photosapi.GrantResponse{}, nil, err
+	}
+	return response, file, nil
 }

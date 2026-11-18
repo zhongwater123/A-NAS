@@ -287,10 +287,12 @@ func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
 		}
 		if stored != key {
 			// A new input: what the steps after it kept is stale.
-			later := StepNames[slices.Index(StepNames, name)+1:]
-			for _, after := range later {
-				if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, after); err != nil {
-					return err
+			for _, affected := range StepNames[slices.Index(StepNames, name):] {
+				if affected != name {
+					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected); err != nil { return err }
+				}
+				if stored != "" && (affected == "pick" || affected == "shots") {
+					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND step = ? AND voided_at IS NULL", now, jobID, affected); err != nil { return err }
 				}
 			}
 		}
@@ -418,20 +420,20 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 
 // analysedVideo is one video's analysis as the job uses it.
 type analysedVideo struct {
-	AssetID         string                     `json:"assetId"`
-	ObjectID        string                     `json:"objectId"`
-	Dimensions      int                        `json:"dimensions"`
-	CardsIdentity   string                     `json:"cardsIdentity"`
-	QualityIdentity string                     `json:"qualityIdentity"`
-	DescriptionsKey string                     `json:"descriptionsKey"`
-	Identity        string                     `json:"identity"`
-	Duration        float64                    `json:"duration"`
-	Width           int                        `json:"width"`
-	Height          int                        `json:"height"`
-	TakenAt         *time.Time                 `json:"takenAt,omitempty"`
-	Windows         []photos.Window            `json:"windows"`
-	Cards           []Card                     `json:"cards"`
-	Measures        map[string]json.RawMessage `json:"measures"`
+	AssetID              string                     `json:"assetId"`
+	ObjectID             string                     `json:"objectId"`
+	Dimensions           int                        `json:"dimensions"`
+	CardsIdentity        string                     `json:"cardsIdentity"`
+	QualityIdentity      string                     `json:"qualityIdentity"`
+	DescriptionsIdentity string                     `json:"descriptionsIdentity"`
+	Identity             string                     `json:"identity"`
+	Duration             float64                    `json:"duration"`
+	Width                int                        `json:"width"`
+	Height               int                        `json:"height"`
+	TakenAt              *time.Time                 `json:"takenAt,omitempty"`
+	Windows              []photos.Window            `json:"windows"`
+	Cards                []Card                     `json:"cards"`
+	Measures             map[string]json.RawMessage `json:"measures"`
 }
 
 type analysisResult struct {
@@ -498,7 +500,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
 		}
 		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
-			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsKey: digestJSON(analysis.Descriptions),
+			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsIdentity: analysis.DescriptionsIdentity,
 			Duration: about[asset.assetID].Duration, Width: about[asset.assetID].Width, Height: about[asset.assetID].Height,
 			TakenAt: about[asset.assetID].TakenAt, Windows: analysis.List, Measures: map[string]json.RawMessage{}}
 		described := map[int]json.RawMessage{}

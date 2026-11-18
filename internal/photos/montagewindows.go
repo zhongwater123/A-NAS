@@ -219,6 +219,7 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 	if err != nil || len(videos) == 0 {
 		return err
 	}
+	reader, _ := s.ai.descriptionReader()
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
 		for _, object := range slices.Sorted(maps.Keys(videos)) {
@@ -227,6 +228,10 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 				return err
 			}
 			if retry {
+				// Retain successful descriptions when a member retries the failed cards.
+				if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE object_id=? AND result IS NULL", object); err != nil {
+					return err
+				}
 				// Whichever step of the analysis failed starts over.
 				if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
 					WHERE object_id = ? AND derivation LIKE 'montage-%' AND state = 'failed'`, now, object); err != nil {
@@ -239,6 +244,9 @@ func (s *Service) AnalyzeGrant(ctx context.Context, owner Principal, grantID str
 			// A job already queued, or failed, stays as it is.
 			if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 				VALUES(?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`, object, windowsDerivation, now, now); err != nil {
+				return err
+			}
+			if err := s.queueMissingDescriptions(ctx, tx, reader, false, "?", object); err != nil {
 				return err
 			}
 		}
@@ -274,8 +282,9 @@ type GrantAnalysis struct {
 	CardList []CardAnalysis `json:"cards,omitempty"`
 	// Described is where the card descriptions stand; Descriptions holds
 	// them once done, a card that could not be described with its error.
-	Described    AnalysisState     `json:"descriptionsState,omitempty"`
-	Descriptions []CardDescription `json:"descriptions,omitempty"`
+	Described            AnalysisState     `json:"descriptionsState,omitempty"`
+	DescriptionsIdentity string            `json:"descriptionsIdentity,omitempty"`
+	Descriptions         []CardDescription `json:"descriptions,omitempty"`
 }
 
 // windowHeader is a window's header in an analysis answer.
@@ -299,8 +308,9 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID, Windows: done.windows}
 	analysis.CardsIdentity, analysis.QualityIdentity = cardsIdentity, qualityIdentity
 	analysis.Described = looked[0].Descriptions
+	analysis.DescriptionsIdentity = looked[0].descriptionIdentity
 	if analysis.Described == AnalysisDone {
-		if analysis.Descriptions, err = s.cardDescriptions(ctx, analysis.ObjectID); err != nil {
+		if analysis.Descriptions, err = s.cardDescriptions(ctx, analysis.ObjectID, analysis.DescriptionsIdentity); err != nil {
 			return GrantAnalysis{}, nil, err
 		}
 	}

@@ -9,6 +9,8 @@ required_tools=(
   rg
   curl
   jq
+  file
+  ffprobe
   gcc
   g++
   make

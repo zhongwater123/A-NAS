@@ -21,7 +21,7 @@ if RUNTIME:
     import numpy as np
 
     from anas_montage import worker
-    from anas_montage.domain import cards as cardrules, picture
+    from anas_montage.domain import cards as cardrules, fill, picture
 
 
 def memfd(array):
@@ -86,6 +86,15 @@ def tiny_case():
 
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
 class FillTest(unittest.TestCase):
+    def test_shooting_order_preserves_each_slots_exact_frame_count(self):
+        slots = [[0, 2.05], [2.05, 4.10]]
+        pieces = [{"card": "later", "start": 0, "slot": slots[0]}, {"card": "earlier", "start": 0, "slot": slots[1]}]
+        ordered = fill.in_shooting_order(pieces, slots, 30, {"earlier": 0, "later": 1}.__getitem__)
+        counts = [round(b * 30) - round(a * 30) for a, b in slots]
+        self.assertNotEqual(*counts)
+        self.assertEqual([c["card"] for c in ordered], ["earlier", "later"])
+        self.assertEqual([round(c["slot"][1] * 30) - round(c["slot"][0] * 30) for c in ordered], counts[::-1])
+
     def test_fill_asks_for_one_span_at_a_time_in_a_fixed_order(self):
         vectors = np.eye(10, 8, dtype=np.float32) + 0.1
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)

@@ -11,11 +11,11 @@ import (
 	"math"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos/textread"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // The montage center's card descriptions, montage-describe/v1
@@ -50,66 +50,100 @@ func describeIdentity(reader, cardsIdentity string) string {
 // card stays out of the montage center's catalog, and its video's other
 // cards go on.
 type CardDescription struct {
-	Identity string `json:"identity,omitempty"`
 	Card        int             `json:"card"`
 	Description json.RawMessage `json:"description,omitempty"`
 	Error       string          `json:"error,omitempty"`
 }
 
-// queueDescribe queues the descriptions of object in the transaction that
-// finishes its quality step, when the Worker has a text reader; without
-// one they are not queued, and a reader that comes later queues them
-// (requeueStaleDescriptions). A job whose cards are all described ends in
-// its first round.
+// queueDescribe queues missing descriptions in the transaction that completed
+// quality. A reader installed later will queue these when the runner starts.
 func (s *Service) queueDescribe(ctx context.Context, tx *sql.Tx, object string) error {
-	if !s.ai.hasReader() {
-		return nil
-	}
-	now := formatTime(s.now())
-	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-		VALUES(?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`, object, describeDerivation, now, now)
-	return err
+	reader, _ := s.ai.descriptionReader()
+	return s.queueMissingDescriptions(ctx, tx, reader, true, "?", object)
 }
 
-// describeState says where the descriptions of object stand: unavailable
-// while the Worker has no text reader, and done once every card that passed
-// the quality check has its description, or there is none.
-func (s *Service) describeState(ctx context.Context, q queryer, object string) (AnalysisState, error) {
-	var state sql.NullString
-	err := q.QueryRowContext(ctx, "SELECT state FROM jobs WHERE object_id = ? AND derivation = ?", object, describeDerivation).Scan(&state)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		var described bool
-		if err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM video_card_descriptions WHERE object_id = ?)", object).Scan(&described); err != nil || described {
-			return AnalysisDone, err
+// The identity of the inputs to a description and the cards eligible to be
+// described. The same predicates are used for lookup and requeue.
+const descriptionInputs = "c.identity || '|quality=' || q.identity"
+const eligibleQuality = "json_type(q.result, '$.reasons') = 'array' AND json_array_length(q.result, '$.reasons') = 0"
+
+func (r *aiRunner) descriptionReader() (reader string, unavailable bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reader, r.model != "" && r.reader == ""
+}
+
+// fillDescriptionProgress checks all available videos in a lookup in one
+// query, including cards for which a previous model left an error.
+func (s *Service) fillDescriptionProgress(ctx context.Context, assets []GrantedAsset) error {
+	reader, unavailable := s.ai.descriptionReader()
+	var ids []any
+	for _, asset := range assets {
+		if asset.Status == GrantAvailable {
+			ids = append(ids, asset.ObjectID)
 		}
-		if quality, err := s.qualityState(ctx, object); err != nil || quality != AnalysisDone {
-			return AnalysisNone, err
-		}
-		if s.ai.withoutReader() {
-			return AnalysisUnavailable, nil
-		}
-		// The quality step is done: only a video without a card that
-		// passed has no description.
-		if cards, _, err := s.cardsToDescribe(ctx, object, ""); err != nil || len(cards) > 0 {
-			return AnalysisNone, err
-		}
-		return AnalysisDone, nil
-	case err != nil:
-		return AnalysisNone, err
-	case state.String == "failed":
-		return AnalysisFailed, nil
-	case s.ai.withoutReader():
-		return AnalysisUnavailable, nil
-	case state.String == "running":
-		return AnalysisWorking, nil
 	}
-	return AnalysisQueued, nil
+	if len(ids) == 0 {
+		return nil
+	}
+	in := sqlitedb.Placeholders(len(ids))
+	type progress struct {
+		job, input, first, last string
+		eligible, described     int
+	}
+	byObject := make(map[string]progress)
+	err := s.eachRow(ctx, `SELECT m.object_id, IFNULL(j.state, ''), IFNULL(MIN(`+descriptionInputs+`), ''),
+  COUNT(*) FILTER (WHERE `+eligibleQuality+`),
+  COUNT(d.identity) FILTER (WHERE `+eligibleQuality+`),
+  IFNULL(MIN(d.identity) FILTER (WHERE `+eligibleQuality+`), ''),
+  IFNULL(MAX(d.identity) FILTER (WHERE `+eligibleQuality+`), '')
+  FROM montage_objects m
+  LEFT JOIN jobs j ON j.object_id=m.object_id AND j.derivation=?
+  LEFT JOIN video_cards c ON c.object_id=m.object_id
+  LEFT JOIN video_card_quality q ON q.object_id=c.object_id AND q.card=c.card
+  LEFT JOIN video_card_descriptions d ON d.object_id=c.object_id AND d.card=c.card
+  WHERE m.object_id IN (`+in+`) GROUP BY m.object_id`, append([]any{describeDerivation}, ids...), func(rows *sql.Rows) error {
+		var object string
+		var p progress
+		if err := rows.Scan(&object, &p.job, &p.input, &p.eligible, &p.described, &p.first, &p.last); err != nil {
+			return err
+		}
+		byObject[object] = p
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for i := range assets {
+		a := &assets[i]
+		p, ok := byObject[a.ObjectID]
+		if !ok || a.Quality != AnalysisDone {
+			continue
+		}
+		identity := describeIdentity(reader, p.input)
+		switch {
+		case p.eligible == 0:
+			a.Descriptions, a.descriptionIdentity = AnalysisDone, identity
+		case unavailable:
+			a.Descriptions = AnalysisUnavailable
+		case p.job == "failed":
+			a.Descriptions = AnalysisFailed
+		case p.job == "running":
+			a.Descriptions = AnalysisWorking
+		case p.job != "":
+			a.Descriptions = AnalysisQueued
+		case p.described == p.eligible && p.first == p.last && (p.first == identity || reader == "" && strings.HasSuffix(p.first, identity)):
+			a.Descriptions, a.descriptionIdentity = AnalysisDone, p.first
+		}
+	}
+	return nil
 }
 
 // cardDescriptions are the stored descriptions of object, in card order.
-func (s *Service) cardDescriptions(ctx context.Context, object string) ([]CardDescription, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT card, IFNULL(result, ''), error, identity FROM video_card_descriptions WHERE object_id = ? ORDER BY card", object)
+func (s *Service) cardDescriptions(ctx context.Context, object, identity string) ([]CardDescription, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.card, IFNULL(d.result, ''), d.error FROM video_card_descriptions d
+ JOIN video_card_quality q ON q.object_id=d.object_id AND q.card=d.card
+ WHERE d.object_id=? AND d.identity=? AND `+eligibleQuality+` ORDER BY d.card`, object, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +152,7 @@ func (s *Service) cardDescriptions(ctx context.Context, object string) ([]CardDe
 	for rows.Next() {
 		var card CardDescription
 		var result string
-		if err := rows.Scan(&card.Card, &result, &card.Error, &card.Identity); err != nil {
+		if err := rows.Scan(&card.Card, &result, &card.Error); err != nil {
 			return nil, err
 		}
 		if result != "" {
@@ -143,7 +177,7 @@ type describeCard struct {
 // check, in card order, and how many of them have a description of
 // reader's identity.
 func (s *Service) cardsToDescribe(ctx context.Context, object, reader string) (cards []describeCard, done map[int]bool, err error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes, c.identity, q.result, IFNULL(d.identity, '')
+	rows, err := s.db.QueryContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes, `+descriptionInputs+`, q.result, IFNULL(d.identity, '')
 		FROM video_cards c JOIN video_card_quality q ON q.object_id = c.object_id AND q.card = c.card
 		LEFT JOIN video_card_descriptions d ON d.object_id = c.object_id AND d.card = c.card
 		WHERE c.object_id = ? ORDER BY c.card`, object)
@@ -232,20 +266,6 @@ func maskTexts(value any) any {
 	return value
 }
 
-// withoutReader reports whether the Worker answered and has no text reader.
-func (r *aiRunner) withoutReader() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.model != "" && r.reader == ""
-}
-
-// hasReader reports whether the Worker last answered with a text reader.
-func (r *aiRunner) hasReader() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.reader != ""
-}
-
 // montageDescribe describes one card of a due description job. It reports
 // whether it claimed one, which ends the round, and whether it did any
 // work. A card that cannot be described, past the context or with an
@@ -284,15 +304,16 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 		}
 	}
 	if card == nil {
-		return true, true, lib.completeDescriptions(ctx, job, cards)
+		_, err := lib.db.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ? AND state = 'running'", job.objectID, job.derivation)
+		return true, true, err
 	}
 	detector, _ := embedder.(Detector)
-	r.switchPhase(ctx, detector, true)
 	if open, reason := gate.Open(ctx, info.OCRMemoryBytes); !open {
 		r.progress.set(AIPaused, reason, "")
 		r.releaseModels(ctx, detector, reason)
-		return true, false, lib.returnJob(ctx, job)
+		return reason != "memory_for_models", false, lib.returnJob(ctx, job)
 	}
+	r.switchPhase(ctx, detector, true)
 	r.progress.set(AIWorking, "", info.Model)
 	original, err := lib.openObject(job.objectID)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -309,32 +330,11 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 	// up, as for the windows; other pressure lets the card's frames finish.
 	working, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var hungUp atomic.Value
-	watched := make(chan struct{})
-	go func() {
-		defer close(watched)
-		ticker := time.NewTicker(gateWatchInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-working.Done():
-				return
-			case <-ticker.C:
-				if open, reason := continuing(gate)(working, info.OCRMemoryBytes); !open {
-					hungUp.Store(reason)
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	durationMs := int(math.Round(job.duration * 1000))
-	instants := make([]int, len(card.keyframes))
-	times := make([]float64, len(card.keyframes))
-	for i, at := range card.keyframes {
-		// A frame within the last 100 ms may not be there.
-		instants[i] = min(at, max(durationMs-100, 0))
-		times[i] = float64(instants[i]) / 1000
+	stopFrames := watchGate(working, continuing(gate), info.OCRMemoryBytes, cancel)
+	instants := card.keyframes
+	times := make([]float64, len(instants))
+	for i, at := range instants {
+		times[i] = float64(at) / 1000
 	}
 	var frames []*os.File
 	defer func() {
@@ -350,57 +350,60 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 		}
 		return err
 	})
+	reason := stopFrames()
 	cancel()
-	<-watched
-	if reason, _ := hungUp.Load().(string); reason != "" || ctx.Err() != nil {
+	if reason != "" || ctx.Err() != nil {
 		return true, false, r.pauseDescribe(ctx, job, detector, reason)
 	}
+	if err == nil && len(frames) != len(times) {
+		err = ffmpegworker.ErrFailed
+	}
 	if err != nil {
-		if class := decodeFailure(err); class != jobWaiting {
+		class := decodeFailure(err)
+		if class == jobWaiting {
+			return true, false, lib.releaseJob(ctx, job)
+		}
+		if class != jobErrorUndecodable && job.attempts < jobMaxAttempts {
 			return true, true, lib.failJob(ctx, job, class)
 		}
-		return true, false, lib.releaseJob(ctx, job)
-	}
-	if len(frames) != len(times) {
-		return true, true, lib.failJob(ctx, job, jobErrorIO)
+		return true, true, lib.finishDescription(ctx, job, *card, info.OCR, nil, class, 0, left == 1)
 	}
 
 	// The description: any reason to stop hangs it up, as a reading does.
 	describing, stop := context.WithCancel(ctx)
 	defer stop()
-	stopWatching := watchGate(describing, gate.Open, info.OCRMemoryBytes, stop)
+	stopWatching := watchGate(describing, continuing(gate), info.OCRMemoryBytes, stop)
 	r.markReaderLoaded()
 	started := lib.now()
 	model, template, description, err := describer.DescribeFrames(describing, frames, cardLayout(*card, instants))
 	paused := stopWatching()
 	stop()
 	took := lib.now().Sub(started)
+	var failure string
 	switch {
 	case ctx.Err() != nil, paused != "":
 		return true, false, r.pauseDescribe(ctx, job, detector, paused)
-	case errors.Is(err, ErrAIUnavailable) || (err == nil && (model != info.OCR || template != describeTemplate)):
-		// Look again next round: the Worker may have lost or changed its reader.
+	case errors.Is(err, ErrAIUnavailable) || (err == nil && model != info.OCR):
 		r.forgetModels()
 		return true, false, lib.releaseJob(ctx, job)
 	case errors.Is(err, ErrAIRejected) || errors.Is(err, ErrAIInvalidResult):
-		// This card alone goes undescribed.
-		err = lib.storeDescription(ctx, job.objectID, *card, info.OCR, nil, err.Error(), took)
+		failure = err.Error()
 	case err != nil:
-		// The Worker failed after taking the frames: an attempt is spent.
-		return true, true, lib.failJob(ctx, job, jobErrorIO)
+		if job.attempts < jobMaxAttempts {
+			return true, true, lib.failJob(ctx, job, jobErrorIO)
+		}
+		failure = jobErrorIO
+	case template != describeTemplate:
+		failure = "unsupported description template"
 	default:
 		if description, err = maskDescription(description); err != nil {
-			return true, true, lib.failJob(ctx, job, jobErrorInvalidResult)
+			failure = jobErrorInvalidResult
 		}
-		err = lib.storeDescription(ctx, job.objectID, *card, info.OCR, description, "", took)
 	}
-	if err != nil {
-		return true, false, errors.Join(err, lib.returnJob(context.WithoutCancel(ctx), job))
+	if failure != "" {
+		description = nil
 	}
-	if left == 1 {
-		return true, true, lib.completeDescriptions(ctx, job, cards)
-	}
-	return true, true, lib.returnJob(ctx, job)
+	return true, true, lib.finishDescription(ctx, job, *card, info.OCR, description, failure, took, left == 1)
 }
 
 // pauseDescribe puts a stopped description job back in its place; a gate
@@ -416,57 +419,53 @@ func (r *aiRunner) pauseDescribe(ctx context.Context, job claimedJob, detector D
 	return err
 }
 
-// storeDescription stores one card's description, masked already, or why
-// it has none, replacing one of another identity.
-func (s *Service) storeDescription(ctx context.Context, object string, card describeCard, reader string, description json.RawMessage, failure string, took time.Duration) error {
+// finishDescription records one card and resets the retry budget for the next
+// in the same transaction. A purge or recut may have retired the running job.
+func (s *Service) finishDescription(ctx context.Context, job claimedJob, card describeCard, reader string, description json.RawMessage, failure string, took time.Duration, last bool) error {
 	var result any
 	if description != nil {
 		result = string(description)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO video_card_descriptions(object_id, card, result, error, identity, millis)
-		VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, error = excluded.error,
-		identity = excluded.identity, millis = excluded.millis`,
-		object, card.card, result, strings.TrimSpace(failure), describeIdentity(reader, card.identity), took.Milliseconds())
-	return err
-}
-
-// completeDescriptions retires the job once every card that passed the
-// quality check has its description, and drops those of cards that are no
-// longer, or no longer pass.
-func (s *Service) completeDescriptions(ctx context.Context, job claimedJob, cards []describeCard) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		keep := make([]any, 0, len(cards)+1)
-		keep = append(keep, job.objectID)
-		marks := make([]string, len(cards))
-		for i, card := range cards {
-			keep = append(keep, card.card)
-			marks[i] = "?"
-		}
-		statement := "DELETE FROM video_card_descriptions WHERE object_id = ?"
-		if len(cards) > 0 {
-			statement += " AND card NOT IN (" + strings.Join(marks, ", ") + ")"
-		}
-		if _, err := tx.ExecContext(ctx, statement, keep...); err != nil {
+		var running bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ? AND state = 'running')", job.objectID, job.derivation).Scan(&running); err != nil || !running {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+		_, err := tx.ExecContext(ctx, `INSERT INTO video_card_descriptions(object_id, card, result, error, identity, millis)
+			VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, error = excluded.error,
+			identity = excluded.identity, millis = excluded.millis`,
+			job.objectID, card.card, result, strings.TrimSpace(failure), describeIdentity(reader, card.identity), took.Milliseconds())
+		if err != nil {
+			return err
+		}
+		if last {
+			_, err = tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', attempts = 0, error_class = '', lease_until = NULL WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 		return err
 	})
 }
 
-// requeueStaleDescriptions queues the descriptions a text reader that is
-// new to the runner has to write: those of the objects a grant still refers
-// to whose quality step is done, and which have no description, or one
-// another reader wrote. A video without a card that passed is asked again
-// too, and ends in one round.
-func (s *Service) requeueStaleDescriptions(ctx context.Context, reader string) error {
+// queueMissingDescriptions queues only current, eligible inputs whose result
+// is missing or stale, after all earlier stages have finished. scope selects
+// either an analyzed object's id or the objects still held by live grants.
+func (s *Service) queueMissingDescriptions(ctx context.Context, q queryer, reader string, resetFailed bool, scope string, arg ...any) error {
+	if reader == "" {
+		return nil
+	}
 	now := formatTime(s.now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-		SELECT DISTINCT q.object_id, ?, 'pending', ?, ? FROM video_card_quality q
-		WHERE q.object_id IN (`+referencedObjects+`)
-		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id = q.object_id AND j.derivation IN (?, ?))
-		  AND (NOT EXISTS (SELECT 1 FROM video_card_descriptions d WHERE d.object_id = q.object_id)
-		    OR EXISTS (SELECT 1 FROM video_card_descriptions d WHERE d.object_id = q.object_id AND instr(d.identity, ?) <> 1))
-		ON CONFLICT DO NOTHING`, describeDerivation, now, now, cardsDerivation, qualityDerivation, reader+describeIdentitySuffix+"|")
+	args := []any{describeDerivation, now, now}
+	args = append(args, arg...)
+	args = append(args, windowsDerivation, cardsDerivation, qualityDerivation, describeIdentity(reader, ""), resetFailed)
+	_, err := q.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
+  SELECT DISTINCT c.object_id, ?, 'pending', ?, ? FROM video_cards c
+  JOIN video_card_quality q ON q.object_id=c.object_id AND q.card=c.card
+  LEFT JOIN video_card_descriptions d ON d.object_id=c.object_id AND d.card=c.card
+  WHERE c.object_id IN (`+scope+`)
+  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id=c.object_id AND j.derivation IN (?, ?, ?))
+  AND `+eligibleQuality+` AND (d.identity IS NULL OR d.identity <> ? || `+descriptionInputs+`)
+  ON CONFLICT(object_id,derivation) DO UPDATE SET state='pending', attempts=0, lease_until=NULL,
+   not_before=excluded.not_before, error_class='' WHERE jobs.state='failed' AND ?`, args...)
 	return err
 }

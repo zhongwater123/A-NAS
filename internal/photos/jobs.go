@@ -268,7 +268,7 @@ WHERE state = 'running' AND attempts >= ?`, jobErrorInterrupted, jobMaxAttempts)
 		}
 		requeued, err := tx.ExecContext(ctx, `
 UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-WHERE state = 'failed' AND error_class = ? AND derivation <> ?`, now, jobErrorIO, textDerivation)
+WHERE state = 'failed' AND error_class = ? AND derivation NOT IN (?, ?)`, now, jobErrorIO, textDerivation, describeDerivation)
 		if err != nil {
 			return err
 		}

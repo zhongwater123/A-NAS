@@ -735,7 +735,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 			return err
 		}
 		// The montage center's descriptions: only those a grant still refers to.
-		if err := lib.requeueStaleDescriptions(ctx, info.OCR); err != nil {
+		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
 			return err
 		}
 		if record.Reader != info.OCR {
