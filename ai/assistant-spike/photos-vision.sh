@@ -10,8 +10,8 @@
 set -uo pipefail
 user=${1:-alice}
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-managed=/etc/hermes/config.yaml
-member=/etc/a-nas-assistant/members/$user/config.yaml
+managed=/usr/lib/a-nas/assistant/managed/config.yaml
+member=/var/lib/a-nas-host/assistant/members/$user/config.yaml
 cache=/srv/a-nas/data/assistant/$user/hermes/cache/images
 real=$([[ -f /etc/anas-spike/model.key ]] && echo 1)
 log=$([[ -n $real ]] && echo /var/log/gateway.jsonl || echo /var/log/fake-model.jsonl)

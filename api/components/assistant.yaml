@@ -10,6 +10,21 @@ schemas:
     required: [available]
     properties:
       available: { type: boolean, description: The member has an assistant instance. }
+      reason: { type: string, enum: [no_key], description: "Why not, when it is known: no_key while no administrator has saved the DeepSeek key." }
+  AssistantKeyState:
+    type: object
+    additionalProperties: false
+    required: [configured, gateway]
+    properties:
+      configured: { type: boolean, description: A key is saved; every active member has VNAS. }
+      gateway: { type: string, enum: [running, starting, stopped, failed], description: "What systemd reports of the model gateway, which holds the key." }
+  AssistantKeyRequest:
+    type: object
+    additionalProperties: false
+    required: [key, acknowledged]
+    properties:
+      key: { type: string, minLength: 16, maxLength: 512, description: "The DeepSeek API key (printable ASCII, no spaces)." }
+      acknowledged: { type: boolean, description: "The administrator confirmed that what VNAS handles goes to DeepSeek; must be true." }
   AssistantSession:
     type: object
     additionalProperties: false

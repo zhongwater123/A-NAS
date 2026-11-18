@@ -87,24 +87,25 @@ type config struct {
 	StateDir     string `env:"ANAS_STATE_DIR" envDefault:"/var/lib/a-nas"`
 	// FileBrokerSocket defaults to the socket beside the Host Agent's.
 	FileBrokerSocket string `env:"ANAS_FILE_BROKER_SOCKET"`
-	// The AI assistant is not shipped yet (ADR 0024): off unless its
-	// sockets are named. With it come the session gate and the executor of
-	// its changes, which keeps the copies the members' cards show beside
-	// the assistant directories (by default assistant/.changes on the data
-	// volume), where only root may read them.
+	// The AI assistant (ADR 0024) is on where its sockets are named, as the
+	// unit does; development runs without it. With it come the session gate and
+	// the executor of its changes, which keeps the copies the members' cards
+	// show beside the assistant directories (by default assistant/.changes on
+	// the data volume), where only root may read them. The instance secrets
+	// are the Host Agent's own, written where the executor prepares a member's
+	// assistant (Executor.AssistantTokenDir), so they have no setting.
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
-	AssistantTokens        string `env:"ANAS_ASSISTANT_TOKEN_DIR" envDefault:"/etc/a-nas-assistant/tokens"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
 	// The scheduled tasks members asked to run now wait here for a round of
-	// their cron unit (ai/assistant-spike/run-requests.sh reads the same place).
+	// their cron unit (ai/assistant/run-requests.sh reads the same place).
 	AssistantRuns string `env:"ANAS_ASSISTANT_RUN_DIR" envDefault:"/run/a-nas/assistant-runs"`
 	// Without the photo service's group the photo service is not installed
 	// and its session lookup is off; the default is the service's user.
 	PhotoSessionGroup  string `env:"ANAS_PHOTO_SESSION_GROUP"`
 	PhotoSessionSocket string `env:"ANAS_PHOTO_SESSION_SOCKET" envDefault:"/run/a-nas-sessions/photos.sock"`
 	// PhotoAssistantLookup=1 looks accounts up by UID for the photo
-	// service's socket for members' AI assistants, which is not shipped yet.
+	// service's socket for members' AI assistants, as the unit sets it.
 	PhotoAssistantLookup string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
 	ShareSessionGroup    string `env:"ANAS_SHARE_SESSION_GROUP"`
 	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
@@ -184,7 +185,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, ReconcileFailed: reconcileFailed.Load,
+		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
 		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped, Deletions: sessions,
 	}, logger)
 	mux := http.NewServeMux()
@@ -211,9 +212,10 @@ func run(logger *slog.Logger) error {
 	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
-		AssistantTokens:  config.AssistantTokens,
+		AssistantTokens:  executor.AssistantTokenDir(),
 		AssistantChanges: assistantChanges,
 		AssistantRuns:    config.AssistantRuns,
+		AssistantOn:      executor.AssistantOn,
 		Accounts:         sessions,
 		Scopes:           scopes,
 	})
@@ -399,6 +401,11 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, module
 		logRepairs(logger, repaired)
 		ensureManagedStores(ctx, executor, logger)
 		ensureModuleStores(ctx, executor, moduleManifests, logger, nil)
+		// A member whose assistant was prepared while the volume was not mounted gets its
+		// folders once it is (ADR 0024).
+		if err := executor.PrepareAssistants(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "members' assistants not prepared on the data volume", "error", err)
+		}
 		continueConversion(ctx, executor, logger)
 		restoreRedundancy(ctx, executor, logger)
 	}

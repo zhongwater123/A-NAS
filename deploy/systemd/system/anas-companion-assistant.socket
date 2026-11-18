@@ -1,12 +1,12 @@
 [Unit]
-Description=A-NAS Product Service socket for members' assistants' companion tools (trial)
+Description=A-NAS Product Service socket for members' assistants' companion tools
 # The Product Service's socket for the companion tools of members' assistants (#412): it
 # passes each call on to the VNAS window of the conversation that made it, and learns
 # the member from the peer UID. Open to every UID, so its directory is root's alone; each
 # assistant's unit binds the socket itself into its sandbox, and the scheduled tasks'
 # units do not. systemd holds it, so it outlives restarts of the Product Service and the
-# copies bound into running sandboxes keep working. product-settings.sh hands it to
-# anas-api.service.
+# copies bound into running sandboxes keep working. anas-api.service takes it
+# (Sockets=).
 
 [Socket]
 ListenStream=/run/a-nas-companion-assistant/assistant.sock
