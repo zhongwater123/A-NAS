@@ -1,6 +1,6 @@
 # 剪辑配乐在 NAS 上的节拍与副歌分析（配乐探针 P2）
 
-> 状态：开发机完成（2026-11-18）；节拍与重拍过门槛，副歌没过，怎么办等评审人定；实验 NAS 的 CPU 未测  
+> 状态：开发机完成（2026-11-18）；节拍与重拍过门槛，副歌没过。同日用户决定改用 allin1、商业版权待议，本文的做法留作退路；实验 NAS 的 CPU 未测  
 > 更新日期：2026-11-18  
 > 适用范围：beat_this 上游提交 `b95c8ab`（2026-11-18 的 main），检查点 `small0`（sha256 `6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b`）；导出用 PyTorch 2.5.1（CPU）、opset 17，ONNX 文件 sha256 `f30b8009f2a44ca1ab946b1a655c144fc50a7c9bc75dc0c33276c8f358ec8af6`；推理用 onnxruntime 1.31.0（与设备的 `ai/requirements.in` 相同）；开发机 C 的 Colima `anas` 虚拟机（aarch64，6 核，8 GiB）  
 > 关联：[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)的“配乐”（PR [#518](https://github.com/zhongwater123/A-NAS/pull/518)）、[评审意见](https://github.com/zhongwater123/A-NAS/pull/518#pullrequestreview-5950219461)、探针脚本 [`ai/eval/montage_music.py`](../../ai/eval/montage_music.py)
@@ -97,13 +97,15 @@ allin1 本身不是标准答案，这里看的是两者是否一致。拟的门�
 
 ## 副歌没过之后
 
-评审人说过不通过时先问他，下面只列可选的做法与代价，不替他定：
+评审人说过不通过时先问评审人，下面只列可选的做法与代价，不替评审人定：
 
 | 做法 | 代价 |
 |---|---|
 | 首版不追求自动找准：配乐页给出两个候选起点（第一版与第二版各一个，9 首里合起来覆盖 6 首），成员试听后选一个或拖动起点 | 成员每首新歌都要听一下；两个候选都不对时（9 首里 3 首）全靠拖动 |
 | 首版仍只用 10 首测试歌，把 allin1 的结果放进设备；M10 的开关默认关闭，只在实验 NAS 上打开（方案写的退路） | 成员不能用自己的歌，首版不能对外开放 |
 | 另找能在 CPU 上跑、许可允许分发的段落模型 | 没有现成的：allin1 要 Demucs 分离音轨，评审人记的是 CPU 上一首 2–5 分钟，权重的许可也要另核；SongFormer 约 7 亿参数，作者说 CPU 上太慢（[讨论](https://huggingface.co/spaces/ASLP-lab/SongFormer/discussions/1)） |
+
+**2026-11-18 的决定**：用户决定在 NAS 上接入 allin1，它的商业版权列为待议点（许可的核对见 PR #518 的[决定记录](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)）。本文的 beat_this 与色度自相似留作退路：待议的结论是不能随产品分发时，按上表第一种或第三种做法补副歌。
 
 ## 复现
 
