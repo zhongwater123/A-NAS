@@ -334,7 +334,7 @@ func fetchedBinary(t testing.TB, root string) string {
 	return filepath.Join(root, "build", "qdrant", manifest.SHA256, "qdrant")
 }
 
-// PinnedRelease is what deploy/qdrant/qdrant.json pins.
+// PinnedRelease is what the current architecture's Qdrant manifest pins.
 type PinnedRelease struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
@@ -342,7 +342,11 @@ type PinnedRelease struct {
 
 // Manifest reads the pinned release from the repository at root.
 func Manifest(root string) (PinnedRelease, error) {
-	data, err := os.ReadFile(filepath.Join(root, "deploy", "qdrant", "qdrant.json"))
+	name := "qdrant.json"
+	if runtime.GOARCH == "arm64" {
+		name = "qdrant-arm64.json"
+	}
+	data, err := os.ReadFile(filepath.Join(root, "deploy", "qdrant", name))
 	if err != nil {
 		return PinnedRelease{}, err
 	}
@@ -351,7 +355,7 @@ func Manifest(root string) (PinnedRelease, error) {
 		return PinnedRelease{}, err
 	}
 	if manifest.Version == "" || len(manifest.SHA256) != 64 {
-		return PinnedRelease{}, errors.New("deploy/qdrant/qdrant.json lacks a version or SHA-256")
+		return PinnedRelease{}, errors.New("qdrant target manifest lacks a version or SHA-256")
 	}
 	return manifest, nil
 }

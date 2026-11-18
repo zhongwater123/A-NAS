@@ -18,6 +18,7 @@ import io
 import json
 import math
 import os
+import platform
 import shutil
 import socket
 import struct
@@ -55,7 +56,7 @@ def inference_threads():
 
 
 def read_manifest(manifest_path):
-    """Returns a model's manifest, which must give its memoryBytes.
+    """Returns a model's manifest with the current architecture's memory budget.
 
     memoryBytes is how much the Worker's memory, as its cgroup counts it,
     grows the first time the model runs, with the model file already in the
@@ -70,6 +71,15 @@ def read_manifest(manifest_path):
     memory = manifest.get("memoryBytes")
     if type(memory) is not int or memory < 0:
         raise Unavailable(f"the manifest {manifest_path} gives no memoryBytes")
+    overrides = manifest.get("memoryBytesByArchitecture", {})
+    if not isinstance(overrides, dict):
+        raise Unavailable(f"the manifest {manifest_path} has invalid memoryBytesByArchitecture")
+    machine = platform.machine().lower()
+    architecture = {"aarch64": "arm64", "x86_64": "amd64"}.get(machine, machine)
+    memory = overrides.get(architecture, memory)
+    if type(memory) is not int or memory < 0:
+        raise Unavailable(f"the manifest {manifest_path} has invalid memoryBytes for {architecture}")
+    manifest["memoryBytes"] = memory
     return manifest
 
 

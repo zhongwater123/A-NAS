@@ -10,7 +10,9 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-lock=$repo/deploy/upstream/packages.json
+# shellcheck source=lib/target.sh
+. "$repo/scripts/lib/target.sh"
+lock=$(target_file "$repo" deploy/upstream/packages.json)
 mkdir -p "${1:-$repo/build/upstream}"
 out=$(cd "${1:-$repo/build/upstream}" && pwd)
 # pinned FILE SIZE SHA256: FILE has this size and SHA-256.
@@ -39,5 +41,6 @@ jq -r '.packages[] | [.source, .file, .sizeBytes, .sha256] | @tsv' "$lock" |
       fi
       mv -f -- "$target.partial" "$target"
     fi
+    require_target_deb "$target"
     echo "$target"
   done

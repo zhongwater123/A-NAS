@@ -7,6 +7,8 @@
 # its content package unpacks it under /opt/a-nas
 # (scripts/build-content-packages.sh).
 # Source this file; it defines functions only.
+# shellcheck source=target.sh
+. "$(dirname "${BASH_SOURCE[0]}")/target.sh"
 
 # require_uv REPO: stop unless uv is the version ai/requirements-dev.txt pins.
 require_uv() {
@@ -27,8 +29,11 @@ require_uv() {
 lock_runtime() {
   local in=$1 out=$2
   shift 2
+  local platform=x86_64-manylinux_2_40 arch
+  arch=$(target_arch) || return 2
+  if [[ "$arch" == arm64 ]]; then platform=aarch64-manylinux_2_40; fi
   uv pip compile "$in" --quiet --generate-hashes --python-version 3.13 \
-    --python-platform x86_64-manylinux_2_40 --only-binary :all: "$@" --output-file "$out"
+    --python-platform "$platform" --only-binary :all: "$@" --output-file "$out"
 }
 
 # image_python IMAGE: the MAJOR.MINOR version of IMAGE's python3, which the
@@ -42,8 +47,8 @@ image_python() {
 write_runtime_manifest() {
   local tarball=$1 id=$2 python=$3 manifest=$4 sha
   read -r sha _ < <(sha256sum "$tarball")
-  jq -cn --arg id "$id" --arg python "$python" --arg file "$(basename "$tarball")" \
+  jq -cn --arg id "$id" --arg python "$python" --arg architecture "$(target_arch)" --arg file "$(basename "$tarball")" \
     --argjson sizeBytes "$(stat -c %s "$tarball")" --arg sha256 "$sha" \
-    '{$id, $python, $file, $sizeBytes, $sha256}' > "$manifest"
+    '{$id, $python, $architecture, os:"linux", $file, $sizeBytes, $sha256}' > "$manifest"
   cat "$manifest"
 }

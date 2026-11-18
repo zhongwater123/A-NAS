@@ -12,7 +12,9 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-manifest=$repo/deploy/qdrant/qdrant.json
+# shellcheck source=lib/target.sh
+. "$repo/scripts/lib/target.sh"
+manifest=$(target_file "$repo" deploy/qdrant/qdrant.json)
 field() { jq -er --arg key "$1" '.[$key]' "$manifest"; }
 source=$(field source)
 file=$(field file)

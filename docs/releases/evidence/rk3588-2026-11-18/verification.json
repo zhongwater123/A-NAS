@@ -1,0 +1,82 @@
+{
+  "milestone": "RK3588 ARM64 deployment and reboot verified",
+  "date": "2026-11-18",
+  "board": "ATK-DLRK3588, 8GB RAM / 64GB eMMC / 256GB PCIe NVMe",
+  "baseCommit": "5a3ceb79daa9e8c2a1881e890f0ab78f4c21c346",
+  "installedVersion": "1.0.1~rc.6+dev20261118.100+g5a3ceb79daa9.rk5.1",
+  "installedApiSHA256": "c3c7f45e35283ae415ac4e7f180e5f9b95a1002b46a3c6414dc1e5c5143f37a8",
+  "validatedBaselineSourceArchiveSHA256": "b5c4acc2aeb5da8aafa3891653b249295376b49da81bb220f402c9a7a40aed9a",
+  "packageManifestSHA256": "d13ffd193ee16f1cca761afacaeea24a2a884956f381f65c440c3629efbb8fcf",
+  "upgradeManifestSHA256": "041de5ea7ffe4fff204ecbe4793075bff675b6a87f7e7f5f73646e5ad0669804",
+  "deployedScopeVerification": {
+    "armSourceAndClockTestFilesMatchDeployedBaseline": 30,
+    "smallScreenCSSSeparatelyBuiltAndTested": true
+  },
+  "checksPassed": [
+    "baseline complete native gate",
+    "web format",
+    "web lint",
+    "web typecheck",
+    "web build and size budgets",
+    "ARM embedded Web package",
+    "new package audit",
+    "360x640 and 768x432 browser bounds",
+    "six-package installed upgrade",
+    "state backup verification",
+    "data volume UUID unchanged",
+    "board kiosk and HTTP 200",
+    "docs-check",
+    "authorized persistent kiosk startup",
+    "normal reboot with data volume automatic mount",
+    "administrator setup preserved after reboot",
+    "offline Host Agent runtime directory created during boot",
+    "Host Agent NRestarts=0",
+    "board screenshot after reboot",
+    "host localhost:18081 HTTP 200 after forwarding restoration"
+  ],
+  "nativeCompleteGate": {
+    "command": "make check-steps",
+    "exitCode": 0,
+    "go": "1.27.4",
+    "webPassed": 1020,
+    "logSHA256": "32f5ab4e99adf325d089ec62de55a85aea7773bef9f2f6396dbfd4e45dbdd08e"
+  },
+  "allProductChecksPassed": false,
+  "notRepeatedForCSSOnlyPatch": [
+    "complete native Go and AI gate",
+    "4B inference"
+  ],
+  "bootVerification": {
+    "userAuthorizationRecordedIn": "docs/decisions/2026-11-18-rk3588-boot-console.md",
+    "firstBootFailuresPreserved": true,
+    "resolvedOnBoard": "/run/samba absent when offline; local systemd tmpfiles rule added",
+    "finalBootID": "BOARD_UUID_REDACTED_02",
+    "productHealthFailures": [
+      "unit:smbd.service (no LAN address)"
+    ],
+    "vendorUnitsStillFailed": [
+      "bootanim.service",
+      "rkaiq_3A.service"
+    ],
+    "captureTimeoutPreserved": true,
+    "independentPNGAndRuntimeValidation": "FIVEINCH_REBOOT_VERIFIED",
+    "boardLocalConfigurationNotBakedIntoSealedRootImage": true,
+    "formalPackageOfflineBootFixPending": true
+  },
+  "physicalScreenEnteredConfirmedByUser": true,
+  "pending": [
+    "physical touch alignment and final orientation",
+    "text input without external keyboard",
+    "LAN and SMB",
+    "full product, Chinese OCR quality, concurrency and long term performance"
+  ],
+  "privateStateBackupsIncluded": false,
+  "newSemanticVersionTagCreated": false,
+  "configurationCaptureScope": "Only the identified development board; references, not an automatic installer or regenerated root image",
+  "publication": {
+    "deviceInstanceIdentifiersRedacted": true,
+    "screenshotContainsOnlyEmptyLoginScreen": true,
+    "rawLogsAndConfigurationsRemainInLocalSealedArtifacts": true,
+    "redactedConfigurationReferencesAreNotInstallableWithoutRestoringLocalIdentityGuards": true
+  }
+}

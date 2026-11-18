@@ -1,0 +1,30 @@
+PASS a-nas and a-nas-host 1.0.1~rc.6+dev20261118.100+g5a3ceb79daa9.rk5.1
+PASS a-nas-console 1.0.1~rc.6+dev20261118.100+g5a3ceb79daa9.rk5.1
+PASS a-nas-photos is 31000:31000
+PASS a-nas-shares is 31001:31001
+PASS a-nas-family is 31002:31002
+PASS a-nas-kiosk cannot log in
+PASS a-nas-search cannot log in
+PASS anas-container cannot log in
+PASS no unit in /etc/systemd/system overrides the package's
+PASS site.conf names the SMB interface
+PASS anas-site.service applied this machine's settings
+FAIL anas-host-agent.service is activating; see journalctl -u anas-host-agent.service
+PASS anas-api.service is active
+PASS anas-photos.service is active
+PASS anas-shares.service is active
+PASS anas-family.service is active
+PASS anas-ai.socket is active
+PASS anas-ffmpeg.socket is active
+PASS anas-vectors-proxy@a-nas-photos.socket is active
+FAIL smbd.service is activating; see journalctl -u smbd.service
+INFO web search: active
+INFO LAN Web entry (Caddy): active
+INFO App Center: Docker waits for bip and default-address-pools in /etc/docker/daemon.json (docs/runbooks/install-container-agent.md)
+INFO internet entry: off
+PASS anas-photos serves /srv/a-nas/data/photos/catalog.db
+FAIL anas-shares has not opened /srv/a-nas/data/shares/catalog.db (member-share store unavailable); see journalctl -u anas-shares. After a rollback, restore the copy taken before the upgrade (docs/runbooks/deploy-a-nas-packages.md)
+PASS anas-family serves /srv/a-nas/data/family/family.db
+FAIL the Host Agent cannot start file workers as users (CapEff=unknown; no identity probe result): roll back this release
+PASS the Product Service answers /healthz
+a-nas-check: 4 checks failed

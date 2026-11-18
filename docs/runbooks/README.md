@@ -4,6 +4,9 @@
 
 ## 索引
 
+- [构建 RK3588 候选内核](build-rk3588-kernel.md)（draft；专用构建文件、内核能力与可逆板端探针）
+- [准备与验收 RK3588 ARM64 候选包](prepare-rk3588-candidate.md)（draft；交叉构建、内容包与板端预检）
+- [适配 RK3588 五寸触控屏](adapt-rk3588-five-inch-display.md)（draft；Mali 权限与单屏显示已实测，触控与输入待验收）
 - [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
 - [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（historical；已被系统服务部署取代）
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）

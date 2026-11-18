@@ -868,6 +868,8 @@ describe("what VNAS asks of the companion", () => {
       });
       await plays("写代码");
       fetched = [];
+      // The host coalesces working -> result within 5 s; this tool has run past that window.
+      vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
       act(() => reportEvent("live0001", "tool.complete", { name: "terminal", tool_id: "c1" }));
       expect(await screen.findByText(/搞定一步，继续看看哦~|这步好啦！/)).toBeInTheDocument();
       await settle();

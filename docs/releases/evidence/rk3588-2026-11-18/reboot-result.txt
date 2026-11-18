@@ -1,0 +1,6 @@
+Host Agent: active, NRestarts=0
+Data volume: mounted by UUID
+Boot kiosk: enabled and active
+Screen capture: valid 1080x1920 PNG
+Health failures: only SMB without LAN
+FIVEINCH_REBOOT_VERIFIED

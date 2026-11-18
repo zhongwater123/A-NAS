@@ -459,11 +459,7 @@ image-test: packages
 build: web-build build-binaries
 
 build-binaries: web-build
-	mkdir -p $(BUILD_DIR)
-	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-api ./cmd/anas-api
-	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
-	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
-	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-scoring ./cmd/anas-scoring
+	GO='$(GO)' bash scripts/build-target-binaries.sh '$(BUILD_DIR)' '$(VERSION)'
 
 # The photo scoring module (ADR 0037) staged for its install script; it is not
 # part of the release (docs/runbooks/install-and-remove-photo-scoring.md).

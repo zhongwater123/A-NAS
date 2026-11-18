@@ -62,6 +62,7 @@
 - [2026-10-30：Web 桌面首屏 JavaScript 上限放宽到 200 kB](2026-10-30-desktop-js-budget.md)
 - [2026-10-30：不调节风扇转速](2026-10-30-no-fan-control.md)
 - [2026-11-16：重新启用与删除账号的做法](2026-11-16-account-deletion.md)
+- [2026-11-18：RK3588 的开机显示使用五寸屏 A-NAS 控制台](2026-11-18-rk3588-boot-console.md)
 
 ### 虚拟伙伴
 

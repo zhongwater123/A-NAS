@@ -1,6 +1,6 @@
 Package: a-nas
 Version: @VERSION@
-Architecture: amd64
+Architecture: @ARCH@
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
