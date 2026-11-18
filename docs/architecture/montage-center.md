@@ -168,8 +168,8 @@ anas-photos
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
 | `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome | 规划的每一轮。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是 Hermes 任务的编号。`reported_at` 是回合脚本报告 `end` 或已清理的时间，`stale` 列出还没有它的轮次 |
 | `plan_grants` | owner_user_id、registered_at | 最近一次经过规划授权登记的请求时间（anas-api 带来 `X-A-NAS-Assistant: on`）。只用来决定留不留记号，授权本身在文件代理那里 |
-| `plans` | job_id、step、round_id、catalog_key、answer_json、accepted_at、voided_at | 每个任务每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
-| `versions` | id、project_id、number、job_id、version_key、film_asset_id、created_at | 成片存进相册后才写一行；失败或取消的任务不留版本。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
+| `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
+| `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | id、owner_user_id、sha256、title、duration、state、reason、analysis_version、analysis_json、created_at | 成员选过的歌：副本的摘要、分析结果（节拍、重拍、段落、副歌、响度）与不可用的原因 |
 
@@ -515,14 +515,16 @@ montage/
 | `montage_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第一步的数据（卡片目录、音乐段落、成员的要求）与这一轮的精确 Schema |
 | `montage_submit_outline` | `jobId`、`attemptToken`、大纲 | `{status: "accepted"}`；或 `{status: "rejected", reasons}`，让模型改了再交 |
 | `montage_shots_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第二步的数据（按收下的大纲生成的画面与可选节拍）与精确 Schema；大纲还没收下时回答“先交大纲” |
-| `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline` |
+| `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline`；还有方案要规划时回答 `{status: "next_plan"}` |
+
+- **一轮规划两个方案**：工具总是作用于第一个还没收下镜头的方案。方案一的镜头收下后回答 `next_plan`，模板要求模型回到 `montage_brief` 做下一版；方案二的 `montage_brief` 在数据里另给 `plan` 与 `earlierOutlines`（之前收下的大纲），让它换一种讲法。这一轮在方案二之前结束时，已收下的方案照常往下做；因为这一轮收下过答案，任务不进 `vnas_unknown`，而是留记号等下一轮规划剩下的方案。
 
 **规则、数据与 Schema 分开**
 - 第八版的提示词把规则和数据写在一起，Schema 又按每个任务动态生成：卡片 ID 是枚举，段落数固定，第二步的画面和可选节拍取决于第一步的答案。交给 VNAS 时拆成三样：
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次运行的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（首版 `plan-v1.md`）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 计算 Worker 的 `plan` 输出数据、Schema 与模板版本。两步的规则一开始就给模型（第二步的 system 文字只依赖目标时长，不依赖第一步的答案）；第一步的数据由 `montage_brief` 返回，第二步的数据等大纲收下后再生成。
 - 定时任务的运行里没有人回答审批，需要确认的操作一律拒绝，`clarify` 也不给。提示词仍要求不调用终端与代码、不委派，也不把描述写进记忆。
@@ -654,6 +656,8 @@ montage/
 | 渲染 | 时间线的摘要、渲染预设版本、副本的 SHA-256 |
 | 存回 | `versionKey` = 任务 ID 加渲染步骤的 `input_key`。重渲染的输出不必逐字节相同，存回也不会重复 |
 
+**两个方案**：分析、目录、歌曲三步共用；之后每个方案各有规划两步、填槽、渲染、存回五步，方案一的步骤名照旧，方案二的加 `-2`（`pick-2` … `save-2`）。方案二的规划、渲染键另加方案号，所以和方案一的答案或时间线相同也各存一条。方案一存回后任务接着做方案二，最后一个方案存回后任务才结束，任务的临时文件也到这时才删。方案数是 `montage.Options.Plans`，产品默认 2。
+
 - 去掉素材后，目录的键变了，所以已收下的规划作废（`plans.voided_at`），两步都重新规划，不会复用含已删素材卡片的旧目录。
 - 任务开始时把素材集合记进 `job_assets`，把歌、起点、要求与是否按拍摄时间记进 `jobs.settings_json`。各步骤的键只从这份快照取，所以任务进行中改项目设置或追加素材，只影响下一次“生成”，重启后也不会因此重做已收下的规划。
 
@@ -729,7 +733,7 @@ montage/
 
 - **登记**：在 `web/src/desktop/apps.tsx` 登记 `montage`，标题“剪辑中心”。服务端开关打开后显示入口，不随 VNAS 是否可用而隐藏（#514：VNAS 不可用时上传、浏览和播放仍要能用）。
 - **加载**：窗口代码按窗口懒加载，`MontageNotices` 在桌面外壳里懒加载，都不计入首屏 JS 预算。
-- **页面**：项目列表 → 新建（上传或从相册选）→ 确认素材与配乐 → 要求 → 进度 → 成片。
+- **页面**：照第八版原型（`ai/montage_v8/web/index.html`）的样子：项目列表 → 新建（上传或从相册选）→ 项目页（素材、配乐与剪辑要求、开始剪辑）→ 进度 → 两个方案并排挑一个。配乐与剪辑要求各是一页。
 - **上传**：复用相册的上传队列 `web/src/photos/uploads.tsx`（并行 2 个、接入传输中心、可重试、处理实况照片），目标是本人的个人图库，按 `LibraryPicker` 的规则找出个人图库。
   - 队列跑完后列出成功与失败，失败的可以重试；只用成功的资产建项目。
   - 单独上传的 MOV 如果补进了图库里在等它的实况照片，上传接口不返回新资产，所以它不进项目（页面行为见规格）。
