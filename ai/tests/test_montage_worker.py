@@ -107,10 +107,11 @@ class FillTest(unittest.TestCase):
 
 
 def described(cid, video, start, end):
+    """A card as the photo library describes it: the reader's beats name their key frames, not their spans."""
     return {"id": cid, "video": video, "start": start, "end": end, "times": [start + 1, start + 4], "frames": [f"{cid}/1", f"{cid}/2"],
             "answer": {"scene": "海边", "summary": "沿海边走", "process": ["走到海边", "望向远处"],
-                       "beats": [{"shot_size": "全景", "what": "海", "end": start + 4},
-                                 {"shot_size": "近景", "what": "人", "end": end}]}}
+                       "beats": [{"frames": [1, 1], "shot_size": "全景", "what": "海"},
+                                 {"frames": [2, 2], "shot_size": "近景", "what": "人"}]}}
 
 
 def brief_music():
@@ -146,6 +147,9 @@ class BriefTest(unittest.TestCase):
         self.assertEqual(shots["pictures"], [1, 1])
         beats = shots["data"]["parts"][0]["pictures"][0]["cards"][0]["beats"]
         self.assertEqual([b["beat"] for b in beats], ["v1-0/1", "v1-0/2"])
+        # Each beat runs from its key frame to the next (the first from the card's start), as the eighth version's
+        # beat_spans gave them: 0–4 s and 4–10 s, cut at the plan's cap.
+        self.assertEqual([b["seconds"] for b in beats], [round(min(planrules.CAP, 4.0)), round(min(planrules.CAP, 6.0))])
         answer = {"unmet": [], "parts": {"段落1": {"画面1": {"beats": ["v1-0/1"], "shows": "海", "link": "开场"}},
                                          "段落2": {"画面1": {"beats": ["v2-0/1"], "shows": "人", "link": "走近"}}}}
         turned = worker.op_shots_answer({"answer": answer, "pictures": shots["pictures"], "picked": picked}, {})

@@ -249,8 +249,21 @@ def op_plan(request, _arrays):
     raise Refused("step is pick or shots")
 
 
+def spanned(cards):
+    """The cards with each beat's span, which the plan's units read. The eighth version set them once a card was
+    described (cards.beat_spans); the photo library keeps the reader's description as it is, without them."""
+    out = []
+    for c in cards:
+        beats = [dict(b) for b in c["answer"]["beats"]]
+        if any("end" not in b for b in beats):
+            cardrules.beat_spans(c, beats)
+        out.append({**c, "answer": {**c["answer"], "beats": beats}})
+    return out
+
+
 def op_plan_brief(request, _arrays):
     """A step's brief for the member's VNAS: its data and exact schema (brief.py)."""
+    request = {**request, "cards": spanned(request["cards"])}
     if request.get("step") == "pick":
         return brief.pick_brief(request)
     if request.get("step") == "shots":
