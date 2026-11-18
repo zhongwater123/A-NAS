@@ -176,10 +176,55 @@ func TestModelsLoadOnlyIfTheReserveStaysFree(t *testing.T) {
 	}
 
 	want := []string{
-		`msg="AI work waits for memory to load its models" available_mib=2559 load_mib=1536 reserve_mib=1024`,
-		`msg="AI work has memory to load its models" available_mib=2560 load_mib=1536`,
-		`msg="AI work waits for memory to load its models" available_mib=1791 load_mib=768 reserve_mib=1024`,
+		`msg="AI work waits for memory to load its models" need_mib=1536 available_mib=2559 load_mib=1536 reserve_mib=1024`,
+		`msg="AI work has memory to load its models" need_mib=1536 available_mib=2560 load_mib=1536`,
+		`msg="AI work waits for memory to load its models" need_mib=1536 available_mib=1791 load_mib=768 reserve_mib=1024`,
 		`msg="AI work yields to low memory" available_mib=1023 reserve_mib=1024`,
+	}
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("log =\n%s\nwant %d lines", logged.String(), len(want))
+	}
+	for i, line := range lines {
+		if !strings.HasSuffix(line, want[i]) {
+			t.Fatalf("log line %d = %s\nwant it to end with %s", i+1, line, want[i])
+		}
+	}
+}
+
+// A round asks about the photos' models and then about the text reader,
+// which takes more. Memory enough for the first alone is one state, said
+// once, not a change at every round.
+func TestMemoryForOneNeedAndNotTheOtherIsLoggedOnce(t *testing.T) {
+	const models, reader = 1536 << 20, 3072 << 20
+	var free uint64
+	var logged bytes.Buffer
+	gate := &Gate{
+		now:       func() time.Time { return time.Date(2026, 11, 19, 20, 0, 0, 0, time.UTC) },
+		pressure:  func(string) (float64, error) { return 0, nil },
+		available: func() (uint64, error) { return free, nil },
+		logger:    slog.New(slog.NewTextHandler(&logged, nil)),
+	}
+	free = MemoryReserve + models
+	for range 3 {
+		if ok, reason := gate.Open(context.Background(), models); !ok {
+			t.Fatalf("Open() with room for the photos' models = closed (%s)", reason)
+		}
+		if ok, reason := gate.Continue(context.Background(), reader); ok || reason != "memory_for_models" {
+			t.Fatalf("Continue() without room for the reader = %v, %q", ok, reason)
+		}
+	}
+	free = MemoryReserve + reader
+	for range 2 {
+		for _, need := range []uint64{models, reader} {
+			if ok, reason := gate.Open(context.Background(), need); !ok {
+				t.Fatalf("Open() with room for both = closed (%s)", reason)
+			}
+		}
+	}
+	want := []string{
+		`msg="AI work waits for memory to load its models" need_mib=3072 available_mib=2560 load_mib=3072 reserve_mib=1024`,
+		`msg="AI work has memory to load its models" need_mib=3072 available_mib=4096 load_mib=3072`,
 	}
 	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
 	if len(lines) != len(want) {
