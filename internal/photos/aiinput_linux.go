@@ -1,6 +1,9 @@
 package photos
 
 import (
+	"bufio"
+	"errors"
+	"io"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -10,12 +13,22 @@ import (
 // it cannot be written, grown or shrunk, so the Worker sees exactly what was
 // rendered, and it disappears with its last descriptor.
 func memoryFile(content []byte) (*os.File, error) {
-	fd, err := unix.MemfdCreate("anas-ai-input", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	return sealedFile("anas-ai-input", func(w io.Writer) error {
+		_, err := w.Write(content)
+		return err
+	})
+}
+
+// sealedFile returns what write writes as a sealed in-memory file read from
+// its start, as memoryFile does, for content too large to hold twice.
+func sealedFile(name string, write func(io.Writer) error) (*os.File, error) {
+	fd, err := unix.MemfdCreate(name, unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), "anas-ai-input")
-	if _, err := file.Write(content); err != nil {
+	file := os.NewFile(uintptr(fd), name)
+	buffered := bufio.NewWriter(file)
+	if err := errors.Join(write(buffered), buffered.Flush()); err != nil {
 		_ = file.Close()
 		return nil, err
 	}

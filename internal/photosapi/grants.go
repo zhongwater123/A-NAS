@@ -196,7 +196,10 @@ func (g Grants) Analyze(ctx context.Context, grantID string, assetIDs []string, 
 }
 
 // Analysis returns a granted video's montage analysis so far and, once its
-// windows are done, their vectors: n × dimensions little-endian float32.
+// windows are done, their List and vectors: WindowCount × Dimensions
+// little-endian float32 in window order. They come in a sealed memfd beside
+// the answer (photos.GrantAnalysis), so a long video's answer stays within
+// the message limit.
 func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
 	response, file, err := g.Call(ctx, GrantRequest{Op: GrantAnalysis, GrantID: grantID, AssetID: assetID})
 	if err != nil {
@@ -206,27 +209,22 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 	if response.Analysis == nil {
 		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
 	}
-	var vectors []byte
-	if file != nil {
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			return photos.GrantAnalysis{}, nil, err
-		}
-		if vectors, err = io.ReadAll(io.LimitReader(file, maxAnalysisBytes+1)); err != nil {
-			return photos.GrantAnalysis{}, nil, err
-		}
-		if len(vectors) > maxAnalysisBytes || len(vectors) != len(response.Analysis.List)*4*windowDimensions {
-			return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %d bytes of vectors for %d windows", len(vectors), len(response.Analysis.List))
-		}
+	analysis := *response.Analysis
+	if analysis.Windows != photos.AnalysisDone {
+		return analysis, nil, nil
 	}
-	return *response.Analysis, vectors, nil
+	if file == nil {
+		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered no windows")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return photos.GrantAnalysis{}, nil, err
+	}
+	vectors, err := photos.ReadWindows(&analysis, file)
+	if err != nil {
+		return photos.GrantAnalysis{}, nil, fmt.Errorf("photo grant: %w", err)
+	}
+	return analysis, vectors, nil
 }
-
-// The window vectors of one video: 768 float32 each, and no more than a
-// 4 GiB video holds windows (6 hours, 10,800 windows, 33 MB).
-const (
-	windowDimensions = 768
-	maxAnalysisBytes = 10800 * 4 * windowDimensions
-)
 
 // Remove takes assets out of a grant.
 func (g Grants) Remove(ctx context.Context, grantID string, assetIDs []string) error {

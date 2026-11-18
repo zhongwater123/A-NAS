@@ -199,12 +199,8 @@ func (g *grantServer) handle(ctx context.Context, request photosapi.GrantRequest
 			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
 		case photosapi.GrantAnalysis:
 			var analysis photos.GrantAnalysis
-			var vectors []byte
-			if analysis, vectors, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
+			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
 				response.Analysis = &analysis
-				if len(vectors) > 0 {
-					opened, err = vectorFile(vectors)
-				}
 			}
 		default:
 			err = service.RemoveFromGrant(ctx, owner, request.GrantID, request.AssetIDs)
@@ -258,23 +254,4 @@ func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *
 		}
 		return response, file, nil
 	}}
-}
-
-// vectorFile holds a video's window vectors for the montage center: a sealed
-// memfd it reads, so a large answer does not pass through the JSON message.
-func vectorFile(vectors []byte) (*os.File, error) {
-	fd, err := unix.MemfdCreate("anas-window-vectors", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), "anas-window-vectors")
-	if _, err := file.Write(vectors); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
 }

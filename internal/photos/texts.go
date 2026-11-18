@@ -251,7 +251,7 @@ func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info Embed
 	r.markReaderLoaded()
 
 	readCtx, cancel := context.WithCancel(ctx)
-	stopWatching := watchGate(readCtx, gate, info.OCRMemoryBytes, cancel)
+	stopWatching := watchGate(readCtx, gate.Open, info.OCRMemoryBytes, cancel)
 	model, whole, err := m.reader.ReadText(readCtx, file, nil)
 	if err == nil && !ended(whole.Finish) {
 		err = errNoEnd
