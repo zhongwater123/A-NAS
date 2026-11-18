@@ -3,7 +3,9 @@ package ffmpegworker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // Output limits for buffered operations.
@@ -23,27 +27,45 @@ var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minu
 // Serve answers one request on conn and returns when it is done.
 func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	defer conn.Close()
-	var request Request
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	file, err := readFrame(conn, &request)
+	body, files, err := unixmsg.ReadBodyFiles(conn, maxFrame, maxFiles)
 	if err != nil {
 		return err
 	}
+	defer unixmsg.CloseFiles(files)
 	_ = conn.SetReadDeadline(time.Time{})
-	if file == nil {
+	// Every request names its operation and may ask for an acknowledgement;
+	// the editing operations decode the rest strictly.
+	var head struct {
+		Op  string `json:"op"`
+		Ack bool   `json:"ack"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		return fmt.Errorf("decode message: %w", err)
+	}
+	if len(files) == 0 {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: "no file descriptor"}, nil)
 	}
-	defer func() { _ = file.Close() }()
-	if request.Ack {
+	if head.Ack {
 		if err := writeFrame(conn, Response{Accepted: true}, nil); err != nil {
 			return err
 		}
 	}
-	// The descriptor shares its offset with the sender's, which an earlier
+	// A descriptor shares its offset with the sender's, which an earlier
 	// operation on the same file may have moved; fd: reads from the offset.
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return writeFrame(conn, Response{Code: CodeUnreadable, Message: "the file cannot seek"}, nil)
+	for _, file := range files {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return writeFrame(conn, Response{Code: CodeUnreadable, Message: "the file cannot seek"}, nil)
+		}
 	}
+	if isEditing(head.Op) {
+		return serveEditing(ctx, conn, tools, head.Op, body, files)
+	}
+	var request Request
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("decode message: %w", err)
+	}
+	file := files[0]
 	if err := request.Validate(); err != nil {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
 	}
@@ -72,7 +94,8 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	stderr.limit = 8 << 10
 	command.Stderr = &stderr
 	if request.Op == OpStream || request.Op == OpAudio {
-		return serveStream(ctx, conn, command, &stderr)
+		// Raw samples are for analysis, background work.
+		return serveStream(ctx, conn, command, &stderr, request.PCM)
 	}
 	// Buffered previews also stop decoding when the caller goes away.
 	go func() { _, _ = conn.Read(make([]byte, 1)); cancel() }()
@@ -145,12 +168,16 @@ func lastLine(message string) string {
 
 // serveStream answers as soon as FFmpeg produces output, then copies it to
 // the connection. A peer that hangs up ends FFmpeg.
-func serveStream(ctx context.Context, conn *net.UnixConn, command *exec.Cmd, stderr *limitedBuffer) error {
+func serveStream(ctx context.Context, conn *net.UnixConn, command *exec.Cmd, stderr *limitedBuffer, lower bool) error {
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	if err := command.Start(); err != nil {
+	start := command.Start
+	if lower {
+		start = func() error { return background(command) }
+	}
+	if err := start(); err != nil {
 		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
 	}
 	buffer := make([]byte, 64<<10)
