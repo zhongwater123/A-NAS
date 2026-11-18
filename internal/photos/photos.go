@@ -273,6 +273,8 @@ type Service struct {
 	mediaWake chan struct{}
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
+	// filmMu keeps two saves of one film from both importing it.
+	filmMu sync.Mutex
 	// compute is Options.Compute.
 	compute MontageCompute
 	// embedder encodes search queries, and detected holds the detector's best

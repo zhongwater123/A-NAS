@@ -206,3 +206,44 @@ func errorString(err error) string {
 	}
 	return err.Error()
 }
+
+func TestAFilmIsSavedOncePerVersionIntoTheOwnersLibrary(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := videoService(t, phoneVideo())
+	private, _ := libraries(t, s, namedAlice)
+	video := importPhoto(t, s, namedAlice, private.ID, "", "beach.mp4", mp4Bytes(1))
+	grant, err := s.RegisterGrant(ctx, granting(namedAlice), "project:1", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	film, err := s.SaveFilm(ctx, granting(namedAlice), grant.ID, "job:1/render:abc", "海边 v1.mp4", bytes.NewReader(mp4Bytes(7)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A save tried again after a cut finds the first.
+	again, err := s.SaveFilm(ctx, granting(namedAlice), grant.ID, "job:1/render:abc", "海边 v1.mp4", bytes.NewReader(mp4Bytes(8)))
+	if err != nil || again != film {
+		t.Fatalf("SaveFilm() again = %s, %v; want %s", again, err, film)
+	}
+	page, err := s.Timeline(ctx, namedAlice, private.ID, "", 10)
+	if err != nil || len(page.Assets) != 2 {
+		t.Fatalf("timeline = %d assets, %v; want the video and one film", len(page.Assets), err)
+	}
+	if looked, _ := s.LookupGrant(ctx, granting(namedAlice), grant.ID, []string{film}); looked[0].Status != photos.GrantAvailable {
+		t.Fatalf("the film in the grant = %+v", looked[0])
+	}
+	// Bob cannot save into Alice's grant.
+	if _, err := s.SaveFilm(ctx, granting(namedBob), grant.ID, "job:2", "x.mp4", bytes.NewReader(mp4Bytes(9))); err == nil {
+		t.Fatal("Bob saved a film into Alice's grant")
+	}
+	// The owner deletes the film: the next save of that version makes a new one.
+	if _, err := s.Trash(ctx, namedAlice, film); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Purge(ctx, namedAlice, film); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := s.SaveFilm(ctx, granting(namedAlice), grant.ID, "job:1/render:abc", "海边 v1.mp4", bytes.NewReader(mp4Bytes(7))); err != nil || saved == film {
+		t.Fatalf("saving a deleted film again = %s, %v", saved, err)
+	}
+}
