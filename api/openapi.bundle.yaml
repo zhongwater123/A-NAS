@@ -3688,6 +3688,21 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects:
+    get:
+      operationId: listMontageProjects
+      summary: The caller's montage projects (剪辑中心, ADR 0038), newest first. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404
+      responses:
+        '200':
+          description: The caller's projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProjectList'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules:
     get:
       operationId: listModules
@@ -10779,6 +10794,7 @@ components:
         - photos
         - shares
         - family
+        - montage
         - containers
         - ai
         - media
@@ -16066,6 +16082,28 @@ components:
           maxItems: 500
           items:
             type: string
+    MontageProject:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+    MontageProjectList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageProject'
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

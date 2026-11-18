@@ -1,0 +1,14 @@
+.mt-app {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+}
+
+.mt-projects {
+  align-self: start;
+  justify-self: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

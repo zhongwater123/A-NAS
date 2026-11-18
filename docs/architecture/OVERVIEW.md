@@ -23,6 +23,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
   │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
+  ├── /api/v1/montage 转发 ──► 剪辑服务（a-nas-montage，独占数据卷 montage 子卷；`ANAS_MONTAGE_ENABLED` 打开前不挂载；ADR 0038）
   ├── /api/v1/modules/<id> 转发 ──► 可移除模块（自己的脚本安装与移除；独占 module-<id> 子卷；如照片打分 a-nas-scoring；ADR 0037）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy

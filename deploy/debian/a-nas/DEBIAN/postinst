@@ -113,7 +113,8 @@ systemctl restart anas-site.service || true
 # smbd that waits for the SMB interface's address keeps trying without it,
 # which must not stop the installation halfway.
 systemctl start smbd.service || true
-systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
+  anas-montage.service
 systemctl try-restart 'anas-kiosk@*.service' || true
 # A running container agent keeps its program until the administrator restarts
 # it: stopping it cancels an app installation in progress, which the App

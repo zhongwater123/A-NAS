@@ -173,16 +173,17 @@ git diff deploy/upstream/packages.json
   - Docker、Caddy 与 `a-nas-docker-policy` 不降级：`a-nas-host` 只要求不低于固定的版本。旧包即使没有地址池保护，独立包仍在 Docker 启动前校验配置。
 - 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。
   ```bash
-  systemctl stop anas-api anas-photos anas-shares anas-family anas-host-agent
+  systemctl stop anas-api anas-photos anas-shares anas-family anas-montage anas-host-agent
   name=<时间>-<旧版本>
   ls /var/backups/a-nas /srv/a-nas/data/.a-nas-backups
   rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
-    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm}
+    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm} \
+    /srv/a-nas/data/montage/montage.db-{wal,shm}
   cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-  for store in photos shares family; do
+  for store in photos shares family montage; do
     [[ ! -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]] || cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   done
-  systemctl start anas-host-agent anas-photos anas-shares anas-family anas-api
+  systemctl start anas-host-agent anas-photos anas-shares anas-family anas-montage anas-api
   a-nas-check
   ```
   副本是升级那一刻的数据库，之后的改动会丢失。两处各保留最近两份；副本不含 `-shm`，它由 SQLite 从日志重建。

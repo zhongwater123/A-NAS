@@ -21,6 +21,7 @@ import { whenText } from "../assistant/taskTime";
 import { Companion } from "../companion/Companion";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
+import { montageAvailable } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -186,6 +187,18 @@ export function Desktop({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
+  // 剪辑中心 is read when the account signs in; its switch changes only with
+  // the device's configuration.
+  const [montage, setMontage] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void montageAvailable()
+      .then((available) => live && setMontage(available))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -201,13 +214,26 @@ export function Desktop({
       assistantReady,
       webSearchEnabled,
       scoring,
+      montage,
       open,
       intents,
       intentHandled,
       changeUser,
       logout: onLogout,
     }),
-    [session, isAdmin, assistantReady, webSearchEnabled, scoring, open, intents, intentHandled, changeUser, onLogout],
+    [
+      session,
+      isAdmin,
+      assistantReady,
+      webSearchEnabled,
+      scoring,
+      montage,
+      open,
+      intents,
+      intentHandled,
+      changeUser,
+      onLogout,
+    ],
   );
   const settingsState = useMemo<SettingsState>(
     () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),

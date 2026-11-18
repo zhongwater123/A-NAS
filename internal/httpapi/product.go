@@ -59,6 +59,9 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
+	// Montage serves /api/v1/montage, 剪辑中心, like Family; nil while its
+	// switch is off (ADR 0038).
+	Montage http.Handler
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
 	// its mounts and finds the caller behind the session token itself.

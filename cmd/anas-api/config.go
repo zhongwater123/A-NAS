@@ -86,6 +86,11 @@ type Config struct {
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
+	// MontageEnabled mounts /api/v1/montage, 剪辑中心 (ADR 0038). It stays off
+	// until the first film can be made end to end; while off the desktop
+	// shows no entry, and hiding the entry alone would not stop the API.
+	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
+	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
 	// ModuleSocketDir holds the API sockets of installed removable modules
 	// (ADR 0037).
 	ModuleSocketDir string `env:"ANAS_MODULE_SOCKET_DIR" envDefault:"/run/a-nas-modules"`
@@ -248,7 +253,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
 		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
@@ -455,6 +460,30 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	})
 	if len(problems) > 0 {
 		return shareServiceConfig{}, errors.Join(problems...)
+	}
+	return c, nil
+}
+
+// montageServiceConfig configures the montage service (ADR 0038), which runs
+// from this binary as its own process and identity.
+type montageServiceConfig struct {
+	Root          string `env:"ANAS_MONTAGE_ROOT" envDefault:"/srv/a-nas/data/montage"`
+	Socket        string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	SessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+}
+
+// loadMontageServiceConfig resolves and validates the montage service's
+// configuration, reporting every problem at once.
+func loadMontageServiceConfig(environment map[string]string) (montageServiceConfig, error) {
+	c, err := envconfig.Parse[montageServiceConfig](environment)
+	if err != nil {
+		return montageServiceConfig{}, err
+	}
+	problems := absolutePaths(map[string]*string{
+		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
+	})
+	if len(problems) > 0 {
+		return montageServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

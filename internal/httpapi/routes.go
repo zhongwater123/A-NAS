@@ -21,6 +21,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -110,6 +111,9 @@ func (h *productHandler) mounts() []apiroute.Route {
 	}
 	if h.Family != nil {
 		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+	}
+	if h.Montage != nil {
+		mount(montageapi.PathPrefix, apiroute.Session, withUser(withoutAssistantHeader(h.Montage)), montageapi.Endpoints())
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
@@ -239,6 +243,16 @@ func allowedDuringPasswordChange(r *http.Request) bool {
 // the token itself (photoservice.Authenticate).
 func serve(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
+}
+
+// withoutAssistantHeader drops montageapi.AssistantHeader from the browser's
+// request: only the Product Service may say that a request registered a
+// planning grant, and the forwarding proxy passes other headers on.
+func withoutAssistantHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del(montageapi.AssistantHeader)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withUser hands an API the signed-in user through attach.

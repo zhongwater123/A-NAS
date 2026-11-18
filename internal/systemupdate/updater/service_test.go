@@ -1041,3 +1041,20 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// Restoring the copies stops the montage service on its own, since a release
+// before it has no such unit, and brings its database back with the others
+// (ADR 0038).
+func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	if err := service.restoreDatabases(context.Background(), "20261118T000000Z-1"); err != nil {
+		t.Fatal(err)
+	}
+	restored := slices.ContainsFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage")
+	})
+	if !host.ran("systemctl stop anas-montage") || !restored || !host.ran("systemctl start anas-montage") {
+		t.Fatalf("calls = %v; want the montage service stopped, its database restored and the service started", host.calls)
+	}
+}
