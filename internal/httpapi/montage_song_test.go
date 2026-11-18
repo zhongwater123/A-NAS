@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // songMedia stands in for the media worker as the montage center uses it:
@@ -118,7 +119,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Files: fileService,
-		Music: library, Montage: recorded, Logger: logger,
+		Music: library, Montage: serviceproxy.Local(recorded), Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)

@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/montageservice"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
 
@@ -87,5 +88,6 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	analysis, stop := context.WithCancel(ctx)
 	analysed := make(chan struct{})
 	go func() { defer close(analysed); store.AnalyzeSongs(analysis) }()
-	return montageapi.New(store, logger), store.RemoveAccount, func() { stop(); <-analysed; _ = store.Close() }, nil
+	// The headers the service gets are those the socket would carry.
+	return serviceproxy.Local(montageapi.New(store, logger)), store.RemoveAccount, func() { stop(); <-analysed; _ = store.Close() }, nil
 }

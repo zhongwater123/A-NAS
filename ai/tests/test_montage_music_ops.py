@@ -131,8 +131,6 @@ class ProtocolTest(unittest.TestCase):
     """The montage center sends the loudness in a memfd, as every compute Worker array."""
 
     def setUp(self):
-        self.addCleanup(worker.OPS.pop, "music", None)
-        worker.OPS["music"] = music_ops.op_music
         self.path = os.path.join(tempfile.mkdtemp(), "compute.sock")
         listener = worker.listening_socket(self.path)
         self.addCleanup(listener.close)
