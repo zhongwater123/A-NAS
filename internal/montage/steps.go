@@ -353,7 +353,14 @@ func (s *Store) analyzeAssets(ctx context.Context, grantID string, ids []string,
 
 const WaitPhotos = "photos_unavailable"
 
-const NeedTooLong = "video_too_long"
+// NeedTooLong: a video is longer than the photo library analyses; trying
+// again fails again, so the member takes it out. NeedModel: the photo
+// library has no local model to describe the cards with; the member tries
+// again once an administrator installed it.
+const (
+	NeedTooLong = "video_too_long"
+	NeedModel   = "model_unavailable"
+)
 
 func jobGrantError(err error, ids []string) error {
 	switch photosapi.GrantErrorCode(err) {
@@ -463,7 +470,8 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	// The states first: reading the analysis itself carries every
 	// window's vector.
-	var pending, broken []string
+	var pending, broken, long []string
+	unavailable := false
 	for _, asset := range run.assets {
 		looked, ok := about[asset.assetID]
 		if ok && looked.Status == photos.GrantTrashed {
@@ -475,17 +483,25 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		states := []photos.AnalysisState{looked.Windows, looked.Cards, looked.Quality, looked.Descriptions}
 		switch {
 		case looked.Windows == photos.AnalysisFailed && photos.VideoTooLong(looked.Duration):
-			return "", &stepNeeds{reason: NeedTooLong, missing: []string{asset.assetID}, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
+			long = append(long, asset.assetID)
 		case slices.Contains(states, photos.AnalysisUnavailable):
-			return "", &stepNeeds{reason: NeedAnalysis, missing: []string{asset.assetID}, err: errors.New("素材分析所需的本地模型不可用")}
+			unavailable = true
 		case slices.Contains(states, photos.AnalysisFailed):
 			broken = append(broken, asset.assetID)
 		case slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }):
 			pending = append(pending, asset.assetID)
 		}
 	}
+	// What the member has to take out comes first, every such video at
+	// once; then what only an administrator can change.
+	if len(long) > 0 {
+		return "", &stepNeeds{reason: NeedTooLong, missing: long, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
+	}
 	if len(broken) > 0 {
 		return "", &stepNeeds{reason: NeedAnalysis, missing: broken}
+	}
+	if unavailable {
+		return "", &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
 	}
 	if len(pending) > 0 {
 		// Asking again changes nothing for the videos already queued.
@@ -518,13 +534,19 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			if !ok {
 				continue // a card the reader could not describe cannot be planned
 			}
+			seen, ok := beatTimes(answer, card.Times)
+			if !ok {
+				s.logger.WarnContext(ctx, "a card's description does not place its beats among the key frames",
+					"asset", asset.assetID, "card", card.Index)
+				continue
+			}
 			id := fmt.Sprintf("v%d-%d", n+1, card.Index)
-			frames := make([]string, len(card.Times))
-			for i := range card.Times {
+			frames := make([]string, len(seen))
+			for i := range seen {
 				frames[i] = fmt.Sprintf("%s/%d", id, i+1)
 			}
 			video.Cards = append(video.Cards, Card{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
-				End: float64(card.EndMs) / 1000, Times: card.Times, Frames: frames, Answer: answer})
+				End: float64(card.EndMs) / 1000, Times: seen, Frames: frames, Answer: answer})
 			if card.Quality != nil {
 				measured, err := json.Marshal(card.Quality)
 				if err != nil {
@@ -537,6 +559,33 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	run.analysis = result
 	return digestJSON(result), nil
+}
+
+// beatTimes are the instants a description's beats were seen at, one a beat:
+// its first key frame, which the beat's "frames" count from 1 among the
+// card's (photos.CardDescriber). The photo library describes a card with
+// more key frames than its reader holds from some of them, so a description
+// may have fewer beats than the card has key frames, and the nth beat is not
+// the nth key frame. The compute Worker's domain reads a card's times and
+// frames by the beat's number (ai/anas_montage/domain/fill.py). A
+// description that does not place every beat cannot be cut from.
+func beatTimes(description json.RawMessage, times []float64) ([]float64, bool) {
+	var answer struct {
+		Beats []struct {
+			Frames []int `json:"frames"`
+		} `json:"beats"`
+	}
+	if err := json.Unmarshal(description, &answer); err != nil || len(answer.Beats) == 0 {
+		return nil, false
+	}
+	seen := make([]float64, len(answer.Beats))
+	for n, beat := range answer.Beats {
+		if len(beat.Frames) == 0 || beat.Frames[0] < 1 || beat.Frames[0] > len(times) {
+			return nil, false
+		}
+		seen[n] = times[beat.Frames[0]-1]
+	}
+	return seen, true
 }
 
 func (s *Store) analyse(_ context.Context, run *jobRun) (any, error) { return run.analysis, nil }

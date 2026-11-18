@@ -41,14 +41,22 @@ type library struct {
 	lostSave int
 	retried  []string
 	removed  []string
+	// asked are the videos an analysis was asked for, other than again.
+	asked []string
+	// described, when set, changes a video's analysis before it is read.
+	described func(assetID string, analysis *photos.GrantAnalysis)
+	// saving, when set, runs when a film arrives, outside the lock.
+	saving func()
 	// registered, when set, runs after a registration, outside the lock.
 	registered func()
 }
 
+// A video lasts ten seconds unless seconds says otherwise.
 type video struct {
 	owner, object string
 	trashed       bool
 	takenAt       time.Time
+	seconds       float64
 }
 
 type grant struct {
@@ -149,7 +157,11 @@ func (l *library) Lookup(_ context.Context, grantID string, ids []string) ([]pho
 			if !ok {
 				state = photos.AnalysisDone
 			}
-			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: 10, TakenAt: &taken,
+			seconds := 10.0
+			if v.seconds > 0 {
+				seconds = v.seconds
+			}
+			out = append(out, photos.GrantedAsset{AssetID: id, Status: photos.GrantAvailable, ObjectID: v.object, Duration: seconds, TakenAt: &taken,
 				Width: 1920, Height: 1080, Windows: state, Cards: state, Quality: state, Descriptions: state})
 		}
 	}

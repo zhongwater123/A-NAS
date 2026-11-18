@@ -110,3 +110,37 @@ func TestJobGrantRequestsRespectPhotoBatchBound(t *testing.T) {
 		t.Fatal("inactive owner must wait for the photo library")
 	}
 }
+
+// everyCard is a compute Worker whose catalog keeps every card.
+type everyCard struct{ Compute }
+
+func (everyCard) Catalog(_ context.Context, request CatalogRequest) ([]string, error) {
+	ids := make([]string, len(request.Cards))
+	for i, card := range request.Cards {
+		ids[i] = card.ID
+	}
+	return ids, nil
+}
+
+// The fill sends the vector of every window beneath the catalog's cards in
+// one request, which the compute Worker bounds: a catalog over the bound
+// fails here with its reason, before anything is planned or read again.
+func TestACatalogWhoseWindowsOutgrowTheComputeWorkerFailsTheJob(t *testing.T) {
+	s := &Store{jobCompute: everyCard{}}
+	catalog := func(dimensions int) error {
+		run := &jobRun{analysis: analysisResult{Videos: []analysedVideo{{AssetID: "video", Dimensions: dimensions,
+			Windows: []photos.Window{{StartMs: 0, EndMs: 2000}, {Index: 1, StartMs: 2000, EndMs: 4000}, {Index: 2, StartMs: 4000, EndMs: 6000}},
+			Cards:   []Card{{ID: "card", Video: "video", Start: 0, End: 4}}}}}}
+		_, err := s.makeCatalog(t.Context(), run)
+		return err
+	}
+	// Two of the three windows lie beneath the card.
+	most := MaxComputeArrayBytes / 4 / 2
+	if err := catalog(most); err != nil {
+		t.Fatalf("a catalog that just fits = %v", err)
+	}
+	var bad *stepFailed
+	if err := catalog(most + 1); !errors.As(err, &bad) {
+		t.Fatalf("a catalog one value over the bound = %v", err)
+	}
+}

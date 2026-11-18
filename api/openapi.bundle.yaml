@@ -3948,7 +3948,7 @@ paths:
   /api/v1/montage/jobs/{jobId}/drop-assets:
     post:
       operationId: dropMontageJobAssets
-      summary: 'Take videos that are missing, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled'
+      summary: 'Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled'
       parameters:
         - $ref: '#/components/parameters/MontageJobID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4000,7 +4000,7 @@ paths:
   /api/v1/montage/jobs/{jobId}/retry:
     post:
       operationId: retryMontageJob
-      summary: Go on from the step the job stopped at, once there is room for the film or the song is fixed
+      summary: Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed
       parameters:
         - $ref: '#/components/parameters/MontageJobID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -16882,7 +16882,8 @@ components:
             - storage_full
             - photos_unavailable
             - video_too_long
-          description: Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md).
+            - model_unavailable
+          description: 'Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.'
         error:
           type: string
         steps:
@@ -16891,7 +16892,7 @@ components:
             $ref: '#/components/schemas/MontageJobStep'
         missingAssetIds:
           type: array
-          description: The videos missing, or whose analysis failed.
+          description: The videos missing, too long, or whose analysis failed.
           items:
             type: string
         version:

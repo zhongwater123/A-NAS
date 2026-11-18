@@ -2,6 +2,7 @@ package montage
 
 import (
 	"context"
+	"testing"
 	"time"
 )
 
@@ -33,3 +34,15 @@ func (s *Store) SetRoom(room bool) {
 
 // UseMusic makes jobs take their songs from music rather than the store.
 func (s *Store) UseMusic(music Music) { s.jobMusic = music }
+
+// NextDue is how long RunJobs would sleep with no job to claim.
+func (s *Store) NextDue(ctx context.Context) time.Duration { return s.nextDue(ctx) }
+
+// Exec changes the database as no request does, for the states only a crash
+// or an earlier release leaves behind.
+func (s *Store) Exec(t testing.TB, query string, args ...any) {
+	t.Helper()
+	if _, err := s.db.ExecContext(t.Context(), query, args...); err != nil {
+		t.Fatal(err)
+	}
+}

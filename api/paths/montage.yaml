@@ -194,7 +194,7 @@
 /api/v1/montage/jobs/{jobId}/drop-assets:
   post:
     operationId: dropMontageJobAssets
-    summary: "Take videos that are missing, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled"
+    summary: "Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -224,7 +224,7 @@
 /api/v1/montage/jobs/{jobId}/retry:
   post:
     operationId: retryMontageJob
-    summary: "Go on from the step the job stopped at, once there is room for the film or the song is fixed"
+    summary: "Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }

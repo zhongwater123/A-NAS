@@ -2264,7 +2264,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Take videos that are missing, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled */
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled */
         post: operations["dropMontageJobAssets"];
         delete?: never;
         options?: never;
@@ -2298,7 +2298,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Go on from the step the job stopped at, once there is room for the film or the song is fixed */
+        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
         post: operations["retryMontageJob"];
         delete?: never;
         options?: never;
@@ -8086,13 +8086,13 @@ export interface components {
             /** @description The step the job is at or stopped at. */
             step?: string;
             /**
-             * @description Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md).
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.
              * @enum {string}
              */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long";
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
-            /** @description The videos missing, or whose analysis failed. */
+            /** @description The videos missing, too long, or whose analysis failed. */
             missingAssetIds?: string[];
             version?: components["schemas"]["MontageVersion"];
             /** Format: date-time */

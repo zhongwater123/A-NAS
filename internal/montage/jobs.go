@@ -437,13 +437,14 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, er
 }
 
 // Retry goes on from the step a job stopped at, once the member has made
-// room or otherwise fixed what it needed.
+// room or otherwise fixed what it needed, or the local model it lacked is
+// installed.
 func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
 	}
-	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic}, job.WaitReason) {
+	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic, NeedModel}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {

@@ -2,6 +2,7 @@ package montage_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -31,12 +32,36 @@ func TestRestartAfterLostPhotoReplyReconcilesDespiteTrashedInput(t *testing.T) {
 	}
 }
 
+// Without the local model that describes the cards, the job needs the model
+// and not one video or another: analysing again or dropping a video does not
+// help, and the member goes on once the model is installed.
 func TestUnavailableAnalysisAsksMemberForLocalModel(t *testing.T) {
+	ctx := t.Context()
 	env := newJobEnv(t)
 	env.lib.set(func() { env.lib.states["asset:a1"] = photos.AnalysisUnavailable })
 	job := env.settle(t, env.generate(t, "model:unavailable").ID)
-	if job.State != montage.JobNeedsInput || job.WaitReason != montage.NeedAnalysis {
+	if job.State != montage.JobNeedsInput || job.WaitReason != montage.NeedModel || len(job.Missing) != 0 {
 		t.Fatalf("%+v", job)
+	}
+	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("RetryAnalysis() without the model = %v", err)
+	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("DropAssets() without the model = %v", err)
+	}
+	// Still not installed: the job stops again, it does not poll.
+	if _, err := env.store.Retry(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if again := env.settle(t, job.ID); again.State != montage.JobNeedsInput || again.WaitReason != montage.NeedModel {
+		t.Fatalf("%+v", again)
+	}
+	env.lib.set(func() { delete(env.lib.states, "asset:a1") })
+	if _, err := env.store.Retry(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if done := env.settle(t, job.ID); done.State != montage.JobDone {
+		t.Fatalf("%+v", done)
 	}
 }
 

@@ -121,11 +121,11 @@ schemas:
       step: { type: string, description: The step the job is at or stopped at. }
       waitReason:
         type: string
-        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full, photos_unavailable, video_too_long]
-        description: "Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md)."
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, storage_full, photos_unavailable, video_too_long, model_unavailable]
+        description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed."
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
-      missingAssetIds: { type: array, description: "The videos missing, or whose analysis failed.", items: { type: string } }
+      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed.", items: { type: string } }
       version: { $ref: "#/schemas/MontageVersion" }
       createdAt: { type: string, format: date-time }
       finishedAt: { type: string, format: date-time }
