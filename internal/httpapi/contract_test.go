@@ -117,6 +117,21 @@ func answerCode(recorder *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
+// refusedForCSRF reports a write that was refused because its CSRF token is
+// missing or wrong, and for no other reason.
+func refusedForCSRF(recorder *httptest.ResponseRecorder) bool {
+	return recorder.Code == http.StatusForbidden && answerCode(recorder) == "csrf_failed"
+}
+
+// refusedBySessionGuard reports a 403 that the session guard gave before the
+// operation was reached. It shares its status with "this caller may not do
+// this", so a test of a permission that reads the status alone also passes
+// when the request never got as far as the permission.
+func refusedBySessionGuard(recorder *httptest.ResponseRecorder) bool {
+	code := answerCode(recorder)
+	return recorder.Code == http.StatusForbidden && (code == "csrf_failed" || code == "password_change_required")
+}
+
 // guardAnswer reports whether the product's guard answered instead of the
 // operation.
 func guardAnswer(recorder *httptest.ResponseRecorder) bool {
