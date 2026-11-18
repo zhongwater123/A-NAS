@@ -6,6 +6,8 @@
   "code": "demucs 4.1.0 (https://github.com/facebookresearch/demucs), whose demucs.hf loads this bag: htdemucs.yaml lists the one model 955717e8",
   "file": "955717e8.safetensors",
   "sizeBytes": 84025440,
+  "memoryBytes": 2667577344,
+  "memoryNote": "The music analysis Worker's high-water mark once htdemucs has separated an 8-minute song, the runtime and allin1's folds loaded as well: 2,544 MiB (2026-11-18, docs/architecture/montage-music.md, 用时与内存). allin1's manifest gives the Worker's whole peak.",
   "sha256": "d9fa14133cfcc034a6758923bb3a8ca9f8dfd0b582134643bbf83f72c17576dd",
   "license": "Pending (docs/decisions/2026-11-17-montage-center-first-version.md, allin1 的商业版权): Demucs' code is MIT; htdemucs was trained on MusDB HQ and 800 more songs, and its weights state no licence of their own. Until it is settled they run only on the development machine and the Experimental NAS, and no release depends on them."
 }

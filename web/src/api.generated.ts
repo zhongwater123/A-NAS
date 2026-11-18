@@ -2332,7 +2332,7 @@ export interface paths {
         };
         /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
         get: operations["getMontageSong"];
-        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 15 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
         put: operations["putMontageSong"];
         post?: never;
         delete?: never;

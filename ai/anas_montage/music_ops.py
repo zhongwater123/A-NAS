@@ -38,7 +38,7 @@ MIN_BARS = 16
 EXCERPT = (30.0, 150.0)
 LONGEST_SLOT = 12.0
 # The longest song the montage center takes, with room for the analysis.
-LONGEST_SONG = 15 * 60 + 5
+LONGEST_SONG = 8 * 60 + 5
 LABELS = set(music.LEVELS)
 
 
