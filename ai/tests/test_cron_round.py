@@ -285,6 +285,34 @@ class CronRoundTests(unittest.TestCase):
         self.assertEqual([call for call, _ in world.calls], ["cron tick"])
         self.assertIsNone(world.gateway)
 
+    def planning(self):
+        """The waker's planning token in the round's directory, and what the round does about it."""
+        self.asked()
+        (Path(self.module.RUNS) / "montage-plan").write_text("0123456789abcdef" * 2)
+        did = []
+        planning = self.module.montage_round
+        planning.clean = lambda: did.append("clean")
+        planning.begin = lambda runs: did.append(("begin", runs)) or ("round:X", "job")
+        planning.finish = lambda planned: did.append(("finish", planned))
+        return did
+
+    def test_the_montage_centers_planning_is_claimed_once_the_rounds_own_gateway_is_ready(self):
+        world = self.round(live=[(1, 8)])
+        did = self.planning()
+        self.assertEqual(self.module.main(), 0)
+        self.assertEqual(did, ["clean", ("begin", self.module.RUNS), ("finish", ("round:X", "job"))])
+        self.assertEqual([call for call, _ in world.calls], ["gateway run --quiet", "cron tick", "gateway stop"])
+
+    def test_a_gateway_that_is_not_the_rounds_claims_no_planning(self):
+        """It does not reach the montage center's socket. With no claim there is no receipt, and the
+        waker gives the planning grant's round back instead of spending it on a round that planned nothing."""
+        world = self.round(live=[(1, 8)], foreign=True)
+        did = self.planning()
+        self.assertTrue(self.module.montage_round.wanted(self.module.RUNS))
+        self.assertEqual(self.module.main(), 0)
+        self.assertEqual(did, ["clean"])
+        self.assertEqual([call for call, _ in world.calls], ["cron tick"])
+
     def test_a_gateway_that_ends_before_it_is_ready_fails_the_round(self):
         world = self.round()
         world.exits_early = True

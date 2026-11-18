@@ -23,8 +23,10 @@ ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
 ReadOnlyPaths=/srv/a-nas/data/assistant
-# The montage service's planning markers and the File Broker's planning grants, read only.
-ReadOnlyPaths=-/run/a-nas-montage -/var/lib/a-nas/assistant-plans
+# The montage service's planning markers, read only, and the File Broker's planning grants in
+# the Host Agent's own state, which only root reads; a grant counts only as root's own file
+# there (cron-waker.py). A member's receipt of a claimed round is in their Hermes home, above.
+ReadOnlyPaths=-/run/a-nas-montage -/var/lib/a-nas-host/assistant/plans
 
 [Install]
 WantedBy=multi-user.target
