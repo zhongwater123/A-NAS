@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 )
 
@@ -21,6 +24,13 @@ import (
 // starts the member's cron unit for a round. Registering again replaces it.
 // ADR 0024 decision 10 keeps background services from driving a member's
 // assistant on their own: the grant is the member's, left while present.
+//
+// The grants are in the Host Agent's own state directory, which only root
+// enters (/var/lib/a-nas-host/assistant/plans), never under a service's: a
+// service that owns a directory above them could put grants of its own
+// making there, or a link that takes root's write elsewhere. The broker
+// writes only into a directory that is its own user's and nobody else's to
+// change, and the waker reads only such grants.
 
 // planGrantRounds is how many rounds of planning one grant allows.
 const planGrantRounds = 5
@@ -72,21 +82,31 @@ func (s *Server) writePlanGrant(username string) error {
 	if err := os.MkdirAll(s.config.AssistantPlans, 0o700); err != nil {
 		return err
 	}
+	if err := ownDirectory(s.config.AssistantPlans); err != nil {
+		return err
+	}
 	encoded, err := json.Marshal(planGrant{IssuedAt: time.Now().UTC().Format(time.RFC3339), Rounds: planGrantRounds})
 	if err != nil {
 		return err
 	}
-	partial, err := os.CreateTemp(s.config.AssistantPlans, "."+username+".*")
+	return atomicfile.Write(filepath.Join(s.config.AssistantPlans, username), encoded, 0o600)
+}
+
+// ownDirectory accepts path only as a directory itself, not a link to one,
+// that belongs to this process's user and that nobody else may write to.
+func ownDirectory(path string) error {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(partial.Name()) }()
-	if _, err := partial.Write(encoded); err != nil {
-		_ = partial.Close()
-		return err
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	switch {
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory", path)
+	case !ok || int(stat.Uid) != os.Geteuid():
+		return fmt.Errorf("%s is not the broker's own", path)
+	case info.Mode().Perm()&0o022 != 0:
+		return fmt.Errorf("%s can be written by others", path)
 	}
-	if err := errors.Join(partial.Chmod(0o600), partial.Sync(), partial.Close()); err != nil {
-		return err
-	}
-	return os.Rename(partial.Name(), filepath.Join(s.config.AssistantPlans, username))
+	return nil
 }
