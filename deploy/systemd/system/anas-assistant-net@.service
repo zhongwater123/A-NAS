@@ -12,6 +12,8 @@ StopWhenUnneeded=yes
 Type=simple
 User=%i
 Group=%i
+# The model gateway's socket admits the group a-nas-users only.
+SupplementaryGroups=a-nas-users
 # Inside the sandbox the model client reaches the model gateway as http://127.0.0.1:18001.
 ExecStart=/usr/bin/socat TCP-LISTEN:18001,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/run/anas-assistant-gw/model.sock
 ExecStartPost=/bin/bash /usr/lib/a-nas/assistant/wait-port.sh 18001

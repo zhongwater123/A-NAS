@@ -82,6 +82,6 @@ systemd 中，一个单元的停止作业还在排队或执行时，同一单元
 
 - 规格：[AI 助手](../specs/ai-assistant.md)
 - ADR：[0024 每位成员一个沙箱中的 Hermes](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
-- 运行手册：[在实验 NAS 上试用 AI 助手](../runbooks/try-ai-assistant-on-experimental-nas.md)
+- 运行手册：[在实验 NAS 上试用 AI 助手](../runbooks/enable-ai-assistant.md)
 - 调查：[助手定时任务的成员文件与停用隔离](2026-10-27-assistant-cron-waker-member-isolation.md)
 - 代码：[`assistant.go`](../../internal/hostops/linux/assistant.go)、[`keep.go`](../../internal/assistantapi/keep.go)、[`service.go`](../../internal/accounts/service.go)

@@ -31,7 +31,7 @@
 **家庭与 AI**
 
 - [家庭中心](docs/specs/family-center.md)：家人在宝宝频道里一起记录照片视频、录音、身高体重、疫苗与大事记。
-- [AI 助手 VNAS](docs/specs/ai-assistant.md)：每位成员一个沙箱中的 Hermes Agent，只读本人能读的位置，写入前由本人确认；以试用软件包提供，用云端模型。
+- [AI 助手 VNAS](docs/specs/ai-assistant.md)：每位成员一个沙箱中的 Hermes Agent，只读本人能读的位置，写入前由本人确认；随主软件包安装，管理员在“设置 → VNAS”中填写 DeepSeek 密钥后全家可用，用云端模型。
 - [虚拟伙伴](docs/specs/virtual-companion.md)：桌面上的“大肥鱼”，随 VNAS 的对话切换动作。
 - [网页搜索](docs/specs/web-search.md)：内置 SearXNG，在桌面上直接搜索互联网，管理员可以关闭。
 
@@ -77,7 +77,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](docs/adr/0034
 | `caddy`、`smbd` | — | 局域网 Web 入口（[ADR 0012](docs/adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）、启用时的互联网入口（[ADR 0032](docs/adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）与 SMB3 |
 | `anas-kiosk@tty1` | `a-nas-kiosk` | 直连屏幕上的 Cage + Chromium |
 
-AI 助手试用包中的单元（`anas-assistant@` 等，以成员本人的身份运行）与照片打分模块的 `anas-module-scoring` 不在主软件包里，分别随各自的软件包或安装脚本安装。
+照片打分模块的 `anas-module-scoring` 不在主软件包里，随它的安装脚本安装。
 
 ## 参与开发
 

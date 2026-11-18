@@ -23,9 +23,9 @@
 # Needs Docker and Go. Prints PASS/FAIL lines and exits non-zero on any
 # failure.
 #
-# The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
-# Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
-# adds its policy check and a real assistant against a scripted model.
+# The AI assistant (ai/assistant-spike/system-test.sh) runs on the content
+# packages' stand-in Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the runtime.tar.gz
+# ai/assistant/runtime.json pins adds its policy check and a real assistant against a scripted model.
 #
 # The content packages (scripts/build-content-packages.sh) are stand-ins:
 # local AI runs on stand-in models and runtime with the Worker's fake
