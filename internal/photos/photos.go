@@ -202,9 +202,13 @@ type Content struct {
 }
 
 type Options struct {
-	Media  MediaDecoder
-	Now    func() time.Time
-	Random io.Reader
+	Media MediaDecoder
+	// Compute is the montage compute Worker, which cuts the cards of the
+	// videos the montage center's grants ask for and measures their quality
+	// (ADR 0038); nil leaves that analysis waiting after the windows.
+	Compute MontageCompute
+	Now     func() time.Time
+	Random  io.Reader
 	// TrashRetention defaults to DefaultTrashRetention.
 	TrashRetention time.Duration
 	// MaxImportBytes defaults to DefaultMaxImportBytes.
@@ -269,6 +273,8 @@ type Service struct {
 	mediaWake chan struct{}
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
+	// compute is Options.Compute.
+	compute MontageCompute
 	// embedder encodes search queries, and detected holds the detector's best
 	// score per class.
 	embedder   Embedder
@@ -351,7 +357,7 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root, release: options.Release, media: options.Media,
+		db: db, root: opened, rootPath: root, release: options.Release, media: options.Media, compute: options.Compute,
 		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
 		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,

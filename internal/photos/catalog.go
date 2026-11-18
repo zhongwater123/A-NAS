@@ -533,6 +533,33 @@ DROP TABLE montage_objects;
 DELETE FROM jobs WHERE derivation LIKE 'montage-%';
 DELETE FROM vector_index_state WHERE name = 'windows';
 `},
+	// 19: the montage analysis's cards and their quality
+	// (montage-cards/v1, montage-quality/v1), cut and measured by the
+	// montage compute Worker from the windows; per content object, like the
+	// windows.
+	{Up: `
+CREATE TABLE video_cards (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    keyframes TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+
+CREATE TABLE video_card_quality (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_quality;
+DROP TABLE video_cards;
+DELETE FROM jobs WHERE derivation IN ('montage-cards/v1', 'montage-quality/v1');
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

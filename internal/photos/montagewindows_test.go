@@ -3,10 +3,13 @@ package photos_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,6 +29,7 @@ import (
 // the library would, by closing the gate.
 type framedVideo struct {
 	mu        sync.Mutex
+	requests  []ffmpegworker.FramesRequest
 	asked     int
 	stopAfter int
 	gate      *lockedGate
@@ -83,6 +87,28 @@ func frameJPEG(patterned bool) []byte {
 }
 
 func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegworker.FramesRequest, each func([]byte) error) (ffmpegworker.FramesResult, error) {
+	v.mu.Lock()
+	v.requests = append(v.requests, request)
+	v.mu.Unlock()
+	if request.Format == ffmpegworker.FormatGray {
+		count := len(request.Times)
+		if count == 0 {
+			count = int(math.Round((request.End - request.Start) * request.Rate))
+		}
+		for range count {
+			if err := each(make([]byte, request.Width*request.Height)); err != nil {
+				return ffmpegworker.FramesResult{}, err
+			}
+		}
+		return ffmpegworker.FramesResult{Times: request.Times}, nil
+	}
+	var result ffmpegworker.FramesResult
+	if request.Blur {
+		for range request.Times {
+			blur := 4.5
+			result.Blur = append(result.Blur, &blur)
+		}
+	}
 	for _, at := range request.Times {
 		v.mu.Lock()
 		v.asked++
@@ -97,7 +123,44 @@ func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegwork
 			return ffmpegworker.FramesResult{}, err
 		}
 	}
-	return ffmpegworker.FramesResult{Times: request.Times}, nil
+	result.Times = request.Times
+	return result, nil
+}
+
+// fakeCompute stands in for the montage compute Worker: two cards per video,
+// halves of its windows, and every card good.
+type fakeCompute struct {
+	mu        sync.Mutex
+	qualities int
+	moves     []int
+}
+
+func (c *fakeCompute) Cards(_ context.Context, windows []photos.CardWindow, _ []float32, _ int, _ []bool) ([]photos.ComputedCard, error) {
+	half := len(windows) / 2
+	card := func(from, to int) photos.ComputedCard {
+		start, end := windows[from].Start, windows[to-1].End
+		return photos.ComputedCard{Start: start, End: end, Times: []float64{start + 1, (start + end) / 2, end - 1}}
+	}
+	return []photos.ComputedCard{card(0, half), card(half, len(windows))}, nil
+}
+func (c *fakeCompute) ShakeMoves(_ context.Context, frames []byte, count int) ([][2]float64, error) {
+	if len(frames) != count*320*180 {
+		return nil, fmt.Errorf("%d bytes for %d shake frames", len(frames), count)
+	}
+	return make([][2]float64, count-1), nil
+}
+func (c *fakeCompute) Keyframe(context.Context, []byte) (float64, float64, error) {
+	return 0.1, 120, nil
+}
+func (c *fakeCompute) SharpPoints(context.Context, []byte, int, int) (float64, error) {
+	return 0, errors.New("light keyframes have no sharp points to count")
+}
+func (c *fakeCompute) Quality(_ context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.qualities++
+	c.moves = append(c.moves, len(measures.Moves))
+	return photos.CardQuality{Blur: measures.Blurs[0], Blocked: 0.1, Points: measures.Points, Reasons: []string{}}, nil
 }
 
 type montageFixture struct {
@@ -107,14 +170,15 @@ type montageFixture struct {
 	video    *framedVideo
 	embedder *fakeEmbedder
 	gate     *lockedGate
+	compute  *fakeCompute
 }
 
 func newMontageFixture(t *testing.T) montageFixture {
 	t.Helper()
 	gate := &lockedGate{open: true}
 	f := montageFixture{clock: newClock(), root: filepath.Join(t.TempDir(), "photos"), video: &framedVideo{gate: gate},
-		embedder: newFakeEmbedder(), gate: gate}
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.video, DisableCapacityReserve: true})
+		embedder: newFakeEmbedder(), gate: gate, compute: &fakeCompute{}}
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.video, Compute: f.compute, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +234,10 @@ func TestWindowVectorsAreMadeOnceForTheVideosGrantsAskFor(t *testing.T) {
 	if looked[0].Windows != photos.AnalysisQueued {
 		t.Fatalf("before the analysis: %+v", looked[0])
 	}
-	// 70 seconds: 35 windows, in two chunks.
-	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 {
-		t.Fatalf("rounds = %d, want a chunk each", rounds)
+	// 70 seconds: 35 windows in two chunks, then the cards, then each of
+	// the two cards' quality, and the job's end.
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 6 {
+		t.Fatalf("rounds = %d, want two chunks, the cards, two cards' quality and the end", rounds)
 	}
 	analysis, vectors, err := f.service.AnalysisOfGrant(ctx, granting(namedBob), grants[1].ID, video.ID)
 	if err != nil || analysis.Windows != photos.AnalysisDone || len(analysis.List) != 35 || len(vectors) != 35*4*4 {
@@ -257,7 +322,7 @@ func TestAnalysesNoGrantRefersToGoAfterAWeekAndANewModelRedoesOnlyTheRest(t *tes
 	// A new model comes with a release, which restarts the photo service:
 	// only the video a grant still refers to is redone.
 	_ = f.service.Close()
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.video, DisableCapacityReserve: true})
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.video, Compute: f.compute, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,6 +425,57 @@ func TestWindowVectorsReachTheirOwnCollectionAndGoWithTheirVideo(t *testing.T) {
 	sync()
 	if count, _ := points(); count != 0 {
 		t.Fatalf("points left of a purged video = %d", count)
+	}
+}
+
+func TestCardsAndTheirQualityFollowTheWindows(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	grant, err := f.service.RegisterGrant(ctx, granting(namedAlice), "project:1", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, granting(namedAlice), grant.ID, []string{video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	analysis, _, err := f.service.AnalysisOfGrant(ctx, granting(namedAlice), grant.ID, video.ID)
+	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone || len(analysis.CardList) != 2 {
+		t.Fatalf("analysis = cards %s, quality %s, %d cards, %v", analysis.Cards, analysis.Quality, len(analysis.CardList), err)
+	}
+	for _, card := range analysis.CardList {
+		if card.Quality == nil || card.Quality.Blur == nil || *card.Quality.Blur != 4.5 || len(card.Times) != 3 {
+			t.Fatalf("card = %+v", card)
+		}
+	}
+	looked, _ := f.service.LookupGrant(ctx, granting(namedAlice), grant.ID, []string{video.ID})
+	if looked[0].Cards != photos.AnalysisDone || looked[0].Quality != photos.AnalysisDone {
+		t.Fatalf("lookup = %+v", looked[0])
+	}
+	// Keyframes 512 wide with blurdetect; shake frames 320 x 180 ten a
+	// second over the 34-second card in two chunks that share a frame.
+	var keyframes, shakes int
+	for _, request := range f.video.requests {
+		switch {
+		case request.Format == ffmpegworker.FormatJPEG && request.Width == 512:
+			keyframes++
+			if !request.Blur || request.Quality != 3 {
+				t.Errorf("keyframe request = %+v", request)
+			}
+		case request.Format == ffmpegworker.FormatGray && request.Width == 320:
+			shakes++
+			if request.Height != 180 || request.Rate != 10 || request.End-request.Start > 30 {
+				t.Errorf("shake request = %+v", request)
+			}
+		}
+	}
+	if keyframes != 2 || shakes != 4 {
+		t.Fatalf("keyframe requests %d, shake requests %d; want one and two a card", keyframes, shakes)
+	}
+	if f.compute.moves[0] != 34*10-1 {
+		t.Fatalf("moves of the first card = %d, want one between each pair of its 340 frames", f.compute.moves[0])
 	}
 }
 

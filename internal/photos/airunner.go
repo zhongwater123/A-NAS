@@ -277,6 +277,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if worked, err := r.montageWindows(ctx, embedder, gate, info); worked || err != nil {
 		return worked, err
 	}
+	if worked, err := r.montageCards(ctx); worked || err != nil {
+		return worked, err
+	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries
 	// had theirs are routed, once.

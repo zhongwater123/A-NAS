@@ -390,6 +390,9 @@ type photoServiceConfig struct {
 	AssistantSocket string `env:"ANAS_PHOTOS_ASSISTANT_SOCKET"`
 	// Without the AI component the socket is absent and photos wait for it.
 	AISocket string `env:"ANAS_AI_SOCKET" envDefault:"/run/a-nas-ai/ai.sock"`
+	// ComputeSocket is the montage compute Worker, which cuts the cards of
+	// the videos the montage center asks about (ADR 0038).
+	ComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET" envDefault:"/run/a-nas-montage-compute/compute.sock"`
 	// VectorSocket reaches the photo service's own vector index (ADR 0028);
 	// the unit names it, and without it the index is off.
 	VectorSocket string `env:"ANAS_PHOTOS_VECTOR_SOCKET"`
@@ -410,7 +413,8 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 	problems := absolutePaths(map[string]*string{
 		"ANAS_PHOTOS_ROOT": &c.Root, "ANAS_PHOTOS_SOCKET": &c.Socket, "ANAS_PHOTO_SESSION_SOCKET": &c.SessionSocket,
 		"ANAS_PHOTOS_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_AI_SOCKET": &c.AISocket, "ANAS_PHOTOS_VECTOR_SOCKET": &c.VectorSocket,
-		"ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
+		"ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
+		"ANAS_FFMPEG_SOCKET":          &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
 	if c.QuietPeriod != "" {
 		if c.Quiet, err = time.ParseDuration(c.QuietPeriod); err != nil || c.Quiet <= 0 {

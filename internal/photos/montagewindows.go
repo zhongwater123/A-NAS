@@ -165,6 +165,11 @@ type GrantAnalysis struct {
 	Windows  AnalysisState `json:"windowsState"`
 	Identity string        `json:"windowsIdentity,omitempty"`
 	List     []Window      `json:"windows,omitempty"`
+	// Cards and Quality say where the cards and their quality stand;
+	// CardList holds the cards cut so far, with the quality measured.
+	Cards    AnalysisState  `json:"cardsState"`
+	Quality  AnalysisState  `json:"qualityState"`
+	CardList []CardAnalysis `json:"cards,omitempty"`
 }
 
 // AnalysisOfGrant returns the analysis of a granted video and, once its
@@ -179,6 +184,15 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 		return GrantAnalysis{}, nil, ErrNotFound
 	}
 	analysis := GrantAnalysis{ObjectID: looked[0].ObjectID}
+	if analysis.Cards, err = s.cardsState(ctx, analysis.ObjectID); err != nil {
+		return GrantAnalysis{}, nil, err
+	}
+	if analysis.Quality, err = s.qualityState(ctx, analysis.ObjectID); err != nil {
+		return GrantAnalysis{}, nil, err
+	}
+	if analysis.CardList, err = s.cardsOf(ctx, analysis.ObjectID); err != nil {
+		return GrantAnalysis{}, nil, err
+	}
 	if analysis.Windows, err = s.windowsState(ctx, s.db, analysis.ObjectID); err != nil || analysis.Windows != AnalysisDone {
 		return analysis, nil, err
 	}
@@ -203,8 +217,9 @@ func (s *Service) AnalysisOfGrant(ctx context.Context, owner Principal, grantID,
 func (s *Service) montageWorkWaiting(ctx context.Context) (bool, error) {
 	now := formatTime(s.now())
 	var due bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation = ?
-		AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`, windowsDerivation, now, now).Scan(&due)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE derivation IN (?, ?, ?)
+		AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
+		windowsDerivation, cardsDerivation, qualityDerivation, now, now).Scan(&due)
 	return due, err
 }
 
@@ -435,7 +450,14 @@ func (s *Service) completeWindows(ctx context.Context, job claimedJob, identity 
 		if _, err := tx.ExecContext(ctx, "DELETE FROM video_windows WHERE object_id = ? AND (idx >= ? OR identity <> ?)", job.objectID, count, identity); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
+		if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
+			return err
+		}
+		// The cards follow the windows: new windows, new cards.
+		now := formatTime(s.now())
+		_, err := tx.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at) VALUES(?, ?, 'pending', ?, ?)
+			ON CONFLICT(object_id, derivation) DO UPDATE SET state = 'pending', attempts = 0, lease_until = NULL, not_before = excluded.not_before, error_class = ''`,
+			job.objectID, cardsDerivation, now, now)
 		return err
 	})
 }
@@ -474,6 +496,8 @@ func (s *Service) PruneMontageAnalysis(ctx context.Context) (int, error) {
 		}
 		cutoff := sqlitedb.FormatTime(now.Add(-montageRetention))
 		for _, statement := range []string{
+			"DELETE FROM video_card_quality WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
+			"DELETE FROM video_cards WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM video_windows WHERE object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 			"DELETE FROM jobs WHERE derivation LIKE 'montage-%' AND object_id IN (SELECT object_id FROM montage_objects WHERE unreferenced_since <= ?)",
 		} {
