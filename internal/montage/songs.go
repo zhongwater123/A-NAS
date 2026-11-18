@@ -35,7 +35,7 @@ import (
 const (
 	MaxSongBytes   = 100 << 20
 	MinSongSeconds = 30.0
-	MaxSongSeconds = 15 * 60.0
+	MaxSongSeconds = 8 * 60.0
 	// SongTarget is how long the film aims to be, as in the eighth version
 	// (domain.options.Case.target); the excerpt follows the music from it.
 	SongTarget = 90.0
@@ -56,7 +56,7 @@ var (
 	ErrSongTooLarge = errors.New("the song is larger than 100 MiB")
 	// ErrSongLength: the song is shorter than MinSongSeconds or longer than
 	// MaxSongSeconds (422).
-	ErrSongLength = errors.New("the song is shorter than 30 seconds or longer than 15 minutes")
+	ErrSongLength = errors.New("the song is shorter than 30 seconds or longer than 8 minutes")
 	// ErrNotAudio: FFmpeg finds no audio in the file (422).
 	ErrNotAudio = errors.New("the file is not audio")
 	// ErrNoSong: the project has no song yet (404).

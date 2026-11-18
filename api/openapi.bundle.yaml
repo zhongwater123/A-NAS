@@ -3796,7 +3796,7 @@ paths:
                 songStart:
                   type: number
                   minimum: 0
-                  maximum: 900
+                  maximum: 480
                   description: 'Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music''s end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing.'
       responses:
         '200':
@@ -3870,7 +3870,7 @@ paths:
   /api/v1/montage/projects/{projectId}/song:
     put:
       operationId: putMontageSong
-      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 15 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
+      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
       parameters:
         - $ref: '#/components/parameters/MontageProjectID'
         - $ref: '#/components/parameters/CSRFToken'

@@ -47,7 +47,7 @@ func TestCopySongAnswersWhatTheLibraryKnowsWithoutCopying(t *testing.T) {
 		"another member's track": {music.Track{ID: "t"}, "user:bob", http.StatusNotFound, "not_found"},
 		"larger than 100 MiB":    {music.Track{ID: "t", SizeBytes: montage.MaxSongBytes + 1}, "user:alice", http.StatusRequestEntityTooLarge, "song_too_large"},
 		"shorter than 30 s":      {music.Track{ID: "t", DurationMs: 29_000}, "user:alice", http.StatusUnprocessableEntity, "song_length"},
-		"longer than 15 min":     {music.Track{ID: "t", DurationMs: 900_001}, "user:alice", http.StatusUnprocessableEntity, "song_length"},
+		"longer than 8 min":      {music.Track{ID: "t", DurationMs: 480_001}, "user:alice", http.StatusUnprocessableEntity, "song_length"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			reached := false

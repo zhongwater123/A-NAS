@@ -43,10 +43,11 @@ RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
 # Background work under anas.slice, which gives way to everything else on the
-# device. The memory a 15-minute song needs at most, measured with allin1 on
-# the development machine (docs/architecture/montage-music.md, 内存); a song
-# that needs more ends this Worker, not the device's other services.
+# device. An 8-minute song, the longest the montage center takes (the user,
+# 2026-11-18), peaked at 4,593 MiB in a Debian 13 runtime like the NAS's; the
+# limit leaves a fifth more (docs/architecture/montage-music.md, 用时与内存).
+# A song that needs more ends this Worker, not the device's other services.
 Slice=anas.slice
-MemoryMax=4G
+MemoryMax=5632M
 MemorySwapMax=0
 OOMScoreAdjust=500

@@ -246,7 +246,7 @@ func TestASongThatIsTooLargeOrNotAudioOrTooLongIsRefused(t *testing.T) {
 		"not audio":           {[]byte("picture"), montage.ErrNotAudio},
 		"empty":               {nil, montage.ErrNotAudio},
 		"shorter than 30 s":   {songBytes(29, "short"), montage.ErrSongLength},
-		"longer than 15 min":  {songBytes(901, "long"), montage.ErrSongLength},
+		"longer than 8 min":   {songBytes(481, "long"), montage.ErrSongLength},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := f.put(t, "user:alice", f.project, c.song); !errors.Is(err, c.want) {

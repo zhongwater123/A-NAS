@@ -78,7 +78,7 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 			return
 		}
 		if seconds := float64(track.DurationMs) / 1000; track.DurationMs > 0 && (seconds < montage.MinSongSeconds || seconds > montage.MaxSongSeconds) {
-			httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 15 minutes")
+			httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 8 minutes")
 			return
 		}
 		source := montage.SongSource{TrackID: track.ID, Title: track.Title}
