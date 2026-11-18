@@ -12,6 +12,8 @@
 
 # The Python of Debian 13, which the runtimes are built for.
 TARGET_PYTHON=3.13
+# shellcheck source=target.sh
+. "$(dirname "${BASH_SOURCE[0]}")/target.sh"
 
 # Each model role is ROLE:EXTENSION:MANIFEST, the manifest under
 # deploy/models. The AI Worker's unit finds the role's file as
@@ -56,19 +58,31 @@ model_link_file() { jq -r '(.parts // [])[0].file // .file' "$1"; }
 
 # ai_runtime_id REPO: the AI Worker's runtime, named by its lock and Python.
 ai_runtime_id() {
-  { cat "$1/ai/requirements.txt"; printf 'python=%s\n' "$TARGET_PYTHON"; } | sha256sum | cut -c1-16
+  local lock
+  lock=$(target_file "$1" ai/requirements.txt) || return 2
+  { cat "$lock"
+    if [[ "$(target_arch)" == arm64 ]]; then printf 'platform=linux/arm64\n'; fi
+    printf 'python=%s\n' "$TARGET_PYTHON"; } | sha256sum | cut -c1-16
 }
 
 # search_runtime_id REPO: web search's runtime, named by its lock, Python and
 # the SearXNG archive it is built from.
 search_runtime_id() {
-  { cat "$1/deploy/search/requirements.txt"
+  local lock
+  lock=$(target_file "$1" deploy/search/requirements.txt) || return 2
+  { cat "$lock"
+    if [[ "$(target_arch)" == arm64 ]]; then printf 'platform=linux/arm64\n'; fi
     printf 'python=%s\nsearxng=%s\n' "$TARGET_PYTHON" "$(pin_field "$1/deploy/search/searxng.json" sha256)"; } |
     sha256sum | cut -c1-16
 }
 
 # pinned_package REPO KIND MANIFEST: the package of Qdrant or llama.cpp.
-pinned_package() { echo "a-nas-$2-$(pin_field "$1/$3" sha256 | cut -c1-12)"; }
+pinned_package() {
+  local manifest sha
+  manifest=$(target_file "$1" "$3") || return 2
+  sha=$(pin_field "$manifest" sha256) || return 2
+  echo "a-nas-$2-${sha:0:12}"
+}
 qdrant_package() { pinned_package "$1" qdrant deploy/qdrant/qdrant.json; }
 llama_package() { pinned_package "$1" llama deploy/llama/llama.json; }
 

@@ -42,6 +42,7 @@ content=$(cd "$2" && pwd)
 repo=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/content.sh
 . "$repo/scripts/lib/content.sh"
+arch=$(target_arch)
 
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
@@ -127,7 +128,7 @@ done
 # release links it from. Its scripts start with this path.
 runtime() {
   local name=$1 kind=$2 id=$3 stand_in_script=$4 target
-  have "$name" amd64 && return
+  have "$name" "$arch" && return
   target=$work/$name/opt/a-nas/$kind/$id
   install -d "$target"
   if "$stand_in"; then
@@ -139,8 +140,12 @@ runtime() {
     local tarball=$content/$kind/$id.tar.gz
     [[ -f "$tarball" ]] || { echo "missing $tarball: build it with scripts/build-${kind%-runtimes}-runtime.sh" >&2; exit 2; }
     tar -C "$target" --no-same-owner -xzf "$tarball"
+    if [[ "$arch" == arm64 ]]; then
+      jq -e '.os == "linux" and .architecture == "arm64" and .python == "3.13"' "$target/share/target.json" >/dev/null
+    fi
+    while IFS= read -r -d '' library; do require_target_elf "$library"; done < <(find "$target" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
   fi
-  package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)" \
+  package "$name" "$arch" "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)" \
     "the Python runtime of A-NAS's ${kind%-runtimes}
  A virtual environment for Debian 13's Python $TARGET_PYTHON in
  /opt/a-nas/$kind/$id, built from the lock its ID names.$("$stand_in" && printf '\n .\n A stand-in around Debian'"'"'s Python for the system test.')" \
@@ -151,26 +156,27 @@ runtime "a-nas-search-runtime-$(search_runtime_id "$repo")" search-runtimes "$(s
   "$repo/scripts/system-test-search.py"
 
 # Qdrant (ADR 0028): its binary alone, out of the official tarball.
-pin=$repo/deploy/qdrant/qdrant.json
+pin=$(target_file "$repo" deploy/qdrant/qdrant.json)
 name=$(qdrant_package "$repo")
-if ! have "$name" amd64; then
+if ! have "$name" "$arch"; then
   sha=$(pin_field "$pin" sha256)
   tarball=$content/qdrant/$sha/$(pin_field "$pin" file)
   pinned "$tarball" "$pin" || { echo "missing or not as pinned: $tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
   install -d "$work/$name/opt/a-nas/qdrant/$sha" "$work/unpacked"
   tar -C "$work/unpacked" --no-same-owner -xzf "$tarball" "$(pin_field "$pin" binary)"
   install -m 0755 "$work/unpacked/$(pin_field "$pin" binary)" "$work/$name/opt/a-nas/qdrant/$sha/qdrant"
+  require_target_elf "$work/$name/opt/a-nas/qdrant/$sha/qdrant"
   rm -rf -- "$work/unpacked"
-  package "$name" amd64 '' "Qdrant $(pin_field "$pin" version) for A-NAS's vector index
+  package "$name" "$arch" '' "Qdrant $(pin_field "$pin" version) for A-NAS's vector index
  The statically linked server deploy/qdrant/qdrant.json pins, in
  /opt/a-nas/qdrant/$sha." "Source: $(pin_field "$pin" source)
 License: $(pin_field "$pin" license)"
 fi
 
 # llama.cpp: llama-server with its libraries and licence, as the pin names.
-pin=$repo/deploy/llama/llama.json
+pin=$(target_file "$repo" deploy/llama/llama.json)
 name=$(llama_package "$repo")
-if ! have "$name" amd64; then
+if ! have "$name" "$arch"; then
   sha=$(pin_field "$pin" sha256)
   tarball=$content/llama/$sha/$(pin_field "$pin" file)
   pinned "$tarball" "$pin" || { echo "missing or not as pinned: $tarball: run scripts/fetch-llama.sh" >&2; exit 2; }
@@ -181,7 +187,8 @@ if ! have "$name" amd64; then
   tar -C "$target" --no-same-owner --strip-components=1 -xzf "$tarball" --wildcards "${members[@]/#/$directory/}"
   chmod -R u=rwX,go=rX "$target"
   chmod 0755 "$target/$(pin_field "$pin" binary)"
-  package "$name" amd64 'libc6, libgcc-s1, libstdc++6, libgomp1, libssl3t64' "llama.cpp $(pin_field "$pin" version) for A-NAS's text reader
+  require_target_elf "$target/$(pin_field "$pin" binary)"
+  package "$name" "$arch" 'libc6, libgcc-s1, libstdc++6, libgomp1, libssl3t64, zlib1g, libzstd1' "llama.cpp $(pin_field "$pin" version) for A-NAS's text reader
  llama-server with its libraries, as deploy/llama/llama.json pins them,
  in /opt/a-nas/llama/$sha." "Source: $(pin_field "$pin" source)
 License: $(pin_field "$pin" license)"
@@ -192,9 +199,9 @@ fi
 # time: each provides, conflicts with and replaces a-nas-assistant-runtime.
 # Its prerm stops what runs on it before apt replaces it; the trial's postinst
 # starts them again (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm).
-pin=$repo/ai/assistant-spike/runtime.json
+pin=$(target_file "$repo" ai/assistant-spike/runtime.json)
 name=$(assistant_runtime_package "$repo")
-if ! "$stand_in" && ! have "$name" amd64; then
+if ! "$stand_in" && ! have "$name" "$arch"; then
   sha=$(pin_field "$pin" sha256)
   tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
   if [[ ! -e "$tarball" ]]; then
@@ -206,7 +213,13 @@ if ! "$stand_in" && ! have "$name" amd64; then
   else
     install -d "$work/$name/opt/a-nas/assistant-runtimes"
     tar -C "$work/$name/opt/a-nas/assistant-runtimes" --no-same-owner -xzf "$tarball"
-    package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
+    if [[ "$arch" == arm64 ]]; then
+      target=$work/$name/opt/a-nas/assistant-runtimes/spike
+      jq -e '.os == "linux" and .architecture == "arm64"' "$target/share/target.json" >/dev/null
+      require_target_elf "$target/python/bin/python3.14"
+      while IFS= read -r -d '' library; do require_target_elf "$library"; done < <(find "$target/python" "$target/venv" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
+    fi
+    package "$name" "$arch" "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
 Provides: a-nas-assistant-runtime
 Conflicts: a-nas-assistant-runtime
 Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant trial

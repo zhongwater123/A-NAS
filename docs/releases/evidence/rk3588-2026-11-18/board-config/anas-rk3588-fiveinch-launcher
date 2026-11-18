@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+test "$(cat /sys/block/mmcblk0/device/cid)" = BOARD_EMMC_CID_REDACTED
+/usr/bin/wlr-randr --output DSI-2 --off --output DSI-1 --on
+exec /usr/lib/a-nas/kiosk-launcher

@@ -1,0 +1,77 @@
+#!/bin/sh
+set -eu
+test "$(id -u)" = 0
+matches=0
+for block in /sys/class/block/mmcblk[0-9]*; do
+    case "${block##*/}" in *boot*|*p*) continue;; esac
+    test -r "$block/device/cid" || continue
+    if test "$(cat "$block/device/cid")" = BOARD_EMMC_CID_REDACTED; then
+        matches=$((matches + 1))
+    fi
+done
+test "$matches" = 1
+test -x /usr/bin/adbd
+if pgrep -x adbd >/dev/null; then echo 'Another adbd is already running' >&2; exit 1; fi
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+for existing in /sys/kernel/config/usb_gadget/*/UDC; do
+    test ! -e "$existing" || test -z "$(cat "$existing")"
+done
+gadget=/sys/kernel/config/usb_gadget/anas-debug
+if test -e "$gadget"; then
+    test "$(cat "$gadget/idVendor")" = 0x2207
+    test "$(cat "$gadget/idProduct")" = 0x0006
+    test "$(cat "$gadget/strings/0x409/serialnumber")" = BOARD_ADB_SERIAL_REDACTED
+    test "$(readlink -f "$gadget/configs/c.1/ffs.adb")" = "$gadget/functions/ffs.adb"
+else
+    mkdir "$gadget"
+    printf '0x2207\n' > "$gadget/idVendor"
+    printf '0x0006\n' > "$gadget/idProduct"
+    printf '0x0310\n' > "$gadget/bcdDevice"
+    printf '0x0200\n' > "$gadget/bcdUSB"
+    mkdir -p "$gadget/strings/0x409" "$gadget/configs/c.1/strings/0x409"
+    printf 'BOARD_ADB_SERIAL_REDACTED\n' > "$gadget/strings/0x409/serialnumber"
+    printf 'ATK\n' > "$gadget/strings/0x409/manufacturer"
+    printf 'ATK-DLRK3588\n' > "$gadget/strings/0x409/product"
+    printf 'adb\n' > "$gadget/configs/c.1/strings/0x409/configuration"
+    printf '500\n' > "$gadget/configs/c.1/MaxPower"
+    mkdir "$gadget/functions/ffs.adb"
+    ln -s "$gadget/functions/ffs.adb" "$gadget/configs/c.1/ffs.adb"
+fi
+mkdir -p /dev/usb-ffs/adb
+if mountpoint -q /dev/usb-ffs/adb; then
+    test "$(findmnt --raw -n -o FSTYPE /dev/usb-ffs/adb)" = functionfs
+    test "$(findmnt --raw -n -o SOURCE /dev/usb-ffs/adb)" = adb
+else
+    mount -t functionfs -o uid=2000,gid=2000 adb /dev/usb-ffs/adb
+fi
+controller=fc000000.usb
+attempt=0
+while test ! -e "/sys/class/udc/$controller"; do
+    attempt=$((attempt + 1)); test "$attempt" -lt 100; sleep 0.1
+done
+export ADBD_SHELL=/bin/bash ADB_TCP_PORT=0
+env 'service.adb.tcp.port=0' 'persist.adb.tcp.port=0' /usr/bin/adbd &
+daemon=$!
+printf '%s\n' "$daemon" > /run/anas-rk3588-adbd.pid
+trap 'kill "$daemon" 2>/dev/null || :; wait "$daemon" 2>/dev/null || :' EXIT
+attempt=0
+while :; do
+    kill -0 "$daemon"
+    if { printf '%s\n' "$controller" > "$gadget/UDC"; } 2>/dev/null; then break; fi
+    attempt=$((attempt + 1)); test "$attempt" -lt 100; sleep 0.05
+done
+test "$(cat "$gadget/UDC")" = "$controller"
+printf 'USB ADB bound to %s; pid %s\n' "$controller" "$daemon"
+while kill -0 "$daemon" 2>/dev/null; do
+    bound=$(cat "$gadget/UDC")
+    if test -z "$bound"; then
+        if { printf '%s\n' "$controller" > "$gadget/UDC"; } 2>/dev/null; then
+            printf 'USB ADB rebound to %s\n' "$controller"
+        fi
+    else
+        test "$bound" = "$controller"
+    fi
+    sleep 0.2
+done
+wait "$daemon"
+exit 1

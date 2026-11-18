@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [RK3588 部署迁移可行性（2026-11）](rk3588-deployment-feasibility-2026-11.md)
 - [本地照片 AI 模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
 - [相册 AI 标签校准与中文检索评估](photo-ai-label-calibration.md)（完成；2026-10-10 起按 AI 聚合从严重新校准，2026-10-12 加入 COCO train 子集）
 - [相册物体检测与混合检索可行性](photo-ai-object-detection.md)（完成；D-FINE Objects365，[实施方案](../architecture/photo-objects.md)已确认）

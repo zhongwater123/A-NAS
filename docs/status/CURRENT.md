@@ -23,6 +23,7 @@
 
 ## 阻塞与外部条件
 
+- [ARM 实机部署里程碑](../releases/rk3588-arm64-milestone-2026-11-18.md)：RK3588 小屏版已自启；待触控与联网验收。
 - Samba 凭据在本人于“设置 → 我的账号”改密后重建：2026-11-04 核对（`pdbedit -L`），16 个账号只差 `admin`。
 - 办公网段（Wi-Fi 与有线 10.24.x）到 NAS 的 TCP 445 不通、80 正常，拦截在公司网络或电脑的安全策略：SMB 从 NAS 所在的 172.18.45.0/24 测试，或请 IT 放行。
 - 互联网访问（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）：等 IT 把公网 IP 的 TCP 443 与 80 映射到机房的边缘服务器 `172.25.4.8` 并确认域名备案，等用户提供域名并添加 A 记录。边缘服务器 2026-11-05 已准备好隧道与防火墙，HAProxy 关闭。

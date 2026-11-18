@@ -5,12 +5,12 @@ Runtime, NumPy and Pillow are installed (docs/development/LOCAL_ENVIRONMENT.md);
 the manifest comes from deploy/models.
 """
 
+import concurrent.futures
 import gc
 import io
 import os
 import socket
 import tempfile
-import threading
 import time
 import unittest
 import weakref
@@ -94,12 +94,13 @@ class RealDetectorTest(unittest.TestCase):
                 session = weakref.ref(detector._session)  # pylint: disable=protected-access
                 image.seek(0)
                 ours, theirs = socket.socketpair()
-                with ours, theirs:
-                    thread = threading.Thread(target=worker.detected, args=(detector, image.fileno(), theirs))
-                    thread.start()
+                with ours, theirs, concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    # Observe worker exceptions in the test thread, too: an
+                    # outdated call must fail rather than silently pass join().
+                    detection = executor.submit(worker.detected, detector, image.fileno(), theirs, "boxes")
                     time.sleep(0.1)
                     ours.close()
-                    thread.join()
+                    detection.result(timeout=30)
                 detector.release()
                 self.assertIsNone(session())
 

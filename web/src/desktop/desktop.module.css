@@ -2025,7 +2025,7 @@ button.net-rates {
     max-width: calc(100vw - 112px);
   }
 }
-@media (max-width: 620px) {
+@media (max-width: 620px), (max-width: 900px) and (max-height: 600px) {
   .desktop-shell {
     min-width: 0;
     min-height: 0;
@@ -2114,6 +2114,7 @@ button.net-rates {
     height: auto !important;
     min-width: 0;
     min-height: 0;
+    max-width: none;
     border-radius: 14px;
   }
   .task-shelf {

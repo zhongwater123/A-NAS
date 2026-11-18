@@ -45,11 +45,15 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
+# shellcheck source=lib/content.sh
+. "$repo/scripts/lib/content.sh"
+arch=$(target_arch)
+for binary in anas-api anas-host-agent anas-container-agent; do
+  require_target_elf "$build/$binary"
+done
 for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy; do
   rm -f -- "$out/${package}"_*.deb
 done
-# shellcheck source=lib/content.sh
-. "$repo/scripts/lib/content.sh"
 
 # The same commit builds the same packages.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
@@ -57,10 +61,10 @@ export SOURCE_DATE_EPOCH
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-upstream=$(jq -r '.packages | map("\(.name) (>= \(.version))") | join(", ")' "$repo/deploy/upstream/packages.json")
+upstream=$(jq -r '.packages | map("\(.name) (>= \(.version))") | join(", ")' "$(target_file "$repo" deploy/upstream/packages.json)")
 # control PACKAGE CONTENT: the package's control file at this version.
 control() {
-  sed -e "s/@VERSION@/$version/g" -e "s/@CONTENT@/$2/g" -e "s/@UPSTREAM@/$upstream/g" "$repo/deploy/debian/$1/DEBIAN/control"
+  sed -e "s/@VERSION@/$version/g" -e "s/@ARCH@/$arch/g" -e "s/@CONTENT@/$2/g" -e "s/@UPSTREAM@/$upstream/g" "$repo/deploy/debian/$1/DEBIAN/control"
 }
 
 # build ROOT: the package in ROOT, named as Debian names it, printed.
@@ -124,16 +128,17 @@ for role in "${ai_roles[@]}"; do
   ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)/$(model_link_file "$manifest")" "$lib/ai/$name.${rest%%:*}"
 done
 ln -s "/opt/a-nas/ai-runtimes/$(ai_runtime_id "$repo")" "$lib/ai/runtime"
-install -m 0644 "$repo/deploy/llama/llama.json" "$lib/ai/"
-ln -s "/opt/a-nas/llama/$(pin_field "$repo/deploy/llama/llama.json" sha256)" "$lib/ai/llama"
+install -m 0644 "$(target_file "$repo" deploy/llama/llama.json)" "$lib/ai/llama.json"
+ln -s "/opt/a-nas/llama/$(pin_field "$(target_file "$repo" deploy/llama/llama.json)" sha256)" "$lib/ai/llama"
 
 # Web search (ADR 0030) and the vector index (ADR 0028).
 install -m 0644 "$repo"/deploy/search/{settings.yml,searxng.json,anas_search.py} "$lib/search/"
 install -m 0755 "$repo/deploy/search/allow-dns.sh" "$lib/search/"
 ln -s "/opt/a-nas/search-runtimes/$(search_runtime_id "$repo")" "$lib/search/runtime"
-install -m 0644 "$repo"/deploy/qdrant/{qdrant.json,config.yaml} "$lib/vectors/"
+install -m 0644 "$(target_file "$repo" deploy/qdrant/qdrant.json)" "$lib/vectors/qdrant.json"
+install -m 0644 "$repo/deploy/qdrant/config.yaml" "$lib/vectors/"
 install -m 0755 "$repo"/deploy/qdrant/{start.sh,wait-ready.sh} "$lib/vectors/"
-ln -s "/opt/a-nas/qdrant/$(pin_field "$repo/deploy/qdrant/qdrant.json" sha256)/qdrant" "$lib/vectors/qdrant"
+ln -s "/opt/a-nas/qdrant/$(pin_field "$(target_file "$repo" deploy/qdrant/qdrant.json)" sha256)/qdrant" "$lib/vectors/qdrant"
 
 # The units, and the links that turn on what every A-NAS runs. The local
 # console, the container agent and the internet entry are turned on by their

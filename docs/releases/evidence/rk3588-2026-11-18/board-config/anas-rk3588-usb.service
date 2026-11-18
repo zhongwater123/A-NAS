@@ -1,0 +1,16 @@
+[Unit]
+Description=USB-only bring-up console for the identified ATK board
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Before=sysinit.target
+Conflicts=usbdevice.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/anas-rk3588-usb
+Restart=on-failure
+RestartSec=1s
+TimeoutStartSec=30
+
+[Install]
+WantedBy=sysinit.target

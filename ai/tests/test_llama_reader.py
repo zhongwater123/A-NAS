@@ -166,6 +166,9 @@ class LlamaReaderTest(unittest.TestCase):
         self.environ["FAKE_LLAMA_REPEAT"] = "200"
         self.environ["FAKE_LLAMA_PIECE_DELAY"] = "0.05"
         reader = self.reader()
+        # Cancel during generation, after server startup has completed. On a
+        # slower machine, timing startup would exercise prompt cancellation.
+        reader._start()
         run = reader.run_options()
         threading.Timer(1, setattr, (run, "terminate", True)).start()
         started = time.monotonic()

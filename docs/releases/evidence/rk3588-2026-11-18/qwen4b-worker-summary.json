@@ -1,0 +1,21 @@
+{
+  "sampleCount": 157,
+  "textSeconds": 177.640176751,
+  "fieldsSeconds": 136.03721268899994,
+  "combinedSeconds": 313.67738943999996,
+  "textWhitespaceNormalizedMatches": true,
+  "cgroupPeakBytes": 5611085824,
+  "cgroupLimitBytes": 5611085824,
+  "anonPeakBytes": 4473122816.0,
+  "memAvailableMinimumBytes": 2527453184.0,
+  "temperatureMaximumCelsius": 56.384,
+  "oomKills": 0,
+  "limitEvents": 5883,
+  "caveats": [
+    "one synthetic English receipt",
+    "custom field schema; production Chinese templates and verification layer not tested",
+    "full OCR pipeline and background scheduling not tested",
+    "filesystem caches warm after package installation",
+    "no simultaneous user workload or sustained thermal test"
+  ]
+}

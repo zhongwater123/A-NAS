@@ -1,0 +1,12 @@
+{
+  "name": "hermes-runtime",
+  "os": "linux",
+  "architecture": "arm64",
+  "python": "3.14.8",
+  "abi": "cp314",
+  "upstreamCommit": "8fd9f70600f143b2d8e294f3848e0874377c206d",
+  "file": "runtime.tar.gz",
+  "sizeBytes": 129098361,
+  "sha256": "f4474665755769dc540a9656238081ad869b09360e390586a2cb0e9efcb9eb84",
+  "note": "Real ARM64 runtime: upstream 8fd9f70600f143b2d8e294f3848e0874377c206d with A-NAS hermes-patches/0001; bundled CPython 3.14.8 aarch64, frozen mcp/sms hash-locked dependencies. Built at the product /opt prefix and smoke-tested through QEMU in a network-disabled disposable container; not a physical-board acceptance."
+}

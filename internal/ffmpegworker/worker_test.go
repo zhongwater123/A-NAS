@@ -285,9 +285,13 @@ func TestRealFFmpegAudio(t *testing.T) {
 	}
 	local := Local{Tools: tools}
 	ctx := context.Background()
-	for _, sample := range []struct{ name, codec string }{{"hi.aiff", "pcm_s24be"}, {"lossy.wma", "wmav2"}, {"hi.wv", "wavpack"}} {
+	// WMA v2 accepts at most 48 kHz. Keep the lossless fixtures at 96 kHz
+	// so those cases still exercise resampling to the requested output rate.
+	for _, sample := range []struct{ name, codec, rate string }{
+		{"hi.aiff", "pcm_s24be", "96000"}, {"lossy.wma", "wmav2", "48000"}, {"hi.wv", "wavpack", "96000"},
+	} {
 		path := filepath.Join(t.TempDir(), sample.name)
-		generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3:sample_rate=96000",
+		generate := exec.Command(tools.FFmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3:sample_rate="+sample.rate,
 			"-ac", "2", "-c:a", sample.codec, "-metadata", "title=测试", path)
 		if output, err := generate.CombinedOutput(); err != nil {
 			t.Skipf("FFmpeg cannot generate %s: %v %s", sample.name, err, output)

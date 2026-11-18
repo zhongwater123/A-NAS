@@ -1,0 +1,10 @@
+{
+  "name": "qdrant",
+  "version": "1.20.0",
+  "source": "https://github.com/qdrant/qdrant/releases/download/v1.20.0/qdrant-aarch64-unknown-linux-musl.tar.gz",
+  "file": "qdrant-aarch64-unknown-linux-musl.tar.gz",
+  "sizeBytes": 31475234,
+  "sha256": "bd8a458b8ef8006ce2c603c5bd6d1d973e39d787f794008dd959112e747c3bb7",
+  "binary": "qdrant",
+  "license": "Apache-2.0 (https://github.com/qdrant/qdrant/blob/v1.20.0/LICENSE). Upstream's aarch64 Linux musl release asset; SHA-256 and size verified against GitHub's official release API. Runtime execution and archive contents require separate validation."
+}

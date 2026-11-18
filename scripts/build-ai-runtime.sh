@@ -22,12 +22,17 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/python-runtime.sh
 . "$repo/scripts/lib/python-runtime.sh"
 require_uv "$repo"
+if [[ "$(target_arch)" == arm64 && "${1:-}" != --lock ]]; then
+  exec bash "$repo/scripts/build-arm64-python-runtime.sh" ai
+fi
 
 if [[ "${1:-}" == --lock ]]; then
   shift
   cd "$repo/ai"
   # The runtime for the NAS alone; the development tools for every platform.
-  lock_runtime requirements.in requirements.txt --excludes requirements.excludes "$@"
+  runtime_lock=requirements.txt
+  if [[ "$(target_arch)" == arm64 ]]; then runtime_lock=requirements-arm64.txt; fi
+  lock_runtime requirements.in "$runtime_lock" --excludes requirements.excludes "$@"
   uv pip compile requirements-dev.in --quiet --universal --generate-hashes --python-version 3.13 \
     --only-binary :all: --output-file requirements-dev.txt "$@"
   echo "updated ai/requirements.txt and ai/requirements-dev.txt"

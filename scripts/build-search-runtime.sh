@@ -26,6 +26,9 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/python-runtime.sh
 . "$repo/scripts/lib/python-runtime.sh"
 require_uv "$repo"
+if [[ "$(target_arch)" == arm64 && "${1:-}" != --lock ]]; then
+  exec bash "$repo/scripts/build-arm64-python-runtime.sh" search
+fi
 
 search=$repo/deploy/search
 pin=$search/searxng.json
@@ -65,7 +68,9 @@ if [[ "${1:-}" == --lock ]]; then
     tar -xzOf "$archive" "$top/requirements.txt" "$top/requirements-server.txt" | grep -Ev '^[[:space:]]*(#|-r|$)'
   } > "$search/requirements.in"
   cd "$search"
-  lock_runtime requirements.in requirements.txt "$@"
+  runtime_lock=requirements.txt
+  if [[ "$(target_arch)" == arm64 ]]; then runtime_lock=requirements-arm64.txt; fi
+  lock_runtime requirements.in "$runtime_lock" "$@"
   echo "updated deploy/search/requirements.in and deploy/search/requirements.txt"
   exit
 fi
