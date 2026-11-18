@@ -23,6 +23,8 @@ type fixture struct {
 	member filesystem.FileSystem
 	exec   *Executor
 	clock  time.Time
+	// full stands for a data volume at its reserve.
+	full bool
 }
 
 // newFixture lays out alice's spaces, recycle bins, Agent空间 folder and
@@ -40,7 +42,8 @@ func newFixture(t *testing.T) *fixture {
 		}
 	}
 	f := &fixture{t: t, volume: volume, member: filesystem.NewRootFileSystem(volume, false), clock: time.Unix(1_800_000_000, 0)}
-	f.exec = &Executor{Root: filepath.Join(t.TempDir(), "changes"), Volume: volume, Now: func() time.Time { return f.clock }}
+	f.exec = &Executor{Root: filepath.Join(t.TempDir(), "changes"), Volume: volume, Now: func() time.Time { return f.clock },
+		Admits: func(string, int64) (bool, error) { return !f.full, nil }}
 	f.put("spaces/private/alice/计划.md", "# 计划\n- 买菜\n")
 	return f
 }
@@ -175,6 +178,33 @@ func TestNothingIsAppliedWithoutAFreshGrant(t *testing.T) {
 	}
 	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(`{"summary":"x","operations":[{"op":"mkdir","path":"/nas/个人空间/新"}]}`)); !strings.Contains(result, "没有得到") {
 		t.Fatalf("apply after expiry = %s", result)
+	}
+}
+
+// The assistant's writes keep the data volume's reserve like every other
+// writer (#181): a change that would go below it is refused before the card,
+// and one approved before the space ran out changes nothing.
+func TestChangesKeepTheDataVolumesReserve(t *testing.T) {
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", "# 计划\n- 买菜\n- 买牛奶\n")
+	f.full = true
+	if _, err := f.prepare(editPlan); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "保留容量") {
+		t.Fatalf("prepare at the reserve: %v", err)
+	}
+	// A folder made, a file moved or deleted adds nothing, so it goes.
+	const tidy = `{"summary":"建文件夹","operations":[{"op":"mkdir","path":"/nas/个人空间/归档"}]}`
+	if _, err := f.prepare(tidy); err != nil {
+		t.Fatalf("a change that adds nothing at the reserve: %v", err)
+	}
+	f.full = false
+	f.approve(editPlan)
+	f.full = true
+	result := f.exec.Apply(context.Background(), "alice", f.member, []byte(editPlan))
+	if !strings.Contains(result, "保留容量") || !strings.Contains(result, "什么都没有改变") {
+		t.Fatalf("apply at the reserve = %s", result)
+	}
+	if got := f.get("spaces/private/alice/计划.md"); got != "# 计划\n- 买菜\n" {
+		t.Fatalf("plan = %q", got)
 	}
 }
 
@@ -403,7 +433,7 @@ func TestAChangeLeftApplyingByAnEarlierProcessHoldsNothing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.exec.Root, "alice", "changes.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	restarted := &Executor{Root: f.exec.Root, Volume: f.volume, Now: f.exec.Now}
+	restarted := &Executor{Root: f.exec.Root, Volume: f.volume, Now: f.exec.Now, Admits: f.exec.Admits}
 	if _, err := restarted.Prepare(context.Background(), "alice", f.member, []byte(editPlan), "next", "req-2"); err != nil {
 		t.Fatalf("a change nobody applies any more still holds its copy: %v", err)
 	}
