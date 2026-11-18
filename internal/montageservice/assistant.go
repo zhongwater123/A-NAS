@@ -104,7 +104,7 @@ func serveAssistant(ctx context.Context, listener net.Listener, handler http.Han
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 << 10}
 	go func() {
 		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
