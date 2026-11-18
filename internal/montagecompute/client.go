@@ -1,8 +1,8 @@
 //go:build linux
 
 // Package montagecompute is the client of the montage center's compute
-// Worker (ai/anas_montage/worker.py, docs/architecture/montage-center.md,
-// 剪辑计算 Worker): the photo service cuts cards and measures their quality
+// Worker (ai/anas_montage/worker.py, docs/architecture/photo-ai.md). The
+// photo service cuts cards and measures their quality
 // with it, the montage service lists the catalog, asks for plans and fills
 // the music's slots. One request and one answer per connection, framed as
 // the AI Worker's; arrays travel as sealed memfds beside the request.
@@ -19,8 +19,6 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
@@ -34,11 +32,13 @@ const (
 )
 
 var (
-	// ErrUnavailable: the Worker could not be reached or stopped; the same
+	// ErrUnavailable: the Worker could not be reached; the same
 	// request may work later.
 	ErrUnavailable = errors.New("the montage compute worker is not available")
 	// ErrRefused: the Worker refused the request; it would refuse it again.
 	ErrRefused = errors.New("the montage compute worker refused the request")
+	// ErrFailed: the Worker took the request and could not finish it.
+	ErrFailed = errors.New("the montage compute worker failed")
 )
 
 // Array is one array a request passes: Float32 or Uint8, with its shape.
@@ -70,24 +70,6 @@ func (a Array) bytes() ([]byte, string, error) {
 		}
 		return a.Uint8, "uint8", nil
 	}
-}
-
-// sealed holds data in a memfd the Worker can only read.
-func sealed(name string, data []byte) (*os.File, error) {
-	fd, err := unix.MemfdCreate("anas-montage-"+name, unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), name)
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_SHRINK|unix.F_SEAL_GROW|unix.F_SEAL_WRITE|unix.F_SEAL_SEAL); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return file, nil
 }
 
 // Client reaches the Worker's socket.
@@ -133,9 +115,9 @@ func (c Client) Call(ctx context.Context, op string, request any, arrays []Array
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrRefused, err)
 		}
-		file, err := sealed(array.Name, data)
+		file, err := unixmsg.SealedFile("anas-montage-"+array.Name, data)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %w", ErrFailed, err)
 		}
 		files = append(files, file)
 		specs = append(specs, arraySpec{Name: array.Name, DType: dtype, Shape: array.Shape})
@@ -146,14 +128,24 @@ func (c Client) Call(ctx context.Context, op string, request any, arrays []Array
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer func() { _ = conn.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	unixConn := conn.(*net.UnixConn)
 	if err := unixmsg.WriteFiles(unixConn, fields, files, maxFrame); err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case errors.Is(err, unixmsg.ErrTooLarge):
+			return fmt.Errorf("%w: %w", ErrRefused, err)
+		default:
+			return fmt.Errorf("%w: %w", ErrFailed, err)
+		}
 	}
 	body, extra, err := unixmsg.ReadBody(unixConn, maxFrame)
 	unixmsg.CloseFile(extra)
@@ -161,11 +153,11 @@ func (c Client) Call(ctx context.Context, op string, request any, arrays []Array
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrFailed, err)
 	}
 	var head failure
 	if err := json.Unmarshal(body, &head); err != nil {
-		return fmt.Errorf("%w: undecodable answer: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: undecodable answer: %w", ErrFailed, err)
 	}
 	if !head.OK {
 		if head.Error != nil && head.Error.Code == "invalid_input" {
@@ -175,12 +167,15 @@ func (c Client) Call(ctx context.Context, op string, request any, arrays []Array
 		if head.Error != nil {
 			message = head.Error.Code + ": " + head.Error.Message
 		}
-		return fmt.Errorf("%w: %s", ErrUnavailable, message)
+		return fmt.Errorf("%w: %s", ErrFailed, message)
 	}
 	if answer == nil {
 		return nil
 	}
-	return json.Unmarshal(body, answer)
+	if err := json.Unmarshal(body, answer); err != nil {
+		return fmt.Errorf("%w: undecodable answer: %w", ErrFailed, err)
+	}
+	return nil
 }
 
 // Window is one window of a video for cutting cards.

@@ -202,6 +202,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
+	if worked, err := r.montageCards(ctx, gate); worked || err != nil {
+		return worked, err
+	}
 	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {
 		r.progress.set(AIPaused, reason, "")
 		r.releaseModels(ctx, detector, reason)
@@ -277,9 +280,6 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// The montage center's analysis comes first: a member waits for it. A
 	// chunk the gate hung up ends the round as a paused detection does.
 	if worked, ended, err := r.montageWindows(ctx, embedder, gate, info); worked || ended || err != nil {
-		return worked, err
-	}
-	if worked, err := r.montageCards(ctx); worked || err != nil {
 		return worked, err
 	}
 	// Then the descriptions, in the reading phase: one card a round.

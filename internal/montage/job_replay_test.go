@@ -67,24 +67,30 @@ type reanalysedSong struct {
 	version string
 }
 
-func (song reanalysedSong) ExcerptKey(context.Context,string,string,float64)(string,error) { return song.version,nil }
+func (song reanalysedSong) ExcerptKey(context.Context, string, string, float64) (string, error) {
+	return song.version, nil
+}
 
-func (song reanalysedSong) Excerpt(ctx context.Context, owner,songID string,start float64)(montage.Excerpt,error) {
-	result,err:=song.music.Excerpt(ctx,owner,songID,start)
+func (song reanalysedSong) Excerpt(ctx context.Context, owner, songID string, start float64) (montage.Excerpt, error) {
+	result, err := song.music.Excerpt(ctx, owner, songID, start)
 	result.Key = song.version
-	return result,err
+	return result, err
 }
 
 func TestSongAnalysisChangeVoidsBothAcceptedPlans(t *testing.T) {
-	env:=newJobEnv(t)
-	env.lib.set(func(){env.lib.noSpace=true})
-	env.store.UseMusic(reanalysedSong{version:"before"})
-	job:=env.generate(t,"new:analysis")
-	if needs:=env.settle(t,job.ID);needs.WaitReason!=montage.NeedStorageFull {t.Fatalf("%+v",needs)}
-	env.store.UseMusic(reanalysedSong{version:"after"})
-	env.lib.set(func(){env.lib.noSpace=false})
-	if _,err:=env.store.Retry(t.Context(),"user:alice",job.ID);err!=nil{t.Fatal(err)}
-	if done:=env.settle(t,job.ID);done.State!=montage.JobDone || env.planner.picks!=2 || env.planner.shots!=2 {
-		t.Fatalf("job=%+v, picks=%d, shots=%d",done,env.planner.picks,env.planner.shots)
+	env := newJobEnv(t)
+	env.lib.set(func() { env.lib.noSpace = true })
+	env.store.UseMusic(reanalysedSong{version: "before"})
+	job := env.generate(t, "new:analysis")
+	if needs := env.settle(t, job.ID); needs.WaitReason != montage.NeedStorageFull {
+		t.Fatalf("%+v", needs)
+	}
+	env.store.UseMusic(reanalysedSong{version: "after"})
+	env.lib.set(func() { env.lib.noSpace = false })
+	if _, err := env.store.Retry(t.Context(), "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if done := env.settle(t, job.ID); done.State != montage.JobDone || env.planner.picks != 2 || env.planner.shots != 2 {
+		t.Fatalf("job=%+v, picks=%d, shots=%d", done, env.planner.picks, env.planner.shots)
 	}
 }

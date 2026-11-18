@@ -336,7 +336,9 @@ func TestRevokingAGrantWhileStagingAFilmPreventsPublication(t *testing.T) {
 	private, _ := libraries(t, s, namedAlice)
 	video := importPhoto(t, s, namedAlice, private.ID, "", "beach.mp4", mp4Bytes(1))
 	grant, err := s.RegisterGrant(ctx, granting(namedAlice), "project:1", []string{video.ID})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
@@ -346,11 +348,21 @@ func TestRevokingAGrantWhileStagingAFilmPreventsPublication(t *testing.T) {
 		saved <- err
 	}()
 	film := mp4Bytes(7)
-	if _, err := writer.Write(film[:1]); err != nil { t.Fatal(err) }
-	if err := s.RevokeGrant(ctx, grant.ID); err != nil { t.Fatal(err) }
-	if _, err := writer.Write(film[1:]); err != nil { t.Fatal(err) }
+	if _, err := writer.Write(film[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeGrant(ctx, grant.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(film[1:]); err != nil {
+		t.Fatal(err)
+	}
 	_ = writer.Close()
-	if err := <-saved; !errors.Is(err, photos.ErrGrantNotFound) { t.Fatalf("save after revocation: %v", err) }
+	if err := <-saved; !errors.Is(err, photos.ErrGrantNotFound) {
+		t.Fatalf("save after revocation: %v", err)
+	}
 	page, err := s.Timeline(ctx, namedAlice, private.ID, "", 10)
-	if err != nil || len(page.Assets) != 1 { t.Fatalf("timeline after revocation: %d assets, %v", len(page.Assets), err) }
+	if err != nil || len(page.Assets) != 1 {
+		t.Fatalf("timeline after revocation: %d assets, %v", len(page.Assets), err)
+	}
 }

@@ -158,7 +158,9 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
 		t.Fatalf("generate without a song: %s", response.Body.String())
 	}
-	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, montage.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil { t.Fatal(err) }
+	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, montage.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
+		t.Fatal(err)
+	}
 
 	// A film: 202 and the job to poll; one job at a time.
 	var job montage.Job

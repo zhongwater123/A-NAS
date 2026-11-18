@@ -19,10 +19,16 @@ type computeWorker struct{ client montagecompute.Client }
 // mapped turns the Worker's unavailability into the library's, so that the
 // work waits for it rather than failing.
 func mapped(err error) error {
-	if errors.Is(err, montagecompute.ErrUnavailable) {
+	switch {
+	case errors.Is(err, montagecompute.ErrUnavailable):
 		return errors.Join(photos.ErrComputeUnavailable, err)
+	case errors.Is(err, montagecompute.ErrRefused):
+		return errors.Join(photos.ErrComputeInvalidResult, err)
+	case errors.Is(err, montagecompute.ErrFailed):
+		return errors.Join(photos.ErrComputeFailed, err)
+	default:
+		return err
 	}
-	return err
 }
 
 func (w computeWorker) Cards(ctx context.Context, windows []photos.CardWindow, vectors []float32, dimensions int, flat []bool) ([]photos.ComputedCard, error) {

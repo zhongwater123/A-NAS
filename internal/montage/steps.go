@@ -289,10 +289,14 @@ func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
 			// A new input: what the steps after it kept is stale.
 			for _, affected := range StepNames[slices.Index(StepNames, name):] {
 				if affected != name {
-					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected); err != nil { return err }
+					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected); err != nil {
+						return err
+					}
 				}
 				if stored != "" && (affected == "pick" || affected == "shots") {
-					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND step = ? AND voided_at IS NULL", now, jobID, affected); err != nil { return err }
+					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND step = ? AND voided_at IS NULL", now, jobID, affected); err != nil {
+						return err
+					}
 				}
 			}
 		}

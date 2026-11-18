@@ -228,12 +228,6 @@ func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID stri
 			entry.Status, entry.ObjectID = GrantAvailable, record.objectID
 			entry.Duration, entry.Width, entry.Height, entry.TakenAt = record.Video.Duration, record.Width, record.Height, record.TakenAt
 			videos[record.objectID] = record.Video.Duration
-			if entry.Cards, err = s.cardsState(ctx, record.objectID); err != nil {
-				return nil, nil, err
-			}
-			if entry.Quality, err = s.qualityState(ctx, record.objectID); err != nil {
-				return nil, nil, err
-			}
 		}
 		found = append(found, entry)
 	}
@@ -243,7 +237,8 @@ func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID stri
 	}
 	for i := range found {
 		if found[i].Status == GrantAvailable {
-			found[i].Windows = progress[found[i].ObjectID].windows
+			p := progress[found[i].ObjectID]
+			found[i].Windows, found[i].Cards, found[i].Quality = p.windows, p.cards, p.quality
 		}
 	}
 	return found, progress, s.fillDescriptionProgress(ctx, found)

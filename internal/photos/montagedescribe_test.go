@@ -121,6 +121,7 @@ func newDescribeFixtureWith(t *testing.T, reader string) describeFixture {
 	t.Helper()
 	ctx := context.Background()
 	f := describeFixture{montageFixture: newMontageFixture(t), embedder: newDescribingEmbedder()}
+	f.enableCompute(t)
 	f.embedder.model = reader
 	private, _ := libraries(t, f.service, namedAlice)
 	f.video = importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))

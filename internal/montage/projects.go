@@ -1009,7 +1009,9 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	defer unlock()
 	var jobs []string
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", userID); err != nil { return err }
+		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", userID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID); err != nil {
 			return err
 		}
@@ -1019,7 +1021,10 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range jobs { s.cancelRunning(id); s.removeJobFiles(id) }
+	for _, id := range jobs {
+		s.cancelRunning(id)
+		s.removeJobFiles(id)
+	}
 	s.songs.Lock()
 	defer s.songs.Unlock()
 	s.removeUnusedCopies(ctx)

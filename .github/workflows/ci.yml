@@ -134,14 +134,14 @@ jobs:
           python-version: "3.13"
 
       # Ruff for `make ai-lint`, zizmor for `make ops-check`. NumPy, pinned by
-      # the runtime's lock (its entry runs to the first line without a
-      # continuation), lets the clustering tests run; the real-model tests need
+      # the runtime's lock, lets the clustering tests run. NumPy and Pillow
+      # also exercise the montage Worker. The real-model tests need
       # model files and stay skipped.
       - name: Install the AI tools and test dependencies
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: |
           python3 -m pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
-          sed -n '/^numpy==/,/[^\\]$/p' ai/requirements.txt |
+          sed -n '/^numpy==/,/[^\\]$/p; /^pillow==/,/[^\\]$/p' ai/requirements.txt |
             python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin
           python3 -m pip check
 
@@ -167,6 +167,7 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         env:
           ANAS_QDRANT_REQUIRED: "1"
+          ANAS_MONTAGE_PYTHON: python3
           GH_TOKEN: ${{ github.token }}
         run: make check
 
@@ -188,6 +189,16 @@ jobs:
           go-version-file: .go-version
           cache: true
 
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the montage Worker test dependencies
+        run: |
+          sed -n '/^numpy==/,/[^\\]$/p; /^pillow==/,/[^\\]$/p' ai/requirements.txt |
+            python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin
+
       # The vector index tests run the Qdrant server the release pins
       # (deploy/qdrant/qdrant.json), checked against its SHA-256.
       - name: Restore the pinned Qdrant server
@@ -204,6 +215,7 @@ jobs:
       - name: Run the Go tests with the race detector
         env:
           ANAS_QDRANT_REQUIRED: "1"
+          ANAS_MONTAGE_PYTHON: python3
         run: make race-test
 
   system:

@@ -86,9 +86,12 @@ if [[ "${1:-}" != --inside ]]; then
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
     "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
     "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
-    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket"
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
   sed -i -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
-    -e 's/ anas-photos-grants\.socket//g' \
+    -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
   sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
     "$legacy_product/usr/lib/systemd/system/anas-photos.service"
@@ -1239,6 +1242,83 @@ check "the photo service answers the montage account on it" \
   setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py
 check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
 check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
+
+# --- The compute worker is socket-activated with the production sandbox.
+# The small test runtime has only system Python, so its fixture answers a
+# fixed quality request and reports whether it can see the data volume or
+# create an IP socket. Real-content runs exercise the production entrypoint.
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
+  install -d /run/systemd/system/anas-montage-compute.service.d
+  cat > /run/systemd/system/anas-montage-compute.service.d/system-test.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/python3 /usr/local/lib/montage-compute-fixture.py
+EOF
+  cat > /usr/local/lib/montage-compute-fixture.py <<'PY'
+import os
+import socket
+from anas_ai import protocol
+
+assert os.environ["LISTEN_PID"] == str(os.getpid())
+assert os.environ["LISTEN_FDS"] == "1"
+listener = socket.socket(fileno=3)
+while True:
+    conn, _ = listener.accept()
+    with conn:
+        request, fds = protocol.read_request(conn)
+        assert not fds
+        if request["op"] == "probe":
+            try:
+                with socket.socket(socket.AF_INET):
+                    network = True
+            except OSError:
+                network = False
+            reply = protocol.ok(data=os.path.isdir("/srv/a-nas/data/photos"), network=network)
+        else:
+            assert request["op"] == "quality"
+            reply = protocol.ok(blur=2.0, shake=0.0, blocked=0.0, points=[None], reasons=[])
+        protocol.write_response(conn, reply)
+PY
+  systemctl daemon-reload
+fi
+cat > /usr/local/lib/montage-compute-client.py <<'PY'
+import json
+import socket
+import struct
+import sys
+
+probe = len(sys.argv) > 1 and sys.argv[1] == "probe"
+request = {"op": "probe"} if probe else {
+    "op": "quality", "blurs": [2.0], "blocked": [0.0], "points": [None], "moves": []
+}
+body = json.dumps(request).encode()
+with socket.socket(socket.AF_UNIX) as conn:
+    conn.settimeout(15)
+    conn.connect("/run/a-nas-montage-compute/compute.sock")
+    conn.sendall(struct.pack(">I", len(body)) + body)
+    with conn.makefile("rb") as stream:
+        size, = struct.unpack(">I", stream.read(4))
+        answer = json.loads(stream.read(size))
+assert answer["ok"], answer
+if probe:
+    assert answer["data"] is False and answer["network"] is False, answer
+else:
+    assert answer["blur"] == 2.0 and answer["shake"] == 0.0 and answer["reasons"] == [], answer
+PY
+check "the compute socket is available to the photo service" \
+  test "$(stat -c '%a %G' /run/a-nas-montage-compute/compute.sock)" = "660 a-nas-photos"
+check "the photo service can activate the compute worker" \
+  runuser -u a-nas-photos -- python3 /usr/local/lib/montage-compute-client.py
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
+  check "the compute worker cannot see the data volume or create an IP socket" \
+    python3 /usr/local/lib/montage-compute-client.py probe
+fi
+compute_pid=$(systemctl show -p MainPID --value anas-montage-compute.service)
+check "kill the running compute worker" systemctl kill --kill-whom=main --signal=SIGKILL anas-montage-compute.service
+check "the compute worker answers the next connection after it is killed" \
+  python3 /usr/local/lib/montage-compute-client.py
+check "systemd replaced the compute worker" \
+  test "$(systemctl show -p MainPID --value anas-montage-compute.service)" != "$compute_pid"
 
 # --- Montage projects (ADR 0038): a project holds the videos its member
 # handed over, through a grant; another member cannot see it, and deleting
@@ -2724,6 +2804,7 @@ login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "the upgrade copied the montage database on the data volume" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
+check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
 check "the previous release, which came before the montage center, has no montage unit" \
   test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
@@ -2732,6 +2813,11 @@ check "and the montage service stopped before its unit went" fails pgrep -u a-na
 check "nor the photo service's grant socket, which stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
   not-found:inactive
+for unit in anas-montage-compute.socket anas-montage-compute.service; do
+  check "rollback removed and stopped $unit" \
+    test "$(systemctl show -p LoadState --value "$unit"):$(systemctl show -p ActiveState --value "$unit")" = not-found:inactive
+done
+check "the compute worker is no longer running" fails systemctl is-active --quiet anas-montage-compute.service
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }

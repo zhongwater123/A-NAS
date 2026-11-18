@@ -311,8 +311,12 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 // StartWorkers recovers durable work before accepting requests. Close cancels
 // and joins the workers before closing their database.
 func (s *Store) StartWorkers(ctx context.Context) error {
-	if err := s.RecoverJobs(ctx); err != nil { return err }
-	if err := s.ReclaimSongs(ctx); err != nil { return err }
+	if err := s.RecoverJobs(ctx); err != nil {
+		return err
+	}
+	if err := s.ReclaimSongs(ctx); err != nil {
+		return err
+	}
 	s.soon(s.AnalyzeSongs)
 	s.soon(s.RunJobs)
 	return nil

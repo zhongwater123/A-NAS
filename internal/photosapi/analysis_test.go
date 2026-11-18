@@ -3,8 +3,8 @@ package photosapi
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +24,16 @@ func TestLargeGrantAnalysisFitsSocketFrame(t *testing.T) {
 	}
 	vectors := bytes.Repeat([]byte{7}, analysis.Dimensions*4)
 	windows, err := os.CreateTemp(t.TempDir(), "windows")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer windows.Close()
-	if _, err := windows.Write(vectors); err != nil { t.Fatal(err) }
-	if err := binary.Write(windows, binary.LittleEndian, [3]uint32{0,2000,0}); err != nil { t.Fatal(err) }
+	if _, err := windows.Write(vectors); err != nil {
+		t.Fatal(err)
+	}
+	if err := binary.Write(windows, binary.LittleEndian, [3]uint32{0, 2000, 0}); err != nil {
+		t.Fatal(err)
+	}
 	file, err := os.Create(filepath.Join(t.TempDir(), "analysis"))
 	if err != nil {
 		t.Fatal(err)

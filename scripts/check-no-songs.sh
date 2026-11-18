@@ -69,7 +69,7 @@ trap 'rm -rf -- "$work"' EXIT
 found=0
 # The repository's files; a copy without .git, as the development
 # machine's virtual machine checks, lists its tree instead.
-if [[ -e "$repo/.git" ]]; then
+if [[ -e "$repo/.git" ]] && git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$repo" ls-files -z | while IFS= read -r -d '' path; do
     if [[ -f "$repo/$path" && ! -L "$repo/$path" ]]; then printf '%s\0' "$repo/$path"; fi
   done

@@ -1,9 +1,9 @@
 package photoservice
 
 import (
-	"golang.org/x/sys/unix"
 	"context"
 	"errors"
+	"golang.org/x/sys/unix"
 	"log/slog"
 	"net"
 	"os"
@@ -216,7 +216,7 @@ func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantReq
 			var analysis photos.GrantAnalysis
 			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
 				response.Analysis = &analysis
-				if len(analysis.CardList) != 0 || len(analysis.Descriptions) != 0 {
+				if len(analysis.Descriptions) != 0 {
 					windows := opened
 					defer unixmsg.CloseFile(windows)
 					response, opened, err = analysisFile(analysis, windows)

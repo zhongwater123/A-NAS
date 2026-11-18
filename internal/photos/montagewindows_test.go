@@ -143,12 +143,18 @@ func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegwork
 // fakeCompute stands in for the montage compute Worker: two cards per video,
 // halves of its windows, and every card good.
 type fakeCompute struct {
-	mu        sync.Mutex
-	qualities int
-	moves     []int
+	mu         sync.Mutex
+	qualities  int
+	moves      []int
+	empty      bool
+	cardsErr   error
+	qualityErr error
 }
 
 func (c *fakeCompute) Cards(_ context.Context, windows []photos.CardWindow, _ []float32, _ int, _ []bool) ([]photos.ComputedCard, error) {
+	if c.empty || c.cardsErr != nil {
+		return nil, c.cardsErr
+	}
 	half := len(windows) / 2
 	card := func(from, to int) photos.ComputedCard {
 		start, end := windows[from].Start, windows[to-1].End
@@ -171,6 +177,9 @@ func (c *fakeCompute) SharpPoints(context.Context, []byte, int, int) (float64, e
 func (c *fakeCompute) Quality(_ context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.qualityErr != nil {
+		return photos.CardQuality{}, c.qualityErr
+	}
 	c.qualities++
 	c.moves = append(c.moves, len(measures.Moves))
 	return photos.CardQuality{Blur: measures.Blurs[0], Blocked: 0.1, Points: measures.Points, Reasons: []string{}}, nil
@@ -191,7 +200,7 @@ func newMontageFixture(t *testing.T) montageFixture {
 	t.Helper()
 	gate := &lockedGate{open: true}
 	f := montageFixture{clock: newClock(), root: t.TempDir() + "/photos", video: &framedVideo{gate: gate},
-		embedder: newFakeEmbedder(), gate: gate, compute: &fakeCompute{}}
+		embedder: newFakeEmbedder(), gate: gate}
 	f.media = f.video
 	f.open(t)
 	return f
@@ -200,12 +209,25 @@ func newMontageFixture(t *testing.T) montageFixture {
 // open opens the store, again after a restart.
 func (f *montageFixture) open(t *testing.T) {
 	t.Helper()
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.compute, DisableCapacityReserve: true})
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
 	f.service = service
+}
+
+func (f *montageFixture) computeWorker() photos.MontageCompute {
+	if f.compute == nil {
+		return nil
+	}
+	return f.compute
+}
+
+func (f *montageFixture) enableCompute(t *testing.T) {
+	t.Helper()
+	f.compute = &fakeCompute{}
+	f.restart(t)
 }
 
 // restart reopens the store, as a release's install restarts the photo
@@ -292,10 +314,9 @@ func TestWindowVectorsAreMadeOnceForTheVideosGrantsAskFor(t *testing.T) {
 	if looked[0].Windows != photos.AnalysisQueued {
 		t.Fatalf("before the analysis: %+v", looked[0])
 	}
-	// 70 seconds: 35 windows in two chunks, then the cards, then each of
-	// the two cards' quality, and the job's end.
-	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 6 {
-		t.Fatalf("rounds = %d, want two chunks, the cards, two cards' quality and the end", rounds)
+	// 70 seconds: 35 windows in two chunks, with no compute worker.
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 {
+		t.Fatalf("rounds = %d, want two window chunks", rounds)
 	}
 	analysis, vectors := f.analysis(t, namedBob, bobGrant.ID, video.ID)
 	if analysis.Windows != photos.AnalysisDone || len(analysis.List) != 35 || analysis.WindowCount != 35 || analysis.Dimensions != 4 ||
@@ -635,6 +656,7 @@ func TestWindowVectorsReachTheirOwnCollectionAndGoWithTheirVideo(t *testing.T) {
 func TestCardsAndTheirQualityFollowTheWindows(t *testing.T) {
 	ctx := context.Background()
 	f := newMontageFixture(t)
+	f.enableCompute(t)
 	private, _ := libraries(t, f.service, namedAlice)
 	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
 	grant, err := f.service.RegisterGrant(ctx, granting(namedAlice), "project:1", []string{video.ID})
@@ -645,7 +667,12 @@ func TestCardsAndTheirQualityFollowTheWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	processAI(t, f.service, f.embedder, f.gate)
-	analysis, _, err := f.service.AnalysisOfGrant(ctx, granting(namedAlice), grant.ID, video.ID)
+	analysis, file, err := f.service.AnalysisOfGrant(ctx, granting(namedAlice), grant.ID, video.ID)
+	if err != nil || file == nil {
+		t.Fatalf("analysis payload = %v, %v", file, err)
+	}
+	defer func() { _ = file.Close() }()
+	_, err = photos.ReadWindows(&analysis, file)
 	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone || len(analysis.CardList) != 2 {
 		t.Fatalf("analysis = cards %s, quality %s, %d cards, %v", analysis.Cards, analysis.Quality, len(analysis.CardList), err)
 	}
@@ -681,6 +708,112 @@ func TestCardsAndTheirQualityFollowTheWindows(t *testing.T) {
 	if f.compute.moves[0] != 34*10-1 {
 		t.Fatalf("moves of the first card = %d, want one between each pair of its 340 frames", f.compute.moves[0])
 	}
+}
+
+func TestMontageAnalysisBackfillsAndFinishesAnEmptyResult(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	f.enableCompute(t)
+	f.compute.empty = true
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	owner := granting(namedAlice)
+	grant, err := f.service.RegisterGrant(ctx, owner, "project:empty", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); !worked || err != nil {
+			t.Fatalf("process windows = %v, %v", worked, err)
+		}
+	}
+	// Simulate a result made on M5, where the windows left no card job.
+	if _, err := catalog(t, f.root).Exec("DELETE FROM jobs WHERE derivation = 'montage-cards/v1'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	analysis, file, err := f.service.AnalysisOfGrant(ctx, owner, grant.ID, video.ID)
+	if file != nil {
+		_ = file.Close()
+	}
+	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone ||
+		analysis.CardsIdentity == "" || analysis.QualityIdentity == "" || len(analysis.CardList) != 0 {
+		t.Fatalf("empty analysis = %+v, %v", analysis, err)
+	}
+}
+
+func TestMontageQualityPausesForForegroundWithoutSpendingAnAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	f := newMontageFixture(t)
+	f.enableCompute(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	grant, _ := f.grant(t, namedAlice, "project:foreground", video)
+	for range 3 {
+		if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); !worked || err != nil {
+			t.Fatalf("process predecessor = %v, %v", worked, err)
+		}
+	}
+	// Enter the foreground while the quality round is taking keyframes.
+	f.video.stopAfter = f.video.asked
+	if worked, err := f.service.ProcessAIJob(ctx, f.embedder, f.gate); worked || err != nil || ctx.Err() != nil {
+		t.Fatalf("quality round = %v, %v; context = %v", worked, err, ctx.Err())
+	}
+	var attempts int
+	if err := catalog(t, f.root).QueryRow("SELECT attempts FROM jobs WHERE derivation = 'montage-quality/v1'").Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("quality attempts after pausing = %d, %v", attempts, err)
+	}
+	f.video.stopAfter = 0
+	f.gate.set(true, "")
+	processAI(t, f.service, f.embedder, f.gate)
+	looked, err := f.service.LookupGrant(ctx, granting(namedAlice), grant.ID, []string{video.ID})
+	if err != nil || len(looked) != 1 || looked[0].Quality != photos.AnalysisDone {
+		t.Fatalf("retrying the quality round = %+v, %v", looked, err)
+	}
+}
+
+func TestMontageAnalysisRetriesBothDownstreamStages(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	f.enableCompute(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	owner := granting(namedAlice)
+	grant, err := f.service.RegisterGrant(ctx, owner, "project:retry", []string{video.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyze := func(retry bool) {
+		t.Helper()
+		if err := f.service.AnalyzeGrant(ctx, owner, grant.ID, []string{video.ID}, retry); err != nil {
+			t.Fatal(err)
+		}
+		processAI(t, f.service, f.embedder, f.gate)
+	}
+	state := func(cards, quality photos.AnalysisState) {
+		t.Helper()
+		asset, err := f.service.LookupGrant(ctx, owner, grant.ID, []string{video.ID})
+		if err != nil || len(asset) != 1 || asset[0].Cards != cards || asset[0].Quality != quality {
+			t.Fatalf("lookup = %+v, %v; want %q and %q", asset, err, cards, quality)
+		}
+	}
+	f.compute.cardsErr = photos.ErrComputeInvalidResult
+	analyze(false)
+	state(photos.AnalysisFailed, photos.AnalysisNone)
+	f.compute.cardsErr = nil
+	f.compute.qualityErr = photos.ErrComputeInvalidResult
+	analyze(true)
+	state(photos.AnalysisDone, photos.AnalysisFailed)
+	f.compute.qualityErr = nil
+	analyze(true)
+	state(photos.AnalysisDone, photos.AnalysisDone)
 }
 
 // A long video's points go to the index in batches small enough for any

@@ -74,7 +74,7 @@ func Local(next http.Handler) http.Handler {
 }
 
 type trustedHeaderKey struct{}
-type trustedHeader struct { name, value string }
+type trustedHeader struct{ name, value string }
 
 // WithInternalHeader carries a header constructed by the Product Service
 // through the proxy after browser-supplied internal headers are removed.
@@ -94,6 +94,8 @@ func onlyTheSession(ctx context.Context, header http.Header) {
 			header.Del(name)
 		}
 	}
-	if h, ok := ctx.Value(trustedHeaderKey{}).(trustedHeader); ok { header.Set(h.name, h.value) }
+	if h, ok := ctx.Value(trustedHeaderKey{}).(trustedHeader); ok {
+		header.Set(h.name, h.value)
+	}
 	header.Set(SessionHeader, accounts.SessionToken(ctx))
 }

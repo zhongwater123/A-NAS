@@ -40,7 +40,7 @@ type library struct {
 	noSpace  bool
 	lostSave int
 	retried  []string
-	removed   []string
+	removed  []string
 	// registered, when set, runs after a registration, outside the lock.
 	registered func()
 }

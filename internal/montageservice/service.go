@@ -90,7 +90,9 @@ func Run(ctx context.Context, config Config) error {
 		Open: func(ctx context.Context, root string) (*montage.Store, error) {
 			store, err := montage.Open(ctx, root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute, JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, Logger: config.Logger})
 			if err == nil {
-				if err = store.StartWorkers(ctx); err != nil { _ = store.Close() }
+				if err = store.StartWorkers(ctx); err != nil {
+					_ = store.Close()
+				}
 			}
 			return store, err
 		},

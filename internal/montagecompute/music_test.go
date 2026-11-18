@@ -79,9 +79,9 @@ worker.main(["--socket", sys.argv[1]])`, socket)
 	if !selection.Chorus || selection.Unusable != "" || selection.Seconds < 30 || selection.Seconds > 150 || len(selection.Parts) == 0 {
 		t.Fatalf("selection = %+v", selection)
 	}
-	start := 21.0
+	start := 21.0 // Equidistant downbeats snap to the earlier one, as in montage.nearest.
 	dragged, err := client.Music(ctx, montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90, Start: &start})
-	if err != nil || dragged.Excerpt != [2]float64{22, 112} || dragged.Seconds != 90 {
+	if err != nil || dragged.Excerpt != [2]float64{20, 110} || dragged.Seconds != 90 {
 		t.Fatalf("dragged = %+v, %v", dragged, err)
 	}
 	broken := structure

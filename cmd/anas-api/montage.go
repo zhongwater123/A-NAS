@@ -118,7 +118,10 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	if !config.MontageEnabled {
 		return nil, store.RemoveAccount, closeStore, nil
 	}
-	if err := store.StartWorkers(ctx); err != nil { closeStore(); return nil, nil, nil, err }
+	if err := store.StartWorkers(ctx); err != nil {
+		closeStore()
+		return nil, nil, nil, err
+	}
 	// The headers the service gets are those the socket would carry.
 	return serviceproxy.Local(montageapi.New(store, logger)), store.RemoveAccount, closeStore, nil
 }
