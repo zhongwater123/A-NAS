@@ -29,7 +29,9 @@ import (
 // seconds, black after. stopAfter,
 // when set, hangs the frames up after that many, as someone starting to use
 // the library would, by closing the gate. during, when set, runs before
-// each frame with how many were asked for.
+// each frame with how many were asked for. extra adds a frame to each range
+// of grey frames, as an FFmpeg rounding the last instant up would; failing,
+// when set, is what every request for frames answers.
 type framedVideo struct {
 	mu        sync.Mutex
 	requests  []ffmpegworker.FramesRequest
@@ -38,6 +40,8 @@ type framedVideo struct {
 	stopAfter int
 	during    func(asked int)
 	gate      *lockedGate
+	extra     bool
+	failing   error
 }
 
 // lockedGate is a gate the test and the runner's watch read at once.
@@ -98,11 +102,18 @@ func frameJPEG(patterned bool) []byte {
 func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegworker.FramesRequest, each func([]byte) error) (ffmpegworker.FramesResult, error) {
 	v.mu.Lock()
 	v.requests = append(v.requests, request)
+	extra, failing := v.extra, v.failing
 	v.mu.Unlock()
+	if failing != nil {
+		return ffmpegworker.FramesResult{}, failing
+	}
 	if request.Format == ffmpegworker.FormatGray {
 		count := len(request.Times)
 		if count == 0 {
 			count = int(math.Round((request.End - request.Start) * request.Rate))
+			if extra {
+				count++
+			}
 		}
 		for range count {
 			if err := each(make([]byte, request.Width*request.Height)); err != nil {
@@ -141,17 +152,38 @@ func (v *framedVideo) Frames(ctx context.Context, _ *os.File, request ffmpegwork
 }
 
 // fakeCompute stands in for the montage compute Worker: two cards per video,
-// halves of its windows, and every card good.
+// halves of its windows, and every card good. cut counts the times it was
+// asked for cards; hook, when set, runs first in Cards ("cards") and Quality
+// ("quality"), and its error is their answer.
 type fakeCompute struct {
 	mu         sync.Mutex
+	cut        int
 	qualities  int
 	moves      []int
 	empty      bool
 	cardsErr   error
 	qualityErr error
+	hook       func(ctx context.Context, op string) error
 }
 
-func (c *fakeCompute) Cards(_ context.Context, windows []photos.CardWindow, _ []float32, _ int, _ []bool) ([]photos.ComputedCard, error) {
+// called counts the call and runs the hook of op.
+func (c *fakeCompute) called(ctx context.Context, op string) error {
+	c.mu.Lock()
+	hook := c.hook
+	if op == "cards" {
+		c.cut++
+	}
+	c.mu.Unlock()
+	if hook == nil {
+		return nil
+	}
+	return hook(ctx, op)
+}
+
+func (c *fakeCompute) Cards(ctx context.Context, windows []photos.CardWindow, _ []float32, _ int, _ []bool) ([]photos.ComputedCard, error) {
+	if err := c.called(ctx, "cards"); err != nil {
+		return nil, err
+	}
 	if c.empty || c.cardsErr != nil {
 		return nil, c.cardsErr
 	}
@@ -174,7 +206,10 @@ func (c *fakeCompute) Keyframe(context.Context, []byte) (float64, float64, error
 func (c *fakeCompute) SharpPoints(context.Context, []byte, int, int) (float64, error) {
 	return 0, errors.New("light keyframes have no sharp points to count")
 }
-func (c *fakeCompute) Quality(_ context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
+func (c *fakeCompute) Quality(ctx context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
+	if err := c.called(ctx, "quality"); err != nil {
+		return photos.CardQuality{}, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.qualityErr != nil {
