@@ -16,7 +16,7 @@
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
   - 虚拟伙伴的动画池 `36492963e4112f55`（2026-11-10 安装，来自 A-NAS-assets 中固定的副本，#445）。
   - Caddy 是官方源的 2.11.9，另装了 `wireguard-tools`（2026-11-05，为互联网访问准备）；`/etc/a-nas/internet.env` 不存在，互联网入口关闭。
-- AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，仅供开发测试。
+- AI 助手以试用包为全部成员开启；部署转正的版本时由 `a-nas` 接管（[手册](../runbooks/enable-ai-assistant.md#从试用接管)）。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1。mount unit 带 `x-systemd.device-bound=no`，2026-11-10 重启后 `StopPropagatedFrom` 为空：一块盘坏了不再卸载整个数据卷（#441）。拔盘与更换的验收见下一步 10。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
@@ -54,7 +54,7 @@
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；#364 的修复已部署（#402），按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-7. 相册 OCR 步骤 6：在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–5 已部署（2026-11-10）。VNAS 用读出的文字回答（[方案](../architecture/photo-ocr.md#助手的工具)）已实现，未部署。
+7. 相册 OCR 步骤 6：在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–5 已部署（2026-11-10）。VNAS 用读出的文字回答（[方案](../architecture/photo-ocr.md#助手的工具)）已部署（#450）。
 8. 家庭中心 M2：认领、隐藏（[规格](../specs/family-center.md)）；数据修复与从相册加入频道已随 `61744597719c` 部署。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）已部署；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
@@ -62,6 +62,6 @@
 12. 实验 NAS 已换成软件包（见上文）。
 13. 设备镜像已接入系统更新；用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
 14. 照片打分：在第 12 步之后按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
-15. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：等用户说“开始做”；实验 NAS 改用镜像以它为前提。
-16. 剪辑中心按[交付](../architecture/montage-center.md#交付)实施，M9 等第 15 步；allin1 版权待议。
+15. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）已合并；部署后按[手册](../runbooks/enable-ai-assistant.md)核对。实验 NAS 改用镜像以它为前提。
+16. 剪辑中心按[交付](../architecture/montage-center.md#交付)实施；allin1 版权待议。
 17. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

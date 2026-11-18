@@ -1,0 +1,47 @@
+[Unit]
+Description=A-NAS assistant model gateway (DeepSeek)
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/adr/0024-run-a-sandboxed-hermes-agent-per-member.md
+After=network-online.target
+Wants=network-online.target
+# The administrator's DeepSeek key (设置 → VNAS), which the Host Agent keeps as this encrypted
+# credential. Without it the assistant is off; the Host Agent starts and stops this unit
+# when the key is saved or deleted.
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
+
+[Service]
+Type=simple
+# Holds the cloud model's key, which no sandbox and no other service can read, and forwards
+# the assistants' requests to DeepSeek. The requests carry members' files: the log keeps who
+# asked, the token usage and the tool names, never the messages, and only root reads it.
+DynamicUser=yes
+# Each member's bridge (anas-assistant-net@.service) connects as the member: the socket is
+# the group a-nas-users's, and the gateway names the member by the peer's UID.
+SupplementaryGroups=a-nas-users
+LoadCredentialEncrypted=a-nas-assistant-deepseek
+ExecStart=/usr/bin/python3 -I /usr/lib/a-nas/assistant/gateway.py /run/anas-assistant-gw/model.sock /var/log/anas-assistant-gateway/requests.jsonl
+RuntimeDirectory=anas-assistant-gw
+RuntimeDirectoryMode=0755
+LogsDirectory=anas-assistant-gateway
+LogsDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

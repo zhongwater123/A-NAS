@@ -20,4 +20,4 @@ VNAS 的窗口里没有斜杠命令。系统技能写明这一点后，模型（
 ## 关联
 
 - [AI 助手规格](../specs/ai-assistant.md)、[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
-- [试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)
+- [启用 AI 助手](../runbooks/enable-ai-assistant.md)

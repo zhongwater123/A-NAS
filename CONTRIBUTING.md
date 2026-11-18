@@ -39,9 +39,21 @@ make check
 ## 提交与 PR
 
 - `main` 只能经 PR 合并，必须通过 CI 的三项检查：“Project checks”、“Go tests with the race detector”与“System test (Debian 13, systemd)”；分支要先与 `main` 同步。
+- 只能用合并提交合并，不能 squash 或 rebase，PR 里的各个提交原样进入 `main`。合并后 GitHub 自动删除 PR 的分支。
+- 一个功能或里程碑默认一个 PR，各步骤写成单独的提交。不依赖其他 PR 的工作单开 PR，以 `main` 为基。
 - 提交信息用英文，格式为 `type(scope): summary`，常用的 type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor` 与 `ci`；正文写清为什么这样改。
 - PR 解决某个 issue 时，在描述里写 `Closes #编号`。
 - 改动影响到的文档随同一个 PR 更新：状态、规格、ADR、决定记录、调查或运行手册，规则见 [AGENTS.md 的“完工”](AGENTS.md#完工)与[文档系统](docs/README.md)。
+
+### 叠放 PR
+
+改动大到一个 PR 评审不了时，可以拆成几个相互依赖的 PR，后一个以前一个的分支为基：
+
+- 下面一层的三项 CI 检查都通过后，才能开上面一层。本地跑不了系统测试时，等 CI 的结果。
+- 最多两层：下面一层在评审，上面一层是草稿。下面一层合并后，上面一层才转为正式 PR，这时才能开再上面一层。
+- 依赖别的 PR 时，以它的分支为基，不把它的提交复制到自己的分支。
+- 下面一层合并后，GitHub 删除它的分支，把上面一层改基到 `main`；作者把上面一层与 `main` 同步，CI 重跑。
+- 下面一层改动后，由作者给上面各层变基、重跑 CI，并更新 PR 描述里的依赖与提交。本地叠了更多分支时，在最上面的分支运行 `git rebase --update-refs <新的基>`，中间各层的分支一起移动，再用 `git push --force-with-lease` 推送。
 
 ## 版权
 

@@ -321,7 +321,7 @@ ops-check:
 	test "$$(grep -c '^f /run/a-nas-ffmpeg/slots/[0-7] 0440 root a-nas-photos -$$' deploy/tmpfiles.d/a-nas.conf)" = 8
 	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
-		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant-spike/companion-mcp-sdk.txt
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant/companion-mcp-sdk.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
@@ -385,15 +385,15 @@ ai-test:
 # The companion's MCP server under the real MCP SDK (ai/tests/test_companion_mcp.py),
 # which make ai-test has not got and the assistant's runtime is not built here
 # for: a virtual environment of its own with the SDK Hermes's lock pins
-# (ai/assistant-spike/companion-mcp-sdk.txt). Without the SDK it fails.
+# (ai/assistant/companion-mcp-sdk.txt). Without the SDK it fails.
 AI_SDK_VENV ?= $(BUILD_DIR)/companion-mcp-sdk
 AI_SDK_STAMP = $(AI_SDK_VENV)/.installed
 
-$(AI_SDK_STAMP): ai/assistant-spike/companion-mcp-sdk.txt
+$(AI_SDK_STAMP): ai/assistant/companion-mcp-sdk.txt
 	rm -rf $(AI_SDK_VENV)
 	python3 -m venv $(AI_SDK_VENV)
 	$(AI_SDK_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
-		-r ai/assistant-spike/companion-mcp-sdk.txt
+		-r ai/assistant/companion-mcp-sdk.txt
 	@touch $(AI_SDK_STAMP)
 
 ai-sdk-test: $(AI_SDK_STAMP)

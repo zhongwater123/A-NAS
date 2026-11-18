@@ -4,7 +4,7 @@ CompanionToolTests stand in for the MCP SDK, which only the assistant's runtime
 has. SdkPathTests run the server under the real SDK and skip without it, unless
 ANAS_COMPANION_MCP_SDK=required, which makes the missing SDK a failure. make
 ai-sdk-test (in make check-steps, so in CI) runs them so, under the SDK
-Hermes's lock pins (ai/assistant-spike/companion-mcp-sdk.txt); the system test
+Hermes's lock pins (ai/assistant/companion-mcp-sdk.txt); the system test
 with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them under the
 runtime itself, and refuses a skip. By hand, with the runtime's Python and its
 packages (ai/assistant-spike/build-runtime.sh):
@@ -25,10 +25,10 @@ import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-SPIKE = Path(__file__).resolve().parents[1] / "assistant-spike"
-SOURCE = SPIKE / "anas_companion_mcp.py"
+ASSISTANT = Path(__file__).resolve().parents[1] / "assistant"
+SOURCE = ASSISTANT / "anas_companion_mcp.py"
 # The servers import what they share from their own folder (anas_window_call.py).
-sys.path.insert(0, str(SPIKE))
+sys.path.insert(0, str(ASSISTANT))
 SDK = bool(importlib.util.find_spec("mcp") and importlib.util.find_spec("mcp_types"))
 SDK_REQUIRED = os.environ.get("ANAS_COMPANION_MCP_SDK") == "required"
 

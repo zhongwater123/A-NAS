@@ -29,7 +29,7 @@ class UnixHTTP(http.client.HTTPConnection):
 
 def secret(user: str) -> str:
     """The instance's secret, the member's password for Hermes's login."""
-    for line in Path(f"/etc/a-nas-assistant/tokens/{user}.env").read_text().splitlines():
+    for line in Path(f"/var/lib/a-nas-host/assistant/tokens/{user}.env").read_text().splitlines():
         if line.startswith("HERMES_DASHBOARD_SESSION_TOKEN="):
             return line.split("=", 1)[1].strip()
     raise SystemExit(f"no assistant secret for {user}")
