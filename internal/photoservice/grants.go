@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -42,7 +41,7 @@ type grantServer struct {
 // grantSocket is the listener systemd hands over by the name "grants", or,
 // in development and tests, one on socketPath.
 func grantSocket(socketPath string) (net.Listener, bool, error) {
-	if listeners, err := activation.ListenersWithNames(); err == nil && len(listeners["grants"]) > 0 {
+	if listeners, err := systemdListeners(); err == nil && len(listeners["grants"]) > 0 {
 		return listeners["grants"][0], true, nil
 	}
 	if socketPath == "" {

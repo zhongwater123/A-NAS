@@ -103,7 +103,7 @@ ANAS_CONTENT_REPOSITORY=$repository "$repo/scripts/build-content-packages.sh" "$
 # Every content package this release depends on, new or already published,
 # goes into its distributions.
 debs=("${products[@]}")
-for name in $(content_packages "$repo") "$(assistant_runtime_package "$repo")"; do
+for name in $(content_packages "$repo"); do
   deb=$(find "$incoming" "$repository/pool" -name "${name}_1_*.deb" -print -quit 2>/dev/null)
   [[ -n "$deb" ]] || { echo "missing $name: its content in $content (scripts/build-content-packages.sh)" >&2; exit 2; }
   debs+=("$deb")

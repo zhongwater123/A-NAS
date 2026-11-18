@@ -116,9 +116,7 @@ func TestIndex(t *testing.T) {
 	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "images", Dimensions: 3, Keywords: []string{"libraries"}}); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() {
-		t.Error("not Warm right after a request")
-	}
+	waitForWarm(t, client)
 	// A vector of another size is refused as such, not as a connection fault.
 	if err := client.Upsert(ctx, "images", []vectorindex.Point{{Key: "short", Vector: []float32{1, 0}}}); !errors.Is(err, vectorindex.ErrRejected) {
 		t.Errorf("Upsert of a 2-d vector into 3-d = %v, want ErrRejected", err)
@@ -240,9 +238,10 @@ func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	if err := client.Prepare(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() || instance.Connections() == 0 {
-		t.Fatal("not Warm after Prepare")
+	if instance.Connections() == 0 {
+		t.Fatal("no connection after Prepare")
 	}
+	waitForWarm(t, client)
 	// Preparing again and again for longer than the idle timeout keeps the
 	// connection open.
 	for range 6 {
@@ -253,6 +252,20 @@ func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	}
 	if instance.Connections() == 0 {
 		t.Fatal("the connection closed while it was being prepared")
+	}
+}
+
+// gRPC publishes its ready picker before its connectivity state. A successful
+// RPC can therefore return before Warm observes Ready, even with a live
+// connection. Wait for that observation rather than assuming their order.
+func waitForWarm(t *testing.T, client *vectorindex.Client) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !client.Warm() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection did not become Warm")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

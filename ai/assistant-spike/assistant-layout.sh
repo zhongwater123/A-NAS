@@ -7,43 +7,37 @@
 # does not own (an impostor made after the real one was renamed). The one exception is
 # Hermes's home, which is the member's own (member_home).
 #
-# Only for the disposable spike and system-test containers. It chowns and setfacls by path
-# in folders members can write (Shared, a Hermes home) and writes the token into the product
-# service's own directory, both following links, so whoever controls those folders could
-# turn it against root. The trial on the Experimental NAS (nas-trial.sh) therefore runs
-# prepare only once, on fresh state, with the session gate (no token copies). The Host Agent opens every directory
-# with openat2(RESOLVE_NO_SYMLINKS) and O_NOFOLLOW, acts only on what it opened, and hands
-# the token to the product service in its typed response.
+# Only for the disposable spike container (run.sh): on an A-NAS the Host Agent does this
+# (internal/hostops/linux/assistant.go) and writes the same files at the same places. This
+# chowns and setfacls by path in folders members can write (Shared, a Hermes home) and writes
+# the token into the product service's own directory, both following links, so whoever
+# controls those folders could turn it against root; the Host Agent opens every directory
+# with openat2(RESOLVE_NO_SYMLINKS) and O_NOFOLLOW and acts only on what it opened.
 #
 #   assistant-layout.sh spaces  DATA ACCOUNT...   spaces and recycle bins as the Host Agent
-#                                                 makes them (spike only; the installer does
-#                                                 this on a real volume)
+#                                                 makes them
 #   assistant-layout.sh prepare DATA ACCOUNT...   Agent空间 and its member folders, the
 #                                                 assistant directories, the files Hermes's
 #                                                 home binds, then members
-#   assistant-layout.sh members DATA ACCOUNT...   what lives in root's own /etc: member config,
-#                                                 instance secrets, instance sockets; and the
-#                                                 owner of an existing Hermes home (member_home).
-#                                                 Nothing inside a folder members can write
-#                                                 (the trial's update)
+#   assistant-layout.sh members DATA ACCOUNT...   the member's settings and instance secret in
+#                                                 /var/lib/a-nas-host/assistant, the instance
+#                                                 sockets, and the owner of an existing Hermes
+#                                                 home (member_home)
 #   assistant-layout.sh quota   DATA SIZE ACCOUNT...  simple quota on the volume, SIZE per
-#                                                 assistant directory
+#                                                 assistant directory (the system test uses it
+#                                                 too: the Host Agent sets none yet)
 #   assistant-layout.sh remove  DATA ACCOUNT      what deleting the account removes
 #
-# With ASSISTANT_GATE=host-agent the Host Agent's File Broker is the session gate (ADR 0024
-# decision 10): the instance sockets stay root's and the product service gets no secret, the
-# broker hands out a connection and an access token of Hermes's login per session. Otherwise
-# (the spike, and the local UI prototype whose product service runs without a File Broker)
-# PRODUCT_USER (default a-nas) owns the instance sockets and gets a copy of each instance
-# secret in PRODUCT_TOKENS (default /run/anas-spike-tokens, which run.sh shares with the host
-# in product mode) to log in with.
+# Without the Host Agent's session gate, PRODUCT_USER (default a-nas) owns the instance
+# sockets and gets a copy of each instance secret in PRODUCT_TOKENS (default
+# /run/anas-spike-tokens, which run.sh shares with the host in product mode) to log in with.
 set -euo pipefail
-here=$(cd "$(dirname "$0")" && pwd)
 users=a-nas-users
 product_user=${PRODUCT_USER:-a-nas}
 product_tokens=${PRODUCT_TOKENS:-/run/anas-spike-tokens}
-gate=${ASSISTANT_GATE:-}
-runtime_python=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
+lib=/usr/lib/a-nas/assistant
+state=/var/lib/a-nas-host/assistant
+runtime_python=$lib/runtime/venv/bin/python
 
 # acl.go: inheritedACL, containerACL, trashRootACL.
 inherited() {
@@ -122,23 +116,11 @@ case $cmd in
     # in Shared, which members can write: the product service refuses to rename, move or delete
     # it. Product mode uses the Host Agent's managed roots; only the isolated
     # stand-in creates them here. Samba hides Agent空间 through its veto list.
-    if [[ -z "$gate" ]]; then
-      ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" owned
-    else
-      [[ -d "$data/spaces/shared/Agent空间" && ! -L "$data/spaces/shared/Agent空间" && "$(stat -c %u "$data/spaces/shared/Agent空间")" == 0 ]] || {
-        echo 'Host Agent must reconcile Agent空间 before preparing the assistant' >&2; exit 1;
-      }
-    fi
+    ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" owned
     # The change broker walks to the staging area as the member, so members pass through.
     ensure_dir "$data/assistant" "$(container)"
     for account in "$@"; do
-      if [[ -z "$gate" ]]; then
-        ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" owned
-      else
-        [[ -d "$data/spaces/shared/Agent空间/$account" && ! -L "$data/spaces/shared/Agent空间/$account" && "$(stat -c %u "$data/spaces/shared/Agent空间/$account")" == 0 ]] || {
-          echo "Host Agent must reconcile Agent空间/$account before preparing the assistant" >&2; exit 1;
-        }
-      fi
+      ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" owned
       home=$data/assistant/$account
       ensure_dir "$home" "user::rwx,group::---,other::---,user:$account:--x,mask::--x" "" subvolume
       ensure_dir "$home/files" "$(inherited "user:$account:rwx")"
@@ -152,55 +134,49 @@ case $cmd in
       # An install from before the Hermes home was the member's own left it root's with an ACL.
       [[ ! -d "$data/assistant/$account/hermes" ]] || member_home "$data/assistant/$account/hermes" "$account"
       # The instance's secret: created once, root-only; the member's password for Hermes's own
-      # login (decision 10), which the Host Agent uses for a signed-in session. Without the
-      # gate the product service gets its own copy and logs in itself.
-      install -d -m 0700 /etc/a-nas-assistant/tokens
-      if ! grep -qxE 'HERMES_DASHBOARD_SESSION_TOKEN=[0-9a-f]{64}' "/etc/a-nas-assistant/tokens/$account.env" 2>/dev/null; then
-        (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" \
-          > "/etc/a-nas-assistant/tokens/$account.env")
+      # login (decision 10). The spike's product service gets its own copy and logs in itself.
+      install -d -m 0700 "$state" "$state/tokens"
+      if ! grep -qxE 'HERMES_DASHBOARD_SESSION_TOKEN=[0-9a-f]{64}' "$state/tokens/$account.env" 2>/dev/null; then
+        (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s
+' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' 
+')"           > "$state/tokens/$account.env")
       fi
       # Hermes reads skills.external_dirs, mcp_servers (under serve) and dashboard.basic_auth
-      # from this file only. The login holds the secret's scrypt hash, made
-      # with Hermes's own hash_password; without the runtime only the probe runs, and serve,
-      # whose login gate would refuse to start without it, never does.
-      install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
+      # from this file only, as the Host Agent writes it (internal/hostops/linux/assistant.go).
+      # The login holds the secret's scrypt hash, made with Hermes's own hash_password here;
+      # without the runtime only the probe runs, and serve, whose login gate would refuse to
+      # start without it, never does.
+      member=$state/members/$account
+      install -d -m 0755 "$state/members" "$member" "$member/skills" "$member/skills/anas-member"
       hash=
       if [[ -x "$runtime_python" ]]; then
-        hash=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$account.env" | tr -d '\n' |
+        hash=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "$state/tokens/$account.env" | tr -d '
+' |
           "$runtime_python" -c 'import sys; from plugins.dashboard_auth.basic import hash_password; print(hash_password(sys.stdin.read()))')
       fi
-      { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"
-        sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$here/managed-config.yaml"
-        [[ -z "$hash" ]] || printf 'dashboard:\n  basic_auth:\n    username: %s\n    password_hash: "%s"\n' "$account" "$hash"
-      } > "/etc/a-nas-assistant/members/$account/config.yaml.new"
-      mv "/etc/a-nas-assistant/members/$account/config.yaml.new" "/etc/a-nas-assistant/members/$account/config.yaml"
-      sed "s/{{member}}/$account/g" "$here/member-skill.md" > "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
-      chmod 0644 "/etc/a-nas-assistant/members/$account/config.yaml" "/etc/a-nas-assistant/members/$account/anas-member/SKILL.md"
-      if [[ "$gate" != host-agent ]] && getent passwd "$product_user" >/dev/null; then
+      { printf 'skills:
+  external_dirs: [%s/skills, /run/anas-assistant-skills]
+' "$lib"
+        sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$lib/managed/config.yaml"
+        [[ -z "$hash" ]] || printf 'dashboard:
+  basic_auth:
+    username: %s
+    password_hash: "%s"
+' "$account" "$hash"
+      } > "$member/config.yaml.new"
+      mv "$member/config.yaml.new" "$member/config.yaml"
+      sed "s/{{member}}/$account/g" "$lib/member-skill.md" > "$member/skills/anas-member/SKILL.md"
+      chmod 0644 "$member/config.yaml" "$member/skills/anas-member/SKILL.md"
+      if getent passwd "$product_user" >/dev/null; then
         install -d -m 0700 -o "$product_user" "$product_tokens"
-        (umask 077; sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$account.env" \
-          > "$product_tokens/$account.token")
+        (umask 077; sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "$state/tokens/$account.env"           > "$product_tokens/$account.token")
         chown "$product_user" "$product_tokens/$account.token"
-      fi
-      # Token files and Linux group membership survive account disable. Ask
-      # the Host Agent even on the first install, before enabling any entry.
-      if [[ "$gate" == host-agent ]]; then
-        if python3 -I "$here/cron-waker.py" --active "$account"; then
-          :
-        else
-          status=$?
-          if [[ "$status" == 1 ]]; then continue; fi
-          echo "cannot query active identity for $account; assistant installation incomplete" >&2
-          exit "$status"
-        fi
       fi
       for template in anas-assistant-api@.socket anas-assistant-curator@.timer; do
         [[ -f /etc/systemd/system/$template ]] || continue
         unit=${template/@./@$account.}
-        # Account disable masks all assistant entry points. An update must
-        # preserve that decision instead of re-enabling them or failing here.
-        state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
-        [[ "$state" == masked || "$state" == masked-runtime ]] && continue
+        state_of=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+        [[ "$state_of" == masked || "$state_of" == masked-runtime ]] && continue
         systemctl enable --now --quiet "$unit"
       done
     done
@@ -214,8 +190,8 @@ case $cmd in
     account=${1:?account}
     systemctl disable --now --quiet "anas-assistant-api@$account.socket" "anas-assistant-curator@$account.timer" 2>/dev/null || true
     systemctl stop "anas-assistant-api@$account.service" "anas-assistant@$account.service" 2>/dev/null || true
-    rm -f "/etc/a-nas-assistant/tokens/$account.env" "$product_tokens/$account.token"
-    rm -rf "/etc/a-nas-assistant/members/$account"
+    rm -f "$state/tokens/$account.env" "$product_tokens/$account.token"
+    rm -rf "${state:?}/members/$account"
     if [[ -d "$data/assistant/$account" ]]; then
       if btrfs subvolume show "$data/assistant/$account" >/dev/null 2>&1; then
         btrfs subvolume delete "$data/assistant/$account" >/dev/null
@@ -227,7 +203,7 @@ case $cmd in
     # like the member's recycle bins, is decided with account deletion (#26).
     ;;
   *)
-    sed -n '2,29p' "$0"
+    sed -n '2,32p' "$0"
     exit 2
     ;;
 esac
