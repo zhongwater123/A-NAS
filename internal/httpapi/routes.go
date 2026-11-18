@@ -86,6 +86,9 @@ func (h *productHandler) table() []apiroute.Route {
 	if h.SystemUpdate != nil {
 		routes = append(routes, h.SystemUpdate.Routes()...)
 	}
+	if h.AssistantKey != nil {
+		routes = append(routes, h.AssistantKey.Routes()...)
+	}
 	return append(routes, h.mounts()...)
 }
 

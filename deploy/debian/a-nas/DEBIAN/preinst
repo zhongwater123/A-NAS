@@ -28,6 +28,15 @@ for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-mo
   fi
 done
 
+# The AI assistant's trial (a-nas-assistant-trial before the assistant was part
+# of a-nas) runs its scripts from that package, which the upgrade empties: what
+# runs of it stops now, and the postinst takes the trial over.
+if [[ -d /run/systemd/system && -L /spike ]]; then
+  systemctl stop anas-assistant-cron-waker.service 2>/dev/null || true
+  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+    'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
+fi
+
 # The databases a release writes: the system disk's, and the data volume's
 # stores while it is mounted. Each is copied before every upgrade, rollback
 # or installation that finds it: one left by a removed release, or by an

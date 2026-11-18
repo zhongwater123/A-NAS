@@ -23,9 +23,9 @@
 # Needs Docker and Go. Prints PASS/FAIL lines and exits non-zero on any
 # failure.
 #
-# The AI assistant's sandbox (ai/assistant-spike/system-test.sh) runs without
-# Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the spike's runtime.tar.gz
-# adds its policy check and a real assistant against a scripted model.
+# The AI assistant (ai/assistant-spike/system-test.sh) runs on the content
+# packages' stand-in Hermes; ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME naming the runtime.tar.gz
+# ai/assistant/runtime.json pins adds its policy check and a real assistant against a scripted model.
 #
 # The content packages (scripts/build-content-packages.sh) are stand-ins:
 # local AI runs on stand-in models and runtime with the Worker's fake
@@ -2585,6 +2585,10 @@ ip link del anas-relay
 . /src/ai/assistant-spike/system-test.sh
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/disable-system-test.sh
+# The assistant's tests bound the Host Agent's change socket over the sandboxes' empty mount
+# point on the host itself, to call it as alice; on a device only each sandbox binds it. The
+# package's tmpfiles.d, which every install below applies, wants the empty file there.
+umount /run/anas-change-agent/agent.sock 2>/dev/null || true
 
 # --- Upgrade, roll back and upgrade again (ADR 0034), with apt from the
 # signed repository. The next release adds a step to control.db; rolling back,

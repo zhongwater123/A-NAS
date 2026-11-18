@@ -6,7 +6,7 @@ set -uo pipefail
 user=${1:-alice}
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 log=/var/log/fake-model.jsonl
-member=/etc/a-nas-assistant/members/$user/config.yaml
+member=/var/lib/a-nas-host/assistant/members/$user/config.yaml
 offered() {  # tool lists the fake model saw since line $1
   tail -n +$(($1 + 1)) "$log" | python3 -c '
 import json, sys
@@ -19,14 +19,14 @@ for line in sys.stdin:
 restart() { systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null; }
 
 echo "=== 1. the managed policy written for the API Server"
-cp -p /etc/hermes/config.yaml /var/tmp/managed.yaml
+cp -p /usr/lib/a-nas/assistant/managed/config.yaml /var/tmp/managed.yaml
 grep -v '^  cli: ' /var/tmp/managed.yaml |
   sed -e '/^  disabled_toolsets:/,/coding\]$/c\  disabled_toolsets: [terminal, code_execution, browser, web, cronjob, delegation, image_gen, tts, x_search, computer_use, kanban]' \
-      -e '/^  coding_context:/d' > /etc/hermes/config.yaml
+      -e '/^  coding_context:/d' > /usr/lib/a-nas/assistant/managed/config.yaml
 restart; before=$(wc -l < "$log")
 "$py" /spike/serve_client.py "$user" chat hello | sed -n '2,3p'
 offered "$before"
-cp -p /var/tmp/managed.yaml /etc/hermes/config.yaml
+cp -p /var/tmp/managed.yaml /usr/lib/a-nas/assistant/managed/config.yaml
 
 echo "=== 2. hostile member config.yaml in a git workspace"
 cp -p "$member" /var/tmp/member.yaml

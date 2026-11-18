@@ -176,6 +176,27 @@ func TestTheTasksWaitingForOneMemberAreBounded(t *testing.T) {
 	}
 }
 
+// Without the administrator's model key no round has a model, and a request left waiting
+// would run whenever a key is saved again.
+func TestRunningATaskNowIsOffWithoutTheModelKey(t *testing.T) {
+	asked := &rounds{}
+	runs := filepath.Join(t.TempDir(), "assistant-runs")
+	h := newAssistantHarness(t, func(config *Config) {
+		config.AssistantRuns, config.StartAssistantRound = runs, asked.start
+		config.AssistantOn = func() bool { return false }
+	})
+	member := accountid.WithSessionToken(context.Background(), "member-token")
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); !errors.Is(err, wire.ErrUnavailable) {
+		t.Fatalf("RunAssistantTask() error = %v, want ErrUnavailable", err)
+	}
+	if got := waiting(t, runs, "alice"); len(got) != 0 {
+		t.Fatalf("waiting without a key = %v", got)
+	}
+	if got := asked.asked(); len(got) != 0 {
+		t.Fatalf("rounds started = %v", got)
+	}
+}
+
 func TestRunningATaskNowIsOffWithoutItsDirectory(t *testing.T) {
 	asked := &rounds{}
 	h := newAssistantHarness(t, func(config *Config) { config.StartAssistantRound = asked.start })

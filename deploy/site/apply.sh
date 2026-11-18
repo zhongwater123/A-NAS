@@ -5,6 +5,11 @@
 #
 # - SearXNG's secret, made once: it signs web search's thumbnail addresses,
 #   and the Product Service reads it to sign them as well (ADR 0030);
+# - the machine's own credential key, made once: it encrypts the AI
+#   assistant's model key, which the Host Agent saves but may not write where
+#   systemd keeps this key (ADR 0024). Made here, on the machine itself, also
+#   on a device whose product is a system extension, whose package scripts
+#   never run; never in an image, which would give every device the same key;
 # - the fan sensor drivers that find a chip (docs/specs/device-temperatures.md);
 # - the LAN Web entry's Caddy site (ADR 0012), and the
 #   internet entry's HTTPS site in it, when /etc/a-nas/internet.env turns the
@@ -39,6 +44,10 @@ if ! grep -Eqx 'SEARXNG_SECRET=[0-9a-f]{64}' /etc/a-nas/search.env 2>/dev/null; 
 fi
 chown root:a-nas /etc/a-nas/search.env
 chmod 0640 /etc/a-nas/search.env
+
+# Does nothing when the key is there already.
+systemd-creds setup >/dev/null 2>&1 ||
+  fail "systemd-creds setup failed: the AI assistant's model key cannot be saved (docs/runbooks/enable-ai-assistant.md)"
 
 # Loading a driver only reads the chip and changes no fan setting. The
 # in-kernel drivers of the common chips find no device on a board without one,
