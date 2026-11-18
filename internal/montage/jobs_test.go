@@ -889,3 +889,28 @@ func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
 		t.Fatalf("old song after cancellation = %v", err)
 	}
 }
+
+func TestFullProjectStillShowsTheSavedFilmAndItsVideos(t *testing.T) {
+	env := newJobEnv(t)
+	job := env.generate(t, "generate")
+	if done := env.settle(t, job.ID); done.State != montage.JobDone {
+		t.Fatalf("job = %+v", done)
+	}
+	ids := make([]string, montage.MaxAssets-len(env.project.Assets))
+	for i := range ids {
+		ids[i] = fmt.Sprintf("asset:extra-%d", i)
+		env.lib.add(ids[i], "user:alice", fmt.Sprintf("object:extra-%d", i), 1)
+	}
+	project, err := env.store.AddAssets(t.Context(), "user:alice", "alice", env.project.ID, "full-project", ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Assets) != montage.MaxAssets || len(project.Versions) != 1 || project.Versions[0].Gone {
+		t.Fatalf("project: %d videos, versions %+v", len(project.Assets), project.Versions)
+	}
+	for _, asset := range project.Assets {
+		if asset.Status != montage.AssetAvailable {
+			t.Errorf("%s: %s", asset.AssetID, asset.Status)
+		}
+	}
+}

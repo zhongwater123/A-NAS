@@ -7,6 +7,8 @@ import (
 	"io"
 )
 
+type filmKey struct{ owner, version string }
+
 // SaveFilm imports a film the montage center made into the owner's private
 // library and adds it to the grant, so the center can reach it like the
 // videos it was cut from. A film is saved once per (owner, versionKey): a
@@ -20,10 +22,13 @@ func (s *Service) SaveFilm(ctx context.Context, owner Principal, grantID, versio
 	if versionKey == "" || len(versionKey) > 256 {
 		return "", ErrInvalidName
 	}
-	s.filmMu.Lock()
-	defer s.filmMu.Unlock()
+	release, err := s.filmMu.Lock(ctx, filmKey{owner.UserID, versionKey})
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	var saved string
-	err := s.db.QueryRowContext(ctx, "SELECT asset_id FROM montage_films WHERE owner_user_id = ? AND version_key = ?", owner.UserID, versionKey).Scan(&saved)
+	err = s.db.QueryRowContext(ctx, "SELECT asset_id FROM montage_films WHERE owner_user_id = ? AND version_key = ?", owner.UserID, versionKey).Scan(&saved)
 	if err == nil {
 		return saved, nil
 	}

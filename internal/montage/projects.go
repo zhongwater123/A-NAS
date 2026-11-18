@@ -458,7 +458,7 @@ func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, n
 	if !printable(requestKey, MaxRequestKey) || !validText(name, MaxNameRunes) {
 		return ProjectDetail{}, false, ErrInvalid
 	}
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return ProjectDetail{}, false, err
 	}
@@ -490,7 +490,7 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 	if !printable(requestKey, MaxRequestKey) {
 		return ProjectDetail{}, ErrInvalid
 	}
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return ProjectDetail{}, err
 	}
@@ -631,17 +631,15 @@ func (s *Store) lookup(ctx context.Context, grantID string, ids []string) (map[s
 	if grantID == "" {
 		return status, nil
 	}
-	for chunk := range slices.Chunk(ids, MaxAssets) {
-		looked, err := s.grants.Lookup(ctx, grantID, chunk)
-		if photosapi.GrantErrorCode(err) == photosapi.GrantNotFound {
-			return map[string]photos.GrantedAsset{}, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, asset := range looked {
-			status[asset.AssetID] = asset
-		}
+	looked, err := s.lookupAssets(ctx, grantID, ids)
+	if photosapi.GrantErrorCode(err) == photosapi.GrantNotFound {
+		return status, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, asset := range looked {
+		status[asset.AssetID] = asset
 	}
 	return status, nil
 }
@@ -697,7 +695,7 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 // until it goes through. The videos and the films stay in the photo
 // library.
 func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) error {
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -898,7 +896,7 @@ func (s *Store) owners(ctx context.Context) ([]string, error) {
 }
 
 func (s *Store) reconcileMember(ctx context.Context, owner string, grants []photos.Grant, seen map[string]bool, first bool) error {
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -1002,7 +1000,7 @@ func (s *Store) unfinishedBatches(ctx context.Context, owner string) ([]batchRow
 // RemoveAccount forgets a deleted account's projects. Its grants went with
 // the photo library's own step, which runs first.
 func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
-	unlock, err := s.members.lock(ctx, userID)
+	unlock, err := s.members.Lock(ctx, userID)
 	if err != nil {
 		return err
 	}

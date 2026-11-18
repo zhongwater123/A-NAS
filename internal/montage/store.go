@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/keylock"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -242,7 +243,7 @@ type Store struct {
 	admits func(path string, incoming int64) (bool, error)
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
-	members memberLocks
+	members keylock.Map[string]
 	// reconciling runs one round of Reconcile at a time. reconciled is set
 	// once a round went through; seen are the unfinished batches the last
 	// round found, which the next one settles.

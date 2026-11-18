@@ -296,7 +296,7 @@ func (s *Store) versionOf(ctx context.Context, jobID string) (*Version, error) {
 // Cancel stops owner's job: a queued or waiting one at once, a running one
 // once its step can stop; a film it made is not saved.
 func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return Job{}, err
 	}
@@ -352,7 +352,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	if err != nil {
 		return Job{}, err
 	}
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return Job{}, err
 	}
@@ -410,7 +410,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 // RetryAnalysis asks the photo library to analyse again the videos whose
 // analysis failed, and goes on.
 func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, error) {
-	unlock, err := s.members.lock(ctx, owner)
+	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
 		return Job{}, err
 	}
