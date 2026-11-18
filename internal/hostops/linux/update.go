@@ -39,7 +39,8 @@ func (e *Executor) updateRunning(ctx context.Context) (bool, error) {
 
 // SystemUpdate reads the state the service left. A state that says an install
 // is under way while no run is in progress was left by a run that stopped;
-// the service is started to finish it.
+// the service is started to finish it, as it is after the restart into a new
+// base image.
 //
 // Whether a run is in progress is asked first: a run saves its state before
 // it ends, so a run seen ended has left its state for the read that follows.
@@ -56,7 +57,11 @@ func (e *Executor) SystemUpdate(ctx context.Context) (systemupdate.Status, error
 	if err != nil {
 		return systemupdate.Status{}, err
 	}
-	if state.Phase.Busy() && !running {
+	// On a device that runs the A-NAS image, a restart since a new base was
+	// written waits for a run too: the page that loads first after the
+	// restart shows how it went.
+	bootID := updater.ReadBootID(filepath.Join(e.systemRoot, "proc", "sys", "kernel", "random", "boot_id"))
+	if state.Unsettled(bootID) && !running {
 		if output, err := e.runner.Run(ctx, "systemctl", []string{"start", "--no-block", updateUnit}, ""); err != nil {
 			return systemupdate.Status{}, commandError("finish the stopped system update", err, output)
 		}

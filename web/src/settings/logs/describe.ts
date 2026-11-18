@@ -251,6 +251,11 @@ function describeSystemUpdate(action: string, actor: Part, raw?: string): Descri
       return { parts: [actor, text("by") === "automatic" ? "请求安装 A-NAS" : "开始安装 A-NAS", version], meta: [] };
     case "revert":
       return { parts: [actor, "开始回到 A-NAS", version], meta: [] };
+    case "restart":
+      return {
+        parts: [actor, text("by") === "automatic" ? "请求重启设备以使用 A-NAS" : "重启了设备以使用 A-NAS", version],
+        meta: [],
+      };
     case "settings":
       return {
         parts: [actor, "修改了系统更新设置"],

@@ -238,8 +238,8 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	memberRequest.AddCookie(responseCookies[0])
 	missingCSRF := httptest.NewRecorder()
 	handler.ServeHTTP(missingCSRF, memberRequest)
-	if got, want := missingCSRF.Code, http.StatusForbidden; got != want {
-		t.Fatalf("missing CSRF status = %d, want %d", got, want)
+	if got, want := missingCSRF.Code, http.StatusForbidden; got != want || !refusedForCSRF(missingCSRF) {
+		t.Fatalf("missing CSRF status = %d, want %d as csrf_failed; body=%s", got, want, missingCSRF.Body.String())
 	}
 
 	memberRequest = httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewBufferString(`{"username":"alice","password":"alice password for testing"}`))
@@ -263,7 +263,7 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	memberTerminalRequest.AddCookie(&http.Cookie{Name: "anas_session", Value: memberSession.Token})
 	memberTerminal := httptest.NewRecorder()
 	handler.ServeHTTP(memberTerminal, memberTerminalRequest)
-	if got, want := memberTerminal.Code, http.StatusForbidden; got != want || terminalCalls != 1 {
+	if got, want := memberTerminal.Code, http.StatusForbidden; got != want || terminalCalls != 1 || refusedBySessionGuard(memberTerminal) {
 		t.Fatalf("member terminal status/calls = %d/%d, want %d/1", got, terminalCalls, want)
 	}
 	resetRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+createdMember.ID+"/credential", bytes.NewBufferString(`{"password":"alice reset password"}`))

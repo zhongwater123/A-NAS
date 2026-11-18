@@ -1,22 +1,29 @@
-import { FolderClosed, ListTodo, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
+import { ListTodo, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
 import { appProject } from "../docker/model";
-import { FamilyGlyph } from "../family/FamilyGlyph";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
 import { displayName } from "../people/people";
 import { PhotosGlyph } from "../photos/PhotosGlyph";
-import { ScoringGlyph } from "../scoring/ScoringGlyph";
 import type { ScoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
 import { lazyCode } from "../ui/lazyCode";
-import { WebSearchGlyph } from "../websearch/WebSearchGlyph";
-import { BackupCenterIcon, MusicIcon, TransferCenterIcon } from "./AppIconArtwork";
+import {
+  AppCenterIcon,
+  BackupCenterIcon,
+  FamilyCenterIcon,
+  FileManagerIcon,
+  MusicIcon,
+  PhotoScoringIcon,
+  RecycleBinIcon,
+  TransferCenterIcon,
+  WebSearchIcon,
+} from "./AppIconArtwork";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
@@ -152,7 +159,7 @@ const definitions = {
   },
   files: {
     title: "文件管理",
-    icon: FolderClosed,
+    icon: FileManagerIcon,
     tone: "files",
     bounds: { x: 230, y: 70, width: 900, height: 620 },
     launcher: { id: "files", keywords: "文件 共享 上传 shared" },
@@ -170,7 +177,7 @@ const definitions = {
   },
   trash: {
     title: "回收站",
-    icon: Trash2,
+    icon: RecycleBinIcon,
     tone: "trash",
     bounds: { x: 260, y: 76, width: 920, height: 620 },
     launcher: { id: "trash", keywords: "删除 恢复" },
@@ -193,7 +200,7 @@ const definitions = {
   },
   store: {
     title: "应用中心",
-    icon: ShoppingBag,
+    icon: AppCenterIcon,
     tone: "store",
     bounds: { x: 300, y: 60, width: 940, height: 660 },
     launcher: { id: "store", keywords: "应用 安装 商店 app", adminOnly: true },
@@ -276,7 +283,7 @@ const definitions = {
   },
   websearch: {
     title: "网页搜索",
-    icon: WebSearchGlyph,
+    icon: WebSearchIcon,
     tone: "websearch",
     bounds: { x: 240, y: 50, width: 1040, height: 700 },
     launcher: {
@@ -288,7 +295,7 @@ const definitions = {
   },
   family: {
     title: "家庭中心",
-    icon: FamilyGlyph,
+    icon: FamilyCenterIcon,
     tone: "family",
     bounds: { x: 200, y: 44, width: 1120, height: 730 },
     launcher: { id: "family", keywords: "家庭 宝宝 成长 疫苗 身高 体重 大事记 亲友 family baby" },
@@ -314,7 +321,7 @@ const definitions = {
   },
   scoring: {
     title: "照片打分",
-    icon: ScoringGlyph,
+    icon: PhotoScoringIcon,
     tone: "scoring",
     bounds: { x: 180, y: 40, width: 1180, height: 760 },
     launcher: {

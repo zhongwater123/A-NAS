@@ -12,6 +12,7 @@ type (
 	State    = systemupdate.State
 	Request  = systemupdate.Request
 	Status   = systemupdate.Status
+	Image    = systemupdate.Image
 )
 
 const (
@@ -23,6 +24,8 @@ const (
 	PhaseRollingBack    = systemupdate.PhaseRollingBack
 	PhaseRolledBack     = systemupdate.PhaseRolledBack
 	PhaseCheckFailed    = systemupdate.PhaseCheckFailed
+	PhaseRestartPending = systemupdate.PhaseRestartPending
+	ProblemBoot         = systemupdate.ProblemBoot
 	ProblemUnreachable  = systemupdate.ProblemUnreachable
 	ProblemSignature    = systemupdate.ProblemSignature
 	ProblemDiskSpace    = systemupdate.ProblemDiskSpace
@@ -44,6 +47,7 @@ const (
 	RequestInstall      = systemupdate.RequestInstall
 	RequestRevert       = systemupdate.RequestRevert
 	RequestBoot         = systemupdate.RequestBoot
+	RequestRestart      = systemupdate.RequestRestart
 	ByAutomatic         = systemupdate.ByAutomatic
 )
 
