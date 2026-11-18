@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
@@ -35,7 +34,7 @@ func (l tracks) OpenTrack(_ context.Context, actor accounts.User, id string) (mu
 	if err != nil {
 		l.t.Fatal(err)
 	}
-	return music.Stream{Content: files.Content{Name: "song.flac", SizeBytes: l.track.SizeBytes, Reader: file}, Track: l.track}, nil
+	return music.Stream{Name: "song.flac", SizeBytes: l.track.SizeBytes, Reader: file, Track: l.track}, nil
 }
 
 func TestCopySongAnswersWhatTheLibraryKnowsWithoutCopying(t *testing.T) {
