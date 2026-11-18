@@ -15,6 +15,16 @@ A round costs a gateway's start, so a round that left every job it was started f
 before holds the next one back: HOLD seconds, doubling up to HOLD_MAX, until a job is newly due
 or one of them moves. Such a job is one Hermes does not take up, or one the member's own
 processes wrote into the store, which is the member's file.
+
+The montage center's planning (docs/architecture/montage-center.md, 发起与结束) starts rounds
+too. The montage service leaves an empty file in MARKERS for each member with a job waiting for
+a plan; this loop picks the first member who may plan now (an account in use with an assistant,
+a planning grant under seven days old with rounds left, their unit not running, not backing off),
+gives the round a token in PLAN_RUN (run-requests.sh moves it into the round, where
+montage_round.py claims a round), and starts their unit. One planning round on the whole device
+at a time: the next waits until the unit that took the token stops, or runs again under another
+invocation. Each grant's rounds are counted in PLAN_STATE, before the token is given; a token
+the unit never took is given back. A member whose marker outlived their round backs off.
 """
 import hashlib
 import http.client
@@ -45,6 +55,15 @@ RUNS = os.environ.get("ANAS_ASSISTANT_RUN_DIR", "/run/a-nas/assistant-runs")
 HOLD = 120
 HOLD_MAX = 3600
 MARKS = 256
+# The montage center's planning markers, its grants, the tokens given to rounds, and the counts.
+MARKERS = os.environ.get("ANAS_MONTAGE_PLAN_MARKERS", "/run/a-nas-montage/plans")
+GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas/assistant-plans")
+PLAN_RUN = os.environ.get("ANAS_MONTAGE_PLAN_RUN", "/run/anas-assistant-montage-plans")
+PLAN_STATE = os.environ.get("ANAS_MONTAGE_PLAN_STATE", "/var/lib/anas-assistant-cron-waker/plans.json")
+GRANT_LIFE = 7 * 24 * 3600
+PLAN_BACKOFF = 120
+PLAN_BACKOFF_MAX = 3600
+START_GRACE = 60
 
 
 def accounts():
@@ -191,6 +210,132 @@ def wake(account):
     print(f"started {unit}" + (f" (round {spent + 1} for the same due jobs)" if spent else ""), flush=True)
 
 
+def unit_state(unit):
+    """(running, invocation) of a unit: a oneshot round is activating while it runs."""
+    shown = subprocess.run(
+        ["/usr/bin/systemctl", "show", "-p", "ActiveState", "-p", "InvocationID", unit],
+        check=False, timeout=COMMAND_TIMEOUT, capture_output=True, text=True,
+    ).stdout
+    fields = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+    return fields.get("ActiveState") in {"activating", "active", "reloading", "deactivating"}, fields.get("InvocationID", "")
+
+
+def load_plans():
+    try:
+        with open(PLAN_STATE, encoding="utf-8") as source:
+            state = json.load(source)
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    state.setdefault("counts", {})
+    state.setdefault("backoff", {})
+    state.setdefault("slot", None)
+    return state
+
+
+def save_plans(state):
+    os.makedirs(os.path.dirname(PLAN_STATE), mode=0o700, exist_ok=True)
+    partial = f"{PLAN_STATE}.{os.getpid()}"
+    with open(partial, "w", encoding="utf-8") as out:
+        json.dump(state, out)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(partial, PLAN_STATE)
+
+
+def plan_grant(account, now):
+    """(issued, rounds) of the member's planning grant while it lasts, or None."""
+    try:
+        info = os.lstat(f"{GRANTS}/{account}")
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+            return None
+        with open(f"{GRANTS}/{account}", encoding="utf-8") as source:
+            grant = json.load(source)
+        issued = datetime.fromisoformat(grant["issuedAt"]).timestamp()
+        rounds = int(grant["rounds"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not 0 <= now - issued <= GRANT_LIFE:
+        return None
+    return grant["issuedAt"], rounds
+
+
+def marked():
+    """The members with a job waiting for a plan, the longest waiting first."""
+    try:
+        entries = [(e.stat(follow_symlinks=False).st_mtime, e.name) for e in os.scandir(MARKERS)
+                   if ACCOUNT.fullmatch(e.name) and e.is_file(follow_symlinks=False)]
+    except OSError:
+        return []
+    return [name for _, name in sorted(entries)]
+
+
+def slot_over(state, now):
+    """Whether the planning round given out has stopped; settles its token and its count."""
+    slot = state["slot"]
+    if not slot:
+        return True
+    account, unit = slot["account"], f"anas-assistant-cron@{slot['account']}.service"
+    running, invocation = unit_state(unit)
+    if running and (not slot["invocation"] or slot["invocation"] == invocation):
+        slot["invocation"] = invocation
+        return False
+    if not running and not slot["invocation"] and now - slot["released"] < START_GRACE:
+        return False  # not started yet
+    token = f"{PLAN_RUN}/{account}"
+    if os.path.lexists(token):
+        # No round took it: the unit did not start, or ran before it was there. Given back.
+        os.unlink(token)
+        key = slot["grant"]
+        state["counts"][key] = max(0, state["counts"].get(key, 1) - 1)
+    if account in marked():
+        # Its marker outlived the round: nothing claimed. Wait before the member's next one.
+        held = state["backoff"].get(account, {"n": 0})
+        n = held["n"] + 1
+        state["backoff"][account] = {"n": n, "until": now + min(PLAN_BACKOFF * 2 ** (n - 1), PLAN_BACKOFF_MAX)}
+    else:
+        state["backoff"].pop(account, None)
+    state["slot"] = None
+    return True
+
+
+def plan_cycle():
+    """Give one member waiting for a plan a round, while no planning round runs."""
+    now = time.time()
+    state = load_plans()
+    if not slot_over(state, now):
+        save_plans(state)
+        return
+    for account in marked():
+        unit = f"anas-assistant-cron@{account}.service"
+        grant = plan_grant(account, now)
+        if grant is None or not os.path.isfile(f"{TOKENS}/{account}.env"):
+            continue
+        key = f"{account}|{grant[0]}"
+        if state["counts"].get(key, 0) >= grant[1]:
+            continue
+        if state["backoff"].get(account, {}).get("until", 0) > now or running(unit) or not active_account(account):
+            continue
+        state["counts"][key] = state["counts"].get(key, 0) + 1
+        state["slot"] = {"account": account, "grant": key, "invocation": "", "released": now}
+        save_plans(state)
+        os.makedirs(PLAN_RUN, mode=0o700, exist_ok=True)
+        with open(f"{PLAN_RUN}/{account}", "x", encoding="utf-8"):
+            pass
+        try:
+            subprocess.run(["/usr/bin/systemctl", "start", "--no-block", unit], check=True, timeout=COMMAND_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            os.unlink(f"{PLAN_RUN}/{account}")
+            state["counts"][key] -= 1
+            state["slot"] = None
+            save_plans(state)
+            raise
+        print(f"started {unit} to plan (round {state['counts'][key]} of the grant)", flush=True)
+        return
+    save_plans(state)
+
+
 def run_cycle():
     # A member's file, filesystem or systemctl request cannot indefinitely hold
     # up the others. subprocess.run kills and reaps a timed-out worker.
@@ -207,6 +352,10 @@ def run_cycle():
 def main():
     while True:
         run_cycle()
+        try:
+            plan_cycle()
+        except Exception as error:  # noqa: BLE001 - planning never stops the members' own tasks.
+            print(f"planning skipped: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
         time.sleep(INTERVAL)
 
 

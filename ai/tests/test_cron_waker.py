@@ -262,3 +262,112 @@ class WakeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanningTests(unittest.TestCase):
+    """The montage center's planning rounds (docs/architecture/montage-center.md, 发起与结束)."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        root = Path(self.temporary.name)
+        paths = {"MARKERS": root / "markers", "GRANTS": root / "grants", "PLAN_RUN": root / "run",
+                 "PLAN_STATE": root / "state/plans.json", "TOKENS": root / "tokens"}
+        for name, path in paths.items():
+            self.addCleanup(setattr, waker, name, getattr(waker, name))
+            setattr(waker, name, str(path))
+        for path in ("markers", "grants", "tokens"):
+            (root / path).mkdir()
+        self.root = root
+        self.now = 1_800_000_000.0
+        self.units = {}  # unit: (running, invocation)
+        self.started = []
+
+        def start(command, **_kwargs):
+            unit = command[-1]
+            self.started.append(unit)
+            self.units[unit] = (True, f"inv-{len(self.started)}")
+            return subprocess.CompletedProcess(command, 0)
+
+        patches = [patch.object(waker, "unit_state", lambda unit: self.units.get(unit, (False, ""))),
+                   patch.object(waker, "running", lambda unit: self.units.get(unit, (False, ""))[0]),
+                   patch.object(waker, "active_account", lambda account: account != "carol"),
+                   patch.object(waker.subprocess, "run", start),
+                   patch.object(waker.time, "time", lambda: self.now)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def member(self, account, *, issued=None, rounds=5, marker_age=0):
+        (self.root / "tokens" / f"{account}.env").write_text("x")
+        issued = issued if issued is not None else self.now - 60
+        stamp = datetime.fromtimestamp(issued, UTC).isoformat()
+        (self.root / "grants" / account).write_text(json.dumps({"issuedAt": stamp, "rounds": rounds}))
+        marker = self.root / "markers" / account
+        marker.write_text("")
+        os.utime(marker, (self.now - marker_age, self.now - marker_age))
+
+    def end_round(self, account, *, took_token=True, claimed=True):
+        unit = f"anas-assistant-cron@{account}.service"
+        self.units[unit] = (False, "")
+        if took_token:
+            (self.root / "run" / account).unlink(missing_ok=True)
+        if claimed:
+            (self.root / "markers" / account).unlink(missing_ok=True)
+
+    def test_one_planning_round_at_a_time_for_the_member_waiting_longest(self):
+        self.member("alice", marker_age=10)
+        self.member("bob", marker_age=60)
+        waker.plan_cycle()
+        self.assertEqual(self.started, ["anas-assistant-cron@bob.service"])
+        self.assertTrue((self.root / "run" / "bob").exists())
+        waker.plan_cycle()
+        self.assertEqual(len(self.started), 1, "a second planning round while one runs")
+        self.end_round("bob")
+        waker.plan_cycle()
+        self.assertEqual(self.started[-1], "anas-assistant-cron@alice.service")
+
+    def test_without_a_grant_rounds_left_or_an_active_account_no_unit_starts(self):
+        self.member("alice", issued=self.now - 8 * 24 * 3600)
+        self.member("bob", rounds=0)
+        self.member("carol")
+        (self.root / "tokens" / "dave.env").unlink(missing_ok=True)
+        (self.root / "markers" / "dave").write_text("")
+        waker.plan_cycle()
+        self.assertEqual(self.started, [])
+
+    def test_a_grant_gives_five_rounds_and_a_token_not_taken_is_given_back(self):
+        self.member("alice", rounds=2)
+        waker.plan_cycle()
+        # The unit ran without taking the token: the round is given back.
+        self.end_round("alice", took_token=False, claimed=False)
+        self.now += waker.START_GRACE + 1
+        waker.plan_cycle()
+        state = json.loads(Path(waker.PLAN_STATE).read_text())
+        self.assertEqual(sum(state["counts"].values()), 0)
+        self.assertIn("alice", state["backoff"])
+        # After the backoff: two rounds taken and claimed, then no more.
+        for _ in range(2):
+            self.now += 3600
+            (self.root / "markers" / "alice").write_text("")
+            waker.plan_cycle()
+            self.end_round("alice")
+            self.now += waker.START_GRACE + 1
+            waker.plan_cycle()  # settles the round: claimed, so no backoff
+        self.assertEqual(len(self.started), 3)
+        self.now += 3600
+        (self.root / "markers" / "alice").write_text("")
+        waker.plan_cycle()
+        self.assertEqual(len(self.started), 3, "a third round on a grant of two")
+
+    def test_the_members_own_run_under_another_invocation_frees_the_slot(self):
+        self.member("alice")
+        self.member("bob", marker_age=5)
+        waker.plan_cycle()
+        first = self.started[-1]
+        waker.plan_cycle()  # records the invocation
+        self.units[first] = (True, "another-invocation")
+        self.end_round(first.split("@")[1].split(".")[0], claimed=True)
+        self.units[first] = (True, "another-invocation")
+        waker.plan_cycle()
+        self.assertEqual(len(self.started), 2)
