@@ -6,7 +6,7 @@ import { APIError } from "./client";
 // remain diagnostic data on APIError, never the fallback presented to users.
 const messages: Record<string, string> = {
   photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
-  montage_unavailable: "剪辑中心暂时不可用：数据卷未就绪或为只读，请检查存储状态后重试",
+  montage_unavailable: "剪辑中心暂不可用，请稍后重试",
   ai_unavailable: "暂时无法识别图片，请稍后再试",
   ...accountErrors,
   ...nameErrors,
