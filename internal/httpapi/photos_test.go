@@ -91,7 +91,7 @@ func TestPhotoAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 		handler.ServeHTTP(recorder, request)
 		return recorder
 	}
-	if response := create("wrong"); response.Code != http.StatusForbidden {
+	if response := create("wrong"); !refusedForCSRF(response) {
 		t.Fatalf("write without CSRF status = %d", response.Code)
 	}
 	if response := create(session.CSRFToken); response.Code != http.StatusCreated {
@@ -128,6 +128,9 @@ func (c *apiClient) call(method, path string, body any, wantStatus int, target a
 	c.handler.ServeHTTP(recorder, request)
 	if recorder.Code != wantStatus {
 		c.t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, recorder.Code, wantStatus, recorder.Body.String())
+	}
+	if refusedBySessionGuard(recorder) {
+		c.t.Fatalf("%s %s was refused by the session guard, not by the operation; body=%s", method, path, recorder.Body.String())
 	}
 	if target != nil {
 		if err := json.Unmarshal(recorder.Body.Bytes(), target); err != nil {

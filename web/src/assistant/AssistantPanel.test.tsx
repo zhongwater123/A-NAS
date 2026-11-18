@@ -9,7 +9,10 @@ import { companionLock, companionPlayback, resetCompanionHost } from "../compani
 import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
 import { assistantHandlers, assistantSession, noticesHandlers, tasksHandlers } from "../test/handlers/assistant";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import type { Approval } from "./api";
+
+fixToday();
 
 // The window against a stand-in for the member's Hermes: the gateway's events
 // are pushed by the test, REST answers come from the test server.

@@ -38,6 +38,9 @@ const maxPage = 20;
 
 // Tabs whose results are tiles across the window rather than a column.
 const tiled = new Set<WebSearchCategory>(["images", "videos"]);
+// VNAS does not use web search (#359): it neither reads the window, whose
+// results are outside text, nor types or clicks in it.
+const VNAS_PRIVATE = "网页搜索";
 
 // A page of results as its updates have come: engines still searching add
 // theirs below.
@@ -256,6 +259,7 @@ export function WebSearchPanel() {
   return (
     <Tabs.Root
       className={styles.ws}
+      data-vnas-private={VNAS_PRIVATE}
       value={category}
       onValueChange={(value) => chooseCategory(value as WebSearchCategory)}
       activationMode="manual"
