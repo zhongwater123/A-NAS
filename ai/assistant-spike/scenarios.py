@@ -367,7 +367,13 @@ async def api_conversation(lines):
 # ---- one conversation ----
 
 def model_records(before):
-    return [json.loads(record) for record in MODEL_LOG.read_text().splitlines()[before:]] if MODEL_LOG.exists() else []
+    """The turn's requests to the model. The product gateway also logs what it refuses: the
+    servers Hermes probes for when a session starts (/api/tags, /v1/props, ...), which are not
+    the model's work and would add some six requests to every run."""
+    if not MODEL_LOG.exists():
+        return []
+    rows = [json.loads(record) for record in MODEL_LOG.read_text().splitlines()[before:]]
+    return [r for r in rows if str(r.get("path", "")).endswith("/chat/completions")]
 
 
 def model_error(records, status):
