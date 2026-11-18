@@ -59,9 +59,9 @@ class ProtocolError(Exception):
     """The peer broke the framing; the connection is dropped."""
 
 
-def read_request(conn):
-    """Returns the decoded request and the descriptors that came with it."""
-    data, fds, _, _ = socket.recv_fds(conn, MAX_FRAME + 4, 1)
+def read_request(conn, max_fds=1):
+    """Returns the decoded request and the descriptors that came with it, at most max_fds."""
+    data, fds, _, _ = socket.recv_fds(conn, MAX_FRAME + 4, max_fds)
     try:
         while len(data) < 4:
             more = conn.recv(4 - len(data))

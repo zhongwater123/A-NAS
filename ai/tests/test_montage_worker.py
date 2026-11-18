@@ -1,0 +1,163 @@
+"""The montage center's compute Worker (ai/anas_montage): its split of the
+prototype's computation gives the prototype's numbers, its fill asks for what
+it lacks in a fixed order, and it speaks the protocol with memfd arrays.
+
+NumPy and Pillow are in the AI runtime only: make ai-test skips these, and the
+runtime's image runs them (docs/development/ai-development.md)."""
+
+import importlib.util
+import io
+import json
+import os
+import socket
+import struct
+import tempfile
+import threading
+import unittest
+
+RUNTIME = bool(importlib.util.find_spec("numpy") and importlib.util.find_spec("PIL"))
+
+if RUNTIME:
+    import numpy as np
+
+    from anas_montage import worker
+    from anas_montage.domain import cards as cardrules
+    from anas_montage.domain import picture
+
+
+def memfd(array):
+    fd = os.memfd_create("test-array")
+    os.write(fd, array.tobytes())
+    return fd
+
+
+@unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
+class ComputationTest(unittest.TestCase):
+    def test_shake_from_moves_in_chunks_is_the_prototypes_jitter(self):
+        rng = np.random.default_rng(7)
+        base = rng.integers(0, 255, (180 + 40, 320 + 40)).astype(np.float32)
+        frames = []
+        for i in range(37):
+            dx, dy = int(rng.integers(0, 6)), int(rng.integers(0, 6))
+            frames.append(base[dy + i % 3 : dy + i % 3 + 180, dx : dx + 320])
+        frames = np.stack(frames).astype(np.uint8)
+        whole = picture.jitter(frames.astype(np.float32))
+        # Chunks of 15 frames that share their edge frame, as the photo service sends them.
+        pairs = []
+        for start in range(0, len(frames) - 1, 14):
+            pairs += worker.moves(frames[start : start + 15])
+        self.assertEqual(len(pairs), len(frames) - 1)
+        self.assertEqual(worker.shake(pairs), whole)
+
+    def test_cards_are_the_prototypes(self):
+        rng = np.random.default_rng(3)
+        vectors = rng.normal(size=(40, 16)).astype(np.float32)
+        vectors[10:25] = vectors[10] + 0.01 * rng.normal(size=(15, 16))
+        vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+        flat = np.zeros(40, np.uint8)
+        flat[39] = 1
+        windows = [{"start": 2 * i, "end": 2 * i + 2} for i in range(40)]
+        answer = worker.op_cards({"windows": windows, "key": "v"}, {"vectors": vectors, "flat": flat})
+        index = cardrules.WindowIndex({"v": {}}, [("v", 2.0 * i, 2.0 * i + 2) for i in range(40)], vectors, flat.astype(bool))
+        expected = [{k: c[k] for k in ("id", "start", "end", "windows", "times", "keys")} for c in cardrules.plan_cards(index, "v")]
+        self.assertEqual(answer["cards"], expected)
+
+    def test_quality_reasons_follow_the_rules(self):
+        poor = worker.op_quality({"blurs": [9.5, 9.0, 8.8], "blocked": [0.0, 0.1, 0.0], "points": [None, None, None],
+                                  "moves": [[3.0 * (i % 2), 0.0] for i in range(30)]}, {})
+        self.assertIn("模糊", poor["reasons"])
+        black = worker.op_quality({"blurs": [None, None, None], "blocked": [0, 0, 0], "points": [None] * 3, "moves": []}, {})
+        self.assertEqual(black["reasons"], ["黑帧"])
+        self.assertIsNone(black["blur"])
+
+
+def tiny_case():
+    """One part of one picture with two 2-second slots, from a card of two beats."""
+    card = {"id": "c1", "video": "v", "start": 0.0, "end": 20.0, "times": [3.0, 12.0], "frames": ["f1", "f2"],
+            "answer": {"beats": [{"shot_size": "远景", "what": "海"}, {"shot_size": "全景", "what": "船"}]}}
+    rows = [{"video": "v", "start": 2.0 * i, "end": 2.0 * i + 2} for i in range(10)]
+    return {
+        "op": "fill", "fps": 30, "rows": rows, "cards": {"c1": card}, "catalog": ["c1"],
+        "music": {"parts": [{"level": "主歌"}]},
+        "planned": {"answer": {"parts": [{"name": "开场", "pictures": [{"beats": ["c1/1", "c1/2"], "shows": "海", "link": ""}]}]},
+                    "slots": [[[[0.0, 2.0], [2.0, 4.0]]]]},
+        "picked": {"parts": [{"scenes": [{"cards": ["c1"], "query": "海边"}]}]},
+    }
+
+
+@unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
+class FillTest(unittest.TestCase):
+    def test_fill_asks_for_one_span_at_a_time_in_a_fixed_order(self):
+        vectors = np.eye(10, 8, dtype=np.float32) + 0.1
+        vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+        request, known, asked = tiny_case(), {}, []
+        for _ in range(10):
+            request["known"] = dict(known)
+            first = worker.op_fill(request, {"vectors": vectors})
+            again = worker.op_fill(request, {"vectors": vectors})
+            self.assertEqual(first, again)
+            if "need" not in first:
+                break
+            need = first["need"]
+            asked.append(need["name"])
+            known[need["name"]] = [need["lo"], need["hi"]]
+        self.assertNotIn("need", first)
+        self.assertEqual(len(asked), len(set(asked)))
+        self.assertEqual(sum(round((c["end"] - c["start"]) * 30) for c in first["clips"]), 120)
+        self.assertEqual(first["short"], [])
+
+
+@unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
+class ProtocolTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "compute.sock")
+        listener = worker.listening_socket(self.path)
+        self.addCleanup(listener.close)
+        thread = threading.Thread(target=self.serve_one, args=(listener,), daemon=True)
+        thread.start()
+
+    @staticmethod
+    def serve_one(listener):
+        conn, _ = listener.accept()
+        with conn:
+            worker.handle(conn)
+
+    def call(self, request, arrays):
+        fds = [memfd(a) for a in arrays]
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.connect(self.path)
+                body = json.dumps(request).encode()
+                socket.send_fds(conn, [struct.pack(">I", len(body)) + body], fds)
+                header = conn.recv(4)
+                (length,) = struct.unpack(">I", header)
+                data = b""
+                while len(data) < length:
+                    data += conn.recv(length - len(data))
+                return json.loads(data)
+        finally:
+            for fd in fds:
+                os.close(fd)
+
+    def test_a_keyframe_part_comes_over_the_socket(self):
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (512, 288), (200, 180, 160)).save(buffer, "JPEG", quality=82)
+        jpeg = np.frombuffer(buffer.getvalue(), np.uint8)
+        answer = self.call({"op": "quality_part", "kind": "keyframe",
+                            "arrays": [{"name": "jpeg", "dtype": "uint8", "shape": [len(jpeg)]}]}, [jpeg])
+        self.assertTrue(answer["ok"], answer)
+        self.assertGreater(answer["light"], 150)
+
+    def test_an_array_of_another_length_is_refused(self):
+        frame = np.zeros((10, 10), np.uint8)
+        answer = self.call({"op": "quality_part", "kind": "sharp",
+                            "arrays": [{"name": "frame", "dtype": "uint8", "shape": [20, 10]}]}, [frame])
+        self.assertFalse(answer["ok"])
+        self.assertEqual(answer["error"]["code"], "invalid_input")
+
+
+if __name__ == "__main__":
+    unittest.main()
