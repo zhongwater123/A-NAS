@@ -34,6 +34,8 @@
 
 **后果**：以后改其中任何一项，连同规格与[实施方案](../architecture/montage-center.md)一起提交，并在这里补一行。
 
+- 2026-11-18 用户决定：配乐的最长时长由 15 分钟改为 8 分钟。依据是配乐分析（allin1）的峰值内存随歌长增长，约每秒 7 MiB：实测 8 分钟的歌约 4.5 GiB，15 分钟外推约 7.3 GiB，接近 8 GB 设备的预算。分步数据见配乐分析文档（`docs/architecture/montage-music.md`）的“用时与内存”一节，随 M8b 合入。
+
 ## 关联
 
 - [剪辑中心规格](../specs/montage-center.md)、[实施方案](../architecture/montage-center.md)
