@@ -2,7 +2,6 @@ package photosapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,10 +99,6 @@ type GrantResponse struct {
 	Next     string                `json:"next,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
 	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
-	// BulkAnalysis carries the variable-length lists in a sealed descriptor
-	// after WindowBytes of binary window vectors and headers.
-	BulkAnalysis bool  `json:"bulkAnalysis,omitempty"`
-	WindowBytes  int64 `json:"windowBytes,omitempty"`
 }
 
 // GrantError is a refused request.
@@ -233,9 +228,6 @@ func (g Grants) Analysis(ctx context.Context, grantID, assetID string) (photos.G
 	if response.Analysis == nil {
 		return photos.GrantAnalysis{}, nil, errors.New("photo grant: analysis answered nothing")
 	}
-	if response.BulkAnalysis {
-		return readBulkAnalysis(response, file)
-	}
 	analysis := *response.Analysis
 	if analysis.Windows != photos.AnalysisDone {
 		return analysis, nil, nil
@@ -265,75 +257,6 @@ func (g Grants) SaveFilm(ctx context.Context, grantID, versionKey, name string, 
 		return "", err
 	}
 	return response.ObjectID, nil
-}
-
-// Bulk analysis keeps the M5 binary windows together and appends the M7
-// card metadata. The socket frame carries only the split position and state.
-type analysisLists struct {
-	Descriptions []photos.CardDescription `json:"descriptions,omitempty"`
-}
-
-const maxAnalysisJSON = 256 << 20
-
-// WriteAnalysis streams the sealed windows and appends the variable-length lists.
-func WriteAnalysis(w io.Writer, analysis photos.GrantAnalysis, windows *os.File) (GrantResponse, error) {
-	var n int64
-	if windows != nil {
-		info, err := windows.Stat()
-		if err != nil {
-			return GrantResponse{}, err
-		}
-		n, err = io.Copy(w, io.NewSectionReader(windows, 0, info.Size()))
-		if err != nil {
-			return GrantResponse{}, err
-		}
-	}
-	metadata, err := json.Marshal(analysisLists{analysis.Descriptions})
-	if err != nil {
-		return GrantResponse{}, err
-	}
-	if len(metadata) > maxAnalysisJSON {
-		return GrantResponse{}, errors.New("photo grant: analysis lists exceed limit")
-	}
-	if _, err = w.Write(metadata); err != nil {
-		return GrantResponse{}, err
-	}
-	analysis.CardList, analysis.Descriptions = nil, nil
-	return GrantResponse{Analysis: &analysis, BulkAnalysis: true, WindowBytes: n}, nil
-}
-
-func readBulkAnalysis(response GrantResponse, file *os.File) (photos.GrantAnalysis, []byte, error) {
-	if file == nil {
-		return photos.GrantAnalysis{}, nil, errors.New("photo grant: missing analysis descriptor")
-	}
-	info, err := file.Stat()
-	if err != nil {
-		return photos.GrantAnalysis{}, nil, err
-	}
-	n := response.WindowBytes
-	if n < 0 || n >= info.Size() || info.Size()-n > maxAnalysisJSON {
-		return photos.GrantAnalysis{}, nil, errors.New("photo grant: invalid analysis descriptor size")
-	}
-	analysis := *response.Analysis
-	var vectors []byte
-	if analysis.Windows == photos.AnalysisDone {
-		vectors, err = photos.ReadWindows(&analysis, io.NewSectionReader(file, 0, n))
-		if err != nil {
-			return photos.GrantAnalysis{}, nil, err
-		}
-	} else if n != 0 {
-		return photos.GrantAnalysis{}, nil, errors.New("photo grant: unfinished analysis contains windows")
-	}
-	metadata := make([]byte, info.Size()-n)
-	if _, err := file.ReadAt(metadata, n); err != nil {
-		return photos.GrantAnalysis{}, nil, err
-	}
-	var lists analysisLists
-	if err := json.Unmarshal(metadata, &lists); err != nil {
-		return photos.GrantAnalysis{}, nil, err
-	}
-	analysis.Descriptions = lists.Descriptions
-	return analysis, vectors, nil
 }
 
 // Remove takes assets out of a grant.

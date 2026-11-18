@@ -18,31 +18,30 @@ func TestLargeGrantAnalysisFitsSocketFrame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	analysis := photos.GrantAnalysis{ObjectID: "video", Windows: photos.AnalysisDone, Described: photos.AnalysisDone, DescriptionsIdentity: "reader", WindowCount: 1, Dimensions: 3}
-	for i := range 200 {
-		analysis.Descriptions = append(analysis.Descriptions, photos.CardDescription{Card: i, Description: description})
+	const count = 200
+	analysis := photos.GrantAnalysis{ObjectID: "video", Windows: photos.AnalysisDone, Described: photos.AnalysisDone, DescriptionsIdentity: "reader", WindowCount: count, Dimensions: 1, CardCount: count, DescriptionCount: count}
+	var cards []photos.CardAnalysis
+	var headers [][3]uint32
+	for i := range count {
+		cards = append(cards, photos.CardAnalysis{Index: i, Description: &photos.CardDescription{Card: i, Description: description}})
+		headers = append(headers, [3]uint32{uint32(i), uint32(i + 1), 0})
 	}
-	vectors := bytes.Repeat([]byte{7}, analysis.Dimensions*4)
-	windows, err := os.CreateTemp(t.TempDir(), "windows")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer windows.Close()
-	if _, err := windows.Write(vectors); err != nil {
-		t.Fatal(err)
-	}
-	if err := binary.Write(windows, binary.LittleEndian, [3]uint32{0, 2000, 0}); err != nil {
-		t.Fatal(err)
-	}
+	vectors := bytes.Repeat([]byte{7}, count*4)
 	file, err := os.Create(filepath.Join(t.TempDir(), "analysis"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = file.Close() })
-	response, err := WriteAnalysis(file, analysis, windows)
-	if err != nil {
+	if _, err = file.Write(vectors); err != nil {
 		t.Fatal(err)
 	}
+	if err = binary.Write(file, binary.LittleEndian, headers); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.NewEncoder(file).Encode(cards); err != nil {
+		t.Fatal(err)
+	}
+	response := GrantResponse{Analysis: &analysis, OK: true}
 	envelope, err := json.Marshal(response)
 	if err != nil || len(envelope) >= GrantMessageLimit {
 		t.Fatalf("socket frame size %d, %v", len(envelope), err)

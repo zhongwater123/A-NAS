@@ -743,9 +743,19 @@ func TestMontageAnalysisBackfillsAndFinishesAnEmptyResult(t *testing.T) {
 		_ = file.Close()
 	}
 	if err != nil || analysis.Cards != photos.AnalysisDone || analysis.Quality != photos.AnalysisDone ||
-		analysis.CardsIdentity == "" || analysis.QualityIdentity == "" || len(analysis.CardList) != 0 {
+		analysis.CardsIdentity == "" || analysis.QualityIdentity == "" || len(analysis.CardList) != 0 ||
+		analysis.Described != photos.AnalysisDone || !strings.HasSuffix(analysis.DescriptionsIdentity, "|quality="+analysis.QualityIdentity) {
 		t.Fatalf("empty analysis = %+v, %v", analysis, err)
 	}
+	f.restart(t)
+	restored, file, err := f.service.AnalysisOfGrant(ctx, owner, grant.ID, video.ID)
+	if file != nil {
+		_ = file.Close()
+	}
+	if err != nil || restored.Described != photos.AnalysisDone || restored.DescriptionsIdentity != analysis.DescriptionsIdentity || restored.DescriptionCount != 0 {
+		t.Fatalf("empty analysis after restart = %+v, %v", restored, err)
+	}
+
 }
 
 func TestMontageQualityPausesForForegroundWithoutSpendingAnAttempt(t *testing.T) {

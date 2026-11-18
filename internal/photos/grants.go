@@ -58,14 +58,11 @@ type GrantedAsset struct {
 	Width    int              `json:"width,omitempty"`
 	Height   int              `json:"height,omitempty"`
 	TakenAt  *time.Time       `json:"takenAt,omitempty"`
-	// Windows, Cards, Quality and Descriptions are where the montage
-	// analysis stands; Descriptions is AnalysisUnavailable while the AI
-	// Worker has no text reader.
-	Windows             AnalysisState `json:"windows,omitempty"`
-	Cards               AnalysisState `json:"cards,omitempty"`
-	Quality             AnalysisState `json:"quality,omitempty"`
-	Descriptions        AnalysisState `json:"descriptions,omitempty"`
-	descriptionIdentity string
+	// Windows, Cards and Quality are where the montage analysis stands.
+	Windows      AnalysisState `json:"windows,omitempty"`
+	Cards        AnalysisState `json:"cards,omitempty"`
+	Quality      AnalysisState `json:"quality,omitempty"`
+	Descriptions AnalysisState `json:"descriptions,omitempty"`
 }
 
 // grantable reports whether owner may grant record: a video it sees,
@@ -238,10 +235,10 @@ func (s *Service) lookupGrant(ctx context.Context, owner Principal, grantID stri
 	for i := range found {
 		if found[i].Status == GrantAvailable {
 			p := progress[found[i].ObjectID]
-			found[i].Windows, found[i].Cards, found[i].Quality = p.windows, p.cards, p.quality
+			found[i].Windows, found[i].Cards, found[i].Quality, found[i].Descriptions = p.windows, p.cards, p.quality, p.described
 		}
 	}
-	return found, progress, s.fillDescriptionProgress(ctx, found)
+	return found, progress, nil
 }
 
 // OpenGrant opens a granted video's original read-only, with its object.

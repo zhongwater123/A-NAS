@@ -171,12 +171,16 @@ func (f describeFixture) cards(t *testing.T, cards []standInCard) {
 			t.Fatal(err)
 		}
 	}
+	var cardsID, qualityID string
+	if err := db.QueryRow("SELECT cards_identity,quality_identity FROM montage_card_results WHERE object_id=?", f.object).Scan(&cardsID, &qualityID); err != nil {
+		t.Fatal(err)
+	}
 	for i, card := range cards {
 		keyframes, _ := json.Marshal(card.keyframes)
-		if _, err := db.Exec("INSERT INTO video_cards VALUES(?, ?, ?, ?, ?, 'cards-1')", f.object, i, card.start, card.end, string(keyframes)); err != nil {
+		if _, err := db.Exec("INSERT INTO video_cards VALUES(?, ?, ?, ?, ?, ?)", f.object, i, card.start, card.end, string(keyframes), cardsID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec("INSERT INTO video_card_quality VALUES(?, ?, ?, 'quality-1')", f.object, i, `{"blur":0.1,"reasons":`+card.reasons+`}`); err != nil {
+		if _, err := db.Exec("INSERT INTO video_card_quality VALUES(?, ?, ?, ?)", f.object, i, `{"blur":0.1,"reasons":`+card.reasons+`}`, qualityID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -225,6 +229,18 @@ func (f describeFixture) lookup(t *testing.T) photos.GrantedAsset {
 	return looked[0]
 }
 
+// Read through the descriptor just as the grant client does.
+func (f describeFixture) analysis(t *testing.T) (photos.GrantAnalysis, error) {
+	t.Helper()
+	a, file, err := f.service.AnalysisOfGrant(t.Context(), granting(namedAlice), f.grant.ID, f.video.ID)
+	if err != nil || file == nil {
+		return a, err
+	}
+	defer func() { _ = file.Close() }()
+	_, err = photos.ReadWindows(&a, file)
+	return a, err
+}
+
 func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testing.T) {
 	f := newDescribeFixture(t)
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisQueued {
@@ -257,7 +273,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 			t.Fatalf("the stored description lacks %q: %s", label, stored[0].result)
 		}
 	}
-	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.HasSuffix(stored[0].identity, "|cards=cards-1|quality=quality-1") {
+	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.Contains(stored[0].identity, "|quality=montage-quality/v1") {
 		t.Fatalf("identity = %q", stored[0].identity)
 	}
 	if f.montageJobs(t) != 0 {
@@ -266,7 +282,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
 		t.Fatalf("descriptions after the rounds = %q", state)
 	}
-	analysis, _, err := f.service.AnalysisOfGrant(context.Background(), granting(namedAlice), f.grant.ID, f.video.ID)
+	analysis, err := f.analysis(t)
 	if err != nil || analysis.Described != photos.AnalysisDone || len(analysis.Descriptions) != 2 || analysis.Descriptions[1].Card != 2 {
 		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
 	}
@@ -333,7 +349,7 @@ func TestACardThatCannotBeDescribedLeavesTheOthers(t *testing.T) {
 		stored[2].failure != "" || !strings.Contains(stored[2].result, "湖边") {
 		t.Fatalf("stored = %+v", stored)
 	}
-	analysis, _, err := f.service.AnalysisOfGrant(context.Background(), granting(namedAlice), f.grant.ID, f.video.ID)
+	analysis, err := f.analysis(t)
 	if err != nil || analysis.Described != photos.AnalysisDone || len(analysis.Descriptions) != 3 ||
 		analysis.Descriptions[0].Description != nil || analysis.Descriptions[0].Error == "" || analysis.Descriptions[2].Description == nil {
 		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
@@ -403,7 +419,7 @@ func TestGrantReauthorizedAfterReaderChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	processAI(t, service, f.embedder, f.gate)
-	a, _, err := service.AnalysisOfGrant(ctx, granting(namedAlice), f.grant.ID, f.video.ID)
+	a, err := f.analysis(t)
 	if err != nil || a.Described != photos.AnalysisDone || !strings.HasPrefix(a.DescriptionsIdentity, "reader-2|") || len(a.Descriptions) != 2 {
 		t.Fatalf("reauthorized analysis: state %s, identity %s, %d descriptions, %v", a.Described, a.DescriptionsIdentity, len(a.Descriptions), err)
 	}
@@ -412,7 +428,7 @@ func TestGrantReauthorizedAfterReaderChange(t *testing.T) {
 func TestNoEligibleCardsNeedNoReader(t *testing.T) {
 	f := newDescribeFixtureWith(t, "")
 	f.cards(t, []standInCard{{start: 0, end: 70000, keyframes: []float64{1, 3, 5}, reasons: `["blur"]`}})
-	a, _, err := f.service.AnalysisOfGrant(t.Context(), granting(namedAlice), f.grant.ID, f.video.ID)
+	a, err := f.analysis(t)
 	if err != nil || a.Described != photos.AnalysisDone || a.DescriptionsIdentity == "" || len(a.Descriptions) != 0 {
 		t.Fatalf("zero eligible cards: state %s, identity %q, %v", a.Described, a.DescriptionsIdentity, err)
 	}

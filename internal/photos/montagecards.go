@@ -324,8 +324,7 @@ func (s *Service) measureCard(ctx context.Context, r *aiRunner) (bool, error) {
 			if count, err := updated.RowsAffected(); err != nil || count == 0 {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-			if err != nil {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation); err != nil {
 				return err
 			}
 			return s.queueDescribe(ctx, tx, job.objectID)
@@ -461,11 +460,12 @@ func (s *Service) sharpPoints(ctx context.Context, taker FrameTaker, original *o
 
 // CardAnalysis is one card of a video's montage analysis.
 type CardAnalysis struct {
-	Index   int          `json:"card"`
-	StartMs int          `json:"startMs"`
-	EndMs   int          `json:"endMs"`
-	Times   []float64    `json:"times"`
-	Quality *CardQuality `json:"quality,omitempty"`
+	Description *CardDescription `json:"description,omitempty"`
+	Index       int              `json:"card"`
+	StartMs     int              `json:"startMs"`
+	EndMs       int              `json:"endMs"`
+	Times       []float64        `json:"times"`
+	Quality     *CardQuality     `json:"quality,omitempty"`
 }
 
 // cardsOf reads a video's cards and the quality measured so far.

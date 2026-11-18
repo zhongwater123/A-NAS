@@ -822,16 +822,16 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	reading := r.reader != ""
 	r.mu.Unlock()
 	now := formatTime(lib.now())
-	if due, err := lib.montageWorkWaiting(ctx, reading); due || err != nil {
+	if due, err := lib.montageWorkWaiting(ctx); due || err != nil {
 		return due, err
 	}
 	var due bool
 	err := lib.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
-    OR (? AND derivation = ?))
+SELECT EXISTS (SELECT 1 FROM jobs j WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
+    OR (? AND derivation = ?) OR (? AND derivation = ? AND `+describeReady+`))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
 		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation,
-		reading, textDerivation, now, now).Scan(&due)
+		reading, textDerivation, reading, describeDerivation, now, now).Scan(&due)
 	return due, err
 }
 
