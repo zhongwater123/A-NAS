@@ -27,7 +27,7 @@ var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minu
 // Serve answers one request on conn and returns when it is done.
 func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	body, files, err := unixmsg.ReadBodyFiles(conn, maxFrame, maxFiles)
 	if err != nil {
 		return err
@@ -65,12 +65,18 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("decode message: %w", err)
 	}
+	if request.Op == OpAudio && request.PCM {
+		if err := decodeStrict(body, &request); err != nil {
+			return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
+		}
+	}
 	file := files[0]
 	if err := request.Validate(); err != nil {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeouts[request.Op])
 	defer cancel()
+	_ = conn.SetWriteDeadline(time.Time{})
 	program, args := tools.command(request)
 	if program == "" {
 		return writeFrame(conn, Response{Code: CodeUnavailable, Message: "decoder is unavailable"}, nil)
@@ -87,23 +93,19 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 		defer func() { _ = input.Close() }()
 		stdin = input
 	}
-	command := exec.CommandContext(ctx, program, args...)
+	command, stderr := newCommand(ctx, program, args, request.PCM && request.Op == OpAudio)
 	command.Stdin = stdin
-	command.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"}
-	var stderr limitedBuffer
-	stderr.limit = 8 << 10
-	command.Stderr = &stderr
-	if request.Op == OpStream || request.Op == OpAudio {
-		// Raw samples are for analysis, background work.
-		return serveStream(ctx, conn, command, &stderr, request.PCM)
-	}
-	// Buffered previews also stop decoding when the caller goes away.
+	// The peer sends nothing beyond its request. Watch even before the
+	// decoder produces its first bytes.
 	go func() { _, _ = conn.Read(make([]byte, 1)); cancel() }()
+	if request.Op == OpStream || request.Op == OpAudio {
+		return serveStream(ctx, conn, command, stderr)
+	}
 	var stdout limitedBuffer
 	stdout.limit = maxOutput[request.Op]
 	command.Stdout = &stdout
 	if err := command.Run(); err != nil || stdout.overflow || stdout.Len() == 0 {
-		return writeFrame(conn, failure(err, &stderr, stdout.overflow), nil)
+		return writeFrame(conn, failure(err, stderr, stdout.overflow), nil)
 	}
 	if err := writeFrame(conn, Response{OK: true}, nil); err != nil {
 		return err
@@ -168,34 +170,28 @@ func lastLine(message string) string {
 
 // serveStream answers as soon as FFmpeg produces output, then copies it to
 // the connection. A peer that hangs up ends FFmpeg.
-func serveStream(ctx context.Context, conn *net.UnixConn, command *exec.Cmd, stderr *limitedBuffer, lower bool) error {
+func serveStream(ctx context.Context, conn *net.UnixConn, command *exec.Cmd, stderr *limitedBuffer) error {
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	start := command.Start
-	if lower {
-		start = func() error { return background(command) }
-	}
-	if err := start(); err != nil {
-		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
+	if err := command.Start(); err != nil {
+		return writeFrame(conn, failure(err, stderr, false), nil)
 	}
 	buffer := make([]byte, 64<<10)
 	count, _ := io.ReadAtLeast(stdout, buffer, 1)
 	if count == 0 {
-		return writeFrame(conn, failure(command.Wait(), stderr, false), nil)
+		err := command.Wait()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return writeFrame(conn, failure(err, stderr, false), nil)
 	}
 	if err := writeFrame(conn, Response{OK: true}, nil); err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
 		return err
 	}
-	// The peer never writes after its request: a read that returns means it
-	// has gone.
-	go func() {
-		_, _ = conn.Read(make([]byte, 1))
-		_ = command.Process.Kill()
-	}()
 	_, err = conn.Write(buffer[:count])
 	if err == nil {
 		_, err = io.CopyBuffer(conn, stdout, buffer)
