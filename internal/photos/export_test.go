@@ -2,6 +2,7 @@ package photos
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -44,4 +45,10 @@ func VectorSyncBackoff(idle time.Duration, failures int) time.Duration {
 func (s *Service) QueueWindows(ctx context.Context, object string) error {
 	_, err := s.db.ExecContext(ctx, "INSERT INTO window_outbox(object_id) VALUES (?)", object)
 	return err
+}
+
+// QueueDescribe queues the card descriptions of object as the quality step
+// of #556 will once it is done, for tests that stand in for it.
+func (s *Service) QueueDescribe(ctx context.Context, object string) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error { return s.queueDescribe(ctx, tx, object) })
 }

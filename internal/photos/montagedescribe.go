@@ -356,7 +356,7 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 		return true, false, lib.releaseJob(ctx, job)
 	case errors.Is(err, ErrAIRejected) || errors.Is(err, ErrAIInvalidResult):
 		// This card alone goes undescribed.
-		description, err = nil, lib.storeDescription(ctx, job.objectID, *card, info.OCR, nil, err.Error(), took)
+		err = lib.storeDescription(ctx, job.objectID, *card, info.OCR, nil, err.Error(), took)
 	case err != nil:
 		// The Worker failed after taking the frames: an attempt is spent.
 		return true, true, lib.failJob(ctx, job, jobErrorIO)

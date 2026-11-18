@@ -79,9 +79,9 @@ func (d *describingEmbedder) DescribeFrames(ctx context.Context, frames []*os.Fi
 	d.frames = append(d.frames, len(frames))
 	call, answer, template, block, describing := len(d.layouts), d.answer, d.template, d.blockDescribing, d.describing
 	d.dmu.Unlock()
-	d.readingEmbedder.mu.Lock()
+	d.mu.Lock()
 	model := d.model
-	d.readingEmbedder.mu.Unlock()
+	d.mu.Unlock()
 	if block {
 		describing <- struct{}{}
 		<-ctx.Done()
@@ -169,8 +169,10 @@ func (f describeFixture) cards(t *testing.T, cards []standInCard) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
-		VALUES(?, 'montage-describe/v1', 'pending', '2000-01-01T00:00:00Z', '2000-01-01T00:00:00Z') ON CONFLICT DO NOTHING`, f.object); err != nil {
+	if _, err := db.Exec("DELETE FROM video_card_descriptions WHERE object_id = ?", f.object); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.QueueDescribe(context.Background(), f.object); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -277,9 +279,9 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 
 	// A new reader, which comes with a release and so a restart, describes
 	// again what a grant still refers to.
-	f.embedder.readingEmbedder.mu.Lock()
+	f.embedder.mu.Lock()
 	f.embedder.model = "reader-2"
-	f.embedder.readingEmbedder.mu.Unlock()
+	f.embedder.mu.Unlock()
 	_ = f.service.Close()
 	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.montageFixture.video, DisableCapacityReserve: true})
 	if err != nil {
@@ -329,9 +331,9 @@ func TestACardThatCannotBeDescribedLeavesTheOthers(t *testing.T) {
 
 func TestDescriptionsWaitForATextReader(t *testing.T) {
 	f := newDescribeFixture(t)
-	f.embedder.readingEmbedder.mu.Lock()
+	f.embedder.mu.Lock()
 	f.embedder.model = ""
-	f.embedder.readingEmbedder.mu.Unlock()
+	f.embedder.mu.Unlock()
 	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 0 {
 		t.Fatalf("without a reader: %d rounds, %d descriptions", rounds, f.embedder.calls())
 	}

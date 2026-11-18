@@ -118,6 +118,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 超出上下文（`invalid_input`）或回答不合 Schema（`invalid_result`）的卡片只把错误记在这张卡片上，同一段视频的其他卡片照常；Worker 崩溃等其他失败耗一次尝试。
   - 分析身份是读文字模型、`montage-card/v1`、体裁、关键帧设置、号码过滤版本与卡片的身份；换读文字模型时只重排仍被授权引用的对象。
   - Worker 没有读文字模型时不排描述（`workWaiting` 不计它），`lookup` 的 `descriptions` 报 `unavailable`（本地模型不可用）。
+  - 开发机实测（2026-11-18，Apple 芯片，Homebrew 的 llama-server b11960，本机下载的 Qwen3.5-4B Q4_K_M 与 mmproj F16，`LlamaReader` 自己的启动参数 `-c 8192 -np 1 --image-max-tokens 1024`）：把品杰样本的关键帧转成 512×910 的竖拍，11 张（样本里关键帧最多的卡片）提示 5,955 token，50 秒描述完、回答完整；12 张 6,440 token；20 张 10,320 token，llama-server 拒绝，这张卡片记为描述失败。每张竖拍约 485 token，与方案按第八版估的 450 相近。
 
 ### 存储（Catalog migration 4–7）
 
