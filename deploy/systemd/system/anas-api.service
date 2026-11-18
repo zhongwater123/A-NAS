@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS local Product Service
 Documentation=https://github.com/zhongwater123/A-NAS
-After=anas-host-agent.service anas-site.service
-Wants=anas-host-agent.service anas-site.service
+After=anas-host-agent.service anas-site.service anas-companion-assistant.socket
+Wants=anas-host-agent.service anas-site.service anas-companion-assistant.socket
 
 [Service]
 Type=simple
@@ -27,6 +27,10 @@ Environment=ANAS_WEB_SEARCH_SOCKET=/run/a-nas-search/search.sock
 Environment=ANAS_WEB_SEARCH_RELEASE=/usr/lib/a-nas/search
 # SearXNG's secret, which anas-site.service makes once (ADR 0030).
 Environment=ANAS_WEB_SEARCH_SECRET_FILE=/etc/a-nas/search.env
+# The AI assistant (ADR 0024): members' instances behind the Host Agent's session gate, and
+# the socket systemd holds for their companion tools (anas-companion-assistant.socket, #412).
+Environment=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
+Sockets=anas-companion-assistant.socket
 # This machine's settings: the terminal and the App Center are off until the
 # administrator turns them on there (ADR 0034). a-nas-generator adds the
 # internet entry's listener when /etc/a-nas/internet.env turns it on.

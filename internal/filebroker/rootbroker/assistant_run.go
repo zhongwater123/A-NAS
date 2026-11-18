@@ -30,9 +30,9 @@ import (
 // session (ADR 0024 decision 10) it notes the task as an empty file named
 // after it in AssistantRuns/<username>, which only root may enter, and starts
 // the member's cron unit. The round takes what waits there as its own
-// (ai/assistant-spike/run-requests.sh), queues each task with Hermes's own
+// (ai/assistant/run-requests.sh), queues each task with Hermes's own
 // trigger_job and runs it as it runs a task that is due
-// (ai/assistant-spike/cron_round.py). A request that comes while a round runs
+// (ai/assistant/cron_round.py). A request that comes while a round runs
 // stays for the next one, which the waker starts.
 
 var (
@@ -60,6 +60,11 @@ func (s *Server) serveAssistantRun(req wire.Request) wire.Response {
 	}
 	if s.config.AssistantSockets == "" || s.config.AssistantRuns == "" {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is not enabled"}}
+	}
+	// Without the administrator's key the round would find no model, and a request left
+	// waiting would run whenever a key is saved again.
+	if s.config.AssistantOn != nil && !s.config.AssistantOn() {
+		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is off: no model key is saved"}}
 	}
 	if !accountid.ValidAssistantAccount(identity.Username) {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeForbidden, Message: "this account has no assistant"}}

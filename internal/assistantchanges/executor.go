@@ -915,23 +915,30 @@ func describe(err error, target string) string {
 	}
 }
 
-func preview(data []byte) *string {
+func preview(data []byte, size int64) *string {
 	if !utf8.Valid(data) {
-		// A cut through the last character still counts as text.
-		trimmed := data
-		for i := 0; i < 3 && len(trimmed) > 0 && !utf8.Valid(trimmed); i++ {
-			trimmed = trimmed[:len(trimmed)-1]
-		}
-		if !utf8.Valid(trimmed) {
+		// Only a truncated preview may end in an incomplete rune. At EOF
+		// these bytes are the actual content and must not be hidden.
+		if int64(len(data)) >= size {
 			return nil
 		}
-		data = trimmed
+		for n := 1; n < utf8.UTFMax && n <= len(data); n++ {
+			prefix, tail := data[:len(data)-n], data[len(data)-n:]
+			if !utf8.FullRune(tail) && utf8.Valid(prefix) {
+				return new(string(prefix))
+			}
+		}
+		return nil
 	}
 	text := string(data)
 	return &text
 }
 
-// preview is the card: each operation, with the old and new text of every write.
+// preview is the card: each operation, with the old and new text of every
+// write. A card shows the start of each file only, so a write also says how
+// large the file was and will be, and whether the new content is shown only
+// in part or is not text at all (#172): the member then knows the card does
+// not show everything the write puts there.
 func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 	type operation struct {
 		Op     string  `json:"op"`
@@ -943,6 +950,17 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		Exists bool    `json:"exists"`
 		Before *string `json:"before,omitempty"`
 		After  *string `json:"after,omitempty"`
+		// BeforeSize is the size of the file a write replaces.
+		BeforeSize *int64 `json:"beforeSize,omitempty"`
+		// Partial: After is only the start of the new content.
+		// Binary: the new content is not text, so there is no After.
+		// BeforePartial: Before is only the start of the old file.
+		Partial          bool  `json:"partial,omitempty"`
+		Binary           bool  `json:"binary,omitempty"`
+		BeforePartial    bool  `json:"beforePartial,omitempty"`
+		BeforeBinary     bool  `json:"beforeBinary,omitempty"`
+		HiddenSize       int64 `json:"hiddenSize,omitempty"`
+		BeforeHiddenSize int64 `json:"beforeHiddenSize,omitempty"`
 	}
 	dir := filepath.Join(e.Root, account, c.ID)
 	ops := make([]operation, 0, len(c.Steps))
@@ -953,11 +971,33 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == filesystem.KindDirectory
 		}
 		if s.Op == "write" {
+			size := s.SourceSize
+			op.Size = &size
+			if s.Before.Exists {
+				before := s.Before.Size
+				op.BeforeSize = &before
+			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)+".before"), previewLimit); err == nil {
-				op.Before = preview(data)
+				op.Before = preview(data, s.Before.Size)
 			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)), previewLimit); err == nil {
-				op.After = preview(data)
+				op.After = preview(data, size)
+			}
+			// A copy cut to its start once the change ended reads short as
+			// well: what decides is the size of the file the write leaves.
+			op.Binary = op.After == nil && size > 0
+			op.HiddenSize = size
+			if op.After != nil {
+				op.HiddenSize = max(0, size-int64(len(*op.After)))
+			}
+			op.Partial = !op.Binary && op.HiddenSize > 0
+			if s.Before.Exists {
+				op.BeforeBinary = op.Before == nil && s.Before.Size > 0
+				op.BeforeHiddenSize = s.Before.Size
+				if op.Before != nil {
+					op.BeforeHiddenSize = max(0, s.Before.Size-int64(len(*op.Before)))
+				}
+				op.BeforePartial = !op.BeforeBinary && op.BeforeHiddenSize > 0
 			}
 		}
 		ops = append(ops, op)
