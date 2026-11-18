@@ -10,13 +10,13 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`61744597719c`（主干上 PR #441 的合并提交，未打标签，2026-11-10 安装，同日正常重启后复测通过；日志在 NAS 的 `/var/tmp/a-nas-*-61744597719c.log`）；容器代理与 AI 助手试用包同版本。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。之后合入 main 的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
-  - 宿主机软件包 `a-nas-host` 与 `a-nas-console`，版本 `0~61744597719c`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
+- 已部署：`c738affa140b`，软件包 `1.0.1~rc.6+dev20261117.89+gc738affa140b`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，含 AI 助手试用包；2026-11-17 核对），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
+  - 宿主机依赖由 `a-nas-host` 与 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
   - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `842b388a0f1987f5`；AI Worker 的内存上限为总内存减 2.5 GiB（5150 MiB）。
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
   - 虚拟伙伴的动画池 `36492963e4112f55`（2026-11-10 安装，来自 A-NAS-assets 中固定的副本，#445）。
   - Caddy 是官方源的 2.11.9，另装了 `wireguard-tools`（2026-11-05，为互联网访问准备）；`/etc/a-nas/internet.env` 不存在，互联网入口关闭。
-- AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
+- AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1。mount unit 带 `x-systemd.device-bound=no`，2026-11-10 重启后 `StopPropagatedFrom` 为空：一块盘坏了不再卸载整个数据卷（#441）。拔盘与更换的验收见下一步 10。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
@@ -60,7 +60,8 @@
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）已部署；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
 11. 虚拟伙伴（大肥鱼）V1（[规格](../specs/virtual-companion.md)）：2026-11-10 已部署；在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-12. 存档密钥已生成（[指纹](../decisions/2026-11-11-release-signing-key.md#密钥)）；按[部署手册](../runbooks/deploy-a-nas-packages.md)把实验 NAS 换成软件包，含 `ANAS_UPDATE_STAGING`；之后的版本在[系统更新](../specs/system-update.md)中安装。
-13. 设备镜像：接入系统更新，再按[手册](../runbooks/build-device-image.md)写到真机试点。
+12. 实验 NAS 已换成软件包（见上文）。
+13. 设备镜像已接入系统更新；用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
 14. 照片打分：在第 12 步之后按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
-15. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+15. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：等用户说“开始做”；实验 NAS 改用镜像以它为前提。
+16. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
