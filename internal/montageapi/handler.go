@@ -44,17 +44,22 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 	}
 	h := &handler{store: store, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]route{
-		"GET /projects":                     h.projects,
-		"POST /projects":                    h.createProject,
-		"GET /projects/{projectID}":         h.project,
-		"PATCH /projects/{projectID}":       h.updateProject,
-		"DELETE /projects/{projectID}":      h.deleteProject,
-		"POST /projects/{projectID}/assets": h.addAssets,
+		"GET /projects":                        h.projects,
+		"POST /projects":                       h.createProject,
+		"GET /projects/{projectID}":            h.project,
+		"PATCH /projects/{projectID}":          h.updateProject,
+		"DELETE /projects/{projectID}":         h.deleteProject,
+		"POST /projects/{projectID}/assets":    h.addAssets,
+		"GET /projects/{projectID}/song":       h.song,
+		"GET /projects/{projectID}/song/audio": h.songAudio,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
 		h.mux.HandleFunc(method+" "+PathPrefix+path, h.withUser(serve))
 	}
+	// The Product Service copies a song here itself (CopySong); the browser
+	// never reaches this route, so it is not one of the API's endpoints.
+	h.mux.ServeMux.HandleFunc("PUT "+PathPrefix+"/projects/{projectID}/song", h.withUser(h.putSong))
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -102,6 +107,24 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key belongs to another project")
 	case errors.Is(err, montage.ErrSessionEnded):
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+	case errors.Is(err, montage.ErrSongTooLarge):
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "song_too_large", "the song is larger than 100 MiB")
+	case errors.Is(err, montage.ErrSongLength):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 15 minutes")
+	case errors.Is(err, montage.ErrNotAudio):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "not_audio", "the file is not audio the montage center can read")
+	case errors.Is(err, montage.ErrNoSong):
+		httpjson.WriteError(w, http.StatusNotFound, "no_song", "the project has no song yet")
+	case errors.Is(err, montage.ErrSongNotReady):
+		httpjson.WriteError(w, http.StatusConflict, "song_not_ready", "the song is not analysed yet, or cannot be used")
+	case errors.Is(err, montage.ErrSongStart), errors.Is(err, montage.ErrWorkerRefused):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_start_unusable", "no usable excerpt starts there")
+	case errors.Is(err, montage.ErrMediaUnavailable):
+		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
+	case errors.Is(err, montage.ErrWorkerUnavailable):
+		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, montage.ErrPhotosUnavailable):
 		h.logger.WarnContext(r.Context(), "photo library unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")

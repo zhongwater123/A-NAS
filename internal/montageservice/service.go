@@ -38,7 +38,12 @@ type Config struct {
 	Sessions   SessionResolver
 	// Grants reaches the photo library's project grants.
 	Grants montage.Grants
-	Logger *slog.Logger
+	// Media, Music and Compute decode, analyse and cut the songs
+	// (montage.Options).
+	Media   montage.Media
+	Music   montage.MusicAnalyzer
+	Compute montage.MusicComputer
+	Logger  *slog.Logger
 	// CheckStore accepts Root as the service's store; RequireOwnedStore
 	// when nil.
 	CheckStore    func(string) error
@@ -175,6 +180,17 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				continue
 			}
 		}
+		if err := store.ReclaimSongs(ctx); err != nil {
+			config.Logger.WarnContext(ctx, "reclaiming song copies failed", "error", err)
+		}
+		analysis, stopAnalysis := context.WithCancel(ctx)
+		analysed := make(chan struct{})
+		go func() { defer close(analysed); store.AnalyzeSongs(analysis) }()
+		closeStore := func() {
+			stopAnalysis()
+			<-analysed
+			_ = store.Close()
+		}
 		serve(accountremoval.Route(config.Sessions.AccountDeletion, RemoveAccount(store), config.Logger,
 			montageapi.New(store, config.Logger)))
 		config.Logger.Info(Ready)
@@ -186,7 +202,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			select {
 			case <-ctx.Done():
 				serve(unavailable)
-				_ = store.Close()
+				closeStore()
 				return
 			case <-ticker.C:
 			}
@@ -206,7 +222,7 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			current, err := os.Lstat(config.Root)
 			if err = errors.Join(err, config.CheckStore(config.Root)); err != nil || !os.SameFile(opened, current) {
 				serve(unavailable)
-				_ = store.Close()
+				closeStore()
 				config.Logger.WarnContext(ctx, "montage store unavailable", "error", err)
 				break
 			}
@@ -222,7 +238,8 @@ func open(ctx context.Context, config Config) (*montage.Store, os.FileInfo, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Logger: config.Logger})
+	store, err := montage.Open(ctx, config.Root, montage.Options{Grants: config.Grants, Media: config.Media, Music: config.Music,
+		Compute: config.Compute, Logger: config.Logger})
 	if err != nil {
 		return nil, nil, err
 	}

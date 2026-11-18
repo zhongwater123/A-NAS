@@ -140,6 +140,8 @@ paths:
   /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
   /api/v1/montage/projects/{projectId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}" }
   /api/v1/montage/projects/{projectId}/assets: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1assets" }
+  /api/v1/montage/projects/{projectId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song" }
+  /api/v1/montage/projects/{projectId}/song/audio: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song~1audio" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }

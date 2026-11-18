@@ -356,7 +356,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, logger)
+	var montageMedia montage.Media
+	if mediaWorker != nil {
+		montageMedia = mediaWorker
+	}
+	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, montageMedia, logger)
 	if err != nil {
 		return err
 	}
