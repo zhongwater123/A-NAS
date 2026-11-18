@@ -70,7 +70,11 @@ const (
 )
 
 // FramesRequest takes frames of a video, either at each of Times (seconds
-// from the start, increasing) or Rate a second from Start to End.
+// from the start, increasing) or Rate a second from Start to End. A range is
+// half-open: frame k stands for the instant Start + k/Rate, for every such
+// instant before End (rangeCount). A range that ends where the next one
+// starts shares no frame with it; one that ends a step later shares the
+// frame of that instant, the same source frame in both.
 //
 // JPEG frames are Width wide, or have LongEdge on their longer side and are
 // never enlarged, encoded at FFmpeg's Quality (2 is best, 31 worst); Blur
@@ -93,9 +97,11 @@ type FramesRequest struct {
 }
 
 // FramesResult describes the frames once all of them came. Times are the
-// instants actually used, in the order of the request's Times: near the end
-// of a video there may be no frame at the instant asked for, and the worker
-// takes an earlier one. Blur holds each JPEG's blurdetect value when the
+// instant of each frame, in order. For a request's Times they are the
+// instants actually used: near the end of a video there may be no frame at
+// the instant asked for, and the worker takes an earlier one. For a range
+// they are Start + k/Rate to the microsecond, one per frame that came: a
+// video that ends before End gives fewer. Blur holds each JPEG's blurdetect value when the
 // request asked for it, nil (null) where blurdetect measures nothing: a flat
 // picture such as a black frame, which the prototype's quality check calls
 // black rather than sharp or blurred.
@@ -180,11 +186,10 @@ func (r FramesRequest) count() (int, error) {
 		if !finiteIn(r.Start, 0, 1e6) || !finiteIn(r.End, 0, 1e6) || r.End <= r.Start || !finiteIn(r.Rate, 0.01, FilmRate) {
 			return invalid("bad range")
 		}
-		estimate := math.Ceil((r.End - r.Start) * r.Rate)
-		if estimate > maxFrames {
+		count = r.rangeCount()
+		if count > maxFrames {
 			return invalid("too many frames")
 		}
-		count = int(estimate)
 	}
 	switch r.Format {
 	case FormatJPEG:
@@ -214,16 +219,16 @@ func (r FramesRequest) count() (int, error) {
 	return count, nil
 }
 
-func (r FramesRequest) outputLimit(count int) int {
-	if len(r.Times) > 0 {
-		return count
-	}
-	// Allow one extra frame for FFmpeg's timestamp rounding, within the
-	// format's hard limits.
-	if r.Format == FormatGray {
-		return min(count+1, maxFrames, maxGrayBytes/(r.Width*r.Height))
-	}
-	return min(count+1, maxJPEGFrames)
+// rangeCount is how many instants Start + k/Rate come before End. The
+// product is taken to the microsecond first, so that 0.1 to 0.4 at 10 a
+// second is three instants, not four.
+func (r FramesRequest) rangeCount() int {
+	return int(math.Ceil(math.Round((r.End-r.Start)*r.Rate*1e6) / 1e6))
+}
+
+// instant is the time frame k of a range stands for, to the microsecond.
+func (r FramesRequest) instant(k int) float64 {
+	return math.Round((r.Start+float64(k)/r.Rate)*1e6) / 1e6
 }
 
 // timeout bounds a frames request by the length of video it covers: a
@@ -306,14 +311,22 @@ func (t Tools) frameCommand(r FramesRequest, at float64) (string, []string) {
 	return t.FFmpeg, append(args, "-q:v", strconv.Itoa(r.Quality), "-c:v", "mjpeg", "-f", "image2", "pipe:1")
 }
 
-// rangeCommand takes Rate frames a second from Start to End in one run.
+// rangeCommand takes the frames of a range in one run. The fps filter picks
+// the frame for an instant from the source frames around it, so the run
+// reads from a step before Start to a step past End, with Start at time 0:
+// the frame for an instant is then the same whichever range takes it.
+// start_time=0 drops what comes before Start, and -frames:v stops at the
+// last instant before End, where the filter's rounding can add one more.
 func (t Tools) rangeCommand(r FramesRequest) (string, []string) {
+	step := 1 / r.Rate
+	lead := min(r.Start, step)
 	args := editingFilters()
-	if r.Start > 0 {
-		args = append(args, "-ss", seconds(r.Start))
+	if from := r.Start - lead; from > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(from, 'f', 6, 64))
 	}
-	args = append(args, "-t", seconds(r.End-r.Start), "-i", "fd:", "-map", "0:v:0", "-an", "-sn", "-dn",
-		"-vf", turn(r.Turned)+"fps="+strconv.FormatFloat(r.Rate, 'f', -1, 64)+","+r.scaled(), "-threads", editThreads)
+	args = append(args, "-t", strconv.FormatFloat(r.End-r.Start+lead+step, 'f', 6, 64), "-i", "fd:", "-map", "0:v:0", "-an", "-sn", "-dn",
+		"-vf", turn(r.Turned)+"setpts=PTS-"+strconv.FormatFloat(lead, 'f', 6, 64)+"/TB,fps="+strconv.FormatFloat(r.Rate, 'f', -1, 64)+":start_time=0,"+r.scaled(),
+		"-frames:v", strconv.Itoa(r.rangeCount()), "-threads", editThreads)
 	if r.Format == FormatGray {
 		return t.FFmpeg, append(args, "-f", "rawvideo", "pipe:1")
 	}
@@ -450,7 +463,7 @@ func serveEditing(ctx context.Context, conn *net.UnixConn, tools Tools, op strin
 		if err != nil {
 			return invalid(err)
 		}
-		return serveFrames(ctx, conn, tools, request.FramesRequest, request.outputLimit(count), files[0])
+		return serveFrames(ctx, conn, tools, request.FramesRequest, count, files[0])
 	case OpSegment:
 		var request segmentWire
 		if err := decodeStrict(body, &request); err != nil {
@@ -667,6 +680,9 @@ func (s *frameSender) send(frame []byte) error {
 		}
 	}
 	s.writeErr = unixmsg.WriteBody(s.conn, frame, nil)
+	if s.writeErr == nil && len(s.request.Times) == 0 {
+		s.result.Times = append(s.result.Times, s.request.instant(s.sent-1))
+	}
 	return s.writeErr
 }
 

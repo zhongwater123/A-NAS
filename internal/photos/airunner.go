@@ -202,7 +202,10 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
-	if worked, err := r.montageCards(ctx, gate); worked || err != nil {
+	// The montage center's cards and their quality need no model of the AI
+	// Worker, so they come before its gate. Work the gate hung up ends the
+	// round, as a hung-up chunk of windows does below.
+	if worked, ended, err := r.montageCards(ctx, gate, detector); worked || ended || err != nil {
 		return worked, err
 	}
 	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {

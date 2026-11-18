@@ -84,9 +84,13 @@ var (
 )
 
 // A successor may only use completed inputs. A failed predecessor also
-// blocks its successors until the user retries that analysis.
-const cardsReady = "j.object_id IN (" + referencedObjects + ") AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + windowsDerivation + "')"
-const qualityReady = cardsReady + " AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + cardsDerivation + "')"
+// blocks its successors until the user retries that analysis. cardsAfter and
+// qualityAfter are that alone; cardsReady and qualityReady also want a grant
+// that still refers to the video.
+const cardsAfter = "NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + windowsDerivation + "')"
+const qualityAfter = cardsAfter + " AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + cardsDerivation + "')"
+const cardsReady = "j.object_id IN (" + referencedObjects + ") AND " + cardsAfter
+const qualityReady = "j.object_id IN (" + referencedObjects + ") AND " + qualityAfter
 
 func cardsVersion(window string) string  { return cardsIdentity + "|input=" + window }
 func qualityVersion(cards string) string { return qualityIdentity + "|input=" + cards }
@@ -139,37 +143,67 @@ type cardOf struct {
 	times      []float64
 }
 
-// montageCards runs a due card or quality job, one card's quality a round,
-// and reports whether it did any work.
-func (r *aiRunner) montageCards(ctx context.Context, gate Gate) (bool, error) {
+// dropUnreferencedCards removes the card and quality jobs nobody is working
+// on of videos no grant refers to any more, as dropUnreferencedWindows does
+// the window jobs: no round would take them, and they would wait for
+// PruneMontageAnalysis. What they did stays until then; a grant asking again
+// queues what is missing (enqueueMissingCards).
+func (s *Service) dropUnreferencedCards(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE derivation IN (?, ?)
+        AND (state = 'pending' OR (state = 'running' AND lease_until <= ?))
+        AND object_id NOT IN (`+referencedObjects+`)`, cardsDerivation, qualityDerivation, formatTime(s.now()))
+	return err
+}
+
+// montageCards runs a due card or quality job, one card's quality a round.
+// It reports whether it did any work, and whether the round ends with it, as
+// a chunk of windows does (montageWindows): the gate hung the work up, or
+// the service is stopping. A compute or FFmpeg Worker that is away does not
+// end the round: its job waits aiRetryDelay without spending an attempt, and
+// the runner looks again no later than that, so ending every round on it
+// would keep the photos' own work waiting for as long as the Worker is away.
+func (r *aiRunner) montageCards(ctx context.Context, gate Gate, detector Detector) (worked, ended bool, err error) {
 	lib := r.lib
 	if lib.compute == nil {
-		return false, nil
+		return false, false, nil
 	}
 	if open, _ := gate.Open(ctx, 0); !open {
-		return false, nil
+		return false, false, nil
 	}
+	// Most rounds have none: a read says so before any write. It also sees
+	// the jobs of videos no grant refers to any more, which go first.
 	now := formatTime(lib.now())
 	var due bool
-	err := lib.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs j
-        WHERE ((j.derivation = ? AND `+cardsReady+`) OR (j.derivation = ? AND `+qualityReady+`))
+	err = lib.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs j
+        WHERE ((j.derivation = ? AND `+cardsAfter+`) OR (j.derivation = ? AND `+qualityAfter+`))
         AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?)))`,
 		cardsDerivation, qualityDerivation, now, now).Scan(&due)
 	if err != nil || !due {
-		return false, err
+		return false, false, err
 	}
+	if err := lib.dropUnreferencedCards(ctx); err != nil {
+		return false, false, err
+	}
+	// Someone using the library, or short memory, hangs the work up at once.
 	working, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stop := watchGate(working, continuing(gate), 0, cancel)
-	defer func() {
-		if reason := stop(); reason != "" {
-			r.progress.set(AIPaused, reason, "")
-		}
-	}()
-	if worked, err := lib.cutCards(working); worked || err != nil || working.Err() != nil {
-		return worked, err
+	stopWatching := watchGate(working, continuing(gate), 0, cancel)
+	worked, err = lib.cutCards(working)
+	if !worked && err == nil && working.Err() == nil {
+		worked, err = lib.measureCard(working, r)
 	}
-	return lib.measureCard(working, r)
+	paused := stopWatching()
+	switch {
+	case ctx.Err() != nil:
+		// Stopping: the job went back to its place with its attempt.
+		return worked, true, err
+	case paused != "":
+		// Hung up: the round ends here, as a hung-up chunk of windows does.
+		r.progress.set(AIPaused, paused, "")
+		r.releaseModels(ctx, detector, paused)
+		return worked, true, err
+	}
+	return worked, false, err
 }
 
 // cutCards cuts the cards of a video whose windows are done.
@@ -373,6 +407,11 @@ func (s *Service) cardQuality(ctx context.Context, taker FrameTaker, job claimed
 		return CardQuality{}, errors.Join(ErrComputeFailed, err)
 	}
 	original, err := s.openObject(job.objectID)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		// A storage fault, not an original that cannot be read: tried again
+		// like the Catalog's above, and as a thumbnail's is (renderJob).
+		return CardQuality{}, errors.Join(ErrComputeFailed, err)
+	}
 	if err != nil {
 		return CardQuality{}, err
 	}
