@@ -158,7 +158,13 @@ function Studio({ id, onPage }: { id: string; onPage: (page: "song" | "ask") => 
   return (
     <>
       <Films versions={project.data.versions} />
-      <Go detail={project.data} songTitle={song.data?.title} songState={song.data?.state} onPage={onPage} />
+      <Go
+        detail={project.data}
+        songTitle={song.data?.title}
+        songState={song.data?.state}
+        songWaiting={Boolean(song.data?.waiting)}
+        onPage={onPage}
+      />
     </>
   );
 }

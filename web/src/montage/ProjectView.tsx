@@ -155,7 +155,13 @@ export function ProjectView({
       {(rename.error || remove.error) && <p className={styles.mtError}>{errorText(rename.error ?? remove.error)}</p>}
       <Videos detail={detail} seconds={seconds} onAdd={onAddVideos} />
       <Films versions={detail.versions} />
-      <Go detail={detail} songTitle={song.data?.title} songState={song.data?.state} onPage={onPage} />
+      <Go
+        detail={detail}
+        songTitle={song.data?.title}
+        songState={song.data?.state}
+        songWaiting={Boolean(song.data?.waiting)}
+        onPage={onPage}
+      />
       {dialogs.dialog}
     </main>
   );
@@ -216,11 +222,14 @@ export function Go({
   detail,
   songTitle,
   songState,
+  songWaiting,
   onPage,
 }: {
   detail: MontageProjectDetail;
   songTitle?: string;
   songState?: string;
+  // The song's analysis waits for a service (MontageSong.waiting).
+  songWaiting?: boolean;
   onPage: (page: "song" | "ask") => void;
 }) {
   const client = useQueryClient();
@@ -340,7 +349,7 @@ export function Go({
               <small>配乐</small>
               <b>
                 {songTitle ?? "还没选歌"}
-                {songState === "analyzing" && " · 分析中"}
+                {songState === "analyzing" && (songWaiting ? " · 等配乐分析服务" : " · 分析中")}
                 {songState === "unusable" && " · 用不了"}
               </b>
             </span>
