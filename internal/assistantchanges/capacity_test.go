@@ -24,9 +24,9 @@ func TestPrepareBudgetsSnapshotsAndTheFinalWrite(t *testing.T) {
 	}{
 		{"new file", nil, "1234", 9, 9, true},
 		{"new file without room for both copies", nil, "1234", 8, 9, false},
-		{"old preview", stringPointer(strings.Repeat("x", 64<<10)), "a", 65539, 65539, true},
-		{"old preview without room", stringPointer(strings.Repeat("x", 64<<10)), "a", 65538, 65539, false},
-		{"empty draft still saves preview", stringPointer(strings.Repeat("x", 64<<10)), "", 0, 65537, false},
+		{"old preview", new(strings.Repeat("x", 64<<10)), "a", 65539, 65539, true},
+		{"old preview without room", new(strings.Repeat("x", 64<<10)), "a", 65538, 65539, false},
+		{"empty draft still saves preview", new(strings.Repeat("x", 64<<10)), "", 0, 65537, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t)
@@ -73,8 +73,6 @@ func TestPrepareBudgetsSnapshotsAndTheFinalWrite(t *testing.T) {
 		})
 	}
 }
-
-func stringPointer(value string) *string { return &value }
 
 func TestApplyMeasuresDirectoryCopiesAgainBeforeAnyStep(t *testing.T) {
 	for _, budget := range []int64{4, 8} {
