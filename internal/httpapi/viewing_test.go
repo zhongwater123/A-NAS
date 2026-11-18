@@ -74,7 +74,7 @@ func TestResetMemberMustChangePasswordAndAdministratorCanViewReadOnly(t *testing
 	}
 
 	administrator := signIn(t, handler, "owner", "correct horse battery staple")
-	if got := administrator.call(t, http.MethodPost, "/api/v1/users/"+alice.ID+"/viewing", `{"password":"wrong password here","reason":"help"}`); got.Code != http.StatusForbidden {
+	if got := administrator.call(t, http.MethodPost, "/api/v1/users/"+alice.ID+"/viewing", `{"password":"wrong password here","reason":"help"}`); got.Code != http.StatusForbidden || refusedBySessionGuard(got) {
 		t.Fatalf("viewing with a wrong password = %d %s", got.Code, got.Body.String())
 	}
 	started := administrator.call(t, http.MethodPost, "/api/v1/users/"+alice.ID+"/viewing", `{"password":"correct horse battery staple","reason":"Alice asked for help"}`)
@@ -86,13 +86,13 @@ func TestResetMemberMustChangePasswordAndAdministratorCanViewReadOnly(t *testing
 	if got := administrator.call(t, http.MethodGet, "/api/v1/spaces/"+aliceSpace+"/entries", ""); got.Code != http.StatusOK || !bytes.Contains(got.Body.Bytes(), []byte(`"docs"`)) {
 		t.Fatalf("viewed entries = %d %s", got.Code, got.Body.String())
 	}
-	if got := administrator.call(t, http.MethodPost, "/api/v1/spaces/"+aliceSpace+"/directories", `{"name":"admin"}`); got.Code != http.StatusForbidden {
+	if got := administrator.call(t, http.MethodPost, "/api/v1/spaces/"+aliceSpace+"/directories", `{"name":"admin"}`); got.Code != http.StatusForbidden || refusedBySessionGuard(got) {
 		t.Fatalf("writing while viewing = %d %s", got.Code, got.Body.String())
 	}
 	if got := administrator.call(t, http.MethodDelete, "/api/v1/viewing/"+grant.ID, ""); got.Code != http.StatusNoContent {
 		t.Fatalf("end viewing = %d %s", got.Code, got.Body.String())
 	}
-	if got := administrator.call(t, http.MethodGet, "/api/v1/spaces/"+aliceSpace+"/entries", ""); got.Code != http.StatusForbidden {
+	if got := administrator.call(t, http.MethodGet, "/api/v1/spaces/"+aliceSpace+"/entries", ""); got.Code != http.StatusForbidden || refusedBySessionGuard(got) {
 		t.Fatalf("entries after ending viewing = %d %s", got.Code, got.Body.String())
 	}
 	var notifications struct{ Items []accounts.Notification }

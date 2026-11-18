@@ -51,7 +51,7 @@ func TestOnlyAdministratorsChooseWhenTheLocalScreenSleeps(t *testing.T) {
 	}
 
 	// Requests the contract itself rules out are sent around the contract client.
-	outsideContract := func(cookie *http.Cookie, csrf, body string) int {
+	outsideContract := func(cookie *http.Cookie, csrf, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPut, "/api/v1/local-display", strings.NewReader(body))
 		if cookie != nil {
 			request.AddCookie(cookie)
@@ -60,7 +60,7 @@ func TestOnlyAdministratorsChooseWhenTheLocalScreenSleeps(t *testing.T) {
 		request.Header.Set("X-CSRF-Token", csrf)
 		recorder := httptest.NewRecorder()
 		f.handler.ServeHTTP(recorder, request)
-		return recorder.Code
+		return recorder
 	}
 	for body, want := range map[string]int{
 		`{"sleepAfterMinutes":15}`: http.StatusUnprocessableEntity,
@@ -68,14 +68,14 @@ func TestOnlyAdministratorsChooseWhenTheLocalScreenSleeps(t *testing.T) {
 		`{}`:                       http.StatusBadRequest,
 		`{"sleepAfter":30}`:        http.StatusBadRequest,
 	} {
-		if got := outsideContract(owner.cookie, owner.csrf, body); got != want {
+		if got := outsideContract(owner.cookie, owner.csrf, body).Code; got != want {
 			t.Errorf("PUT %s = %d, want %d", body, got, want)
 		}
 	}
-	if got := outsideContract(owner.cookie, "", `{"sleepAfterMinutes":60}`); got != http.StatusForbidden {
-		t.Errorf("without the CSRF token = %d", got)
+	if got := outsideContract(owner.cookie, "", `{"sleepAfterMinutes":60}`); !refusedForCSRF(got) {
+		t.Errorf("without the CSRF token = %d %s", got.Code, got.Body)
 	}
-	if got := outsideContract(nil, "", `{"sleepAfterMinutes":60}`); got != http.StatusUnauthorized {
+	if got := outsideContract(nil, "", `{"sleepAfterMinutes":60}`).Code; got != http.StatusUnauthorized {
 		t.Errorf("signed out = %d", got)
 	}
 	if got := sleepAfter(signedOut.do(http.MethodGet, "/api/v1/local-display", "", nil, http.StatusOK)); got != 10 {

@@ -134,6 +134,27 @@ func TestATaskNoRoundCanRunIsNotLeftWaiting(t *testing.T) {
 	}
 }
 
+// A task that already waits was accepted by an earlier call. A later call
+// for the same task whose round cannot be started is refused without taking
+// that request back.
+func TestARefusedSecondRequestLeavesTheFirstWaiting(t *testing.T) {
+	asked := &rounds{}
+	h, runs := runHarness(t, asked)
+	member := accountid.WithSessionToken(context.Background(), "member-token")
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); err != nil {
+		t.Fatalf("RunAssistantTask() error = %v", err)
+	}
+	asked.mu.Lock()
+	asked.fail = errors.New("Failed to start anas-assistant-cron@alice.service: Connection timed out")
+	asked.mu.Unlock()
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); !errors.Is(err, wire.ErrUnavailable) {
+		t.Fatalf("the second RunAssistantTask() error = %v, want ErrUnavailable", err)
+	}
+	if got := waiting(t, runs, "alice"); len(got) != 1 || got[0] != "a1b2c3d4e5f6" {
+		t.Fatalf("waiting after the refused second request = %v, want the first one's", got)
+	}
+}
+
 func TestTheTasksWaitingForOneMemberAreBounded(t *testing.T) {
 	asked := &rounds{}
 	h, runs := runHarness(t, asked)
