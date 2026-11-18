@@ -44,6 +44,7 @@ schemas:
       chronological: { type: boolean }
       assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
       versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/MontageVersion" } }
+      job: { $ref: "#/schemas/MontageJob", description: "The project's latest job, for the page to pick up where it was after a reload." }
   MontageSongSection:
     type: object
     additionalProperties: false

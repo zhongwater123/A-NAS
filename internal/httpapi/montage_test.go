@@ -166,6 +166,11 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	jobPath := "/api/v1/montage/jobs/" + job.ID
 	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
+	var withJob montage.ProjectDetail
+	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &withJob)
+	if withJob.Job == nil || withJob.Job.ID != job.ID {
+		t.Fatalf("the project's job = %+v", withJob.Job)
+	}
 	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
 	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
 	var notices struct {

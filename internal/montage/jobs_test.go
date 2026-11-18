@@ -448,6 +448,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	if _, err := env.store.Job(ctx, "user:bob", job.ID); !errors.Is(err, montage.ErrNotFound) {
 		t.Fatalf("Bob reading Alice's job = %v", err)
 	}
+	// The project's page picks the job up again after a reload.
+	if detail, err := env.store.Project(ctx, "user:alice", env.project.ID); err != nil || detail.Job == nil || detail.Job.ID != job.ID {
+		t.Fatalf("project = %+v, %v", detail.Job, err)
+	}
 
 	done := env.settle(t, job.ID)
 	if done.State != montage.JobDone || done.Version == nil || done.Version.Number != 1 {

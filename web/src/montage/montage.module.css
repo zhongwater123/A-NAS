@@ -1,14 +1,230 @@
+/* 剪辑中心's window: a list of projects, a page to make one, and a project's
+   page of cards (videos, song, request, the job, the films). */
 .mt-app {
+  height: 100%;
+  overflow: auto;
+  padding: 20px 24px;
+}
+.mt-page {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.mt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mt-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+.mt-back,
+.mt-icon {
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  height: 100%;
-  padding: 24px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: inherit;
+  background: none;
+  cursor: pointer;
 }
-
+.mt-back:hover,
+.mt-icon:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.mt-back svg,
+.mt-icon svg {
+  width: 18px;
+  height: 18px;
+}
 .mt-projects {
-  align-self: start;
-  justify-self: stretch;
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.mt-project {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-lg);
+  color: inherit;
+  background: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-project:hover {
+  border-color: rgba(58, 95, 232, 0.4);
+}
+.mt-project small,
+.mt-results small {
+  color: #8a8f98;
+}
+.mt-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.mt-choice {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed rgba(58, 95, 232, 0.4);
+  border-radius: var(--radius-lg);
+  color: inherit;
+  background: rgba(58, 95, 232, 0.04);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mt-choice svg {
+  width: 22px;
+  height: 22px;
+  color: #3a5fe8;
+}
+.mt-choice small {
+  color: #6b717c;
+}
+.mt-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.7);
+}
+.mt-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.mt-card p {
+  margin: 0;
+}
+.mt-card textarea {
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-md);
+  font: inherit;
+  resize: vertical;
+}
+.mt-card audio {
+  width: 100%;
+}
+.mt-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mt-inline input {
+  width: 90px;
+  margin-left: 6px;
+}
+.mt-hint {
+  color: #a55a12;
+  font-size: 12.5px;
+}
+.mt-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mt-status,
+.mt-results {
+  margin: 0;
+}
+.mt-results ul,
+.mt-tracks,
+.mt-versions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mt-tracks {
+  max-height: 220px;
+  overflow: auto;
+}
+.mt-tracks button {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-tracks button:hover {
+  background: rgba(58, 95, 232, 0.08);
+}
+.mt-link {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  color: #3a5fe8;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.mt-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.mt-steps li {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #8a8f98;
+  background: rgba(0, 0, 0, 0.04);
+}
+.mt-steps li[data-state="done"] {
+  color: #1f6f3a;
+  background: rgba(31, 111, 58, 0.1);
+}
+.mt-steps li[data-state="running"] {
+  color: #3a5fe8;
+  background: rgba(58, 95, 232, 0.12);
+}
+.mt-versions li {
+  display: flex;
+  align-items: center;
+}
+.mt-versions li span {
+  flex: 1;
+}
+.mt-film {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000;
 }

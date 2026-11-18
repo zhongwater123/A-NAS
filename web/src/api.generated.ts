@@ -8036,18 +8036,6 @@ export interface components {
             /** @description The member deleted the film from the photo library. */
             gone?: boolean;
         };
-        MontageProject: {
-            id: string;
-            name: string;
-            assetCount: number;
-            /** Format: date-time */
-            createdAt: string;
-            ask: string;
-            chronological: boolean;
-            assets: components["schemas"]["MontageProjectAsset"][];
-            /** @description The films saved, newest first. */
-            versions: components["schemas"]["MontageVersion"][];
-        };
         MontageJobStep: {
             /** @enum {string} */
             name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save";
@@ -8082,6 +8070,20 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             finishedAt?: string;
+        };
+        MontageProject: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            ask: string;
+            chronological: boolean;
+            assets: components["schemas"]["MontageProjectAsset"][];
+            /** @description The films saved, newest first. */
+            versions: components["schemas"]["MontageVersion"][];
+            /** @description The project's latest job, for the page to pick up where it was after a reload. */
+            job?: components["schemas"]["MontageJob"];
         };
         MontageNotice: {
             /** @enum {string} */
@@ -8637,9 +8639,9 @@ export type MontageRequestKey = components['schemas']['MontageRequestKey'];
 export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
 export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
 export type MontageVersion = components['schemas']['MontageVersion'];
-export type MontageProject = components['schemas']['MontageProject'];
 export type MontageJobStep = components['schemas']['MontageJobStep'];
 export type MontageJob = components['schemas']['MontageJob'];
+export type MontageProject = components['schemas']['MontageProject'];
 export type MontageNotice = components['schemas']['MontageNotice'];
 export type MontageNotices = components['schemas']['MontageNotices'];
 export type MontageSongSection = components['schemas']['MontageSongSection'];

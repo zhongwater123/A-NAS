@@ -16750,43 +16750,6 @@ components:
         gone:
           type: boolean
           description: The member deleted the film from the photo library.
-    MontageProject:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - name
-        - assetCount
-        - createdAt
-        - ask
-        - chronological
-        - assets
-        - versions
-      properties:
-        id:
-          type: string
-          minLength: 1
-        name:
-          type: string
-        assetCount:
-          type: integer
-          minimum: 0
-        createdAt:
-          type: string
-          format: date-time
-        ask:
-          type: string
-        chronological:
-          type: boolean
-        assets:
-          type: array
-          items:
-            $ref: '#/components/schemas/MontageProjectAsset'
-        versions:
-          type: array
-          description: The films saved, newest first.
-          items:
-            $ref: '#/components/schemas/MontageVersion'
     MontageJobStep:
       type: object
       additionalProperties: false
@@ -16885,6 +16848,46 @@ components:
         finishedAt:
           type: string
           format: date-time
+    MontageProject:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - assetCount
+        - createdAt
+        - ask
+        - chronological
+        - assets
+        - versions
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        assetCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        ask:
+          type: string
+        chronological:
+          type: boolean
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageProjectAsset'
+        versions:
+          type: array
+          description: The films saved, newest first.
+          items:
+            $ref: '#/components/schemas/MontageVersion'
+        job:
+          $ref: '#/components/schemas/MontageJob'
+          description: The project's latest job, for the page to pick up where it was after a reload.
     MontageNotice:
       type: object
       additionalProperties: false

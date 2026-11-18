@@ -101,6 +101,9 @@ type ProjectDetail struct {
 	Assets        []ProjectAsset `json:"assets"`
 	// Versions are the films saved, newest first.
 	Versions []Version `json:"versions"`
+	// Job is the project's latest job, for the page to pick up where it
+	// was after a reload.
+	Job *Job `json:"job,omitempty"`
 }
 
 // ProjectPage is a page of projects, newest first.
@@ -443,6 +446,17 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 	}
 	detail.AssetCount = len(detail.Assets)
 	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
+		return ProjectDetail{}, err
+	}
+	var latest string
+	switch err := s.db.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest); {
+	case err == nil:
+		job, err := s.Job(ctx, owner, latest)
+		if err != nil {
+			return ProjectDetail{}, err
+		}
+		detail.Job = &job
+	case !errors.Is(err, sql.ErrNoRows):
 		return ProjectDetail{}, err
 	}
 	// The films were added to the grant when saved: one lookup says where
