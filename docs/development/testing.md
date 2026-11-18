@@ -81,7 +81,7 @@ npm run dev
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；zizmor 检查工作流与 Dependabot 配置的安全问题（见[安全扫描](#安全扫描)）；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 | `make vendor-check` | [`scripts/check-dsh-pet-vendor.sh`](../../scripts/check-dsh-pet-vendor.sh) 离线核对复制进来的 dsh-pet：清单的池等于 `install-media-pool.sh` 固定的池与 README 记录的池，README 列出的补丁与补丁目录一致，每个复制文件的文件头写着固定的提交，目录里的文件正是 `dsh-pet/files.sha256` 列出的、内容与复制脚本写下的一致（手工改过任何一个文件都通不过）。给 `DSH_PET=<检出>`（可再给 `DSH_PET_MOV_ZIP=<zip>`）时在临时目录重新引入、要求没有差异，并确认改过的检出被拒绝；重新引入要装有 json5 的 Python，开发机 B 上给 `VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python`。CI 没有检出与 zip，只运行离线部分并打印 SKIP，完整检查是提里程碑或升级前的本地步骤，见[虚拟伙伴](../specs/virtual-companion.md#验收证据) |
 
-`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant/companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。
+`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant/companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。它用 `python3 -m venv` 建环境并在其中运行 pip，需要 Python 带 `ensurepip`：Debian 与 Ubuntu 上是 `python3-venv` 软件包，[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 会检查。
 
 lychee 从发布页下载，核对 SHA-256（与 CI 中的一致）后放进 `PATH`：
 
@@ -101,7 +101,7 @@ python3 -m venv ~/.local/opt/ai-tools
 ~/.local/opt/ai-tools/bin/pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
 ```
 
-开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
+开发机 B 在 2026-11-18 装上 `python3-venv` 之前没有 `ensurepip`，它的 `~/.local/opt/ai-tools` 是用 uv 建的；装不了系统包的机器照此办理：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
 `make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。测试启动的后台操作也要在测试返回前等它结束：之后才写进 `t.TempDir()` 的 goroutine 会让清理报 `directory not empty`（[调查](../investigations/2026-11-04-volume-test-writes-after-cleanup.md)）。
 
