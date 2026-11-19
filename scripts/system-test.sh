@@ -1336,7 +1336,8 @@ listener = socket.socket(fileno=3)
 while True:
     conn, _ = listener.accept()
     with conn:
-        request, fds = protocol.read_request(conn)
+        # The photo library's analysis sends several arrays; their requests are refused below.
+        request, fds = protocol.read_request(conn, 16)
         request = with_body(request, fds)
         if request["op"] == "probe":
             try:

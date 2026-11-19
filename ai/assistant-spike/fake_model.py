@@ -42,22 +42,33 @@ def text_of(content):
     return ""
 
 
+def embedded(text):
+    """The JSON objects in a text, as Hermes puts an MCP server's result in a note
+    (<untrusted_tool_result …>) or a JSON envelope."""
+    objects, start = [], text.find("{")
+    while start >= 0 and len(objects) < 20:
+        try:
+            value, length = json.JSONDecoder().raw_decode(text[start:])
+        except (ValueError, RecursionError):
+            start = text.find("{", start + 1)
+            continue
+        objects.append(value)
+        start = text.find("{", start + length)
+    return objects
+
+
 def strings_of(content):
     """The text of a tool result, with the strings of the JSON it holds, however Hermes wrapped it."""
-    text = text_of(content)
-    found = [text]
-    with contextlib.suppress(ValueError, RecursionError):
-        stack = [json.loads(text)]
-        while stack:
-            value = stack.pop()
-            if isinstance(value, str):
-                found.append(value)
-                with contextlib.suppress(ValueError, RecursionError):
-                    stack.append(json.loads(value))
-            elif isinstance(value, dict):
-                stack.extend(value.values())
-            elif isinstance(value, list):
-                stack.extend(value)
+    found, stack = [], [text_of(content)]
+    while stack and len(found) < 100:
+        value = stack.pop()
+        if isinstance(value, str):
+            found.append(value)
+            stack.extend(embedded(value))
+        elif isinstance(value, dict):
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
     return found
 
 
@@ -242,6 +253,10 @@ class Handler(BaseHTTPRequestHandler):
             log.write(json.dumps({"t": time.time(), "path": self.path, "stream": bool(body.get("stream")),
                                   "tools": tools, "messages": len(messages), "decision": choice, "review": review,
                                   "plan": bool(planning(messages)),
+                                  # What a planning step answered to: the last messages, cut short.
+                                  "tail": [{"role": m.get("role"), "text": text_of(m.get("content"))[:300],
+                                            "calls": [c.get("function", {}).get("name") for c in m.get("tool_calls") or []]}
+                                           for m in messages[-2:]] if planning(messages) else None,
                                   "image_parts": sum(1 for m in messages if isinstance(m.get("content"), list)
                                                      for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"),
                                   "system_chars": sum(len(text_of(m.get("content"))) for m in messages if m.get("role") == "system")},

@@ -678,6 +678,10 @@ if "$real_runtime"; then
     check "the model was offered the montage, memory and skill tools alone" test "$plan_tools" = \
       '["mcp__montage__montage_brief","mcp__montage__montage_shots_brief","mcp__montage__montage_submit_outline","mcp__montage__montage_submit_shots","memory","skill_manage","skill_view","skills_list"]'
     echo "INFO montage planning: tools offered: $plan_tools"
+    # What the scripted VNAS did, step by step, and what each step answered to.
+    jq -c '.[] | {decision: (.decision | {tool, text: ((.text // "") | .[0:160]), args: ((.args // "") | .[0:160])}),
+      after: [(.tail // [])[] | {role, calls, text: (.text | .[0:200])}]}' <<<"$plan_requests" 2>/dev/null |
+      sed 's/^/INFO montage planning step: /' || true
     check "a model call of more than two minutes in the round was waited out" \
       jq -e 'any(.[]; (.decision.sleep // 0) >= 120)' <<<"$plan_requests"
     # shellcheck disable=SC2016 # $title is jq's
