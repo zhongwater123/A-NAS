@@ -49,6 +49,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -88,6 +91,13 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "share-service" {
 		if err := runShareService(logger); err != nil {
 			logger.Error("A-NAS share service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == montageServiceCommand {
+		if err := runMontageService(logger); err != nil {
+			logger.Error("A-NAS montage service stopped", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -152,8 +162,9 @@ func runPhotoService(logger *slog.Logger) error {
 		Logger:              logger,
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
-		Photos:              photos.Options{Media: config.Media.client(), Release: version},
-		Vectors:             vectors,
+		Photos: photos.Options{Media: config.Media.client(), Release: version,
+			Compute: photoservice.MontageCompute(montagecompute.Client{SocketPath: config.ComputeSocket})},
+		Vectors: vectors,
 	})
 }
 
@@ -248,6 +259,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
+	var montageGrants montage.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -266,6 +278,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
+		montageGrants = photoservice.LocalGrants(photoService, sessions, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -346,6 +359,15 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
+	var montageMedia montage.Media
+	if mediaWorker != nil {
+		montageMedia = mediaWorker
+	}
+	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, montageMedia, logger)
+	if err != nil {
+		return err
+	}
+	defer closeMontage()
 	// The assistants' companion tools call from the member's own UID; the
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
@@ -372,6 +394,8 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
+		Montage:      montageAPI,
+		PlanGrants:   planGrants(broker),
 		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
@@ -401,7 +425,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
 	// Deleted accounts are removed once their 30 days are over
 	// (docs/specs/account-enable-and-delete.md).
-	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily,
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeMontage,
 		musicService, mediaService, transferService)
 	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
@@ -948,4 +972,13 @@ func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool)
 		return nil, "", assistantapi.ErrSessionRejected
 	}
 	return conn, conn.Token, nil
+}
+
+// planGrants registers planning grants through the File Broker, where
+// there is one.
+func planGrants(broker *filebroker.Client) montageapi.PlanRegistrar {
+	if broker == nil {
+		return nil
+	}
+	return broker
 }

@@ -1,0 +1,249 @@
+/api/v1/montage:
+  get:
+    operationId: getMontage
+    summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
+    responses:
+      "204": { description: The montage center is on }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects:
+  get:
+    operationId: listMontageProjects
+    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageCursor" }]
+    responses:
+      "200": { description: A page of the caller's projects, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProjectPage" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createMontageProject
+    summary: "Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey, assetIds]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+              name: { type: string, maxLength: 64, description: "Empty names the project by its videos' dates." }
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The project the same requestKey made before, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "201": { description: The new project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}:
+  get:
+    operationId: getMontageProject
+    summary: "One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }]
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  patch:
+    operationId: updateMontageProject
+    summary: "Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            minProperties: 1
+            properties:
+              name: { type: string, minLength: 1, maxLength: 64 }
+              ask: { type: string, maxLength: 200 }
+              chronological: { type: boolean }
+              songStart: { type: number, minimum: 0, maximum: 480, description: "Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt." }
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteMontageProject
+    summary: "Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/assets:
+  post:
+    operationId: addMontageProjectAssets
+    summary: "Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey, assetIds]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/song:
+  put:
+    operationId: putMontageSong
+    summary: "Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [trackId]
+            properties:
+              trackId: { type: string, minLength: 1, maxLength: 256, description: "A track of GET /api/v1/music/tracks." }
+    responses:
+      "200": { description: "The song, being analysed or as analysed before", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageSong" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  get:
+    operationId: getMontageSong
+    summary: "The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404)"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }]
+    responses:
+      "200": { description: The song, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageSong" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/song/audio:
+  get:
+    operationId: getMontageSongAudio
+    description: >-
+      The montage center's copy of the project's song, to listen to: with Range support when browsers play its format,
+      otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot
+      seek, so players request a new start.
+    parameters:
+      - { $ref: "../components/montage.yaml#/parameters/MontageProjectID" }
+      - { name: Range, in: header, schema: { type: string } }
+      - { name: start, in: query, description: Seconds to start a decoded song from; ignored for other songs., schema: { type: number, minimum: 0 } }
+    responses:
+      "200": { description: Audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
+      "206": { description: Partial audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "416": { description: The range is outside the song. }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/generate:
+  post:
+    operationId: generateMontageFilm
+    summary: "Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [requestKey]
+            properties:
+              requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
+    responses:
+      "202": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}:
+  get:
+    operationId: getMontageJob
+    summary: "One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/cancel:
+  post:
+    operationId: cancelMontageJob
+    summary: "Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/drop-assets:
+  post:
+    operationId: dropMontageJobAssets
+    summary: "Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [assetIds]
+            properties:
+              assetIds: { $ref: "../components/montage.yaml#/schemas/MontageAssetIDs" }
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/retry-analysis:
+  post:
+    operationId: retryMontageJobAnalysis
+    summary: "Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/retry:
+  post:
+    operationId: retryMontageJob
+    summary: "Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/jobs/{jobId}/replan:
+  post:
+    operationId: replanMontageJob
+    summary: "Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/notices:
+  get:
+    operationId: listMontageNotices
+    summary: "The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day"
+    responses:
+      "200": { description: "The notices, newest first", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageNotices" } } } }

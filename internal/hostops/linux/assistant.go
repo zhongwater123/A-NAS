@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 )
 
@@ -128,6 +130,26 @@ func (e *Executor) AssistantTokenDir() string {
 // assistantTokenPath is the member's instance secret in AssistantTokenDir.
 func (e *Executor) assistantTokenPath(username string) string {
 	return filepath.Join(e.AssistantTokenDir(), username+".env")
+}
+
+// AssistantPlanDir holds the members' planning grants for the montage center, one file each
+// named by the account: the File Broker writes them behind the member's live session, and
+// root's waker reads them (ai/assistant/cron-waker.py). It is in the Host Agent's own state
+// directory, which no service can write to (docs/architecture/montage-center.md, 规划授权).
+func (e *Executor) AssistantPlanDir() string {
+	return filepath.Join(e.assistantState(), "plans")
+}
+
+// forgetPlanGrant removes the planning grant of an account that is being closed: a grant is
+// the member's own, and the name may be another member's later.
+func (e *Executor) forgetPlanGrant(username string) error {
+	if !accountid.ValidAssistantAccount(username) {
+		return nil
+	}
+	if err := os.Remove(filepath.Join(e.AssistantPlanDir(), username)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s's planning grant: %w", username, err)
+	}
+	return nil
 }
 
 // assistantMemberDir holds the member's Hermes settings and skill, which their sandbox binds.
@@ -303,6 +325,11 @@ func (e *Executor) AssistantOn() bool {
 // member: a mask wins in either order against preparing the member's assistant, whose
 // enabling a mask refuses, so an account is closed at once.
 func (e *Executor) disableAssistant(ctx context.Context, username string) error {
+	// The member's planning grant goes first, whatever becomes of the units: without it the
+	// waker starts no round of planning for the account.
+	if err := e.forgetPlanGrant(username); err != nil {
+		return err
+	}
 	units, err := e.assistantUnits(username, assistantTemplates)
 	if err != nil || len(units) == 0 {
 		return err
@@ -593,10 +620,21 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	if err != nil {
 		return err
 	}
+	// The cron unit's settings add the montage center's planning server from its own policy,
+	// which a conversation's instance never starts (docs/architecture/montage-center.md).
+	cronConfig := config
+	if managedCron, err := os.ReadFile(filepath.Join(library, "managed-cron", "config.yaml")); err == nil {
+		if cronConfig, err = memberConfig(username, hash, managedCron); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the assistant's policy for scheduled tasks: %w", err)
+	}
 	skillPath := filepath.Join(member, "skills", "anas-member", "SKILL.md")
 	for path, contents := range map[string][]byte{
 		configPath: config,
-		skillPath:  bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
+		filepath.Join(member, "config-cron.yaml"): cronConfig,
+		skillPath: bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err

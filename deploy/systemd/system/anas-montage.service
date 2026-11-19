@@ -1,0 +1,48 @@
+[Unit]
+Description=A-NAS montage center service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service anas-api.service anas-photos.service anas-montage-assistant.socket
+Wants=anas-host-agent.service anas-api.service anas-montage-assistant.socket
+
+[Service]
+Type=simple
+User=a-nas-montage
+Group=a-nas-montage
+# Reaches the media worker and the montage compute worker; the photo store
+# stays private to a-nas-photos. The group also reaches the photo service's
+# API and the AI worker, as for the family service (ADR 0038, consequences).
+SupplementaryGroups=a-nas-photos
+ExecStart=/usr/lib/a-nas/anas-api montage-service
+Environment=ANAS_MONTAGE_ROOT=/srv/a-nas/data/montage
+Environment=ANAS_MONTAGE_SOCKET=/run/a-nas-montage/montage.sock
+Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
+# Members' cron units plan with VNAS through a socket systemd holds
+# (anas-montage-assistant.socket); the waker reads who has a job to plan from
+# the markers in /run/a-nas-montage/plans (docs/architecture/montage-center.md).
+Sockets=anas-montage-assistant.socket
+RuntimeDirectory=a-nas-montage
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Mounts can appear after startup; only montage/ grants this UID access.
+ReadWritePaths=/srv/a-nas/data
+RestrictAddressFamilies=AF_UNIX
+# Heavy work runs in the workers and the photo service; this one keeps state.
+MemoryMax=512M
+CPUWeight=20
+IOWeight=20
+
+[Install]
+WantedBy=multi-user.target

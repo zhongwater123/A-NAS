@@ -235,6 +235,14 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
+	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api montage-service' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
+	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -242,7 +250,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-montage a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
 	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
@@ -252,12 +260,33 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'Environment=ANAS_PHOTO_SESSION_GROUP=a-nas-photos' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
+	grep -Fqx 'SocketUser=a-nas-montage' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	@# The montage center's socket for members' scheduled tasks: open to every UID in a directory only root
+	@# enters, bound into the cron unit alone, and stopped before the montage service it would start again.
+	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
+	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
+	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
+	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
+	@# Planning grants are in the Host Agent's own state, never under a service's directory.
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/cron-waker.py
+	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket
@@ -479,6 +508,7 @@ scoring-module:
 # build/packages; needs dpkg-deb and jq.
 packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
+	scripts/check-no-songs.sh $(BUILD_DIR)/packages
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)

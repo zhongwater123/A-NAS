@@ -1,4 +1,4 @@
-import { Settings, Share2 } from "lucide-react";
+import { Clapperboard, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -33,6 +33,7 @@ const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
+const MontagePanel = lazyCode(() => import("../montage/MontagePanel").then((module) => module.MontagePanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
@@ -85,6 +86,8 @@ export interface WindowContext {
   // 照片打分 shows only where its module is installed, to its administrators
   // and the raters they chose (ADR 0037).
   scoring: ScoringAccess;
+  // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
+  montage: boolean;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -313,6 +316,18 @@ const definitions = {
         onIntentHandled={(handled) => intentHandled("family", handled)}
       />
     ),
+  },
+  montage: {
+    title: "剪辑中心",
+    icon: Clapperboard,
+    tone: "montage",
+    bounds: { x: 220, y: 48, width: 1080, height: 720 },
+    launcher: {
+      id: "montage",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
+      visible: ({ montage }) => montage,
+    },
+    render: () => <MontagePanel />,
   },
   scoring: {
     title: "照片打分",

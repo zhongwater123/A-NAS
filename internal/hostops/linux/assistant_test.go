@@ -386,3 +386,39 @@ func TestDisablingRemovesTheSocketTheMaskLeft(t *testing.T) {
 		t.Fatalf("a file that is no socket was removed: %v", err)
 	}
 }
+
+// A planning grant for the montage center is the member's own, left while they were signed
+// in: closing the account removes it, so the waker starts no round of planning for it, and a
+// later account of the same name does not inherit it. Nobody else's is touched, and it goes
+// even where no assistant unit is installed.
+func TestDisablingAnAccountRemovesItsPlanningGrant(t *testing.T) {
+	for _, installed := range []bool{true, false} {
+		root := t.TempDir()
+		if installed {
+			root = installedAssistant(t)
+		}
+		host := newFakeHost()
+		executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+		plans := executor.AssistantPlanDir()
+		if want := filepath.Join(root, "var", "lib", "a-nas-host", "assistant", "plans"); plans != want {
+			t.Fatalf("planning grants in %s, want the Host Agent's own %s", plans, want)
+		}
+		if err := os.MkdirAll(plans, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, username := range []string{"alice", "bob"} {
+			if err := os.WriteFile(filepath.Join(plans, username), []byte(`{"issuedAt":"2026-11-18T10:00:00Z","rounds":5}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := executor.DisableCredential(context.Background(), "alice"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(plans, "alice")); !os.IsNotExist(err) {
+			t.Fatalf("installed %v: alice's planning grant after closing her account: %v", installed, err)
+		}
+		if _, err := os.Lstat(filepath.Join(plans, "bob")); err != nil {
+			t.Fatalf("installed %v: bob's planning grant: %v", installed, err)
+		}
+	}
+}

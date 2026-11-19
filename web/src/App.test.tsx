@@ -757,6 +757,52 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
   });
 
+  it("shows 剪辑中心 only while the device turns it on, and opens its empty project list", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
+    await user.click(icons[0]);
+    expect(await screen.findByText("还没有剪辑项目")).toBeInTheDocument();
+    unmount();
+
+    serveDesktop({ montage: false });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+  });
+
+  it("asks again whether 剪辑中心 is on when the page comes back into view", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    // The first read fails as on a network error, which the contract does not describe.
+    let failed = false;
+    server.use(
+      http.untyped.get(
+        `${window.location.origin}/api/v1/montage`,
+        () => {
+          failed = true;
+          return HttpResponse.error();
+        },
+        { once: true },
+      ),
+    );
+    const shown = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    try {
+      render(<App />);
+      await waitFor(() => expect(failed).toBe(true));
+      await screen.findAllByRole("button", { name: "打开相册" });
+      expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((await screen.findAllByRole("button", { name: "打开剪辑中心" })).length).toBeGreaterThan(0);
+    } finally {
+      shown.mockRestore();
+    }
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     serveDesktop();
     serveWindows();

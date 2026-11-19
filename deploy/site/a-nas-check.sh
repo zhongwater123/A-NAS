@@ -92,7 +92,7 @@ else
 fi
 
 # Accounts that own data keep fixed IDs (ADR 0011); the others cannot log in.
-for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003; do
   name=${account%%:*} id=${account#*:}
   if [[ "$(id -u "$name" 2>/dev/null):$(id -g "$name" 2>/dev/null)" == "$id:$id" ]]; then
     pass "$name is $id:$id"
@@ -131,8 +131,9 @@ else
   fail anas-site "anas-site.service failed; see journalctl -u anas-site"
 fi
 
-for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service \
-  anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket smbd.service; do
+for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service \
+  anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-montage-compute.socket anas-montage-assistant.socket \
+  anas-vectors-proxy@a-nas-photos.socket smbd.service; do
   # A unit that is starting or restarting, as smbd does when the Host Agent
   # writes Samba's configuration, gets time to finish.
   for _ in $(seq 1 30); do
@@ -165,7 +166,7 @@ fi
 # its "ready" and "unavailable" lines since it started tells.
 if mountpoint -q /srv/a-nas/data; then
   for store in 'anas-photos photos/catalog.db photo' 'anas-shares shares/catalog.db member-share' \
-    'anas-family family/family.db family'; do
+    'anas-family family/family.db family' 'anas-montage montage/montage.db montage'; do
     read -r unit database name <<<"$store"
     if [[ ! -f "/srv/a-nas/data/$database" ]]; then
       echo "INFO $unit: no $database yet"

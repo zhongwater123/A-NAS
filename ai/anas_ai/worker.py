@@ -31,12 +31,14 @@ import socket
 import sys
 import threading
 
-from anas_ai import protocol, providers
+from anas_ai import describe, protocol, providers
 
 IDLE_SECONDS = 600
 # The photo service sends thumbnails and a 1600 px detector input; anything
 # larger is not what it sends.
 MAX_IMAGE_BYTES = 32 << 20
+# A key frame for describe_frames is 512 pixels wide.
+MAX_KEYFRAME_BYTES = 4 << 20
 # The photo service sends queries of at most 200 characters.
 MAX_QUERY_CHARS = 1000
 SYSTEMD_FIRST_FD = 3
@@ -109,7 +111,11 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
 def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0, reader=None):
     """Answers one request; returns whether the Worker should exit."""
     try:
-        request, fds = protocol.read_request(conn)
+        request, fds = protocol.read_request(conn, protocol.MAX_FDS)
+    except protocol.TooManyDescriptors as error:
+        with contextlib.suppress(OSError):
+            protocol.write_response(conn, protocol.failure(protocol.CODE_INVALID_REQUEST, str(error)))
+        return False
     except (protocol.ProtocolError, OSError, ValueError) as error:
         log.warning("dropped a malformed request: %s", error)
         return False
@@ -192,6 +198,23 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
             return protocol.failure(protocol.CODE_INVALID_INPUT, 'read_text needs one image descriptor and "kind": '
                                     '"text", or "fields" with a non-empty "schema" object')
         return detected(Reading(reader.provider, kind, schema), fds[0], conn, "reading")
+    if op == protocol.OP_DESCRIBE_FRAMES:
+        if reader.provider is None:
+            return protocol.failure(protocol.CODE_UNAVAILABLE, reader.reason)
+        offsets, groups, duration = request.get("offsets"), request.get("groups"), request.get("duration")
+        if not describe.valid_layout(offsets, groups, duration) or len(fds) != len(offsets):
+            return protocol.failure(protocol.CODE_INVALID_REQUEST, (
+                f"describe_frames needs {describe.FEWEST_FRAMES} to {describe.MOST_FRAMES} image descriptors, "
+                '"offsets" rising from 0 for each, "groups" counting beats from 1 in order, and "duration" '
+                "not before the last offset"))
+        try:
+            frames = [read_limited(fd, MAX_KEYFRAME_BYTES) for fd in fds]
+        except providers.InvalidInput as error:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
+        found = watched(Describing(reader.provider, offsets, groups, duration), frames, conn, "description")
+        if found is not None and found["ok"]:
+            found["template"] = describe.TEMPLATE
+        return found
     if op == protocol.OP_RELEASE:
         what = request.get("what")
         if what not in ("detector", "all"):
@@ -264,18 +287,37 @@ class Reading:
         return self.provider.read(data, self.kind, self.schema, run)
 
 
+class Describing:
+    """A text reader bound to one card's layout, describing its key frames the way detections run."""
+
+    def __init__(self, provider, offsets, groups, duration):
+        self.provider, self.offsets, self.groups, self.duration = provider, offsets, groups, duration
+        self.model = provider.model
+
+    def run_options(self):
+        return self.provider.run_options()
+
+    def detect(self, frames, run):
+        return self.provider.describe(frames, self.offsets, self.groups, self.duration, run)
+
+
 def detected(detector, fd, conn, key):
     """Answers with what detector finds in the image under key ("boxes",
-    "faces" or "vectors"), or None when the caller hung up.
-
-    The detection runs on its own thread while this one watches the
-    connection: when the photo service hangs up because the user became
-    active, the detection is told to stop and the Worker is free at once.
-    """
+    "faces" or "vectors"), or None when the caller hung up."""
     try:
         data = read_limited(fd, MAX_IMAGE_BYTES)
     except providers.InvalidInput as error:
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
+    return watched(detector, data, conn, key)
+
+
+def watched(detector, data, conn, key):
+    """Answers with what detector makes of data under key, or None when the caller hung up.
+
+    The work runs on its own thread while this one watches the connection:
+    when the photo service hangs up because the user became active, the work
+    is told to stop and the Worker is free at once.
+    """
     run = detector.run_options()
     outcome = {}
 
@@ -304,6 +346,8 @@ def detected(detector, fd, conn, key):
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
     if isinstance(error, providers.Unavailable):
         return protocol.failure(protocol.CODE_UNAVAILABLE, str(error))
+    if isinstance(error, providers.InvalidResult):
+        return protocol.failure(protocol.CODE_INVALID_RESULT, str(error))
     if error is not None:
         log.error("detecting %s failed: %r", key, error)
         return protocol.failure(protocol.CODE_INTERNAL, type(error).__name__)

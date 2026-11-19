@@ -38,7 +38,15 @@ type fakeHost struct {
 	content       []string // installed content packages
 	removed       []string
 	calls         []string
+	// fails are systemctl and sh commands that fail, by their command line.
+	fails map[string]error
 }
+
+// exitStatus fails as a command that exited with that status does.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e exitStatus) ExitCode() int { return int(e) }
 
 func newFakeHost() *fakeHost {
 	return &fakeHost{installed: map[string]string{"a-nas": "1", "a-nas-host": "1"}, versions: []string{"1", "2"},
@@ -153,6 +161,9 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 		}
 		return []byte("PASS everything\n"), nil
 	case "systemctl", "sh":
+		if err := h.fails[h.calls[len(h.calls)-1]]; err != nil {
+			return []byte(name + " failed"), err
+		}
 		return nil, nil
 	}
 	return nil, fmt.Errorf("unexpected command %s", name)
@@ -1039,5 +1050,61 @@ func writeFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Restoring the copies stops the montage service on its own, since a release
+// before it has no such unit, and brings its database back with the others
+// (ADR 0038). It stops first: a request of its on the photo service's grant
+// socket would start the photo service again while the copies go back. And
+// its socket for members' scheduled tasks stops before it: a round of a
+// member's tasks that connects there would start the montage service again
+// while its database is restored.
+func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	if err := service.restoreDatabases(context.Background(), "20261118T000000Z-1"); err != nil {
+		t.Fatal(err)
+	}
+	restore := slices.IndexFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage")
+	})
+	socket := slices.Index(host.calls, "systemctl stop anas-montage-assistant.socket")
+	montage := slices.Index(host.calls, "systemctl stop anas-montage")
+	photos := slices.IndexFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "systemctl stop ") && strings.Contains(call, " anas-photos")
+	})
+	started := slices.Index(host.calls, "systemctl start anas-montage")
+	if socket < 0 || socket > montage || montage > photos || photos > restore || restore > started {
+		t.Fatalf("calls = %v; want the montage center's assistant socket stopped, then the montage service, then the photo service, "+
+			"the databases restored and the montage service started", host.calls)
+	}
+}
+
+// Only a montage unit that is not loaded, as on a release before it, lets
+// the restore go on without stopping it; any other failure to stop the
+// service, or the socket that would start it again, stops the restore before
+// a journal is deleted (ADR 0038).
+func TestRestoringTheDatabasesNeedsTheMontageServiceStopped(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		fails    map[string]error
+		restored bool
+	}{
+		{"no such units", map[string]error{"systemctl stop anas-montage": exitStatus(5), "systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
+		{"no socket yet", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
+		{"stop failed", map[string]error{"systemctl stop anas-montage": exitStatus(1)}, false},
+		{"the socket did not stop", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(1)}, false},
+	} {
+		host := newFakeHost()
+		host.fails = tc.fails
+		service, _ := newService(t, host)
+		err := service.restoreDatabases(context.Background(), "20261118T000000Z-1")
+		if restored := host.ran("sh -c"); (err == nil) != tc.restored || restored != tc.restored {
+			t.Errorf("%s: err = %v, restored = %t; calls = %v", tc.name, err, restored, host.calls)
+		}
+		if !tc.restored && host.ran("systemctl stop anas-api") {
+			t.Errorf("%s: the other services stopped although the restore cannot go on", tc.name)
+		}
 	}
 }

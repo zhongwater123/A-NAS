@@ -848,6 +848,9 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-share {
   background: linear-gradient(155deg, #ffb25e, #f2621c);
 }
+.icon-montage {
+  background: linear-gradient(155deg, #8f7bff, #4b2fd6);
+}
 /* Docker's own whale and blue (#2496ed). */
 .icon-docker {
   background: linear-gradient(155deg, #3aa8f5, #1d7fd6);

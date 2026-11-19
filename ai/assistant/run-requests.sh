@@ -12,18 +12,29 @@
 # list and nobody but root may change; cron_round.py queues those jobs with Hermes's own
 # trigger_job before it hands the due jobs over. A request that comes while a round runs
 # waits for the next one, which the waker starts (cron-waker.py).
+#
+# The waker's planning token for the montage center (/run/anas-assistant-montage-plans/ACCOUNT,
+# cron-waker.py) is taken the same way, as montage-plan in the round's directory: only a round
+# the waker started for planning claims a round of planning (montage_round.py).
 set -euo pipefail
 waiting=/run/a-nas/assistant-runs
 taken=/run/anas-assistant-run-now
+plans=/run/anas-assistant-montage-plans
 account=${2:-}
 [[ "$account" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "run-requests: bad account" >&2; exit 2; }
 case ${1:-} in
   take)
     rm -rf -- "${taken:?}/$account"
-    [[ -d "$waiting/$account" && ! -L "$waiting/$account" ]] || exit 0
     install -d -m 0711 "$taken"
-    mv -- "$waiting/$account" "$taken/$account"
-    chgrp -- "$account" "$taken/$account"
+    if [[ -d "$waiting/$account" && ! -L "$waiting/$account" ]]; then
+      mv -- "$waiting/$account" "$taken/$account"
+    fi
+    if [[ -f "$plans/$account" && ! -L "$plans/$account" ]]; then
+      install -d -m 0750 "$taken/$account"
+      mv -- "$plans/$account" "$taken/$account/montage-plan"
+    fi
+    [[ -d "$taken/$account" ]] || exit 0
+    chgrp -R -- "$account" "$taken/$account"
     chmod 0750 "$taken/$account"
     ;;
   done)
