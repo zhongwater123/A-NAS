@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-11-18
+更新时间：2026-11-19
 
 本页是目录：只记当前事实、阻塞、待用户决定的事与下一步，每条一两行，细节在链接的文档中。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，决定的经过见[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)。每次部署前的本页存为同目录下按安装日期命名的快照（如 [2026-11-10](2026-11-10.md)），规则见[文档系统](../README.md#写入规则)第 8 条。
 
@@ -10,13 +10,14 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`c738affa140b`，软件包 `1.0.1~rc.6+dev20261117.89+gc738affa140b`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，含 AI 助手试用包；2026-11-17 核对），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
+- 已部署：`99446cf5f15a`，软件包 `1.0.1~rc.6+dev20261119.119+g99446cf5f15a`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，2026-11-19 安装），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
   - 宿主机依赖由 `a-nas-host` 与 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
-  - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `842b388a0f1987f5`；AI Worker 的内存上限为总内存减 2.5 GiB（5150 MiB）。
+  - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `76a8ba1f3e6dfb14`；AI Worker 的内存上限为总内存减 2.5 GiB。
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
-  - 虚拟伙伴的动画池 `36492963e4112f55`（2026-11-10 安装，来自 A-NAS-assets 中固定的副本，#445）。
+  - 虚拟伙伴的动画池 `36492963e4112f55`（A-NAS-assets 中固定的副本，#445）。
   - Caddy 是官方源的 2.11.9，另装了 `wireguard-tools`（2026-11-05，为互联网访问准备）；`/etc/a-nas/internet.env` 不存在，互联网入口关闭。
-- AI 助手以试用包为全部成员开启；部署转正的版本时由 `a-nas` 接管（[手册](../runbooks/enable-ai-assistant.md#从试用接管)）。
+- AI 助手 V1 转正：2026-11-19 由 `a-nas` 接管试用（[手册](../runbooks/enable-ai-assistant.md#从试用接管)），全部成员可用。
+- 剪辑中心由 drop-in `anas-api.service.d/montage-demo.conf` 只在本机打开（[手册](../runbooks/demo-montage-center.md)）；配乐分析是[手动装的](../runbooks/enable-montage-music.md)，不随 release 发布。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1；一块盘坏了不再卸载整个数据卷（#441，2026-11-10 重启后核对，[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
@@ -61,5 +62,6 @@
 11. 虚拟伙伴（大肥鱼）V1（[规格](../specs/virtual-companion.md)）：在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
 12. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
 13. 照片打分：按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
-14. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：部署后按[手册](../runbooks/enable-ai-assistant.md)核对接管与验证；实验 NAS 改用镜像以它为前提。
-15. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+14. AI 助手 V1（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：按[手册的“验证”](../runbooks/enable-ai-assistant.md#验证)试用；实验 NAS 改用镜像以它为前提。
+15. 剪辑中心：按[演示手册](../runbooks/demo-montage-center.md)第 7、8 步验收，用时与峰值内存记进 [#561](https://github.com/zhongwater123/A-NAS/issues/561)；配乐分析按[手册](../runbooks/enable-montage-music.md)第 5 步实测。
+16. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
