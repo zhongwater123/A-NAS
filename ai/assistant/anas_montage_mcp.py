@@ -16,6 +16,7 @@ not_found or unavailable. The server is the SDK's low-level one, as the companio
 montage center as the model wrote them, and it answers a wrong one as rejected.
 """
 
+import contextlib
 import http.client
 import json
 import os
@@ -56,14 +57,20 @@ TOOLS = {
 
 SAID = {
     "accepted": "已收下。",
+    # What an accepted answer means depends on the step (said): never a word another answer also contains.
+    "outline_accepted": "大纲已收下：接着调 montage_shots_brief。",
+    "shots_accepted": "全部方案都已收下：做完了，只回答 [SILENT]。",
     "rejected": "不合格，按 reasons 改好再交。",
     "outline_first": "先交大纲，收下后再读第二步。",
-    "next_plan": "这一版已收下，接着做下一版：回到第 1 步重新调 montage_brief，换一种讲法。",
+    "next_plan": "这一版的镜头交好了，还有下一版：回到第 1 步重新调 montage_brief，换一种讲法。",
     "cancelled": "任务已取消：立刻停下，只回答 [SILENT]。",
     "round_over": "这一轮已结束：立刻停下，只回答 [SILENT]。",
     "not_found": "任务编号或 token 不对：照提示词里给的写。",
     "unavailable": "剪辑中心暂时连不上，稍后再试一次；仍不行就停下，只回答 [SILENT]。",
 }
+
+# The status an accepted answer is said with, by the tool that was answered.
+ACCEPTED = {"montage_submit_outline": "outline_accepted", "montage_submit_shots": "shots_accepted"}
 
 
 def ask(route: str, body: dict) -> dict:
@@ -89,17 +96,22 @@ def ask(route: str, body: dict) -> dict:
         return {"status": "unavailable"}
     if response.status == 404:
         return {"status": "not_found"}
+    if response.status == 400:
+        # The montage center refused the call itself: the arguments, not the answer's content.
+        return {"status": "rejected", "reasons": ["调用的参数不对：jobId 和 attemptToken 是提示词里给的字符串，answer 是一个 JSON 对象"]}
     if response.status != 200 or not isinstance(answer, dict):
         return {"status": "unavailable"}
     return answer
 
 
-def line(data: dict) -> str:
+def line(data: dict, tool: str = "") -> str:
     """One line for the model, and the data the brief or the reasons hold."""
     status = data.get("status")
     if status is None:
         # A brief: its data and schema, as they are.
         return json.dumps(data, ensure_ascii=False)
+    if status == "accepted" and tool in ACCEPTED:
+        status = ACCEPTED[tool]
     said = SAID.get(status, status)
     reasons = data.get("reasons") or []
     return said + ("\n" + "\n".join(f"- {r}" for r in reasons) if reasons else "")
@@ -112,8 +124,12 @@ def call(tool: str, arguments: dict | None) -> CallToolResult:
     else:
         route, _read_only, _description, properties = TOOLS[tool]
         body = {key: arguments.get(key) for key in properties if arguments.get(key) is not None}
+        if isinstance(body.get("answer"), str):
+            # A model may write the answer as a JSON string: it is the same answer.
+            with contextlib.suppress(ValueError):
+                body["answer"] = json.loads(body["answer"])
         data = ask(route, body)
-    return CallToolResult(content=[TextContent(type="text", text=line(data))], structured_content=data, is_error=False)
+    return CallToolResult(content=[TextContent(type="text", text=line(data, tool))], structured_content=data, is_error=False)
 
 
 def tools() -> list[Tool]:

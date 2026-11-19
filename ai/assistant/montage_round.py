@@ -151,7 +151,8 @@ def report(left):
     cleaned = [stale.get("roundId", "") for stale in answer.get("rounds", []) if isinstance(stale, dict)]
     cleaned = [round_id for round_id in cleaned if ROUND_ID.fullmatch(round_id) and round_id not in left]
     if cleaned:
-        ask("/v1/rounds/cleaned", {"roundIds": cleaned})
+        # The montage center takes at most 100 at a time; the next round reports the rest.
+        ask("/v1/rounds/cleaned", {"roundIds": cleaned[:100]})
 
 
 def nonce(runs):
@@ -272,7 +273,7 @@ def finish(planned):
     outcome = "unknown"
     try:
         job = next((j for j in load_jobs() if j.get("id") == job_id), None) or {}
-        outcome = str(job.get("last_status") or "unknown")
+        outcome = str(job.get("last_status") or ("never ran" if not job.get("last_run_at") else "unknown"))
         if job.get("last_error"):
             outcome += ": " + str(job["last_error"])[:400]
         remove(job_id)

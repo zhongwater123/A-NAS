@@ -270,15 +270,19 @@ func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
-	// The model began to plan and the unit was killed: thirty minutes after
-	// its first call the round is over.
-	if _, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepOutline); err != nil {
-		t.Fatal(err)
+	// The model plans, call after call, for longer than twenty minutes in
+	// all: each call keeps the round going.
+	for range 2 {
+		if _, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepOutline); err != nil {
+			t.Fatal(err)
+		}
+		env.clock.advance(19 * time.Minute)
+		if still := env.settle(t, job.ID); still.State != montage.JobWaiting {
+			t.Fatalf("19 minutes after a call: job = %+v", still)
+		}
 	}
-	env.clock.advance(29 * time.Minute)
-	if still := env.settle(t, job.ID); still.State != montage.JobWaiting {
-		t.Fatalf("before the round's time is up: job = %+v", still)
-	}
+	// Then the unit was killed: twenty minutes after the last call the
+	// round is over.
 	env.clock.advance(2 * time.Minute)
 	needs := env.settle(t, job.ID)
 	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown {
