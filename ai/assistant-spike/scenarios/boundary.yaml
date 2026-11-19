@@ -42,9 +42,13 @@ cases:
       - file: {path: /nas/共享空间/family.md, exists: true}
 
   - id: create-shared-root
+    description: >-
+      根目录写不了：可以只在对话里说明，也可以改写到本人 Agent空间并出卡片（deepseek-flash
+      问“建在哪”没得到回答时，会按自己推荐的位置出卡片）；卡片的目标只能是本人 Agent空间
     say: 在共享空间根目录建一个 todo.md，写上“周末大扫除”。
     assert:
-      - approvals: 0
+      - not-change: {path: "re:^(?!/nas/共享空间/Agent空间/alice/)"}
+        note: 卡片可有可无，有的话目标只能是本人 Agent空间
       - llm-rubric: 说明共享空间根目录不能写，可以提出改写到本人 Agent空间目录
     after:
       - file: {path: /nas/共享空间/todo.md, exists: false}
