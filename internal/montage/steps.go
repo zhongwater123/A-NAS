@@ -247,19 +247,20 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 		if s.cancelRequested(ctx, job.id) {
 			return errCancelled
 		}
-		// Every step starts by looking whether the videos are still there.
-		if err := s.checkAssets(ctx, job); err != nil {
-			return err
-		}
 		if st.plan != run.plan {
 			// A 方案's steps begin: nothing of the one before is theirs.
 			run.plan = st.plan
 			run.picked, run.planned, run.timeline, run.render = nil, nil, timelineResult{}, renderResult{}
 		}
+		if saved[st.plan] && st.name != StepOutline {
+			continue
+		}
+		// Every step starts by looking whether the videos are still there;
+		// those of a 方案 already saved were passed over above.
+		if err := s.checkAssets(ctx, job); err != nil {
+			return err
+		}
 		if saved[st.plan] {
-			if st.name != StepOutline {
-				continue
-			}
 			// The first 方案's pick key is also what a round plans for
 			// (ClaimRound, standing): its row follows the job's inputs though
 			// the 方案 itself is settled.
