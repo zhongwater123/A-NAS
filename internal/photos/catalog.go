@@ -600,6 +600,21 @@ CREATE TABLE montage_films (
 `, Down: `
 DROP TABLE montage_films;
 `},
+	// 22: card descriptions name how the Worker fits key frames into the
+	// reader's context (fit=1, #583). A description that succeeded before
+	// had all its key frames fit, which the fitting asks about unchanged,
+	// so it moves to the new identity. A failed one, possibly from frames
+	// the context could not hold, keeps the old identity: it is stale, and
+	// the AI runner queues it again for a video a grant still refers to.
+	{Up: `
+UPDATE video_card_descriptions
+   SET identity = replace(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|', '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|')
+ WHERE result IS NOT NULL AND instr(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|') > 0;
+`, Down: `
+UPDATE video_card_descriptions
+   SET identity = replace(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|', '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|')
+ WHERE instr(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|') > 0;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

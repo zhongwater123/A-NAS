@@ -869,3 +869,88 @@ func TestDescriptionsAreMadeOnceWhenAGrantWentAndAnotherCame(t *testing.T) {
 		t.Fatalf("descriptions with the third grant = %q", state)
 	}
 }
+
+// A card that failed before the Worker fitted key frames into the reader's
+// context (#583) has an identity without fit=: after the upgrade's
+// migration it is stale, and the restart's first handshake queues it for a
+// video a grant still refers to. A card described before keeps its
+// description under the new identity and is not asked about again.
+func TestDescriptionsFailedBeforeFrameFittingAreDescribedAgain(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "granted", true: "revoked"}[revoked], func(t *testing.T) {
+			f := newDescribeFixture(t)
+			f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+				switch call {
+				case 1:
+					return json.RawMessage(`{"camera":"地面","summary":"湖边"}`), nil
+				case 2:
+					return nil, fmt.Errorf("%w: llama-server answered 400: the request exceeds the available context size", photos.ErrAIRejected)
+				}
+				return json.RawMessage(`{"camera":"地面","summary":"山顶"}`), nil
+			}
+			f.cards(t, []standInCard{
+				{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
+				{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
+			})
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
+				t.Fatalf("%d rounds, %d descriptions", rounds, f.embedder.calls())
+			}
+			before := f.descriptions(t)
+			if len(before) != 2 || before[0].result == "" || before[1].result != "" || !strings.Contains(before[1].identity, ",fit=1|") {
+				t.Fatalf("descriptions = %+v", before)
+			}
+			// The Catalog as the build before fit= left it.
+			db := catalog(t, f.root)
+			for _, statement := range []string{
+				"UPDATE video_card_descriptions SET identity = replace(identity, ',fit=1|', '|')",
+				"DELETE FROM schema_downgrades WHERE version = 22",
+				"PRAGMA user_version = 21",
+			} {
+				if _, err := db.Exec(statement); err != nil {
+					t.Fatalf("%s: %v", statement, err)
+				}
+			}
+			if revoked {
+				if err := f.service.RevokeGrant(t.Context(), f.grant.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			f.restart(t)
+			migrated := f.descriptions(t)
+			if len(migrated) != 2 || migrated[0] != before[0] || strings.Contains(migrated[1].identity, "fit=") {
+				t.Fatalf("after the migration = %+v, want card 0 as before %+v and card 1 under the old identity", migrated, before[0])
+			}
+			rounds := processAI(t, f.service, f.embedder, f.gate)
+			if revoked {
+				// The video no grant refers to is not described again.
+				if rounds != 0 || f.embedder.calls() != 2 || f.montageJobs(t) != 0 {
+					t.Fatalf("revoked: %d rounds, %d descriptions in all, %d montage jobs", rounds, f.embedder.calls(), f.montageJobs(t))
+				}
+				// A new grant asks for its analysis, which describes the stale card.
+				f.grant, _ = f.montageFixture.grant(t, namedAlice, "project:again", f.video)
+				processAI(t, f.service, f.embedder, f.gate)
+			} else if rounds != 1 {
+				t.Fatalf("after the restart: %d rounds", rounds)
+			}
+			if f.embedder.calls() != 3 {
+				t.Fatalf("%d descriptions in all, want only the failed card again", f.embedder.calls())
+			}
+			stored := f.descriptions(t)
+			if len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") || stored[1].identity != before[0].identity {
+				t.Fatalf("stored = %+v", stored)
+			}
+			analysis, err := f.analysis(t)
+			if err != nil || analysis.Described != photos.AnalysisDone || analysis.DescriptionsIdentity != before[0].identity ||
+				len(analysis.Descriptions) != 2 || analysis.Descriptions[0].Description == nil || analysis.Descriptions[1].Description == nil {
+				t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
+			}
+
+			// The same fitting asks about nothing again.
+			f.restart(t)
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 3 {
+				t.Fatalf("after another restart: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+			}
+		})
+	}
+}
