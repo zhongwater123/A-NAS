@@ -129,7 +129,7 @@ def plan(messages, tools, prompt):
     if last.get("role") != "tool":
         return {"text": "[SILENT]"}
     said = "\n".join(strings_of(last.get("content")))
-    if called.endswith("montage_brief") or called.endswith("montage_shots_brief"):
+    if called.endswith(("montage_brief", "montage_shots_brief")):
         brief = brief_in(last.get("content"))
         if brief is None:
             return {"text": "简报读不到：" + said[:200]}

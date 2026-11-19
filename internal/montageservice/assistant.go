@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -23,11 +25,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 )
 
-// The montage center's assistant socket (docs/architecture/montage-center.md,
-// MCP 服务器): systemd holds it as anas-montage-assistant.socket, named
-// "assistant", open to every UID in a directory only root enters; it is
-// bound only into members' cron units. The peer's UID, which the kernel
-// reports, is the member; the Host Agent says which account it is.
+// The montage center's assistant socket (docs/architecture/montage-planning-session.md):
+// systemd holds it as anas-montage-assistant.socket, named "assistant", open
+// to every UID in a directory only root enters; it is bound only into
+// members' planning instances. The peer's UID, which the kernel reports, is
+// the member; the Host Agent says which account it is. Root's planner, the
+// one peer outside a sandbox, names the account it plans for instead
+// (AccountHeader).
 
 // AccountResolver finds the account in use for a member's UID.
 type AccountResolver interface {
@@ -57,18 +61,49 @@ func withPeerUID(ctx context.Context, conn net.Conn) context.Context {
 	return context.WithValue(ctx, peerUIDKey{}, int(cred.Uid))
 }
 
-// authenticatePeer makes the peer's account the request's user.
-func authenticatePeer(resolver AccountResolver, logger *slog.Logger, next http.Handler) http.Handler {
+// AccountHeader names the account root's planner claims and reports a round
+// for. Only a root peer is heard naming one: only root reaches the socket
+// outside the sandboxes, whose processes all run as their members.
+const AccountHeader = "X-A-NAS-Account"
+
+// UIDOf is the Linux UID of the account name, from the system's user database.
+func UIDOf(name string) (int, error) {
+	found, err := user.Lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(found.Uid)
+}
+
+// authenticatePeer makes the peer's account the request's user: a member's
+// by the peer's UID, or, for a root peer, the account it names, which must
+// be one in use under that name. uidOf finds the UID of a name.
+func authenticatePeer(resolver AccountResolver, uidOf func(string) (int, error), logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := r.Context().Value(peerUIDKey{}).(int)
+		named := ""
+		if ok && uid == 0 {
+			named = r.Header.Get(AccountHeader)
+			if !accountid.ValidAssistantAccount(named) {
+				logger.ErrorContext(r.Context(), "root named no account on the montage assistant socket")
+				httpjson.WriteError(w, http.StatusForbidden, "forbidden", "root names the account it plans for")
+				return
+			}
+			found, err := uidOf(named)
+			if err != nil || found <= 0 {
+				httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+				return
+			}
+			uid = found
+		}
 		if !ok || uid <= 0 {
 			logger.ErrorContext(r.Context(), "montage assistant socket peer is not a member", "uid", uid, "credentials", ok)
 			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "only members' assistants use this socket")
 			return
 		}
-		user, err := resolver.ResolveAccountUID(r.Context(), uid)
+		account, err := resolver.ResolveAccountUID(r.Context(), uid)
 		switch {
-		case errors.Is(err, accountid.ErrUserNotFound):
+		case errors.Is(err, accountid.ErrUserNotFound), err == nil && named != "" && account.Username != named:
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		case err != nil:
@@ -76,7 +111,7 @@ func authenticatePeer(resolver AccountResolver, logger *slog.Logger, next http.H
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "montage_unavailable", "the montage center is not available")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: user.UserID, Username: user.Username})))
+		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: account.UserID, Username: account.Username})))
 	})
 }
 
@@ -177,7 +212,7 @@ func listenAssistant(ctx context.Context, config Config, gate *assistantGate) (f
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		serveAssistant(ctx, listener, authenticatePeer(config.Accounts, config.Logger, gate), config.Logger)
+		serveAssistant(ctx, listener, authenticatePeer(config.Accounts, UIDOf, config.Logger, gate), config.Logger)
 	}()
 	return func() {
 		cancel()

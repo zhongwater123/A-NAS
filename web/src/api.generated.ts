@@ -8117,10 +8117,10 @@ export interface components {
             /** @description The step the job is at or stopped at. */
             step?: string;
             /**
-             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.
              * @enum {string}
              */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
             /** @description The videos missing, too long, or whose analysis failed. */

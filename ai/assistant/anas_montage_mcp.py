@@ -1,13 +1,13 @@
-"""The montage center's planning tools for a member's VNAS (docs/architecture/montage-center.md, MCP 服务器).
+"""The montage center's planning tools for a member's VNAS (docs/architecture/montage-planning-session.md).
 
-A stdio server inside the member's cron unit. Each call goes to the montage center's assistant socket, which knows
-the member by the caller's UID and answers only for their jobs; every call names the job and the round's token.
-Four tools: the two steps' briefs (data and exact schema) and their submissions. The montage center checks each
-answer and keeps the first good one.
+A stdio server inside the member's planning instance (anas-assistant-plan@.service). Each call goes to the montage
+center's assistant socket, which knows the member by the caller's UID and answers only for their jobs; every call
+names the job and the round's token. Four tools: the two steps' briefs (data and exact schema) and their
+submissions. The montage center checks each answer and keeps the first good one.
 
-Only the cron unit binds the socket, and only a planning round's job opens the montage toolset
-(enabled_toolsets=["montage", "no_mcp"], montage_round.py): the member's own tasks and conversations never list
-these tools. In any other sandbox the server lists none.
+Only the planning instance binds the socket and has this server in its policy, and it gives the model these tools
+with memory and skills alone (HERMES_TUI_TOOLSETS): the member's own conversations and tasks never list them. In
+any other sandbox the server lists none.
 
 Every answer is a result, never an error (is_error stays false): Hermes counts errors towards its circuit breaker,
 which after three in a row makes the server unreachable for a minute, and a refused answer is for the model to
@@ -133,7 +133,7 @@ def call(tool: str, arguments: dict | None) -> CallToolResult:
 
 
 def tools() -> list[Tool]:
-    # Outside the cron unit the path is the empty file the bind would cover, or nothing: no tools.
+    # Outside the planning instance the path is the empty file the bind would cover, or nothing: no tools.
     try:
         if not stat.S_ISSOCK(os.stat(SOCKET).st_mode):
             return []

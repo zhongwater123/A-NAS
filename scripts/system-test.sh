@@ -82,9 +82,11 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
-  # Nor has it the photo service's grant socket for the montage center, or
-  # the montage center's socket for members' scheduled tasks.
+  # Nor has it the photo service's grant socket for the montage center, the
+  # montage center's socket for planning, or its planner.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage-planner.service" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-assistant.socket" \
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-assistant.socket" \
     "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
@@ -94,6 +96,7 @@ if [[ "${1:-}" != --inside ]]; then
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
   sed -i -e '/systemctl stop anas-montage-assistant\.socket/d' -e 's/ anas-montage-assistant\.socket//g' \
+    -e 's/ anas-montage-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
     -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
     -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"

@@ -14,11 +14,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montage"
 )
 
-// The montage center's assistant socket (docs/architecture/montage-center.md,
-// MCP 服务器): bound only into each member's cron unit, where the round
-// script and the montage MCP server reach it. The montage service knows the
-// member from the peer's UID and puts them in the request's context
-// (accounts.WithUser); every call answers only for that member's jobs.
+// The montage center's assistant socket (docs/architecture/montage-planning-session.md):
+// bound only into each member's planning instance, where the montage MCP
+// server reaches it, and reached outside the sandboxes by root's planner,
+// which claims and reports the rounds. The montage service knows the member
+// from the peer's UID, or the account root names, and puts them in the
+// request's context (accounts.WithUser); every call answers only for that
+// member's jobs.
 
 // AssistantPrefix is where the assistant socket's API lives.
 const AssistantPrefix = "/v1"
@@ -46,8 +48,6 @@ func Assistant(store *montage.Store, logger *slog.Logger) http.Handler {
 	}
 	h := &assistantHandler{store: store, logger: logger, mux: http.NewServeMux(), limits: map[string]*rate.Limiter{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
-		"POST /rounds/stale":             h.stale,
-		"POST /rounds/cleaned":           h.cleaned,
 		"POST /rounds/claim":             h.claim,
 		"POST /rounds/{roundID}/started": h.started,
 		"POST /rounds/{roundID}/abandon": h.abandon,
@@ -120,35 +120,6 @@ func (h *assistantHandler) fail(w http.ResponseWriter, r *http.Request, err erro
 	}
 }
 
-func (h *assistantHandler) stale(w http.ResponseWriter, r *http.Request, owner string) {
-	rounds, err := h.store.StaleRounds(r.Context(), owner)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"rounds": rounds})
-}
-
-type cleanedRequest struct {
-	RoundIDs []string `json:"roundIds"`
-}
-
-func (h *assistantHandler) cleaned(w http.ResponseWriter, r *http.Request, owner string) {
-	var request cleanedRequest
-	if !httpjson.Read(w, r, maxAssistantBytes, &request) {
-		return
-	}
-	if len(request.RoundIDs) > 100 {
-		h.fail(w, r, montage.ErrInvalid)
-		return
-	}
-	if err := h.store.CleanedRounds(r.Context(), owner, request.RoundIDs); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (h *assistantHandler) claim(w http.ResponseWriter, r *http.Request, owner string) {
 	claim, err := h.store.ClaimRound(r.Context(), owner)
 	if err != nil {
@@ -174,8 +145,14 @@ func (h *assistantHandler) started(w http.ResponseWriter, r *http.Request, owner
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// outcomeRequest is how a round stopped: in the planner's words (Outcome),
+// whether it never started for something it could not reach or for an error
+// (Failure, "unreachable" or "error"), and how a conversation that started
+// ended (Result, "complete" or what stopped it).
 type outcomeRequest struct {
 	Outcome string `json:"outcome"`
+	Failure string `json:"failure"`
+	Result  string `json:"result"`
 }
 
 func (h *assistantHandler) abandon(w http.ResponseWriter, r *http.Request, owner string) {
@@ -183,7 +160,7 @@ func (h *assistantHandler) abandon(w http.ResponseWriter, r *http.Request, owner
 	if !httpjson.Read(w, r, maxAssistantBytes, &request) {
 		return
 	}
-	if err := h.store.AbandonRound(r.Context(), owner, r.PathValue("roundID"), request.Outcome); err != nil {
+	if err := h.store.AbandonRound(r.Context(), owner, r.PathValue("roundID"), request.Outcome, request.Failure); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -195,7 +172,7 @@ func (h *assistantHandler) end(w http.ResponseWriter, r *http.Request, owner str
 	if !httpjson.Read(w, r, maxAssistantBytes, &request) {
 		return
 	}
-	if err := h.store.EndRound(r.Context(), owner, r.PathValue("roundID"), request.Outcome); err != nil {
+	if err := h.store.EndRound(r.Context(), owner, r.PathValue("roundID"), request.Outcome, request.Result); err != nil {
 		h.fail(w, r, err)
 		return
 	}

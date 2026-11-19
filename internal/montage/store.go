@@ -315,6 +315,11 @@ CREATE INDEX plans_by_job ON plans(job_id, step, voided_at);
 ALTER TABLE jobs DROP COLUMN plans;
 ALTER TABLE projects DROP COLUMN song_track;
 `},
+		// 7: planning is a conversation of the member's planning instance
+		// (docs/architecture/montage-planning-session.md): why a round
+		// stopped short of the model's planning, which says when the job
+		// asks again (retryWait).
+		{Up: "ALTER TABLE rounds ADD COLUMN failure TEXT NOT NULL DEFAULT ''", Down: "ALTER TABLE rounds DROP COLUMN failure"},
 	},
 }
 
@@ -353,6 +358,9 @@ type Store struct {
 	// planMarkers is where the planning markers go, one empty file per
 	// member with a job wanting a round (/run/a-nas-montage/plans).
 	planMarkers string
+	// opened is when the store was opened: rounds that stopped short of
+	// planning before it do not hold a job back (retryWait).
+	opened time.Time
 	// plans is how many films, 方案, a job started now makes to choose
 	// from; a job keeps the number it started with (jobs.plans).
 	plans int
@@ -443,6 +451,7 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if store.now == nil {
 		store.now = time.Now
 	}
+	store.opened = store.now()
 	if store.logger == nil {
 		store.logger = slog.Default()
 	}

@@ -159,6 +159,18 @@ if [[ -e /etc/a-nas/internet.env ]]; then
 else
   echo "INFO internet entry: off"
 fi
+# VNAS runs while the administrator's model key is saved, and with it the montage center's
+# planner, which hands the planning to members' planning instances.
+if [[ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]]; then
+  if systemctl is-active --quiet anas-montage-planner.service; then
+    pass "anas-montage-planner.service is active"
+  else
+    fail unit:anas-montage-planner.service \
+      "anas-montage-planner.service is $(systemctl is-active anas-montage-planner.service); see journalctl -u anas-montage-planner"
+  fi
+else
+  echo "INFO VNAS and the montage center's planner: off without the model key"
+fi
 
 # A store on the data volume that its service opened before opens again. A
 # service whose database does not open, as when a rollback finds no reverse

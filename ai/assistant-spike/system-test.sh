@@ -42,7 +42,7 @@ check "without a key the model gateway is not running" \
 check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar "$api/api/v1/assistant-key")" = 403
 # The requests that may lead to planning in the montage center register a planning grant for
 # the member behind them first (docs/architecture/montage-center.md, 规划授权): the File Broker
-# writes it into the Host Agent's own state, for the waker alone. Here the job asked for does
+# writes it into the Host Agent's own state, for root's planner alone. Here the job asked for does
 # not exist, so the montage center answers 404 once the Product Service has passed the request
 # on; without VNAS it passes it on with no grant.
 replan() { # JAR CSRF: the status of asking to plan a job again
@@ -680,6 +680,7 @@ if "$real_runtime"; then
     echo "INFO montage planning: tools offered: $plan_tools"
     check "a model call of more than two minutes in the round was waited out" \
       jq -e 'any(.[]; (.decision.sleep // 0) >= 120)' <<<"$plan_requests"
+    # shellcheck disable=SC2016 # $title is jq's
     check "the planning stays in her VNAS history, titled for the project" jq -e --arg title "剪辑规划 · $plan_name" \
       'any(.sessions[]; .title == $title)' <<<"$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/sessions" || true)"
     check "Hermes's background review of the planning ran" \

@@ -862,6 +862,14 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 		return nil, &stepNeeds{reason: NeedVNASUnknown, err: err}
 	case errors.Is(err, ErrPlanInvalid):
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: err}
+	case errors.Is(err, ErrPlanFailed):
+		// The page shows what the planner reported, after "规划出错".
+		var failure *planFailed
+		said := ""
+		if errors.As(err, &failure) {
+			said = failure.said
+		}
+		return nil, &stepNeeds{reason: NeedPlanError, err: err, said: cmp.Or(said, err.Error())}
 	case err != nil:
 		return nil, err
 	}
