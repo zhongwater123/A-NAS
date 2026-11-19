@@ -435,6 +435,16 @@ async def print_only(path):
 
 # ---- a scored suite ----
 
+def upstream_cache():
+    """bypassed (SPIKE_NO_CACHE=1 past a relay's cache), none (an upstream without a response
+    cache, SPIKE_NO_CACHE=none), allowed (neither: repeated runs may be one cached answer)."""
+    if not REAL_MODEL:
+        return None
+    if Path("/etc/anas-spike/upstream-no-cache").exists():
+        return "bypassed"
+    return "none" if Path("/etc/anas-spike/upstream-uncached").exists() else "allowed"
+
+
 def digest(paths, root=None):
     """One short hash over the files' names (below root, so that moving the folder changes
     nothing) and contents, read in chunks (the runtime is ~130 MB)."""
@@ -459,7 +469,7 @@ def environment():
             "runtime": digest([runtime]) if runtime.exists() else None,
             "repo": os.environ.get("VNAS_EVAL_REPO"),
             "skills": digest([*src.glob("skills/*/SKILL.md"), src / "member-skill.md", src / "managed-config.yaml"], src),
-            "upstream_cache": None if not REAL_MODEL else "bypassed" if Path("/etc/anas-spike/upstream-no-cache").exists() else "allowed",
+            "upstream_cache": upstream_cache(),
             "approval_timeout": APPROVAL_TIMEOUT}
 
 
