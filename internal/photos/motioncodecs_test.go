@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/codectest"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
@@ -21,11 +22,11 @@ import (
 func TestRealMotionPhotoCodecs(t *testing.T) {
 	encoder, err := exec.LookPath("heif-enc")
 	if err != nil {
-		t.Skip("heif-enc not installed")
+		codectest.Missing(t, "heif-enc is not installed")
 	}
 	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
-		t.Skip("media codecs not installed")
+		codectest.Missing(t, "FFmpeg is not installed")
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.png")
