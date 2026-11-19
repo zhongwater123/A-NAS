@@ -42,6 +42,15 @@ func (s *Store) BackupIfDue(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	// A copy is about the size of the database; below the reserve the day
+	// goes without one, and RunBackups tries again within the hour.
+	database, err := os.Stat(filepath.Join(s.dir, "scoring.db"))
+	if err != nil {
+		return err
+	}
+	if err := s.room(database.Size()); err != nil {
+		return err
+	}
 	partial := name + ".partial"
 	_ = os.Remove(partial)
 	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {

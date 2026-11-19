@@ -174,6 +174,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "dimension_exists", "a scoring dimension has this name")
 	case errors.Is(err, scoring.ErrOriginalChanged):
 		httpjson.WriteError(w, http.StatusGone, "original_changed", "the original is gone or no longer the imported photo")
+	case errors.Is(err, scoring.ErrInsufficientSpace):
+		httpjson.WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", "the data volume is at its reserve")
 	default:
 		httpjson.WriteInternal(w, r, h.logger, err)
 	}
@@ -571,6 +573,8 @@ type batch struct {
 		Imported  int             `json:"imported"`
 		Skipped   int             `json:"skipped"`
 		SkippedBy []skippedReason `json:"skippedBy"`
+		// WaitingForSpace: the import is paused at the data volume's reserve.
+		WaitingForSpace bool `json:"waitingForSpace"`
 	} `json:"import"`
 	Photos   int `json:"photos"`
 	Anchors  int `json:"anchors"`
@@ -587,6 +591,7 @@ func batchBody(b scoring.Batch, catalogue scoring.Catalogue) batch {
 		Flagged: b.Flagged, Answers: b.Answers,
 	}
 	body.Import.Files, body.Import.Imported, body.Import.Skipped = b.Files, b.Imported, b.Skipped
+	body.Import.WaitingForSpace = b.WaitingForSpace
 	body.Import.SkippedBy = []skippedReason{}
 	for reason, count := range b.SkippedBy {
 		body.Import.SkippedBy = append(body.Import.SkippedBy, skippedReason{Reason: reason, Count: count})

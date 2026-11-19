@@ -384,7 +384,7 @@ describe("ScoringPanel for an administrator", () => {
           adminBatch({
             name: body.name,
             state: "importing",
-            import: { files: 0, imported: 0, skipped: 0, skippedBy: [] },
+            import: { files: 0, imported: 0, skipped: 0, skippedBy: [], waitingForSpace: false },
             answers: 0,
           }),
         );
@@ -471,6 +471,30 @@ describe("ScoringPanel for an administrator", () => {
     expect(await screen.findByText("正在读取文件夹")).toBeTruthy();
   });
 
+  it("says when an import waits for space on the data volume", async () => {
+    server.use(
+      http.get("/api/v1/modules/scoring/admin/batches", ({ response }) =>
+        response(200).json({
+          items: [
+            adminBatch({
+              state: "importing",
+              import: { files: 160, imported: 40, skipped: 2, skippedBy: [], waitingForSpace: true },
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/v1/modules/scoring/admin/batches/{batchId}/stats", ({ response }) =>
+        response(200).json({ items: [] }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:owner" access={{ admin: true, rater: false }} />);
+    const row = await screen.findByRole("button", { name: /风景第一批/ });
+    expect(row.textContent).toContain("空间不足，导入已暂停");
+    await user.click(row);
+    expect((await screen.findByText(/腾出空间后自动继续/)).textContent).toContain("已处理 42 / 160 个文件");
+  });
+
   it("shows a batch's coverage and each rater's statistics, and closes it", async () => {
     let state: "open" | "closed" = "open";
     server.use(
@@ -487,6 +511,7 @@ describe("ScoringPanel for an administrator", () => {
                   { reason: "too_small", count: 40 },
                   { reason: "unsupported_type", count: 2 },
                 ],
+                waitingForSpace: false,
               },
             }),
           ],
