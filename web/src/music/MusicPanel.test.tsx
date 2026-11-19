@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api/client";
 import { session } from "../test/fixtures";
 import { musicFavorites, musicHandlers, musicPlaylists, musicStatus } from "../test/handlers/music";
+import { sizedScrollers } from "../test/layout";
 import { http, server } from "../test/server";
 import type { Track } from "./api";
 import { MusicPanel } from "./MusicPanel";
@@ -62,7 +63,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const rowOf = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title))!;
+// The song table is virtualized: its rows show only in a scroller of some size.
+sizedScrollers();
+
+// rowOf is the table row that shows title; a test waits for it with waitFor.
+function rowOf(title: string): HTMLElement {
+  const row = screen.getAllByRole("row").find((candidate) => within(candidate).queryByText(title));
+  if (!row) throw new Error(`no row shows ${title}`);
+  return row;
+}
 
 describe("MusicPanel", () => {
   it("loads the library, starts a scan and plays a song on double click", async () => {
@@ -137,8 +146,7 @@ describe("MusicPanel", () => {
     const favorites = musicFavorites();
     server.use(...musicHandlers({ tracks: library }), ...favorites.handlers);
     render(<MusicPanel userId="user:u1" />);
-    await screen.findByText("晴天");
-    fireEvent.click(within(rowOf("晴天")).getByRole("button", { name: "收藏" }));
+    fireEvent.click(within(await waitFor(() => rowOf("晴天"))).getByRole("button", { name: "收藏" }));
     await waitFor(() => expect(favorites.sent).toEqual([{ trackId: "file:a1", favorite: true }]));
     fireEvent.click(screen.getByRole("button", { name: /我的收藏/ }));
     expect(await screen.findByRole("heading", { name: "我的收藏" })).toBeTruthy();

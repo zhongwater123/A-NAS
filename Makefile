@@ -510,16 +510,19 @@ packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
 	scripts/check-no-songs.sh $(BUILD_DIR)/packages
 
+# check runs every step, past a failing one (-k), so that one run reports
+# every failure; the quick steps come first. It writes the deploy manifest only
+# once all have passed.
 check:
 	@rm -f $(VALIDATION_MANIFEST)
-	@$(MAKE) --no-print-directory check-steps VERSION="$(VERSION)"
+	@$(MAKE) -k --no-print-directory check-steps VERSION="$(VERSION)"
 	@commit="$$(git rev-parse --short=12 HEAD)"; \
 	api_sha="$$(sha256sum $(BUILD_DIR)/anas-api | cut -d ' ' -f 1)"; \
 	agent_sha="$$(sha256sum $(BUILD_DIR)/anas-host-agent | cut -d ' ' -f 1)"; \
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
+check-steps: fmt-check docs-check ops-check vendor-check vet go-lint api-check web-typecheck web-lint web-test web-build vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)

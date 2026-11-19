@@ -47,6 +47,9 @@ const serve = (names: string[]) =>
 const write = (leaf: "say" | "anim" | "position" | "throw" | "lock" | "sleep", data: unknown) =>
   act(() => companionState.writePet("main", leaf, data));
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+// How long the vendored work-status bridge holds a step's end that follows
+// its start too soon (WORK_STATE_GAP_MS in dsh-pet/host/plugin/work-status-bridge.ts).
+const WORK_STATE_GAP_MS = 5000;
 /** Something waited for the member in the turn: a big one, which ends with its clip (workStatus.ts BIG_TURN_*). */
 const askedMember = (sessionId: string) =>
   act(() => {
@@ -868,8 +871,16 @@ describe("what VNAS asks of the companion", () => {
       });
       await plays("写代码");
       fetched = [];
-      act(() => reportEvent("live0001", "tool.complete", { name: "terminal", tool_id: "c1" }));
-      expect(await screen.findByText(/搞定一步，继续看看哦~|这步好啦！/)).toBeInTheDocument();
+      // A step done soon after it started waits out the work-status bridge's
+      // hold (WORK_STATE_GAP_MS): on a fake clock, not on a busy machine's.
+      vi.useFakeTimers({ shouldClearNativeTimers: true });
+      try {
+        act(() => reportEvent("live0001", "tool.complete", { name: "terminal", tool_id: "c1" }));
+        act(() => vi.advanceTimersByTime(WORK_STATE_GAP_MS));
+        expect(screen.getByText(/搞定一步，继续看看哦~|这步好啦！/)).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
       await settle();
       expect(fetched).toEqual([]);
     });
