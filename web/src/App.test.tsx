@@ -764,7 +764,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     const { unmount } = render(<App />);
     const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
     await user.click(icons[0]);
-    expect(await screen.findByText("还没有项目：新建一个，交一批视频开始。")).toBeInTheDocument();
+    expect(await screen.findByText("还没有项目")).toBeInTheDocument();
     unmount();
 
     serveDesktop({ montage: false });
