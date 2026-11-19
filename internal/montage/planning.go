@@ -108,12 +108,14 @@ const (
 	detailSeparator = ": "
 )
 
-// DetailUnreachable and DetailFailed are the details of a job that waits to
-// try again, in minutes, after a round VNAS could not be reached for, or
-// one that failed.
+// DetailUnreachable is the detail of a job that tries again in minutes after
+// a round VNAS could not be reached for.
 func DetailUnreachable(minutes int) string {
 	return fmt.Sprintf("VNAS 暂时连不上，%d 分钟后再试", minutes)
 }
+
+// DetailFailed is the detail of a job that tries once more in minutes after a
+// round whose planning failed.
 func DetailFailed(minutes int) string {
 	return fmt.Sprintf("规划出错，%d 分钟后再试一次", minutes)
 }
