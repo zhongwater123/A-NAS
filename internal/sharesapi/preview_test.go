@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
@@ -56,6 +58,11 @@ func TestHEICPreviewUsesReadOnlyAnonymousInput(t *testing.T) {
 		}
 		if _, err = file.Write([]byte("bad")); err == nil {
 			t.Fatal("worker received writable input")
+		}
+		// Read-only by access mode, as ADR 0017 hands FFmpeg its input,
+		// not only by the memfd's seals.
+		if flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFL, 0); err != nil || flags&unix.O_ACCMODE != unix.O_RDONLY {
+			t.Fatalf("input access mode = %#o, %v; want read-only", flags&unix.O_ACCMODE, err)
 		}
 		var out bytes.Buffer
 		err = png.Encode(&out, image.NewRGBA(image.Rect(0, 0, 1, 1)))
