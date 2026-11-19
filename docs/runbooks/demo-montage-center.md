@@ -2,13 +2,13 @@
 
 ## 目的
 
-把剪辑中心整条栈（#514 的 M1–M10，分支 `feat/montage-web`）装到 Experimental NAS，只在这台设备上打开剪辑中心，演示一遍：上传视频 → 选歌 → 写要求 → 后台由成员的 VNAS 规划 → 成片存进相册。
+把剪辑中心整条栈（#514 的 M1–M10）装到 Experimental NAS，只在这台设备上打开剪辑中心，演示一遍：上传视频 → 选歌 → 写要求 → 后台由成员的 VNAS 规划两个方案 → 两条成片存进相册。
 
 这是演示，不是发布：
 - 剪辑中心的产品默认值仍是关闭，只在这台设备上用 drop-in 打开；
 - allin1 的商业版权还没有结论，配乐分析只按[启用配乐分析](enable-montage-music.md)手动装在实验 NAS 上。
 
-成功结果：成员在剪辑中心点“开始”后关掉浏览器，任务走完，成片出现在成员的个人图库，可以播放。
+成功结果：成员在剪辑中心点“开始剪辑”后关掉浏览器，任务走完，方案一、方案二两条成片出现在成员的个人图库，可以播放。
 
 ## 前提与风险
 
@@ -29,11 +29,12 @@
 
 1. **开发机 B：取到要演示的提交，跑门禁**。
    ```bash
-   git fetch origin feat/montage-web
-   git switch --detach origin/feat/montage-web
+   git fetch origin main
+   git switch --detach origin/main
    git status --short   # 必须为空
    make check
    ```
+   - [#578](https://github.com/zhongwater123/A-NAS/pull/578) 合并之前，把 `main` 换成 `feat/montage-web`。
    - 完成标准：`make check` 通过（`src/companion/Companion.test.tsx` 的偶发超时可以单独重跑确认）。记下 `git rev-parse --short HEAD`。
 2. **开发机 B：构建配乐分析的运行环境与权重**，按[启用配乐分析](enable-montage-music.md)的第 1–3 步，得到 11 个 `.deb`。
 3. **开发机 B：发布并推送**，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的第 1、2 步：
@@ -57,7 +58,9 @@
 7. **准备演示素材**：
    - 演示成员的“音乐”文件夹里放好《Symphony》；
    - 本机有品杰一组的 11 段视频，用来在剪辑中心里上传；
-   - **主页背景（可选）**：把原型的背景片放到这台设备上，主页就播它，和原型一样；不放时主页轮流播成员自己的三段视频。片子是用户的私人素材，仓库是公开的，所以它只放在设备上，不进仓库也不进软件包。从开发机 C（Mac）拷到 NAS 后，以 root：
+   - **主页背景（可选）**：把原型的背景片放到这台设备上，主页就播它，和原型一样；不放时主页轮流播成员自己的三段视频。
+     - **谁能看到**：这个文件是设备级的，`GET /api/v1/montage/hero` 把它给这台设备上每一位登录的成员，不只是放它的人。片子是用户的私人素材：只在这台设备的成员都可以看它时才放，演示完按“回滚或恢复”删掉。
+     - 仓库是公开的，所以它只放在设备上，不进仓库也不进软件包。从开发机 C（Mac）拷到 NAS 后，以 root：
      ```bash
      install -d -o a-nas-montage -g a-nas-montage -m 0750 /srv/a-nas/data/montage/hero
      install -o a-nas-montage -g a-nas-montage -m 0640 hero.mp4 hero.jpg /srv/a-nas/data/montage/hero/
@@ -66,10 +69,12 @@
 8. **演示**：
    1. 成员打开剪辑中心 → 新建项目 → 上传视频，选 11 段，上传完点“新建项目”；
    2. 在项目页选歌《Symphony》，等分析完成，试听选段；
-   3. 写一句要求，点“开始”，然后关掉浏览器；
-   4. 过一会儿重新登录：项目页的进度从服务端恢复，桌面提示“正在由 VNAS 规划”或“成片已存进相册”；
-   5. 在“成片”里播放、下载，在相册的个人图库里也能找到“<项目名> v1.mp4”。
-   - 每一步以 root 记下用时与峰值内存，写进 #561：
+   3. 写一句要求，点“开始剪辑”，然后关掉浏览器；
+   4. 过一会儿重新登录：项目页的进度从服务端恢复，13 个步骤里方案一的 5 步在前、方案二的 5 步在后；桌面提示“正在由 VNAS 规划”，两个方案都存完后提示“成片已存进相册”；
+   5. 方案一存完、方案二还在规划或渲染时，“成片”里已经能播放方案一；
+   6. 两个方案都存完后，“成片”里并排显示方案一、方案二，各自播放、下载；在相册的个人图库里能找到“<项目名> v1.mp4”与“<项目名> v2.mp4”。
+   - 一轮规划交回了方案一、没有交回方案二时，方案一照常存进相册，项目页显示“VNAS 没有交回方案二的规划，重新规划？”。点“重新规划”后，新的一轮只规划方案二；记下出现过这种情况。
+   - 每一步以 root 记下用时与峰值内存，写进 #561。两个方案各渲染一次，分开记：任务接口 `GET /api/v1/montage/jobs/<任务 ID>` 的 `steps` 里有每一步的 `startedAt` 与 `finishedAt`，方案一是 `pick` 到 `save`，方案二是 `pick-2` 到 `save-2`。
      ```bash
      journalctl -u anas-montage -u anas-photos -u anas-montage-compute -u anas-montage-music --since today
      systemctl show -p MemoryPeak anas-montage-music anas-montage-compute anas-ai
@@ -77,9 +82,9 @@
 
 ## 验证
 
-- **任务走完**：剪辑中心项目页的“生成”显示“成片已存进相册”，“成片”里有第 1 版。
-- **成片规格**：`ffprobe` 看成片为 1920×1080、30 帧、有音轨，时长与选段相差不超过 0.1 秒。
-- **规划在后台发起**：`journalctl -u 'anas-assistant-cron@<账号>'` 有 `montage round: round … handed to Hermes`，之后有 `ended: ok`。
+- **任务走完**：剪辑中心项目页不再显示进度，“成片”里并排有方案一（第 1 版）与方案二（第 2 版），相册的个人图库里有 v1 与 v2 两个文件。
+- **成片规格**：`ffprobe` 看两条成片都是 1920×1080、30 帧、有音轨，时长与选段相差不超过 0.1 秒。
+- **规划在后台发起**：`journalctl -u 'anas-assistant-cron@<账号>'` 有 `montage round: round … handed to Hermes`，之后有 `ended: ok`。一轮规划两个方案：没有点过“重新规划”时只有一轮。
 - **规划用后已清理**：成员 VNAS 的“定时任务”里不再有“剪辑规划”。
 
 ## 回滚或恢复
@@ -90,6 +95,7 @@
   systemctl daemon-reload && systemctl restart anas-api
   ```
   项目与成片都留着。成片在相册里，与剪辑中心无关。
+- **删掉主页背景片**（放过的话）：`rm -r /srv/a-nas/data/montage/hero`。主页改为轮流播成员自己的视频。
 - **卸掉配乐分析**：按[启用配乐分析](enable-montage-music.md)的“回滚或恢复”。
 - **退回上一版本**：“设置 → 系统更新 → 回到上一版本”，或按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的“回滚或恢复”。
 
