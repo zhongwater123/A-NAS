@@ -8,9 +8,15 @@ Runs as root in the spike container with two Unix sockets:
 - the product socket (argv[1]), reachable only by the product service. When
   Hermes asks the member to approve a call of 提交更改, the product service
   prepares the change from the call's arguments: the broker checks the
-  targets, copies the staged files into its own state and returns a preview.
-  The member's own click then approves or rejects it; anything left
-  unanswered is expired.
+  submission's size and paths before it looks at any file, as the File
+  Broker's validate does (at most 100 operations and 64 KiB, targets in the
+  member's space or Agent空间 folder but never a .a-nas-* system name, a move
+  only within one of them), then checks the targets, copies the staged files
+  into its own state and returns a preview.
+  A copy (a file or folder from wherever the assistant reads) is not staged:
+  the card shows what is copied where and its size, and applying copies it
+  as the member. The member's own click then approves or rejects it;
+  anything left unanswered is expired.
 - the agent socket (argv[2]), bound into every assistant sandbox. The account
   is the caller's UID (SO_PEERCRED). The MCP tool asks it to apply a
   submission; it applies only a change the member approved with exactly
@@ -47,6 +53,10 @@ PRODUCT_SOCK, AGENT_SOCK = sys.argv[1], sys.argv[2]
 DATA = Path("/srv/a-nas/data")
 STATE = Path("/var/lib/anas-spike/changes")
 PREVIEW_LIMIT = 64 * 1024
+# A submission's steps, and its summary and paths together in bytes of its canonical form
+# (MaxOperations, MaxSubmission in internal/assistantchanges).
+MAX_OPERATIONS = 100
+MAX_SUBMISSION = 64 << 10
 # An approval is used by the call Hermes makes right after it; a grant nobody
 # used by then is void.
 GRANT_SECONDS = 120
@@ -66,7 +76,8 @@ def areas(account: str) -> tuple:
 
 def clean(raw) -> str:
     """The path as written, made canonical without following links; '..' is refused."""
-    path = PurePosixPath(str(raw or ""))
+    raw = raw or ""
+    path = PurePosixPath(str(raw))
     if not path.is_absolute():
         raise ValueError(f"{raw}: 需要绝对路径")
     if ".." in path.parts:
@@ -75,13 +86,36 @@ def clean(raw) -> str:
 
 
 def volume_path(account: str, sandbox_path: str, *, target: bool) -> str:
-    """Where a sandbox path is, relative to the data volume."""
+    """Where a sandbox path is, relative to the data volume. A target is never a system name
+    (.a-nas-*, such as the recycle bin) or anything in one."""
     for prefix, root, is_target in areas(account):
         if is_target == target and sandbox_path.startswith(prefix + "/"):
-            return root + "/" + sandbox_path[len(prefix) + 1:]
+            inside = sandbox_path[len(prefix) + 1:]
+            if target and any(part.startswith(".a-nas-") for part in inside.split("/")):
+                raise ValueError(f"{sandbox_path}：不能更改系统文件夹")
+            return root + "/" + inside
     if target:
         raise ValueError(f"{sandbox_path}: 只能更改 /nas/个人空间 或 /nas/共享空间/Agent空间/{account} 中的文件")
     raise ValueError(f"{sandbox_path}: source 必须是 {STAGING} 中已写好的文件")
+
+
+def same_area(account: str, a: str, b: str) -> bool:
+    """Whether two targets are in the same place. The member's space and the shared space are
+    separate Btrfs subvolumes, and a rename between them fails (sameArea in the File Broker)."""
+    for prefix, _, is_target in areas(account):
+        if is_target and a.startswith(prefix + "/"):
+            return b.startswith(prefix + "/")
+    return False
+
+
+def source_path(account: str, sandbox_path: str) -> str:
+    """Where a file or folder to copy is, relative to the data volume: anywhere the
+    assistant reads as the member, besides its own folder (sourcePath in the File Broker)."""
+    for prefix, root in (("/nas/个人空间", f"spaces/private/{account}"), ("/nas/共享空间", "spaces/shared"),
+                         ("/nas/助手", f"assistant/{account}/files")):
+        if sandbox_path.startswith(prefix + "/"):
+            return root + "/" + sandbox_path[len(prefix) + 1:]
+    raise ValueError(f"{sandbox_path}：只能复制个人空间、共享空间或 /nas/助手 中的文件")
 
 
 def trash_for(account: str, sandbox_path: str) -> str:
@@ -96,11 +130,30 @@ def trash_for(account: str, sandbox_path: str) -> str:
     return bin_ if parent == "." else f"{bin_}/{parent}"
 
 
+def text(value) -> str:
+    """One argument as the File Broker reads it (text in ParseSubmission): a string as it is,
+    anything else as its JSON, nothing as empty."""
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
 def submission(summary, operations) -> dict:
-    """The arguments of one call of 提交更改 in canonical form; the grant is bound to their digest."""
-    ops = [{key: op.get(key) for key in ("op", "path", "to", "source") if op.get(key) is not None}
+    """The arguments of one call of 提交更改 in canonical form, the File Broker's Submission: its
+    keys in their order, empty ones left out. The grant is bound to their digest."""
+    ops = [{key: text(op.get(key)) for key in ("op", "path", "to", "source") if text(op.get(key))}
            for op in operations or [] if isinstance(op, dict)]
-    return {"summary": str(summary or ""), "operations": ops}
+    return {"summary": text(summary), "operations": ops}
+
+
+def canonical(sub: dict) -> bytes:
+    """A submission as the File Broker's json.Marshal writes it, which MAX_SUBMISSION bounds: Go
+    escapes <, > and & and U+2028/U+2029, and reads a lone surrogate as U+FFFD (three bytes, as the
+    surrogate passed through here)."""
+    data = json.dumps(sub, ensure_ascii=False, separators=(",", ":"))
+    for char in "<>&\u2028\u2029":
+        data = data.replace(char, f"\\u{ord(char):04x}")
+    return data.encode("utf-8", "surrogatepass")
 
 
 def digest(sub: dict) -> str:
@@ -113,13 +166,22 @@ def digest(sub: dict) -> str:
 # Broker's openat2(RESOLVE_NO_SYMLINKS) does. A link anywhere along a path, even
 # one the member made, stops it: nothing is read or written through it.
 MEMBER = r'''
-import base64, hashlib, json, os, stat, sys
+import base64, errno, hashlib, json, os, secrets, shutil, stat, sys
 
 DATA, LIMIT = "/srv/a-nas/data", 64 * 1024
 WALK = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW
+LIST = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 class Refused(Exception):
+    pass
+
+
+class Unsupported(OSError):
+    """Neither a regular file nor a folder (a link, a device, a socket): a copy stops at it."""
+
+
+class SourceChanged(OSError):
     pass
 
 
@@ -166,21 +228,69 @@ def fingerprint(rel):
             return {"exists": True, "kind": "dir"}, None
         if not stat.S_ISREG(st.st_mode):
             return {"exists": True, "kind": "other"}, None
-        data = read(dfd, name)
-        return {"exists": True, "kind": "file", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}, data
+        # Hashed a block at a time: a copy may replace a file of any size.
+        fd, sha, size, head = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd), hashlib.sha256(), 0, b""
+        with os.fdopen(fd, "rb") as f:
+            while block := f.read(1 << 20):
+                sha.update(block)
+                size += len(block)
+                head += block[:LIMIT - len(head)]
+        return {"exists": True, "kind": "file", "size": size, "sha256": sha.hexdigest()}, head
     except FileNotFoundError:
         return {"exists": False}, None
     finally:
         os.close(dfd)
 
 
+def meta(rel):
+    """What a copy's source is now, from its metadata alone, as the File Broker's fingerprint."""
+    try:
+        dfd, name = parent(rel)
+    except FileNotFoundError:
+        return {"exists": False}
+    try:
+        st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return {"exists": False}
+    finally:
+        os.close(dfd)
+    kinds = ((stat.S_ISREG, "file"), (stat.S_ISDIR, "dir"), (stat.S_ISLNK, "link"))
+    kind = next((label for test, label in kinds if test(st.st_mode)), "other")
+    return {"exists": True, "kind": kind, "size": st.st_size, "inode": st.st_ino, "modTime": st.st_mtime_ns}
+
+
+def usage(fd):
+    """The size of the files in the folder open at fd, which it closes. Links are not
+    followed or counted; a folder the member cannot read counts as empty."""
+    total = 0
+    try:
+        for name in os.listdir(fd):
+            try:
+                st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+            elif stat.S_ISDIR(st.st_mode):
+                try:
+                    child = os.open(name, LIST, dir_fd=fd)
+                except (PermissionError, FileNotFoundError):
+                    continue
+                total += usage(child)
+    finally:
+        os.close(fd)
+    return total
+
+
 def problem(exc, path):
-    if isinstance(exc, NotADirectoryError):
+    if isinstance(exc, (NotADirectoryError, Unsupported)) or exc.errno == errno.ELOOP:
         return f"{path} 经过链接或文件，不能更改"
     if isinstance(exc, PermissionError):
         return f"没有权限：{path}"
     if isinstance(exc, FileExistsError):
         return f"{path} 已经存在"
+    if exc.errno == errno.ENOSPC:
+        return f"空间不足：{path}"
     return f"{exc.strerror or exc}：{path}"
 
 
@@ -196,6 +306,20 @@ def inspect(items):
                     out.append({"content": base64.b64encode(read(dfd, name)).decode()})
                 finally:
                     os.close(dfd)
+            elif item["kind"] == "copy":
+                seen = meta(item["rel"])
+                try:
+                    if seen.get("kind") == "dir":
+                        dfd, name = parent(item["rel"])
+                        try:
+                            size = usage(os.open(name, LIST, dir_fd=dfd))
+                        finally:
+                            os.close(dfd)
+                    else:
+                        size = seen.get("size", 0)
+                    out.append({"before": seen, "size": size})
+                except OSError as exc:
+                    out.append({"before": seen, "error": problem(exc, item["path"])})
             else:
                 seen, data = fingerprint(item["rel"])
                 out.append({"before": seen, **({"head": base64.b64encode(data[:LIMIT]).decode()} if data is not None else {})})
@@ -222,6 +346,87 @@ def to_trash(dfd, name, trash):
         os.close(tfd)
 
 
+def rename_new(dfd, name, to):
+    # The File Broker renames with RENAME_NOREPLACE; os.rename has no flags, so this spike checks first.
+    try:
+        os.stat(to, dir_fd=dfd, follow_symlinks=False)
+        raise FileExistsError(errno.EEXIST, "exists")
+    except FileNotFoundError:
+        pass
+    os.rename(name, to, src_dir_fd=dfd, dst_dir_fd=dfd)
+
+
+def copy_file(sdir, sname, tdir, tname):
+    # A new file with the mode of files made through the Web, so it takes the folder's default ACL.
+    # What a failed copy leaves behind, copy() removes.
+    src = os.open(sname, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=sdir)
+    try:
+        was = os.fstat(src)
+        if not stat.S_ISREG(was.st_mode):
+            raise Unsupported(errno.EINVAL, "unsupported file type")
+        out = os.open(tname, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o660, dir_fd=tdir)
+        try:
+            with open(src, "rb", closefd=False) as fin, open(out, "wb", closefd=False) as fout:
+                shutil.copyfileobj(fin, fout, 1 << 20)
+            now = os.fstat(src)
+            if (now.st_size, now.st_mtime_ns, now.st_ctime_ns) != (was.st_size, was.st_mtime_ns, was.st_ctime_ns):
+                raise SourceChanged(errno.EAGAIN, "复制时源文件被改动过")
+            os.utime(out, ns=(os.fstat(out).st_atime_ns, was.st_mtime_ns))
+            os.fsync(out)
+        finally:
+            os.close(out)
+    finally:
+        os.close(src)
+
+
+def copy_at(sdir, sname, tdir, tname):
+    """Copy a regular file or folder tree to a new name, never through a link."""
+    mode = os.stat(sname, dir_fd=sdir, follow_symlinks=False).st_mode
+    if stat.S_ISREG(mode):
+        return copy_file(sdir, sname, tdir, tname)
+    if not stat.S_ISDIR(mode):
+        raise Unsupported(errno.EINVAL, "unsupported file type")
+    os.mkdir(tname, 0o770, dir_fd=tdir)
+    src = os.open(sname, LIST, dir_fd=sdir)
+    try:
+        dst = os.open(tname, LIST, dir_fd=tdir)
+        try:
+            for child in os.listdir(src):
+                copy_at(src, child, dst, child)
+            os.utime(dst, ns=(os.fstat(dst).st_atime_ns, os.fstat(src).st_mtime_ns))
+        finally:
+            os.close(dst)
+    finally:
+        os.close(src)
+
+
+def remove(dfd, name):
+    try:
+        if stat.S_ISDIR(os.stat(name, dir_fd=dfd, follow_symlinks=False).st_mode):
+            shutil.rmtree(name, dir_fd=dfd)
+        else:
+            os.unlink(name, dir_fd=dfd)
+    except OSError:
+        pass
+
+
+def copy(dfd, name, step):
+    # Copied next to the target under a name of its own, then a file it replaces goes to the
+    # recycle bin and the copy takes its place, as the File Broker's executor does.
+    temp = ".a-nas-assistant-copy-" + secrets.token_hex(4)
+    sdfd, sname = parent(step["sourceRel"])
+    try:
+        copy_at(sdfd, sname, dfd, temp)
+        if step["before"]["exists"]:
+            to_trash(dfd, name, step["trash"])
+        rename_new(dfd, temp, name)
+    except BaseException:
+        remove(dfd, temp)
+        raise
+    finally:
+        os.close(sdfd)
+
+
 def apply(plan):
     for step in plan:
         try:
@@ -229,14 +434,24 @@ def apply(plan):
                 return {"done": 0, "error": f"{step['path']} 在用户确认前后被改动过，请重新提交"}
         except OSError as exc:
             return {"done": 0, "error": problem(exc, step["path"])}
+        if "sourceBefore" in step:
+            try:
+                changed = meta(step["sourceRel"]) != step["sourceBefore"]
+            except OSError:
+                changed = True
+            if changed:
+                return {"done": 0, "error": f"{step['source']} 在用户确认前后被改动过，请重新提交"}
     for n, step in enumerate(plan):
         try:
             kind = step["op"]
             if kind == "mkdir":
                 os.close(folder(step["rel"], create=True))
                 continue
-            dfd, name = parent(step["rel"], create=kind == "write")
+            dfd, name = parent(step["rel"], create=kind in ("write", "copy"))
             try:
+                if kind == "copy":
+                    copy(dfd, name, step)
+                    continue
                 if kind in ("write", "delete") and step["before"]["exists"]:
                     to_trash(dfd, name, step["trash"])
                 if kind == "write":
@@ -292,11 +507,17 @@ def text_of(data: bytes | None) -> str | None:
 def check(account: str, sub: dict) -> tuple[list[dict], list[str]]:
     """Validate a submission against what the member's paths hold now; returns the planned steps and the problems."""
     steps, errors, items = [], [], []
-    if not sub["operations"]:
-        errors.append("没有任何操作")
+    # Bounded before any path is looked at, as the File Broker's validate does.
+    count = len(sub["operations"])
+    if count == 0:
+        return [], ["没有任何操作"]
+    if count > MAX_OPERATIONS:
+        return [], [f"一批最多 {MAX_OPERATIONS} 项操作，这批有 {count} 项"]
+    if len(canonical(sub)) > MAX_SUBMISSION:
+        return [], [f"说明与路径合计超过 {MAX_SUBMISSION >> 10} KiB"]
     for i, op in enumerate(sub["operations"], 1):
         kind = op.get("op")
-        if kind not in ("write", "delete", "move", "mkdir"):
+        if kind not in ("write", "copy", "delete", "move", "mkdir"):
             errors.append(f"第 {i} 项：未知操作 {kind!r}")
             continue
         try:
@@ -307,10 +528,17 @@ def check(account: str, sub: dict) -> tuple[list[dict], list[str]]:
             if kind == "move":
                 step["to"] = clean(op.get("to"))
                 step["toRel"] = volume_path(account, step["to"], target=True)
+                if not same_area(account, step["path"], step["to"]):
+                    raise ValueError(f"{step['path']} 与 {step['to']} 不在同一个空间，不能移动：先 copy 到新位置，再 delete 原来的")
                 items.append({"kind": "target", "rel": step["toRel"], "path": step["to"]})
             if kind == "write":
                 step["source"] = clean(op.get("source"))
                 items.append({"kind": "source", "rel": volume_path(account, step["source"], target=False), "path": step["source"]})
+            if kind == "copy":
+                # Copied as the member when applied; nothing is staged, so a file of any size can be copied.
+                step["source"] = clean(op.get("source"))
+                step["sourceRel"] = source_path(account, step["source"])
+                items.append({"kind": "copy", "rel": step["sourceRel"], "path": step["source"]})
             steps.append(step)
         except ValueError as exc:
             errors.append(f"第 {i} 项：{exc}")
@@ -322,12 +550,30 @@ def check(account: str, sub: dict) -> tuple[list[dict], list[str]]:
         seen = next(found)
         to = next(found) if step["op"] == "move" else None
         source = next(found) if step["op"] == "write" else None
+        copied = next(found) if step["op"] == "copy" else None
         if "error" in seen:
             errors.append(prefix + seen["error"])
             continue
         step["before"] = seen["before"]
         if step["op"] in ("delete", "move") and not seen["before"]["exists"]:
             errors.append(f"{prefix}{step['path']} 不存在")
+        if step["op"] in ("write", "copy") and seen["before"]["exists"] and seen["before"]["kind"] != "file":
+            errors.append(f"{prefix}{step['path']} 不是普通文件")
+            continue
+        if copied is not None:
+            origin = copied.get("before")
+            if origin is None:
+                errors.append(prefix + copied["error"])
+            elif not origin["exists"]:
+                errors.append(f"{prefix}{step['source']} 不存在")
+            elif origin["kind"] not in ("file", "dir"):
+                errors.append(f"{prefix}{step['source']} 不能复制")
+            elif origin["kind"] == "dir" and seen["before"]["exists"]:
+                errors.append(f"{prefix}{step['path']} 已经存在")
+            elif "error" in copied:
+                errors.append(prefix + copied["error"])
+            else:
+                step["sourceBefore"], step["sourceSize"] = origin, copied["size"]
         if to is not None and ("error" in to or to["before"]["exists"]):
             errors.append(prefix + to.get("error", f"{step['to']} 已经存在"))
         if source is not None:
@@ -357,10 +603,13 @@ def snapshot_dir(account: str, change_id: str) -> Path:
 
 
 def preview(account: str, change: dict) -> dict:
-    """The card: each operation, with the old and new text of every write."""
+    """The card: each operation, with the old and new text of every write, and what each copy
+    takes from where with its size."""
     ops = []
     for n, step in enumerate(change["steps"]):
         entry = {key: step.get(key) for key in ("op", "path", "to") if step.get(key)}
+        if step["op"] == "copy":
+            entry |= {"from": step["source"], "size": step["sourceSize"], "folder": step["sourceBefore"]["kind"] == "dir" or None}
         entry["exists"] = step["before"]["exists"]
         if step["op"] == "write":
             entry["before"] = step.get("beforeText")
@@ -425,7 +674,8 @@ def apply(account: str, sub: dict) -> str:
         return "这批更改没有得到用户本人的确认，什么都没有改变。"
     plan = []
     for n, seen in enumerate(change["steps"]):
-        step = {key: seen[key] for key in ("op", "path", "rel", "trash", "before", "toRel") if key in seen}
+        step = {key: seen[key] for key in ("op", "path", "rel", "trash", "before", "toRel", "source", "sourceRel", "sourceBefore")
+                if key in seen}
         if seen["op"] == "write":
             step["content"] = base64.b64encode((snapshot_dir(account, change["id"]) / str(n)).read_bytes()).decode()
         plan.append(step)
