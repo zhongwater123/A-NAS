@@ -34,26 +34,35 @@ function serve(seen: Seen, options: Parameters<typeof photosHandlers>[0] = {}) {
     ...photosHandlers(options),
     // The device keeps no film of its own for the home page.
     http.get("/api/v1/montage/hero", ({ response }) => response(404).json(apiError("not_found", "resource not found"))),
-    http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
+    // The member has no project until one is made here.
+    http.get("/api/v1/montage/projects", ({ response }) =>
+      response(200).json({ items: seen.created ? [{ ...made(seen.created), previewAssetIds: [] }] : [] }),
+    ),
     http.post("/api/v1/montage/projects", async ({ request, response }) => {
       seen.created = ((await request.json()) as { assetIds: string[] }).assetIds;
-      return response(201).json({
-        id: "project:new",
-        name: "2026-08-02",
-        assetCount: seen.created.length,
-        createdAt: "2026-11-18T09:00:00Z",
-        ask: "",
-        chronological: true,
-        assets: [],
-        versions: [],
-      });
+      return response(201).json(made(seen.created));
     }),
+    http.get("/api/v1/montage/projects/{projectId}", ({ response }) => response(200).json(made(seen.created ?? []))),
+    http.get("/api/v1/montage/projects/{projectId}/song", ({ response }) =>
+      response(404).json(apiError("no_song", "the project has no song yet")),
+    ),
   );
 }
 
+const made = (assetIds: string[]) => ({
+  id: "project:new",
+  name: "2026-08-02",
+  assetCount: assetIds.length,
+  createdAt: "2026-11-18T09:00:00Z",
+  ask: "",
+  chronological: true,
+  assets: [],
+  versions: [],
+});
+
+// Without a project, the home page is where the first one is made.
 async function openNew() {
   render(<MontagePanel userId="user:alice" />);
-  await userEvent.click(await screen.findByRole("button", { name: "新建项目" }));
   return screen.findByRole("region", { name: "新建剪辑项目" });
 }
 
@@ -115,11 +124,26 @@ describe("剪辑中心：新建项目", () => {
     await waitFor(() => expect(seen.created).toEqual(["photo:a", "photo:b", "photo:c"]));
   });
 
+  it("makes the first project on the home page, which then shows it selected with its song and request", async () => {
+    const seen: Seen = {};
+    serve(seen);
+    queue.items = [upload("a.mov", "done", { assetId: "photo:a" })];
+    const region = await openNew();
+    // Nothing to go back to or cancel: this is the home page.
+    expect(screen.queryByRole("button", { name: "全部项目" })).not.toBeInTheDocument();
+    expect(within(region).getByText("素材")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "新建项目（1 段）" }));
+    expect(await screen.findByRole("button", { name: "选中 2026-08-02" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("region", { name: "新建剪辑项目" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /配乐 还没选歌/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /剪辑要求/ })).toBeEnabled();
+  });
+
   it("waits for the uploads still on their way, and leaves out a MOV that completed a Live Photo", async () => {
     serve({});
     queue.items = [upload("a.mov", "done", { assetId: "photo:a" }), upload("b.mov", "uploading", { progress: 0.4 })];
     const { rerender } = render(<MontagePanel userId="user:alice" />);
-    await userEvent.click(await screen.findByRole("button", { name: "新建项目" }));
     await screen.findByRole("region", { name: "新建剪辑项目" });
     expect(screen.queryByRole("button", { name: /新建项目（/ })).not.toBeInTheDocument();
     // The second became no video of its own: it completed a Live Photo.

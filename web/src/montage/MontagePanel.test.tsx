@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WINDOW_ID } from "../desktop/windowSnapshot";
-import { asset } from "../test/handlers/photos";
+import { asset, photosHandlers } from "../test/handlers/photos";
 import { apiError, http, server } from "../test/server";
 import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api";
 import { MontagePanel } from "./MontagePanel";
@@ -701,6 +701,32 @@ describe("剪辑中心", () => {
     const second = render(<MontagePanel userId="user:alice" />);
     await waitFor(() => expect(second.container.querySelector('video[src^="/api/v1/montage/hero"]')).not.toBeNull());
     expect(asked).toBe("bytes=0-0");
+  });
+
+  it("shows a member without projects the steps of the first one, and a drawn hero", async () => {
+    server.use(
+      ...photosHandlers(),
+      http.get("/api/v1/montage/hero", ({ response }) =>
+        response(404).json(apiError("not_found", "resource not found")),
+      ),
+      http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
+    );
+    const { container } = render(<MontagePanel userId="user:alice" />);
+    // 素材: the videos to make the project from, uploaded or from a library.
+    const footage = await screen.findByRole("region", { name: "新建剪辑项目" });
+    expect(within(footage).getByText("素材")).toBeInTheDocument();
+    expect(await within(footage).findByRole("button", { name: "选择视频" })).toBeEnabled();
+    expect(await within(footage).findByRole("button", { name: /从我的图库选/ })).toBeInTheDocument();
+    // 配乐, 剪辑要求 and 开始剪辑 come next, once there is a project.
+    const go = screen.getByRole("region", { name: "开始剪辑" });
+    expect(within(go).getByRole("button", { name: /配乐 还没选歌/ })).toBeDisabled();
+    expect(within(go).getByRole("button", { name: /剪辑要求 按拍摄时间/ })).toBeDisabled();
+    expect(within(go).getByRole("button", { name: "开始剪辑" })).toBeDisabled();
+    expect(within(go).getByText("先新建项目")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "剪辑项目" })).not.toBeInTheDocument();
+    // No film of the device's and no videos of the member's: the hero is drawn, with no player.
+    await waitFor(() => expect(container.querySelector('[data-reel="drawn"]')).not.toBeNull());
+    expect(container.querySelector("video")).toBeNull();
   });
 
   it("starts a film from the home page, for the project selected there", async () => {

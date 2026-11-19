@@ -276,6 +276,119 @@
     animation: none;
   }
 }
+/* The hero drawn when there is no film to play: the window's glows and an
+   editing timeline, three tracks of clips in the steps' colours under a
+   playhead, drifting slowly to the left. */
+.mt-reel-drawn {
+  background:
+    radial-gradient(520px 300px at 74% 18%, rgba(255, 154, 77, 0.34), transparent 65%),
+    radial-gradient(460px 300px at 96% 92%, rgba(168, 85, 247, 0.26), transparent 65%),
+    radial-gradient(640px 360px at 40% 115%, rgba(74, 168, 255, 0.22), transparent 65%),
+    linear-gradient(160deg, #1d2c48 0%, #161a2a 48%, #231a33 100%);
+}
+.mt-reel-drawn::before {
+  content: "";
+  position: absolute;
+  inset: -30% -10%;
+  background:
+    radial-gradient(closest-side at 62% 42%, rgba(255, 95, 126, 0.2), transparent),
+    radial-gradient(closest-side at 86% 62%, rgba(56, 210, 255, 0.14), transparent);
+  animation: mt-drift 24s ease-in-out infinite alternate;
+}
+@keyframes mt-drift {
+  to {
+    transform: translate3d(-6%, 4%, 0) scale(1.08);
+  }
+}
+.mt-tracks {
+  position: absolute;
+  top: 16%;
+  right: -32px;
+  left: 34%;
+  display: grid;
+  gap: 12px;
+  transform: rotate(-4deg);
+  mask-image: linear-gradient(90deg, transparent, #000 16%, #000 88%, transparent);
+}
+.mt-tracks::after {
+  content: "";
+  position: absolute;
+  top: -20px;
+  bottom: -20px;
+  left: 46%;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--mt-grad);
+  box-shadow: 0 0 16px rgba(255, 110, 90, 0.85);
+}
+.mt-track {
+  display: flex;
+  width: max-content;
+  height: 44px;
+  animation: mt-roll 52s linear infinite;
+}
+.mt-track span {
+  flex: none;
+  width: 132px;
+  margin-right: 8px;
+  border: 1px solid color-mix(in srgb, var(--mt-tone) 70%, transparent);
+  border-radius: 8px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--mt-tone) 44%, transparent),
+    color-mix(in srgb, var(--mt-tone) 18%, transparent)
+  );
+}
+/* Six clip lengths, twice: the second six take the first six's place as the track rolls by half its length. */
+.mt-track span:nth-child(6n + 2) {
+  width: 84px;
+}
+.mt-track span:nth-child(6n + 3) {
+  width: 176px;
+}
+.mt-track span:nth-child(6n + 4) {
+  width: 108px;
+}
+.mt-track span:nth-child(6n + 5) {
+  width: 64px;
+}
+.mt-track span:nth-child(6n) {
+  width: 148px;
+}
+.mt-track.tune {
+  height: 26px;
+  animation-duration: 44s;
+  animation-delay: -17s;
+}
+/* The song's track: a waveform in each clip. */
+.mt-track.tune span {
+  background:
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--mt-tone) 70%, transparent) 0 2px, transparent 2px 5px)
+    center / 100% 62% no-repeat,
+    color-mix(in srgb, var(--mt-tone) 12%, transparent);
+}
+.mt-track.cut {
+  height: 22px;
+  animation-duration: 60s;
+  animation-delay: -31s;
+}
+@keyframes mt-roll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mt-reel-drawn::before,
+  .mt-track {
+    animation: none;
+  }
+}
+@container montagewindow (max-width: 720px) {
+  .mt-tracks {
+    top: 10%;
+    left: 12%;
+  }
+}
 .mt-hero::before {
   content: "";
   position: absolute;
@@ -284,6 +397,10 @@
   background:
     linear-gradient(90deg, rgba(7, 8, 11, 0.86) 0%, rgba(7, 8, 11, 0.55) 40%, rgba(7, 8, 11, 0.05) 75%),
     linear-gradient(to top, rgba(7, 8, 11, 0.75), transparent 55%);
+}
+/* A drawn hero is dark enough for the heading: its shade lets more of it through. */
+.mt-hero:has(> .mt-reel-drawn)::before {
+  opacity: 0.6;
 }
 .mt-hero-copy {
   min-width: 0;
@@ -683,9 +800,14 @@ button.mt-row:hover {
   text-align: left;
   transition: 0.15s;
 }
-.mt-opt:hover {
+.mt-opt:hover:not(:disabled) {
   border-color: var(--mt-tone);
   transform: translateY(-1px);
+}
+/* A step that waits for the project: the home page before the first one. */
+.mt-opt:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 .mt-opt .mt-badge {
   width: 38px;
@@ -1021,6 +1143,28 @@ textarea.mt-text {
   color: var(--mt-faint);
   font-size: 13px;
 }
+/* The drop zone, and the photo library beside it once the window is wide. */
+.mt-alt {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+}
+@container montagewindow (min-width: 900px) {
+  .mt-pickrow {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+  .mt-pickrow .mt-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .mt-pickrow .mt-or {
+    margin: 0 0 4px;
+  }
+}
 .mt-or {
   display: flex;
   align-items: center;
@@ -1054,7 +1198,7 @@ textarea.mt-text {
 .mt-sample b {
   display: block;
 }
-.mt-sample span {
+.mt-sample b + span {
   color: var(--mt-faint);
   font-size: 13px;
 }
