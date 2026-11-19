@@ -1,14 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Music2, Pause, Play, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
 import { coverURL, listTracks, streamURL } from "../music/api";
+import { clock } from "../photos/model";
 import { Spinner } from "../ui/workspace";
 import { chooseSong, type MontageSong, songAudioURL, updateProject } from "./api";
 import { Failed } from "./Failed";
 import styles from "./montage.module.css";
-import { clock, songQuery } from "./queries";
+import { songKey, songQuery } from "./queries";
+import { useShown } from "./shown";
 
 // Why a song is not ready yet, or cannot be used (MontageSong.waiting, .reason).
 const songWaits: Record<NonNullable<MontageSong["waiting"]>, string> = {
@@ -38,14 +40,14 @@ const coverOf = (title: string) => covers[[...title].reduce((sum, c) => sum + c.
 // the film is cut to, then the member's music library to choose from.
 export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
   const client = useQueryClient();
-  const song = useQuery(songQuery(id));
+  const song = useQuery(songQuery(id, useShown()));
   const tracks = useQuery({ queryKey: ["music", "tracks"], queryFn: listTracks });
   const [filter, setFilter] = useState("");
   const [playing, setPlaying] = useState<string>();
   const audio = useRef<HTMLAudioElement>(null);
   const choose = useMutation({
     mutationFn: (trackId: string) => chooseSong(id, trackId),
-    onSuccess: (chosen) => client.setQueryData(["montage", "song", id], chosen),
+    onSuccess: (chosen) => client.setQueryData(songKey(id), chosen),
   });
   const shown = useMemo(() => {
     const words = filter.trim().toLowerCase();
@@ -75,10 +77,9 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
             <Music2 />
           </span>
           <div>
-            <div className={styles.mtStepN}>成片的长度和节奏跟着它走</div>
             <h2>配乐</h2>
           </div>
-          {tracks.data && <small>曲库 {tracks.data.items.length} 首</small>}
+          {tracks.data && <small>音乐库 {tracks.data.items.length} 首</small>}
         </div>
         {song.error && <Failed inline error={song.error} onRetry={() => void song.refetch()} />}
         {song.data && <Chosen projectId={id} song={song.data} />}
@@ -87,7 +88,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
           <input
             className={styles.mtText}
             type="search"
-            placeholder="搜索曲库：歌名或歌手"
+            placeholder="搜索歌名或歌手"
             aria-label="搜索歌曲"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
@@ -95,16 +96,17 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
         <div className={styles.mtLabel}>音乐库</div>
         {tracks.error && <Failed inline error={tracks.error} onRetry={() => void tracks.refetch()} />}
-        {choose.error && <p className={styles.mtError}>{errorText(choose.error)}</p>}
+        {choose.error && <p className={styles.mtError}>{errorText(choose.error, "montage")}</p>}
         {!tracks.data && !tracks.error && <Spinner small />}
         {tracks.data && shown.length === 0 && (
           <p className={styles.mtFaint}>
-            {filter.trim() ? "曲库里没有匹配的歌。" : "曲库里还没有歌：先把歌放进“音乐”文件夹，再回来选。"}
+            {filter.trim() ? "没有匹配的歌" : "音乐库里没有歌。把歌放进个人空间的“音乐”文件夹后再选"}
           </p>
         )}
         <ul className={styles.mtSongs} aria-label="音乐库">
           {shown.map((track) => {
-            const on = song.data?.title === track.title;
+            // By the track the song was copied from: two tracks may share a title.
+            const on = song.data?.trackId === track.id;
             return (
               <li key={track.id} className={`${styles.mtSong} ${on ? styles.on : ""}`}>
                 <span className={styles.mtCover} style={{ background: coverOf(track.title) }} aria-hidden="true">
@@ -133,7 +135,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
                 <button
                   type="button"
                   className={`${styles.mtCheck} ${on ? styles.on : ""}`}
-                  aria-label={`用《${track.title}》配乐`}
+                  aria-label={`用《${track.title}》${track.artist ? `（${track.artist}）` : ""}配乐`}
                   aria-pressed={on}
                   disabled={choose.isPending}
                   onClick={() => choose.mutate(track.id)}
@@ -150,11 +152,22 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
       <div className={styles.mtFoot}>
         <button type="button" className={`${styles.mtBtn} ${styles.primary}`} onClick={onBack}>
           <Check aria-hidden="true" />
-          好了，回去开始剪辑
+          完成
         </button>
       </div>
     </main>
   );
+}
+
+// excerptAudio is the address that plays the excerpt alone: the media
+// fragment #t=from,to starts and stops the player there. The copy browsers
+// play is addressed by the song's own time; the one the NAS decodes starts
+// at ?start= already, and cannot seek, so its fragment counts from there.
+export function excerptAudio(projectId: string, song: MontageSong, excerpt: number[]): string {
+  const [from, to] = excerpt;
+  return song.transcode
+    ? `${songAudioURL(projectId, from)}#t=0,${(to - from).toFixed(2)}`
+    : `${songAudioURL(projectId)}#t=${from.toFixed(2)},${to.toFixed(2)}`;
 }
 
 // Chosen is the song the project uses: how far its analysis got, and the
@@ -163,22 +176,39 @@ function Chosen({ projectId, song }: { projectId: string; song: MontageSong }) {
   const client = useQueryClient();
   const excerpt = song.selection?.excerpt;
   const [start, setStart] = useState<number>();
-  const at = start ?? excerpt?.[0] ?? 0;
+  const kept = excerpt?.[0] ?? 0;
+  const at = start ?? kept;
   const span = excerpt ? excerpt[1] - excerpt[0] : 0;
   const move = useMutation({
     mutationFn: (seconds: number) => updateProject(projectId, { songStart: seconds }),
     onSuccess: () => {
       setStart(undefined);
-      void client.invalidateQueries({ queryKey: ["montage", "song", projectId] });
+      void client.invalidateQueries({ queryKey: songKey(projectId) });
     },
   });
+  // The new start is handed in when the slider lets go of it: the browser's
+  // own change event, which comes at the end of a drag wherever the pointer
+  // is released, and after each step by the keyboard. React's onChange is
+  // the input event, which comes while dragging.
+  const slider = useRef<HTMLInputElement>(null);
+  const released = useEffectEvent((seconds: number) => {
+    if (seconds !== kept && !move.isPending) move.mutate(seconds);
+  });
+  const ready = Boolean(excerpt);
+  useEffect(() => {
+    const input = slider.current;
+    if (!input) return;
+    const changed = () => released(Number(input.value));
+    input.addEventListener("change", changed);
+    return () => input.removeEventListener("change", changed);
+  }, [ready]);
   const status =
     song.state === "analyzing"
       ? song.waiting
         ? songWaits[song.waiting]
-        : "正在分析节拍与段落…"
+        : "正在分析节拍与段落"
       : song.state === "unusable"
-        ? `${song.reason ? songReasons[song.reason] : "这首歌用不了"}，换一首吧`
+        ? `${song.reason ? songReasons[song.reason] : "这首歌不能用"}，请换一首`
         : undefined;
   return (
     <div className={styles.mtChosen}>
@@ -193,7 +223,7 @@ function Chosen({ projectId, song }: { projectId: string; song: MontageSong }) {
             <span className={styles.mtTag}>{clock(song.duration)}</span>
             {song.tempo !== undefined && <span className={styles.mtTag}>{Math.round(song.tempo)} BPM</span>}
             {excerpt && song.selection?.chorus && <span className={styles.mtTag}>{clock(excerpt[0])} 进副歌</span>}
-            {song.selection && <span className={styles.mtTag}>约 {Math.round(song.selection.seconds)} 秒</span>}
+            {song.selection && <span className={styles.mtTag}>成片 {Math.round(song.selection.seconds)} 秒</span>}
           </span>
         </span>
       </div>
@@ -213,6 +243,7 @@ function Chosen({ projectId, song }: { projectId: string; song: MontageSong }) {
           </div>
           {song.selection?.chorus === false && <p className={styles.mtNote}>没找到副歌，用了最响的一段：请试听确认</p>}
           <input
+            ref={slider}
             className={styles.mtRange}
             type="range"
             aria-label="选段起点"
@@ -221,12 +252,10 @@ function Chosen({ projectId, song }: { projectId: string; song: MontageSong }) {
             step={0.5}
             value={at}
             onChange={(event) => setStart(Number(event.target.value))}
-            onPointerUp={() => start !== undefined && move.mutate(start)}
-            onKeyUp={() => start !== undefined && move.mutate(start)}
           />
           {/* biome-ignore lint/a11y/useMediaCaption: a song excerpt has no captions */}
-          <audio controls preload="none" src={songAudioURL(projectId, song.transcode ? excerpt[0] : undefined)} />
-          {move.error && <p className={styles.mtError}>{errorText(move.error)}</p>}
+          <audio controls preload="none" aria-label="试听选段" src={excerptAudio(projectId, song, excerpt)} />
+          {move.error && <p className={styles.mtError}>{errorText(move.error, "montage")}</p>}
         </>
       )}
     </div>

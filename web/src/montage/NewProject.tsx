@@ -3,8 +3,10 @@ import { ChevronLeft, Images, Upload, Video } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
-import { listPhotoLibraries, type PhotoAlbum, type PhotoAsset } from "../photos/api";
+import { listPhotoLibraries, type PhotoAsset, type PhotoLibrary } from "../photos/api";
+import { type Caller, libraryName, ownLibrary } from "../photos/model";
 import { PhotoPicker } from "../photos/PhotoPicker";
+import { isVideoFile } from "../photos/uploadGroups";
 import { type UploadItem, useUploads } from "../photos/uploads";
 import { Spinner } from "../ui/workspace";
 import { addAssets, createProject } from "./api";
@@ -18,7 +20,8 @@ const states: Record<UploadItem["state"], string> = {
 };
 
 // NewProject makes a project of videos the member uploads now, through the
-// photo library's upload queue into their private library, or picks from it
+// photo library's upload queue into their private library, or picks from a
+// library they can see, their own or the shared one
 // (docs/specs/montage-center.md, 上传一批视频新建项目、从相册选视频). With
 // into, the videos join that project instead. Only videos that uploaded go
 // in: the failed may be retried or left out. It is laid out as the
@@ -36,12 +39,17 @@ export function NewProject({
 }) {
   const client = useQueryClient();
   const libraries = useQuery({ queryKey: ["photos", "libraries"], queryFn: listPhotoLibraries });
-  const own = libraries.data?.find(
-    (library) => library.kind === "private" && library.ownerUserId === userId && !library.viewing,
+  // The libraries videos may come from: the member's own and the shared one,
+  // never another member's that an administrator is only viewing. They are
+  // named as the photo library names them.
+  const caller: Caller = { userId, isAdmin: false, libraries: libraries.data ?? [] };
+  const own = ownLibrary(caller);
+  const visible = caller.libraries.filter(
+    (library) => !library.viewing && (library.kind === "shared" || library === own),
   );
-  const [settled, setSettled] = useState(false);
-  const uploads = useUploads(useCallback(() => setSettled(true), []));
-  const [picking, setPicking] = useState(false);
+  const nameOf = (library: PhotoLibrary) => libraryName(caller, library);
+  const uploads = useUploads(useCallback(() => undefined, []));
+  const [picking, setPicking] = useState<PhotoLibrary>();
   const input = useRef<HTMLInputElement>(null);
   const make = useMutation({
     mutationFn: async (assetIds: string[]) =>
@@ -57,15 +65,11 @@ export function NewProject({
   const failed = uploads.items.filter((item) => item.state === "failed");
   const busy = uploads.items.some((item) => item.state === "waiting" || item.state === "uploading");
   const verb = into ? "加入项目" : "新建项目";
-  const title = into ? "追加视频" : "选这次要剪的视频";
 
   const send = (files: FileList | null) => {
     if (!own || !files?.length) return;
-    setSettled(false);
-    uploads.add(
-      [...files].filter((file) => file.type.startsWith("video/") || /\.(mov|mp4|m4v)$/i.test(file.name)),
-      { libraryId: own.id, label: "我的图库" },
-    );
+    // What the photo library's own upload takes as a video, by type or by name.
+    uploads.add([...files].filter(isVideoFile), { libraryId: own.id, label: nameOf(own) });
   };
 
   return (
@@ -76,15 +80,14 @@ export function NewProject({
       </button>
       <section
         className={`${styles.mtPanel} ${styles.mtStep} ${styles.media}`}
-        aria-label={into ? "追加视频" : "新建剪辑项目"}
+        aria-label={into ? "添加视频" : "新建剪辑项目"}
       >
         <div className={styles.mtStepH}>
           <span className={styles.mtBadge} aria-hidden="true">
             <Video />
           </span>
           <div>
-            <div className={styles.mtStepN}>素材</div>
-            <h2>{title}</h2>
+            <h2>{into ? "添加视频" : "新建项目"}</h2>
           </div>
           {uploads.items.length > 0 && (
             <small>
@@ -92,11 +95,11 @@ export function NewProject({
             </small>
           )}
         </div>
-        {libraries.error && <p className={styles.mtError}>{errorText(libraries.error)}</p>}
+        {libraries.error && <p className={styles.mtError}>{errorText(libraries.error, "photos")}</p>}
         {!libraries.data && !libraries.error ? (
           <Spinner />
         ) : !own ? (
-          <p className={styles.mtNote}>找不到你的个人图库。</p>
+          <p className={styles.mtNote}>找不到你的个人图库</p>
         ) : (
           <>
             <div className={styles.mtDrop}>
@@ -104,7 +107,7 @@ export function NewProject({
                 <Upload />
               </div>
               <b>上传视频</b>
-              <p>从这台电脑选一批视频，存进你的个人图库，再交给剪辑中心</p>
+              <p>视频存进你的个人图库</p>
               <button
                 type="button"
                 className={`${styles.mtBtn} ${styles.primary}`}
@@ -119,7 +122,7 @@ export function NewProject({
                 hidden
                 type="file"
                 multiple
-                accept="video/*,.mov,.mp4,.m4v"
+                accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.3gp,.mts,.m2ts,.avi"
                 aria-label="选择视频"
                 onChange={(event) => {
                   send(event.target.files);
@@ -128,15 +131,23 @@ export function NewProject({
               />
             </div>
             <div className={styles.mtOr}>或者</div>
-            <button type="button" className={styles.mtSample} onClick={() => setPicking(true)} disabled={busy}>
-              <span className={styles.mtRowIcon} aria-hidden="true">
-                <Images />
-              </span>
-              <span>
-                <b>从相册选</b>
-                <span>选个人图库里已有的视频，原片留在原处</span>
-              </span>
-            </button>
+            {visible.map((library) => (
+              <button
+                key={library.id}
+                type="button"
+                className={styles.mtSample}
+                onClick={() => setPicking(library)}
+                disabled={busy}
+              >
+                <span className={styles.mtRowIcon} aria-hidden="true">
+                  <Images />
+                </span>
+                <span>
+                  <b>从{nameOf(library)}选</b>
+                  <span>原片留在原来的图库</span>
+                </span>
+              </button>
+            ))}
             {uploads.items.length > 0 && (
               <ul className={`${styles.mtRows} ${styles.mtHint}`} aria-label="上传" role="status">
                 {uploads.items.map((item) => (
@@ -163,14 +174,15 @@ export function NewProject({
             )}
             {completedLive.length > 0 && (
               <p className={`${styles.mtNote} ${styles.mtHint}`}>
-                {completedLive.length} 个 MOV 补进了图库里的实况照片，没有加入项目。
+                {completedLive.length} 个 MOV 补进了图库里的实况照片，没有加入项目
               </p>
             )}
-            {make.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(make.error)}</p>}
+            {make.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(make.error, "montage")}</p>}
           </>
         )}
       </section>
-      {settled && !busy && videos.length > 0 && (
+      {/* Whatever became of the batches after it, what uploaded can make the project. */}
+      {!busy && videos.length > 0 && (
         <div className={styles.mtFoot}>
           <button type="button" className={styles.mtBtn} onClick={onCancel}>
             取消
@@ -185,15 +197,15 @@ export function NewProject({
           </button>
         </div>
       )}
-      {picking && own && (
+      {picking && (
         <PhotoPicker
-          // The picker browses one library's timeline: the member's own.
-          album={{ id: "", libraryId: own.id, name: "我的图库" } as unknown as PhotoAlbum}
-          onClose={() => setPicking(false)}
+          album={{ libraryId: picking.id, name: nameOf(picking) }}
+          title={`从${nameOf(picking)}选视频`}
+          videos
+          onClose={() => setPicking(undefined)}
           onAdd={(assets: PhotoAsset[]) => {
-            setPicking(false);
-            const chosen = assets.filter((asset) => asset.mediaType.startsWith("video/")).map((asset) => asset.id);
-            if (chosen.length) make.mutate(chosen);
+            setPicking(undefined);
+            if (assets.length) make.mutate(assets.map((asset) => asset.id));
           }}
         />
       )}

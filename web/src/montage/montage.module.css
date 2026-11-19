@@ -651,6 +651,17 @@ button.mt-row:hover {
   margin-top: 24px;
   padding: 18px 22px;
 }
+/* Why the film cannot start, or what went wrong: a line of its own under the bar. */
+.mt-go > p {
+  flex: 1 0 100%;
+  margin: -6px 0 0;
+  text-align: right;
+  font-size: 13px;
+}
+.mt-go > p.mt-error {
+  margin-top: 0;
+  text-align: left;
+}
 .mt-opts {
   flex: 1;
   min-width: 0;
@@ -1086,22 +1097,36 @@ textarea.mt-text {
 .mt-work-h[data-tone="stopped"] svg {
   color: var(--mt-bad);
 }
-.mt-work ol {
+/* The steps in columns: what every 方案 shares, then each 方案's own. */
+.mt-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 18px 28px;
+  margin-top: 20px;
+}
+.mt-stages h3 {
+  margin: 0 0 10px;
+  color: var(--mt-faint);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+}
+.mt-stages ol {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 18px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
-.mt-work li {
+.mt-stages li {
   display: flex;
   align-items: center;
   gap: 10px;
   color: var(--mt-faint);
   font-size: 14px;
 }
-.mt-work li i {
+.mt-stages li i {
   width: 18px;
   height: 18px;
   display: grid;
@@ -1114,30 +1139,30 @@ textarea.mt-text {
   font-style: normal;
   font-weight: 800;
 }
-.mt-work li[data-state="done"] {
+.mt-stages li[data-state="done"] {
   color: var(--mt-muted);
 }
-.mt-work li[data-state="done"] i {
+.mt-stages li[data-state="done"] i {
   border-color: var(--mt-ok);
   background: var(--mt-ok);
 }
-.mt-work li[data-state="done"] i::before {
+.mt-stages li[data-state="done"] i::before {
   content: "✓";
 }
-.mt-work li[data-state="running"] {
+.mt-stages li[data-state="running"] {
   color: var(--mt-ink);
 }
-.mt-work li[data-state="running"] i {
+.mt-stages li[data-state="running"] i {
   border-color: var(--mt-accent);
   border-top-color: transparent;
   animation: mt-spin 0.8s linear infinite;
 }
-.mt-work li[data-state="waiting"],
-.mt-work li[data-state="needs_input"] {
+.mt-stages li[data-state="waiting"],
+.mt-stages li[data-state="needs_input"] {
   color: var(--mt-warn);
 }
-.mt-work li[data-state="waiting"] i,
-.mt-work li[data-state="needs_input"] i {
+.mt-stages li[data-state="waiting"] i,
+.mt-stages li[data-state="needs_input"] i {
   border-color: var(--mt-warn);
 }
 .mt-leave {
@@ -1259,39 +1284,62 @@ textarea.mt-text {
   font-size: 19px;
 }
 .mt-acts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
   gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mt-line);
+  font-size: 13px;
 }
+/* The films of earlier jobs: a row each, to play here or to download. */
 .mt-versions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mt-versions li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--mt-line);
+  border-radius: var(--mt-r-sm);
+  background: var(--mt-bg-2);
+}
+.mt-versions li b {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.mt-versions li span {
+  color: var(--mt-faint);
+  font-size: 12px;
 }
 .mt-versions a,
-.mt-versions span,
 .mt-versions button {
-  padding: 3px 10px;
-  border: 1px solid var(--mt-line);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1px solid var(--mt-line-2);
   border-radius: 999px;
   color: var(--mt-muted);
   background: var(--mt-panel-2);
   font-size: 12px;
-}
-.mt-versions a {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   text-decoration: none;
+  transition: 0.15s;
 }
-.mt-versions a svg {
+.mt-versions a:hover,
+.mt-versions button:hover,
+.mt-versions button[aria-pressed="true"] {
+  border-color: var(--mt-accent);
+  color: var(--mt-ink);
+}
+.mt-versions svg {
   width: 12px;
   height: 12px;
-}
-.mt-versions span {
-  opacity: 0.45;
-  text-decoration: line-through;
 }
 .mt-how {
   display: flex;

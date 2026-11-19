@@ -12,7 +12,7 @@ export function Failed({ error, onRetry, inline }: { error: Error; onRetry: () =
           <WifiOff />
         </span>
       )}
-      <span>{errorText(error)}</span>
+      <span>{errorText(error, "montage")}</span>
       <button type="button" className={`${styles.mtBtn} ${styles.small}`} onClick={onRetry}>
         <RotateCw aria-hidden="true" />
         重试

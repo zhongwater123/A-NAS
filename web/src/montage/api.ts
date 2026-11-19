@@ -1,5 +1,6 @@
 import { call, client } from "../api/client";
-import type { components } from "../api.generated";
+import { requestKey } from "../api/requestKey";
+import type { components, operations } from "../api.generated";
 
 export type MontageProject = components["schemas"]["MontageProjectSummary"];
 export type MontageProjectDetail = components["schemas"]["MontageProject"];
@@ -10,8 +11,11 @@ export type MontageVersion = components["schemas"]["MontageVersion"];
 
 const project = (projectId: string) => ({ params: { path: { projectId } } });
 const job = (jobId: string) => ({ params: { path: { jobId } } });
-// A request key per action: the same click retried repeats nothing.
-const key = () => crypto.randomUUID();
+// A request key per action: the same click retried repeats nothing. The
+// desktop's own keys work on plain LAN HTTP too, where crypto.randomUUID is
+// not there.
+const key = requestKey;
+export type ProjectChange = operations["updateMontageProject"]["requestBody"]["content"]["application/json"];
 
 export async function listProjects(signal?: AbortSignal): Promise<MontageProject[]> {
   return (await call(client.GET("/api/v1/montage/projects", { signal }))).items;
@@ -31,10 +35,8 @@ export const addAssets = (projectId: string, assetIds: string[]) =>
     }),
   );
 
-export const updateProject = (
-  projectId: string,
-  change: { name?: string; ask?: string; chronological?: boolean; songStart?: number },
-) => call(client.PATCH("/api/v1/montage/projects/{projectId}", { ...project(projectId), body: change }));
+export const updateProject = (projectId: string, change: ProjectChange) =>
+  call(client.PATCH("/api/v1/montage/projects/{projectId}", { ...project(projectId), body: change }));
 
 export const deleteProject = (projectId: string) =>
   call(client.DELETE("/api/v1/montage/projects/{projectId}", project(projectId)));
@@ -70,4 +72,15 @@ export async function listNotices(signal?: AbortSignal): Promise<MontageNotice[]
 
 // The device's background film for the home page, and its poster; 404 without one.
 export const heroURL = "/api/v1/montage/hero";
+// Whether the device keeps a film of its own for the home page: its first
+// byte is asked for, and the montage center answers 404 without one.
+export async function hasHero(signal?: AbortSignal): Promise<boolean> {
+  const { response } = await client.GET("/api/v1/montage/hero", {
+    params: { header: { Range: "bytes=0-0" } },
+    parseAs: "stream",
+    signal,
+  });
+  await response.body?.cancel();
+  return response.ok;
+}
 export const heroPosterURL = "/api/v1/montage/hero/poster";

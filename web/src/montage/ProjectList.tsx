@@ -3,17 +3,14 @@ import { Check, ChevronRight, Clapperboard, Plus } from "lucide-react";
 
 import { thumbnailURL } from "../photos/api";
 import { Spinner } from "../ui/workspace";
-import { listProjects, type MontageProject } from "./api";
+import type { MontageProject } from "./api";
 import { Failed } from "./Failed";
 import { HeroReel } from "./HeroReel";
 import styles from "./montage.module.css";
 import { Films, Go } from "./ProjectView";
-import { projectQuery, songQuery } from "./queries";
+import { projectQuery, projectsQuery, songQuery } from "./queries";
+import { useShown } from "./shown";
 
-export const projectsQuery = {
-  queryKey: ["montage", "projects"],
-  queryFn: ({ signal }: { signal: AbortSignal }) => listProjects(signal),
-};
 const day = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
 
 // The hero's videos: three, from the newest projects first.
@@ -55,13 +52,7 @@ export function Home({
       <section className={styles.mtHero}>
         <HeroReel assetIds={reelOf(list)} />
         <div className={styles.mtHeroCopy}>
-          <div className={styles.mtEyebrow}>A-NAS · 剪辑中心</div>
-          <h1>
-            把一次旅行，
-            <br />
-            剪成一支<em>跟着音乐走</em>的短片
-          </h1>
-          <p>选一个项目，点开始剪辑。VNAS 看懂每段画面，按歌曲的段落和小节规划两个方案，你挑一个，成片存回你的相册。</p>
+          <h1>剪辑中心</h1>
         </div>
       </section>
       <section className={`${styles.mtPanel} ${styles.mtStep} ${styles.media}`} aria-label="剪辑项目">
@@ -70,8 +61,7 @@ export function Home({
             <Clapperboard />
           </span>
           <div>
-            <div className={styles.mtStepN}>素材</div>
-            <h2>选这次要剪的项目</h2>
+            <h2>项目</h2>
           </div>
           {chosen && (
             <small>
@@ -81,7 +71,7 @@ export function Home({
         </div>
         {projects.error && <Failed inline error={projects.error} onRetry={() => void projects.refetch()} />}
         {!projects.data && !projects.error && <Spinner />}
-        {projects.data?.length === 0 && <p className={styles.mtFaint}>还没有项目：新建一个，交一批视频开始。</p>}
+        {projects.data?.length === 0 && <p className={styles.mtFaint}>还没有项目</p>}
         <ul className={styles.mtRows}>
           {list.map((project) => {
             const on = project.id === chosen?.id;
@@ -137,7 +127,7 @@ export function Home({
       ) : (
         list.length > 0 && (
           <section className={`${styles.mtPanel} ${styles.mtGo}`} aria-label="开始剪辑">
-            <p className={styles.mtFaint}>先在上面选一个项目，再开始剪辑。</p>
+            <p className={styles.mtFaint}>先选一个项目</p>
             <button type="button" className={`${styles.mtBtn} ${styles.primary} ${styles.big}`} disabled>
               开始剪辑
             </button>
@@ -152,19 +142,13 @@ export function Home({
 // made, the job, and the bar that starts the film.
 function Studio({ id, onPage }: { id: string; onPage: (page: "song" | "ask") => void }) {
   const project = useQuery(projectQuery(id));
-  const song = useQuery(songQuery(id));
+  const song = useQuery(songQuery(id, useShown()));
   if (project.error) return <Failed inline error={project.error} onRetry={() => void project.refetch()} />;
   if (!project.data) return null;
   return (
     <>
       <Films versions={project.data.versions} />
-      <Go
-        detail={project.data}
-        songTitle={song.data?.title}
-        songState={song.data?.state}
-        songWaiting={Boolean(song.data?.waiting)}
-        onPage={onPage}
-      />
+      <Go detail={project.data} song={song.data} onPage={onPage} />
     </>
   );
 }

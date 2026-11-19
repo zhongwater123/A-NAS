@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import { getPhoto, originalURL, thumbnailURL } from "../photos/api";
+import { clock, durationLabel } from "../photos/model";
 import { VideoPlayer } from "../photos/VideoPlayer";
 import { useDialogs } from "../ui/feedback";
 import { Spinner } from "../ui/workspace";
@@ -30,6 +32,7 @@ import {
   getJob,
   type MontageJob,
   type MontageProjectDetail,
+  type MontageSong,
   type MontageVersion,
   replan,
   retryAnalysis,
@@ -38,14 +41,25 @@ import {
 } from "./api";
 import { Failed } from "./Failed";
 import styles from "./montage.module.css";
-import { projectQuery, songQuery } from "./queries";
-import { active, needs, planNames, stateText, stepNames } from "./words";
+import { jobKey, projectKey, projectQuery, projectsKey, songQuery } from "./queries";
+import { useShown } from "./shown";
+import {
+  actionLabels,
+  actionsOf,
+  active,
+  type JobAction,
+  planName,
+  stageName,
+  stageOf,
+  stateText,
+  stepLabel,
+} from "./words";
 
 // A job in progress is asked about every two seconds, while the window can be seen.
 const POLL_MS = 2_000;
 const when = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
-const length = (seconds: number) =>
-  seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒` : `${Math.round(seconds)} 秒`;
+// The length of a project's videos together; none known yet reads as nothing.
+const total = (seconds: number) => (seconds >= 1 ? ` · ${durationLabel(seconds)}` : "");
 
 // ProjectView is the prototype's upload page for one project: the project
 // over its first video, its videos in the footage panel, the job and the
@@ -63,20 +77,20 @@ export function ProjectView({
 }) {
   const client = useQueryClient();
   const project = useQuery(projectQuery(id));
-  const song = useQuery(songQuery(id));
+  const song = useQuery(songQuery(id, useShown()));
   const dialogs = useDialogs();
   const remove = useMutation({
     mutationFn: () => deleteProject(id),
     onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ["montage", "projects"] });
+      void client.invalidateQueries({ queryKey: projectsKey });
       onBack();
     },
   });
   const rename = useMutation({
     mutationFn: (name: string) => updateProject(id, { name }),
     onSuccess: (detail) => {
-      client.setQueryData(["montage", "project", id], detail);
-      void client.invalidateQueries({ queryKey: ["montage", "projects"] });
+      client.setQueryData(projectKey(id), detail);
+      void client.invalidateQueries({ queryKey: projectsKey });
     },
   });
 
@@ -113,8 +127,8 @@ export function ProjectView({
           <div className={styles.mtEyebrow}>剪辑项目</div>
           <h1>{detail.name}</h1>
           <p>
-            {detail.assetCount} 段视频 · 约 {length(seconds)} ·{" "}
-            {detail.versions.length ? `已有 ${detail.versions.length} 版成片` : "还没有成片"}
+            {detail.assetCount} 段视频{total(seconds)} ·{" "}
+            {detail.versions.length ? `${detail.versions.length} 版成片` : "还没有成片"}
           </p>
         </div>
         <div className={styles.mtHeroTools}>
@@ -152,16 +166,12 @@ export function ProjectView({
           </button>
         </div>
       </section>
-      {(rename.error || remove.error) && <p className={styles.mtError}>{errorText(rename.error ?? remove.error)}</p>}
+      {(rename.error || remove.error) && (
+        <p className={styles.mtError}>{errorText(rename.error ?? remove.error, "montage")}</p>
+      )}
       <Videos detail={detail} seconds={seconds} onAdd={onAddVideos} />
       <Films versions={detail.versions} />
-      <Go
-        detail={detail}
-        songTitle={song.data?.title}
-        songState={song.data?.state}
-        songWaiting={Boolean(song.data?.waiting)}
-        onPage={onPage}
-      />
+      <Go detail={detail} song={song.data} onPage={onPage} />
       {dialogs.dialog}
     </main>
   );
@@ -171,17 +181,16 @@ function Videos({ detail, seconds, onAdd }: { detail: MontageProjectDetail; seco
   const trashed = detail.assets.filter((asset) => asset.status === "trashed").length;
   const missing = detail.assets.filter((asset) => asset.status === "missing").length;
   return (
-    <section className={`${styles.mtPanel} ${styles.mtStep} ${styles.media}`} aria-label="素材">
+    <section className={`${styles.mtPanel} ${styles.mtStep} ${styles.media}`} aria-label="视频">
       <div className={styles.mtStepH}>
         <span className={styles.mtBadge} aria-hidden="true">
           <Video />
         </span>
         <div>
-          <div className={styles.mtStepN}>素材</div>
-          <h2>这次要剪的视频</h2>
+          <h2>视频</h2>
         </div>
         <small>
-          <b>{detail.assetCount}</b> 段 · 约 {length(seconds)}
+          <b>{detail.assetCount}</b> 段{total(seconds)}
         </small>
       </div>
       <ul className={styles.mtThumbs}>
@@ -190,12 +199,12 @@ function Videos({ detail, seconds, onAdd }: { detail: MontageProjectDetail; seco
             <img src={thumbnailURL(asset.assetId)} alt="" loading="lazy" />
             {asset.status === "trashed" && <em>在回收站</em>}
             {asset.status === "missing" && <em>已不在相册</em>}
-            {asset.duration !== undefined && <span>{length(asset.duration)}</span>}
+            {asset.duration !== undefined && <span>{clock(asset.duration)}</span>}
           </li>
         ))}
       </ul>
-      {trashed > 0 && <p className={`${styles.mtNote} ${styles.mtHint}`}>有 {trashed} 个视频在回收站，恢复后才能用</p>}
-      {missing > 0 && <p className={`${styles.mtNote} ${styles.mtHint}`}>有 {missing} 个视频已经不在相册里了</p>}
+      {trashed > 0 && <p className={`${styles.mtNote} ${styles.mtHint}`}>{trashed} 个视频在回收站，恢复后才能用</p>}
+      {missing > 0 && <p className={`${styles.mtNote} ${styles.mtHint}`}>{missing} 个视频已经不在相册里</p>}
       <button type="button" className={styles.mtAdd} onClick={onAdd}>
         <Plus aria-hidden="true" />
         添加视频
@@ -213,62 +222,67 @@ const tones: Record<MontageJob["state"], string> = {
   cancelled: "stopped",
   done: "done",
 };
-const labels = { drop: "去掉这些继续", retryAnalysis: "重试分析", retry: "重试", replan: "重新规划" } as const;
+
+// Why a film cannot start yet, for the song's part.
+function songHint(song: MontageSong | null | undefined): string | undefined {
+  if (song === undefined) return undefined;
+  if (song === null) return "先选一首歌";
+  if (song.state === "analyzing") return "配乐分析完成后可以开始";
+  if (song.state === "unusable") return "这首歌不能用，请换一首";
+  return undefined;
+}
 
 // Go is the prototype's bar under the footage: the song and the request,
-// each opening its own page, and 开始剪辑. The job it starts shows above it
-// as the prototype's processing panel, until the film is saved.
+// each opening its own page, and 开始剪辑. The project's latest job shows
+// above it as the prototype's processing panel, until its films are saved;
+// it comes with the project, so it is there again after a reload, after the
+// window was closed, and after a visit to the song's or the request's page.
 export function Go({
   detail,
-  songTitle,
-  songState,
-  songWaiting,
+  song,
   onPage,
 }: {
   detail: MontageProjectDetail;
-  songTitle?: string;
-  songState?: string;
-  // The song's analysis waits for a service (MontageSong.waiting).
-  songWaiting?: boolean;
+  // undefined while the song loads, null when the project has none.
+  song: MontageSong | null | undefined;
   onPage: (page: "song" | "ask") => void;
 }) {
   const client = useQueryClient();
-  const latest = detail.job;
-  // The job this page started, or else the project's latest.
-  const [started, setStarted] = useState<string>();
-  const jobId = started ?? latest?.id;
+  const shown = useShown();
+  const jobId = detail.job?.id;
   const job = useQuery({
-    queryKey: ["montage", "job", jobId],
+    queryKey: jobKey(jobId),
     queryFn: ({ signal }) => getJob(jobId as string, signal),
     enabled: Boolean(jobId),
-    initialData: latest && latest.id === jobId ? latest : undefined,
-    refetchInterval: (query) => (active(query.state.data) ? POLL_MS : false),
+    initialData: detail.job,
+    refetchInterval: (query) => (shown && active(query.state.data) ? POLL_MS : false),
     refetchIntervalInBackground: false,
   });
-  const ended = useRef(false);
+  const current = job.data;
+  // A film the job saved shows on the project at once: the first 方案 while
+  // the second is still planned or rendered, and both when the job ends.
+  const saved = current?.versions?.length ?? 0;
+  const listed = detail.versions.filter((version) => version.jobId === jobId).length;
   useEffect(() => {
-    // A job that saved a film shows its version on the project.
-    if (job.data?.state === "done" && !ended.current) {
-      ended.current = true;
-      void client.invalidateQueries({ queryKey: ["montage", "project", detail.id] });
-    }
-  }, [job.data?.state, client, detail.id]);
+    if (saved > listed) void client.invalidateQueries({ queryKey: projectKey(detail.id) });
+  }, [saved, listed, client, detail.id]);
   const start = useMutation({
     mutationFn: () => generate(detail.id),
     onSuccess: (created) => {
-      ended.current = false;
-      client.setQueryData(["montage", "job", created.id], created);
-      setStarted(created.id);
+      client.setQueryData(jobKey(created.id), created);
+      // The project carries its latest job: pages that read it again, as
+      // this bar does when it is mounted anew, find the job just started.
+      client.setQueryData<MontageProjectDetail>(projectKey(detail.id), (old) => old && { ...old, job: created });
     },
   });
   const act = useMutation({
-    mutationFn: (action: "cancel" | "drop" | "retryAnalysis" | "retry" | "replan") => {
+    mutationFn: (action: JobAction | "cancel") => {
       const id = jobId as string;
       switch (action) {
         case "cancel":
           return cancelJob(id);
         case "drop":
-          return dropAssets(id, job.data?.missingAssetIds ?? []);
+          return dropAssets(id, current?.missingAssetIds ?? []);
         case "retryAnalysis":
           return retryAnalysis(id);
         case "retry":
@@ -277,20 +291,27 @@ export function Go({
           return replan(id);
       }
     },
-    onSuccess: (updated) => client.setQueryData(["montage", "job", updated.id], updated),
+    onSuccess: (updated) => client.setQueryData(jobKey(updated.id), updated),
+    onError: (error) => {
+      // The job moved on meanwhile, as when its film already went to the
+      // photo library and it can no longer be cancelled: show where it is.
+      if (error instanceof APIError && error.code === "job_state") void job.refetch();
+    },
   });
-  const current = job.data;
-  const songReady = songState === "ready";
   const going = active(current) || current?.state === "needs_input";
-  const shown = current && current.state !== "done" && current.state !== "cancelled";
+  const panel = current && current.state !== "done" && current.state !== "cancelled";
   const tone = current ? tones[current.state] : undefined;
   const Icon = tone === "stopped" ? AlertTriangle : tone === "waiting" ? Clock : Loader2;
-  const way = current?.state === "needs_input" ? needs[current.waitReason ?? ""] : undefined;
+  const actions = current ? actionsOf(current) : [];
   const done = current?.steps.filter((step) => step.state === "done").length ?? 0;
-  const order = detail.chronological ? "按拍摄时间" : "交给 VNAS 安排顺序";
+  const order = detail.chronological ? "按拍摄时间" : "由 VNAS 安排顺序";
+  const hint = songHint(song);
+  // The videos a stopped job names, those the photo library still shows.
+  const named =
+    current?.state === "needs_input" && current.waitReason !== "asset_missing" ? current.missingAssetIds : [];
   return (
     <>
-      {shown && (
+      {panel && (
         <section className={`${styles.mtPanel} ${styles.mtWork}`} role="status" aria-label="生成进度">
           <div className={styles.mtWorkH} data-tone={tone}>
             <Icon aria-hidden="true" className={tone === "running" ? styles.mtSpin : undefined} />
@@ -299,23 +320,44 @@ export function Go({
           <div className={styles.mtBar} aria-hidden="true">
             <span style={{ width: `${(done / current.steps.length) * 100}%` }} />
           </div>
-          <ol aria-label="步骤">
-            {current.steps.map((step) => (
-              <li key={step.name} data-state={step.state}>
-                <i aria-hidden="true" />
-                {stepNames[step.name] ?? step.name}
-              </li>
-            ))}
-          </ol>
+          <div className={styles.mtStages}>
+            {[0, 1, 2].map((stage) => {
+              const own = current.steps.filter((step) => stageOf(step.name) === stage);
+              return (
+                own.length > 0 && (
+                  <section key={stage}>
+                    <h3>{stageName(stage)}</h3>
+                    <ol aria-label={stageName(stage)}>
+                      {own.map((step) => (
+                        <li key={step.name} data-state={step.state}>
+                          <i aria-hidden="true" />
+                          {stepLabel(step.name)}
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                )
+              );
+            })}
+          </div>
+          {named && named.length > 0 && (
+            <ul className={`${styles.mtThumbs} ${styles.mtHint}`} aria-label="涉及的视频">
+              {named.map((assetId) => (
+                <li key={assetId} className={styles.mtThumb}>
+                  <img src={thumbnailURL(assetId)} alt="" loading="lazy" />
+                </li>
+              ))}
+            </ul>
+          )}
           {current.state === "failed" && current.error && (
             <p className={`${styles.mtError} ${styles.mtHint}`}>{current.error}</p>
           )}
-          {act.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(act.error)}</p>}
-          <div className={styles.mtLeave}>
-            <span>{going ? "可以关掉窗口：VNAS 在后台规划，成片会存进你的相册。" : "这一次没有剪完。"}</span>
-            {going && (
+          {act.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(act.error, "montage")}</p>}
+          {going && (
+            <div className={styles.mtLeave}>
+              <span>{active(current) && "可以关掉窗口，任务在设备上继续"}</span>
               <div>
-                {way?.actions.map((action) => (
+                {actions.map((action) => (
                   <button
                     key={action}
                     type="button"
@@ -323,7 +365,7 @@ export function Go({
                     disabled={act.isPending}
                     onClick={() => act.mutate(action)}
                   >
-                    {labels[action]}
+                    {actionLabels[action]}
                   </button>
                 ))}
                 <button
@@ -335,8 +377,8 @@ export function Go({
                   取消
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
       )}
       <section className={`${styles.mtPanel} ${styles.mtGo}`} aria-label="开始剪辑">
@@ -348,12 +390,12 @@ export function Go({
             <span className={styles.mtOptTx}>
               <small>配乐</small>
               <b>
-                {songTitle ?? "还没选歌"}
-                {songState === "analyzing" && (songWaiting ? " · 等配乐分析服务" : " · 分析中")}
-                {songState === "unusable" && " · 用不了"}
+                {song?.title ?? "还没选歌"}
+                {song?.state === "analyzing" && (song.waiting ? " · 等配乐分析服务" : " · 分析中")}
+                {song?.state === "unusable" && " · 不能用"}
               </b>
             </span>
-            <span className={styles.mtOptMore}>{songTitle ? "更改 ›" : "去选 ›"}</span>
+            <span className={styles.mtOptMore}>{song ? "更改 ›" : "去选 ›"}</span>
           </button>
           <button type="button" className={`${styles.mtOpt} ${styles.cut}`} onClick={() => onPage("ask")}>
             <span className={styles.mtBadge} aria-hidden="true">
@@ -369,13 +411,14 @@ export function Go({
         <button
           type="button"
           className={`${styles.mtBtn} ${styles.primary} ${styles.big}`}
-          disabled={start.isPending || going || !songReady}
+          disabled={start.isPending || going || song?.state !== "ready"}
           onClick={() => start.mutate()}
         >
           <Play aria-hidden="true" />
           {detail.versions.length ? "再剪一版" : "开始剪辑"}
         </button>
-        {start.error && <p className={styles.mtError}>{errorText(start.error)}</p>}
+        {!going && hint && <p className={styles.mtFaint}>{hint}</p>}
+        {start.error && <p className={styles.mtError}>{errorText(start.error, "montage")}</p>}
       </section>
     </>
   );
@@ -383,12 +426,14 @@ export function Go({
 
 // Films is the prototype's 挑一个 page: the latest job's 方案 side by side,
 // each played where the photo library plays its videos, and the films of
-// earlier jobs below.
+// earlier jobs below, each of which plays here too.
 export function Films({ versions }: { versions: MontageVersion[] }) {
+  const [playing, setPlaying] = useState<number>();
   if (!versions.length) return null;
   const latest = versions[0].jobId;
   const pair = versions.filter((version) => version.jobId === latest).sort((a, b) => a.plan - b.plan);
   const earlier = versions.filter((version) => version.jobId !== latest);
+  const old = earlier.find((version) => version.number === playing && !version.gone);
   return (
     <section className={`${styles.mtPanel} ${styles.mtFinish}`} aria-label="成片">
       <div className={styles.mtOk}>
@@ -396,12 +441,8 @@ export function Films({ versions }: { versions: MontageVersion[] }) {
           <Check />
         </span>
         <div>
-          <h2>{pair.length > 1 ? `${pair.length} 个方案，挑一个` : "成片已存进相册"}</h2>
-          <p>
-            {pair.length > 1
-              ? "同一批素材、同一首歌，规划了两次。两版都已存进相册：挑喜欢的那版下载，另一版可以在相册里删掉。"
-              : "在你的个人图库里。"}
-          </p>
+          <h2>成片</h2>
+          <p>{pair.length > 1 ? `${pair.length} 个方案，都已存进你的个人图库` : "已存进你的个人图库"}</p>
         </div>
       </div>
       <div className={styles.mtFilms}>
@@ -410,22 +451,42 @@ export function Films({ versions }: { versions: MontageVersion[] }) {
         ))}
       </div>
       {earlier.length > 0 && (
-        <div className={styles.mtActs}>
-          <span className={styles.mtFaint}>更早的版本</span>
-          <div className={styles.mtVersions} role="group" aria-label="更早的版本">
-            {earlier.map((version) =>
-              version.gone ? (
-                <span key={version.number} title="成片已不在相册">
-                  第 {version.number} 版
-                </span>
-              ) : (
-                <a key={version.number} href={originalURL(version.filmAssetId, true)}>
-                  <Download aria-hidden="true" />第 {version.number} 版
-                </a>
-              ),
-            )}
+        <>
+          <div className={styles.mtActs}>
+            <span className={styles.mtFaint}>更早的版本</span>
+            <ul className={styles.mtVersions} aria-label="更早的版本">
+              {earlier.map((version) => (
+                <li key={version.number}>
+                  <b>第 {version.number} 版</b>
+                  {version.gone ? (
+                    <span>成片已不在相册</span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        aria-pressed={playing === version.number}
+                        aria-label={`播放第 ${version.number} 版`}
+                        onClick={() => setPlaying(playing === version.number ? undefined : version.number)}
+                      >
+                        <Play aria-hidden="true" />
+                        播放
+                      </button>
+                      <a href={originalURL(version.filmAssetId, true)} aria-label={`下载第 ${version.number} 版`}>
+                        <Download aria-hidden="true" />
+                        下载
+                      </a>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
+          {old && (
+            <div className={`${styles.mtFilm} ${styles.mtHint}`} role="group" aria-label={`第 ${old.number} 版`}>
+              <FilmPlayer key={old.filmAssetId} assetId={old.filmAssetId} />
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -433,7 +494,7 @@ export function Films({ versions }: { versions: MontageVersion[] }) {
 
 // FilmCard is one 方案's film, as the prototype's version card.
 function FilmCard({ version }: { version: MontageVersion }) {
-  const name = planNames[version.plan] ?? `方案 ${version.plan}`;
+  const name = planName(version.plan);
   return (
     <article className={styles.mtFilmCard} aria-label={name}>
       <div className={styles.mtFilm}>
@@ -451,7 +512,7 @@ function FilmCard({ version }: { version: MontageVersion }) {
           <h3>{name}</h3>
           <span className={styles.mtTag}>第 {version.number} 版</span>
         </div>
-        <p className={styles.mtFaint}>{when.format(new Date(version.createdAt))} · 存进了你的个人图库</p>
+        <p className={styles.mtFaint}>{when.format(new Date(version.createdAt))}</p>
         {!version.gone && (
           <a className={`${styles.mtBtn} ${styles.primary}`} href={originalURL(version.filmAssetId, true)}>
             <Download aria-hidden="true" />
@@ -471,7 +532,7 @@ function FilmPlayer({ assetId }: { assetId: string }) {
     return (
       <div className={styles.mtCentered}>
         <Film aria-hidden="true" />
-        {errorText(asset.error)}
+        {errorText(asset.error, "photos")}
       </div>
     );
   }
@@ -487,6 +548,7 @@ function FilmPlayer({ assetId }: { assetId: string }) {
       <VideoPlayer
         asset={asset.data}
         stage={stage}
+        autoPlay={false}
         onDownload={() => window.location.assign(originalURL(asset.data.id, true))}
       />
     </div>

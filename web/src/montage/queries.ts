@@ -1,15 +1,27 @@
 import { APIError } from "../api/client";
-import { getProject, getSong, type MontageSong } from "./api";
+import { getProject, getSong, listProjects, type MontageSong } from "./api";
 
-// The queries the project's pages share: one project, and its song (null
-// before one is chosen).
+// The queries the window's pages share: the projects, one project, and its
+// song (null before one is chosen).
+export const projectsKey = ["montage", "projects"] as const;
+export const projectKey = (projectId: string) => ["montage", "project", projectId] as const;
+export const songKey = (projectId: string) => ["montage", "song", projectId] as const;
+export const jobKey = (jobId?: string) => ["montage", "job", jobId] as const;
+
+export const projectsQuery = {
+  queryKey: projectsKey,
+  queryFn: ({ signal }: { signal: AbortSignal }) => listProjects(signal),
+};
+
 export const projectQuery = (projectId: string) => ({
-  queryKey: ["montage", "project", projectId],
+  queryKey: projectKey(projectId),
   queryFn: ({ signal }: { signal: AbortSignal }) => getProject(projectId, signal),
 });
 
-export const songQuery = (projectId: string) => ({
-  queryKey: ["montage", "song", projectId],
+// A song being analysed is asked about again until it is done, while the
+// window can be seen (shown).
+export const songQuery = (projectId: string, shown: boolean) => ({
+  queryKey: songKey(projectId),
   queryFn: async ({ signal }: { signal: AbortSignal }): Promise<MontageSong | null> => {
     try {
       return await getSong(projectId, signal);
@@ -18,11 +30,7 @@ export const songQuery = (projectId: string) => ({
       throw error;
     }
   },
-  // A song being analysed is asked about again until it is done, while the window can be seen.
   refetchInterval: (query: { state: { data?: MontageSong | null } }) =>
-    query.state.data?.state === "analyzing" ? 4_000 : false,
+    shown && query.state.data?.state === "analyzing" ? 4_000 : false,
   refetchIntervalInBackground: false,
 });
-
-export const clock = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
