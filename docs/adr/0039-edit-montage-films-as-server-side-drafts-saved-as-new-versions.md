@@ -131,16 +131,16 @@
 
 ## 交付
 
-都在首版闭环（实施方案的 M10）之后，按 #596 拆票：
+都在首版闭环（实施方案的 M10）之后，按 #596 的子票实施：
 
 | 票 | 内容 | 依赖 |
 |---|---|---|
-| R1 | 规格、实施方案、向量索引与 CONTEXT 按本 ADR 改写 | 本 ADR 接受 |
-| R2 | 相册 `searchWindows`、窗口集合的别名与 Catalog 退回 | R1、M5 |
-| R3 | 计算 Worker 的 `pins` 与 `likeness`；修改稿、操作、候选、确认、镜头清单、缩略图 | R1、M8a |
-| R4 | `jobs.kind`、`edit` 任务的渲染与存回、粗预览的配乐接口、`versions` 的新列 | R3 |
-| R5 | `recut`：模板 `plan-v3.md`、brief 的 `base` 与 `change`、anas-api 的第五条登记 | R4、M9 |
-| R6 | 选版页的三个操作与每版的信息，修改页（第 11 项），含粗预览与 `VideoPlayer` 的起止时间 | R2–R5 |
+| R1（[#598](https://github.com/zhongwater123/A-NAS/issues/598)） | 规格、实施方案、向量索引与 CONTEXT 按本 ADR 改写 | 本 ADR 接受 |
+| R2（[#599](https://github.com/zhongwater123/A-NAS/issues/599)） | 相册 `searchWindows`、窗口集合的别名与 Catalog 退回 | R1、M5 |
+| R3（[#600](https://github.com/zhongwater123/A-NAS/issues/600)） | 计算 Worker 的 `pins` 与 `likeness`；修改稿、操作、候选、确认、镜头清单、缩略图 | R1、M8a |
+| R4（[#601](https://github.com/zhongwater123/A-NAS/issues/601)） | `jobs.kind`、`edit` 任务的渲染与存回、粗预览的配乐接口、`versions` 的新列 | R3 |
+| R5（[#602](https://github.com/zhongwater123/A-NAS/issues/602)） | `recut`：模板 `plan-v3.md`、brief 的 `base` 与 `change`、anas-api 的第五条登记 | R4、M9 |
+| R6（[#603](https://github.com/zhongwater123/A-NAS/issues/603)） | 选版页的三个操作与每版的信息，修改页（第 11 项），含粗预览与 `VideoPlayer` 的起止时间 | R2–R5 |
 
 ## 未选择
 
