@@ -348,7 +348,11 @@ describe("剪辑中心", () => {
 
   it("says what failed when the planning failed twice, and plans again", async () => {
     const seen = fresh();
-    const stopped = job("needs_input", { waitReason: "plan_error", step: "pick", error: "session.create: unknown method" });
+    const stopped = job("needs_input", {
+      waitReason: "plan_error",
+      step: "pick",
+      error: "session.create: unknown method",
+    });
     serve(
       () => project({ job: stopped }),
       () => stopped,
