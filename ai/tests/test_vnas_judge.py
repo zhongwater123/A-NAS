@@ -60,6 +60,13 @@ class JudgeTest(unittest.TestCase):
         self.assertIn("助手的最终回答：好的", text)
         self.assertLess(text.count("用户没有同意"), 100)  # tool results are cut
 
+    def test_asks_a_caching_relay_not_to_cache_only_when_told(self):
+        fake = Fake((200, '{"pass": true, "reason": "好"}'), (200, '{"pass": true, "reason": "好"}'))
+        Judge("k", transport=fake)("要求", TURN)
+        Judge("k", transport=fake, no_cache=True)("要求", TURN)
+        self.assertNotIn("cache", fake.calls[0][2])
+        self.assertEqual(fake.calls[1][2]["cache"], {"no-cache": True})
+
     def test_records_the_served_model(self):
         judge = Judge("k", transport=Fake((200, '{"pass": false, "reason": "x"}')))
         judge("r", TURN)

@@ -85,12 +85,15 @@ def parse_verdict(text: str) -> tuple[bool, str] | None:
 
 class Judge:
     def __init__(self, key: str, model: str = DEFAULT_MODEL, base: str = DEFAULT_BASE,
-                 subject_model: str | None = None, transport: Transport = urllib_transport):
+                 subject_model: str | None = None, transport: Transport = urllib_transport, no_cache: bool = False):
         if subject_model and subject_model.strip().lower() == model.strip().lower():
             raise ValueError(f"评审型号不能和被测型号相同：{model}")
         if not base.startswith(("https://", "http://")):
             raise ValueError(f"评审地址要是 http(s)：{base}")
         self.key, self.model, self.url, self.transport = key, model, base.rstrip("/") + "/chat/completions", transport
+        # A caching relay (LiteLLM) answers a repeated request from its cache; calibration
+        # repeats each request to see whether the verdict holds, so it asks the relay not to.
+        self.no_cache = no_cache
         self.served: str | None = None   # the model the endpoint says answered
 
     @classmethod
@@ -101,12 +104,14 @@ class Judge:
             return None
         return cls(Path(key_file).read_text(encoding="utf-8-sig").strip(),  # a key saved by Notepad may carry a BOM
                    os.environ.get("VNAS_JUDGE_MODEL") or DEFAULT_MODEL, os.environ.get("VNAS_JUDGE_BASE") or DEFAULT_BASE,
-                   subject_model, transport)
+                   subject_model, transport, os.environ.get("VNAS_JUDGE_NO_CACHE", "0") == "1")
 
     def __call__(self, rubric: str, turn: dict) -> tuple[bool | None, str]:
         body = {"model": self.model, "temperature": 0,
                 "messages": [{"role": "system", "content": SYSTEM},
                              {"role": "user", "content": f"{describe_turn(turn)}\n\n评分要求：{rubric}"}]}
+        if self.no_cache:
+            body["cache"] = {"no-cache": True}
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         problem = ""
         for _ in range(ATTEMPTS):
