@@ -10,12 +10,20 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // A planning grant (docs/architecture/montage-center.md, 规划授权): the
 // requests that may lead to planning register one for the member, behind
 // their session, before the Product Service forwards them; the montage
 // center is told by AssistantHeader whether VNAS can plan.
+
+// AssistantHeader tells the montage center that the Product Service
+// registered a planning grant for the member behind this request ("on"), or
+// that they have no VNAS to plan with ("off"). Only RegisterPlan sets it: the
+// proxy to the montage service drops every X-A-NAS- header a browser sent
+// and adds this one from the request's context (serviceproxy).
+const AssistantHeader = "X-A-NAS-Assistant"
 
 // PlanningRoutes are the requests that register a planning grant.
 var PlanningRoutes = []apiroute.Endpoint{
@@ -46,7 +54,6 @@ func RegisterPlan(registrar PlanRegistrar, next http.Handler, logger *slog.Logge
 		logger = slog.Default()
 	}
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		r.Header.Del(SongHeader)
 		on := "off"
 		if registrar != nil {
 			// The route puts the session's token on the request's context;
@@ -61,7 +68,7 @@ func RegisterPlan(registrar PlanRegistrar, next http.Handler, logger *slog.Logge
 				on = "on"
 			}
 		}
-		r.Header.Set(AssistantHeader, on)
-		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), session.User)))
+		ctx := serviceproxy.WithInternalHeader(accounts.WithUser(r.Context(), session.User), AssistantHeader, on)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }

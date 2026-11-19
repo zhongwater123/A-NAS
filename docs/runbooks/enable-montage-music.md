@@ -1,7 +1,7 @@
 # 在实验 NAS 上启用剪辑中心的配乐分析
 
-状态：draft（构建与打包在开发机上验证过；实验 NAS 上的安装还没做）
-更新时间：2026-11-18
+状态：draft（见“已验证与未验证”；实验 NAS 上的安装还没做）
+更新时间：2026-11-19
 
 ## 目的
 
@@ -21,11 +21,20 @@
   - 实验 NAS 已装与本手册同一提交的 `a-nas`（[部署 A-NAS 软件包](deploy-a-nas-packages.md)），剪辑中心的开关在实验 NAS 上已打开。
   - 一台 x86_64 的构建机（Windows 开发机的 WSL），有 Docker、jq、`ai/requirements-dev.txt` 固定版本的 uv：NATTEN 要按 NAS 的处理器编译，arm64 的开发机 C 编出的运行环境不能用。
 - **资源**：运行环境压缩包约 300 MB，解开约 860 MB；权重约 95 MB。Worker 只在分析时运行，峰值内存见[用时与内存](../architecture/montage-music.md#用时与内存)，单元上限 `MemoryMax`。
-- **风险**：分析期间 Worker 占满它能用的核，放在 `anas.slice` 下，前台操作优先；内存超过上限时只结束 Worker，这首歌标为等待并在 5 分钟后重试。
+- **风险**：分析期间 Worker 占满它能用的核，放在 `anas.slice` 下，前台操作优先；内存超过上限时只结束 Worker，这首歌 5 分钟后再试，连续失败 3 次后记为不可用（`analysis_failed`）。
 - **停止条件**（出现任一项立即停止）：
   - 构建报告下载与 `deploy/montage-music/sources.json` 或锁文件的哈希不符、`pip check` 不通过，或 `madmom's model files are in the runtime`；
   - apt 报告依赖无法满足或版本不是 `a-nas` 的同一版本；
   - `journalctl -u anas-montage-music` 出现 `does not match` 的权重核对失败或 `oom-kill`。
+
+## 已验证与未验证
+
+- **已验证**（2026-11-18，开发者的记录见 [#579](https://github.com/zhongwater123/A-NAS/pull/579) 的提交 `c627d582`、`9a8b031e`）：
+  - 第 1 步在 Windows 开发机的 WSL（x86_64）上完整跑过，得到运行环境 `40109f4bba9b6c36.tar.gz`；
+  - 用签名软件源里的软件包装进 Debian 13 的 systemd 容器，一首 150 秒的歌分析到 `ready`：分离 88.8 秒、allin1 302.2 秒（7 线程），峰值 2145 MiB。
+- **未验证**：
+  - 实验 NAS 上的第 4、5 步，以及 10 首对照歌在 NAS 的处理器上的结果、用时与峰值内存；
+  - 两个单元装好后的 `systemd-analyze verify`（[测试与验证](../development/testing.md#系统测试)要求警告也算失败）：这个包不在 `make packages` 里，系统测试不装它，装到实验 NAS 后按“验证”一节补。
 
 ## 步骤
 
@@ -75,6 +84,12 @@
    - 完成标准：配乐页显示选段；把用时、各步用时与 `MemoryPeak` 记进设计文档的[用时与内存](../architecture/montage-music.md#用时与内存)。
 
 ## 验证
+
+- 单元通过校验，没有任何输出：
+
+  ```bash
+  systemd-analyze verify --man=no /usr/lib/systemd/system/anas-montage-music.socket /usr/lib/systemd/system/anas-montage-music.service
+  ```
 
 - 剪辑服务的接口：`GET /api/v1/montage/projects/<id>/song` 的 `state` 是 `ready`，`selection` 有选段与小节槽。
 - Worker 没有网络、看不到数据卷：`systemctl show anas-montage-music -p PrivateNetwork -p InaccessiblePaths` 为 `yes` 与 `-/srv/a-nas`。

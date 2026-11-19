@@ -21,6 +21,7 @@ const songReasons: Record<NonNullable<MontageSong["reason"]>, string> = {
   few_bars: "这首歌太短，不到 16 小节",
   no_excerpt: "找不到 30 秒到 150 秒的一段",
   long_slot: "节拍太慢，一个镜头会超过 12 秒",
+  analysis_failed: "这首歌分析失败",
 };
 // The prototype's covers: a colour per song, its first letter on it.
 const covers = [

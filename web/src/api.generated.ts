@@ -2133,6 +2133,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        get: operations["getMontage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/projects": {
         parameters: {
             query?: never;
@@ -2143,7 +2160,7 @@ export interface paths {
         /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
         get: operations["listMontageProjects"];
         put?: never;
-        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200). No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
         post: operations["createMontageProject"];
         delete?: never;
         options?: never;
@@ -2162,7 +2179,7 @@ export interface paths {
         get: operations["getMontageProject"];
         put?: never;
         post?: never;
-        /** Delete the project and revoke its grant. The videos and the films stay in the photo library */
+        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
         delete: operations["deleteMontageProject"];
         options?: never;
         head?: never;
@@ -2179,7 +2196,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add videos to the project. The same requestKey again adds nothing more; a requestKey of another project is a conflict. Films already made stay, and nothing is made anew */
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
         post: operations["addMontageProjectAssets"];
         delete?: never;
         options?: never;
@@ -2196,7 +2213,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey again returns the same job. A project with a job in progress answers job_in_progress (409) */
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
         post: operations["generateMontageFilm"];
         delete?: never;
         options?: never;
@@ -2230,7 +2247,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. A film it made is not saved. A job that ended is job_state (409) */
+        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome */
         post: operations["cancelMontageJob"];
         delete?: never;
         options?: never;
@@ -2247,7 +2264,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Take videos that are missing, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled */
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
         post: operations["dropMontageJobAssets"];
         delete?: never;
         options?: never;
@@ -2264,7 +2281,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ask the photo library to analyse again the videos whose analysis failed, and go on */
+        /** Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
         post: operations["retryMontageJobAnalysis"];
         delete?: never;
         options?: never;
@@ -2281,7 +2298,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Go on from the step the job stopped at, once there is room for the film or the song is fixed */
+        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
         post: operations["retryMontageJob"];
         delete?: never;
         options?: never;
@@ -2298,7 +2315,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Plan again from the step not yet taken, when the plan was not handed back or kept failing its checks */
+        /** Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
         post: operations["replanMontageJob"];
         delete?: never;
         options?: never;
@@ -2313,7 +2330,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The desktop's notices of the caller's jobs: waiting for planning, planning, needing the member, and films saved in the last day */
+        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day */
         get: operations["listMontageNotices"];
         put?: never;
         post?: never;
@@ -2332,7 +2349,7 @@ export interface paths {
         };
         /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
         get: operations["getMontageSong"];
-        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one. More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
         put: operations["putMontageSong"];
         post?: never;
         delete?: never;
@@ -8046,7 +8063,7 @@ export interface components {
             items: components["schemas"]["MontageProjectSummary"][];
             next?: string;
         };
-        /** @description Unique per member: the same key again repeats nothing. */
+        /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
         MontageRequestKey: string;
         MontageAssetIDs: string[];
         MontageProjectAsset: {
@@ -8100,13 +8117,13 @@ export interface components {
             /** @description The step the job is at or stopped at. */
             step?: string;
             /**
-             * @description Why a waiting job waits, or what a job that needs input needs (docs/specs/montage-center.md).
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.
              * @enum {string}
              */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full";
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
-            /** @description The videos missing, or whose analysis failed. */
+            /** @description The videos missing, too long, or whose analysis failed. */
             missingAssetIds?: string[];
             /** @description The first 方案's film. */
             version?: components["schemas"]["MontageVersion"];
@@ -8139,6 +8156,8 @@ export interface components {
             /** @description The project's name. */
             project: string;
             reason?: string;
+            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. */
+            detail?: string;
             /** @description The film saved, for saved. */
             filmAssetId?: string;
             /** Format: date-time */
@@ -8190,12 +8209,12 @@ export interface components {
             /** @enum {string} */
             state: "analyzing" | "ready" | "unusable";
             /**
-             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last.
+             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
              * @enum {string}
              */
-            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot";
+            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
             /**
-             * @description What the analysis waits for; it is tried again every few minutes.
+             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
              * @enum {string}
              */
             waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
@@ -12954,6 +12973,25 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
+    getMontage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The montage center is on */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
     listMontageProjects: {
         parameters: {
             query?: {
@@ -13020,6 +13058,7 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
@@ -13088,7 +13127,7 @@ export interface operations {
                     name?: string;
                     ask?: string;
                     chronological?: boolean;
-                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. */
+                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
                     songStart?: number;
                 };
             };
@@ -13261,6 +13300,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     retryMontageJobAnalysis: {
@@ -13340,6 +13380,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listMontageNotices: {
@@ -13416,6 +13457,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];

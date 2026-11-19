@@ -93,16 +93,15 @@ type config struct {
 	// show beside the assistant directories (by default assistant/.changes on
 	// the data volume), where only root may read them. The instance secrets
 	// are the Host Agent's own, written where the executor prepares a member's
-	// assistant (Executor.AssistantTokenDir), so they have no setting.
+	// assistant (Executor.AssistantTokenDir), so they have no setting; nor
+	// have the members' planning grants for the montage center, which the
+	// File Broker keeps beside them (Executor.AssistantPlanDir).
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
 	// The scheduled tasks members asked to run now wait here for a round of
 	// their cron unit (ai/assistant/run-requests.sh reads the same place).
 	AssistantRuns string `env:"ANAS_ASSISTANT_RUN_DIR" envDefault:"/run/a-nas/assistant-runs"`
-	// Members' planning grants for the montage center wait here for the
-	// waker (ai/assistant/cron-waker.py reads the same place).
-	AssistantPlans string `env:"ANAS_ASSISTANT_PLAN_DIR" envDefault:"/var/lib/a-nas/assistant-plans"`
 	// Without the photo service's group the photo service is not installed
 	// and its session lookup is off; the default is the service's user.
 	PhotoSessionGroup  string `env:"ANAS_PHOTO_SESSION_GROUP"`
@@ -220,13 +219,18 @@ func run(logger *slog.Logger) error {
 		defer placer.Close()
 		scopes = placer
 	}
+	// Planning grants are registered only where the assistant is on.
+	assistantPlans := ""
+	if config.AssistantSockets != "" {
+		assistantPlans = executor.AssistantPlanDir()
+	}
 	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
 		AssistantTokens:  executor.AssistantTokenDir(),
 		AssistantChanges: assistantChanges,
 		AssistantRuns:    config.AssistantRuns,
-		AssistantPlans:   config.AssistantPlans,
+		AssistantPlans:   assistantPlans,
 		AssistantOn:      executor.AssistantOn,
 		Accounts:         sessions,
 		Scopes:           scopes,

@@ -159,6 +159,11 @@ type PlanInput struct {
 	Settings JobSettings     `json:"settings"`
 	// Picked is the first step's answer, for the second step.
 	Picked json.RawMessage `json:"picked,omitempty"`
+	// StepKey is the input key of the step being planned and PickKey the
+	// first step's: a planner that answers later, as the member's VNAS does,
+	// keeps its answers by them, so that one for other inputs is never used.
+	StepKey string `json:"-"`
+	PickKey string `json:"-"`
 }
 
 // Planner makes the two steps of the plan: which scenes go into each part
@@ -184,6 +189,8 @@ var (
 type Music interface {
 	// Chosen is the project's song and the excerpt's start; no song is "".
 	Chosen(ctx context.Context, owner, projectID string) (string, float64, error)
+	// ExcerptKey reads the identity without running the compute Worker.
+	ExcerptKey(ctx context.Context, owner, songID string, start float64) (string, error)
 	// Excerpt is the song's excerpt from start.
 	Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error)
 	// Audio opens the song's copy.

@@ -60,8 +60,12 @@ else
 fi
 
 # The writers stop first, so that each copy is whole. The new release starts
-# them again; so does the old one if this one fails to unpack.
+# them again; so does the old one if this one fails to unpack. The montage
+# center's socket for members' scheduled tasks stops before its service, which
+# a round of a member's tasks would otherwise start again through it while
+# montage.db is copied; a release before it has no such unit.
 if [[ -d /run/systemd/system ]]; then
+  systemctl stop anas-montage-assistant.socket 2>/dev/null || true
   systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service 2>/dev/null || true
 fi
 # The system disk's copies go to /var/backups/a-nas; the data volume's stay on

@@ -11,6 +11,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 type registrar struct {
@@ -25,12 +26,14 @@ func (r *registrar) RegisterAssistantPlan(ctx context.Context) (string, error) {
 }
 
 // The requests that may lead to planning register a planning grant behind
-// the member's session first, and only the Product Service says so.
+// the member's session first, and only the Product Service says so: the
+// header reaches the montage center through the proxy, which drops the one a
+// browser sent.
 func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 	var seen []string
-	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	next := serviceproxy.Local(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get(montageapi.AssistantHeader))
-	})
+	}))
 	// As the Product Service's routes give it: the Session resolved from the
 	// cookie has no Token, which is on the request's context alone.
 	session := accounts.Session{User: accounts.User{ID: "user:alice", Username: "alice"}}

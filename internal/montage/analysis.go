@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -22,7 +22,10 @@ import (
 // mono at 22050 Hz for the loudness, the eighth version's inputs, and hands
 // them to the music analysis Worker; then the compute Worker's music
 // operation picks the default excerpt. A Worker that is away leaves the song
-// waiting, with what was found so far kept, and it is tried again later.
+// waiting, with what was found so far kept, and it is tried again later, as
+// long as it takes: asking costs nothing. An analysis the Worker took and
+// could not finish is tried analysisAttempts times, since every attempt
+// costs minutes of the Worker, and then the song cannot be used.
 
 // AnalysisVersion names how songs are analysed now: allin1's harmonix-all
 // and the eighth version's excerpt.
@@ -34,8 +37,13 @@ const (
 	monoRate   = 22050
 )
 
-// analysisRetry is how long a song waits for a Worker that was away.
+// analysisRetry is how long a song waits for a Worker that was away, or
+// between attempts that failed.
 const analysisRetry = 5 * time.Minute
+
+// analysisAttempts is how many times a Worker may fail on a song
+// (ErrWorkerFailed) before the song is unusable.
+const analysisAttempts = 3
 
 // analysisPoll is how often waiting songs are looked at without a wake-up.
 const analysisPoll = time.Minute
@@ -48,8 +56,12 @@ func (s *Store) wakeAnalysis() {
 }
 
 // AnalyzeSongs analyses the songs waiting, one content at a time, until ctx
-// ends.
+// ends. Songs an earlier AnalysisVersion found unusable are analysed again
+// first.
 func (s *Store) AnalyzeSongs(ctx context.Context) {
+	if err := s.requeueStale(ctx); err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "queueing songs for another analysis failed", "error", err)
+	}
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -85,6 +97,16 @@ func (s *Store) AnalyzeWaiting(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// requeueStale queues the songs that an earlier AnalysisVersion found
+// unusable: what changed since may be what refused them. Songs that are ready
+// keep the analysis their projects were set up with.
+func (s *Store) requeueStale(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE songs SET state = 'analyzing', reason = '', waiting = '', attempts = 0, next_try = NULL,
+		analysis_json = NULL, loudness = NULL, updated_at = ? WHERE state = 'unusable' AND analysis_version != ?`,
+		sqlitedb.FormatTime(s.now()), AnalysisVersion)
+	return err
+}
+
 func (s *Store) nextSong(ctx context.Context) (string, bool, error) {
 	var sha string
 	err := s.db.QueryRowContext(ctx, `SELECT sha256 FROM songs WHERE state = 'analyzing' AND (next_try IS NULL OR next_try <= ?)
@@ -107,6 +129,9 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 	if analysis.Structure == nil {
 		found, err := s.findStructure(ctx, sha)
 		switch {
+		case err != nil && ctx.Err() != nil:
+			// The service is stopping; the song is as due as it was.
+			return
 		case errors.Is(err, ErrNotAudio), errors.Is(err, ErrWorkerRefused):
 			s.logger.InfoContext(ctx, "a song cannot be analysed", "song", sha, "error", err)
 			s.finish(ctx, sha, SongUnusable, UnusableUndecodable, songAnalysis{}, nil)
@@ -114,6 +139,10 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 		case errors.Is(err, ErrMediaUnavailable):
 			s.logger.WarnContext(ctx, "the media worker is away; the song waits", "error", err)
 			s.wait(ctx, sha, WaitMedia)
+			return
+		case errors.Is(err, ErrWorkerFailed):
+			s.logger.WarnContext(ctx, "the music analysis worker failed on a song", "song", sha, "error", err)
+			s.failed(ctx, sha, WaitAnalyzer, songAnalysis{}, nil)
 			return
 		case err != nil:
 			s.logger.WarnContext(ctx, "the music analysis worker is away; the song waits", "error", err)
@@ -134,15 +163,23 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 		s.wait(ctx, sha, WaitCompute)
 		return
 	}
-	var title string
-	if err := s.db.QueryRowContext(ctx, "SELECT title FROM songs WHERE sha256 = ? ORDER BY created_at LIMIT 1", sha).Scan(&title); err != nil {
-		s.logger.WarnContext(ctx, "reading a song's title failed", "error", err)
-	}
-	selection, err := s.compute.Music(ctx, MusicRequest{Song: title, Structure: *analysis.Structure, Loudness: loudness, Target: SongTarget})
+	// The excerpt is every member's who chose this content, so it names no
+	// song: each member's own title joins it when a job asks (Excerpt).
+	selection, err := s.compute.Music(ctx, MusicRequest{Structure: *analysis.Structure, Loudness: loudness, Target: SongTarget})
 	switch {
+	case err != nil && ctx.Err() != nil:
+		return
 	case errors.Is(err, ErrWorkerRefused):
+		// Not one of the reasons the operation names (few_bars and the
+		// others arrive in its answer): it cannot read what allin1 found.
 		s.logger.WarnContext(ctx, "the compute worker refused a song's structure", "song", sha, "error", err)
-		s.finish(ctx, sha, SongUnusable, UnusableFewBars, analysis, loudness)
+		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
+		return
+	case errors.Is(err, ErrWorkerFailed):
+		// It took the structure and broke on it, or stopped. That may be
+		// the Worker's moment or this song's, so it counts as an attempt.
+		s.logger.WarnContext(ctx, "the compute worker failed on a song's structure", "song", sha, "error", err)
+		s.failed(ctx, sha, WaitCompute, analysis, loudness)
 		return
 	case err != nil:
 		s.logger.WarnContext(ctx, "the compute worker is away; the song waits", "error", err)
@@ -205,7 +242,10 @@ func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// The Worker reads the stereo stream to its end, then the mono one, so
-	// one decoding runs at a time.
+	// one decoding runs at a time. A pipe ends the same way whether the
+	// decoding finished or broke off, so the Worker analyses the streams
+	// only once whole says both were written to their end.
+	whole := make(chan error, 1)
 	decoded := make(chan error, 1)
 	go func() {
 		err := s.decodeInto(ctx, file, stereoIn, 2, stereoRate)
@@ -214,19 +254,18 @@ func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error)
 		} else {
 			_ = monoIn.Close()
 		}
-		if err != nil {
-			// The Worker would read a stream cut short as a whole song.
-			cancel()
-		}
+		whole <- err
 		decoded <- err
 	}()
-	analysis, err := s.music.Analyze(ctx, stereoOut, monoOut)
+	analysis, err := s.music.Analyze(ctx, stereoOut, monoOut, whole)
 	// A Worker that stopped reading leaves the decoding a closed pipe.
 	_ = stereoOut.Close()
 	_ = monoOut.Close()
 	decodeErr := <-decoded
 	switch {
-	case decodeErr != nil && (err == nil || errors.Is(err, context.Canceled) || errors.Is(decodeErr, ErrNotAudio)):
+	case decodeErr != nil && !errors.Is(decodeErr, syscall.EPIPE):
+		// The decoding broke off by itself: what the Worker made of a
+		// stream cut short says nothing about the song.
 		return Analysis{}, decodeErr
 	case err != nil:
 		return Analysis{}, err
@@ -251,7 +290,7 @@ func (s *Store) decodeInto(ctx context.Context, file *os.File, pipe *os.File, ch
 	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid), errors.Is(err, ffmpegworker.ErrTooLarge):
 		return fmt.Errorf("%w: %v", ErrNotAudio, err)
 	}
-	return fmt.Errorf("%w: %v", ErrMediaUnavailable, err)
+	return fmt.Errorf("%w: %w", ErrMediaUnavailable, err)
 }
 
 func (s *Store) keepStructure(ctx context.Context, sha string, analysis songAnalysis, loudness []float32) error {
@@ -278,22 +317,48 @@ func (s *Store) finish(ctx context.Context, sha, state, reason string, analysis 
 	}
 }
 
-// wait leaves the content's rows waiting for a Worker.
+// wait leaves the content's rows waiting for a Worker that is away.
 func (s *Store) wait(ctx context.Context, sha, why string) {
-	if _, err := s.db.ExecContext(ctx, `UPDATE songs SET waiting = ?, attempts = attempts + 1, next_try = ?
+	if _, err := s.db.ExecContext(ctx, `UPDATE songs SET waiting = ?, next_try = ?
 		WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
 		s.logger.WarnContext(ctx, "recording a waiting song failed", "error", err)
 	}
 }
 
+// failed counts an analysis a Worker took and could not finish, and leaves
+// the content waiting for that Worker (why). It is tried again later, until
+// analysisAttempts of them failed: then it cannot be used, and the Worker is
+// free for other songs; analysis and loudness are what was found of it so
+// far.
+func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalysis, loudness []float32) {
+	var attempts int
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE songs SET waiting = ?, attempts = attempts + 1, next_try = ?
+			WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
+			return err
+		}
+		// A member who chose the content later joins the count of those
+		// already waiting.
+		return tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(attempts), 0) FROM songs WHERE sha256 = ? AND state = 'analyzing'", sha).Scan(&attempts)
+	})
+	if err != nil {
+		s.logger.WarnContext(ctx, "recording a failed analysis failed", "error", err)
+		return
+	}
+	if attempts >= analysisAttempts {
+		s.logger.WarnContext(ctx, "a song's analysis failed too often; the song cannot be used", "song", sha, "attempts", attempts)
+		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
+	}
+}
+
+// encodeLoudness is the curve as little-endian float32, as the Workers pass
+// it and the songs table keeps it.
 func encodeLoudness(values []float32) []byte {
 	if values == nil {
 		return nil
 	}
-	out := make([]byte, 4*len(values))
-	for i, v := range values {
-		binary.LittleEndian.PutUint32(out[4*i:], math.Float32bits(v))
-	}
+	// Append fails only for types without a fixed size.
+	out, _ := binary.Append(make([]byte, 0, 4*len(values)), binary.LittleEndian, values)
 	return out
 }
 
@@ -302,8 +367,8 @@ func decodeLoudness(data []byte) ([]float32, error) {
 		return nil, errors.New("a song's loudness is not whole float32 values")
 	}
 	out := make([]float32, len(data)/4)
-	for i := range out {
-		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[4*i:]))
+	if _, err := binary.Decode(data, binary.LittleEndian, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

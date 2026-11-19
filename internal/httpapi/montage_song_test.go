@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // songMedia stands in for the media worker as the montage center uses it:
@@ -42,9 +43,12 @@ func (songMedia) Audio(_ context.Context, _ *os.File, request ffmpegworker.Audio
 // Worker's music operation.
 type songStructure struct{}
 
-func (songStructure) Analyze(_ context.Context, stereo, mono *os.File) (montage.Analysis, error) {
+func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (montage.Analysis, error) {
 	_, _ = io.Copy(io.Discard, stereo)
 	_, _ = io.Copy(io.Discard, mono)
+	if err := <-whole; err != nil {
+		return montage.Analysis{}, err
+	}
 	var downbeats []float64
 	for t := 0.0; t < 120; t += 2 {
 		downbeats = append(downbeats, t)
@@ -118,7 +122,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Files: fileService,
-		Music: library, Montage: recorded, Logger: logger,
+		Music: library, Montage: serviceproxy.Local(recorded), Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
@@ -226,6 +230,12 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	decode(t, owner.do(http.MethodGet, path+"/song", "", nil, http.StatusOK).Body, &song)
 	if song.Selection.Excerpt[0] != 14 || *song.DefaultStart != 30 {
 		t.Fatalf("song after dragging = %+v", song.Selection)
+	}
+	// Dragged back onto the default start, it follows the default excerpt again.
+	owner.do(http.MethodPatch, path, `{"songStart":30.4}`, nil, http.StatusOK)
+	decode(t, owner.do(http.MethodGet, path+"/song", "", nil, http.StatusOK).Body, &song)
+	if song.Selection.Excerpt != [2]float64{30, 120} {
+		t.Fatalf("song back on the default start = %+v", song.Selection)
 	}
 	owner.do(http.MethodDelete, path, "", nil, http.StatusNoContent)
 	entries, _ := os.ReadDir(filepath.Join(dir, "montage", "songs"))

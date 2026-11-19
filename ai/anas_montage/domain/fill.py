@@ -59,12 +59,13 @@ def in_shooting_order(pieces: list[dict], slots: list, fps: int, rank: Callable[
     if len(groups) < 2 or not all(groups):
         return pieces
     order = sorted(range(len(groups)), key=lambda n: (rank(groups[n][0]["card"]), groups[n][0]["start"]))
-    t = slots[0][0]
+    frame = round(slots[0][0] * fps)
     for n in order:
         a, b = slots[n]
+        end = frame + round(b * fps) - round(a * fps)
         for x in groups[n]:
-            x["slot"] = [round(t, 3), round(t + b - a, 3)]
-        t += b - a
+            x["slot"] = [frame / fps, end / fps]
+        frame = end
     return [x for n in order for x in groups[n]]
 
 

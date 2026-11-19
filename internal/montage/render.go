@@ -15,7 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
@@ -25,8 +27,8 @@ const (
 	maxNeeds = 2000
 	// maxClips is the most shots a film has (assemble's limit).
 	maxClips = 100
-	// windowDimensions is the size of a window's vector.
-	windowDimensions = 768
+	// The compute Worker bounds the sum of its input arrays (worker.MAX_ARRAY_BYTES).
+	MaxComputeArrayBytes = 64 << 20
 	// filmBytesPerFrame is room enough for a frame of the segments and
 	// the film both (about 8 Mbit/s each, with headroom).
 	filmBytesPerFrame = 80 << 10
@@ -60,7 +62,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 			known = progress.Known
 		}
 	}
-	rows, vectors, err := s.fillRows(ctx, run)
+	rows, vectors, dimensions, err := s.fillRows(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +72,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 		request.Cards[id] = run.catalog.Cards[id]
 	}
 	for range maxNeeds {
-		answer, err := s.jobCompute.Fill(ctx, request, vectors, windowDimensions)
+		answer, err := s.jobCompute.Fill(ctx, request, vectors, dimensions)
 		if err != nil {
 			return nil, err
 		}
@@ -96,14 +98,11 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 }
 
 // fillRows are the windows beneath the catalog's cards, with their vectors.
-func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32, error) {
-	spans := map[string][][2]float64{}
-	for _, id := range run.catalog.Catalog {
-		card := run.catalog.Cards[id]
-		spans[card.Video] = append(spans[card.Video], [2]float64{card.Start, card.End})
-	}
+func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32, int, error) {
+	spans := catalogSpans(run.catalog)
 	rows := []FillRow{}
 	var vectors []float32
+	dimensions := 0
 	for _, video := range run.analysis.Videos {
 		within := spans[video.AssetID]
 		if len(within) == 0 {
@@ -111,28 +110,47 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		}
 		analysis, raw, err := s.grants.Analysis(ctx, run.grantID, video.AssetID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("reading the window vectors of %s: %w", video.AssetID, err)
+			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
-		if analysis.ObjectID != video.ObjectID || analysis.Identity != video.Identity {
-			// The analysis changed under the job: its key is stale.
-			return nil, nil, errors.New("the photo library's analysis changed while the job ran")
+		if analysis.ObjectID != video.ObjectID || analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions {
+			return nil, nil, 0, errors.New("the photo library's analysis changed while the job ran")
 		}
-		if len(raw) != len(analysis.List)*4*windowDimensions {
-			return nil, nil, fmt.Errorf("%d bytes of vectors for %d windows", len(raw), len(analysis.List))
+		if dimensions != 0 && dimensions != analysis.Dimensions {
+			return nil, nil, 0, failed("window vectors have incompatible dimensions")
+		}
+		dimensions = analysis.Dimensions
+		if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
+			return nil, nil, 0, failed("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
 		}
 		for i, window := range analysis.List {
 			start, end := float64(window.StartMs)/1000, float64(window.EndMs)/1000
-			if !slices.ContainsFunc(within, func(span [2]float64) bool { return start < span[1] && end > span[0] }) {
+			if !overlaps(within, start, end) {
 				continue
 			}
+			if len(vectors)+dimensions > MaxComputeArrayBytes/4 {
+				return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
+			}
 			rows = append(rows, FillRow{Video: video.AssetID, Start: start, End: end})
-			for d := range windowDimensions {
-				at := (i*windowDimensions + d) * 4
+			for d := range dimensions {
+				at := (i*dimensions + d) * 4
 				vectors = append(vectors, math.Float32frombits(binary.LittleEndian.Uint32(raw[at:])))
 			}
 		}
 	}
-	return rows, vectors, nil
+	return rows, vectors, dimensions, nil
+}
+
+func catalogSpans(catalog catalogResult) map[string][][2]float64 {
+	spans := map[string][][2]float64{}
+	for _, id := range catalog.Catalog {
+		card := catalog.Cards[id]
+		spans[card.Video] = append(spans[card.Video], [2]float64{card.Start, card.End})
+	}
+	return spans
+}
+
+func overlaps(spans [][2]float64, start, end float64) bool {
+	return slices.ContainsFunc(spans, func(span [2]float64) bool { return start < span[1] && end > span[0] })
 }
 
 // clearSpan finds the clear span the fill needs, from grey frames of the
@@ -187,11 +205,8 @@ func (s *Store) clearSpan(ctx context.Context, run *jobRun, need FillNeed) ([2]f
 // job started with.
 func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os.File, error) {
 	file, object, err := s.grants.Open(ctx, run.grantID, assetID)
-	switch code := photosapi.GrantErrorCode(err); {
-	case code == photosapi.GrantAssetNotFound || code == photosapi.GrantNotFound:
-		return nil, &stepNeeds{reason: NeedMissing, missing: []string{assetID}}
-	case err != nil:
-		return nil, fmt.Errorf("opening %s: %w", assetID, err)
+	if err != nil {
+		return nil, jobGrantError(err, []string{assetID})
 	}
 	for _, asset := range run.assets {
 		if asset.assetID == assetID && asset.objectID != object {
@@ -225,7 +240,8 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 		return failed("the timeline has %d shots", len(answer.Clips))
 	}
 	total := 0
-	var slots [][2]float64
+	var slots [][2]int
+	var slot [2]int
 	for i, raw := range answer.Clips {
 		var clip Clip
 		if err := json.Unmarshal(raw, &clip); err != nil {
@@ -236,7 +252,7 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 			return failed("shot %d uses a video outside the project", i+1)
 		}
 		card, ok := run.catalog.Cards[clip.Card]
-		if !ok || card.Video != clip.Video {
+		if !ok || card.Video != clip.Video || !slices.Contains(run.catalog.Catalog, clip.Card) {
 			return failed("shot %d uses a card outside the catalog", i+1)
 		}
 		if !finite(clip.Start, clip.End, clip.Share, clip.Slow, clip.Slot[0], clip.Slot[1]) || clip.Start < 0 || clip.Start >= clip.End {
@@ -252,19 +268,70 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 		if frames <= 0 || clip.Slot[0] >= clip.Slot[1] {
 			return failed("shot %d is empty", i+1)
 		}
+		// FFmpeg consumes frames / slow from Start. The Worker rounds Slow
+		// to three decimal places, so allow that rounding in the span.
+		slow := max(1, clip.Slow)
+		if clip.Start < card.Start-0.001 || clip.End > card.End+0.001 ||
+			float64(frames)/FilmRate > (clip.End-clip.Start)*(slow+0.0005)+0.000001 {
+			return failed("shot %d reads beyond its source span", i+1)
+		}
+		thisSlot := [2]int{filmFrame(clip.Slot[0]), filmFrame(clip.Slot[1])}
+		if thisSlot != slot || len(slots) == 0 {
+			if thisSlot[0] != total || thisSlot[0] != slot[1] || thisSlot[1] <= thisSlot[0] {
+				return failed("slot %v does not follow frame %d", clip.Slot, total)
+			}
+			slots = append(slots, thisSlot)
+			slot = thisSlot
+		}
 		total += frames
-		if !slices.Contains(slots, clip.Slot) {
-			slots = append(slots, clip.Slot)
+		if total > slot[1] {
+			return failed("shot %d overfills its slot", i+1)
 		}
 	}
-	slices.SortFunc(slots, func(a, b [2]float64) int { return int(math.Copysign(1, a[0]-b[0])) })
-	for i := 1; i < len(slots); i++ {
-		if slots[i][0] < slots[i-1][1]-1e-3 {
-			return failed("slots %v and %v overlap", slots[i-1], slots[i])
-		}
+	if total != slot[1] {
+		return failed("the last slot ends at frame %d, filled to %d", slot[1], total)
+	}
+	if err := checkPlannedSlots(run.planned, slots); err != nil {
+		return err
 	}
 	if total != run.excerpt.Frames {
 		return failed("the shots take %d frames, the excerpt %d", total, run.excerpt.Frames)
+	}
+	return nil
+}
+
+// The Python fill rounds beat positions to the nearest even frame.
+func filmFrame(seconds float64) int { return int(math.RoundToEven(seconds * FilmRate)) }
+
+// Within a picture the Worker may reorder whole slots to follow shooting
+// order. Each picture must still use exactly its planned slot lengths.
+func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
+	var layout struct{ Slots [][][][2]float64 }
+	if err := json.Unmarshal(plan, &layout); err != nil {
+		return failed("invalid planned slots: %v", err)
+	}
+	at := 0
+	for _, part := range layout.Slots {
+		for _, picture := range part {
+			if len(picture) == 0 || len(picture) > len(filled)-at {
+				return failed("the picture has unfilled slots")
+			}
+			lengths := map[int]int{}
+			for _, slot := range picture {
+				lengths[filmFrame(slot[1])-filmFrame(slot[0])]++
+			}
+			for _, slot := range filled[at : at+len(picture)] {
+				length := slot[1] - slot[0]
+				if lengths[length] == 0 {
+					return failed("unexpected %d-frame slot in picture", length)
+				}
+				lengths[length]--
+			}
+			at += len(picture)
+		}
+	}
+	if at != len(filled) {
+		return failed("the timeline has %d unplanned slots", len(filled)-at)
 	}
 	return nil
 }
@@ -416,7 +483,10 @@ func writeFile(path string, content io.Reader) error {
 		_ = os.Remove(partial)
 		return err
 	}
-	return os.Rename(partial, path)
+	if err := os.Rename(partial, path); err != nil {
+		return err
+	}
+	return atomicfile.SyncDir(filepath.Dir(path))
 }
 
 // checkFilm checks the film against the timeline: its length within 0.1
@@ -432,14 +502,14 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 		return err
 	}
 	want := float64(frames) / FilmRate
-	if math.Abs(probe.Format.Duration-want) > durationTolerance {
+	if !finite(probe.Format.Duration) || math.Abs(probe.Format.Duration-want) > durationTolerance {
 		return failed("the film lasts %.3f seconds, the timeline %.3f", probe.Format.Duration, want)
 	}
 	var picture, sound bool
 	for _, stream := range probe.Streams {
 		switch stream.Type {
 		case "video":
-			if stream.Width != FilmWidth || stream.Height != FilmHeight || math.Abs(stream.FrameRate-FilmRate) > 0.01 {
+			if stream.Width != FilmWidth || stream.Height != FilmHeight || !finite(stream.FrameRate) || math.Abs(stream.FrameRate-FilmRate) > 0.01 {
 				return failed("the film is %d×%d at %v frames a second", stream.Width, stream.Height, stream.FrameRate)
 			}
 			picture = true
@@ -455,17 +525,23 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 
 // --- save ---
 
-// save saves the film into the owner's library, once per version key,
-// records the version and ends the job. A cancelled job saves nothing.
+// saveRefusal gives settleJob both the outcome and permission to release
+// the save fence in the same transaction.
+type saveRefusal struct{ error }
+
+func (r *saveRefusal) Unwrap() error { return r.error }
+
+// save saves a 方案's film into the owner's library, once per version key,
+// and records the version. The last 方案's ends the job; after an earlier
+// one the job goes on with the next. A cancelled job saves nothing.
 func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
-	if s.cancelRequested(ctx, run.id) {
-		return nil, errCancelled
-	}
+	step, last := planStep("save", run.plan), run.plan >= s.plans
+	versionKey := run.keys[step]
 	var number int
-	var project string
+	var name string
 	if err := s.db.QueryRowContext(ctx, `SELECT IFNULL((SELECT number FROM versions WHERE version_key = ?),
 		(SELECT IFNULL(MAX(number), 0) + 1 FROM versions WHERE project_id = p.id)), p.name
-		FROM projects p WHERE p.id = ?`, run.keys[planStep("save", run.plan)], run.projectID).Scan(&number, &project); err != nil {
+		FROM projects p WHERE p.id = ?`, versionKey, run.projectID).Scan(&number, &name); err != nil {
 		return nil, err
 	}
 	film, err := os.Open(filepath.Join(s.jobDir(run.id), run.render.Film))
@@ -473,20 +549,37 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		return nil, err
 	}
 	defer func() { _ = film.Close() }()
-	name, last := planStep("save", run.plan), run.plan >= s.plans
-	versionKey := run.keys[name]
-	assetID, err := s.grants.SaveFilm(ctx, run.grantID, versionKey, filmName(project, number), film)
-	switch photosapi.GrantErrorCode(err) {
-	case "":
-		if err != nil {
-			return nil, fmt.Errorf("saving the film: %w", err)
+	// Once this update wins, cancellation cannot claim the job until the
+	// outcome of this version key is known, also across a restart.
+	started, err := s.db.ExecContext(ctx, "UPDATE jobs SET save_started = 1 WHERE id = ? AND cancel_requested = 0 AND state = 'running'", run.id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := started.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, errCancelled
+	}
+	assetID, err := s.grants.SaveFilm(ctx, run.grantID, versionKey, filmName(name, number), film)
+	if err != nil {
+		code := photosapi.GrantErrorCode(err)
+		if code == "" || code == photosapi.GrantUnavailable || run.replayingSave && code == photosapi.GrantOwnerInactive {
+			return nil, fmt.Errorf("waiting for the photo library to confirm the saved film: %w", err)
 		}
-	case photosapi.GrantNoSpace:
-		return nil, &stepNeeds{reason: NeedStorageFull, err: err}
-	case photosapi.GrantNotFound, photosapi.GrantUnauthorized:
-		return nil, &stepNeeds{reason: NeedMissing, err: err}
-	default:
-		return nil, fmt.Errorf("saving the film: %w", err)
+		if run.replayingSave && code == photosapi.GrantNotFound {
+			// Revocation prevents the service from reading even the old receipt.
+			return nil, &saveRefusal{failed("相册授权已撤销，无法确认上次存回的结果，请在相册中核对成片")}
+		}
+		switch code {
+		case photosapi.GrantNoSpace:
+			return nil, &saveRefusal{&stepNeeds{reason: NeedStorageFull, err: err}}
+		case photosapi.GrantUnauthorized:
+			return nil, &saveRefusal{&stepNeeds{reason: NeedMissing, err: err}}
+		default:
+			return nil, &saveRefusal{jobGrantError(err, nil)}
+		}
 	}
 	now := sqlitedb.FormatTime(s.now())
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
@@ -496,13 +589,15 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
-			fmt.Sprintf(`{"filmAssetId":%q}`, assetID), now, run.id, name); err != nil {
+			fmt.Sprintf(`{"filmAssetId":%q}`, assetID), now, run.id, step); err != nil {
 			return err
 		}
 		if !last {
-			return nil // the next 方案 goes on
+			// The next 方案 goes on: the fence is released, the job runs on.
+			_, err := tx.ExecContext(ctx, `UPDATE jobs SET save_started = 0, attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?`, now, run.id)
+			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', attempts = 0, error_class = '', error = '', wait_reason = '',
+		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', save_started = 0, missing_json = NULL, attempts = 0, error_class = '', error = '', wait_reason = '',
 			lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, now, now, run.id)
 		return err
 	})

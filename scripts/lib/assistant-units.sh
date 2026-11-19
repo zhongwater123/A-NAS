@@ -10,6 +10,23 @@
 # (ai/assistant/media-cache.py). scripts/build-packages.sh and the spike's
 # installer (ai/assistant-spike/assistant-install.sh) source this file.
 
+# derive_cron_policy POLICY SERVER OUT: the managed policy of a member's scheduled tasks in
+# OUT: POLICY, the policy of every other unit, with the montage center's planning server
+# added, the fragment of mcp_servers in SERVER. A conversation's instance never starts that
+# server (docs/architecture/montage-center.md, MCP 服务器). The text is spliced, which keeps
+# the policy's comments; internal/hostops/linux reads the result as YAML in its tests, where a
+# key written twice or a fragment out of place fails.
+derive_cron_policy() {
+  local policy=$1 server=$2 out=$3
+  if [[ "$(grep -c '^mcp_servers:$' "$policy")" != 1 ]] || grep -q '^  montage:' "$policy" ||
+    [[ "$(grep -c '^  montage:$' "$server")" != 1 ]]; then
+    echo "the assistant's policy and the montage server do not fit together" >&2
+    return 1
+  fi
+  sed "/^mcp_servers:\$/r $server" "$policy" >"$out"
+  chmod 0644 "$out"
+}
+
 # derive_assistant_units DIR: anas-assistant-cron@.service and
 # anas-assistant-curator@.service in DIR, from DIR/anas-assistant@.service.
 derive_assistant_units() {

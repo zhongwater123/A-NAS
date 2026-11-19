@@ -157,9 +157,7 @@ install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.
 # conversation's instance never starts (docs/architecture/montage-center.md);
 # the fixed prompt templates a planning round fills go beside it.
 install -d "$lib/assistant/managed-cron" "$lib/assistant/montage-prompts"
-sed "/^mcp_servers:/r $assistant/montage-mcp.yaml" "$assistant/managed-config.yaml" >"$lib/assistant/managed-cron/config.yaml"
-grep -q '^  montage:' "$lib/assistant/managed-cron/config.yaml" || { echo "the cron policy has no montage server" >&2; exit 1; }
-chmod 0644 "$lib/assistant/managed-cron/config.yaml"
+derive_cron_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-cron/config.yaml"
 install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
