@@ -202,22 +202,37 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
-	// The montage center's cards and their quality need no model of the AI
-	// Worker, so they come before its gate. Work the gate hung up ends the
-	// round, as a hung-up chunk of windows does below.
-	if worked, ended, err := r.montageCards(ctx, gate, detector); worked || ended || err != nil {
+	// The montage center's analysis is work a member waits for: someone using
+	// the photo library does not hold it back, while short memory and the
+	// device's other work still do (MemberGate). The cards and their quality
+	// need no model of the AI Worker, so they come before its gate. Work the
+	// gate hung up ends the round, as a hung-up chunk of windows does below.
+	montage, forMembers := forMember(gate)
+	if worked, ended, err := r.montageCards(ctx, montage, detector); worked || ended || err != nil {
 		return worked, err
 	}
+	// While the library is in use, the montage center's windows and
+	// descriptions go on alone: the photos' own work waits.
+	montageOnly := false
 	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {
-		r.progress.set(AIPaused, reason, "")
-		r.releaseModels(ctx, detector, reason)
-		return false, nil
+		if reason == "foreground" && forMembers {
+			if open, why := montage.Open(ctx, r.memoryNeed()); !open {
+				reason = why
+			} else if montageOnly, err = r.lib.montageAnalysisDue(ctx); err != nil {
+				return false, err
+			}
+		}
+		if !montageOnly {
+			r.progress.set(AIPaused, reason, "")
+			r.releaseModels(ctx, detector, reason)
+			return false, nil
+		}
 	}
 	// Any call starts the Worker through its socket and keeps it from
 	// exiting when idle, so once its model is known ask only when there is
 	// work for it. A new model comes with a release, whose install restarts
 	// this service, or shows up in a search (noticeModel).
-	if model := r.knownModel(); model != "" && next == nil {
+	if model := r.knownModel(); model != "" && next == nil && !montageOnly {
 		waiting, err := r.workWaiting(ctx, model)
 		if err != nil || !waiting {
 			if state, _, _ := r.progress.get(); err == nil && state != AIUnavailable {
@@ -253,7 +268,11 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 		if err := r.lib.storeWorkerRecord(record); err != nil {
 			return false, err
 		}
-		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
+		weighed := gate
+		if montageOnly {
+			weighed = montage
+		}
+		if open, reason := weighed.Open(ctx, info.MemoryBytes); !open {
 			r.progress.set(AIPaused, reason, "")
 			if reason == "memory_for_models" || reason == "memory_low" || reason == "memory_pressure" {
 				// This round's call may have started the Worker, which would
@@ -282,12 +301,19 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	}
 	// The montage center's analysis comes first: a member waits for it. A
 	// chunk the gate hung up ends the round as a paused detection does.
-	if worked, ended, err := r.montageWindows(ctx, embedder, gate, info); worked || ended || err != nil {
+	if worked, ended, err := r.montageWindows(ctx, embedder, montage, info); worked || ended || err != nil {
 		return worked, err
 	}
 	// Then the descriptions, in the reading phase: one card a round.
-	if claimed, described, err := r.montageDescribe(ctx, embedder, gate, info); claimed || err != nil {
+	if claimed, described, err := r.montageDescribe(ctx, embedder, montage, info); claimed || err != nil {
 		return described, err
+	}
+	if montageOnly {
+		// Nothing of the montage center's was left to do; the photos' own
+		// work waits for the library to be quiet.
+		r.progress.set(AIPaused, "foreground", "")
+		r.releaseModels(ctx, detector, "foreground")
+		return false, nil
 	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries

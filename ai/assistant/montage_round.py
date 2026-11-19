@@ -45,8 +45,10 @@ MODELS = "http://127.0.0.1:18001/v1/models"  # the model bridge of the member's 
 PLAN_FILE = "montage-plan"  # the waker's token, as run-requests.sh names it in this round's directory
 RECEIPT = "anas-montage-claim"  # in the member's Hermes home, where the waker reads it
 NAME = "剪辑规划 "
-ROUND_ID = re.compile(r"round:[A-Z2-7]{24}")
-JOB_ID = re.compile(r"job:[A-Z2-7]{24}")
+# The montage center's round and job ids are a prefix and crypto/rand.Text (26 base32 letters), its tokens
+# 16 random bytes in hex (internal/montage); internal/montage/roundscript_test.go holds them to these.
+ROUND_ID = re.compile(r"round:[A-Z2-7]{26}")
+JOB_ID = re.compile(r"job:[A-Z2-7]{26}")
 TOKEN = re.compile(r"[0-9a-f]{32}")
 NONCE = re.compile(r"[0-9a-f]{32}")
 TIMEOUT = 30

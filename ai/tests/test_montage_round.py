@@ -15,10 +15,11 @@ from pathlib import Path
 from unittest import mock
 
 ASSISTANT = Path(__file__).resolve().parents[1] / "assistant"
-ROUND = "round:" + "A" * 24
-OTHER = "round:" + "B" * 24
-GONE = "round:" + "C" * 24
-JOB = "job:" + "D" * 24
+# As the montage center makes them (internal/montage/roundscript_test.go).
+ROUND = "round:" + "A" * 26
+OTHER = "round:" + "B" * 26
+GONE = "round:" + "C" * 26
+JOB = "job:" + "D" * 26
 NONCE = "0123456789abcdef" * 2
 
 
