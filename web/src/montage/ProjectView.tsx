@@ -47,6 +47,7 @@ import {
   actionLabels,
   actionsOf,
   active,
+  failureText,
   type JobAction,
   planName,
   stageName,
@@ -349,8 +350,8 @@ export function Go({
               ))}
             </ul>
           )}
-          {current.state === "failed" && current.error && (
-            <p className={`${styles.mtError} ${styles.mtHint}`}>{current.error}</p>
+          {current.state === "failed" && failureText(current) && (
+            <p className={`${styles.mtError} ${styles.mtHint}`}>{failureText(current)}</p>
           )}
           {act.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(act.error, "montage")}</p>}
           {going && (

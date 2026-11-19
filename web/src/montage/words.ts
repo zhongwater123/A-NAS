@@ -114,3 +114,11 @@ const unsupported: [RegExp, string][] = [
 export function limitsOf(ask: string): string[] {
   return unsupported.filter(([pattern]) => pattern.test(ask)).map(([, said]) => said);
 }
+
+// failureText is what the page says of a job that failed, beyond that it
+// did. The montage center writes some failures for the member, in Chinese,
+// as the one that asks to check the photo library for a film it could not
+// confirm; the rest are its own diagnostics, which stay in its log.
+export function failureText(job: MontageJob): string | undefined {
+  return job.error && /[\u4e00-\u9fff]/.test(job.error) ? job.error : undefined;
+}

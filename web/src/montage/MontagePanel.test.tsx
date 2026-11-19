@@ -361,6 +361,28 @@ describe("剪辑中心", () => {
     expect(await within(page).findByText("相册暂时不可用，会自动重试", {}, { timeout: 4000 })).toBeInTheDocument();
   });
 
+  it("says of a failed job what was written for the member, and keeps diagnostics out of the page", async () => {
+    let failed = job("failed", { step: "fill", error: "the fill asked again for v1-0/2" });
+    serve(
+      () => project({ job: failed }),
+      () => failed,
+      fresh(),
+    );
+    const first = render(<MontagePanel userId="user:alice" />);
+    await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
+    const progress = await screen.findByRole("status", { name: "生成进度" });
+    expect(within(progress).getByText("没有剪成")).toBeInTheDocument();
+    expect(within(progress).queryByText(/the fill asked/)).not.toBeInTheDocument();
+    // A failed job is over: nothing to cancel, and another film may start.
+    expect(within(progress).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "开始剪辑" })).toBeEnabled();
+    first.unmount();
+
+    failed = job("failed", { step: "save", error: "相册授权已撤销，无法确认上次存回的结果，请在相册中核对成片" });
+    await openProject();
+    expect(await screen.findByText("相册授权已撤销，无法确认上次存回的结果，请在相册中核对成片")).toBeInTheDocument();
+  });
+
   it("shows where the job is when it can no longer be cancelled", async () => {
     let current = job("running", { step: "render" });
     serve(
