@@ -45,6 +45,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
 - [0037：可移除模块以独立服务接入，A-NAS 只提供登录、转发与存储](0037-plug-removable-modules-in-as-separate-services.md)（proposed）
 - [0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问](0038-keep-montage-media-in-the-photo-library.md)（修订 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10）
+- [0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本](0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（proposed；修订剪辑中心规格的非目标）
 
 ## 格式
 

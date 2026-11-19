@@ -32,6 +32,7 @@
 
 只列链接，问题、选项与经过在被链接的文档中。
 
+- [ADR 0039：剪辑中心出片后的二次编辑](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（#596；确认这一版与镜头清单格式是起草时的默认）
 - [活动记录保留多久](../decisions/2026-10-22-activity-record-retention.md)
 - [FFmpeg Worker 的槽位、分层与内存上限](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)
 - [相册视频实现时选的默认做法](../decisions/2026-10-20-photo-video-defaults.md)
