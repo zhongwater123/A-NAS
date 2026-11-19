@@ -1,11 +1,11 @@
 # 剪辑中心首版实施方案
 
-状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
-更新时间：2026-11-18
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
+更新时间：2026-11-19
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
-- 服务身份、项目授权与数据归属见 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；
+- 服务身份、项目授权与数据归属见 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；出片后的二次编辑见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)；
 - 用户定下的事见[决定记录](../decisions/2026-11-17-montage-center-first-version.md)，本方案补充的默认做法见[另一份决定记录](../decisions/2026-11-17-montage-center-default-rules.md)；
 - 需求来源 [#514](https://github.com/zhongwater123/A-NAS/issues/514)。
 
@@ -47,8 +47,8 @@
 | 处理中（步骤、进度、可离开） | 做，精简 | 进度从服务端恢复；“正在看的关键帧”与逐字描述动画只是展示，延后 |
 | 取消 | 做 | #514 的可靠性要求 |
 | 首页循环背景片 | 不做 | 窗口打开就是项目列表 |
-| 三版并排、挑一版、快捷微调、说一句重剪 | 延后 | 耗时与模型费用都是三倍，还要处理部分失败；#514 要求默认出一条 |
-| 精修：换镜头、拖动、删除、锁定重洗、撤销、预览、导出镜头清单 | 延后 | 要在服务端保存编辑记录并让修改进入导出（#514），文字搜镜头还要窗口向量的检索；工作量与闭环本身相当 |
+| 三版并排、快捷微调 | 不做 | 耗时与模型费用都是三倍，还要处理部分失败；#514 要求默认出一条。2026-11-18 起出两个方案 |
+| 挑一版、说一句重剪；精修：换镜头、拖动、删除、锁定重洗、撤销、预览、导出镜头清单 | 首版闭环之后（[#596](https://github.com/zhongwater123/A-NAS/issues/596)） | 要在服务端保存编辑记录并让修改进入导出（#514），文字搜镜头还要窗口向量的检索；工作量与闭环本身相当。做法见“出片后的二次编辑”与 ADR 0039 |
 | 竖屏、指定时长、多首歌、字幕、原声 | 延后 | 第八版的渲染固定 1920×1080、30 帧、单曲配乐，时长由音乐段落决定；做这些要改选段、填槽与渲染。首版只提示，不假装支持（#514） |
 | 在 NAS 上运行 allin1 | 做 | 2026-11-18 用户决定（[决定记录](../decisions/2026-11-17-montage-center-first-version.md)第 2 项）。它给出的结构与第八版用的相同，`music` 可以原样迁移。商业版权待议；不能随产品分发时退回配乐探针测过的 beat_this 与色度自相似（见“配乐”） |
 | 拼接接连拍的原片（第八版 `tools/join.py`） | 延后 | 原型里是离线手动步骤，产品里要自动判断哪些原片能拼 |
@@ -161,9 +161,9 @@ anas-photos
 | 表 | 主要列 | 说明 |
 |---|---|---|
 | `batches` | id、owner_user_id、request_key、created_at | 一次主动导入；`(owner_user_id, request_key)` 唯一，重复提交返回第一次的结果 |
-| `projects` | id、owner_user_id、name、grant_id、state、song_id、song_track、song_start、song_selection、ask、chronological、created_at | `song_track` 是这首歌从音乐库的哪一首复制来的（接口的 `trackId`），配乐页只给这一首打勾，同名的其他歌不打勾；`song_selection` 是成员拖动起点后的选段。`state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
+| `projects` | id、owner_user_id、name、grant_id、state、song_id、song_track、song_start、song_selection、ask、chronological、chosen_version_id、created_at | `song_track` 是这首歌从音乐库的哪一首复制来的（接口的 `trackId`），配乐页只给这一首打勾，同名的其他歌不打勾；`song_selection` 是成员拖动起点后的选段；`chosen_version_id` 是成员确认的那一版（#596）。`state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
 | `project_assets` | project_id、asset_id、object_id、batch_id、added_at | 素材范围固定到内容对象 |
-| `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error、missing_json、save_started、plans、plan_wanted、plan_wanted_at、plan_epoch | `settings_json` 是任务开始时的歌、起点、要求与是否按拍摄时间，见“持久任务”。`save_started` 是存回栅栏：存回请求发出后置 1，结果确认前取消回答 409，重启后重放同一个版本键。`plans` 是这个任务出几个方案（最多 2；升级前开始的任务是 1，照开始时的样子做完）。`plan_wanted` 与 `plan_wanted_at` 表示等一轮规划及从何时起；`plan_epoch` 在重新规划、去掉素材时加一，旧轮次随之作废 |
+| `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error、missing_json、save_started、plans、plan_wanted、plan_wanted_at、plan_epoch、kind、source_version_id、draft_id、draft_revision | `kind` 是 `generate`、`edit` 或 `recut`，后三列是 `edit`、`recut` 任务的来源（#596，见“出片后的二次编辑”）。`settings_json` 是任务开始时的歌、起点、要求与是否按拍摄时间，见“持久任务”。`save_started` 是存回栅栏：存回请求发出后置 1，结果确认前取消回答 409，重启后重放同一个版本键。`plans` 是这个任务出几个方案（最多 2；升级前开始的任务是 1，照开始时的样子做完）。`plan_wanted` 与 `plan_wanted_at` 表示等一轮规划及从何时起；`plan_epoch` 在重新规划、去掉素材时加一，旧轮次随之作废 |
 | `job_assets` | job_id、asset_id、object_id | 任务开始时的素材集合 |
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
 | `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome、epoch、template、input_key、called_at | 规划的每一轮。`epoch` 与 `input_key` 是领取时任务的规划代数与方案一第一步的输入键，每次工具调用都拿它们和任务现在的值比，对不上就回答“这一轮已结束”；`called_at` 是模型第一次调用工具的时间，规划时限从它算起。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是 Hermes 任务的编号。`reported_at` 是回合脚本报告 `end` 或已清理的时间，`stale` 列出还没有它的轮次 |
@@ -171,7 +171,9 @@ anas-photos
 | `plan_answers` | job_id、step、input_key、round_id、answer_json、accepted_at | 工具收下的答案，按（任务、步骤、这一步的输入键）只留第一份。任务自己的步骤按输入键取出，再写进 `plans`。`step` 只有 `pick`、`shots`，方案二也写这两个值，靠输入键区分 |
 | `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
 | `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案；答案由任务的步骤从 `plan_answers` 取来写入，`round_id` 不再填写。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
-| `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
+| `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、kind、source_version_id、draft_revision、timeline_json、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关。`kind` 同任务；`timeline_json` 是这一版的时间线，存回时在同一个事务里写入，修改稿、粗预览与镜头清单都从它读 |
+| `drafts` | id、owner_user_id、project_id、base_version_id、revision、slots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`slots_json` 按音乐槽记节拍、是否改过、是否锁定，删掉的槽记由哪一镜补上 |
+| `draft_revisions` | draft_id、revision、op、seed、slots_json、created_at | 每一步一行，只留最近 100 个；撤销回到上一行的 `slots_json`，本身也写一行 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | id、owner_user_id、sha256、title、duration、state、reason、analysis_version、analysis_json、created_at | 成员选过的歌：副本的摘要、分析结果（节拍、重拍、段落、副歌、响度）与不可用的原因 |
 
@@ -184,10 +186,10 @@ montage/
 ```
 
 **清理**
-- 删除项目：先取消任务，再删掉项目、版本记录与规划，撤销相册授权；不动相册里的原片和成片（#514）。
+- 删除项目：先取消任务，再删掉项目、版本记录、修改稿与规划，撤销相册授权；不动相册里的原片和成片（#514）。
 - `tmp/<job-id>/` 在任务结束（完成、失败或取消）时删除；服务启动时只删掉已结束任务的目录。渲染步骤记为完成、目录里的文件却不见了时，渲染步骤视为没完成，重新渲染。
 - 删除账号：`ForgetStep("montage")` 清掉这位成员的全部行。相册在自己的账号删除步骤里清掉这位成员的授权。相册那一步先执行，所以剪辑中心的撤销必须幂等。
-- 配乐副本：删除项目、删除账号之后，回收已经没有任何 `songs` 行引用的 `songs/<sha256>/` 目录。同一份内容可能被几位成员共用，所以按引用回收；服务启动时也对一次账。
+- 配乐副本：删除项目、删除账号之后，回收已经没有任何 `songs` 行引用的 `songs/<sha256>/` 目录。`songs` 行在当前项目、未结束的任务或任何版本（经它的任务的 `settings_json`）还引用时保留：二次编辑的粗预览、存为新版本与重剪都用版本当时的歌（#596 起；在此之前项目换歌后，旧任务的歌会被回收）。同一份内容可能被几位成员共用，所以按引用回收；服务启动时也对一次账。
 - 启动时对账：`montage.db` 与相册的授权表可能被恢复到不同的时间点。剪辑中心启动时用 `list` 列出相册里自己的授权：剪辑中心有、相册没有的，项目标为素材缺失；相册有、剪辑中心不认识的，撤销。
 
 ## 项目授权
@@ -198,7 +200,7 @@ montage/
 - 由 systemd 持有：`anas-photos-grants.socket` 监听 `/run/a-nas-photos-grants/grants.sock`，`SocketUser=a-nas-montage`、权限 0600，所在目录只有 root 能写，交给 `anas-photos` 接受连接。不用属组 0660，是因为产品服务也在 `a-nas-montage` 组里。相册另用 `SO_PEERCRED` 核对对端 UID 是 31003。
 - 协议用 `internal/unixmsg`：4 字节长度加 JSON，带描述符，已有 fuzz 测试。HTTP 传不了 `SCM_RIGHTS`，所以不用 HTTP。
 - 请求与回答的 Go 类型放在 `internal/photosapi`，双方共用。按先例，内部接口不进 `api/` 契约（[API 契约](../development/api-contract.md)）。
-- 这个套接字上的请求不算有人在用相册，不推迟相册的 AI 工作；助手套接字上的请求则算。
+- 这个套接字上的请求不算有人在用相册，不推迟相册的 AI 工作；助手套接字上的请求则算。例外是 `searchWindows`：成员在修改页等着结果，所以它和照片搜索一样算。
 
 **相册用的身份**：每次都按授权主人重新构造一种新的“授权身份” Principal。它不能照搬助手身份：助手身份看不到视频、不能导入、不能打开原片（`internal/photos/policy.go`、`assets.go`）。授权身份：
 - 能看到视频、打开原片，只能往主人的个人图库导入，其他写操作一律拒绝；
@@ -215,6 +217,7 @@ montage/
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。窗口向量放在 memfd 里，是 `n × 768` 个小端 float32，只按长度校验 |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
+| `searchWindows(grantId, texts, k)` | 修改页的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch` |
 | `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 
@@ -306,7 +309,7 @@ montage/
   - 用独立的 `window_outbox` 同步。触发器建在 `video_windows` 和资产的图库变化上。现有的 `vector_outbox` 主键只有 `object_id`，同步循环也只认 `images_*`，不能复用。
   - `internal/vectorindex` 新增按 `object` 过滤删除的类型化操作，因为一个对象有多少个窗口点，删除时 Catalog 行已经没了。
   - 对账与“集合丢失就立即重建”按集合分别做。
-- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；等有检索的读者，比如精修的文字搜镜头或 [#207](https://github.com/zhongwater123/A-NAS/issues/207) 的视频分段，再满足它。
+- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；二次编辑的文字搜镜头（`searchWindows`，#596）是第一个检索的读者，在 [#599](https://github.com/zhongwater123/A-NAS/issues/599) 中满足它，见[向量索引](vector-index.md#剪辑中心的窗口集合)。
 - **不建 HNSW**：点数在十万级以内，精确扫描就够。内存账：一组 47 分钟的素材约 1,460 个点、4.5 MB，Catalog 与 Qdrant 各一份。
 - **与 #207 的关系**：#207 的视频分段可以从这些窗口派生，由 #207 的设计决定。
 
@@ -355,7 +358,8 @@ montage/
 | `music` | 剪辑中心 | allin1 的结构（节拍、重拍、段落与标签）、响度序列、目标秒数、起点 | 选段、音乐段落、小节槽 | `domain/music.py` |
 | `plan` | 剪辑中心 | 目录、音乐段落、要求、顺序；第二步再加第一步的答案 | 一步规划的数据、这一轮的精确 Schema 与规则模板的版本；规则本身见“规划” | `domain/plan.py`（`pick_request`、`shots_request`）、`domain/prompts.py`、`domain/music.py` 的音乐说明 |
 | `shots_answer` | 剪辑中心 | 第二步的答案 | 整理后的镜头 | `domain/plan.py` |
-| `fill` | 剪辑中心 | 大纲、镜头、卡片、槽、窗口向量、已知的无遮挡区间 | 时间线（每个镜头的起止帧）与没填满的槽；或者 `need`：还缺哪一段的无遮挡区间 | `domain/fill.py` |
+| `fill` | 剪辑中心 | 大纲、镜头、卡片、槽、窗口向量、已知的无遮挡区间；可选的 `pins`（槽 → 卡片与节拍，#596） | 时间线（每个镜头的起止帧）与没填满的槽；或者 `need`：还缺哪一段的无遮挡区间 | `domain/fill.py` |
+| `likeness` | 剪辑中心 | 两个节拍各自覆盖的窗口向量 | 两组均值的余弦（#596：删除一镜时选哪一边延长） | 新增，第八版没有 |
 | `clear` | 剪辑中心 | 关键帧与一段 256×144 的灰度帧 | 关键帧两侧的无遮挡区间 | `domain/picture.py` |
 
 **协议**
@@ -425,7 +429,7 @@ montage/
 - 2026-11-17 重剪的 5 条成片是 77–95 秒、65–140 MiB。
 
 **准入与 CPU**
-- 新操作都用 `Background` 优先级。全机的后台请求一共只有 2 个槽位：剪辑中心同一时刻最多发 1 个 FFmpeg 请求，相册的剪辑分析同一时刻也最多 1 个。两者同时在跑时，缩略图、影视与音乐扫描要等，首版接受；跟着 [FFmpeg 槽位的决定](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)调整。
+- 新操作都用 `Background` 优先级，修改页的缩略图除外（#596，见“出片后的二次编辑”）。全机的后台请求一共只有 2 个槽位：剪辑中心同一时刻最多发 1 个 FFmpeg 请求，相册的剪辑分析同一时刻也最多 1 个。两者同时在跑时，缩略图、影视与音乐扫描要等，首版接受；跟着 [FFmpeg 槽位的决定](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)调整。
 - FFmpeg 实例都在 `system-anasffmpeg.slice` 里，实例之间 CPU 权重相同，`Background` 只限制并发数。所以：
   - `Background` 操作的 FFmpeg 进程以 nice 10 运行，调高 nice 不需要特权；
   - `segment` 与 `frames` 限制线程数，初值 4，M4 实测后定；
@@ -542,7 +546,7 @@ montage/
 
 成员不在线时，规划仍要在成员的 VNAS 里调用模型。[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 的会话闸门不让后台服务凭自己的身份驱动成员的助手；定时任务能在成员离线时运行，是因为任务是成员自己建的。所以后台规划也要成员在场时留下授权，思路与“项目授权”相同。
 
-- **登记**：成员做规格默认规则里列出的几项操作（开始、重新规划、去掉素材、重试分析，之后都可能要规划）时，anas-api 在转发之前，带着这次请求的会话调用文件代理的新操作 `assistant_plan`。
+- **登记**：成员做规格默认规则里列出的几项操作（开始、重新规划、去掉素材、重试分析、重剪，之后都可能要规划）时，anas-api 在转发之前，带着这次请求的会话调用文件代理的新操作 `assistant_plan`。
   - 文件代理照“立即运行”（`assistant_run`）核对会话有效、账号在用；另外核对这个账号有 VNAS，即 Host Agent 为它准备的 `/var/lib/a-nas-host/assistant/tokens/<账号>.env` 存在，和唤醒服务认定“有助手”的办法相同。`assistant_run` 本身只查账号名的格式，不查这一项。
   - 核对通过就写 `/var/lib/a-nas/assistant-plans/<账号>`，内容是签发时间与轮数上限 5。只有文件代理写它，再次登记时整个替换。
   - `assistant_plan` 用正常的回答区分三种结果：已登记、设备没有开启 VNAS、这个账号没有 VNAS。错误码 `unavailable` 只留给临时故障（会话目录读不了、记录写不进）。`assistant_run` 把“设备没开”也答成 `unavailable`，这里不照搬，否则 anas-api 分不清。
@@ -737,10 +741,19 @@ montage/
 | PUT | `/projects/{id}/song` | `{trackId}`：从音乐库复制这首歌并开始分析（见“配乐”） |
 | GET | `/projects/{id}/song`、`/projects/{id}/song/audio` | 分析进度、节拍、段落、副歌与默认选段，以及复制自音乐库的哪一首（`trackId`）；试听副本，支持 Range |
 | GET | `/hero`、`/hero/poster` | 设备上的主页背景片与封面（剪辑中心数据目录下的 `hero/hero.mp4`、`hero.jpg`），不属于软件；没有时回答 404，页面改为轮播成员自己的视频 |
+| POST | `/versions/{id}/confirm` | 确认这一版（#596，以下各行见“出片后的二次编辑”） |
+| POST | `/versions/{id}/recut` | `{requestKey, change}`：回答 202 与 `recut` 任务；项目已有进行中的任务时回答 409 |
+| GET | `/versions/{id}/draft` | 这一版的修改稿，没有就建：音乐段落与槽、每槽的节拍、锁定、粗预览用的片段、选段起点、修订号、能否撤销 |
+| POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo`；修订号对不上回答 409 |
+| GET | `/drafts/{id}/candidates` | `?slot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表 |
+| GET | `/drafts/{id}/song` | 粗预览用的配乐副本，支持 Range |
+| POST | `/drafts/{id}/save` | `{requestKey}`：回答 202 与 `edit` 任务，按当前修订存为新版本；项目已有进行中的任务时回答 409 |
+| GET | `/versions/{id}/shots`、`/drafts/{id}/shots` | 镜头清单（CSV） |
+| GET | `/projects/{id}/frames/{assetId}` | `?t=` 毫秒：缩略图 |
 
 成片是相册资产，播放与下载都走相册现有的接口。
 
-规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。`generate`、`replan`、`drop-assets`、`retry-analysis` 这四条由 anas-api 先经文件代理登记规划授权再转发（见“规划授权”），登记不了时回答 503 `assistant_unavailable`，请求不转发；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这五条在 anas-api 里有自己的处理，不只是透传。
+规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。`generate`、`replan`、`drop-assets`、`retry-analysis` 与 `recut`（#596）这五条由 anas-api 先经文件代理登记规划授权再转发（见“规划授权”），登记不了时回答 503 `assistant_unavailable`，请求不转发；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这六条在 anas-api 里有自己的处理，不只是透传。
 
 ## 网页
 
@@ -758,7 +771,63 @@ montage/
   - 单独上传的 MOV 如果补进了图库里在等它的实况照片，上传接口不返回新资产，所以它不进项目（页面行为见规格）。
 - **数据获取**：引入 TanStack Query（[#271](https://github.com/zhongwater123/A-NAS/issues/271)），放在懒加载的窗口代码里。执行中每 2 秒轮询一次，窗口最小化或不可见时停止（`shown.ts` 跟随窗口外框的 `hidden`）。创建类请求的 `requestKey` 用 `web/src/api/requestKey`，局域网 HTTP 下没有 `crypto.randomUUID()` 也能用。
 - **播放**：成片是相册视频，直接复用 `VideoPlayer`。
+- **选版页与修改页**（#596）：照规格的[出片后的二次编辑](../specs/montage-center.md#出片后的二次编辑)。拖动用成熟的库（例如 dnd-kit），不手写；`VideoPlayer` 加起止时间，粗预览与试看共用；修改页的代码随窗口懒加载。修订号冲突时重新读取修改稿。
 - **提示**：主线没有通用的桌面通知中心，剪辑的提示照 `FamilyNotices` 的做法放在桌面外壳里。
+
+## 出片后的二次编辑
+
+确认一版、修改镜头与一句话重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。为什么这样做见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)，行为与界面以规格的[出片后的二次编辑](../specs/montage-center.md#出片后的二次编辑)为准，分票见 ADR 的“交付”。在首版闭环（M10）之后实施。
+
+**版本的时间线**：二次编辑都从一个版本出发，所以存回时把这一版的时间线（`fill` 的 `clips`，连同段落、画面与小节槽的划分）写进 `versions.timeline_json`，与写版本行在同一个事务里。之前的版本没有这一列，第一次打开修改页时从它的任务的填槽步骤结果补上；步骤结果也没有时，这一版只能播放，不能修改或重剪。
+
+**修改稿**
+- `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍，修订号 0。槽的键是段落、画面与小节槽的序号，和 `fill` 的嵌套相同。
+- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按规格“修改的规则”校验；写一行 `draft_revisions`、更新 `drafts`；超过 100 个修订时删掉最旧的。回答新的修改稿。
+- 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。节拍够不够长按 `fill` 的放慢上限（2.5 倍）算。
+- 删除时两边都够长，调一次计算 Worker 的 `likeness` 选更像的一边。
+- `shuffle` 先用一次 `searchWindows` 查全部没锁画面的 `query`，再按种子挑；种子写进修订，同一种子结果相同。
+- 粗预览的片段随修改稿一起回答：没改过的槽取版本时间线里的镜头，改过的槽取所选节拍的起点与一个槽长。
+
+**候选**：`GET /drafts/{id}/candidates?slot=&q=&size=&scene=&landscape=`
+- 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。
+- 窗口换算成节拍：节拍的分数取它覆盖的窗口里最高的一个（同原型），只用来排序，不设门槛。
+- 景别取节拍描述的 `shot_size`，场景取卡片描述的 `scene`；筛选都在剪辑中心做，不进相册的检索。回答附场景的列表与个数。
+- 每个候选标明够不够长、已用在第几镜、横竖。
+
+**重新填槽**：`fill` 增加可选输入 `pins`（槽键 → 卡片与节拍）。钉住的槽首段用这个节拍，不够长时照原规则放慢或补段，无遮挡区间照旧经重入取帧。不带 `pins` 时结果与现在逐个相同，第八版的黄金比对不变。
+
+**任务的种类**：`jobs.kind` 决定 `steps()` 给出的步骤表。
+
+| 种类 | 来源 | 步骤 | 版本键 |
+|---|---|---|---|
+| `generate` | 项目当前的设置 | 现在的步骤 | 任务 ID 加渲染键 |
+| `edit` | 修改稿的一个修订：素材、歌、起点与顺序取来源版本的任务快照 | 查素材 → 带 `pins` 填槽 → 校验 → 渲染 → 存回 | 修改稿 ID、修订号加渲染键 |
+| `recut` | 来源版本的任务快照，加这句话 | 分析 → 目录 → 歌曲 → 规划两步（一个方案）→ 填槽 → 渲染 → 存回 | 任务 ID 加渲染键 |
+
+- 一个项目同一时刻只有一个没结束的任务：建任务时在同一个事务里查，已有就回答 409 `job_in_progress`。原来只有 `generate` 这样做，现在三种都是。
+- `edit` 任务里素材缺失或进了回收站，照规格停下或暂停，`missing_json` 附用到它们的槽号；`drop-assets` 对 `edit` 任务回答 409。
+- `edit` 与 `recut` 任务不改项目的设置，也不改 `project_assets`。
+
+**重剪的规划**
+- `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
+- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。
+- 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。回合脚本同时认 v2 与 v3。
+- 这句话照“一句话要求”限 200 字，也过“不支持的要求”的词表。
+
+**缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
+- 资产要在这个项目的素材里；经 `open` 与 FFmpeg `frames` 取一帧 JPEG，长边 320。
+- 用 `Interactive` 优先级：成员在页面上等着看。它不计入剪辑中心同一时刻最多 1 个的后台请求，另设并发上限，初值 4，R3 实测后定。
+- 回答 `Cache-Control: private, max-age=31536000, immutable`：内容对象不可变，同一时刻的帧不会变。
+- 不存盘，也不经过计算 Worker，所以不会一边占着 FFmpeg 槽位一边等计算 Worker。
+
+**粗预览**
+- `GET /drafts/{id}/song` 送出来源版本任务快照里的配乐副本，支持 Range；选段起点在修改稿的回答里。
+- 原片用相册现有的视频播放。网页用两个 `<video>` 交替，下一段提前载入并跳到起点；以音乐的播放时间为准切换，不等跳转。
+- 不渲染，不占 FFmpeg 的后台槽位；相册的转码播放与缩略图用 `Streaming`、`Interactive`，和别人的播放一起排队。
+
+**确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
+
+**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM，列见规格。
 
 ## 原型缺陷的修复
 
@@ -796,6 +865,7 @@ montage/
 
 - **先后**：P1、P2 已做完。M1–M8b 不碰助手，M0 之后照常推进；allin1 的商业版权待议不挡开发，挡 M10 打开开关；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
 - 第八版代码在 PR #454 的分支上（2026-11-17）。M6 从提交 `19f2d6db` 复制 `domain/`，并在 PR 描述里写明来源。
+- **出片后的二次编辑**：R1–R6 是 [#596](https://github.com/zhongwater123/A-NAS/issues/596) 的子 issue，内容与依赖见 [ADR 0039 的交付](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付)，都在 M10 之后。
 - **整体验收**归 M10：在实验 NAS 上走完规格里的“首版闭环”。各票只对自己那部分的验收负责。
 
 ## 考虑过的替代方案
@@ -826,7 +896,7 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 | Hermes 的后台复盘可能把卡片描述或诱导文字写进成员的记忆或技能 | 描述留在助手目录里；诱导在以后的对话里生效 | Hermes 对定时任务的运行固定不跑复盘，P1 已实测；升级 Hermes 时核对；描述已去掉号码 | 升级时核对 |
 | 定时任务单元多一个 MCP 子进程，对话实例里也多一个空闲的（P1 实测约 78 MiB） | 内存变多 | 定时任务单元单独一份成员配置，对话实例不带 montage；M9 实测 | 实施中验证 |
 | [FFmpeg 槽位与内存的决定](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)仍是 pending | 渲染并发和内存上限可能再变 | 剪辑只用 `Background`，跟着最终数值走 | 不处理 |
-| 窗口集合首版没有读者 | 多一份同步、对账与内存 | 按用户决定照 #514 做；不建 HNSW | 不处理 |
+| 窗口集合首版没有读者 | 多一份同步、对账与内存 | 按用户决定照 #514 做；不建 HNSW。二次编辑的文字搜镜头是第一个读者（#599） | 不处理 |
 | 剪辑渲染与剪辑分析同时占着全机仅有的 2 个后台 FFmpeg 槽位 | 缩略图、影视与音乐扫描变慢 | 各自同一时刻只发 1 个；跟着 FFmpeg 槽位的决定调整 | 实施中验证 |
 | 黄金比对的样本来自真人素材，不能进公开仓库 | 新会话无法在仓库里复现比对 | 样本留在开发机，测试按环境变量读取、没有样本时跳过；PR 写明位置与摘要 | 不处理 |
 | 第八版代码在 PR #454 的分支上（2026-11-17） | 来源不稳定 | 固定从 `19f2d6db` 复制，PR 描述写明来源 | 不处理 |
