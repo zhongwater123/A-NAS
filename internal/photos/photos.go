@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/keylock"
 	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
@@ -69,9 +70,9 @@ type Principal struct {
 	// Grant marks the montage center acting for the member under a project
 	// grant (ADR 0038 decision 3), while the member may be away. It sees the
 	// member's own private library and the shared library, videos included,
-	// opens originals, adds only to the member's private library and changes
-	// nothing else; it never acts as an administrator or through a viewing
-	// grant, even when the member could.
+	// opens originals, imports only into the member's private library and
+	// adds or changes nothing else; it never acts as an administrator or
+	// through a viewing grant, even when the member could.
 	Grant bool
 }
 
@@ -274,7 +275,7 @@ type Service struct {
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
 	// filmMu keeps two saves of one film from both importing it.
-	filmMu sync.Mutex
+	filmMu keylock.Map[filmKey]
 	// compute is Options.Compute.
 	compute MontageCompute
 	// embedder encodes search queries, and detected holds the detector's best

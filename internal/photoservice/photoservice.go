@@ -148,6 +148,11 @@ func Run(parent context.Context, config Config) error {
 		}
 	}
 	grantListener, grantInherited, err := grantSocket(config.GrantSocketPath)
+	active, _ := config.Sessions.(ActiveAccounts)
+	if err == nil && grantListener != nil && active == nil {
+		_ = grantListener.Close()
+		err = errors.New("the grant socket needs a lookup of the accounts in use")
+	}
 	if err != nil {
 		_ = listener.Close()
 		if assistantListener != nil {
@@ -184,7 +189,9 @@ func Run(parent context.Context, config Config) error {
 		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
-	serveError := make(chan error, 2)
+	// One place for each server's result, so that none blocks once Run has
+	// returned.
+	serveError := make(chan error, 3)
 	go func() { serveError <- server.Serve(listener) }()
 	var assistantServer *http.Server
 	if assistantListener != nil {
@@ -195,22 +202,11 @@ func Run(parent context.Context, config Config) error {
 		}
 		go func() { serveError <- assistantServer.Serve(assistantListener) }()
 	}
+	var grants *grantServer
 	if grantListener != nil {
-		active, _ := config.Sessions.(ActiveAccounts)
-		if active == nil {
-			_ = grantListener.Close()
-			_ = listener.Close()
-			return errors.New("the grant socket needs a lookup of the accounts in use")
-		}
-		grants := grantServer{service: &opened, sessions: config.Sessions, accounts: active,
-			peerUID: cmp.Or(config.GrantPeerUID, accountid.MontageServiceUID), logger: config.Logger}
-		go func() { serveError <- grants.serve(grantListener) }()
-		defer func() {
-			_ = grantListener.Close()
-			if !grantInherited && config.GrantSocketPath != "" {
-				_ = os.Remove(config.GrantSocketPath)
-			}
-		}()
+		grants = newGrantServer(grantListener, &opened, config.Sessions, active,
+			cmp.Or(config.GrantPeerUID, accountid.MontageServiceUID), config.Logger)
+		go func() { serveError <- grants.serve() }()
 	}
 
 	// As in the Product Service, background work stops as soon as the
@@ -226,6 +222,19 @@ func Run(parent context.Context, config Config) error {
 		stop()
 		<-supervised
 	}()
+	if grants != nil {
+		// Deferred after the store, so it runs first: the grant requests
+		// being answered finish before the Catalog closes, also when a
+		// server failed. On a normal stop they have drained already.
+		defer func() {
+			drained, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			defer cancel()
+			grants.drain(drained)
+			if !grantInherited && config.GrantSocketPath != "" {
+				_ = os.Remove(config.GrantSocketPath)
+			}
+		}()
+	}
 
 	select {
 	case err := <-serveError:
@@ -234,6 +243,15 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
+	// The grant socket stops accepting with the others and drains beside
+	// them, within the same grace.
+	grantsDrained := make(chan struct{})
+	go func() {
+		defer close(grantsDrained)
+		if grants != nil {
+			grants.drain(shutdown)
+		}
+	}()
 	var shutdownErr error
 	if assistantServer != nil {
 		shutdownErr = assistantServer.Shutdown(shutdown)
@@ -243,6 +261,7 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdownErr = errors.Join(shutdownErr, server.Shutdown(shutdown))
 	_ = os.Remove(config.SocketPath)
+	<-grantsDrained
 	return shutdownErr
 }
 
@@ -558,9 +577,6 @@ func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 	})
 }
 
-// listen opens an API socket. The Product Service's socket is 0660, for its
-// user is a member of this service's group; the runtime directory keeps
-// everyone else out.
 // systemdListeners are the sockets systemd handed over, by name. Reading
 // them clears LISTEN_FDS, so they are read once for the assistant's and
 // the grants' sockets both.
@@ -583,6 +599,9 @@ func assistantSocket(socketPath string) (net.Listener, bool, error) {
 	return listener, false, err
 }
 
+// listen opens an API socket. The Product Service's socket is 0660, for its
+// user is a member of this service's group; the runtime directory keeps
+// everyone else out.
 func listen(socketPath string, mode os.FileMode) (net.Listener, error) {
 	if info, err := os.Lstat(socketPath); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {

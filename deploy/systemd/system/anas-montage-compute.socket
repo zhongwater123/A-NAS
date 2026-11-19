@@ -4,8 +4,8 @@ Documentation=https://github.com/zhongwater123/A-NAS
 
 [Socket]
 # The first connection starts anas-montage-compute.service, a single instance
-# that answers connections one at a time (docs/architecture/montage-center.md,
-# 剪辑计算 Worker). The photo service and the montage service reach it through
+# that answers connections one at a time (docs/architecture/photo-ai.md,
+# 剪辑中心的分析). The photo service and the montage service reach it through
 # the a-nas-photos group.
 ListenStream=/run/a-nas-montage-compute/compute.sock
 SocketUser=root

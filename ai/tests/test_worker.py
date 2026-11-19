@@ -357,10 +357,11 @@ class WorkerTest(unittest.TestCase):
         for change in ({"offsets": [0, 2]}, {"offsets": [0, 4, 2]}, {"offsets": [-1, 2, 4]}, {"offsets": [0, "2", 4]},
                        {"groups": [1, 1]}, {"groups": [2, 2, 3]}, {"groups": [1, 3, 3]}, {"groups": [1, 2, 1]},
                        {"groups": [1, True, 2]}, {"duration": 3}, {"duration": None}, {"duration": float("nan")},
-                       {"offsets": None}):
+                       {"offsets": None}, {"offsets": 5}, {"offsets": True}, {"duration": 10**400}):
             bad = {**request, **change}
             self.assertEqual(call(path, bad, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST, change)
         self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        self.assertTrue(call(path, {"op": "info"})["ok"])
         request, frames = self.card(3, b"")
         frames[1] = self.image(b"")
         self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_INPUT)

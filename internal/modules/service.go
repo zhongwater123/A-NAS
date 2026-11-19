@@ -27,7 +27,8 @@ type SessionResolver interface {
 // never the Product Service (ADR 0037 decision 3). The handler finds the
 // caller with accounts.UserFrom; Status is set so that ActiveAdministrator
 // holds for an administrator, since the lookup only names active accounts.
-func Authenticate(sessions SessionResolver, unavailable string, logger *slog.Logger, next http.Handler) http.Handler {
+// name says whose lookup failed in the log, as "scoring" or "montage".
+func Authenticate(sessions SessionResolver, name, unavailable string, logger *slog.Logger, next http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -39,7 +40,7 @@ func Authenticate(sessions SessionResolver, unavailable string, logger *slog.Log
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		case err != nil:
-			logger.WarnContext(r.Context(), "module session lookup failed", "error", err)
+			logger.WarnContext(r.Context(), name+" session lookup failed", "error", err)
 			httpjson.WriteError(w, http.StatusServiceUnavailable, unavailable, "session lookup unavailable")
 			return
 		case user.MustChangePassword:

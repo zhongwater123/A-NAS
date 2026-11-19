@@ -24,12 +24,15 @@ const waits: Record<string, string> = {
   analysis: "相册正在分析素材，或本地模型暂时不可用",
   asset_trashed: "有视频在回收站，恢复后继续",
   vnas: "等待 VNAS 规划",
+  photos_unavailable: "等相册确认存回的成片，稍后自动重试",
 };
 
 // The member's way out of a job that stopped, by reason.
 export const needs: Record<string, { text: string; actions: ("drop" | "retryAnalysis" | "retry" | "replan")[] }> = {
   asset_missing: { text: "有视频已经不在相册里了", actions: ["drop"] },
   analysis_failed: { text: "有视频分析失败", actions: ["retryAnalysis", "drop"] },
+  video_too_long: { text: "有视频太长，相册分析不了", actions: ["drop"] },
+  model_unavailable: { text: "相册缺少分析视频的本地模型：装好后重试", actions: ["retry"] },
   no_usable_footage: { text: "素材里没有可用的画面：追加素材后再生成", actions: [] },
   music_invalid: { text: "这首歌用不了：换一首后再生成", actions: [] },
   vnas_unknown: { text: "VNAS 没有交回规划，重新规划？", actions: ["replan"] },

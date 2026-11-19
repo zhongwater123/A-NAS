@@ -63,11 +63,12 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/modules/scoring/me", ({ response }) =>
       response(200).json(options.scoring ?? { admin: false, rater: false }),
     ),
-    http.get("/api/v1/montage/projects", ({ response }) =>
+    http.get("/api/v1/montage", ({ response }) =>
       options.montage
-        ? response(200).json({ items: [] })
+        ? response(204).empty()
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
+    http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [] })),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),

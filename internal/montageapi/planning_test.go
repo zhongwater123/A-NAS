@@ -11,6 +11,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 type registrar struct {
@@ -25,13 +26,17 @@ func (r *registrar) RegisterAssistantPlan(ctx context.Context) (string, error) {
 }
 
 // The requests that may lead to planning register a planning grant behind
-// the member's session first, and only the Product Service says so.
+// the member's session first, and only the Product Service says so: the
+// header reaches the montage center through the proxy, which drops the one a
+// browser sent.
 func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 	var seen []string
-	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	next := serviceproxy.Local(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get(montageapi.AssistantHeader))
-	})
-	session := accounts.Session{Token: "session-token", User: accounts.User{ID: "user:alice", Username: "alice"}}
+	}))
+	// As the Product Service's routes give it: the Session resolved from the
+	// cookie has no Token, which is on the request's context alone.
+	session := accounts.Session{User: accounts.User{ID: "user:alice", Username: "alice"}}
 	for _, c := range []struct {
 		name   string
 		reg    *registrar
@@ -46,6 +51,7 @@ func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			seen = nil
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/montage/jobs/job:1/replan", nil)
+			request = request.WithContext(accounts.WithSessionToken(request.Context(), "session-token"))
 			// The browser's own header is never believed.
 			request.Header.Set(montageapi.AssistantHeader, "on")
 			recorder := httptest.NewRecorder()

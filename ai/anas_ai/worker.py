@@ -202,7 +202,7 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
         if reader.provider is None:
             return protocol.failure(protocol.CODE_UNAVAILABLE, reader.reason)
         offsets, groups, duration = request.get("offsets"), request.get("groups"), request.get("duration")
-        if len(fds) != len(offsets or ()) or not describe.valid_layout(offsets, groups, duration):
+        if not describe.valid_layout(offsets, groups, duration) or len(fds) != len(offsets):
             return protocol.failure(protocol.CODE_INVALID_REQUEST, (
                 f"describe_frames needs {describe.FEWEST_FRAMES} to {describe.MOST_FRAMES} image descriptors, "
                 '"offsets" rising from 0 for each, "groups" counting beats from 1 in order, and "duration" '

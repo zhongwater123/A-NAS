@@ -187,11 +187,16 @@ def main():
     started = time.monotonic()
     deadline = started + ROUND
     queue(requested())
-    # Before any gateway can run them: the planning jobs an earlier round left behind.
+    # Before any gateway can run them: the planning jobs an earlier round left behind. Nothing of the montage
+    # center's planning (clean, begin, finish) lets a failure out: the member's own tasks run all the same.
     montage_round.clean()
     if ready(home).state == "ready":
         # Somebody else's gateway serves the home: its jobs run there, and it is not this round's to stop.
         say("a gateway already serves this home; handing it the jobs that are due")
+        if montage_round.wanted(RUNS):
+            # That gateway does not reach the montage center's socket, so nothing is claimed and no receipt
+            # is left: the waker gives the planning grant's round back and starts another later.
+            say("the montage center's planning waits for a round with a gateway of its own")
         before = due()
         tick = hermes("cron", "tick", timeout=TICK)
         wait_handover(before, deadline)

@@ -2,6 +2,8 @@
 
 import base64
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -33,16 +35,16 @@ class LlamaReaderTest(unittest.TestCase):
         self.environ = {"FAKE_LLAMA_RECORD": self.record}
         for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE",
                      "FAKE_LLAMA_PIECE_DELAY", "FAKE_LLAMA_ERROR", "FAKE_LLAMA_NO_FINISH", "FAKE_LLAMA_START_DELAY",
-                     "FAKE_LLAMA_EXIT", "FAKE_LLAMA_ANSWERS"):
+                     "FAKE_LLAMA_EXIT", "FAKE_LLAMA_ANSWERS", "FAKE_LLAMA_FINISH", "FAKE_LLAMA_PROMPT_TOKENS"):
             self.environ[name] = None
 
     def reader(self, sha=None, cache_dir=None):
+        self.addCleanup(self.restore_environ, dict(os.environ))
         for name, value in self.environ.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-        self.addCleanup(self.restore_environ, dict(os.environ))
         files = []
         for name, content in (("model.gguf", b"language"), ("mmproj.gguf", b"vision")):
             path = os.path.join(self.directory, name)
@@ -198,9 +200,73 @@ class LlamaReaderTest(unittest.TestCase):
         self.assertEqual(images, ["data:image/jpeg;base64," + base64.b64encode(frame).decode() for frame in frames])
         self.assertEqual(parts[1]["text"], "第 1 张（第 1 组，第 0 秒）")
         self.assertEqual((body["temperature"], body["repeat_penalty"], body["max_tokens"], body["cache_prompt"]),
-                         (0.2, 1.1, 1800, False))
+                         (0.2, 1.1, 1800, True))
         self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}})
         self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def described(self, count, size, beats):
+        """The answer and the request of a card of count key frames of size, which the model answers with beats."""
+        answer = {**ANSWER, "beats": [{"shot_size": "远景", "what": f"画面 {n + 1}"} for n in range(beats)]}
+        self.environ["FAKE_LLAMA_ANSWERS"] = json.dumps([json.dumps(answer, ensure_ascii=False)])
+        reader = self.reader()
+        frames = [b"frame %d" % k for k in range(count)]
+        with mock.patch.object(providers, "frame_size", return_value=size):
+            answer = reader.describe(frames, [2.0 * k for k in range(count)], list(range(1, count + 1)), 2.0 * count,
+                                     reader.run_options())
+        with open(self.record, encoding="utf-8") as file:
+            body = json.load(file)["body"]
+        parts = body["messages"][1]["content"]
+        sent = [frames.index(base64.b64decode(part["image_url"]["url"].split(",", 1)[1]))
+                for part in parts if part["type"] == "image_url"]
+        return answer, body, parts, sent
+
+    def test_a_card_with_more_key_frames_than_fit_is_described_from_some_of_them(self):
+        # A video filmed upright: about 485 tokens a key frame beside the
+        # prompts' 620, so 11 leave the answer its 1,800 of the 8,192.
+        answer, body, parts, sent = self.described(14, (512, 910), 11)
+        kept = [0, 1, 3, 4, 5, 7, 8, 9, 10, 12, 13]
+        self.assertEqual(sent, kept)
+        self.assertTrue(parts[0]["text"].startswith("下面 11 张图按时间先后取自同一段视频（共 28 秒）"))
+        self.assertEqual(parts[-2]["text"], "第 11 张（第 11 组，第 26 秒）")
+        beats = body["response_format"]["json_schema"]["schema"]["properties"]["beats"]
+        self.assertEqual((beats["minItems"], beats["maxItems"], body["max_tokens"]), (11, 11, 1800))
+        # Each beat names its key frame among the card's fourteen.
+        self.assertEqual([beat["frames"] for beat in answer["beats"]], [[k + 1, k + 1] for k in kept])
+
+    def test_a_card_whose_key_frames_fit_is_described_from_all_of_them(self):
+        # 11 upright frames, or the protocol's 20 of a video filmed level, 165 tokens each.
+        for count, size in ((11, (512, 910)), (20, (512, 288))):
+            with self.subTest(count=count, size=size):
+                answer, body, _, sent = self.described(count, size, count)
+                self.assertEqual(sent, list(range(count)))
+                self.assertEqual(body["max_tokens"], 1800)
+                self.assertEqual([beat["frames"] for beat in answer["beats"]], [[n, n] for n in range(1, count + 1)])
+
+    def test_key_frames_of_unknown_size_are_all_sent(self):
+        # Then the server refuses a prompt past the context, or the check after the answer does.
+        self.assertIsNone(providers.frame_size(b"not a picture"))
+        _, _, _, sent = self.described(20, None, 20)
+        self.assertEqual(sent, list(range(20)))
+
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is in the AI runtime")
+    def test_a_key_frames_tokens_are_estimated_from_its_size(self):
+        from PIL import Image
+
+        def jpeg(width, height):
+            buffer = io.BytesIO()
+            Image.new("RGB", (width, height)).save(buffer, "JPEG")
+            return buffer.getvalue()
+
+        upright, level = jpeg(512, 910), jpeg(512, 288)
+        self.assertEqual(providers.frame_size(upright), (512, 910))
+        # The development machine's count for a frame of 512 × 910.
+        self.assertEqual(providers.describe_frame_tokens([upright] * 3), 485)
+        self.assertEqual(providers.describe_frame_tokens([level] * 3), 165)
+        self.assertEqual(providers.describe_frame_tokens([level, upright, level]), 485)
+        # No frame takes more than the server's cap for an image.
+        self.assertEqual(providers.describe_frame_tokens([jpeg(2048, 2048)] * 3),
+                         providers.OCR_IMAGE_TOKENS + providers.DESCRIBE_LABEL_TOKENS)
+        self.assertIsNone(providers.describe_frame_tokens([upright, b"not a picture", upright]))
 
     def test_an_answer_that_does_not_fit_is_asked_again_three_times(self):
         good = json.dumps(ANSWER, ensure_ascii=False)
@@ -218,6 +284,14 @@ class LlamaReaderTest(unittest.TestCase):
         self.assertIn("repeat_penalty=1.3", str(raised.exception))
         with open(self.record, encoding="utf-8") as file:
             self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.3)
+
+    def test_a_card_that_runs_out_of_context_is_not_reencoded(self):
+        self.environ.update(FAKE_LLAMA_FINISH="length", FAKE_LLAMA_PROMPT_TOKENS="7400")
+        reader = self.reader()
+        with self.assertRaises(providers.InvalidInput):
+            reader.describe([b"1", b"2", b"3"], [0, 1, 2], [1, 2, 3], 3, reader.run_options())
+        with open(self.record, encoding="utf-8") as file:
+            self.assertEqual(json.load(file)["body"]["repeat_penalty"], 1.1)
 
     def test_a_card_past_the_context_is_refused(self):
         self.environ["FAKE_LLAMA_STATUS"] = "400"

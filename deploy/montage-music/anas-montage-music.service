@@ -19,6 +19,10 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=HF_HUB_OFFLINE=1
 Environment=MPLCONFIGDIR=/var/cache/a-nas-montage-music/matplotlib
 Environment=NUMBA_CACHE_DIR=/var/cache/a-nas-montage-music/numba
+# librosa, which allin1 imports once the stems are separated, asks platformdirs
+# for a cache directory and fails without a home; DynamicUser has none, so
+# it is the unit's own cache. Fontconfig reads the same variable.
+Environment=XDG_CACHE_HOME=/var/cache/a-nas-montage-music
 ExecStart=/usr/lib/a-nas/montage-music/runtime/bin/python -m anas_montage_music.worker --allin1 /usr/lib/a-nas/montage-music/allin1 --allin1-manifest /usr/lib/a-nas/montage-music/allin1.json --demucs /usr/lib/a-nas/montage-music/demucs --demucs-manifest /usr/lib/a-nas/montage-music/demucs.json
 CacheDirectory=a-nas-montage-music
 CacheDirectoryMode=0700

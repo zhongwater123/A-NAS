@@ -20,6 +20,7 @@ import (
 // from its first step not done.
 
 const (
+	dueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
 	// heartbeat renews a running job's lease.
 	heartbeat = 30 * time.Second
 	// waitPoll is how often a job waiting for the photo library's
@@ -74,7 +75,6 @@ var errCancelled = errors.New("the job was cancelled")
 type claimed struct {
 	id, owner, projectID string
 	settings             JobSettings
-	attempts             int
 }
 
 // wakeJobs tells the scheduler a job is due.
@@ -98,8 +98,15 @@ func (s *Store) cancelRunning(jobID string) {
 // intermediate files of jobs that ended; it runs before RunJobs.
 func (s *Store) RecoverJobs(ctx context.Context) error {
 	now := sqlitedb.FormatTime(s.now())
-	if _, err := s.db.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
-		WHERE state = 'running'`, now, now); err != nil {
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
+			WHERE cancel_requested = 1 AND `+activeStateQuery, now, now); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
+			WHERE state = 'running'`, now, now)
+		return err
+	}); err != nil {
 		return err
 	}
 	// The run directory starts empty: the markers come back from the jobs.
@@ -156,7 +163,10 @@ func (s *Store) RunJobs(ctx context.Context) {
 			s.run(ctx, job)
 			continue
 		}
-		wait := s.nextDue(ctx)
+		wait := jobRetryDelay
+		if err == nil {
+			wait = s.nextDue(ctx)
+		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
@@ -170,7 +180,7 @@ func (s *Store) RunJobs(ctx context.Context) {
 // nextDue is how long until a queued or waiting job is due.
 func (s *Store) nextDue(ctx context.Context) time.Duration {
 	var next sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE state IN ('queued', 'waiting')").Scan(&next); err != nil || !next.Valid {
+	if err := s.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next); err != nil || !next.Valid {
 		return idlePoll
 	}
 	at := scanTime(next)
@@ -187,10 +197,10 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
 		var settings string
-		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, settings_json, attempts FROM jobs
-			WHERE state IN ('queued', 'waiting') AND not_before <= ? AND cancel_requested = 0
+		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, settings_json FROM jobs
+			WHERE `+dueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
-			Scan(&job.id, &job.owner, &job.projectID, &settings, &job.attempts)
+			Scan(&job.id, &job.owner, &job.projectID, &settings)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -198,6 +208,8 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 			return err
 		}
 		if err := json.Unmarshal([]byte(settings), &job.settings); err != nil {
+			_, err = tx.ExecContext(ctx, `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+				"invalid job settings: "+err.Error(), sqlitedb.FormatTime(now), sqlitedb.FormatTime(now), job.id)
 			return err
 		}
 		found = true
@@ -227,7 +239,7 @@ func (s *Store) run(ctx context.Context, job claimed) {
 		// The lease keeper or the member stopped the step: its reason wins.
 		err = cause
 	}
-	s.settle(context.WithoutCancel(ctx), job, err, ctx.Err() != nil)
+	s.settleJob(context.WithoutCancel(ctx), job, err, ctx.Err() != nil)
 }
 
 // keepJob renews the job's lease every 30 seconds, ends the step when the
@@ -250,9 +262,9 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 			case <-ticker.C:
 			}
 			now := s.now()
-			var requested bool
-			err := s.db.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested`,
-				sqlitedb.FormatTime(now.Add(jobLease)), sqlitedb.FormatTime(now), job.id).Scan(&requested)
+			var requested, saving bool
+			err := s.db.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
+				sqlitedb.FormatTime(now.Add(jobLease)), sqlitedb.FormatTime(now), job.id).Scan(&requested, &saving)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				cancel(errCancelled) // the project went
@@ -263,7 +275,7 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 				cancel(errCancelled)
 				return
 			}
-			if now.Sub(lastCheck) >= lifecycleCheck {
+			if !saving && now.Sub(lastCheck) >= lifecycleCheck {
 				lastCheck = now
 				if err := s.checkAssets(ctx, job); err != nil {
 					var wait *stepWait
@@ -282,53 +294,77 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 	}
 }
 
-// settle records how a run ended.
-func (s *Store) settle(ctx context.Context, job claimed, err error, stopping bool) {
-	now := s.now()
-	at := sqlitedb.FormatTime(now)
-	var wait *stepWait
-	var needs *stepNeeds
-	var bad *stepFailed
-	var statement string
-	var args []any
-	switch {
-	case err == nil:
-		return // the save step recorded the end
-	case errors.Is(err, errCancelled) || s.cancelRequested(ctx, job.id):
-		statement, args = `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, []any{at, at, job.id}
-	case stopping:
-		// The service stops: the job goes on from this step at the next start.
-		statement, args = `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ? WHERE id = ?`, []any{at, at, job.id}
-	case errors.As(err, &wait):
-		statement, args = `UPDATE jobs SET state = 'waiting', wait_reason = ?, error = ?, lease_until = NULL, not_before = ?, updated_at = ? WHERE id = ?`,
-			[]any{wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay)), at, job.id}
-	case errors.As(err, &needs):
-		var missing any
-		if len(needs.missing) > 0 {
-			encoded, _ := json.Marshal(needs.missing)
-			missing = string(encoded)
-		}
-		statement, args = `UPDATE jobs SET state = 'needs_input', wait_reason = ?, missing_json = ?, error_class = 'input', error = ?,
-			lease_until = NULL, updated_at = ? WHERE id = ?`, []any{needs.reason, missing, needs.Error(), at, job.id}
-	case errors.As(err, &bad):
-		statement, args = `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, lease_until = NULL, finished_at = ?, updated_at = ?
-			WHERE id = ?`, []any{bad.Error(), at, at, job.id}
-	case job.attempts+1 >= jobMaxAttempts:
-		statement, args = `UPDATE jobs SET state = 'failed', attempts = attempts + 1, error_class = 'retryable', error = ?, lease_until = NULL,
-			finished_at = ?, updated_at = ? WHERE id = ?`, []any{err.Error(), at, at, job.id}
-	default:
-		// Tried again after one minute, then two.
-		delay := jobRetryDelay * time.Duration(job.attempts+1)
-		statement, args = `UPDATE jobs SET state = 'queued', attempts = attempts + 1, error_class = 'retryable', error = ?, lease_until = NULL,
-			not_before = ?, updated_at = ? WHERE id = ?`, []any{err.Error(), sqlitedb.FormatTime(now.Add(delay)), at, job.id}
+// settleJob records how a run ended.
+func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping bool) {
+	if err == nil {
+		// Saving finishes the job and releases its intermediates.
+		s.releaseSong(ctx, job.owner)
+		return
 	}
-	if _, dbErr := s.db.ExecContext(ctx, statement, args...); dbErr != nil {
+	dbErr := s.withTx(ctx, func(tx *sql.Tx) error {
+		var attempts int
+		var cancelled, saving bool
+		if err := tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", job.id).Scan(&attempts, &cancelled, &saving); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		now := s.now()
+		at := sqlitedb.FormatTime(now)
+		state, reason, class, message := JobQueued, "", "", ""
+		var finished, missing any
+		next := at
+		var wait *stepWait
+		var needs *stepNeeds
+		var bad *stepFailed
+		var refused *saveRefusal
+		if errors.As(err, &refused) {
+			saving = false
+		}
+		switch {
+		case cancelled || errors.Is(err, errCancelled):
+			state, finished = JobCancelled, at
+		case stopping && refused == nil:
+			// The service is stopping. Resume this step immediately on startup.
+		case saving:
+			// The photo library may already have committed. Replay the same
+			// version key until its outcome is known, retaining the rendered film.
+			state, reason, message, next = JobWaiting, WaitPhotos, err.Error(), sqlitedb.FormatTime(now.Add(waitPoll))
+		case errors.As(err, &wait):
+			// The detail says more for the project page, such as why VNAS has
+			// not taken the plan.
+			state, reason, message, next = JobWaiting, wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay))
+		case errors.As(err, &needs):
+			state, reason, class, message = JobNeedsInput, needs.reason, "input", needs.Error()
+			if len(needs.missing) != 0 {
+				encoded, _ := json.Marshal(needs.missing)
+				missing = string(encoded)
+			}
+		case errors.As(err, &bad):
+			state, class, message, finished = JobFailed, "invalid", bad.Error(), at
+		default:
+			attempts++
+			class, message = "retryable", err.Error()
+			if attempts >= jobMaxAttempts {
+				state, finished = JobFailed, at
+			} else {
+				next = sqlitedb.FormatTime(now.Add(jobRetryDelay * time.Duration(attempts)))
+			}
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
+			missing_json = ?, save_started = ?, lease_until = NULL, not_before = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+			state, reason, attempts, class, message, missing, saving, next, finished, at, job.id)
+		return err
+	})
+	if dbErr != nil {
 		s.logger.ErrorContext(ctx, "recording a montage job's step failed", "job", job.id, "error", dbErr)
 		return
 	}
 	s.logger.InfoContext(ctx, "montage job stopped", "job", job.id, "reason", err.Error())
 	if s.finished(ctx, job.id) {
 		s.removeJobFiles(job.id)
+		s.releaseSong(ctx, job.owner)
 	}
 }
 

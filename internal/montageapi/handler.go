@@ -19,12 +19,6 @@ import (
 
 const PathPrefix = "/api/v1/montage"
 
-// AssistantHeader tells the montage service whether the request registered
-// a planning grant for the member's VNAS (docs/architecture/montage-center.md,
-// 规划授权). Only the Product Service sets it, on the requests that register
-// one; it removes the header from every other request first.
-const AssistantHeader = "X-A-NAS-Assistant"
-
 // Unavailable is the error code while the montage store cannot be used, as
 // when the data volume is offline or read-only.
 const Unavailable = "montage_unavailable"
@@ -100,7 +94,11 @@ func (h *handler) withUser(next route) http.HandlerFunc {
 	}
 }
 
-// maxJSONBytes bounds a JSON request: at most montage.MaxAssets IDs.
+// maxJSONBytes bounds a JSON request. The largest the contract allows is
+// about 34 KB: montage.MaxAssets IDs of montage.MaxIDLength printable ASCII
+// characters with their quotes and commas, a request key and a name of
+// montage.MaxNameRunes characters, each escaped to six bytes at most
+// (TestTheLargestRequestFits).
 const maxJSONBytes = 64 << 10
 
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
@@ -114,7 +112,9 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, montage.ErrAssetsRefused):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "assets_unavailable", "a video is not one you can add")
 	case errors.Is(err, montage.ErrConflict):
-		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key belongs to another project")
+		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key was used for another request")
+	case errors.Is(err, montage.ErrGrantRevoked):
+		httpjson.WriteError(w, http.StatusConflict, "grant_revoked", "the project can no longer reach its videos")
 	case errors.Is(err, montage.ErrSessionEnded):
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 	case errors.Is(err, montage.ErrJobActive):
@@ -138,7 +138,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, montage.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
-	case errors.Is(err, montage.ErrWorkerUnavailable):
+	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, montage.ErrPhotosUnavailable):

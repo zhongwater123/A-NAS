@@ -10,9 +10,11 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/keylock"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -26,7 +28,10 @@ var schema = sqlitedb.Schema{
 	Baseline: func(context.Context, *sql.DB) error { return nil },
 	Steps: []sqlitedb.Step{
 		// 1: projects, the batches that brought their videos, the videos
-		// fixed to their content, and grants waiting to be revoked.
+		// fixed to their content, and grants waiting to be revoked. A batch
+		// keeps what its request asked for, so that its request key repeats
+		// that request alone, and stays registering until its videos are in
+		// the project.
 		{Up: `
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,
@@ -34,7 +39,6 @@ CREATE TABLE projects (
     name TEXT NOT NULL,
     grant_id TEXT,
     state TEXT NOT NULL CHECK (state IN ('registering', 'ready')),
-    grant_lost INTEGER NOT NULL DEFAULT 0,
     ask TEXT NOT NULL DEFAULT '',
     chronological INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -47,9 +51,13 @@ CREATE TABLE batches (
     owner_user_id TEXT NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     request_key TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'add')),
+    asset_ids TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('registering', 'done')),
     created_at TEXT NOT NULL,
     UNIQUE (owner_user_id, request_key)
 );
+CREATE INDEX batches_unfinished ON batches(owner_user_id) WHERE state = 'registering';
 
 CREATE TABLE project_assets (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -197,10 +205,16 @@ DROP TABLE steps;
 DROP TABLE job_assets;
 DROP TABLE jobs;
 `},
-		// 4: planning by the member's VNAS (docs/architecture/montage-center.md,
-		// 规划): when each member last registered a planning grant, and under
-		// which name the waker knows them; which jobs want a round, and each
-		// round's attempt at planning (epoch: replanning starts a new one).
+		{Up: "ALTER TABLE jobs ADD COLUMN save_started INTEGER NOT NULL DEFAULT 0", Down: "ALTER TABLE jobs DROP COLUMN save_started"},
+		// 5: planning by the member's VNAS (docs/architecture/montage-center.md,
+		// 规划). plan_grants: when each member last registered a planning
+		// grant, and under which name the waker knows them. jobs: which want
+		// a round and since when, and their epoch, which replanning raises.
+		// rounds: the epoch and the pick step's input key a round plans for,
+		// its template, and when its model first called a tool. plan_answers:
+		// the first answer taken for a step's input key, which the job's step
+		// then takes into plans. plan_briefs: the brief built for a step's
+		// input key.
 		{Up: `
 CREATE TABLE plan_grants (
     owner_user_id TEXT PRIMARY KEY,
@@ -208,21 +222,47 @@ CREATE TABLE plan_grants (
     registered_at TEXT NOT NULL
 );
 ALTER TABLE jobs ADD COLUMN plan_wanted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN plan_wanted_at TEXT;
 ALTER TABLE jobs ADD COLUMN plan_epoch INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE rounds ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE rounds ADD COLUMN template TEXT NOT NULL DEFAULT '';
+ALTER TABLE rounds ADD COLUMN input_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE rounds ADD COLUMN called_at TEXT;
 CREATE INDEX rounds_by_job ON rounds(job_id, claimed_at);
 CREATE INDEX rounds_by_owner ON rounds(owner_user_id, reported_at);
+
+CREATE TABLE plan_answers (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL CHECK (step IN ('pick', 'shots')),
+    input_key TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    answer_json TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, step, input_key)
+);
+
+CREATE TABLE plan_briefs (
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL CHECK (step IN ('pick', 'shots')),
+    input_key TEXT NOT NULL,
+    brief_json TEXT NOT NULL,
+    PRIMARY KEY (job_id, step, input_key)
+);
 `, Down: `
+DROP TABLE plan_briefs;
+DROP TABLE plan_answers;
 DROP INDEX rounds_by_owner;
 DROP INDEX rounds_by_job;
+ALTER TABLE rounds DROP COLUMN called_at;
+ALTER TABLE rounds DROP COLUMN input_key;
 ALTER TABLE rounds DROP COLUMN template;
 ALTER TABLE rounds DROP COLUMN epoch;
 ALTER TABLE jobs DROP COLUMN plan_epoch;
+ALTER TABLE jobs DROP COLUMN plan_wanted_at;
 ALTER TABLE jobs DROP COLUMN plan_wanted;
 DROP TABLE plan_grants;
 `},
-		// 5: a job makes two films to choose from, as the prototype's 方案
+		// 6: a job makes two films to choose from, as the prototype's 方案
 		// (docs/specs/montage-center.md, 两个方案): each plan and version
 		// says which of the job's 方案 it is.
 		{Up: `
@@ -303,6 +343,23 @@ type Store struct {
 	// planMarkers is where the planning markers go, one empty file per
 	// member with a job wanting a round (/run/a-nas-montage/plans).
 	planMarkers string
+	// members holds a member's lock while a request or reconciling changes
+	// that member's projects and grants.
+	members keylock.Map[string]
+	// reconciling runs one round of Reconcile at a time. reconciled is set
+	// once a round went through; seen are the unfinished batches the last
+	// round found, which the next one settles.
+	reconciling sync.Mutex
+	reconciled  atomic.Bool
+	seen        map[string]bool
+
+	// Revocations a request asked for run in the background until Close.
+	mu         sync.Mutex
+	closed     bool
+	base       context.Context
+	stop       context.CancelFunc
+	background sync.WaitGroup
+
 	// plans is how many films, 方案, a job makes to choose from.
 	plans int
 }
@@ -370,8 +427,45 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if store.logger == nil {
 		store.logger = slog.Default()
 	}
+	store.base, store.stop = context.WithCancel(context.Background())
 	return store, nil
 }
 
-// Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+// StartWorkers recovers durable work before accepting requests. Close cancels
+// and joins the workers before closing their database.
+func (s *Store) StartWorkers(ctx context.Context) error {
+	if err := s.RecoverJobs(ctx); err != nil {
+		return err
+	}
+	if err := s.ReclaimSongs(ctx); err != nil {
+		return err
+	}
+	s.soon(s.AnalyzeSongs)
+	s.soon(s.RunJobs)
+	return nil
+}
+
+// Close stops the revocations, the song analysis and the job still running,
+// which stay queued, and closes the database.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.stop()
+	s.background.Wait()
+	return s.db.Close()
+}
+
+// soon runs work in the background unless the store is closing.
+func (s *Store) soon(work func(context.Context)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.background.Go(func() { work(s.base) })
+}
+
+func (s *Store) withTx(ctx context.Context, apply func(*sql.Tx) error) error {
+	return sqlitedb.WithTx(ctx, s.db, apply)
+}

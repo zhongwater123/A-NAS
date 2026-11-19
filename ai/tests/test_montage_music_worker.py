@@ -6,7 +6,9 @@ ai/eval/montage_music_allin1.py compares the real one with the development
 machine's structure files.
 
 NumPy is in the AI runtime only: make ai-test skips these, and the runtime's
-image runs them (docs/development/ai-development.md)."""
+image runs them (docs/development/ai-development.md). librosa, which computes
+the loudness, is in the music runtime only: elsewhere a stand-in answers for
+it too, and the test of the loudness itself is skipped."""
 
 import base64
 import importlib.util
@@ -18,6 +20,7 @@ import threading
 import unittest
 
 RUNTIME = bool(importlib.util.find_spec("numpy"))
+LIBROSA = RUNTIME and bool(importlib.util.find_spec("librosa"))
 
 if RUNTIME:
     import numpy as np
@@ -43,11 +46,23 @@ class WorkerTest(unittest.TestCase):
     def setUp(self):
         self.found = {"bpm": 120, "beats": [0.5, 1.0], "downbeats": [0.5], "segments": [{"start": 0, "end": 3, "label": "intro"}]}
         original = worker.structure
-        worker.structure = lambda models, stereo: {**self.found, "frames": len(stereo)}
-        self.addCleanup(setattr, worker, "structure", original)
+        self.analysed = 0
 
-    def call(self, request, streams):
-        """Sends request with a pipe per stream, written while the Worker reads, as the montage center does."""
+        def structure(models, stereo):
+            self.analysed += 1
+            return {**self.found, "frames": len(stereo)}
+
+        worker.structure = structure
+        self.addCleanup(setattr, worker, "structure", original)
+        if not LIBROSA:
+            self.addCleanup(setattr, worker, "rms_curve", worker.rms_curve)
+            worker.rms_curve = lambda y: np.zeros(1 + len(y) // worker.HOP, np.float32)
+
+    def call(self, request, streams, confirm=None):
+        """Sends request with a pipe per stream, written while the Worker reads, as the montage center does.
+
+        confirm: True sends the frame that says the streams are whole once they are written, False hangs up instead;
+        the answer is then None."""
         ours, theirs = socket.socketpair()
         pipes = [os.pipe() for _ in streams]
         writers = [threading.Thread(target=self.write, args=(w, data), daemon=True) for (_, w), data in zip(pipes, streams, strict=True)]
@@ -59,6 +74,20 @@ class WorkerTest(unittest.TestCase):
             w.start()
         server = threading.Thread(target=worker.handle, args=(StandIn(), theirs), daemon=True)
         server.start()
+        if confirm is not None:
+            for w in writers:
+                w.join()
+            if confirm:
+                frame = json.dumps({"streams": "complete"}).encode()
+                ours.sendall(struct.pack(">I", len(frame)) + frame)
+            else:
+                ours.shutdown(socket.SHUT_WR)
+                server.join()
+                theirs.close()
+                left = ours.recv(4)
+                ours.close()
+                self.assertEqual(left, b"")
+                return None
         (length,) = struct.unpack(">I", ours.recv(4))
         data = b""
         while len(data) < length:
@@ -80,6 +109,21 @@ class WorkerTest(unittest.TestCase):
     def streams(self):
         return [{"name": "stereo", "channels": 2, "rate": 44100}, {"name": "mono", "channels": 1, "rate": 22050}]
 
+    def test_streams_are_analysed_once_they_are_confirmed_whole(self):
+        stereo, mono = tone(3, 44100, 2), tone(3, 22050, 1)
+        request = {"op": "analyze", "confirm": True, "streams": self.streams()}
+        answer = self.call(request, [stereo.tobytes(), mono.tobytes()], confirm=True)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(self.analysed, 1)
+        # The decoding broke off: the pipes end as they would after a whole
+        # song, the caller hangs up, and nothing is analysed or answered.
+        self.assertIsNone(self.call(request, [stereo.tobytes(), mono.tobytes()[:22050 * 4 * 2]], confirm=False))
+        self.assertEqual(self.analysed, 1)
+        # What is no song is refused without waiting to be confirmed.
+        answer = self.call(request, [b"", mono.tobytes()])
+        self.assertEqual(answer["error"]["code"], "invalid_input")
+
+    @unittest.skipUnless(LIBROSA, "librosa is in the music runtime")
     def test_a_song_is_analysed_with_the_eighth_versions_loudness(self):
         stereo, mono = tone(3, 44100, 2), tone(3, 22050, 1)
         answer = self.call({"op": "analyze", "streams": self.streams()}, [stereo.tobytes(), mono.tobytes()])
@@ -87,7 +131,7 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(answer["frames"], len(stereo))
         self.assertEqual(answer["model"], "stand-in")
         loudness = np.frombuffer(base64.b64decode(answer["loudness"]), "<f4")
-        # librosa.feature.rms(y) with its defaults, as the eighth version computes it.
+        # The eighth version's own formula (adapters/music.py, rms_curve).
         y = mono[:, 0]
         padded = np.pad(y, 1024)
         n = 1 + (len(padded) - 2048) // 512

@@ -1,17 +1,25 @@
 """The montage center's planning in a round of the member's cron unit (docs/architecture/montage-center.md, 发起与结束).
 
 cron_round.py calls this around its own round:
-- clean, always and before the gateway starts: the rounds the montage center lists as claimed and never reported
-  (stale) left a job named "剪辑规划 <round>" and its run's sessions in Hermes, which a gateway would run again as
-  soon as it is ready; they are removed and reported. Unable to ask, every such job is paused instead.
+- clean, always and before the gateway starts: a planning job never outlives its round, so every job named
+  "剪辑规划 <round>" still in Hermes was left by a round that was killed, and a gateway would run it again as soon as
+  it is ready. They are removed with their runs' sessions, whether the montage center still knows their rounds or
+  not (a round goes with its project or account), and the rounds it lists as never reported are reported cleaned.
 - begin, only when the waker left this round a planning token (montage-plan, which run-requests.sh moved here) and
-  the gateway is this round's own: claim a round, check that the model answers, create the job paused with only
-  the montage toolset, record that it started, and make it due. The gateway's tick hands it over with the jobs that
-  are due.
+  the gateway is this round's own: claim a round, leave the waker a receipt of the claim, check that the model
+  answers, create the job paused with only the montage toolset, record that it started, and make it due. The
+  gateway's tick hands it over with the jobs that are due.
 - finish, once the round's runs are over: remove the job's run sessions and the job, then report how it ended.
+
+None of the three lets a failure of its own out: the round runs the member's own due tasks too, which the montage
+center must not stop.
 
 The prompt is the fixed template the package installs (MONTAGE_PROMPTS/<template>.md); only the round's ids, its
 token and the target seconds are filled in, each checked first, so the montage center cannot write the prompt.
+
+The receipt is how the waker counts a planning grant's rounds (cron-waker.py): the token's nonce, written into the
+member's Hermes home once a round is claimed. The montage center cannot write there, so it cannot have a round run
+uncounted; a round that claimed nothing leaves none, and the waker gives the grant's round back.
 
 Hermes's job table and session store are internal to Hermes, as cron_round.py's other calls: an upgrade that moves
 them fails the round loudly (docs/research/hermes-agent-runtime.md, "以后怎么升级").
@@ -22,38 +30,33 @@ import http.client
 import json
 import os
 import re
-import socket
 import string
 import urllib.request
 
 from cron.jobs import create_job, load_jobs, remove_job, trigger_job
+from hermes_constants import get_hermes_home
 from hermes_state import SessionDB
+
+from anas_window_call import UnixHTTP
 
 SOCKET = "/run/anas-assistant-montage/montage.sock"
 PROMPTS = os.environ.get("ANAS_MONTAGE_PROMPTS", "/usr/lib/a-nas/assistant/montage-prompts")
 MODELS = "http://127.0.0.1:18001/v1/models"  # the model bridge of the member's namespace
 PLAN_FILE = "montage-plan"  # the waker's token, as run-requests.sh names it in this round's directory
+RECEIPT = "anas-montage-claim"  # in the member's Hermes home, where the waker reads it
 NAME = "剪辑规划 "
 ROUND_ID = re.compile(r"round:[A-Z2-7]{24}")
 JOB_ID = re.compile(r"job:[A-Z2-7]{24}")
 TOKEN = re.compile(r"[0-9a-f]{32}")
+NONCE = re.compile(r"[0-9a-f]{32}")
 TIMEOUT = 30
+# Only the montage toolset. no_mcp keeps Hermes from adding every enabled MCP server when the configuration it
+# loaded has no server named montage: a job's list that names no known server gets them all (anas, companion).
+TOOLSETS = ["montage", "no_mcp"]
 
 
 def say(text):
     print(f"montage round: {text}", flush=True)
-
-
-class UnixHTTP(http.client.HTTPConnection):
-    def __init__(self, path, timeout):
-        super().__init__("localhost")
-        self.path = path
-        self.wait = timeout
-
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.settimeout(self.wait)
-        self.sock.connect(self.path)
 
 
 class Unreachable(Exception):
@@ -94,46 +97,84 @@ def remove(job_id):
 
 
 def pause_all():
-    """Without the montage center, the planning jobs a killed round left must not run in this round's gateway."""
+    """The planning jobs that could not be removed must not run in this round's gateway."""
     from cron.jobs import pause_job
 
     for job in planning_jobs().values():
         try:
-            pause_job(job["id"], reason="剪辑中心连不上，等下一轮清理")
+            pause_job(job["id"], reason="剪辑规划的遗留任务，等下一轮清理")
         except TypeError:  # a Hermes whose pause_job takes no reason
             pause_job(job["id"])
 
 
 def clean():
-    """Remove what earlier rounds left, before the gateway starts."""
-    if not os.path.exists(SOCKET):
+    """Remove what earlier rounds left, before the gateway starts. Whatever fails here, the round goes on."""
+    try:
+        left = sweep()
+    except Exception as broken:  # noqa: BLE001 - the member's own tasks run whatever becomes of this.
+        say(f"removing the planning jobs left over failed ({type(broken).__name__}: {broken}); pausing them")
+        left = None
+    if left is None or left:
+        try:
+            pause_all()
+        except Exception as broken:  # noqa: BLE001
+            say(f"pausing them failed too ({type(broken).__name__}: {broken})")
+    if left is None or not os.path.exists(SOCKET):
         return
     try:
-        status, answer = ask("/v1/rounds/stale")
-    except Unreachable as broken:
-        say(f"the montage center did not answer ({broken}); pausing the planning jobs left over")
-        pause_all()
-        return
-    if status != 200:
-        say(f"stale answered {status}; pausing the planning jobs left over")
-        pause_all()
-        return
-    jobs = planning_jobs()
-    cleaned = []
-    for stale in answer.get("rounds", []):
-        round_id = stale.get("roundId", "")
-        if not ROUND_ID.fullmatch(round_id):
-            continue
-        if round_id in jobs:
-            remove(jobs[round_id]["id"])
+        report(left)
+    except Exception as broken:  # noqa: BLE001
+        say(f"the rounds cleaned up were not reported ({type(broken).__name__}: {broken}); the next round reports them")
+
+
+def sweep():
+    """Remove every planning job; the rounds whose job could not be removed."""
+    left = set()
+    for round_id, job in planning_jobs().items():
+        try:
+            remove(job["id"])
             say(f"removed the job of round {round_id}")
-        cleaned.append(round_id)
+        except Exception as broken:  # noqa: BLE001 - one job that will not go does not keep the others.
+            left.add(round_id)
+            say(f"the job of round {round_id} could not be removed ({type(broken).__name__}: {broken})")
+    return left
+
+
+def report(left):
+    """Tell the montage center which rounds it lists as never reported have nothing left in Hermes."""
+    status, answer = ask("/v1/rounds/stale")
+    if status != 200:
+        say(f"stale answered {status}")
+        return
+    cleaned = [stale.get("roundId", "") for stale in answer.get("rounds", []) if isinstance(stale, dict)]
+    cleaned = [round_id for round_id in cleaned if ROUND_ID.fullmatch(round_id) and round_id not in left]
     if cleaned:
         ask("/v1/rounds/cleaned", {"roundIds": cleaned})
 
 
+def nonce(runs):
+    """The nonce of the waker's planning token in this round's directory, or None without one."""
+    if not runs:
+        return None
+    try:
+        with open(os.path.join(runs, PLAN_FILE), encoding="ascii") as token:
+            value = token.read(65).strip()
+    except (OSError, ValueError):
+        return None
+    return value if NONCE.fullmatch(value) else None
+
+
 def wanted(runs):
-    return bool(runs) and os.path.isfile(os.path.join(runs, PLAN_FILE))
+    return nonce(runs) is not None
+
+
+def acknowledge(value, round_id):
+    """Leave the waker the receipt of a claim: this token's round was claimed, and counts."""
+    path = os.path.join(str(get_hermes_home()), RECEIPT)
+    partial = f"{path}.{os.getpid()}"
+    with open(partial, "w", encoding="utf-8") as out:
+        json.dump({"nonce": value, "round": round_id}, out)
+    os.replace(partial, path)
 
 
 def model_answers():
@@ -170,8 +211,9 @@ def abandon(round_id, reason):
 
 
 def begin(runs):
-    """Claim a round and hand its job to Hermes; the round's ids, or None."""
-    if not wanted(runs) or not os.path.exists(SOCKET):
+    """Claim a round and hand its job to Hermes; the round's ids, or None. Whatever fails, the round goes on."""
+    value = nonce(runs)
+    if value is None or not os.path.exists(SOCKET):
         return None
     try:
         status, claim = ask("/v1/rounds/claim")
@@ -181,10 +223,21 @@ def begin(runs):
     if status != 200:
         say(f"no round to plan ({status})")
         return None
-    round_id = claim.get("roundId", "")
+    round_id = claim.get("roundId", "") if isinstance(claim, dict) else ""
     if not ROUND_ID.fullmatch(round_id):
         say("the claim named no round")
         return None
+    try:
+        return hand_over(value, round_id, claim)
+    except Exception as broken:  # noqa: BLE001 - the member's own tasks run whatever becomes of this.
+        abandon(round_id, f"这一轮没能交给 VNAS：{type(broken).__name__}: {broken}"[:400])
+        return None
+
+
+def hand_over(value, round_id, claim):
+    """The claimed round's job in Hermes, due; None once the round is abandoned or refused."""
+    # Before anything can call the model: a round the waker cannot count is not planned.
+    acknowledge(value, round_id)
     try:
         text = prompt(claim)
     except (OSError, ValueError, KeyError) as broken:
@@ -193,7 +246,7 @@ def begin(runs):
     if not model_answers():
         abandon(round_id, "VNAS 的模型连不上：设备上没有密钥，或模型网关没有回应")
         return None
-    job = create_job(prompt=text, schedule="every 1440m", name=NAME + round_id, enabled_toolsets=["montage"],
+    job = create_job(prompt=text, schedule="every 1440m", name=NAME + round_id, enabled_toolsets=list(TOOLSETS),
                      paused=True, paused_reason="剪辑规划，等回合脚本触发")
     try:
         status, _ = ask(f"/v1/rounds/{round_id}/started", {"runRef": job["id"]})
@@ -210,15 +263,19 @@ def begin(runs):
 
 
 def finish(planned):
-    """Remove the round's job and its sessions, then report how it ended."""
+    """Remove the round's job and its sessions, then report how it ended. Whatever fails, the round goes on."""
     if planned is None:
         return
     round_id, job_id = planned
-    job = next((j for j in load_jobs() if j.get("id") == job_id), None) or {}
-    outcome = str(job.get("last_status") or "unknown")
-    if job.get("last_error"):
-        outcome += ": " + str(job["last_error"])[:400]
-    remove(job_id)
+    outcome = "unknown"
+    try:
+        job = next((j for j in load_jobs() if j.get("id") == job_id), None) or {}
+        outcome = str(job.get("last_status") or "unknown")
+        if job.get("last_error"):
+            outcome += ": " + str(job["last_error"])[:400]
+        remove(job_id)
+    except Exception as broken:  # noqa: BLE001 - the end is reported all the same; the next round removes the job.
+        say(f"the job of round {round_id} could not be removed ({type(broken).__name__}: {broken})")
     try:
         ask(f"/v1/rounds/{round_id}/end", {"outcome": outcome})
     except Unreachable as broken:

@@ -94,6 +94,7 @@ type Config struct {
 	// MontageMusicSocket and MontageComputeSocket reach the montage
 	// center's Workers in development, where the montage center runs in
 	// this process; without them its songs wait.
+	MontagePlanAnswers   string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
 	MontageMusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET"`
 	MontageComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET"`
 	// ModuleSocketDir holds the API sockets of installed removable modules

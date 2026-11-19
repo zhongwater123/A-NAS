@@ -81,7 +81,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 event = {"error": {"code": 500, "message": error, "type": "server_error"}}
                 self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
             elif not os.environ.get("FAKE_LLAMA_NO_FINISH"):
-                self.wfile.write(b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n')
+                finish = os.environ.get("FAKE_LLAMA_FINISH", "stop")
+                event = {"choices": [{"delta": {}, "finish_reason": finish}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                if body.get("stream_options", {}).get("include_usage"):
+                    event = {"choices": [], "usage": {"prompt_tokens": int(os.environ.get("FAKE_LLAMA_PROMPT_TOKENS", "0"))}}
+                    self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                self.wfile.write(b"data: [DONE]\n\n")
         except BrokenPipeError:
             pass  # the client hung up, which llama-server notices between tokens
 

@@ -1,4 +1,4 @@
-"""The montage center's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
+"""The montage center's compute Worker (docs/architecture/photo-ai.md, 剪辑计算 Worker).
 
 It runs the prototype's pure computation (domain/) for the photo service,
 which cuts cards and measures their quality, and for the montage center,
@@ -171,12 +171,13 @@ def op_quality_part(request, arrays):
 
 
 def op_quality(request, _arrays):
-    blurs = [float("nan") if b is None else float(b) for b in request["blurs"]]
+    blurs = request["blurs"]
     blocked = [float(b) for b in request["blocked"]]
     points = request["points"]
     if not blurs or len(blocked) != len(blurs) or len(points) != len(blurs):
         raise Refused("a card's keyframes differ in number")
-    q = {"blur": round(float(statistics.median(blurs)), 3), "shake": shake(request["moves"]),
+    blur = float("nan") if any(b is None for b in blurs) else round(statistics.median(map(float, blurs)), 3)
+    q = {"blur": blur, "shake": shake(request["moves"] or []),
          "blocked": float(statistics.median(blocked)), "points": points}
     reasons = qualityrules.reasons(q)
     return {**q, "blur": None if math.isnan(q["blur"]) else q["blur"], "reasons": reasons}
@@ -184,7 +185,9 @@ def op_quality(request, _arrays):
 
 def op_catalog(request, _arrays):
     described = request["cards"]
-    usable = catalogrules.usable(described, request.get("measures", {}), set(request.get("kept", [])),
+    measures = {key: {**value, "blur": float("nan")} if value["blur"] is None else value
+                for key, value in request.get("measures", {}).items()}
+    usable = catalogrules.usable(described, measures, set(request.get("kept", [])),
                                  request.get("excluded", []), quality=request.get("quality", True))
     return {"cards": [c["id"] for c in usable]}
 
@@ -249,8 +252,21 @@ def op_plan(request, _arrays):
     raise Refused("step is pick or shots")
 
 
+def spanned(cards):
+    """The cards with each beat's span, which the plan's units read. The eighth version set them once a card was
+    described (cards.beat_spans); the photo library keeps the reader's description as it is, without them."""
+    out = []
+    for c in cards:
+        beats = [dict(b) for b in c["answer"]["beats"]]
+        if any("end" not in b for b in beats):
+            cardrules.beat_spans(c, beats)
+        out.append({**c, "answer": {**c["answer"], "beats": beats}})
+    return out
+
+
 def op_plan_brief(request, _arrays):
     """A step's brief for the member's VNAS: its data and exact schema (brief.py)."""
+    request = {**request, "cards": spanned(request["cards"])}
     if request.get("step") == "pick":
         return brief.pick_brief(request)
     if request.get("step") == "shots":
