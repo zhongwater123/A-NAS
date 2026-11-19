@@ -2375,6 +2375,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/hero": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
+        get: operations["getMontageHero"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The background film's poster (hero/hero.jpg); 404 without one. */
+        get: operations["getMontageHeroPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules": {
         parameters: {
             query?: never;
@@ -8022,6 +8056,8 @@ export interface components {
             assetCount: number;
             /** Format: date-time */
             createdAt: string;
+            /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
+            previewAssetIds?: string[];
         };
         MontageProjectPage: {
             items: components["schemas"]["MontageProjectSummary"][];
@@ -8046,6 +8082,10 @@ export interface components {
         MontageVersion: {
             /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
             number: number;
+            /** @description The job that made it. */
+            jobId: string;
+            /** @description Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二. */
+            plan: number;
             /** @description The film in the caller's photo library; play and download it there. */
             filmAssetId: string;
             /** Format: date-time */
@@ -8053,21 +8093,12 @@ export interface components {
             /** @description The member deleted the film from the photo library. */
             gone?: boolean;
         };
-        MontageProject: {
-            id: string;
-            name: string;
-            assetCount: number;
-            /** Format: date-time */
-            createdAt: string;
-            ask: string;
-            chronological: boolean;
-            assets: components["schemas"]["MontageProjectAsset"][];
-            /** @description The films saved, newest first. */
-            versions: components["schemas"]["MontageVersion"][];
-        };
         MontageJobStep: {
-            /** @enum {string} */
-            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save";
+            /**
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @enum {string}
+             */
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
             /**
              * @description A step that stopped with the job shows the job's state.
              * @enum {string}
@@ -8094,11 +8125,28 @@ export interface components {
             steps: components["schemas"]["MontageJobStep"][];
             /** @description The videos missing, too long, or whose analysis failed. */
             missingAssetIds?: string[];
+            /** @description The first 方案's film. */
             version?: components["schemas"]["MontageVersion"];
+            /** @description Every 方案's film the job saved, in order. */
+            versions?: components["schemas"]["MontageVersion"][];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             finishedAt?: string;
+        };
+        MontageProject: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            ask: string;
+            chronological: boolean;
+            assets: components["schemas"]["MontageProjectAsset"][];
+            /** @description The films saved, newest first. */
+            versions: components["schemas"]["MontageVersion"][];
+            /** @description The project's latest job, for the page to pick up where it was after a reload. */
+            job?: components["schemas"]["MontageJob"];
         };
         MontageNotice: {
             /** @enum {string} */
@@ -8154,6 +8202,8 @@ export interface components {
         };
         MontageSong: {
             id: string;
+            /** @description The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title. */
+            trackId?: string;
             title: string;
             duration: number;
             /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */
@@ -8656,9 +8706,9 @@ export type MontageRequestKey = components['schemas']['MontageRequestKey'];
 export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
 export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
 export type MontageVersion = components['schemas']['MontageVersion'];
-export type MontageProject = components['schemas']['MontageProject'];
 export type MontageJobStep = components['schemas']['MontageJobStep'];
 export type MontageJob = components['schemas']['MontageJob'];
+export type MontageProject = components['schemas']['MontageProject'];
 export type MontageNotice = components['schemas']['MontageNotice'];
 export type MontageNotices = components['schemas']['MontageNotices'];
 export type MontageSongSection = components['schemas']['MontageSongSection'];
@@ -13460,6 +13510,68 @@ export interface operations {
                 content?: never;
             };
             422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHero: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The film */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            /** @description Part of the film */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the film. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHeroPoster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

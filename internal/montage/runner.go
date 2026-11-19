@@ -75,6 +75,8 @@ var errCancelled = errors.New("the job was cancelled")
 type claimed struct {
 	id, owner, projectID string
 	settings             JobSettings
+	// plans is how many 方案 the job makes, as it started.
+	plans int
 }
 
 // wakeJobs tells the scheduler a job is due.
@@ -197,10 +199,10 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
 		var settings string
-		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, settings_json FROM jobs
+		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, settings_json, plans FROM jobs
 			WHERE `+dueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
-			Scan(&job.id, &job.owner, &job.projectID, &settings)
+			Scan(&job.id, &job.owner, &job.projectID, &settings, &job.plans)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

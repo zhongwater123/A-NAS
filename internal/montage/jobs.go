@@ -13,10 +13,11 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// A job makes one film of a project (docs/architecture/montage-center.md,
-// 持久任务): analysis, catalog, song, planning, filling and checking the
-// timeline, rendering and saving, each step's result stored before the next
-// so that a restart or a retry goes on from the first step not done. The
+// A job makes the films of a project to choose from, 方案一 and 方案二
+// (docs/architecture/montage-center.md, 持久任务): analysis, catalog and
+// song once, then for each 方案 planning, filling and checking the timeline,
+// rendering and saving, each step's result stored before the next so that a
+// restart or a retry goes on from the first step not done. The
 // job keeps a snapshot of the project's videos and settings when it starts:
 // changing the project meanwhile only changes the next job.
 
@@ -79,30 +80,32 @@ type Step struct {
 
 // Job is a job as the member sees it.
 type Job struct {
-	ID         string     `json:"id"`
-	ProjectID  string     `json:"projectId"`
-	State      string     `json:"state"`
-	Step       string     `json:"step,omitempty"`
-	WaitReason string     `json:"waitReason,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	Steps      []Step     `json:"steps"`
-	Missing    []string   `json:"missingAssetIds,omitempty"`
+	ID         string   `json:"id"`
+	ProjectID  string   `json:"projectId"`
+	State      string   `json:"state"`
+	Step       string   `json:"step,omitempty"`
+	WaitReason string   `json:"waitReason,omitempty"`
+	Error      string   `json:"error,omitempty"`
+	Steps      []Step   `json:"steps"`
+	Missing    []string `json:"missingAssetIds,omitempty"`
+	// Version is the first 方案's film; Versions are every 方案's, in order.
 	Version    *Version   `json:"version,omitempty"`
+	Versions   []Version  `json:"versions,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 // Version is a film a job saved.
 type Version struct {
-	Number      int       `json:"number"`
+	Number int `json:"number"`
+	// JobID and Plan: the job that made it, and which of its 方案 it is.
+	JobID       string    `json:"jobId"`
+	Plan        int       `json:"plan"`
 	FilmAssetID string    `json:"filmAssetId"`
 	CreatedAt   time.Time `json:"createdAt"`
 	// Gone: the member deleted the film from the photo library.
 	Gone bool `json:"gone,omitempty"`
 }
-
-// StepNames are a job's steps, in order.
-var StepNames = []string{"analysis", "catalog", "song", "pick", "shots", "fill", "render", "save"}
 
 func scanTime(value sql.NullString) *time.Time {
 	if !value.Valid {
@@ -170,8 +173,8 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		}
 		jobID, created = newID("job"), true
 		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, state, not_before, created_at, updated_at)
-			VALUES(?, ?, ?, ?, ?, 'queued', ?, ?, ?)`, jobID, owner, projectID, requestKey, string(encoded), now, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before, created_at, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`, jobID, owner, projectID, requestKey, string(encoded), s.plans, now, now, now); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
@@ -213,9 +216,10 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	var step, reason, message sql.NullString
 	var created string
 	var finished sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, state, step, wait_reason, error, created_at, finished_at
+	var plans int
+	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
-		Scan(&job.ID, &job.ProjectID, &job.State, &step, &reason, &message, &created, &finished)
+		Scan(&job.ID, &job.ProjectID, &job.State, &step, &reason, &message, &created, &finished, &plans)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -249,7 +253,8 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	if err := rows.Err(); err != nil {
 		return Job{}, err
 	}
-	for _, name := range StepNames {
+	// The steps of as many 方案 as the job started with.
+	for _, name := range s.stepNames(plans) {
 		st, ok := done[name]
 		if !ok {
 			st = Step{Name: name, State: "pending"}
@@ -259,11 +264,12 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	if job.Missing, err = s.missingOf(ctx, jobID); err != nil {
 		return Job{}, err
 	}
-	version, err := s.versionOf(ctx, jobID)
-	if err != nil {
+	if job.Versions, err = s.versionsOf(ctx, "job_id", jobID, "plan"); err != nil {
 		return Job{}, err
 	}
-	job.Version = version
+	if len(job.Versions) > 0 {
+		job.Version = &job.Versions[0]
+	}
 	return job, nil
 }
 
@@ -276,21 +282,26 @@ func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
 	return missing, json.Unmarshal([]byte(raw.String), &missing)
 }
 
-func (s *Store) versionOf(ctx context.Context, jobID string) (*Version, error) {
-	var version Version
-	var created string
-	err := s.db.QueryRowContext(ctx, "SELECT number, film_asset_id, created_at FROM versions WHERE job_id = ?", jobID).
-		Scan(&version.Number, &version.FilmAssetID, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+// versionsOf lists the versions whose column is value, ordered by order.
+func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]Version, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT number, job_id, plan, film_asset_id, created_at FROM versions WHERE "+column+" = ? ORDER BY "+order, value)
 	if err != nil {
 		return nil, err
 	}
-	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
-		version.CreatedAt = *at
+	defer rows.Close()
+	versions := []Version{}
+	for rows.Next() {
+		var version Version
+		var created string
+		if err := rows.Scan(&version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created); err != nil {
+			return nil, err
+		}
+		if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
+			version.CreatedAt = *at
+		}
+		versions = append(versions, version)
 	}
-	return &version, nil
+	return versions, rows.Err()
 }
 
 // Cancel stops owner's job: a queued or waiting one at once, a running one
@@ -529,7 +540,7 @@ const noticeWindow = 24 * time.Hour
 func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
 		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
-		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id
+		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
 		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
 		  OR (j.state = 'done' AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, WaitVNAS, sqlitedb.FormatTime(s.now().Add(-noticeWindow)))
 	if err != nil {

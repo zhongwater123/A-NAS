@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -262,6 +263,58 @@ ALTER TABLE jobs DROP COLUMN plan_wanted_at;
 ALTER TABLE jobs DROP COLUMN plan_wanted;
 DROP TABLE plan_grants;
 `},
+		// 6: a job makes two films to choose from, as the prototype's 方案
+		// (docs/specs/montage-center.md, 两个方案): each plan the job took
+		// and each version says which of the job's 方案 it is, and a job how
+		// many it makes: one for the jobs from before this step, which go on
+		// as they started. The answers and briefs of step 5 need nothing: a
+		// later 方案's input keys are its own. A project also keeps which
+		// track of the music library its song was copied from, for the page
+		// to mark that track and no other of the same title.
+		{Up: `
+ALTER TABLE projects ADD COLUMN song_track TEXT;
+ALTER TABLE jobs ADD COLUMN plans INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE plans ADD COLUMN plan INTEGER NOT NULL DEFAULT 1;
+DROP INDEX plans_by_job;
+CREATE INDEX plans_by_job ON plans(job_id, plan, step, voided_at);
+CREATE TABLE versions_new (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    job_id TEXT NOT NULL,
+    plan INTEGER NOT NULL DEFAULT 1,
+    version_key TEXT NOT NULL UNIQUE,
+    film_asset_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (project_id, number),
+    UNIQUE (job_id, plan)
+);
+INSERT INTO versions_new(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at)
+    SELECT id, project_id, number, job_id, 1, version_key, film_asset_id, created_at FROM versions;
+DROP TABLE versions;
+ALTER TABLE versions_new RENAME TO versions;
+`, Down: `
+CREATE TABLE versions_old (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    job_id TEXT NOT NULL UNIQUE,
+    version_key TEXT NOT NULL UNIQUE,
+    film_asset_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (project_id, number)
+);
+INSERT INTO versions_old(id, project_id, number, job_id, version_key, film_asset_id, created_at)
+    SELECT id, project_id, number, job_id, version_key, film_asset_id, created_at FROM versions WHERE plan = 1;
+DROP TABLE versions;
+ALTER TABLE versions_old RENAME TO versions;
+DROP INDEX plans_by_job;
+DELETE FROM plans WHERE plan <> 1;
+ALTER TABLE plans DROP COLUMN plan;
+CREATE INDEX plans_by_job ON plans(job_id, step, voided_at);
+ALTER TABLE jobs DROP COLUMN plans;
+ALTER TABLE projects DROP COLUMN song_track;
+`},
 	},
 }
 
@@ -300,6 +353,9 @@ type Store struct {
 	// planMarkers is where the planning markers go, one empty file per
 	// member with a job wanting a round (/run/a-nas-montage/plans).
 	planMarkers string
+	// plans is how many films, 方案, a job started now makes to choose
+	// from; a job keeps the number it started with (jobs.plans).
+	plans int
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
 	members keylock.Map[string]
@@ -317,6 +373,15 @@ type Store struct {
 	stop       context.CancelFunc
 	background sync.WaitGroup
 }
+
+// DefaultPlans is how many 方案 a job makes unless Options says otherwise:
+// two films to choose from (docs/specs/montage-center.md, 两个方案). MaxPlans
+// is the most a store can be asked for: the contract names the steps of two
+// (api/components/montage.yaml, MontageJobStep).
+const (
+	DefaultPlans = 2
+	MaxPlans     = 2
+)
 
 // Options are what a store works with.
 type Options struct {
@@ -338,8 +403,11 @@ type Options struct {
 	// PlanMarkers is the directory of planning markers the waker reads;
 	// without it no member's VNAS is asked to plan.
 	PlanMarkers string
-	Now         func() time.Time
-	Logger      *slog.Logger
+	// Plans is how many films, 方案, each job started makes: 0 is
+	// DefaultPlans, more than MaxPlans is refused.
+	Plans  int
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -348,6 +416,9 @@ type Options struct {
 func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if options.Grants == nil {
 		return nil, errors.New("the montage store needs the photo library's grants")
+	}
+	if options.Plans < 0 || options.Plans > MaxPlans {
+		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
 	}
 	db, err := sqlitedb.Open(filepath.Join(root, DatabaseName), sqlitedb.Options{Durable: true})
 	if err != nil {
@@ -360,7 +431,10 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
 		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
-		planMarkers: options.PlanMarkers}
+		planMarkers: options.PlanMarkers, plans: options.Plans}
+	if store.plans == 0 {
+		store.plans = DefaultPlans
+	}
 	store.jobMusic = store
 	// Without a stand-in, the member's VNAS plans, where markers reach it.
 	if store.planner == nil && store.planMarkers != "" {

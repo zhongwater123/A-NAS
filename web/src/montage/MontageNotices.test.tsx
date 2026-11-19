@@ -93,4 +93,30 @@ describe("the montage center's notices on the desktop", () => {
     expect(await screen.findByText("「雪山」的成片已存进相册")).toBeInTheDocument();
     await waitFor(() => expect(asked).toBe(1));
   });
+
+  it("keeps what the latest request said when an older one answers after it", async () => {
+    // The first request is still on its way when the page shows again and asks anew.
+    let releaseFirst: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let asked = 0;
+    server.use(
+      http.get("/api/v1/montage/notices", async ({ response }) => {
+        if (++asked === 1) {
+          await held;
+          return response(200).json({ items: [notices[0]] });
+        }
+        return response(200).json({ items: [notices[1]] });
+      }),
+    );
+    render(<MontageNotices onOpen={() => undefined} />);
+    await waitFor(() => expect(asked).toBe(1));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(await screen.findByText("「雪山」的成片已存进相册")).toBeInTheDocument();
+    releaseFirst();
+    await settle();
+    expect(screen.getByText("「雪山」的成片已存进相册")).toBeInTheDocument();
+    expect(screen.queryByText("「海边」在等 VNAS 规划")).toBeNull();
+  });
 });

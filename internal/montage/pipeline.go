@@ -151,7 +151,9 @@ type Editing interface {
 // PlanInput is what planning reads: the catalog's cards, the excerpt and
 // the member's settings.
 type PlanInput struct {
-	JobID    string          `json:"jobId"`
+	JobID string `json:"jobId"`
+	// Plan is which of the job's 方案 is planned, from 1.
+	Plan     int             `json:"plan"`
 	Cards    []Card          `json:"cards"`
 	Music    json.RawMessage `json:"music"`
 	Settings JobSettings     `json:"settings"`

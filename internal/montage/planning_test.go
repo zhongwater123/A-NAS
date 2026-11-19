@@ -739,3 +739,307 @@ func TestAPlanningGrantIsNotedOnlyOnTheProductServicesWord(t *testing.T) {
 		t.Fatal("the planning grant the Product Service registered was not noted")
 	}
 }
+
+// newTwoPlanEnv is newPlanEnv with jobs that make two 方案, as the product's do.
+func newTwoPlanEnv(t *testing.T) *jobEnv {
+	t.Helper()
+	env := newPlanEnv(t)
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.plans = 2
+	env.open(t)
+	return env
+}
+
+// outlineBrief reads the outline brief of a round: which 方案 it names (none
+// for the first) and how many earlier outlines it carries.
+func (e *jobEnv) outlineBrief(t *testing.T, claim montage.Claim) (int, int) {
+	t.Helper()
+	brief, err := e.store.Brief(context.Background(), "user:alice", claim.JobID, claim.AttemptToken, montage.StepOutline)
+	if err != nil {
+		t.Fatalf("Brief() = %v", err)
+	}
+	var data struct {
+		Plan    int               `json:"plan"`
+		Earlier []json.RawMessage `json:"earlierOutlines"`
+	}
+	if err := json.Unmarshal(brief.(map[string]json.RawMessage)["data"], &data); err != nil {
+		t.Fatalf("brief = %s, %v", brief.(map[string]json.RawMessage)["data"], err)
+	}
+	return data.Plan, len(data.Earlier)
+}
+
+// One round plans both 方案 (docs/architecture/montage-center.md, 一轮规划两个
+// 方案): the first's shots taken, the model is told to go on with the next,
+// whose outline brief carries the first outline to differ from. Each 方案's
+// answers are kept under its own input keys, and the job takes them as it
+// comes to their steps.
+func TestARoundPlansBothPlansTheSecondAfterTheFirst(t *testing.T) {
+	ctx := context.Background()
+	env := newTwoPlanEnv(t)
+	job, claim := env.planning(t)
+	if plan, earlier := env.outlineBrief(t, claim); plan != 0 || earlier != 0 {
+		t.Fatalf("the first outline's brief names 方案 %d with %d earlier outlines", plan, earlier)
+	}
+	if got := env.submit(t, claim, montage.StepOutline, outline("v1-0", "v2-0")); got.Status != montage.ToolAccepted {
+		t.Fatalf("first outline = %+v", got)
+	}
+	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolNextPlan || got.Message == "" {
+		t.Fatalf("first shots = %+v", got)
+	}
+	// The call tried again, as after a lost answer, is told the same; no
+	// answer of the second 方案 is taken from it.
+	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolNextPlan {
+		t.Fatalf("first shots again = %+v", got)
+	}
+	// The model goes on before the job came to the second 方案: the job is
+	// still at the first's steps, or waits.
+	if early, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepShots); err != nil ||
+		early.(*montage.ToolAnswer).Status != montage.ToolOutlineFirst {
+		t.Fatalf("second shots brief before its outline = %+v, %v", early, err)
+	}
+	if plan, earlier := env.outlineBrief(t, claim); plan != 2 || earlier != 1 {
+		t.Fatalf("the second outline's brief names 方案 %d with %d earlier outlines", plan, earlier)
+	}
+	if got := env.submit(t, claim, montage.StepOutline, outline("v2-0")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second outline = %+v", got)
+	}
+	if got := env.submit(t, claim, montage.StepShots, outline("v2-0")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second shots = %+v", got)
+	}
+	// Past the last 方案 the tools keep to it: its shots again are taken already.
+	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second shots again = %+v", got)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || done.Versions[0].Plan != 1 || done.Versions[1].Plan != 2 {
+		t.Fatalf("job = %+v", done)
+	}
+	// Each 方案's shots were turned back with its own outline, and the outline's
+	// brief, the same for both, was built once.
+	if len(env.compute.turned) != 2 || env.compute.turned[0] == env.compute.turned[1] {
+		t.Fatalf("turned back with %q", env.compute.turned)
+	}
+	if env.compute.briefs["pick"] != 1 || env.compute.briefs["shots"] != 2 {
+		t.Fatalf("briefs built = %v", env.compute.briefs)
+	}
+	if rounds := env.store.Count(t, "SELECT COUNT(*) FROM rounds WHERE job_id = ?", job.ID); rounds != 1 {
+		t.Fatalf("%d rounds planned the two 方案", rounds)
+	}
+}
+
+// A round that handed the first 方案 back and ended before the second: the
+// model may have been called, so no round is started on its own (#514). The
+// first 方案's film is made and saved; for the second the member is asked, and
+// the round she allows plans the second alone.
+func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) {
+	ctx := context.Background()
+	env := newTwoPlanEnv(t)
+	job, claim := env.planning(t)
+	env.submit(t, claim, montage.StepOutline, outline("v1-0", "v2-0"))
+	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolNextPlan {
+		t.Fatalf("first shots = %+v", got)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || needs.Step != "pick-2" ||
+		len(needs.Versions) != 1 || needs.Versions[0].Plan != 1 {
+		t.Fatalf("job = %+v", needs)
+	}
+	if env.marked(t) {
+		t.Fatal("a marker for a round the member did not ask for")
+	}
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, montage.ErrNoPlanWanted) {
+		t.Fatalf("a claim nobody asked for = %v", err)
+	}
+	if env.lib.saves != 1 {
+		t.Fatalf("%d films saved before the second 方案 was planned", env.lib.saves)
+	}
+
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if env.waitForPlan(t, job.ID); !env.marked(t) {
+		t.Fatal("no marker after the member planned again")
+	}
+	// The first 方案 was not made again, and the new round plans the second.
+	if env.lib.saves != 1 {
+		t.Fatalf("%d films saved after planning again", env.lib.saves)
+	}
+	second := env.round(t)
+	if plan, earlier := env.outlineBrief(t, second); plan != 2 || earlier != 1 {
+		t.Fatalf("the new round's outline brief names 方案 %d with %d earlier outlines", plan, earlier)
+	}
+	env.submit(t, second, montage.StepOutline, outline("v2-0"))
+	if got := env.submit(t, second, montage.StepShots, outline("v2-0")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second shots = %+v", got)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || env.lib.saves != 2 {
+		t.Fatalf("job = %+v, %d films saved", done, env.lib.saves)
+	}
+}
+
+// A round that handed in only the first 方案's outline and ended needs the
+// member as before: an outline alone is no 方案 handed back.
+func TestARoundThatEndsWithOnlyAnOutlineNeedsTheMember(t *testing.T) {
+	env := newTwoPlanEnv(t)
+	job, claim := env.planning(t)
+	env.submit(t, claim, montage.StepOutline, outline("v1-0"))
+	if err := env.store.EndRound(context.Background(), "user:alice", claim.RoundID, "the unit was stopped"); err != nil {
+		t.Fatal(err)
+	}
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || needs.Step != "shots" || env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
+	}
+}
+
+// A video deleted for good after the first 方案 was saved: taking it out
+// plans what is left again, in a new round, and the 方案 already saved stays
+// as it is. It is not made again and not saved a second time, which the
+// versions' UNIQUE (job_id, plan) would refuse after the photo library took
+// the film; and its film's copy does not stay in the job's directory while
+// the second 方案 is planned.
+func TestDroppingAVideoAfterTheFirstPlanWasSavedKeepsItAndMakesTheRest(t *testing.T) {
+	ctx := context.Background()
+	env := newTwoPlanEnv(t)
+	job, claim := env.planning(t)
+	env.submit(t, claim, montage.StepOutline, outline("v1-0", "v2-0"))
+	env.submit(t, claim, montage.StepShots, outline("v1-0"))
+	// The first 方案 is made and saved while the round still plans the second.
+	waiting := env.waitForPlan(t, job.ID)
+	if len(waiting.Versions) != 1 || env.lib.saves != 1 || waiting.Step != "pick-2" {
+		t.Fatalf("job = %+v, %d films saved", waiting, env.lib.saves)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "tmp", job.ID, "film.mp4")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the saved film's copy is still in the job's directory: %v", err)
+	}
+	first, segments := waiting.Versions[0], env.editing.segments
+
+	env.lib.set(func() { delete(env.lib.videos, "asset:a2") })
+	env.clock.advance(2 * time.Minute)
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedMissing || len(needs.Missing) != 1 || needs.Missing[0] != "asset:a2" {
+		t.Fatalf("job = %+v", needs)
+	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, needs.Missing); err != nil {
+		t.Fatal(err)
+	}
+	if late := env.submit(t, claim, montage.StepOutline, outline("v1-0")); late.Status != montage.ToolRoundOver {
+		t.Fatalf("an answer of the round that planned the old videos = %+v", late)
+	}
+	again := env.waitForPlan(t, job.ID)
+	if env.lib.saves != 1 || env.editing.segments != segments || len(again.Versions) != 1 || again.Versions[0] != first {
+		t.Fatalf("the saved 方案 was touched: job = %+v, %d films saved, %d segments rendered (were %d)",
+			again, env.lib.saves, env.editing.segments, segments)
+	}
+	for _, st := range again.Steps[3:8] {
+		if st.State != "done" {
+			t.Fatalf("the saved 方案's step %s is %s", st.Name, st.State)
+		}
+	}
+	if again.Step != "pick-2" || !env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", again, env.marked(t))
+	}
+	// The new round plans the second 方案 alone, from the videos left; the
+	// first's outline was for other cards and is not given along.
+	second := env.round(t)
+	if plan, earlier := env.outlineBrief(t, second); plan != 2 || earlier != 0 {
+		t.Fatalf("the new round's outline brief names 方案 %d with %d earlier outlines", plan, earlier)
+	}
+	if refused := env.submit(t, second, montage.StepOutline, outline("v2-0")); refused.Status != montage.ToolRejected {
+		t.Fatalf("an outline with a card of the video taken out = %+v", refused)
+	}
+	env.submit(t, second, montage.StepOutline, outline("v1-1"))
+	if got := env.submit(t, second, montage.StepShots, outline("v1-1")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second shots = %+v", got)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || done.Versions[0] != first || done.Versions[1].Plan != 2 || env.lib.saves != 2 {
+		t.Fatalf("job = %+v, %d films saved", done, env.lib.saves)
+	}
+	if env.jobFiles(job.ID) {
+		t.Fatal("the job's files outlived it")
+	}
+}
+
+// An answer that fails its checks after the member planned again: checking
+// it waited for the compute Worker (the second step's brief was still being
+// built), and meanwhile its round ended. The refusal is the old round's: the
+// round is told it is over, and the new planning starts with none counted
+// against it.
+func TestARefusalThatCrossesPlanningAgainCountsForNothing(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	job, claim := env.planning(t)
+	if taken := env.submit(t, claim, montage.StepOutline, outline("v1-0")); taken.Status != montage.ToolAccepted {
+		t.Fatalf("outline = %+v", taken)
+	}
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	env.compute.mu.Lock()
+	env.compute.onBrief = func(step string) {
+		if step == montage.StepShots {
+			once.Do(func() {
+				close(reached)
+				<-release
+			})
+		}
+	}
+	env.compute.mu.Unlock()
+	answered := make(chan montage.ToolAnswer, 1)
+	failed := make(chan error, 1)
+	go func() {
+		said, err := env.store.Submit(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepShots, outline("v9-9"))
+		if err != nil {
+			failed <- err
+			return
+		}
+		answered <- said
+	}()
+	select {
+	case <-reached:
+	case err := <-failed:
+		t.Fatalf("Submit() = %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the shots' brief was never built")
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case said := <-answered:
+		if said.Status != montage.ToolRoundOver {
+			t.Fatalf("a refusal after planning again = %+v", said)
+		}
+	case err := <-failed:
+		t.Fatalf("Submit() = %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the submission never answered")
+	}
+	if counted := env.store.Count(t, "SELECT plan_rejections FROM jobs WHERE id = ?", job.ID); counted != 0 {
+		t.Fatalf("%d refusals counted against the new planning", counted)
+	}
+	// In the other order, as before: a refusal handed in after the member
+	// planned again is told the round is over too, and counts for nothing.
+	if late := env.submit(t, claim, montage.StepShots, outline("v9-9")); late.Status != montage.ToolRoundOver {
+		t.Fatalf("a refusal of the round that is over = %+v", late)
+	}
+	if counted := env.store.Count(t, "SELECT plan_rejections FROM jobs WHERE id = ?", job.ID); counted != 0 {
+		t.Fatalf("%d refusals counted after the round was over", counted)
+	}
+}

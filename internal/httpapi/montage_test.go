@@ -171,7 +171,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// A film: 202 and the job to poll; one job at a time.
 	var job montage.Job
 	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
-	if job.State != montage.JobQueued || len(job.Steps) != len(montage.StepNames) {
+	if job.State != montage.JobQueued || len(job.Steps) != 3+5*montage.DefaultPlans {
 		t.Fatalf("job = %+v", job)
 	}
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)
@@ -202,6 +202,11 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)
 	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
+	var withJob montage.ProjectDetail
+	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &withJob)
+	if withJob.Job == nil || withJob.Job.ID != job.ID {
+		t.Fatalf("the project's job = %+v", withJob.Job)
+	}
 	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
 	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
 	var notices struct {

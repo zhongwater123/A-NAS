@@ -166,6 +166,9 @@ type compute struct {
 	// second step's answers were turned back with.
 	briefs map[string]int
 	turned []string
+	// onBrief, when set, runs as a brief is being built, outside the lock:
+	// a test holds the Worker there.
+	onBrief func(step string)
 }
 
 func (c *compute) Catalog(_ context.Context, request montage.CatalogRequest) ([]string, error) {
@@ -229,7 +232,11 @@ func (c *compute) PlanBrief(_ context.Context, request montage.PlanBriefRequest)
 		c.briefs = map[string]int{}
 	}
 	c.briefs[request.Step]++
+	hold := c.onBrief
 	c.mu.Unlock()
+	if hold != nil {
+		hold(request.Step)
+	}
 	ids := make([]string, len(request.Cards))
 	for i, card := range request.Cards {
 		ids[i] = card.ID
@@ -246,7 +253,7 @@ func (c *compute) PlanBrief(_ context.Context, request montage.PlanBriefRequest)
 	enum, _ := json.Marshal(ids)
 	schema := `{"type":"object","required":["parts"],"properties":{"parts":{"type":"array","minItems":1,"items":{"type":"object",
 		"required":["name","cards"],"properties":{"name":{"type":"string"},"cards":{"type":"array","items":{"enum":` + string(enum) + `}}}}}}}`
-	brief := montage.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v1"}
+	brief := montage.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v2"}
 	if request.Step == "shots" {
 		brief.Slots, brief.Pictures = json.RawMessage(`[[[[0,2],[2,4]]]]`), []int{1}
 	}
@@ -408,11 +415,13 @@ type jobEnv struct {
 	project montage.ProjectDetail
 	// markers, when set, has the member's VNAS plan, leaving markers here.
 	markers string
+	// plans is how many 方案 each job makes: one unless a test asks for more.
+	plans int
 }
 
 func (e *jobEnv) open(t *testing.T) {
 	t.Helper()
-	options := montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing, Now: e.clock.now}
+	options := montage.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing, Now: e.clock.now, Plans: max(e.plans, 1)}
 	if e.markers != "" {
 		options.PlanMarkers = e.markers
 	} else {
@@ -504,6 +513,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	}
 	if _, err := env.store.Job(ctx, "user:bob", job.ID); !errors.Is(err, montage.ErrNotFound) {
 		t.Fatalf("Bob reading Alice's job = %v", err)
+	}
+	// The project's page picks the job up again after a reload.
+	if detail, err := env.store.Project(ctx, "user:alice", env.project.ID); err != nil || detail.Job == nil || detail.Job.ID != job.ID {
+		t.Fatalf("project = %+v, %v", detail.Job, err)
 	}
 
 	done := env.settle(t, job.ID)
@@ -1283,5 +1296,110 @@ func TestRemovingAnAccountStopsItsRunningJobAndTakesItsFiles(t *testing.T) {
 	}
 	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrNotFound) {
 		t.Fatalf("the removed account's job = %v", err)
+	}
+}
+
+func TestAJobMakesTwoPlansToChooseFrom(t *testing.T) {
+	ctx := context.Background()
+	env := newJobEnv(t)
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.plans = 2
+	env.open(t)
+	done := env.settle(t, env.generate(t, "generate:1").ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || done.Version == nil || done.Version.Plan != 1 {
+		t.Fatalf("job = %+v", done)
+	}
+	for i, version := range done.Versions {
+		if version.Plan != i+1 || version.Number != i+1 || version.JobID != done.ID {
+			t.Fatalf("version %d = %+v", i, version)
+		}
+	}
+	var names []string
+	for _, st := range done.Steps {
+		names = append(names, st.Name)
+		if st.State != "done" {
+			t.Fatalf("step %s is %s", st.Name, st.State)
+		}
+	}
+	if !slices.Equal(names[3:], []string{"pick", "shots", "fill", "render", "save", "pick-2", "shots-2", "fill-2", "render-2", "save-2"}) {
+		t.Fatalf("steps = %v", names)
+	}
+	if films := env.lib.filmNames(); env.lib.saves != 2 || !slices.Equal(films, []string{"海边 v1.mp4", "海边 v2.mp4"}) {
+		t.Fatalf("saved %d films: %v", env.lib.saves, films)
+	}
+	if env.jobFiles(done.ID) {
+		t.Fatal("the job's files outlived it")
+	}
+	project, err := env.store.Project(ctx, "user:alice", env.project.ID)
+	if err != nil || len(project.Versions) != 2 || project.Versions[0].Plan != 2 {
+		t.Fatalf("versions = %+v, %v", project.Versions, err)
+	}
+	// One notice for the job, not one per 方案.
+	if notices, err := env.store.Notices(ctx, "user:alice"); err != nil || len(notices) != 1 {
+		t.Fatalf("notices = %+v, %v", notices, err)
+	}
+}
+
+func TestTheProjectListShowsAFewOfEachProjectsVideos(t *testing.T) {
+	env := newJobEnv(t)
+	page, err := env.store.Projects(context.Background(), "user:alice", "")
+	if err != nil || len(page.Items) != 1 || !slices.Equal(page.Items[0].PreviewAssetIDs, []string{"asset:a1", "asset:a2"}) {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+}
+
+func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
+	env := newJobEnv(t)
+	if _, err := env.store.OpenHero("film"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("without a hero = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(env.root, "hero"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.root, "hero", "hero.mp4"), []byte("film"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	hero, err := env.store.OpenHero("film")
+	if err != nil || hero.ContentType != "video/mp4" || hero.Info.Size() != 4 {
+		t.Fatalf("hero = %+v, %v", hero, err)
+	}
+	_ = hero.File.Close()
+	if _, err := env.store.OpenHero("poster"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("a poster the device does not have = %v", err)
+	}
+	if _, err := env.store.OpenHero("../montage.db"); !errors.Is(err, montage.ErrNotFound) {
+		t.Fatalf("another file = %v", err)
+	}
+}
+
+// A job makes as many 方案 as the store made when it started: one from
+// before the store made two goes on, and ends, with its one, and shows the
+// steps of one.
+func TestAJobKeepsTheNumberOfPlansItStartedWith(t *testing.T) {
+	env := newJobEnv(t)
+	job := env.generate(t, "generate:1")
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.plans = 2
+	env.open(t)
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Steps) != 8 || len(done.Versions) != 1 || env.lib.saves != 1 {
+		t.Fatalf("the job from before = %+v, %d films saved", done, env.lib.saves)
+	}
+	for _, st := range done.Steps {
+		if st.State != "done" {
+			t.Fatalf("step %s of a finished job is %s", st.Name, st.State)
+		}
+	}
+	next := env.settle(t, env.generate(t, "generate:2").ID)
+	if next.State != montage.JobDone || len(next.Steps) != 13 || len(next.Versions) != 2 {
+		t.Fatalf("a job started now = %+v", next)
+	}
+	// The contract names the steps of two 方案: a store is not opened for more.
+	if _, err := montage.Open(context.Background(), t.TempDir(), montage.Options{Grants: env.lib, Plans: montage.MaxPlans + 1}); err == nil {
+		t.Fatal("a store for three 方案 a job was opened")
 	}
 }

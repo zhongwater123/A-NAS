@@ -247,3 +247,26 @@
     summary: "The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day"
     responses:
       "200": { description: "The notices, newest first", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageNotices" } } } }
+/api/v1/montage/hero:
+  get:
+    operationId: getMontageHero
+    description: >-
+      The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps
+      under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the
+      member's own videos.
+    parameters:
+      - { name: Range, in: header, schema: { type: string } }
+    responses:
+      "200": { description: The film, content: { video/mp4: { schema: { type: string, format: binary } } } }
+      "206": { description: Part of the film, content: { video/mp4: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "416": { description: The range is outside the film. }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/hero/poster:
+  get:
+    operationId: getMontageHeroPoster
+    description: The background film's poster (hero/hero.jpg); 404 without one.
+    responses:
+      "200": { description: The poster, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

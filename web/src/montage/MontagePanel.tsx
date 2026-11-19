@@ -1,42 +1,81 @@
-import { Clapperboard } from "lucide-react";
-import { useEffect, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
-import { EmptyState, Notice, Spinner } from "../ui/workspace";
-import workspaceStyles from "../ui/workspace.module.css";
-import { listProjects, type MontageProject } from "./api";
+import { AskPage } from "./AskPage";
 import styles from "./montage.module.css";
+import { NewProject } from "./NewProject";
+import { Home } from "./ProjectList";
+import { ProjectView } from "./ProjectView";
+import { SongPage } from "./SongPage";
+import { ShownProvider, useWindowShown } from "./shown";
 
-// MontagePanel is the 剪辑中心 window: the member's projects. Creating them,
-// choosing a song and making a film come with the later steps of the plan
-// (docs/architecture/montage-center.md, 交付).
-export function MontagePanel() {
-  const [projects, setProjects] = useState<MontageProject[]>();
-  const [failure, setFailure] = useState("");
-  useEffect(() => {
-    const controller = new AbortController();
-    listProjects(controller.signal)
-      .then(setProjects)
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setFailure(errorText(error));
-      });
-    return () => controller.abort();
-  }, []);
+// MontagePanel is the 剪辑中心 window (docs/specs/montage-center.md), laid
+// out as the 第八版 prototype's pages: the home page, where a project is
+// selected and its film started; a new project from an upload or from the
+// photo library; a project opened with its videos; and the song and the
+// request, each on its own page, returning where they were opened from.
+// Data comes through TanStack Query (#271), which loads with this window
+// only. What polls stops while the window is minimized (shown.ts).
+export type MontageView =
+  | { kind: "home" }
+  | { kind: "new"; into?: string }
+  | { kind: "project"; id: string }
+  | { kind: "page"; id: string; page: "song" | "ask"; from: "home" | "project" };
+
+export function MontagePanel({ userId }: { userId: string }) {
+  const [client] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000, refetchOnWindowFocus: false } } }),
+  );
+  const [view, setView] = useState<MontageView>({ kind: "home" });
+  // The project selected on the home page: the newest until one is
+  // clicked (undefined), none once the member unselects it (null).
+  const [selected, setSelected] = useState<string | null>();
+  const root = useRef<HTMLDivElement>(null);
+  const shown = useWindowShown(root);
+  const open = (id: string) => setView({ kind: "project", id });
+  const home = () => setView({ kind: "home" });
   return (
-    <div className={`${workspaceStyles.bkApp} ${styles.mtApp}`}>
-      {failure ? (
-        <Notice tone="danger">{failure}</Notice>
-      ) : projects === undefined ? (
-        <Spinner />
-      ) : projects.length === 0 ? (
-        <EmptyState icon={<Clapperboard />} title="还没有剪辑项目" />
-      ) : (
-        <ul className={styles.mtProjects}>
-          {projects.map((project) => (
-            <li key={project.id}>{project.name}</li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <QueryClientProvider client={client}>
+      <ShownProvider value={shown}>
+        <div className={styles.mtApp} ref={root}>
+          {view.kind === "home" && (
+            <Home
+              selected={selected}
+              onSelect={setSelected}
+              onOpen={open}
+              onPage={(id, page) => setView({ kind: "page", id, page, from: "home" })}
+              onNew={() => setView({ kind: "new" })}
+            />
+          )}
+          {view.kind === "new" && (
+            <NewProject
+              userId={userId}
+              into={view.into}
+              onDone={(id) => {
+                setSelected(id);
+                if (view.into) open(id);
+                else home();
+              }}
+              onCancel={() => (view.into ? open(view.into) : home())}
+            />
+          )}
+          {view.kind === "page" &&
+            (view.page === "song" ? (
+              <SongPage id={view.id} onBack={() => (view.from === "home" ? home() : open(view.id))} />
+            ) : (
+              <AskPage id={view.id} onBack={() => (view.from === "home" ? home() : open(view.id))} />
+            ))}
+          {view.kind === "project" && (
+            <ProjectView
+              key={view.id}
+              id={view.id}
+              onBack={home}
+              onPage={(page) => setView({ kind: "page", id: view.id, page, from: "project" })}
+              onAddVideos={() => setView({ kind: "new", into: view.id })}
+            />
+          )}
+        </div>
+      </ShownProvider>
+    </QueryClientProvider>
   );
 }

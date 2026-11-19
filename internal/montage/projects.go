@@ -93,7 +93,13 @@ type Project struct {
 	Name       string    `json:"name"`
 	AssetCount int       `json:"assetCount"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// PreviewAssetIDs are up to six of its videos, spread over the order
+	// they were added: the list shows their thumbnails.
+	PreviewAssetIDs []string `json:"previewAssetIds,omitempty"`
 }
+
+// previewCount is how many videos a project in the list shows.
+const previewCount = 6
 
 // ProjectAsset is a video of a project.
 type ProjectAsset struct {
@@ -112,6 +118,9 @@ type ProjectDetail struct {
 	Assets        []ProjectAsset `json:"assets"`
 	// Versions are the films saved, newest first.
 	Versions []Version `json:"versions"`
+	// Job is the project's latest job, for the page to pick up where it
+	// was after a reload.
+	Job *Job `json:"job,omitempty"`
 }
 
 // ProjectPage is a page of projects, newest first.
@@ -548,7 +557,45 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 		}
 		page.Items, lastAt = append(page.Items, project), created
 	}
-	return page, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ProjectPage{}, err
+	}
+	// The store has one connection: the page's rows go before the previews are read.
+	if err := rows.Close(); err != nil {
+		return ProjectPage{}, err
+	}
+	for i := range page.Items {
+		if page.Items[i].PreviewAssetIDs, err = s.previews(ctx, page.Items[i].ID); err != nil {
+			return ProjectPage{}, err
+		}
+	}
+	return page, nil
+}
+
+// previews picks up to previewCount of a project's videos, evenly spread.
+func (s *Store) previews(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var all []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		all = append(all, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	n := min(len(all), previewCount)
+	picked := make([]string, 0, n)
+	for k := range n {
+		picked = append(picked, all[k*len(all)/n])
+	}
+	return picked, nil
 }
 
 // Project returns owner's project with where each video stands now. A video
@@ -588,6 +635,17 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 	}
 	detail.AssetCount = len(detail.Assets)
 	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
+		return ProjectDetail{}, err
+	}
+	var latest string
+	switch err := s.db.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest); {
+	case err == nil:
+		job, err := s.Job(ctx, owner, latest)
+		if err != nil {
+			return ProjectDetail{}, err
+		}
+		detail.Job = &job
+	case !errors.Is(err, sql.ErrNoRows):
 		return ProjectDetail{}, err
 	}
 	// The films were added to the grant when saved: one lookup says where
@@ -1041,22 +1099,5 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 
 // versions lists a project's films, newest first.
 func (s *Store) versions(ctx context.Context, projectID string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT number, film_asset_id, created_at FROM versions WHERE project_id = ? ORDER BY number DESC", projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	versions := []Version{}
-	for rows.Next() {
-		var version Version
-		var created string
-		if err := rows.Scan(&version.Number, &version.FilmAssetID, &created); err != nil {
-			return nil, err
-		}
-		if version.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
-			return nil, err
-		}
-		versions = append(versions, version)
-	}
-	return versions, rows.Err()
+	return s.versionsOf(ctx, "project_id", projectID, "number DESC")
 }
