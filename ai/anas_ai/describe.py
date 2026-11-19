@@ -199,6 +199,12 @@ def fitting(offsets, groups, most):
     spread evenly from its first to its last; kept are their places among the
     card's frames, counted from 0. A beat that keeps none of its frames is
     left out, and the beats after it move up. A card that fits is unchanged.
+
+    The NAS names this fitting in a description's identity (fit= in
+    internal/photos/montagedescribe.go, describeIdentitySuffix): a change to
+    which frames a card is described from, here or in how LlamaReader.describe
+    counts what fits, bumps fit= there, or cards that failed under the old
+    fitting are never described again.
     """
     count = len(offsets)
     if count <= most:

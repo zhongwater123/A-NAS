@@ -150,6 +150,8 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 // with migration 17's stored Down when it opens the Catalog; the statements
 // that undo older migrations by hand come after it.
 var undoMontageGrants = []string{
+	migrations[21].Down,
+	"DELETE FROM schema_downgrades WHERE version = 22",
 	"DROP TABLE montage_films",
 	"DELETE FROM schema_downgrades WHERE version = 21",
 	"DROP TABLE video_card_descriptions",
@@ -340,4 +342,67 @@ func upStatements(steps []sqlitedb.Step) []string {
 func TestCatalogMigrationsAfterThePackagedReleasesHaveDowns(t *testing.T) {
 	sqlitedbtest.CheckReversible(t, sqlitedb.Schema{Name: "the photo catalog", Steps: migrations, WithoutDown: migrationsWithoutDown},
 		func(path string) (*sql.DB, error) { return sqlitedb.Open(path, sqlitedb.Options{Durable: true}) })
+}
+
+// Migration 22 gives successful card descriptions the identity with fit=1
+// and leaves failed ones stale; its Down takes every description back to
+// the identity the build before fit= reads, and going forward again repeats
+// the Up.
+func TestDescriptionFittingMigrationRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	const (
+		before = "reader-1|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|quality=q-1"
+		after  = "reader-1|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|quality=q-1"
+	)
+	if after != describeIdentity("reader-1", "q-1") {
+		t.Fatalf("the migration's identity %q is not describeIdentity's %q", after, describeIdentity("reader-1", "q-1"))
+	}
+	identities := func() []string {
+		t.Helper()
+		rows, err := service.db.QueryContext(ctx, "SELECT identity FROM video_card_descriptions ORDER BY card")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var found []string
+		for rows.Next() {
+			var identity string
+			if err := rows.Scan(&identity); err != nil {
+				t.Fatal(err)
+			}
+			found = append(found, identity)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	for _, statement := range []string{
+		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('" + zeroObjectID + "', 1, 'video/mp4', '')",
+		"INSERT INTO video_card_descriptions(object_id, card, result, error, identity) VALUES('" + zeroObjectID + "', 0, '{}', '', '" + after + "')",
+		"INSERT INTO video_card_descriptions(object_id, card, result, error, identity) VALUES('" + zeroObjectID + "', 1, NULL, 'too many frames', '" + after + "')",
+	} {
+		if _, err := service.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:21], WithoutDown: migrationsWithoutDown}
+	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
+		t.Fatalf("the older build's migration: %v", err)
+	}
+	if got := identities(); !slices.Equal(got, []string{before, before}) {
+		t.Fatalf("identities after going back = %q", got)
+	}
+	if err := migrate(ctx, service.db); err != nil {
+		t.Fatal(err)
+	}
+	if got := identities(); !slices.Equal(got, []string{after, before}) {
+		t.Fatalf("identities after migrating again = %q", got)
+	}
 }
