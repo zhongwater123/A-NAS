@@ -11,7 +11,7 @@
 | 本机工具 | Homebrew 安装的 Go 1.27.3、ShellCheck 0.11.0、bash 5.3、Colima 0.10.3 与 Docker CLI；Node.js 26.11.1、npm 11.20.0；Ruff 0.17.1 按[静态检查](../testing.md#静态检查)装在 `~/.local/opt/ruff` |
 | `~/.anas-env` | 把 Ruff 与 `/opt/homebrew/bin` 放在 `PATH` 最前面：macOS 自带的 `/bin/bash` 是 3.2，`ops-check` 需要 bash 4 以上 |
 | Linux 虚拟机 | Colima 配置 `anas`：vz、6 核、8 GiB，Ubuntu 24.04 arm64，只供 A-NAS 使用；本机的 `default` 配置留给其他项目 |
-| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2、Ruff 0.17.1，zizmor 1.32.0 与 pip-audit 2.10.1 在 venv `~/.local/opt/zizmor` 中；gcc 13.3、`file` 与 qemu-user-static 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
+| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2（见[静态检查](../testing.md)）、Ruff 0.17.1，zizmor 1.32.0 与 pip-audit 2.10.1 在 venv `~/.local/opt/zizmor` 中；gcc 13.3、`file` 与 qemu-user-static 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
 | 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`、系统测试镜像 `anas-systemd:trixie` |
 | 模型 | `~/A-NAS-models`，目录结构与 `scripts/fetch-models.sh` 的 `layout` 相同（`embeddinggemma-2-740m`、`faces/yunet`、`faces/auraface`、`pets/dinov2-small`、`dfine-obj365`），另有 `faces/sface`；文件按 `deploy/models/*.json` 中的地址下载，并核对 SHA-256。D-FINE 只有官方权重 `dfine_m_obj365.pth`：在 arm64 上按清单导出的 ONNX 大小相同但 SHA-256 不同，Worker 与打包都会拒绝，放在 `dfine-obj365/arm64-export`，只供本机评估；`dfine-obj365/official` 用 `scripts/fetch-models.sh ~/A-NAS-models` 拉取（[拉取模型](../ai-development.md#拉取模型)） |
 | 测试照片 | `~/A-NAS-datasets/shared-gallery/<月份>/`：实验 NAS 相册共享图库的原图（JPEG、PNG 与一段 MP4），每月附 NAS 记录的清单 `manifest-*.json`，`SHA256SUMS` 为本机计算值。相册没有打包下载，按月经 Web 的相册接口取原图 |
