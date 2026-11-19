@@ -731,6 +731,10 @@ button.mt-row:hover {
   gap: 10px;
   margin-top: 18px;
 }
+/* the song being uploaded, above the music library */
+.mt-sent {
+  margin-bottom: 16px;
+}
 .mt-search {
   position: relative;
   margin-bottom: 16px;

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, Music2, Pause, Play, Search } from "lucide-react";
+import { Check, ChevronLeft, Music2, Pause, Play, Search, Upload } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
@@ -11,6 +11,7 @@ import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { songKey, songQuery } from "./queries";
 import { useShown } from "./shown";
+import { acceptedSongTypes, type SongUploadStep, useSongUpload } from "./songUpload";
 
 // Why a song is not ready yet, or cannot be used (MontageSong.waiting, .reason).
 const songWaits: Record<NonNullable<MontageSong["waiting"]>, string> = {
@@ -34,17 +35,27 @@ const covers = [
   "linear-gradient(135deg, #4aa8ff, #5b6cff)",
   "linear-gradient(135deg, #ff9a4d, #ff5f7e)",
 ];
+// Where an upload the member started stands, after the file is sent.
+const uploadSteps: Record<Exclude<SongUploadStep, "upload">, string> = {
+  checking: "检查中",
+  scan: "扫描音乐库",
+  choose: "选用中",
+};
 const coverOf = (title: string) => covers[[...title].reduce((sum, c) => sum + c.charCodeAt(0), 0) % covers.length];
 
 // SongPage is the prototype's 配乐 page: the chosen song with the excerpt
-// the film is cut to, then the member's music library to choose from.
-export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
+// the film is cut to, then the member's music library to choose from, or a
+// song to upload into it.
+export function SongPage({ id, userId, onBack }: { id: string; userId: string; onBack: () => void }) {
   const client = useQueryClient();
   const song = useQuery(songQuery(id, useShown()));
   const tracks = useQuery({ queryKey: ["music", "tracks"], queryFn: listTracks });
   const [filter, setFilter] = useState("");
   const [playing, setPlaying] = useState<string>();
   const audio = useRef<HTMLAudioElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const uploads = useSongUpload(id, userId);
+  const sent = uploads.job;
   const choose = useMutation({
     mutationFn: (trackId: string) => chooseSong(id, trackId),
     onSuccess: (chosen) => client.setQueryData(songKey(id), chosen),
@@ -80,7 +91,56 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
             <h2>配乐</h2>
           </div>
           {tracks.data && <small>音乐库 {tracks.data.items.length} 首</small>}
+          <button
+            type="button"
+            className={`${styles.mtBtn} ${styles.small}`}
+            disabled={uploads.busy}
+            onClick={() => picker.current?.click()}
+          >
+            <Upload aria-hidden="true" />
+            上传配乐
+          </button>
+          <input
+            ref={picker}
+            hidden
+            type="file"
+            accept={acceptedSongTypes}
+            aria-label="选择歌曲"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) uploads.pick(file);
+            }}
+          />
         </div>
+        {sent && (
+          <ul className={`${styles.mtRows} ${styles.mtSent}`} aria-label="上传配乐">
+            <li className={styles.mtRow} data-state={sent.problem ? "failed" : undefined}>
+              <span className={styles.mtRowName}>
+                <b>{sent.name}</b>
+                {sent.problem && <small>{sent.problem}</small>}
+                {sent.step === "upload" && !sent.problem && (
+                  <span className={styles.mtBar} aria-hidden="true">
+                    <span style={{ width: `${Math.round(uploads.progress * 100)}%` }} />
+                  </span>
+                )}
+              </span>
+              {sent.problem ? (
+                <button type="button" className={styles.mtLink} onClick={uploads.retry ?? uploads.dismiss}>
+                  {uploads.retry ? "重试" : "关闭"}
+                </button>
+              ) : (
+                <span className={styles.mtRowEnd}>
+                  {sent.step !== "upload"
+                    ? uploadSteps[sent.step]
+                    : uploads.queued
+                      ? "排队中"
+                      : `上传中 ${Math.round(uploads.progress * 100)}%`}
+                </span>
+              )}
+            </li>
+          </ul>
+        )}
         {song.error && <Failed inline error={song.error} onRetry={() => void song.refetch()} />}
         {song.data && <Chosen projectId={id} song={song.data} />}
         <div className={styles.mtSearch}>
@@ -100,7 +160,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
         {!tracks.data && !tracks.error && <Spinner small />}
         {tracks.data && shown.length === 0 && (
           <p className={styles.mtFaint}>
-            {filter.trim() ? "没有匹配的歌" : "音乐库里没有歌。把歌放进个人空间的“音乐”文件夹后再选"}
+            {filter.trim() ? "没有匹配的歌" : "音乐库里没有歌。点“上传配乐”，或把歌放进个人空间的“音乐”文件夹"}
           </p>
         )}
         <ul className={styles.mtSongs} aria-label="音乐库">

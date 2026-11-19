@@ -61,7 +61,7 @@ export function MontagePanel({ userId }: { userId: string }) {
           )}
           {view.kind === "page" &&
             (view.page === "song" ? (
-              <SongPage id={view.id} onBack={() => (view.from === "home" ? home() : open(view.id))} />
+              <SongPage id={view.id} userId={userId} onBack={() => (view.from === "home" ? home() : open(view.id))} />
             ) : (
               <AskPage id={view.id} onBack={() => (view.from === "home" ? home() : open(view.id))} />
             ))}

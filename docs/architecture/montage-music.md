@@ -1,6 +1,6 @@
 # 剪辑中心的配乐
 
-状态：M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)）已实现选歌复制、配乐分析 Worker、`music` 选段、试听与起点；allin1 的商业版权待议，待议期间配乐分析只在开发机与实验 NAS 上运行，见“版权待议期间”
+状态：M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)）已实现选歌复制、配乐页上传、配乐分析 Worker、`music` 选段、试听与起点；allin1 的商业版权待议，待议期间配乐分析只在开发机与实验 NAS 上运行，见“版权待议期间”
 更新时间：2026-11-19
 
 本文是[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)为准。
@@ -22,6 +22,7 @@
    剪辑计算 Worker 的 music：第八版的选段与小节槽 → songs 行：ready 或 unusable（原因）
 ```
 
+- **上传**：配乐页的“上传配乐”不另开接口，把几样现成的东西接起来（[`web/src/montage/songUpload.ts`](../../web/src/montage/songUpload.ts)）：文件经传输中心的队列传进成员个人空间的“音乐”文件夹（没有时由 NAS 建，同名时另存一份），完成后读传输的 `entryId`，请音乐库扫描（扫描中再请求会在结束后再扫一遍）并等它回到空闲，曲目编号就是文件编号，出现后照常 `PUT /song`。浏览器先按音乐库认的扩展名、100 MiB 与 30 秒到 8 分钟挡一遍，读不出时长的交给剪辑服务判断。扫描后没有这首歌时，按音乐库是否自定了来源，写明“音乐”文件夹不在来源里或格式读不出。离开配乐页后上传仍在传输中心继续，但不再自动选用。
 - **复制**：`montageapi.CopySong` 是 anas-api 对 `PUT /api/v1/montage/projects/{id}/song` 的专门处理（[`internal/montageapi/song.go`](../../internal/montageapi/song.go)）。它调 `music.Service.OpenTrack`，与音乐播放相同，看不到的曲目（包括别人个人空间里的）回答 404；音乐库已知的大小与时长先挡掉超限的，不复制。文件在扫描之后被删回答 404，成员已无权打开回答 403，与音乐功能播放这首歌时相同。歌曲经 `X-A-NAS-Song` 头带上标题与能否直接播放（音乐功能的 `Transcode`）；标题先截到剪辑中心保存的 200 个字符（`montage.SongTitle`），再长的标签也放得进这个头。这个头只由 anas-api 设置：转发代理先去掉浏览器发来的所有 `X-A-NAS-` 头，再放上 anas-api 生成的这一个（[`serviceproxy.WithInternalHeader`](../../internal/serviceproxy/serviceproxy.go)）。
 - **收下**：剪辑服务边收边算 SHA-256，超过 100 MiB 回答 413；再请 FFmpeg Worker probe，没有音频或时长不在 30 秒到 8 分钟回答 422（上限见“用时与内存”）（[`internal/montage/songs.go`](../../internal/montage/songs.go)）。副本按内容存成 `songs/<sha256>/audio`，几位成员选同一首共用一份。
 - **表**：`montage.db` 第 2 步加 `songs`（每位成员一行：摘要、标题、时长、状态、不可用的原因、等待的原因、分析结果与响度）与 `projects.song_id`、`song_start`、`song_selection`，带 Down（[`internal/montage/store.go`](../../internal/montage/store.go)）。`song_selection` 是成员拖动起点后那一段的选段，连同计算 Worker 的领域代码读的那份数据：读项目不用再算，任务也直接用成员看到的这一段，不再找计算 Worker。
@@ -157,6 +158,7 @@
 - 代码：
   - 选歌、副本与回收、试听、起点：[`internal/montageapi/song.go`](../../internal/montageapi/song.go)、[`internal/montage/songs.go`](../../internal/montage/songs.go)
   - 分析、等待与失败：[`internal/montage/analysis.go`](../../internal/montage/analysis.go)、[`internal/montage/workers.go`](../../internal/montage/workers.go)
+  - 配乐页与上传：[`web/src/montage/SongPage.tsx`](../../web/src/montage/SongPage.tsx)、[`web/src/montage/songUpload.ts`](../../web/src/montage/songUpload.ts)
   - 任务取选段：[`internal/montage/jobmusic.go`](../../internal/montage/jobmusic.go)
   - 选段：[`ai/anas_montage/music_ops.py`](../../ai/anas_montage/music_ops.py)、[`ai/anas_montage/domain/music.py`](../../ai/anas_montage/domain/music.py)、[`internal/montagecompute/music.go`](../../internal/montagecompute/music.go)
   - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-montage-music.service)
@@ -164,6 +166,7 @@
   - 仓库与软件包不含歌曲的检查：[`scripts/check-no-songs.sh`](../../scripts/check-no-songs.sh)
 - 测试：
   - Go：[`internal/montage/songs_test.go`](../../internal/montage/songs_test.go)、[`internal/montage/jobmusic_test.go`](../../internal/montage/jobmusic_test.go)、[`internal/montage/workers_test.go`](../../internal/montage/workers_test.go)、[`internal/montageapi/song_test.go`](../../internal/montageapi/song_test.go)、[`internal/httpapi/montage_song_test.go`](../../internal/httpapi/montage_song_test.go)、[`internal/montagecompute/music_test.go`](../../internal/montagecompute/music_test.go)
+  - Web：[`web/src/montage/SongPage.test.tsx`](../../web/src/montage/SongPage.test.tsx)（上传配乐）
   - Python：[`ai/tests/test_montage_music_ops.py`](../../ai/tests/test_montage_music_ops.py)、[`ai/tests/test_montage_music_worker.py`](../../ai/tests/test_montage_music_worker.py)
   - 对照：[`ai/eval/montage_music_golden.py`](../../ai/eval/montage_music_golden.py)、[`ai/eval/montage_music_allin1.py`](../../ai/eval/montage_music_allin1.py)
   - 系统测试的选歌一节：[`scripts/system-test.sh`](../../scripts/system-test.sh)
