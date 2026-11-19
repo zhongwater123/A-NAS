@@ -98,7 +98,9 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 		t.Fatalf("requests = %+v", overview.Requests)
 	}
 	aliceID = overview.Requests[0].AccountID
-	owner.do(http.MethodPost, "/api/v1/family/requests/"+aliceID+"/approve", "", nil, http.StatusOK)
+	// A guardian approves the role shown; a changed request is looked at again.
+	owner.do(http.MethodPost, "/api/v1/family/requests/"+aliceID+"/approve", `{"role":"奶奶"}`, nil, http.StatusConflict)
+	owner.do(http.MethodPost, "/api/v1/family/requests/"+aliceID+"/approve", `{"role":"外婆"}`, nil, http.StatusOK)
 	bob.do(http.MethodPost, "/api/v1/family/join", `{"role":"舅舅"}`, nil, http.StatusOK)
 	bob.do(http.MethodDelete, "/api/v1/family/join", "", nil, http.StatusNoContent)
 	bob.do(http.MethodPost, "/api/v1/family/join", `{"role":"舅舅"}`, nil, http.StatusOK)
@@ -213,7 +215,7 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 
 	// Removing a member, deleting a baby and bringing it back.
 	bob.do(http.MethodPost, "/api/v1/family/join", `{"role":"舅舅"}`, nil, http.StatusOK)
-	owner.do(http.MethodPost, "/api/v1/family/requests/"+bobID+"/approve", "", nil, http.StatusOK)
+	owner.do(http.MethodPost, "/api/v1/family/requests/"+bobID+"/approve", `{"role":"舅舅"}`, nil, http.StatusOK)
 	bob.do(http.MethodPost, "/api/v1/family/leave", "", nil, http.StatusNoContent)
 	owner.do(http.MethodDelete, "/api/v1/family/members/"+aliceID, "", nil, http.StatusNoContent)
 	alice.do(http.MethodGet, babyPath+"/records", "", nil, http.StatusForbidden)

@@ -57,8 +57,8 @@ export const joinFamily = (role: string) => call(client.POST("/api/v1/family/joi
 export const cancelJoin = () => call(client.DELETE("/api/v1/family/join"));
 export const leaveFamily = () => call(client.POST("/api/v1/family/leave"));
 export const setRole = (role: string) => call(client.PATCH("/api/v1/family/me", { body: { role } }));
-export const approveJoin = (accountId: string) =>
-  call(client.POST("/api/v1/family/requests/{accountId}/approve", account(accountId)));
+export const approveJoin = (accountId: string, role: string) =>
+  call(client.POST("/api/v1/family/requests/{accountId}/approve", { ...account(accountId), body: { role } }));
 export const rejectJoin = (accountId: string) =>
   call(client.DELETE("/api/v1/family/requests/{accountId}", account(accountId)));
 export const setGuardian = (accountId: string, guardian: boolean) =>
@@ -167,6 +167,7 @@ const familyMessages: Record<string, string> = {
   not_family_member: "加入家庭后才能看到这里",
   forbidden: "只有家长或添加它的人可以这样做",
   last_guardian: "家庭里至少要有一位家长，请先把另一位家人设为家长",
+  request_changed: "对方刚改了称呼，请看过新的申请后再同意",
   already_in_channel: "这些照片都已在频道中",
   changed: "已经有人先保存了修改，请关闭后重新打开再改",
   conflict: "这和现有的内容冲突，例如这个大事记已经配过说明，或有记录早于新的出生日",

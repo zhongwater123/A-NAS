@@ -146,6 +146,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request conflicts with the current state")
 	case errors.Is(err, family.ErrLastGuardian):
 		httpjson.WriteError(w, http.StatusConflict, "last_guardian", "the family needs at least one guardian")
+	case errors.Is(err, family.ErrRequestChanged):
+		httpjson.WriteError(w, http.StatusConflict, "request_changed", "the requester changed the role since it was shown")
 	case errors.Is(err, family.ErrInChannel):
 		httpjson.WriteError(w, http.StatusConflict, "already_in_channel", "the photos are in the channel already")
 	case errors.Is(err, family.ErrPhotosUnavailable):
@@ -211,7 +213,11 @@ func (h *handler) setRole(w http.ResponseWriter, r *http.Request, actor family.A
 }
 
 func (h *handler) approve(w http.ResponseWriter, r *http.Request, actor family.Actor) {
-	member, err := h.store.Approve(r.Context(), actor, r.PathValue("accountID"))
+	var request roleRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	member, err := h.store.Approve(r.Context(), actor, r.PathValue("accountID"), request.Role)
 	h.reply(w, r, http.StatusOK, member, err)
 }
 
