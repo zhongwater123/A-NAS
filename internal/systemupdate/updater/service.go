@@ -22,9 +22,11 @@ type Commands interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// The packages of an A-NAS release, at one version; the last two only where
-// they are installed.
-var releasePackages = []string{"a-nas", "a-nas-host", "a-nas-console", "a-nas-assistant-trial"}
+// The packages of an A-NAS release, at one version; the last only where it is
+// installed. a-nas-assistant-trial is no longer one: the assistant is part of
+// a-nas, and apt removes the empty package that replaced the trial when the
+// next release no longer satisfies it.
+var releasePackages = []string{"a-nas", "a-nas-host", "a-nas-console"}
 
 // contentPatterns are the content packages a release depends on
 // (scripts/lib/content.sh): installed at version 1, named by their content.
@@ -349,8 +351,7 @@ func (s *Service) installedVersion(ctx context.Context, name string) string {
 }
 
 // landed reports whether the release is installed whole at version: a-nas
-// and a-nas-host, and a-nas-console and a-nas-assistant-trial where dpkg
-// has them in any status.
+// and a-nas-host, and a-nas-console where dpkg has it in any status.
 func (s *Service) landed(ctx context.Context, version string) bool {
 	for i, name := range releasePackages {
 		status, installed := s.packageState(ctx, name)
@@ -422,9 +423,9 @@ func (s *Service) newer(ctx context.Context, a, b string) bool {
 }
 
 // releaseArguments are the release's packages at a version, as apt-get
-// install takes them: a-nas and a-nas-host always, a-nas-console and
-// a-nas-assistant-trial where dpkg has them. One that a failed install or a
-// cut left unpacked or half installed counts, so that going back rewrites it.
+// install takes them: a-nas and a-nas-host always, a-nas-console where dpkg
+// has it. One that a failed install or a cut left unpacked or half installed
+// counts, so that going back rewrites it.
 func (s *Service) releaseArguments(ctx context.Context, version string) []string {
 	var arguments []string
 	for i, name := range releasePackages {
@@ -865,6 +866,19 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	if backup == "" {
 		return errors.New("no copy of the databases from before the install")
 	}
+	// The montage service came later (ADR 0038): a release before it has no
+	// unit to stop or start, which systemctl says with exit status 5. Any
+	// other failure may leave it writing montage.db, so nothing is restored.
+	// It stops first: a request of its on the photo service's grant socket
+	// would start the photo service again. And before it its socket for
+	// members' scheduled tasks, through which a round of a member's tasks
+	// would start it again while montage.db is restored; the socket starts
+	// again with the service.
+	for _, unit := range []string{"anas-montage-assistant.socket", "anas-montage"} {
+		if output, err := s.Commands.Run(ctx, "systemctl", "stop", unit); err != nil && !unitNotLoaded(err) {
+			return fmt.Errorf("stop %s: %w: %s", unit, err, lastLines(string(output), 3))
+		}
+	}
 	services := []string{"anas-api", "anas-photos", "anas-shares", "anas-family", "anas-host-agent"}
 	if output, err := s.Commands.Run(ctx, "systemctl", append([]string{"stop"}, services...)...); err != nil {
 		return fmt.Errorf("stop the services: %w: %s", err, lastLines(string(output), 3))
@@ -874,9 +888,10 @@ name=$1
 rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
   /srv/a-nas/data/photos/catalog.db-wal /srv/a-nas/data/photos/catalog.db-shm \
   /srv/a-nas/data/shares/catalog.db-wal /srv/a-nas/data/shares/catalog.db-shm \
-  /srv/a-nas/data/family/family.db-wal /srv/a-nas/data/family/family.db-shm
+  /srv/a-nas/data/family/family.db-wal /srv/a-nas/data/family/family.db-shm \
+  /srv/a-nas/data/montage/montage.db-wal /srv/a-nas/data/montage/montage.db-shm
 cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-for store in photos shares family; do
+for store in photos shares family montage; do
   if [ -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]; then
     cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   fi
@@ -884,10 +899,19 @@ done`
 	output, err := s.Commands.Run(ctx, "sh", "-c", script, "restore", backup)
 	slices.Reverse(services)
 	_, _ = s.Commands.Run(ctx, "systemctl", append([]string{"start"}, services...)...)
+	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-montage")
 	if err != nil {
 		return fmt.Errorf("restore the databases: %w: %s", err, lastLines(string(output), 3))
 	}
 	return nil
+}
+
+// unitNotLoaded reports systemctl's exit status 5: the unit is not loaded,
+// so nothing of it runs. A unit whose file went while its process still
+// runs stays loaded, and stopping it succeeds.
+func unitNotLoaded(err error) bool {
+	var exit interface{ ExitCode() int }
+	return errors.As(err, &exit) && exit.ExitCode() == 5
 }
 
 // keepContent removes the content packages neither the version installed
@@ -899,6 +923,8 @@ func (s *Service) keepContent(ctx context.Context, current, previous string) {
 		if version == "" {
 			continue
 		}
+		// Before the assistant was part of a-nas, a release depended on its
+		// runtime through a-nas-assistant-trial.
 		for _, name := range []string{"a-nas", "a-nas-assistant-trial"} {
 			output, err := s.Commands.Run(ctx, "apt-cache", "depends", "--no-recommends", "--no-suggests",
 				"--no-conflicts", "--no-breaks", "--no-replaces", "--no-enhances", name+"="+version)

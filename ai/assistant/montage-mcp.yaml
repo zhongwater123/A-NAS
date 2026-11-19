@@ -1,0 +1,15 @@
+  # The montage center's planning tools (docs/architecture/montage-center.md,
+  # MCP 服务器): only in the cron unit's policy, and opened only by a planning
+  # round's job (enabled_toolsets=["montage"]), never by a platform toolset.
+  # trust: full, for no one is there to approve a call in a cron run
+  # (approvals.cron_mode: deny); the montage center checks every answer.
+  montage:
+    command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
+    args: [/usr/lib/a-nas/assistant/anas_montage_mcp.py]
+    trust: full
+    enabled: true
+    lazy: false
+    timeout: 120
+    tools:
+      prompts: false
+      resources: false

@@ -86,7 +86,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    ```
    - 至少写 `ANAS_SMB_INTERFACE=<网卡>`。可写的键与说明见 `/usr/share/a-nas/site.conf.example`（装包后才有，内容同 [`deploy/site/site.conf`](../../deploy/site/site.conf)）。
    - 由开发机推送新版本的机器另写 `ANAS_UPDATE_STAGING=/home/anas-dev/apps/a-nas/repository`（第 2 步的暂存目录）：之后的版本由“设置 → 系统更新”取用推送、安装，见下面“以后的版本”。已装好的机器随时可以加上这一行，系统更新每次运行时读取，不用运行 `a-nas-site`。
-6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`，装了助手试用的加 `a-nas-assistant-trial`。
+6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`。装过助手试用的设备升级到 2026-11-18 之后的第一个版本时也加 `a-nas-assistant-trial`（空的过渡包，[接管试用](enable-ai-assistant.md#从试用接管)），之后不再需要。
    ```bash
    apt-get update
    apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本> a-nas-docker-policy
@@ -171,18 +171,21 @@ git diff deploy/upstream/packages.json
   ```
   - 新版本改过的数据库结构，由旧版本启动时按新版本存下的反向步骤退回（[`internal/sqlitedb/migrate.go`](../../internal/sqlitedb/migrate.go)）。
   - Docker、Caddy 与 `a-nas-docker-policy` 不降级：`a-nas-host` 只要求不低于固定的版本。旧包即使没有地址池保护，独立包仍在 Docker 启动前校验配置。
-- 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。
+- 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。剪辑服务单独停起：回到剪辑中心之前的版本时没有这个单元，这两行报 `Unit anas-montage.service not loaded`，可以忽略。
   ```bash
+  systemctl stop anas-montage
   systemctl stop anas-api anas-photos anas-shares anas-family anas-host-agent
   name=<时间>-<旧版本>
   ls /var/backups/a-nas /srv/a-nas/data/.a-nas-backups
   rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
-    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm}
+    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm} \
+    /srv/a-nas/data/montage/montage.db-{wal,shm}
   cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-  for store in photos shares family; do
+  for store in photos shares family montage; do
     [[ ! -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]] || cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   done
   systemctl start anas-host-agent anas-photos anas-shares anas-family anas-api
+  systemctl start anas-montage
   a-nas-check
   ```
   副本是升级那一刻的数据库，之后的改动会丢失。两处各保留最近两份；副本不含 `-shm`，它由 SQLite 从日志重建。

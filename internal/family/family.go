@@ -294,15 +294,7 @@ func (s *Store) migrate(ctx context.Context) error {
 var databaseSchema = sqlitedb.Schema{Name: "family.db", Steps: migrations, WithoutDown: 3}
 
 func (s *Store) inTx(ctx context.Context, apply func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := apply(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, apply)
 }
 
 type queryer interface {

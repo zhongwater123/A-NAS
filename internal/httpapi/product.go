@@ -14,12 +14,14 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/accountsapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -59,6 +61,12 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
+	// Montage serves /api/v1/montage, 剪辑中心, like Family; nil while its
+	// switch is off (ADR 0038).
+	Montage http.Handler
+	// PlanGrants registers the member's planning grant for the montage
+	// center's background planning (the File Broker); nil goes on without.
+	PlanGrants montageapi.PlanRegistrar
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
 	// its mounts and finds the caller behind the session token itself.
@@ -91,6 +99,9 @@ type ProductDependencies struct {
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
 	WebSearch *websearchapi.API
+	// AssistantKey serves Settings → VNAS, the AI assistant's model key (ADR 0024); nil
+	// leaves its routes out.
+	AssistantKey *assistantkeyapi.API
 	// SystemUpdate serves Settings → 系统更新 (docs/specs/system-update.md);
 	// nil leaves its routes out.
 	SystemUpdate *systemupdateapi.API

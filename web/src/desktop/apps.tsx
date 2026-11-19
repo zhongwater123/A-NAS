@@ -1,4 +1,4 @@
-import { ListTodo, Settings, Share2 } from "lucide-react";
+import { Clapperboard, ListTodo, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -33,6 +33,7 @@ const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
+const MontagePanel = lazyCode(() => import("../montage/MontagePanel").then((module) => module.MontagePanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
@@ -80,11 +81,16 @@ export interface WindowContext {
   isAdmin: boolean;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
+  // Without the administrator's DeepSeek key nobody has VNAS; its icon says so.
+  assistantNeedsKey: boolean;
+  openSettings: (section: SettingsSection) => void;
   // Web search shows only while an administrator leaves it on (ADR 0030).
   webSearchEnabled: boolean;
   // 照片打分 shows only where its module is installed, to its administrators
   // and the raters they chose (ADR 0037).
   scoring: ScoringAccess;
+  // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
+  montage: boolean;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -101,6 +107,8 @@ export interface SettingsState {
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   storagePlan: StoragePlanFlow;
+  // assistantKeyChanged reads again whether this account has VNAS.
+  assistantKeyChanged: () => void;
 }
 export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
 
@@ -116,6 +124,7 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
       storagePlan={state.storagePlan}
       onUserChange={changeUser}
       onLogout={logout}
+      onAssistantKeyChange={state.assistantKeyChanged}
     />
   );
 }
@@ -140,6 +149,9 @@ interface AppDefinition {
     adminOnly?: boolean;
     // An app that is not ready shows a disabled icon marked 规划中.
     ready?: (context: WindowContext) => boolean;
+    // An app that exists but cannot open now says why under its icon; settings is the
+    // Settings page that changes that, which the icon opens.
+    unavailable?: (context: WindowContext) => { note: string; settings?: SettingsSection } | undefined;
     // An app an administrator turned off has no icon at all.
     visible?: (context: WindowContext) => boolean;
   };
@@ -319,6 +331,18 @@ const definitions = {
       <TodosPanel intent={intents.todos} onIntentHandled={(handled) => intentHandled("todos", handled)} />
     ),
   },
+  montage: {
+    title: "剪辑中心",
+    icon: Clapperboard,
+    tone: "montage",
+    bounds: { x: 220, y: 48, width: 1080, height: 720 },
+    launcher: {
+      id: "montage",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
+      visible: ({ montage }) => montage,
+    },
+    render: ({ session }) => <MontagePanel userId={session.user.id} />,
+  },
   scoring: {
     title: "照片打分",
     icon: PhotoScoringIcon,
@@ -340,7 +364,14 @@ const definitions = {
     launcher: {
       id: "ai",
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
-      ready: ({ assistantReady }) => assistantReady,
+      ready: ({ assistantReady, assistantNeedsKey }) => assistantReady || assistantNeedsKey,
+      // An administrator goes to where the key is set; a member cannot do anything about it.
+      unavailable: ({ assistantNeedsKey, isAdmin }) =>
+        !assistantNeedsKey
+          ? undefined
+          : isAdmin
+            ? { note: "未填写密钥", settings: "assistant" }
+            : { note: "需管理员设置" },
     },
     render: ({ session, open, intents, intentHandled }) => (
       <AssistantPanel
@@ -367,13 +398,31 @@ export function desktopApps(context: WindowContext, isOpen: (id: WindowID) => bo
       return [];
     if (launcher.ready && !launcher.ready(context))
       return [{ id: launcher.id, label: title, ariaLabel: `${title}，规划中`, tone, icon: <Icon />, disabled: true }];
+    const keywords = typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords;
+    const unavailable = launcher.unavailable?.(context);
+    if (unavailable) {
+      const { note, settings } = unavailable;
+      return [
+        {
+          id: launcher.id,
+          label: title,
+          ariaLabel: `${title}，${note}`,
+          keywords,
+          tone,
+          icon: <Icon />,
+          unavailable: true,
+          note,
+          onClick: settings ? () => context.openSettings(settings) : undefined,
+        },
+      ];
+    }
     return [
       {
         id: launcher.id,
         label: title,
         // A Latin name keeps a space after 打开, as in 打开 Docker.
         ariaLabel: `打开${/^[A-Za-z]/.test(title) ? " " : ""}${title}`,
-        keywords: typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords,
+        keywords,
         tone,
         icon: <Icon />,
         active: isOpen(id),

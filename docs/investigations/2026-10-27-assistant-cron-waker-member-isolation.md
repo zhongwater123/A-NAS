@@ -30,7 +30,7 @@ go test ./internal/hostops/linux -run TestDisabledAccountsStopAndMaskAssistantUn
 - [账号停用回归](../../internal/hostops/linux/assistant_test.go)
 - [既有活动身份查询](../../internal/accounts/session_identity_test.go)
 - [AI 助手规格](../specs/ai-assistant.md)
-- [试用与升级手册](../runbooks/try-ai-assistant-on-experimental-nas.md)
+- [试用与升级手册](../runbooks/enable-ai-assistant.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 
 ## 审查补充

@@ -81,7 +81,7 @@ npm run dev
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；zizmor 检查工作流与 Dependabot 配置的安全问题（见[安全扫描](#安全扫描)）；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 | `make vendor-check` | [`scripts/check-dsh-pet-vendor.sh`](../../scripts/check-dsh-pet-vendor.sh) 离线核对复制进来的 dsh-pet：清单的池等于 `install-media-pool.sh` 固定的池与 README 记录的池，README 列出的补丁与补丁目录一致，每个复制文件的文件头写着固定的提交，目录里的文件正是 `dsh-pet/files.sha256` 列出的、内容与复制脚本写下的一致（手工改过任何一个文件都通不过）。给 `DSH_PET=<检出>`（可再给 `DSH_PET_MOV_ZIP=<zip>`）时在临时目录重新引入、要求没有差异，并确认改过的检出被拒绝；重新引入要装有 json5 的 Python，开发机 B 上给 `VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python`。CI 没有检出与 zip，只运行离线部分并打印 SKIP，完整检查是提里程碑或升级前的本地步骤，见[虚拟伙伴](../specs/virtual-companion.md#验收证据) |
 
-`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant-spike/companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。
+`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant/companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。它用 `python3 -m venv` 建环境并在其中运行 pip，需要 Python 带 `ensurepip`：Debian 与 Ubuntu 上是 `python3-venv` 软件包，[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 会检查。
 
 lychee 从发布页下载，核对 SHA-256（与 CI 中的一致）后放进 `PATH`：
 
@@ -101,7 +101,7 @@ python3 -m venv ~/.local/opt/ai-tools
 ~/.local/opt/ai-tools/bin/pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
 ```
 
-开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
+开发机 B 在 2026-11-18 装上 `python3-venv` 之前没有 `ensurepip`，它的 `~/.local/opt/ai-tools` 是用 uv 建的；装不了系统包的机器照此办理：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
 `make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。测试启动的后台操作也要在测试返回前等它结束：之后才写进 `t.TempDir()` 的 goroutine 会让清理报 `directory not empty`（[调查](../investigations/2026-11-04-volume-test-writes-after-cleanup.md)）。
 
@@ -207,7 +207,7 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 
 ## 安全扫描
 
-依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查：govulncheck 查产品与 `tools/` 下各 Go 工具的模块，只报代码可达的漏洞；pip-audit 查 AI 与网页搜索运行环境的 Python 锁；`npm audit --omit=dev` 查 Web 的运行依赖。Web 的开发依赖、`tools/` 下 npm 工具（`openapi`、`changelog`）的包和 `ai/requirements-dev.txt` 不在门禁中，有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。助手运行环境按 Hermes 的锁安装（[`build-runtime.sh`](../../ai/assistant-spike/build-runtime.sh)），它和 [`companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 既不在门禁中，GitHub 的依赖图也看不到。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：交给 imaging 的图片都经 `imagerender.Decode` 解码，它拒绝像素超出调色板的图片，见[调查](../investigations/2026-11-17-imaging-panics-end-the-process.md)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
+依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查：govulncheck 查产品与 `tools/` 下各 Go 工具的模块，只报代码可达的漏洞；pip-audit 查 AI 与网页搜索运行环境的 Python 锁；`npm audit --omit=dev` 查 Web 的运行依赖。Web 的开发依赖、`tools/` 下 npm 工具（`openapi`、`changelog`）的包和 `ai/requirements-dev.txt` 不在门禁中，有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。助手运行环境按 Hermes 的锁安装（[`build-runtime.sh`](../../ai/assistant-spike/build-runtime.sh)），它和 [`companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 既不在门禁中，GitHub 的依赖图也看不到。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：交给 imaging 的图片都经 `imagerender.Decode` 解码，它拒绝像素超出调色板的图片，见[调查](../investigations/2026-11-17-imaging-panics-end-the-process.md)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
 
 工作流：`make ops-check` 先用 actionlint 检查语法与表达式，再用 zizmor 检查工作流与 Dependabot 配置的安全问题，如模板注入、检出后保留凭据、更新没有冷却期。zizmor 的版本由 `ai/requirements-dev.txt` 按哈希固定，`PATH` 上的版本不同即失败，安装见[静态检查](#静态检查)。设了 `GH_TOKEN` 时它还做在线审计，如固定的 Action 提交是否属于该仓库、Action 是否有已知公告；CI 的 `Project checks` 传入作业的只读令牌，本地没有令牌时只做离线审计。检出都写 `persist-credentials: false`，否则 zizmor 报 `artipacked`。
 
