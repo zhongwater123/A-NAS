@@ -27,11 +27,14 @@ import (
 // each answer is checked there and the first good one kept for the input key
 // of the step it answers. The job's own step then takes it into its plan
 // (steps.go), so an answer for inputs the job no longer has is never used.
+// One round plans every 方案 of the job, one after another: a later 方案's
+// steps have input keys of their own (planKey), and their answers wait there
+// until the job comes to them.
 
 // PlanTemplate is the version of the prompt template the round script
 // fills (ai/anas_montage/prompts/); a claim answers it, and a round script
 // that has another refuses the round.
-const PlanTemplate = "plan-v1"
+const PlanTemplate = "plan-v2"
 
 const (
 	// planGrantLife is how long a planning grant lets rounds start.
@@ -152,7 +155,13 @@ func (s *Store) planned(ctx context.Context, input PlanInput, step string) (json
 	if input.StepKey == "" || input.PickKey == "" {
 		return nil, errors.New("the planning step has no input key")
 	}
-	brief, err := s.briefOf(ctx, input.JobID, step, input.StepKey, func() (PlanInput, error) { return input, nil })
+	briefKey := input.StepKey
+	if step == StepOutline {
+		// The outline's brief is the same for every 方案: kept under the
+		// first's key, it is built once.
+		briefKey = input.PickKey
+	}
+	brief, err := s.briefOf(ctx, input.JobID, step, briefKey, func() (PlanInput, error) { return input, nil })
 	if err != nil {
 		return nil, err
 	}

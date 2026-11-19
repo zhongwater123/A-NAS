@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -60,6 +61,9 @@ type jobRun struct {
 	analysis analysisResult
 	catalog  catalogResult
 	excerpt  Excerpt
+	// plan is the 方案 whose steps run, from 1 (0 before the first):
+	// picked to render are its own.
+	plan     int
 	picked   json.RawMessage
 	planned  json.RawMessage
 	timeline timelineResult
@@ -71,6 +75,8 @@ type jobAsset struct{ assetID, objectID string }
 // step is one step: its key from the run so far, and doing it.
 type step struct {
 	name string
+	// plan is the 方案 the step belongs to, 0 for the steps all share.
+	plan int
 	key  func(ctx context.Context, run *jobRun) (string, error)
 	do   func(ctx context.Context, run *jobRun) (any, error)
 	// load takes a stored result back into the run.
@@ -80,8 +86,48 @@ type step struct {
 	reusable func(run *jobRun) bool
 }
 
-func (s *Store) steps() []step {
-	return []step{
+// planStep names a step of the plan-th 方案: the first keeps the plain
+// names, the others add their number ("pick-2").
+func planStep(name string, plan int) string {
+	if plan <= 1 {
+		return name
+	}
+	return fmt.Sprintf("%s-%d", name, plan)
+}
+
+// planOf is a step's plain name and the 方案 it belongs to.
+func planOf(name string) (string, int) {
+	base, number, found := strings.Cut(name, "-")
+	if !found {
+		return name, 1
+	}
+	plan, err := strconv.Atoi(number)
+	if err != nil || plan < 2 {
+		return name, 1
+	}
+	return base, plan
+}
+
+// planKey is the first step's input key of the plan-th 方案. The first
+// 方案's is pickKey itself, which a round plans for; a later one's adds its
+// number, so that it is planned anew and its answers are kept apart. The
+// tools work it out as the job's steps do (briefs.go).
+func planKey(pickKey string, plan int) string {
+	if plan <= 1 {
+		return pickKey
+	}
+	return digest(pickKey, fmt.Sprintf("plan %d", plan))
+}
+
+// steps are a job's steps, in order (docs/architecture/montage-center.md,
+// 两个方案): analysis, catalog and song, which every 方案 shares, then each
+// 方案's own two steps of planning, fill, render and save, for as many 方案
+// as the job started with. The first 方案 saved, the job goes on with the
+// next; the last one's save ends the job. The list is the one place that
+// says the order: what a job shows (Job) and which steps a new input makes
+// stale (startStep) read it.
+func (s *Store) steps(plans int) []step {
+	steps := []step{
 		{name: "analysis", key: s.analysisKey, do: s.analyse,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.analysis) }},
 		{name: "catalog", key: func(_ context.Context, run *jobRun) (string, error) {
@@ -89,26 +135,72 @@ func (s *Store) steps() []step {
 		}, do: s.makeCatalog, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.catalog) }},
 		{name: "song", key: s.songKey, do: s.excerptOf,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.excerpt) }},
-		{name: "pick", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
-		}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
-		{name: "shots", key: func(_ context.Context, run *jobRun) (string, error) {
-			return shotsKey(run.keys["pick"], run.picked), nil
-		}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
-		{name: "fill", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys["shots"], digest(string(run.planned)), fillVersion), nil
-		}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
-		{name: "render", key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key), nil
-		}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
-			reusable: s.filmKept},
-		{name: "save", key: func(_ context.Context, run *jobRun) (string, error) {
-			return run.id + "|" + run.keys["render"], nil
-		}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
 	}
+	for plan := 1; plan <= plans; plan++ {
+		pick, shots, fill, render := planStep("pick", plan), planStep("shots", plan), planStep("fill", plan), planStep("render", plan)
+		steps = append(steps,
+			step{name: pick, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+				if plan > 1 {
+					return planKey(run.keys["pick"], plan), nil
+				}
+				return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
+			}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
+			step{name: shots, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+				return shotsKey(run.keys[pick], run.picked), nil
+			}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
+			step{name: fill, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+				return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
+			}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
+			step{name: render, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+				parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
+				if plan > 1 {
+					// Two 方案 with the same timeline are still two films.
+					parts = append(parts, fmt.Sprintf("plan %d", plan))
+				}
+				return digest(parts...), nil
+			}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
+				reusable: s.filmKept},
+			step{name: planStep("save", plan), plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+				return run.id + "|" + run.keys[render], nil
+			}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
+		)
+	}
+	return steps
 }
 
-// runSteps runs job from its first step not done.
+// stepNames are the names of the steps of a job that makes plans 方案, in order.
+func (s *Store) stepNames(plans int) []string {
+	steps := s.steps(plans)
+	names := make([]string, len(steps))
+	for i, st := range steps {
+		names[i] = st.name
+	}
+	return names
+}
+
+// savedPlans are the job's 方案 whose films are saved.
+func (s *Store) savedPlans(ctx context.Context, q queryer, jobID string) (map[int]bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	saved := map[int]bool{}
+	for rows.Next() {
+		var plan int
+		if err := rows.Scan(&plan); err != nil {
+			return nil, err
+		}
+		saved[plan] = true
+	}
+	return saved, rows.Err()
+}
+
+// runSteps runs job from its first step not done. A 方案 whose film is saved
+// is settled: the film is in the member's library whatever became of the
+// job's videos since, so its steps are neither done again nor made stale by
+// a new input, and the job makes only the 方案 not saved yet
+// (docs/specs/montage-center.md, 素材进回收站或被删除: 已存进相册的成片不受影响).
 func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	run := &jobRun{claimed: job, keys: map[string]string{}}
 	// An interrupted save may already have committed in the photo library.
@@ -118,11 +210,17 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 		return err
 	}
 	if saving {
+		// The 方案 being saved is the first without a version: a version is
+		// recorded in the transaction that releases the fence.
+		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", job.id).Scan(&run.plan); err != nil {
+			return err
+		}
 		var rendered string
 		var key string
+		save := planStep("save", run.plan)
 		err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
-			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name='render'
-			JOIN steps w ON w.job_id=j.id AND w.name='save' WHERE j.id=?`, job.id).Scan(&run.grantID, &rendered, &key)
+			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
+			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, planStep("render", run.plan), save, job.id).Scan(&run.grantID, &rendered, &key)
 		if err != nil {
 			return err
 		}
@@ -130,20 +228,52 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 			return err
 		}
 		run.replayingSave = true
-		run.keys["save"] = key
-		_, err = s.save(ctx, run)
-		return err
+		run.keys[save] = key
+		if _, err = s.save(ctx, run); err != nil || s.finished(ctx, job.id) {
+			return err
+		}
+		// A 方案 before the last: the job goes on with the next.
+		run = &jobRun{claimed: job, keys: map[string]string{}}
 	}
 	if err := s.loadRun(ctx, run); err != nil {
 		return err
 	}
-	for _, st := range s.steps() {
+	saved, err := s.savedPlans(ctx, s.db, job.id)
+	if err != nil {
+		return err
+	}
+	steps := s.steps(job.plans)
+	for i, st := range steps {
 		if s.cancelRequested(ctx, job.id) {
 			return errCancelled
 		}
-		// Every step starts by looking whether the videos are still there.
+		if st.plan != run.plan {
+			// A 方案's steps begin: nothing of the one before is theirs.
+			run.plan = st.plan
+			run.picked, run.planned, run.timeline, run.render = nil, nil, timelineResult{}, renderResult{}
+		}
+		if saved[st.plan] && st.name != StepOutline {
+			continue
+		}
+		// Every step starts by looking whether the videos are still there;
+		// those of a 方案 already saved were passed over above.
 		if err := s.checkAssets(ctx, job); err != nil {
 			return err
+		}
+		if saved[st.plan] {
+			// The first 方案's pick key is also what a round plans for
+			// (ClaimRound, standing): its row follows the job's inputs though
+			// the 方案 itself is settled.
+			key, err := st.key(ctx, run)
+			if err != nil {
+				return err
+			}
+			run.keys[st.name] = key
+			if _, err := s.db.ExecContext(ctx, "UPDATE steps SET input_key = ? WHERE job_id = ? AND name = ? AND input_key <> ?",
+				key, job.id, st.name, key); err != nil {
+				return err
+			}
+			continue
 		}
 		key, err := st.key(ctx, run)
 		if err != nil {
@@ -162,7 +292,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 				continue
 			}
 		}
-		if err := s.startStep(ctx, job.id, st.name, key); err != nil {
+		if err := s.startStep(ctx, job.id, st, key, steps[i+1:], saved); err != nil {
 			return err
 		}
 		result, err := st.do(ctx, run)
@@ -172,8 +302,9 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 		if err != nil {
 			return err
 		}
-		if st.name == "save" {
-			return nil // save records its step with the version and the job's end
+		if base, _ := planOf(st.name); base == "save" {
+			saved[st.plan] = true
+			continue // save records its step with the version, and the last 方案's the job's end
 		}
 		encoded, err := json.Marshal(result)
 		if err != nil {
@@ -263,8 +394,10 @@ func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte
 }
 
 // startStep records the step running with its key; a step with another key
-// starts over, and so does everything after it.
-func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
+// starts over, and so does everything after it (later), but for the steps of
+// a 方案 already saved.
+func (s *Store) startStep(ctx context.Context, jobID string, st step, key string, later []step, saved map[int]bool) error {
+	name := st.name
 	now := sqlitedb.FormatTime(s.now())
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		var stored string
@@ -287,14 +420,18 @@ func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
 		}
 		if stored != key {
 			// A new input: what the steps after it kept is stale.
-			for _, affected := range StepNames[slices.Index(StepNames, name):] {
-				if affected != name {
-					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected); err != nil {
+			for _, affected := range append([]step{st}, later...) {
+				if saved[affected.plan] {
+					continue
+				}
+				if affected.name != name {
+					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected.name); err != nil {
 						return err
 					}
 				}
-				if stored != "" && (affected == "pick" || affected == "shots") {
-					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND step = ? AND voided_at IS NULL", now, jobID, affected); err != nil {
+				if base, plan := planOf(affected.name); stored != "" && (base == StepOutline || base == StepShots) {
+					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND plan = ? AND step = ? AND voided_at IS NULL",
+						now, jobID, plan, base); err != nil {
 						return err
 					}
 				}
@@ -692,29 +829,29 @@ func (s *Store) planInput(run *jobRun, step string) PlanInput {
 	for _, id := range run.catalog.Catalog {
 		cards = append(cards, run.catalog.Cards[id])
 	}
-	return PlanInput{JobID: run.id, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked,
-		StepKey: run.keys[step], PickKey: run.keys["pick"]}
+	return PlanInput{JobID: run.id, Plan: run.plan, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked,
+		StepKey: run.keys[planStep(step, run.plan)], PickKey: run.keys["pick"]}
 }
 
-// accepted is the job's plan for a step taken for this catalog, not voided.
-func (s *Store) accepted(ctx context.Context, jobID, step, catalogKey string) (json.RawMessage, bool, error) {
+// accepted is a 方案's plan for a step taken for this catalog, not voided.
+func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, catalogKey string) (json.RawMessage, bool, error) {
 	var answer string
-	err := s.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
-		ORDER BY accepted_at DESC LIMIT 1`, jobID, step, catalogKey).Scan(&answer)
+	err := s.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
+		ORDER BY accepted_at DESC LIMIT 1`, jobID, plan, step, catalogKey).Scan(&answer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
 	return json.RawMessage(answer), err == nil, err
 }
 
-func (s *Store) accept(ctx context.Context, jobID, step, catalogKey string, answer json.RawMessage) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO plans(job_id, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?)",
-		jobID, step, catalogKey, string(answer), sqlitedb.FormatTime(s.now()))
+func (s *Store) accept(ctx context.Context, jobID string, plan int, step, catalogKey string, answer json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
+		jobID, plan, step, catalogKey, string(answer), sqlitedb.FormatTime(s.now()))
 	return err
 }
 
 func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, PlanInput) (json.RawMessage, error)) (any, error) {
-	if answer, ok, err := s.accepted(ctx, run.id, step, run.keys["catalog"]); err != nil || ok {
+	if answer, ok, err := s.accepted(ctx, run.id, run.plan, step, run.keys["catalog"]); err != nil || ok {
 		return answer, err
 	}
 	answer, err := ask(ctx, s.planInput(run, step))
@@ -731,15 +868,15 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	if !json.Valid(answer) {
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: errors.New("the plan is not JSON")}
 	}
-	return answer, s.accept(ctx, run.id, step, run.keys["catalog"], answer)
+	return answer, s.accept(ctx, run.id, run.plan, step, run.keys["catalog"], answer)
 }
 
 func (s *Store) pick(ctx context.Context, run *jobRun) (any, error) {
-	return s.plan(ctx, run, "pick", s.planner.Pick)
+	return s.plan(ctx, run, StepOutline, s.planner.Pick)
 }
 
 func (s *Store) shots(ctx context.Context, run *jobRun) (any, error) {
-	return s.plan(ctx, run, "shots", s.planner.Shots)
+	return s.plan(ctx, run, StepShots, s.planner.Shots)
 }
 
 // voidPlans voids the job's plans: the catalog changed.

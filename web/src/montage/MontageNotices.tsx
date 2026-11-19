@@ -37,13 +37,20 @@ export function MontageNotices({ onOpen }: { onOpen: () => void }) {
   const [notices, setNotices] = useState<MontageNotice[]>([]);
 
   // Asked once a minute while the page is visible, and when it becomes
-  // visible again; a hidden page asks nothing.
+  // visible again; a hidden page asks nothing. Only the latest request is
+  // listened to: one still on its way when the next is sent is given up, so
+  // that an older answer arriving late does not put back what the newer one
+  // replaced (waiting for planning, after the film was saved).
   useEffect(() => {
-    const leaving = new AbortController();
+    let latest: AbortController | undefined;
     const load = () => {
       if (document.visibilityState !== "visible") return;
-      listNotices(leaving.signal).then(
+      latest?.abort();
+      const asking = new AbortController();
+      latest = asking;
+      listNotices(asking.signal).then(
         (items) => {
+          if (asking !== latest) return;
           const told = seen();
           setNotices(items.filter((notice) => !told.has(key(notice))));
         },
@@ -54,7 +61,8 @@ export function MontageNotices({ onOpen }: { onOpen: () => void }) {
     const timer = window.setInterval(load, POLL_MS);
     document.addEventListener("visibilitychange", load);
     return () => {
-      leaving.abort();
+      latest?.abort();
+      latest = undefined;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", load);
     };

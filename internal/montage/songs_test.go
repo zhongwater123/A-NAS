@@ -239,7 +239,9 @@ func TestAChosenSongIsCopiedAndAnalysed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if song.State != montage.SongAnalyzing || song.Title != "Symphony" || song.Duration != 200 || song.Transcode {
+	// The song says which track it was copied from: two tracks of one title
+	// are told apart by it.
+	if song.State != montage.SongAnalyzing || song.Title != "Symphony" || song.Duration != 200 || song.Transcode || song.TrackID != "track" {
 		t.Fatalf("song = %+v", song)
 	}
 	copies := f.copies(t)

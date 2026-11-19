@@ -327,7 +327,7 @@ const definitions = {
       keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
       visible: ({ montage }) => montage,
     },
-    render: () => <MontagePanel />,
+    render: ({ session }) => <MontagePanel userId={session.user.id} />,
   },
   scoring: {
     title: "照片打分",
