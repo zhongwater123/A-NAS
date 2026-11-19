@@ -1063,7 +1063,8 @@ func TestTheMontageAnalysisGoesOnWhileTheLibraryIsInUse(t *testing.T) {
 	importPhoto(t, f.service, namedAlice, private.ID, "", "a.png", encodePNG(1))
 	processAll(t, f.service)
 	grant, object := f.grant(t, namedAlice, "project:in-use", video)
-	gate := &libraryInUseGate{lockedGate: lockedGate{reason: "foreground"}}
+	gate := &libraryInUseGate{}
+	gate.set(false, "foreground")
 	gate.member.set(false, "memory_low")
 	if worked, err := f.service.ProcessAIJob(ctx, f.embedder, gate); worked || err != nil || f.embedder.embedded != 0 {
 		t.Fatalf("a round with memory short = %v, %v; %d images embedded", worked, err, f.embedder.embedded)
@@ -1082,7 +1083,7 @@ func TestTheMontageAnalysisGoesOnWhileTheLibraryIsInUse(t *testing.T) {
 	if status := aiStatus(t, f.service, namedAlice); status.State != photos.AIPaused || status.Reason != "foreground" {
 		t.Fatalf("status once the analysis is done = %+v", status)
 	}
-	gate.lockedGate.set(true, "")
+	gate.set(true, "")
 	processAI(t, f.service, f.embedder, gate)
 	if f.embedder.embedded != 36 {
 		t.Fatalf("once the library is quiet, %d images embedded; want the photo too", f.embedder.embedded)
