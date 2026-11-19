@@ -535,7 +535,7 @@ func (r *saveRefusal) Unwrap() error { return r.error }
 // and records the version. The last 方案's ends the job; after an earlier
 // one the job goes on with the next. A cancelled job saves nothing.
 func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
-	step, last := planStep("save", run.plan), run.plan >= s.plans
+	step, last := planStep("save", run.plan), run.plan >= run.plans
 	versionKey := run.keys[step]
 	var number int
 	var name string
@@ -607,6 +607,13 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	s.logger.InfoContext(ctx, "montage film saved", "job", run.id, "project", run.projectID, "version", number, "plan", run.plan)
 	if last {
 		s.removeJobFiles(run.id)
+		return nil, nil
+	}
+	// The film is in the library: its copy here does not wait for the 方案
+	// still to be planned and made, however long that takes.
+	_ = film.Close()
+	if err := os.Remove(film.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.logger.WarnContext(ctx, "removing a saved film's copy failed", "job", run.id, "error", err)
 	}
 	return nil, nil
 }

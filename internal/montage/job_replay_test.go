@@ -119,3 +119,32 @@ func TestSongAnalysisChangeVoidsBothAcceptedPlans(t *testing.T) {
 		t.Fatalf("job=%+v, picks=%d, shots=%d", done, env.planner.picks, env.planner.shots)
 	}
 }
+
+// The photo library took the first 方案's film and its answer was lost: the
+// save is replayed with the same version key, once, and the job then goes on
+// with the second 方案, also across a restart.
+func TestALostReplyForTheFirstPlansFilmIsReplayedAndTheJobGoesOn(t *testing.T) {
+	env := newJobEnv(t)
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.plans = 2
+	env.open(t)
+	env.lib.set(func() { env.lib.lostSave = 1 })
+	job := env.generate(t, "lost:first")
+	if !env.store.RunOnce(context.Background()) {
+		t.Fatal("job not claimed")
+	}
+	if waiting := env.job(t, job.ID); waiting.WaitReason != montage.WaitPhotos || waiting.Step != "save" || env.lib.saves != 1 {
+		t.Fatalf("job=%+v, imports=%d", waiting, env.lib.saves)
+	}
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.open(t)
+	env.clock.advance(3 * time.Minute)
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || done.Versions[0].Plan != 1 || done.Versions[1].Plan != 2 || env.lib.saves != 2 {
+		t.Fatalf("job=%+v, imports=%d", done, env.lib.saves)
+	}
+}

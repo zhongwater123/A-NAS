@@ -83,15 +83,15 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 	if token == "" || len(token) > 64 {
 		return roundCall{}, nil, ErrNotFound
 	}
-	call := roundCall{jobID: jobID, plans: s.plans}
+	call := roundCall{jobID: jobID}
 	var state string
 	var epoch, current int
 	var cancelled bool
 	var pickKey sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested,
+	err := q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
 		(SELECT input_key FROM steps WHERE job_id = j.id AND name = 'pick')
 		FROM rounds r JOIN jobs j ON j.id = r.job_id WHERE r.job_id = ? AND r.owner_user_id = ? AND r.attempt_token = ?`,
-		jobID, owner, token).Scan(&call.roundID, &state, &epoch, &call.pickKey, &current, &cancelled, &pickKey)
+		jobID, owner, token).Scan(&call.roundID, &state, &epoch, &call.pickKey, &current, &cancelled, &call.plans, &pickKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return roundCall{}, nil, ErrNotFound
 	}
@@ -208,12 +208,20 @@ func (s *Store) shotsTaken(ctx context.Context, call roundCall, plan int) (bool,
 	return taken, err
 }
 
-// currentPlan is the 方案 a round works on: the first whose second step has
-// no answer yet; past the last, the last. It reads the answers kept, not the
-// job's plans: the job may not have come to an answer yet when the model
-// hands in the next.
+// currentPlan is the 方案 a round works on: the first not saved whose second
+// step has no answer yet; past the last, the last. It reads the answers
+// kept, not the job's plans: the job may not have come to an answer yet when
+// the model hands in the next. A 方案 saved is settled, also when the job's
+// inputs changed since and its answers are under other keys (runSteps).
 func (s *Store) currentPlan(ctx context.Context, call roundCall) (int, error) {
+	saved, err := s.savedPlans(ctx, s.db, call.jobID)
+	if err != nil {
+		return 0, err
+	}
 	for plan := 1; plan < call.plans; plan++ {
+		if saved[plan] {
+			continue
+		}
 		if taken, err := s.shotsTaken(ctx, call, plan); err != nil || !taken {
 			return plan, err
 		}

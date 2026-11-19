@@ -121,9 +121,12 @@ func planKey(pickKey string, plan int) string {
 
 // steps are a job's steps, in order (docs/architecture/montage-center.md,
 // 两个方案): analysis, catalog and song, which every 方案 shares, then each
-// 方案's own two steps of planning, fill, render and save. The first 方案
-// saved, the job goes on with the next; the last one's save ends the job.
-func (s *Store) steps() []step {
+// 方案's own two steps of planning, fill, render and save, for as many 方案
+// as the job started with. The first 方案 saved, the job goes on with the
+// next; the last one's save ends the job. The list is the one place that
+// says the order: what a job shows (Job) and which steps a new input makes
+// stale (startStep) read it.
+func (s *Store) steps(plans int) []step {
 	steps := []step{
 		{name: "analysis", key: s.analysisKey, do: s.analyse,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.analysis) }},
@@ -133,7 +136,7 @@ func (s *Store) steps() []step {
 		{name: "song", key: s.songKey, do: s.excerptOf,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.excerpt) }},
 	}
-	for plan := 1; plan <= s.plans; plan++ {
+	for plan := 1; plan <= plans; plan++ {
 		pick, shots, fill, render := planStep("pick", plan), planStep("shots", plan), planStep("fill", plan), planStep("render", plan)
 		steps = append(steps,
 			step{name: pick, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
@@ -165,9 +168,9 @@ func (s *Store) steps() []step {
 	return steps
 }
 
-// stepNames are the names of a job's steps, in order.
-func (s *Store) stepNames() []string {
-	steps := s.steps()
+// stepNames are the names of the steps of a job that makes plans 方案, in order.
+func (s *Store) stepNames(plans int) []string {
+	steps := s.steps(plans)
 	names := make([]string, len(steps))
 	for i, st := range steps {
 		names[i] = st.name
@@ -175,7 +178,29 @@ func (s *Store) stepNames() []string {
 	return names
 }
 
-// runSteps runs job from its first step not done.
+// savedPlans are the job's 方案 whose films are saved.
+func (s *Store) savedPlans(ctx context.Context, q queryer, jobID string) (map[int]bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	saved := map[int]bool{}
+	for rows.Next() {
+		var plan int
+		if err := rows.Scan(&plan); err != nil {
+			return nil, err
+		}
+		saved[plan] = true
+	}
+	return saved, rows.Err()
+}
+
+// runSteps runs job from its first step not done. A 方案 whose film is saved
+// is settled: the film is in the member's library whatever became of the
+// job's videos since, so its steps are neither done again nor made stale by
+// a new input, and the job makes only the 方案 not saved yet
+// (docs/specs/montage-center.md, 素材进回收站或被删除: 已存进相册的成片不受影响).
 func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	run := &jobRun{claimed: job, keys: map[string]string{}}
 	// An interrupted save may already have committed in the photo library.
@@ -213,7 +238,12 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	if err := s.loadRun(ctx, run); err != nil {
 		return err
 	}
-	for _, st := range s.steps() {
+	saved, err := s.savedPlans(ctx, s.db, job.id)
+	if err != nil {
+		return err
+	}
+	steps := s.steps(job.plans)
+	for i, st := range steps {
 		if s.cancelRequested(ctx, job.id) {
 			return errCancelled
 		}
@@ -225,6 +255,24 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 			// A 方案's steps begin: nothing of the one before is theirs.
 			run.plan = st.plan
 			run.picked, run.planned, run.timeline, run.render = nil, nil, timelineResult{}, renderResult{}
+		}
+		if saved[st.plan] {
+			if st.name != StepOutline {
+				continue
+			}
+			// The first 方案's pick key is also what a round plans for
+			// (ClaimRound, standing): its row follows the job's inputs though
+			// the 方案 itself is settled.
+			key, err := st.key(ctx, run)
+			if err != nil {
+				return err
+			}
+			run.keys[st.name] = key
+			if _, err := s.db.ExecContext(ctx, "UPDATE steps SET input_key = ? WHERE job_id = ? AND name = ? AND input_key <> ?",
+				key, job.id, st.name, key); err != nil {
+				return err
+			}
+			continue
 		}
 		key, err := st.key(ctx, run)
 		if err != nil {
@@ -243,7 +291,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 				continue
 			}
 		}
-		if err := s.startStep(ctx, job.id, st.name, key); err != nil {
+		if err := s.startStep(ctx, job.id, st, key, steps[i+1:], saved); err != nil {
 			return err
 		}
 		result, err := st.do(ctx, run)
@@ -254,6 +302,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 			return err
 		}
 		if base, _ := planOf(st.name); base == "save" {
+			saved[st.plan] = true
 			continue // save records its step with the version, and the last 方案's the job's end
 		}
 		encoded, err := json.Marshal(result)
@@ -344,8 +393,10 @@ func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte
 }
 
 // startStep records the step running with its key; a step with another key
-// starts over, and so does everything after it.
-func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
+// starts over, and so does everything after it (later), but for the steps of
+// a 方案 already saved.
+func (s *Store) startStep(ctx context.Context, jobID string, st step, key string, later []step, saved map[int]bool) error {
+	name := st.name
 	now := sqlitedb.FormatTime(s.now())
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		var stored string
@@ -368,14 +419,16 @@ func (s *Store) startStep(ctx context.Context, jobID, name, key string) error {
 		}
 		if stored != key {
 			// A new input: what the steps after it kept is stale.
-			names := s.stepNames()
-			for _, affected := range names[slices.Index(names, name):] {
-				if affected != name {
-					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected); err != nil {
+			for _, affected := range append([]step{st}, later...) {
+				if saved[affected.plan] {
+					continue
+				}
+				if affected.name != name {
+					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected.name); err != nil {
 						return err
 					}
 				}
-				if base, plan := planOf(affected); stored != "" && (base == StepOutline || base == StepShots) {
+				if base, plan := planOf(affected.name); stored != "" && (base == StepOutline || base == StepShots) {
 					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND plan = ? AND step = ? AND voided_at IS NULL",
 						now, jobID, plan, base); err != nil {
 						return err

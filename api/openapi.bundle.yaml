@@ -17142,6 +17142,9 @@ components:
         id:
           type: string
           minLength: 1
+        trackId:
+          type: string
+          description: 'The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title.'
         title:
           type: string
         duration:

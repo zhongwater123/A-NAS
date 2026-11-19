@@ -173,8 +173,8 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		}
 		jobID, created = newID("job"), true
 		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, state, not_before, created_at, updated_at)
-			VALUES(?, ?, ?, ?, ?, 'queued', ?, ?, ?)`, jobID, owner, projectID, requestKey, string(encoded), now, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before, created_at, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`, jobID, owner, projectID, requestKey, string(encoded), s.plans, now, now, now); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
@@ -216,9 +216,10 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	var step, reason, message sql.NullString
 	var created string
 	var finished sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, state, step, wait_reason, error, created_at, finished_at
+	var plans int
+	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
-		Scan(&job.ID, &job.ProjectID, &job.State, &step, &reason, &message, &created, &finished)
+		Scan(&job.ID, &job.ProjectID, &job.State, &step, &reason, &message, &created, &finished, &plans)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -252,7 +253,8 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	if err := rows.Err(); err != nil {
 		return Job{}, err
 	}
-	for _, name := range s.stepNames() {
+	// The steps of as many 方案 as the job started with.
+	for _, name := range s.stepNames(plans) {
 		st, ok := done[name]
 		if !ok {
 			st = Step{Name: name, State: "pending"}

@@ -217,7 +217,9 @@ var ErrWorkerRefused = errors.New("the worker refused the input")
 
 // SongDetail is a project's song as the music page shows it.
 type SongDetail struct {
-	ID       string  `json:"id"`
+	ID string `json:"id"`
+	// TrackID is the track of the music library the song was copied from.
+	TrackID  string  `json:"trackId,omitempty"`
 	Title    string  `json:"title"`
 	Duration float64 `json:"duration"`
 	// Transcode: browsers cannot play the copy; /song/audio decodes it to
@@ -404,8 +406,8 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source Son
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE projects SET song_id = ?, song_start = NULL, song_selection = NULL, updated_at = ?
-			WHERE id = ? AND owner_user_id = ?`, songID, sqlitedb.FormatTime(s.now()), projectID, owner); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE projects SET song_id = ?, song_track = NULLIF(?, ''), song_start = NULL, song_selection = NULL, updated_at = ?
+			WHERE id = ? AND owner_user_id = ?`, songID, source.TrackID, sqlitedb.FormatTime(s.now()), projectID, owner); err != nil {
 			return err
 		}
 		return forgetUnusedSongs(ctx, tx, owner)
@@ -516,6 +518,7 @@ func (s *Store) ReclaimSongs(ctx context.Context) error {
 // projectSong is a project's song and the start the member chose.
 type projectSong struct {
 	songID    sql.NullString
+	trackID   sql.NullString
 	start     sql.NullFloat64
 	selection sql.NullString
 }
@@ -523,8 +526,8 @@ type projectSong struct {
 func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID string) (projectSong, error) {
 	var song projectSong
 	var state string
-	err := q.QueryRowContext(ctx, `SELECT state, song_id, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
-		projectID, owner).Scan(&state, &song.songID, &song.start, &song.selection)
+	err := q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
+		projectID, owner).Scan(&state, &song.songID, &song.trackID, &song.start, &song.selection)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && state != "ready" {
 		return projectSong{}, ErrNotFound
 	}
@@ -569,7 +572,7 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, 
 	if err != nil {
 		return SongDetail{}, err
 	}
-	detail := SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
+	detail := SongDetail{ID: row.id, TrackID: chosen.trackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
 		State: row.state, Reason: row.reason, Waiting: row.waiting}
 	if st := row.analysis.Structure; st != nil {
 		detail.Tempo, detail.Beats, detail.Downbeats, detail.Sections = st.BPM, st.Beats, st.Downbeats, st.Segments

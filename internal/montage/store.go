@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -264,9 +265,15 @@ DROP TABLE plan_grants;
 `},
 		// 6: a job makes two films to choose from, as the prototype's 方案
 		// (docs/specs/montage-center.md, 两个方案): each plan the job took
-		// and each version says which of the job's 方案 it is. The answers and
-		// briefs of step 5 need nothing: a later 方案's input keys are its own.
+		// and each version says which of the job's 方案 it is, and a job how
+		// many it makes: one for the jobs from before this step, which go on
+		// as they started. The answers and briefs of step 5 need nothing: a
+		// later 方案's input keys are its own. A project also keeps which
+		// track of the music library its song was copied from, for the page
+		// to mark that track and no other of the same title.
 		{Up: `
+ALTER TABLE projects ADD COLUMN song_track TEXT;
+ALTER TABLE jobs ADD COLUMN plans INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE plans ADD COLUMN plan INTEGER NOT NULL DEFAULT 1;
 DROP INDEX plans_by_job;
 CREATE INDEX plans_by_job ON plans(job_id, plan, step, voided_at);
@@ -305,6 +312,8 @@ DROP INDEX plans_by_job;
 DELETE FROM plans WHERE plan <> 1;
 ALTER TABLE plans DROP COLUMN plan;
 CREATE INDEX plans_by_job ON plans(job_id, step, voided_at);
+ALTER TABLE jobs DROP COLUMN plans;
+ALTER TABLE projects DROP COLUMN song_track;
 `},
 	},
 }
@@ -344,7 +353,8 @@ type Store struct {
 	// planMarkers is where the planning markers go, one empty file per
 	// member with a job wanting a round (/run/a-nas-montage/plans).
 	planMarkers string
-	// plans is how many films, 方案, a job makes to choose from.
+	// plans is how many films, 方案, a job started now makes to choose
+	// from; a job keeps the number it started with (jobs.plans).
 	plans int
 	// members holds a member's lock while a request or reconciling changes
 	// that member's projects and grants.
@@ -365,8 +375,13 @@ type Store struct {
 }
 
 // DefaultPlans is how many 方案 a job makes unless Options says otherwise:
-// two films to choose from (docs/specs/montage-center.md, 两个方案).
-const DefaultPlans = 2
+// two films to choose from (docs/specs/montage-center.md, 两个方案). MaxPlans
+// is the most a store can be asked for: the contract names the steps of two
+// (api/components/montage.yaml, MontageJobStep).
+const (
+	DefaultPlans = 2
+	MaxPlans     = 2
+)
 
 // Options are what a store works with.
 type Options struct {
@@ -388,7 +403,8 @@ type Options struct {
 	// PlanMarkers is the directory of planning markers the waker reads;
 	// without it no member's VNAS is asked to plan.
 	PlanMarkers string
-	// Plans is how many films, 方案, each job makes; 0 is DefaultPlans.
+	// Plans is how many films, 方案, each job started makes: 0 is
+	// DefaultPlans, more than MaxPlans is refused.
 	Plans  int
 	Now    func() time.Time
 	Logger *slog.Logger
@@ -400,6 +416,9 @@ type Options struct {
 func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if options.Grants == nil {
 		return nil, errors.New("the montage store needs the photo library's grants")
+	}
+	if options.Plans < 0 || options.Plans > MaxPlans {
+		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
 	}
 	db, err := sqlitedb.Open(filepath.Join(root, DatabaseName), sqlitedb.Options{Durable: true})
 	if err != nil {
@@ -413,7 +432,7 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
 		planMarkers: options.PlanMarkers, plans: options.Plans}
-	if store.plans <= 0 {
+	if store.plans == 0 {
 		store.plans = DefaultPlans
 	}
 	store.jobMusic = store

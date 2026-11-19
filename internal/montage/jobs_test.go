@@ -1366,3 +1366,33 @@ func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
 		t.Fatalf("another file = %v", err)
 	}
 }
+
+// A job makes as many 方案 as the store made when it started: one from
+// before the store made two goes on, and ends, with its one, and shows the
+// steps of one.
+func TestAJobKeepsTheNumberOfPlansItStartedWith(t *testing.T) {
+	env := newJobEnv(t)
+	job := env.generate(t, "generate:1")
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.plans = 2
+	env.open(t)
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Steps) != 8 || len(done.Versions) != 1 || env.lib.saves != 1 {
+		t.Fatalf("the job from before = %+v, %d films saved", done, env.lib.saves)
+	}
+	for _, st := range done.Steps {
+		if st.State != "done" {
+			t.Fatalf("step %s of a finished job is %s", st.Name, st.State)
+		}
+	}
+	next := env.settle(t, env.generate(t, "generate:2").ID)
+	if next.State != montage.JobDone || len(next.Steps) != 13 || len(next.Versions) != 2 {
+		t.Fatalf("a job started now = %+v", next)
+	}
+	// The contract names the steps of two 方案: a store is not opened for more.
+	if _, err := montage.Open(context.Background(), t.TempDir(), montage.Options{Grants: env.lib, Plans: montage.MaxPlans + 1}); err == nil {
+		t.Fatal("a store for three 方案 a job was opened")
+	}
+}

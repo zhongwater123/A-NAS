@@ -8202,6 +8202,8 @@ export interface components {
         };
         MontageSong: {
             id: string;
+            /** @description The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title. */
+            trackId?: string;
             title: string;
             duration: number;
             /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */

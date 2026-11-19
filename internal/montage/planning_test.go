@@ -903,3 +903,75 @@ func TestARoundThatEndsWithOnlyAnOutlineNeedsTheMember(t *testing.T) {
 		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
 	}
 }
+
+// A video deleted for good after the first 方案 was saved: taking it out
+// plans what is left again, in a new round, and the 方案 already saved stays
+// as it is. It is not made again and not saved a second time, which the
+// versions' UNIQUE (job_id, plan) would refuse after the photo library took
+// the film; and its film's copy does not stay in the job's directory while
+// the second 方案 is planned.
+func TestDroppingAVideoAfterTheFirstPlanWasSavedKeepsItAndMakesTheRest(t *testing.T) {
+	ctx := context.Background()
+	env := newTwoPlanEnv(t)
+	job, claim := env.planning(t)
+	env.submit(t, claim, montage.StepOutline, outline("v1-0", "v2-0"))
+	env.submit(t, claim, montage.StepShots, outline("v1-0"))
+	// The first 方案 is made and saved while the round still plans the second.
+	waiting := env.waitForPlan(t, job.ID)
+	if len(waiting.Versions) != 1 || env.lib.saves != 1 || waiting.Step != "pick-2" {
+		t.Fatalf("job = %+v, %d films saved", waiting, env.lib.saves)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "tmp", job.ID, "film.mp4")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the saved film's copy is still in the job's directory: %v", err)
+	}
+	first, segments := waiting.Versions[0], env.editing.segments
+
+	env.lib.set(func() { delete(env.lib.videos, "asset:a2") })
+	env.clock.advance(2 * time.Minute)
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedMissing || len(needs.Missing) != 1 || needs.Missing[0] != "asset:a2" {
+		t.Fatalf("job = %+v", needs)
+	}
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, needs.Missing); err != nil {
+		t.Fatal(err)
+	}
+	if late := env.submit(t, claim, montage.StepOutline, outline("v1-0")); late.Status != montage.ToolRoundOver {
+		t.Fatalf("an answer of the round that planned the old videos = %+v", late)
+	}
+	again := env.waitForPlan(t, job.ID)
+	if env.lib.saves != 1 || env.editing.segments != segments || len(again.Versions) != 1 || again.Versions[0] != first {
+		t.Fatalf("the saved 方案 was touched: job = %+v, %d films saved, %d segments rendered (were %d)",
+			again, env.lib.saves, env.editing.segments, segments)
+	}
+	for _, st := range again.Steps[3:8] {
+		if st.State != "done" {
+			t.Fatalf("the saved 方案's step %s is %s", st.Name, st.State)
+		}
+	}
+	if again.Step != "pick-2" || !env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", again, env.marked(t))
+	}
+	// The new round plans the second 方案 alone, from the videos left; the
+	// first's outline was for other cards and is not given along.
+	second := env.round(t)
+	if plan, earlier := env.outlineBrief(t, second); plan != 2 || earlier != 0 {
+		t.Fatalf("the new round's outline brief names 方案 %d with %d earlier outlines", plan, earlier)
+	}
+	if refused := env.submit(t, second, montage.StepOutline, outline("v2-0")); refused.Status != montage.ToolRejected {
+		t.Fatalf("an outline with a card of the video taken out = %+v", refused)
+	}
+	env.submit(t, second, montage.StepOutline, outline("v1-1"))
+	if got := env.submit(t, second, montage.StepShots, outline("v1-1")); got.Status != montage.ToolAccepted {
+		t.Fatalf("second shots = %+v", got)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	done := env.settle(t, job.ID)
+	if done.State != montage.JobDone || len(done.Versions) != 2 || done.Versions[0] != first || done.Versions[1].Plan != 2 || env.lib.saves != 2 {
+		t.Fatalf("job = %+v, %d films saved", done, env.lib.saves)
+	}
+	if env.jobFiles(job.ID) {
+		t.Fatal("the job's files outlived it")
+	}
+}
