@@ -17,6 +17,7 @@ import (
 
 	"github.com/disintegration/imaging"
 
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 	"github.com/zhongwater123/A-NAS/internal/imagerender"
 )
@@ -130,25 +131,9 @@ func writeJPEG(target string, picture image.Image) error {
 	if err := jpeg.Encode(&encoded, picture, &jpeg.Options{Quality: 86}); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".cover-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temporary.Name()) }()
-	if _, err := temporary.Write(encoded.Bytes()); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	// Put never renders a cover again once its file exists, so the file is
-	// synced before it takes its name: a crash must not leave it empty.
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), target)
+	// Put never renders a cover again once its file exists, so a crash must
+	// not leave it empty under its name.
+	return atomicfile.Write(target, encoded.Bytes(), 0o600)
 }
 
 func validCoverID(id string) bool {
