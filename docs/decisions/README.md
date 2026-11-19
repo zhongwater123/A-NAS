@@ -77,6 +77,7 @@
 
 - [2026-11-17：剪辑中心首版的数据归属与几项做法](2026-11-17-montage-center-first-version.md)
 - [2026-11-17：剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)
+- [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
 
 ### 网页搜索
 

@@ -1,6 +1,6 @@
 # 0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本
 
-状态：proposed（2026-11-19 起草；第 4、5、7、8、10 项由用户 2026-11-19 定下，同日用户要求照原型补齐第 1、2、8、11 项里的界面与规则；“确认这一版”的做法与镜头清单的格式是起草时的默认做法，等用户确认；修订[剪辑中心规格](../specs/montage-center.md#非目标)的非目标“挑一版、快捷微调、精修”）
+状态：proposed（2026-11-19 起草；第 4、5、7、8、10 项由用户 2026-11-19 定下，同日用户要求照原型补齐第 1、2、8、11 项里的界面与规则；“确认这一版”的做法与镜头清单的格式等用户确认，见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)；修订[剪辑中心规格](../specs/montage-center.md#非目标)的非目标“挑一版、快捷微调、精修”）
 
 剪辑中心出了方案一、方案二两条成片之后，成员要能在成片上直接改：确认一版、按音乐槽换镜头，或者说一句话让 VNAS 重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)，父 issue [#514](https://github.com/zhongwater123/A-NAS/issues/514)）。第八版网页原型已经做出了这套交互，但修改只存在浏览器里，“重剪”“修改后的渲染”“预览”都是模拟的。
 
@@ -11,6 +11,8 @@
 - 文字搜镜头用相册的剪辑窗口向量。
 
 这些选择牵涉剪辑中心的数据表、任务种类、相册授权套接字的新操作和窗口向量集合的第一个读者，改回来都要迁移数据或改协议，所以写成 ADR。
+
+本 ADR 对上面这些难以逆转的选择负责。第 1、2、8、11 项里照原型写的界面与数值（每版显示的信息、候选列几个、场景列几个、修改页的布局与提示文字）是 R1 写进规格的输入：R1 合入后以规格为准，这里不随之修改。两项可以改回来的默认做法在[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)里等确认。
 
 ## 背景
 
@@ -26,7 +28,7 @@
 ## 决定
 
 1. **选版页的三个操作**。两个方案并排的每一条成片下面有“确认这一版”“修改镜头”和一个说一句话的输入框加“重剪”。
-   - **确认这一版**：在项目上记下选定的版本（`projects.chosen_version_id`），项目列表与主页以它为这个项目的成片，另一条收进“其他版本”。不删除任何成片，另一条照规格由成员在相册里删；可以改选。（起草时的默认做法）
+   - **确认这一版**：在项目上记下选定的版本（`projects.chosen_version_id`），项目列表与主页以它为这个项目的成片。另一条怎么处理是[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的第 1 项，默认不删除、收进“其他版本”，可以改选。
    - **每一版显示的信息**（照原型）：
      - 成片播放器，同一时刻只播一条；
      - 镜头缩略图条，每格宽度按槽的长短；
@@ -54,12 +56,12 @@
 
 4. **预览按槽轮流播原片，存为新版本时才渲染**（用户 2026-11-19 定）。
    - **粗预览**：页面放这一版的音乐选段，同时按槽轮流播每个槽用到的原片片段，静音，在槽的切点换下一段。原片用相册现有的视频播放；两个 `<video>` 交替，下一段提前载入并跳到起点，切换时不等跳转。以音乐的播放时间为准，原片跟着它换。
-   - **片段取哪一段**：没改过的槽用这一版时间线里的镜头，与成片相同；改过的槽从所选节拍的起点取一个槽长，是近似值，精确的截取等存为新版本时由 `fill` 算。
+   - **片段取哪一段**：没改过的槽按这一版时间线里的镜头取原片，起点与成片相同；放慢过的镜头按原速播，播到的原片比成片里用到的长；改过的槽从所选节拍的起点取一个槽长，是近似值，精确的截取等存为新版本时由 `fill` 算。
    - **不含的东西**：放慢、竖拍的模糊垫底、开头结尾的淡出和无遮挡的截取，页面写明“粗预览，不含放慢、竖拍垫底与淡出”。浏览器不能直接播的原片走相册的转码播放，跳转慢，切点处可能短暂黑屏，粗预览接受。
    - 可以从任意一镜开始播，改一步就能马上再看，不占 FFmpeg 的后台槽位。
    - **音乐**：剪辑中心按这一版任务快照里的配乐副本与选段起点，经 `GET /drafts/{id}/song` 按 Range 送出。
    - **存为新版本**：`edit` 任务按修改稿走“查素材 → 重新填槽 → 渲染 → 存回”，不留中间的预览文件。存回的是新版本、原版本不动，所以先渲染出来再看是不是想要的；不满意就在相册里删掉，修改稿还在，可以接着改。
-   - **即时的辅助**：镜头与候选的缩略图由剪辑中心经 `open` 加 FFmpeg `frames`（JPEG，长边 320，`Interactive` 优先级）现取，不存盘，靠浏览器缓存（内容对象不可变，可以 `private, immutable`）。单个节拍的试看也用相册的视频播放，从节拍起点播到终点。`VideoPlayer` 还不支持起止时间，实施时补上，粗预览与试看共用。
+   - **即时的辅助**：镜头与候选的缩略图由剪辑中心经 `open` 加 FFmpeg `frames`（JPEG，长边 320，`Interactive` 优先级）现取，不存盘，靠浏览器缓存（内容对象不可变，可以 `private, immutable`）。成员在页面上等着看，所以不用 `Background`；这是剪辑中心第一个不走 `Background` 的 FFmpeg 请求，实施方案“[FFmpeg Worker 的新操作](../architecture/montage-center.md#ffmpeg-worker-的新操作)”中“新操作都用 `Background`”在 R1 改写。单个节拍的试看也用相册的视频播放，从节拍起点播到终点。`VideoPlayer` 还不支持起止时间，实施时补上，粗预览与试看共用。
    - 不选“每次预览都先渲染一遍”：一次预览就是一次完整渲染，几分钟里占着后台 FFmpeg 槽位，改一步看一次等不起；存为新版本又不覆盖原片，渲染一次就够。
 
 5. **改完另存新版本，原版本不动**（用户 2026-11-19 定）。
@@ -89,9 +91,9 @@
      - 写了字时列最像的 3 个，往下滚动看更多；没写字时按拍摄先后列出筛选下的全部节拍，不调用搜索。
    - 不选剪辑中心自己调 AI Worker 编码文字：它在 `a-nas-photos` 组里连得上，但那会绕过相册的准入（[ADR 0038](0038-keep-montage-media-in-the-photo-library.md) 决定 4）。不选等 [#207](https://github.com/zhongwater123/A-NAS/issues/207) 的相册视频分段：范围是全相册，#596 要排在它之后。
 
-9. **导出镜头清单**：`GET /versions/{id}/shots.csv` 与 `GET /drafts/{id}/shots.csv`，用 Go 的 `encoding/csv` 写，UTF-8 带 BOM 以便表格软件直接打开。每个镜头一行：镜号、音乐槽、成片里的起止、段落、资产 ID、拍摄时间、原片里的起止、放慢倍数、是否改过；删掉的槽另列由哪一镜补上。原型导出 JSON，是给开发看的；产品给人看。（起草时的默认做法）
+9. **导出镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots`，由服务端按版本或修改稿的时间线生成，每个镜头一行，删掉的槽写明由哪一镜补上。格式与列是[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的第 2 项，默认 CSV。
 
-10. **文档**：按用户 2026-11-19 的要求，这次只写本 ADR，不改规格与实施方案，不开 PR。实施第一张票时，把规格的非目标、场景与验收，实施方案的首版范围、数据、接口与交付，以及 [CONTEXT](../../CONTEXT.md) 的术语（修改稿、音乐槽、锁定、重洗、重剪）按本 ADR 改写，并在那里链接回来。三版并排与快捷微调按钮仍不做。
+10. **文档**：按用户 2026-11-19 的要求，这次只写本 ADR（两项默认做法另写决定记录），不改规格与实施方案，不开 PR。实施第一张票时，把规格的非目标、场景与验收，实施方案的首版范围、数据、接口、FFmpeg 的新操作与交付，[向量索引](../architecture/vector-index.md#剪辑中心的窗口集合)中窗口集合“首版没有读者”的说法，以及 [CONTEXT](../../CONTEXT.md) 的术语（修改稿、音乐槽、锁定、重洗、重剪）按本 ADR 改写，并在那里链接回来。三版并排与快捷微调按钮仍不做。
 
 11. **修改页照原型的样子**（用户 2026-11-19 要求补齐）。
     - **顶栏**：“换一版”回到项目页的两版并排处，版本名与“精修镜头”，镜头数，“重洗没锁的”，“全部还原”，“粗预览”，“导出镜头清单”，“存为新版本”。
@@ -115,7 +117,7 @@
 | GET | `/drafts/{id}/candidates` | `?slot=&q=&size=&scene=&landscape=`：同卡片、备用节拍与搜索结果（没写 `q` 时按拍摄先后列出全部），标明够不够长、已用在第几镜、横竖；回答里附场景的列表与个数 |
 | GET | `/drafts/{id}/song` | 粗预览用的配乐副本，支持 Range |
 | POST | `/drafts/{id}/save` | `{requestKey}`：202 与 `edit` 任务，按当前修订渲染并存为新版本 |
-| GET | `/versions/{id}/shots.csv`、`/drafts/{id}/shots.csv` | 镜头清单 |
+| GET | `/versions/{id}/shots`、`/drafts/{id}/shots` | 镜头清单（格式见第 9 项） |
 | GET | `/projects/{id}/frames/{assetId}` | `?t=` 毫秒：缩略图 |
 
 ## 后果
@@ -133,7 +135,7 @@
 
 | 票 | 内容 | 依赖 |
 |---|---|---|
-| R1 | 规格、实施方案与 CONTEXT 按本 ADR 改写 | 本 ADR 接受 |
+| R1 | 规格、实施方案、向量索引与 CONTEXT 按本 ADR 改写 | 本 ADR 接受 |
 | R2 | 相册 `searchWindows`、窗口集合的别名与 Catalog 退回 | R1、M5 |
 | R3 | 计算 Worker 的 `pins` 与 `likeness`；修改稿、操作、候选、确认、镜头清单、缩略图 | R1、M8a |
 | R4 | `jobs.kind`、`edit` 任务的渲染与存回、粗预览的配乐接口、`versions` 的新列 | R3 |
@@ -152,5 +154,6 @@
 
 - 需求：[#596](https://github.com/zhongwater123/A-NAS/issues/596)、[#514](https://github.com/zhongwater123/A-NAS/issues/514)；原型 PR [#454](https://github.com/zhongwater123/A-NAS/pull/454)
 - 规格与方案：[剪辑中心规格](../specs/montage-center.md)、[剪辑中心技术设计](../architecture/montage-center.md)、[向量索引](../architecture/vector-index.md)
+- 决定记录：[二次编辑起草时选的两项默认做法](../decisions/2026-11-19-montage-edit-defaults.md)
 - ADR：[0038](0038-keep-montage-media-in-the-photo-library.md)、[0028](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - 代码：[`internal/montage/render.go`](../../internal/montage/render.go)、[`internal/montage/steps.go`](../../internal/montage/steps.go)、[`ai/anas_montage/domain/fill.py`](../../ai/anas_montage/domain/fill.py)、[`web/src/montage/ProjectView.tsx`](../../web/src/montage/ProjectView.tsx)、[`internal/photos/search.go`](../../internal/photos/search.go)
