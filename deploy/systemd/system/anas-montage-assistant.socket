@@ -1,12 +1,14 @@
 [Unit]
-Description=A-NAS montage center socket for members' scheduled tasks
+Description=A-NAS montage center socket for planning by members' VNAS
 # The montage center's socket for planning by members' VNAS
-# (docs/architecture/montage-center.md, MCP 服务器): the round script and the
-# montage MCP server of a member's cron unit reach it, and the service learns
-# the member from the peer UID. Open to every UID, so its directory is root's
-# alone; only anas-assistant-cron@.service binds it into its sandbox, never a
-# conversation's instance or the curator. systemd holds it, so it outlives
-# restarts of the montage service. anas-montage.service takes it (Sockets=).
+# (docs/architecture/montage-planning-session.md): the montage MCP server of a
+# member's planning instance reaches it, and the service learns the member
+# from the peer UID; root's planner claims and reports rounds on it, naming
+# the member. Open to every UID, so its directory is root's alone; only
+# anas-assistant-plan@.service binds it into its sandbox, never a
+# conversation's instance, the scheduled tasks or the curator. systemd holds
+# it, so it outlives restarts of the montage service. anas-montage.service
+# takes it (Sockets=).
 
 [Socket]
 ListenStream=/run/a-nas-montage-assistant/assistant.sock

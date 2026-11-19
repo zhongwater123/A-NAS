@@ -153,11 +153,12 @@ for file in "$assistant"/*.sh "$assistant"/*.py; do
 done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
-# The cron unit's policy adds the montage center's planning server, which a
-# conversation's instance never starts (docs/architecture/montage-center.md);
-# the fixed prompt templates a planning round fills go beside it.
-install -d "$lib/assistant/managed-cron" "$lib/assistant/montage-prompts"
-derive_cron_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-cron/config.yaml"
+# The planning instance's policy adds the montage center's planning server,
+# which no other unit starts, and reviews every planning
+# (docs/architecture/montage-planning-session.md); the fixed prompt templates
+# the planner fills go beside it.
+install -d "$lib/assistant/managed-plan" "$lib/assistant/montage-prompts"
+derive_plan_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
 install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
@@ -178,14 +179,15 @@ ln -s "/opt/a-nas/qdrant/$(pin_field "$repo/deploy/qdrant/qdrant.json" sha256)/q
 # console, the container agent and the internet entry are turned on by their
 # runbooks or by a-nas-generator.
 install -m 0644 "$repo"/deploy/systemd/system/* "$units/"
-# The assistant's scheduled tasks and its curator, made from its sandbox.
+# The assistant's scheduled tasks, its curator and its planning instance, made
+# from its sandbox.
 derive_assistant_units "$units"
 wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
 for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-search anas-site \
-  anas-assistant-gateway anas-assistant-cron-waker; do
+  anas-assistant-gateway anas-assistant-cron-waker anas-montage-planner; do
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket

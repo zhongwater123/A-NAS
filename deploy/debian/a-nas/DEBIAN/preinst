@@ -61,8 +61,8 @@ fi
 
 # The writers stop first, so that each copy is whole. The new release starts
 # them again; so does the old one if this one fails to unpack. The montage
-# center's socket for members' scheduled tasks stops before its service, which
-# a round of a member's tasks would otherwise start again through it while
+# center's socket for planning stops before its service, which root's planner
+# or a member's planning instance would otherwise start again through it while
 # montage.db is copied; a release before it has no such unit.
 if [[ -d /run/systemd/system ]]; then
   systemctl stop anas-montage-assistant.socket 2>/dev/null || true

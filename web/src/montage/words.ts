@@ -64,6 +64,7 @@ const reasons: Record<Reason, { text: (videos: number) => string; actions?: JobA
   music_invalid: { text: () => "这首歌不能用。取消后换一首，再开始剪辑" },
   vnas_unknown: { text: () => "VNAS 没有交回规划，重新规划？", actions: ["replan"] },
   plan_invalid: { text: () => "规划连续 3 次不合格", actions: ["replan"] },
+  plan_error: { text: () => "规划出错", actions: ["replan"] },
   storage_full: { text: () => "空间不足，腾出空间后重试", actions: ["retry"] },
 };
 
@@ -84,13 +85,15 @@ export function stateText(job: MontageJob): string {
     case "running":
       return `正在${(job.step && stepNames[job.step as keyof typeof stepNames]) || "处理"}`;
     case "waiting":
-      // The detail says why VNAS has not taken it (VNAS 没有开启、还没有接手…).
+      // The detail says what it waits for and when it tries again (VNAS 正在规划、VNAS 暂时连不上，2 分钟后再试…).
       return job.waitReason === "vnas" && job.error
         ? `等待 VNAS 规划：${job.error}`
         : (reason?.text(videos) ?? "等待中");
     case "needs_input":
       // The round handed the first 方案 back and ended: only the second is asked about.
       if (job.waitReason === "vnas_unknown" && job.step?.endsWith("-2")) return "VNAS 没有交回方案二的规划，重新规划？";
+      // What failed, as the planner reported it.
+      if (job.waitReason === "plan_error" && job.error) return `规划出错：${job.error}`;
       return reason?.text(videos) ?? "需要你处理";
     case "done":
       return "成片已存进相册";

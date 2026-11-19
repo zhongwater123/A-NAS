@@ -346,6 +346,24 @@ describe("剪辑中心", () => {
     await waitFor(() => expect(seen.did).toEqual(["replan"]));
   });
 
+  it("says what failed when the planning failed twice, and plans again", async () => {
+    const seen = fresh();
+    const stopped = job("needs_input", {
+      waitReason: "plan_error",
+      step: "pick",
+      error: "session.create: unknown method",
+    });
+    serve(
+      () => project({ job: stopped }),
+      () => stopped,
+      seen,
+    );
+    const page = await openProject();
+    expect(await within(page).findByText("规划出错：session.create: unknown method")).toBeInTheDocument();
+    await userEvent.click(within(page).getByRole("button", { name: "重新规划" }));
+    await waitFor(() => expect(seen.did).toEqual(["replan"]));
+  });
+
   it("says why a job waits: for VNAS with the reason, and for the photo library", async () => {
     let waiting = job("waiting", { waitReason: "vnas", step: "pick", error: "VNAS 没有开启" });
     serve(

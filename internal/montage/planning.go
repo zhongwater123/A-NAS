@@ -1,6 +1,7 @@
 package montage
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -18,11 +19,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// Planning by the member's own VNAS (docs/architecture/montage-center.md,
-// 规划): a job that comes to planning waits for VNAS and leaves a marker,
-// /run/a-nas-montage/plans/<account>; the waker starts the member's cron
-// unit, whose round script claims a round here, hands the round's prompt
-// to Hermes, and reports that it started and ended. The model reads the
+// Planning by the member's own VNAS (docs/architecture/montage-planning-session.md):
+// a job that comes to planning waits for VNAS and leaves a marker,
+// /run/a-nas-montage/plans/<account>; root's planner claims a round here,
+// holds it as one conversation with the member's planning instance, and
+// reports that it started and how it ended, or that it never started and
+// why (ai/assistant/montage-planner.py). The model reads the
 // briefs and hands the two steps back through the montage tools (briefs.go);
 // each answer is checked there and the first good one kept for the input key
 // of the step it answers. The job's own step then takes it into its plan
@@ -31,9 +33,9 @@ import (
 // steps have input keys of their own (planKey), and their answers wait there
 // until the job comes to them.
 
-// PlanTemplate is the version of the prompt template the round script
-// fills (ai/anas_montage/prompts/); a claim answers it, and a round script
-// that has another refuses the round.
+// PlanTemplate is the version of the prompt template the planner fills
+// (ai/anas_montage/prompts/); a claim answers it, and a planner that has
+// another refuses the round.
 const PlanTemplate = "plan-v2"
 
 const (
@@ -47,20 +49,36 @@ const (
 	// 方案, eight calls or more, which took longer than 30 minutes from the
 	// first. handoverTimeout still bounds the round as a whole.
 	planTimeout = 20 * time.Minute
-	// handoverTimeout: a round handed to Hermes whose model never called a
-	// tool is over by then. Hermes may run the member's own due jobs first,
-	// in the same round of the unit, which lasts an hour at most
-	// (TimeoutStartSec=1h, cron_round.py's ROUND); past that nothing of it
-	// is left to call.
+	// handoverTimeout: a round started is over by then, whatever its model
+	// does. The planner gives a conversation an hour at most
+	// (montage-planner.py's TURN); past that nothing of it is left to call.
 	handoverTimeout = 65 * time.Minute
 	// notTakenAfter: a job that wanted a round this long without one says so.
 	notTakenAfter = 10 * time.Minute
 	// maxPlanRejections: this many answers refused in a row and the
 	// member is asked.
 	maxPlanRejections = 3
-	// planBackoffMost bounds the wait after an abandoned round.
-	planBackoffMost = 30 * time.Minute
+	// After a round VNAS could not be reached for, the next waits 2, 4, 8
+	// minutes, at most unreachableWaitMost; after one that failed, errorWait,
+	// and a second failure is the member's (docs/architecture/montage-planning-session.md, 重试).
+	unreachableWaitFirst = 2 * time.Minute
+	unreachableWaitMost  = 15 * time.Minute
+	errorWait            = time.Minute
+	maxPlanErrors        = 2
 )
+
+// Why a round stopped short of the model's planning (rounds.failure): what
+// it needed could not be reached, which is tried again a few minutes later,
+// or the planning itself failed, which is tried once more. The planner says
+// which; a round that timed out before it started was not reached.
+const (
+	failureUnreachable = "unreachable"
+	failureError       = "error"
+)
+
+// RoundComplete is how a round ends that ran to the model's last answer: the
+// planner's result for a conversation that completed.
+const RoundComplete = "complete"
 
 // Round states.
 const (
@@ -70,7 +88,7 @@ const (
 	RoundAbandoned = "abandoned"
 )
 
-// Planning errors the round script and the tools are told.
+// Planning errors the planner and the tools are told.
 var (
 	// ErrNoPlanWanted: no job of the member waits for a round.
 	ErrNoPlanWanted = errors.New("no job waits for planning")
@@ -80,14 +98,27 @@ var (
 	ErrJobCancelled = errors.New("the job was cancelled")
 )
 
-// The details a job waiting for VNAS shows (docs/specs/montage-center.md).
+// The details a job waiting for VNAS shows (docs/specs/montage-center.md):
+// what it waits for and, when it waits to try again, when that is.
 const (
 	DetailVNASOff   = "VNAS 没有开启"
 	DetailGrantOld  = "规划授权已过期，请点“重新规划”"
 	DetailNotTaken  = "VNAS 还没有接手"
-	DetailRetrying  = "VNAS 这一轮没有开始，稍后再试"
+	DetailPlanning  = "VNAS 正在规划"
 	detailSeparator = ": "
 )
+
+// DetailUnreachable is the detail of a job that tries again in minutes after
+// a round VNAS could not be reached for.
+func DetailUnreachable(minutes int) string {
+	return fmt.Sprintf("VNAS 暂时连不上，%d 分钟后再试", minutes)
+}
+
+// DetailFailed is the detail of a job that tries once more in minutes after a
+// round whose planning failed.
+func DetailFailed(minutes int) string {
+	return fmt.Sprintf("规划出错，%d 分钟后再试一次", minutes)
+}
 
 // planDetail is the detail an ErrPlanPending carries.
 func planDetail(err error) string {
@@ -102,7 +133,7 @@ func pending(detail string) error {
 	return fmt.Errorf("%w%s%s", ErrPlanPending, detailSeparator, detail)
 }
 
-// accountName is what the waker accepts as an account's name: the marker
+// accountName is what the planner accepts as an account's name: the marker
 // is a file named by it.
 var accountName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
@@ -202,49 +233,95 @@ func shotsKey(pickKey string, picked []byte) string {
 	return digest(pickKey, digest(string(picked)), promptVersion)
 }
 
-// lastRound is the job's latest round for its epoch and inputs.
-type lastRound struct {
-	id, state     string
-	ended         time.Time
-	abandonedRuns int
+// pastRound is one of the job's rounds for its epoch and inputs.
+type pastRound struct {
+	state, failure, outcome string
+	ended                   time.Time
 }
 
-func (s *Store) latestRound(ctx context.Context, jobID string, epoch int, pickKey string) (lastRound, bool, error) {
-	var round lastRound
-	var ended sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id, state, ended_at FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ?
-		ORDER BY claimed_at DESC, id DESC LIMIT 1`, jobID, epoch, pickKey).Scan(&round.id, &round.state, &ended)
-	if errors.Is(err, sql.ErrNoRows) {
-		return lastRound{}, false, nil
-	}
+// pastRounds are the job's latest rounds for its epoch and inputs, the latest first.
+func (s *Store) pastRounds(ctx context.Context, jobID string, epoch int, pickKey string) ([]pastRound, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT state, failure, outcome, ended_at FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ?
+		ORDER BY claimed_at DESC, id DESC LIMIT 20`, jobID, epoch, pickKey)
 	if err != nil {
-		return lastRound{}, false, err
+		return nil, err
 	}
-	if at := scanTime(ended); at != nil {
-		round.ended = *at
+	defer rows.Close()
+	var rounds []pastRound
+	for rows.Next() {
+		var round pastRound
+		var ended sql.NullString
+		if err := rows.Scan(&round.state, &round.failure, &round.outcome, &ended); err != nil {
+			return nil, err
+		}
+		if at := scanTime(ended); at != nil {
+			round.ended = *at
+		}
+		rounds = append(rounds, round)
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ? AND state = 'abandoned'",
-		jobID, epoch, pickKey).Scan(&round.abandonedRuns); err != nil {
-		return lastRound{}, false, err
-	}
-	return round, true, nil
+	return rounds, rows.Err()
 }
 
-// planBackoff is how long after its nth abandoned round a job waits before
-// it asks again: 1, 2, 4… minutes, at most 30.
-func planBackoff(n int) time.Duration {
-	if n <= 0 {
-		return 0
-	}
-	delay := time.Minute << min(n-1, 5)
-	return min(delay, planBackoffMost)
+// unreachableWait is how long a job waits after its nth round in a row that
+// could not reach VNAS: 2, 4, 8 minutes, then 15.
+func unreachableWait(n int) time.Duration {
+	return min(unreachableWaitFirst<<min(max(n, 1)-1, 4), unreachableWaitMost)
 }
+
+// retryWait is how long the job still waits before VNAS is asked again after
+// rounds that stopped short of the model's planning, the latest first, and
+// what it waits for; or, after the second that failed, why the member is
+// asked. Only rounds since the member last registered a planning grant, and
+// since the montage service started, count: doing something that may need
+// planning, or installing another version, tries again at once.
+func (s *Store) retryWait(rounds []pastRound, registered time.Time) (time.Duration, string, error) {
+	since := registered
+	if s.opened.After(since) {
+		since = s.opened
+	}
+	failed, unreached, said := 0, 0, ""
+	for _, round := range rounds {
+		switch {
+		case round.ended.Before(since):
+		case round.failure == failureError:
+			failed++
+			if said == "" {
+				said = round.outcome
+			}
+		case failed == 0:
+			unreached++
+		}
+	}
+	if failed >= maxPlanErrors {
+		return 0, "", &planFailed{said: said}
+	}
+	latest := rounds[0]
+	if latest.ended.Before(since) {
+		return 0, "", nil
+	}
+	wait, detail := unreachableWait(unreached), DetailUnreachable
+	if latest.failure == failureError {
+		wait, detail = errorWait, DetailFailed
+	}
+	left := latest.ended.Add(wait).Sub(s.now())
+	if left <= 0 {
+		return 0, "", nil
+	}
+	return left, detail(int((left + time.Minute - 1) / time.Minute)), nil
+}
+
+// planFailed: the planning failed twice; said is what the planner reported.
+type planFailed struct{ said string }
+
+func (p *planFailed) Error() string { return "the planning failed: " + p.said }
+func (p *planFailed) Unwrap() error { return ErrPlanFailed }
 
 // awaitPlan says why the job's step has no plan yet: a round runs, VNAS has
-// not taken it, or it needs the member, when a round ended without the step
-// or the answers kept failing their checks. A job that may have a round
-// wants one and leaves its owner's marker; one that may not wants none.
-// pickKey is the first step's input key, which a round plans for.
+// not taken it, it waits to try again, or it needs the member, when a round
+// ended without the step, the planning failed twice or the answers kept
+// failing their checks. A job that may have a round wants one and leaves its
+// owner's marker; one that may not wants none. pickKey is the first step's
+// input key, which a round plans for.
 func (s *Store) awaitPlan(ctx context.Context, jobID, step, pickKey string) error {
 	var owner string
 	var rejections, epoch int
@@ -272,28 +349,31 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, step, pickKey string) erro
 	if rejections >= maxPlanRejections {
 		return unwanted(ErrPlanInvalid)
 	}
-	round, found, err := s.latestRound(ctx, jobID, epoch, pickKey)
+	rounds, err := s.pastRounds(ctx, jobID, epoch, pickKey)
 	if err != nil {
 		return err
-	}
-	if found {
-		switch round.state {
-		case RoundClaimed, RoundStarted:
-			return unwanted(pending(""))
-		case RoundEnded:
-			// The model may have been called: never started again on its own (#514).
-			return unwanted(fmt.Errorf("%w: the round ended without the %s step", ErrPlanUnknown, step))
-		case RoundAbandoned:
-			// From when the round was abandoned: one that timed out was
-			// abandoned five minutes after its claim.
-			if wait := planBackoff(round.abandonedRuns); s.now().Before(round.ended.Add(wait)) {
-				return unwanted(pending(DetailRetrying))
-			}
-		}
 	}
 	username, registered, granted, err := s.planGrant(ctx, s.db, owner)
 	if err != nil {
 		return err
+	}
+	if len(rounds) > 0 {
+		switch latest := rounds[0]; {
+		case latest.state == RoundClaimed || latest.state == RoundStarted:
+			return unwanted(pending(DetailPlanning))
+		case latest.state == RoundEnded && latest.failure != failureError:
+			// The model may have been called: never started again on its own (#514).
+			return unwanted(fmt.Errorf("%w: the round ended without the %s step", ErrPlanUnknown, step))
+		}
+		// The rounds stopped short of the model's planning: one that timed
+		// out before it started was abandoned five minutes after its claim.
+		wait, detail, err := s.retryWait(rounds, registered)
+		if err != nil {
+			return unwanted(err)
+		}
+		if wait > 0 {
+			return unwanted(pending(detail))
+		}
 	}
 	switch {
 	case !granted:
@@ -394,8 +474,8 @@ func (s *Store) SyncMarkers(ctx context.Context) error {
 	return nil
 }
 
-// syncMarkers is SyncMarkers for where a failure only delays: the waker
-// would start a round that claims nothing, which syncs them again.
+// syncMarkers is SyncMarkers for where a failure only delays: the planner
+// would claim a round that finds nothing, which syncs them again.
 func (s *Store) syncMarkers(ctx context.Context) {
 	if err := s.SyncMarkers(ctx); err != nil {
 		s.logger.WarnContext(ctx, "syncing the planning markers failed", "error", err)
@@ -404,13 +484,16 @@ func (s *Store) syncMarkers(ctx context.Context) {
 
 // --- rounds ---
 
-// Claim is what a claimed round tells the round script.
+// Claim is what a claimed round tells the planner: what it fills the
+// template with, and the project's name, which titles the conversation in
+// the member's VNAS history.
 type Claim struct {
 	RoundID       string `json:"roundId"`
 	JobID         string `json:"jobId"`
 	AttemptToken  string `json:"attemptToken"`
 	Template      string `json:"template"`
 	TargetSeconds int    `json:"targetSeconds"`
+	Project       string `json:"project"`
 }
 
 func newToken() string {
@@ -420,10 +503,9 @@ func newToken() string {
 }
 
 // ClaimRound starts a round for owner's earliest job that wants one, while
-// the waker's marker is there. The round plans for the job's epoch and the
+// the member's marker is there. The round plans for the job's epoch and the
 // first step's input key as they are now. A claim that finds no such job
-// leaves no marker behind: the waker would start the member's unit for it
-// again and again.
+// leaves no marker behind: the planner would claim for it again and again.
 func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 	var claim Claim
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -435,11 +517,11 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 			return ErrNoPlanWanted
 		}
 		var epoch int
-		var pickKey string
-		err = tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
+		var pickKey, settings string
+		err = tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
 			WHERE j.owner_user_id = ? AND `+wantsRound+`
 			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
-			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&claim.JobID, &epoch, &pickKey)
+			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&claim.JobID, &epoch, &pickKey, &settings)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNoPlanWanted
 		}
@@ -452,6 +534,10 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 			return err
 		}
 		claim.TargetSeconds = excerptSeconds(excerpt.String)
+		var kept JobSettings
+		if json.Unmarshal([]byte(settings), &kept) == nil {
+			claim.Project = kept.ProjectName
+		}
 		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), PlanTemplate
 		now := sqlitedb.FormatTime(s.now())
 		if _, err := tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
@@ -503,8 +589,9 @@ func (s *Store) round(ctx context.Context, q queryer, owner, roundID string) (ro
 // outcome; the rounds it ends follow.
 const endRound = `UPDATE rounds SET ended_at = ?, outcome = ?, state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END`
 
-// endRounds ends the job's rounds in progress, whatever they plan for.
-// Their Hermes jobs are the next round's to remove (StaleRounds).
+// endRounds ends the job's rounds in progress, whatever they plan for. Their
+// conversations stay in the member's VNAS history; what they hand back from
+// now on is not kept.
 func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outcome string) error {
 	_, err := q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
 	return err
@@ -520,8 +607,9 @@ func (s *Store) newPlanEpoch(ctx context.Context, tx *sql.Tx, jobID, why string)
 	return endRounds(ctx, tx, jobID, s.now(), why)
 }
 
-// StartRound records that the round's job was handed to Hermes, as runRef;
-// a round abandoned or over is refused, and the script removes the job.
+// StartRound records that the round was handed to the member's planning
+// instance as the conversation runRef, before its prompt goes in; a round
+// abandoned or over is refused, and the planner hands nothing to the model.
 func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) error {
 	if len(runRef) > 128 {
 		return ErrInvalid
@@ -544,9 +632,15 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 	})
 }
 
-// AbandonRound records that the round stopped before Hermes had it: no
-// model was called, and the job waits for another round after a backoff.
-func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason string) error {
+// AbandonRound records that the round stopped before its prompt reached the
+// model, and why: failure says whether what it needed could not be reached
+// (failureUnreachable, also for anything else the planner says) or the
+// planning failed (failureError). The job waits for another round
+// (retryWait).
+func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failure string) error {
+	if failure != failureError {
+		failure = failureUnreachable
+	}
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
 		if err != nil {
@@ -556,8 +650,8 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason string)
 			return ErrRoundOver
 		}
 		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ? WHERE id = ?",
-			now, now, truncate(reason, 500), roundID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
+			now, now, truncate(reason, 500), failure, roundID); err != nil {
 			return err
 		}
 		return s.dueNow(ctx, tx, r.jobID)
@@ -568,9 +662,17 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason string)
 	return err
 }
 
-// EndRound records how the round's run ended in Hermes. A round reported
-// before it started is abandoned.
-func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome string) error {
+// EndRound records how the round's conversation ended: result is
+// RoundComplete for one that ran to the model's last answer, else what
+// stopped it (an error, a timeout, the conversation cut off). One that
+// stopped before the model called any montage tool failed (failureError):
+// whether the model had begun is unknown, but it planned nothing, and the
+// job tries once more. A round reported before it started is abandoned.
+func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result string) error {
+	failure := ""
+	if result != "" && result != RoundComplete {
+		failure = failureError
+	}
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
 		if err != nil {
@@ -579,11 +681,12 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome string) er
 		now := sqlitedb.FormatTime(s.now())
 		switch r.state {
 		case RoundClaimed:
-			_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ? WHERE id = ?",
-				now, now, truncate(outcome, 500), roundID)
+			_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
+				now, now, truncate(outcome, 500), cmp.Or(failure, failureUnreachable), roundID)
 		case RoundStarted:
-			_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'ended', ended_at = ?, reported_at = ?, outcome = ? WHERE id = ?",
-				now, now, truncate(outcome, 500), roundID)
+			_, err = tx.ExecContext(ctx, `UPDATE rounds SET state = 'ended', ended_at = ?, reported_at = ?, outcome = ?,
+				failure = CASE WHEN called_at IS NULL THEN ? ELSE '' END WHERE id = ?`,
+				now, now, truncate(outcome, 500), failure, roundID)
 		default:
 			_, err = tx.ExecContext(ctx, "UPDATE rounds SET reported_at = COALESCE(reported_at, ?) WHERE id = ?", now, roundID)
 		}
@@ -598,46 +701,11 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome string) er
 	return err
 }
 
-// StaleRound is a round whose run may have left a job and a session in
-// Hermes: claimed by an earlier run of the unit, never reported.
-type StaleRound struct {
-	RoundID string `json:"roundId"`
-	RunRef  string `json:"runRef,omitempty"`
-}
-
-// StaleRounds lists owner's rounds no round script reported the end of.
-func (s *Store) StaleRounds(ctx context.Context, owner string) ([]StaleRound, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, run_ref FROM rounds WHERE owner_user_id = ? AND reported_at IS NULL ORDER BY claimed_at", owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	stale := []StaleRound{}
-	for rows.Next() {
-		var r StaleRound
-		if err := rows.Scan(&r.RoundID, &r.RunRef); err != nil {
-			return nil, err
-		}
-		stale = append(stale, r)
-	}
-	return stale, rows.Err()
-}
-
-// CleanedRounds records that the round script removed these rounds' jobs
-// and sessions: a round still claimed is abandoned, one started is over.
-func (s *Store) CleanedRounds(ctx context.Context, owner string, roundIDs []string) error {
-	for _, id := range roundIDs {
-		if err := s.EndRound(ctx, owner, id, "cleaned up by a later round"); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-	}
-	return nil
-}
-
 // SweepRounds ends the rounds that ran out of time: claimed and not started
-// in five minutes (abandoned, no model called); started and not ended thirty
-// minutes after the model's first call, or with no call at all once the
-// unit's own round is over (what they did not hand back is unknown).
+// in five minutes (abandoned, no model called, as if VNAS was not reached);
+// started and not ended twenty minutes after the model's last call, or
+// whatever the model does once the planner's own limit is over (what they
+// did not hand back is unknown).
 func (s *Store) SweepRounds(ctx context.Context) error {
 	now := s.now()
 	late := `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND (started_at <= ? OR called_at <= ?))`
