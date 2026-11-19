@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-16
+更新时间：2026-11-19
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -13,13 +13,13 @@
 | Fake 模式界面预览 | Windows 用 [fake-preview](../../.claude/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
 | systemd 系统测试 | [system-test](../../.claude/skills/system-test/SKILL.md) |
 
-`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。`make check` 以 `make -k` 运行这些目标：一步失败后继续运行其余各步，最后报告全部失败，耗时短的格式、文档、运维、vendor、vet 与 golangci-lint 排在最前；直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
 
 ## Qdrant 测试依赖
 
 向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。在 Linux x86_64 开发环境中先运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
-清单目前固定 Linux x86_64 包。其他架构使用 `ANAS_QDRANT_BINARY` 前需自行验证同版本二进制的可运行性；项目尚无已验证的 ARM64 完整门禁流程。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
+清单目前固定 Linux x86_64 包。ARM64 Linux 上经 binfmt 注册的 x86_64 模拟（qemu-user-static 或 Rosetta）运行同一个二进制，开发机 C 的做法见 [macOS 环境](environments/macos.md#运行检查)；[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 检查二进制是否已获取、binfmt 是否已注册。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
 
 ## 测试素材
 
@@ -92,7 +92,7 @@ tar -xzf /tmp/lychee.tar.gz -C /tmp
 install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 ```
 
-开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。 它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
 
 Ruff、pip-audit、zizmor 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 

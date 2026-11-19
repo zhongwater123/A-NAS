@@ -1,19 +1,21 @@
 # macOS 与 Colima 开发环境
 
-更新时间：2026-11-11
+更新时间：2026-11-19
 
 开发机 C 的配置与操作步骤。公共检查要求见[测试与验证](../testing.md)。
 
 | 项目 | 状态 |
 |---|---|
 | 系统 | macOS 27.0.1，Apple 芯片（arm64） |
-| 检出 | `~/Desktop/A-NAS`，在 iCloud“桌面与文稿”的同步范围内，见[注意事项](#注意事项) |
+| 检出 | `~/code/A-NAS`，不在 iCloud 的同步范围内，见[注意事项](#注意事项) |
 | 本机工具 | Homebrew 安装的 Go 1.27.3、ShellCheck 0.11.0、bash 5.3、Colima 0.10.3 与 Docker CLI；Node.js 26.11.1、npm 11.20.0；Ruff 0.17.1 按[静态检查](../testing.md#静态检查)装在 `~/.local/opt/ruff` |
 | `~/.anas-env` | 把 Ruff 与 `/opt/homebrew/bin` 放在 `PATH` 最前面：macOS 自带的 `/bin/bash` 是 3.2，`ops-check` 需要 bash 4 以上 |
 | Linux 虚拟机 | Colima 配置 `anas`：vz、6 核、8 GiB，Ubuntu 24.04 arm64，只供 A-NAS 使用；本机的 `default` 配置留给其他项目 |
-| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、Ruff 0.17.1；gcc 13.3 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
-| 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`；系统测试镜像尚未构建 |
+| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2（见[静态检查](../testing.md)）、Ruff 0.17.1，zizmor 1.32.0 与 pip-audit 2.10.1 在 venv `~/.local/opt/zizmor` 中；gcc 13.3、`file` 与 qemu-user-static 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
+| 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`、系统测试镜像 `anas-systemd:trixie` |
 | 模型 | `~/A-NAS-models`，目录结构与 `scripts/fetch-models.sh` 的 `layout` 相同（`embeddinggemma-2-740m`、`faces/yunet`、`faces/auraface`、`pets/dinov2-small`、`dfine-obj365`），另有 `faces/sface`；文件按 `deploy/models/*.json` 中的地址下载，并核对 SHA-256。D-FINE 只有官方权重 `dfine_m_obj365.pth`：在 arm64 上按清单导出的 ONNX 大小相同但 SHA-256 不同，Worker 与打包都会拒绝，放在 `dfine-obj365/arm64-export`，只供本机评估；`dfine-obj365/official` 用 `scripts/fetch-models.sh ~/A-NAS-models` 拉取（[拉取模型](../ai-development.md#拉取模型)） |
+| 测试照片 | `~/A-NAS-datasets/shared-gallery/<月份>/`：实验 NAS 相册共享图库的原图（JPEG、PNG 与一段 MP4），每月附 NAS 记录的清单 `manifest-*.json`，`SHA256SUMS` 为本机计算值。相册没有打包下载，按月经 Web 的相册接口取原图 |
+| 测试视频 | `~/A-NAS-datasets/videos/`：12 段可署名使用的视频，共 8.5 GiB。11 段是 Wikimedia Commons 上 CC BY / CC BY-SA 或公有领域的 WebM，SHA-1 与 Commons 公布的一致，其中两段是 4K、10 分钟以上；另有 Netflix Open Content 的 Meridian（4K 59.94p HDR PQ 的 MP4，CC BY 4.0），按其 S3 分片 ETag 核对。最长一段是 67 分钟的 1080p 爱丁堡街景；`CREDITS.md` 记录作者、许可与原始页面，展示时按许可署名 |
 | 网络 | Docker Hub 时通时断（`registry-1.docker.io` 有时被解析到错误地址），拉取失败时重试；`proxy.golang.org`、`vuln.go.dev`、npm、PyPI、GitHub 与 `deb.debian.org` 可达 |
 
 ## 为什么用虚拟机
@@ -31,18 +33,20 @@ docker context use colima    # colima start 会把 Docker 上下文切到 colima
 
 虚拟机中的工具链：
 
-- 用 apt 安装 `build-essential`、`jq`、`rsync` 与 `python3-venv`。
+- 用 apt 安装 `build-essential`、`jq`、`rsync`、`python3-venv`、`file` 与 `qemu-user-static`。`file` 是[环境检查](../../../scripts/check-dev-env.sh)要求的工具；qemu-user-static 注册 x86_64 的 binfmt，见[运行检查](#运行检查)。
 - Go 与 Node.js 从官方地址下载 linux-arm64 包，按官方公布的 SHA-256 核对。
 - ShellCheck 用 GitHub 发布的 `shellcheck-v0.11.0.linux.aarch64.tar.xz`，SHA-256 为 `12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588`。
-- Ruff、pip-audit 与 uv 按[静态检查](../testing.md#静态检查)的命令安装：`make check` 的 `vuln-check` 需要 pip-audit。
+- Ruff、pip-audit、zizmor 与 uv 按[静态检查](../testing.md#静态检查)的命令装进 `~/.local/opt` 下的 venv：`ops-check` 需要 zizmor，`vuln-check` 需要 pip-audit，版本都以 `ai/requirements-dev.txt` 为准。
+- lychee 按[静态检查](../testing.md#静态检查)下载同一发布中的 `lychee-aarch64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后放进 `~/.local/opt/lychee`。
+- 以上各目录（venv 的是其 `bin`）都写进虚拟机的 `~/.anas-env`，加入 `PATH`。在副本中运行 `bash scripts/check-dev-env.sh` 确认：它核对 ShellCheck、lychee 与 zizmor 的固定版本、pip-audit、Qdrant 与 binfmt，以及剩余磁盘空间。
 
 镜像拉不下来时，可以从已有该镜像的虚拟机复制：`docker --context <来源> save <镜像> | docker --context colima-anas load`。
 
 ## 运行检查
 
-当前清单固定的是 Linux x86_64 Qdrant，不能直接作为这台 ARM64 虚拟机的原生二进制运行。这里尚无经过验证的兼容运行方案；完整门禁可交给 Windows/WSL 开发机或 CI 执行。Qdrant 的版本、路径和强制检查规则见[测试依赖](../testing.md#qdrant-测试依赖)。
+`deploy/qdrant/qdrant.json` 只固定了 Linux x86_64 的静态链接版。虚拟机装了 qemu-user-static，经 binfmt 以用户态模拟运行它，测试用的仍是清单所列的同一个二进制（2026-11-19 在虚拟机中：`qdrant --version` 输出 1.20.0，`internal/vectorindex` 的测试在 `ANAS_QDRANT_REQUIRED=1` 下通过）。下面的入口在副本中用 `scripts/fetch-qdrant.sh` 取得它，并像 CI 一样设 `ANAS_QDRANT_REQUIRED=1`，缺少时失败。Qdrant 的版本、路径和强制检查规则见[测试依赖](../testing.md#qdrant-测试依赖)；不要通过取消 `ANAS_QDRANT_REQUIRED` 来报告完整门禁通过。
 
-下面的完整检查入口会强制要求 Qdrant，缺少时失败。只有在虚拟机中准备好同版本、确认能够运行的 Qdrant，并在 `~/.anas-env` 中导出绝对路径 `ANAS_QDRANT_BINARY` 后，才能用它验证全部目标。不要通过取消 `ANAS_QDRANT_REQUIRED` 来报告完整门禁通过。
+虚拟机的 60 GiB 数据盘只挂在 `/var/lib/docker`；`~/anas-check` 所在的根分区约 19 GiB，其他会话的副本也在那里。完整门禁需要约 20 GiB 空闲，环境检查不足时给出警告；用完的副本及时删除。
 
 在检出根目录运行；再次运行只同步改动：
 
@@ -55,12 +59,14 @@ mkdir -p "$dst"
 rsync -a --delete --exclude .git --exclude web/node_modules --exclude tools/openapi/node_modules --exclude build \
   --include internal/webui/dist/.keep --exclude 'internal/webui/dist/*' "$src"/ "$dst"/
 cd "$dst"
+# The vector index tests run the pinned Qdrant, as in CI.
+bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
 if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 
-尚未准备好 Qdrant 时，可将上面的 `make check-steps` 换成 `make docs-check` 等独立目标；记录实际执行的目标，不将部分检查记为完整通过。
+`make check-steps` 在第一个失败处停止；要一次看到全部失败，换成 `make -k check-steps`（`make check` 本身就这样运行）。只跑部分检查时，换成 `make docs-check` 等独立目标；记录实际执行的目标，不将部分检查记为完整通过。
 
 ## Fake 预览
 
@@ -98,11 +104,12 @@ EOF
 
 ## 注意事项
 
-- iCloud 同步的目录中，iCloud 可能生成“空格加数字”的冲突副本（如 `index 3.html`），也会把不常用的文件移到云端、本地只留占位，rsync 读到占位文件时报 `Resource deadlock avoided`。因此上面的 rsync 跳过 `internal/webui/dist` 的构建产物（副本中会重新构建）。新的检出、模型与数据集都应放在不同步的目录。
+- 检出、模型与数据集不要放在 iCloud 同步的目录（如桌面、文稿）。切换分支等短时间内的大量改写会让 iCloud 生成“空格加数字”的冲突副本（如 `config 2.go`），Go 会把这些 `.go` 副本一起编译，报重复定义；iCloud 还会把不常用的文件移到云端、本地只留占位，rsync 读到时报 `Resource deadlock avoided`。旧检出 `~/Desktop/A-NAS` 仍在同步范围内，不再使用。上面的 rsync 跳过 `internal/webui/dist` 的构建产物（副本中会重新构建）。
 - 虚拟机与 Docker 镜像只供 A-NAS 使用；`colima stop anas` 释放它占用的内存。
 
 ## 关联
 
 - [开发环境入口](../LOCAL_ENVIRONMENT.md)
+- [环境检查脚本](../../../scripts/check-dev-env.sh)
 - [Fake 预览的会话隔离与功能限制](../../../.claude/skills/fake-preview/SKILL.md)
 - [构建目标](../../../Makefile)
