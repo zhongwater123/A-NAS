@@ -83,17 +83,23 @@ def pick_request(case: Case, opts: CutOptions, cards: list[dict], m: dict) -> tu
         where = "所在视频 " if many else ""
         user = _replace(user, ((CARD_MARKS[0].format(where=where), CARD_MARKS[1].format(where=where)), PICK_MARKS), "labels")
     ids = [c["id"] for c in cards]
+
+    def part(slots: int) -> dict:
+        # A part has no more pictures than its music part has slots: a picture without a slot is never filled
+        # (music.slotted), and the film could not be cut. prefixItems gives each part its own limit.
+        return {"type": "object", "required": ["name", "summary", "link", "scenes"], "properties": {
+            "name": {"type": "string"}, "summary": {"type": "string"}, "link": {"type": "string"},
+            "scenes": {"type": "array", "minItems": 1, "maxItems": slots, "items": {
+                "type": "object", "required": ["query", "cards"], "properties": {
+                    "query": {"type": "string"},
+                    "cards": {"type": "array", "minItems": 1, "maxItems": 3,
+                              "items": {"type": "string", "enum": ids}}}}}}}
+
     schema = {"type": "object", "required": ["design", "opening", "ending", "unmet", "parts"], "properties": {
         "design": {"type": "string"}, "opening": {"type": "string"}, "ending": {"type": "string"},
         "unmet": {"type": "array", "items": {"type": "string"}},
-        "parts": {"type": "array", "minItems": parts, "maxItems": parts, "items": {
-            "type": "object", "required": ["name", "summary", "link", "scenes"], "properties": {
-                "name": {"type": "string"}, "summary": {"type": "string"}, "link": {"type": "string"},
-                "scenes": {"type": "array", "minItems": 1, "maxItems": max(len(x["slots"]) for x in m["parts"]), "items": {
-                    "type": "object", "required": ["query", "cards"], "properties": {
-                        "query": {"type": "string"},
-                        "cards": {"type": "array", "minItems": 1, "maxItems": 3,
-                                  "items": {"type": "string", "enum": ids}}}}}}}}}}
+        "parts": {"type": "array", "minItems": parts, "maxItems": parts,
+                  "prefixItems": [part(len(x["slots"])) for x in m["parts"]], "items": False}}}
     return PICK_SYSTEM, user, schema
 
 

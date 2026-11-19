@@ -41,10 +41,12 @@ const (
 	planGrantLife = 7 * 24 * time.Hour
 	// claimTimeout: a round claimed and not started by then is abandoned.
 	claimTimeout = 5 * time.Minute
-	// planTimeout: a round whose model began to plan, which its first call
-	// of a tool shows, and that did not end by then is over; what it did
-	// not hand back is unknown.
-	planTimeout = 30 * time.Minute
+	// planTimeout: a round whose model called no tool for this long after
+	// its last call is over; what it did not hand back is unknown. Counted
+	// from the last call (roundFor), not the first: one round plans both
+	// 方案, eight calls or more, which took longer than 30 minutes from the
+	// first. handoverTimeout still bounds the round as a whole.
+	planTimeout = 20 * time.Minute
 	// handoverTimeout: a round handed to Hermes whose model never called a
 	// tool is over by then. Hermes may run the member's own due jobs first,
 	// in the same round of the unit, which lasts an hour at most
