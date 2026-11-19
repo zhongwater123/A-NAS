@@ -1,11 +1,11 @@
 # 剪辑中心二次编辑起草时选的两项默认做法
 
-状态：pending
+状态：decided（2026-11-19，用户）
 更新时间：2026-11-19
 
 ## 问题
 
-[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 定下了出片后的二次编辑怎样实现（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。下面两件事起草时先选了默认做法，用户还没有确认；改回来只是一次普通提交，所以写在这里，不写进 ADR。实施 #596 的 R4 与 R6 之前要定。
+[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 定下了出片后的二次编辑怎样实现（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。下面两件事起草时先选了默认做法；改回来只是一次普通提交，所以写在这里，不写进 ADR。实施 #596 的 R4 与 R6 之前要定。
 
 1. 成员在选版页点“确认这一版”之后，另一条成片怎么处理。
 2. “导出镜头清单”导出成什么格式。
@@ -24,7 +24,9 @@
 
 ## 决定
 
-等用户确认。
+两项都按默认：确认这一版只记下选定的版本，不删除任何成片；镜头清单导出成 CSV。
+
+2026-11-19 用户在评审 ADR 0039 后说“你评审就行了，没问题的话可以拆子票准备开发了”，即 ADR 与这两项默认一并通过。未另外记录理由。
 
 ## 关联
 
