@@ -975,3 +975,71 @@ func TestDroppingAVideoAfterTheFirstPlanWasSavedKeepsItAndMakesTheRest(t *testin
 		t.Fatal("the job's files outlived it")
 	}
 }
+
+// An answer that fails its checks after the member planned again: checking
+// it waited for the compute Worker (the second step's brief was still being
+// built), and meanwhile its round ended. The refusal is the old round's: the
+// round is told it is over, and the new planning starts with none counted
+// against it.
+func TestARefusalThatCrossesPlanningAgainCountsForNothing(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	job, claim := env.planning(t)
+	if taken := env.submit(t, claim, montage.StepOutline, outline("v1-0")); taken.Status != montage.ToolAccepted {
+		t.Fatalf("outline = %+v", taken)
+	}
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	env.compute.mu.Lock()
+	env.compute.onBrief = func(step string) {
+		if step == montage.StepShots {
+			once.Do(func() {
+				close(reached)
+				<-release
+			})
+		}
+	}
+	env.compute.mu.Unlock()
+	answered := make(chan montage.ToolAnswer, 1)
+	failed := make(chan error, 1)
+	go func() {
+		said, err := env.store.Submit(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepShots, outline("v9-9"))
+		if err != nil {
+			failed <- err
+			return
+		}
+		answered <- said
+	}()
+	select {
+	case <-reached:
+	case err := <-failed:
+		t.Fatalf("Submit() = %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the shots' brief was never built")
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case said := <-answered:
+		if said.Status != montage.ToolRoundOver {
+			t.Fatalf("a refusal after planning again = %+v", said)
+		}
+	case err := <-failed:
+		t.Fatalf("Submit() = %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the submission never answered")
+	}
+	if counted := env.store.Count(t, "SELECT plan_rejections FROM jobs WHERE id = ?", job.ID); counted != 0 {
+		t.Fatalf("%d refusals counted against the new planning", counted)
+	}
+	// In the other order, as before: a refusal handed in after the member
+	// planned again is told the round is over too, and counts for nothing.
+	if late := env.submit(t, claim, montage.StepShots, outline("v9-9")); late.Status != montage.ToolRoundOver {
+		t.Fatalf("a refusal of the round that is over = %+v", late)
+	}
+	if counted := env.store.Count(t, "SELECT plan_rejections FROM jobs WHERE id = ?", job.ID); counted != 0 {
+		t.Fatalf("%d refusals counted after the round was over", counted)
+	}
+}

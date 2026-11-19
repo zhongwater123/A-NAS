@@ -166,6 +166,9 @@ type compute struct {
 	// second step's answers were turned back with.
 	briefs map[string]int
 	turned []string
+	// onBrief, when set, runs as a brief is being built, outside the lock:
+	// a test holds the Worker there.
+	onBrief func(step string)
 }
 
 func (c *compute) Catalog(_ context.Context, request montage.CatalogRequest) ([]string, error) {
@@ -229,7 +232,11 @@ func (c *compute) PlanBrief(_ context.Context, request montage.PlanBriefRequest)
 		c.briefs = map[string]int{}
 	}
 	c.briefs[request.Step]++
+	hold := c.onBrief
 	c.mu.Unlock()
+	if hold != nil {
+		hold(request.Step)
+	}
 	ids := make([]string, len(request.Cards))
 	for i, card := range request.Cards {
 		ids[i] = card.ID

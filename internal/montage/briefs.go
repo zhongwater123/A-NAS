@@ -359,7 +359,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 		return toolAnswer(ToolRoundOver), nil
 	}
 	if reasons := checkAnswer(brief.Schema, answer, step); len(reasons) > 0 {
-		return s.refuse(ctx, jobID, reasons)
+		return s.refuse(ctx, owner, jobID, token, reasons)
 	}
 	// As the job's step stores a result (runSteps): the second step's key
 	// is worked out from these bytes on both sides (shotsKey).
@@ -403,17 +403,35 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 }
 
 // refuse counts a refused answer; the third in a row is the last this
-// round may give.
-func (s *Store) refuse(ctx context.Context, jobID string, reasons []string) (ToolAnswer, error) {
+// round may give. As a good answer is kept, a refusal counts only for a
+// round still standing when it is written, in the same transaction: checking
+// the answer may have waited for the compute Worker, and a round that ended
+// meanwhile, or whose job was planned again, must not count against the
+// planning that follows it. Such a round is told it is over.
+func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons []string) (ToolAnswer, error) {
+	var late *ToolAnswer
 	var rejections int
-	if err := s.db.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
-		jobID).Scan(&rejections); err != nil {
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		if _, late, err = s.standing(ctx, tx, owner, jobID, token); err != nil || late != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
+			jobID).Scan(&rejections); err != nil {
+			return err
+		}
+		if rejections >= maxPlanRejections {
+			return s.dueNow(ctx, tx, jobID)
+		}
+		return nil
+	})
+	if err != nil {
 		return ToolAnswer{}, err
 	}
+	if late != nil {
+		return *late, nil
+	}
 	if rejections >= maxPlanRejections {
-		if err := s.dueNow(ctx, s.db, jobID); err != nil {
-			return ToolAnswer{}, err
-		}
 		s.wakeJobs()
 		reasons = append(reasons, "连续 3 次不合格，这一轮到此为止")
 	}
