@@ -161,14 +161,16 @@ anas-photos
 | 表 | 主要列 | 说明 |
 |---|---|---|
 | `batches` | id、owner_user_id、request_key、created_at | 一次主动导入；`(owner_user_id, request_key)` 唯一，重复提交返回第一次的结果 |
-| `projects` | id、owner_user_id、name、grant_id、state、song_id、song_start、ask、chronological、created_at | `state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
+| `projects` | id、owner_user_id、name、grant_id、state、song_id、song_track、song_start、song_selection、ask、chronological、created_at | `song_track` 是这首歌从音乐库的哪一首复制来的（接口的 `trackId`），配乐页只给这一首打勾，同名的其他歌不打勾；`song_selection` 是成员拖动起点后的选段。`state` 依次为 `registering`、`ready`、`deleting`。先写 `registering` 的行，再以项目 ID 为幂等键登记授权；登记要用会话，所以重启时停在 `registering` 的行无法补完，启动时撤销它的授权，并在同一个事务里删掉这一行与它的批次行 |
 | `project_assets` | project_id、asset_id、object_id、batch_id、added_at | 素材范围固定到内容对象 |
-| `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error | `settings_json` 是任务开始时的歌、起点、要求与是否按拍摄时间，见“持久任务” |
+| `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error、missing_json、save_started、plans、plan_wanted、plan_wanted_at、plan_epoch | `settings_json` 是任务开始时的歌、起点、要求与是否按拍摄时间，见“持久任务”。`save_started` 是存回栅栏：存回请求发出后置 1，结果确认前取消回答 409，重启后重放同一个版本键。`plans` 是这个任务出几个方案（最多 2；升级前开始的任务是 1，照开始时的样子做完）。`plan_wanted` 与 `plan_wanted_at` 表示等一轮规划及从何时起；`plan_epoch` 在重新规划、去掉素材时加一，旧轮次随之作废 |
 | `job_assets` | job_id、asset_id、object_id | 任务开始时的素材集合 |
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
-| `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome | 规划的每一轮。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是 Hermes 任务的编号。`reported_at` 是回合脚本报告 `end` 或已清理的时间，`stale` 列出还没有它的轮次 |
-| `plan_grants` | owner_user_id、registered_at | 最近一次经过规划授权登记的请求时间（anas-api 带来 `X-A-NAS-Assistant: on`）。只用来决定留不留记号，授权本身在文件代理那里 |
-| `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
+| `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome、epoch、template、input_key、called_at | 规划的每一轮。`epoch` 与 `input_key` 是领取时任务的规划代数与方案一第一步的输入键，每次工具调用都拿它们和任务现在的值比，对不上就回答“这一轮已结束”；`called_at` 是模型第一次调用工具的时间，规划时限从它算起。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是 Hermes 任务的编号。`reported_at` 是回合脚本报告 `end` 或已清理的时间，`stale` 列出还没有它的轮次 |
+| `plan_grants` | owner_user_id、username、registered_at | 最近一次经过规划授权登记的请求时间（anas-api 带来 `X-A-NAS-Assistant: on`）。只用来决定留不留记号，授权本身在文件代理那里 |
+| `plan_answers` | job_id、step、input_key、round_id、answer_json、accepted_at | 工具收下的答案，按（任务、步骤、这一步的输入键）只留第一份。任务自己的步骤按输入键取出，再写进 `plans`。`step` 只有 `pick`、`shots`，方案二也写这两个值，靠输入键区分 |
+| `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
+| `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案；答案由任务的步骤从 `plan_answers` 取来写入，`round_id` 不再填写。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
 | `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | id、owner_user_id、sha256、title、duration、state、reason、analysis_version、analysis_json、created_at | 成员选过的歌：副本的摘要、分析结果（节拍、重拍、段落、副歌、响度）与不可用的原因 |
@@ -517,14 +519,19 @@ montage/
 | `montage_shots_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第二步的数据（按收下的大纲生成的画面与可选节拍）与精确 Schema；大纲还没收下时回答“先交大纲” |
 | `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline`；还有方案要规划时回答 `{status: "next_plan"}` |
 
-- **一轮规划两个方案**：工具总是作用于第一个还没收下镜头的方案。方案一的镜头收下后回答 `next_plan`，模板要求模型回到 `montage_brief` 做下一版；方案二的 `montage_brief` 在数据里另给 `plan` 与 `earlierOutlines`（之前收下的大纲），让它换一种讲法。这一轮在方案二之前结束时，已收下的方案照常往下做；因为这一轮收下过答案，任务不进 `vnas_unknown`，而是留记号等下一轮规划剩下的方案。
+- **一轮规划两个方案**：一次生成只用掉规划授权 5 轮中的 1 轮。
+  - 工具作用于“当前方案”：第一个还没存进相册、第二步还没有答案的方案；按 `plan_answers` 判断，不看 `plans`，因为模型交完方案一时任务可能还没来得及取走。方案一的镜头收下、后面还有方案时回答 `next_plan`，同一次调用重试也得到同样的回答；模板要求模型回到 `montage_brief` 做下一版。
+  - 方案二的输入键：第一步是 `planKey(方案一第一步的键, 2)`，第二步仍是 `shotsKey(本方案第一步的键, 本方案的大纲)`。任务的步骤与工具用同一对函数，所以答案存进 `plan_answers` 的键就是步骤要找的键。
+  - brief：第一步的 brief 两个方案相同，存在方案一的键下，只做一次；第二步的按各自的键存。方案二的 `montage_brief` 在返回前另拼上 `plan` 与 `earlierOutlines`（方案一收下的大纲），让它换一种讲法；这两项不存进 `plan_briefs`。
+  - 一轮的身份只记方案一第一步的键（`rounds.input_key`），领取时也按它连接 `steps`。
+  - 这一轮在方案二交齐之前结束：方案一照常往下做、存进相册，方案二进入 `needs_input(vnas_unknown)`，由成员决定是否重新规划，不自动再开一轮（#514：模型可能已经调用过）。
 
 **规则、数据与 Schema 分开**
 - 第八版的提示词把规则和数据写在一起，Schema 又按每个任务动态生成：卡片 ID 是枚举，段落数固定，第二步的画面和可选节拍取决于第一步的答案。交给 VNAS 时拆成三样：
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次运行的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；第一次读 brief 就带着 `plan` 与 `earlierOutlines` 时，只做数据指明的这一版）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 计算 Worker 的 `plan` 输出数据、Schema 与模板版本。两步的规则一开始就给模型（第二步的 system 文字只依赖目标时长，不依赖第一步的答案）；第一步的数据由 `montage_brief` 返回，第二步的数据等大纲收下后再生成。
 - 定时任务的运行里没有人回答审批，需要确认的操作一律拒绝，`clarify` 也不给。提示词仍要求不调用终端与代码、不委派，也不把描述写进记忆。
@@ -592,7 +599,7 @@ montage/
 6. **结果**：
    - **两步答案都收下**：任务往下走。
    - **领取后、`started` 之前失败**（没有密钥、模板版本对不上、单元被杀）：回合脚本调 `abandon`；没有报告时，领取 5 分钟后按作废处理。这一轮没有调用过模型，任务回到 `waiting(vnas)` 并写明原因；剪辑中心按 1、2、4……分钟退避（最长 30 分钟）后再留记号。
-   - **`started` 之后没交齐**（`end` 已报告，或 30 分钟没交齐）：进入 `needs_input(vnas_unknown)`，不自动再开一轮，因为模型可能已经调用过（#514）。成员点“重新规划”时重新登记授权、再留记号。
+   - **`started` 之后没交齐**（`end` 已报告；或模型第一次调用工具起 30 分钟没交齐；或交给 Hermes 后 65 分钟一次工具都没调用）：进入 `needs_input(vnas_unknown)`，不自动再开一轮，因为模型可能已经调用过（#514）。成员点“重新规划”时重新登记授权、再留记号。
    - **等了 10 分钟还没被领取**（没有 VNAS、授权用完或过期、单元起不来、成员自己的定时任务占着单元、别人的规划在跑）：任务仍是 `waiting(vnas)`，页面写“VNAS 还没有接手”，并给出“重新规划”，点了会刷新授权。
 7. **提示**：桌面外壳懒加载的 `MontageNotices` 照家庭中心的 `FamilyNotices` 做，只显示提示，不发起规划。内容见规格“本稿补充的默认规则”的桌面提示。
 
@@ -656,9 +663,14 @@ montage/
 | 渲染 | 时间线的摘要、渲染预设版本、副本的 SHA-256 |
 | 存回 | `versionKey` = 任务 ID 加渲染步骤的 `input_key`。重渲染的输出不必逐字节相同，存回也不会重复 |
 
-**两个方案**：分析、目录、歌曲三步共用；之后每个方案各有规划两步、填槽、渲染、存回五步，方案一的步骤名照旧，方案二的加 `-2`（`pick-2` … `save-2`）。方案二的规划、渲染键另加方案号，所以和方案一的答案或时间线相同也各存一条。方案一存回后任务接着做方案二，最后一个方案存回后任务才结束，任务的临时文件也到这时才删。方案数是 `montage.Options.Plans`，产品默认 2。
+**两个方案**：分析、目录、歌曲三步共用；之后每个方案各有规划两步、填槽、渲染、存回五步，方案一的步骤名照旧，方案二的加 `-2`（`pick-2` … `save-2`）。步骤表由 `steps()` 一处定义，步骤名与进度都从它得出。
+- 方案数记在任务上（`jobs.plans`），开始时取 `montage.Options.Plans`（产品默认 2，最多 2）；升级前开始的任务是 1。
+- 方案二的规划键见“规划”的 `planKey`；渲染键另加方案号，所以和方案一的时间线相同也各存一条。
+- 方案一存回后任务接着做方案二，最后一个方案存回后任务才结束。每个方案的成片存回后就从任务目录删掉，已存的方案不再渲染。
+- 存回栅栏（`jobs.save_started`）每个方案各用一次：不是最后一个方案时，版本记下就放开，任务继续；重启后重放的是第一个还没有版本的方案。
+- **已存的方案是定局**：方案一存过之后“去掉这些继续”，方案一的版本和相册里的成片都不动，只按剩下的素材重做没存的方案；这时方案二的大纲数据不带方案一的大纲，因为它是按旧目录写的。
 
-- 去掉素材后，目录的键变了，所以已收下的规划作废（`plans.voided_at`），两步都重新规划，不会复用含已删素材卡片的旧目录。
+- 去掉素材后，目录的键变了，所以没存的方案已收下的规划作废（`plans.voided_at`），两步都重新规划，不会复用含已删素材卡片的旧目录。
 - 任务开始时把素材集合记进 `job_assets`，把歌、起点、要求与是否按拍摄时间记进 `jobs.settings_json`。各步骤的键只从这份快照取，所以任务进行中改项目设置或追加素材，只影响下一次“生成”，重启后也不会因此重做已收下的规划。
 
 **失败分类**
@@ -710,9 +722,9 @@ montage/
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/projects` | 本人的项目，游标分页 |
+| GET | `/projects` | 本人的项目，游标分页；每个项目带最多 6 段视频（`previewAssetIds`，均匀取）给缩略图和主页背景用 |
 | POST | `/projects` | `{requestKey, name, assetIds}`：建批次与项目，登记授权并请相册开始分析；一次最多 500 个资产 |
-| GET、PATCH、DELETE | `/projects/{id}` | 详情（素材状态、分析进度、版本与成片资产）；改名与设置（起点、要求、按拍摄时间）；删除 |
+| GET、PATCH、DELETE | `/projects/{id}` | 详情（素材状态、分析进度、最近的任务 `job`、各任务各方案的版本与成片资产）；改名与设置（起点、要求、按拍摄时间）；删除 |
 | POST | `/projects/{id}/assets` | `{requestKey, assetIds}`：加入已有项目 |
 | POST | `/projects/{id}/generate` | `{requestKey}`：回答 202 与任务；项目已有进行中的任务时回答 409 |
 | GET | `/jobs/{id}` | 状态、步骤、进度、排队位置、等待原因 |
@@ -723,21 +735,28 @@ montage/
 | POST | `/jobs/{id}/replan` | 规划没有交回或不合格时重新规划 |
 | GET | `/notices` | 桌面提示：等待规划与正在规划的任务、需要处理的任务、刚存进相册的成片 |
 | PUT | `/projects/{id}/song` | `{trackId}`：从音乐库复制这首歌并开始分析（见“配乐”） |
-| GET | `/projects/{id}/song`、`/projects/{id}/song/audio` | 分析进度、节拍、段落、副歌与默认选段；试听副本，支持 Range |
+| GET | `/projects/{id}/song`、`/projects/{id}/song/audio` | 分析进度、节拍、段落、副歌与默认选段，以及复制自音乐库的哪一首（`trackId`）；试听副本，支持 Range |
+| GET | `/hero`、`/hero/poster` | 设备上的主页背景片与封面（剪辑中心数据目录下的 `hero/hero.mp4`、`hero.jpg`），不属于软件；没有时回答 404，页面改为轮播成员自己的视频 |
 
 成片是相册资产，播放与下载都走相册现有的接口。
 
-规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。`generate`、`replan`、`drop-assets`、`retry-analysis` 这四条由 anas-api 先经文件代理登记规划授权再转发（见“规划授权”）；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这五条在 anas-api 里有自己的处理，不只是透传。
+规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。`generate`、`replan`、`drop-assets`、`retry-analysis` 这四条由 anas-api 先经文件代理登记规划授权再转发（见“规划授权”），登记不了时回答 503 `assistant_unavailable`，请求不转发；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这五条在 anas-api 里有自己的处理，不只是透传。
 
 ## 网页
 
 - **登记**：在 `web/src/desktop/apps.tsx` 登记 `montage`，标题“剪辑中心”。服务端开关打开后显示入口，不随 VNAS 是否可用而隐藏（#514：VNAS 不可用时上传、浏览和播放仍要能用）。
 - **加载**：窗口代码按窗口懒加载，`MontageNotices` 在桌面外壳里懒加载，都不计入首屏 JS 预算。
-- **页面**：照第八版原型（`ai/montage_v8/web/index.html`）的样子。主页就能剪：大图背景轮流播放成员自己的三段视频（原型用的是手工剪好的 `hero.mp4`，那是用户的私人素材，不放进软件），下面像原型的文件夹那样列出项目，点一下选中、箭头打开；选中项目的配乐、剪辑要求、开始剪辑、进度和两个方案都在主页。项目页列出它的视频，可以追加。配乐与剪辑要求各是一页，返回打开它的地方。项目列表带每个项目最多 6 段视频（`previewAssetIds`）给缩略图和背景用。
+- **页面**：照第八版原型（`ai/montage_v8/web/index.html`）的样子，文字按“只写事实和操作”从简。
+  - 主页就能剪：标题区的背景先问设备有没有背景片（`/hero`），有就播它，没有就轮流播成员自己的三段视频（播放决策经 TanStack Query 按视频缓存）。下面像原型的文件夹那样列出项目，点一下选中、再点取消，箭头打开；选中项目的配乐、剪辑要求、开始剪辑、进度和两个方案都在主页。
+  - 进度按“准备、方案一、方案二”三组并排；只有任务进行中才写“可以关掉窗口”。
+  - 两条成片并排，都等成员点播放，不自动播放（相册 `VideoPlayer` 的 `autoPlay` 传 `false`）；更早的版本也能播放。方案一存进相册后马上显示，不等方案二。
+  - 失败的任务只显示服务写给成员看的原因，其余诊断信息不上页面，只写“没有剪成”。
+  - 项目页列出它的视频，可以追加；选视频用相册的 `PhotoPicker`，只列视频，可选本人或共享图库。配乐与剪辑要求各是一页，返回打开它的地方。
+  - **背景片待定**：`/hero` 把设备上的同一个文件给每一位登录成员看，和“轮播成员自己的视频”不同。演示手册写明了谁能看到、演示后删除；要不要保留这个接口还没有决定。
 - **上传**：复用相册的上传队列 `web/src/photos/uploads.tsx`（并行 2 个、接入传输中心、可重试、处理实况照片），目标是本人的个人图库，按 `LibraryPicker` 的规则找出个人图库。
   - 队列跑完后列出成功与失败，失败的可以重试；只用成功的资产建项目。
   - 单独上传的 MOV 如果补进了图库里在等它的实况照片，上传接口不返回新资产，所以它不进项目（页面行为见规格）。
-- **数据获取**：引入 TanStack Query（[#271](https://github.com/zhongwater123/A-NAS/issues/271)），放在懒加载的窗口代码里。执行中每 2 秒轮询一次，窗口不可见时停止。
+- **数据获取**：引入 TanStack Query（[#271](https://github.com/zhongwater123/A-NAS/issues/271)），放在懒加载的窗口代码里。执行中每 2 秒轮询一次，窗口最小化或不可见时停止（`shown.ts` 跟随窗口外框的 `hidden`）。创建类请求的 `requestKey` 用 `web/src/api/requestKey`，局域网 HTTP 下没有 `crypto.randomUUID()` 也能用。
 - **播放**：成片是相册视频，直接复用 `VideoPlayer`。
 - **提示**：主线没有通用的桌面通知中心，剪辑的提示照 `FamilyNotices` 的做法放在桌面外壳里。
 
