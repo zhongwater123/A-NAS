@@ -20,7 +20,11 @@ const stillOnly = () =>
 // in the software: the repository is public); otherwise a few of the
 // member's own videos, one after another, muted. Each plays the
 // way the photo library plays it (the original, or its stream); a viewer
-// who asked for less motion sees the first one still.
+// who asked for less motion sees the first one still. Without either, and
+// until the device has answered, the hero is drawn in the window's colours:
+// three tracks of clips under a playhead, as an editing timeline, moving
+// slowly unless the viewer asked for less motion. It is drawn, never a
+// bundled picture or film: the repository is public.
 export function HeroReel({ assetIds }: { assetIds: string[] }) {
   // The device's own film, when it has one (montage/hero/hero.mp4). It is
   // asked for before it is played: a player that was given a film the device
@@ -77,11 +81,30 @@ export function HeroReel({ assetIds }: { assetIds: string[] }) {
       </div>
     );
   }
-  if (!current || !settled) return null;
+  if (!current || !settled) return <Timeline />;
   return (
     <div className={styles.mtReel} aria-hidden="true">
       <img key={`still-${current}`} src={thumbnailURL(current)} alt="" />
       {source && <video key={source} src={source} muted autoPlay playsInline loop preload="auto" />}
+    </div>
+  );
+}
+
+const TRACKS = ["media", "tune", "cut"] as const;
+const CLIPS = 12;
+
+function Timeline() {
+  return (
+    <div className={`${styles.mtReel} ${styles.mtReelDrawn}`} data-reel="drawn" aria-hidden="true">
+      <div className={styles.mtTracks}>
+        {TRACKS.map((tone) => (
+          <div key={tone} className={`${styles.mtTrack} ${styles[tone]}`}>
+            {Array.from({ length: CLIPS }, (_, i) => (
+              <span key={i} />
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

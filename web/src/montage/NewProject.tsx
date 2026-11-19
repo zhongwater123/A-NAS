@@ -19,13 +19,8 @@ const states: Record<UploadItem["state"], string> = {
   failed: "失败",
 };
 
-// NewProject makes a project of videos the member uploads now, through the
-// photo library's upload queue into their private library, or picks from a
-// library they can see, their own or the shared one
-// (docs/specs/montage-center.md, 上传一批视频新建项目、从相册选视频). With
-// into, the videos join that project instead. Only videos that uploaded go
-// in: the failed may be retried or left out. It is laid out as the
-// prototype's footage panel: a drop zone, or the photo library.
+// NewProject is the page that makes a project, or adds videos to one with
+// into: the footage panel under a way back.
 export function NewProject({
   userId,
   into,
@@ -36,6 +31,39 @@ export function NewProject({
   into?: string;
   onDone: (projectId: string) => void;
   onCancel: () => void;
+}) {
+  return (
+    <main className={styles.mtSub}>
+      <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onCancel}>
+        <ChevronLeft aria-hidden="true" />
+        {into ? "返回项目" : "全部项目"}
+      </button>
+      <Footage userId={userId} into={into} onDone={onDone} onCancel={onCancel} />
+    </main>
+  );
+}
+
+// Footage makes a project of videos the member uploads now, through the
+// photo library's upload queue into their private library, or picks from a
+// library they can see, their own or the shared one
+// (docs/specs/montage-center.md, 上传一批视频新建项目、从相册选视频). With
+// into, the videos join that project instead. Only videos that uploaded go
+// in: the failed may be retried or left out. It is laid out as the
+// prototype's footage panel: a drop zone, or the photo library. The home
+// page shows it as its 素材 step until the member has a project (step),
+// where there is nothing to cancel.
+export function Footage({
+  userId,
+  into,
+  step,
+  onDone,
+  onCancel,
+}: {
+  userId: string;
+  into?: string;
+  step?: boolean;
+  onDone: (projectId: string) => void;
+  onCancel?: () => void;
 }) {
   const client = useQueryClient();
   const libraries = useQuery({ queryKey: ["photos", "libraries"], queryFn: listPhotoLibraries });
@@ -73,11 +101,7 @@ export function NewProject({
   };
 
   return (
-    <main className={styles.mtSub}>
-      <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onCancel}>
-        <ChevronLeft aria-hidden="true" />
-        {into ? "返回项目" : "全部项目"}
-      </button>
+    <>
       <section
         className={`${styles.mtPanel} ${styles.mtStep} ${styles.media}`}
         aria-label={into ? "添加视频" : "新建剪辑项目"}
@@ -87,6 +111,7 @@ export function NewProject({
             <Video />
           </span>
           <div>
+            {step && <div className={styles.mtStepN}>素材</div>}
             <h2>{into ? "添加视频" : "新建项目"}</h2>
           </div>
           {uploads.items.length > 0 && (
@@ -102,52 +127,56 @@ export function NewProject({
           <p className={styles.mtNote}>找不到你的个人图库</p>
         ) : (
           <>
-            <div className={styles.mtDrop}>
-              <div className={styles.mtDropIcon} aria-hidden="true">
-                <Upload />
+            <div className={styles.mtPickrow}>
+              <div className={styles.mtDrop}>
+                <div className={styles.mtDropIcon} aria-hidden="true">
+                  <Upload />
+                </div>
+                <b>上传视频</b>
+                <p>视频存进你的个人图库</p>
+                <button
+                  type="button"
+                  className={`${styles.mtBtn} ${styles.primary}`}
+                  onClick={() => input.current?.click()}
+                  disabled={busy}
+                >
+                  <Upload aria-hidden="true" />
+                  选择视频
+                </button>
+                <input
+                  ref={input}
+                  hidden
+                  type="file"
+                  multiple
+                  accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.3gp,.mts,.m2ts,.avi"
+                  aria-label="选择视频"
+                  onChange={(event) => {
+                    send(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
               </div>
-              <b>上传视频</b>
-              <p>视频存进你的个人图库</p>
-              <button
-                type="button"
-                className={`${styles.mtBtn} ${styles.primary}`}
-                onClick={() => input.current?.click()}
-                disabled={busy}
-              >
-                <Upload aria-hidden="true" />
-                选择视频
-              </button>
-              <input
-                ref={input}
-                hidden
-                type="file"
-                multiple
-                accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.3gp,.mts,.m2ts,.avi"
-                aria-label="选择视频"
-                onChange={(event) => {
-                  send(event.target.files);
-                  event.target.value = "";
-                }}
-              />
+              <div className={styles.mtAlt}>
+                <div className={styles.mtOr}>或者</div>
+                {visible.map((library) => (
+                  <button
+                    key={library.id}
+                    type="button"
+                    className={styles.mtSample}
+                    onClick={() => setPicking(library)}
+                    disabled={busy}
+                  >
+                    <span className={styles.mtRowIcon} aria-hidden="true">
+                      <Images />
+                    </span>
+                    <span>
+                      <b>从{nameOf(library)}选</b>
+                      <span>原片留在原来的图库</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className={styles.mtOr}>或者</div>
-            {visible.map((library) => (
-              <button
-                key={library.id}
-                type="button"
-                className={styles.mtSample}
-                onClick={() => setPicking(library)}
-                disabled={busy}
-              >
-                <span className={styles.mtRowIcon} aria-hidden="true">
-                  <Images />
-                </span>
-                <span>
-                  <b>从{nameOf(library)}选</b>
-                  <span>原片留在原来的图库</span>
-                </span>
-              </button>
-            ))}
             {uploads.items.length > 0 && (
               <ul className={`${styles.mtRows} ${styles.mtHint}`} aria-label="上传" role="status">
                 {uploads.items.map((item) => (
@@ -184,9 +213,11 @@ export function NewProject({
       {/* Whatever became of the batches after it, what uploaded can make the project. */}
       {!busy && videos.length > 0 && (
         <div className={styles.mtFoot}>
-          <button type="button" className={styles.mtBtn} onClick={onCancel}>
-            取消
-          </button>
+          {onCancel && (
+            <button type="button" className={styles.mtBtn} onClick={onCancel}>
+              取消
+            </button>
+          )}
           <button
             type="button"
             className={`${styles.mtBtn} ${styles.primary}`}
@@ -209,6 +240,6 @@ export function NewProject({
           }}
         />
       )}
-    </main>
+    </>
   );
 }

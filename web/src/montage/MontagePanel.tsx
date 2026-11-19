@@ -40,6 +40,7 @@ export function MontagePanel({ userId }: { userId: string }) {
         <div className={styles.mtApp} ref={root}>
           {view.kind === "home" && (
             <Home
+              userId={userId}
               selected={selected}
               onSelect={setSelected}
               onOpen={open}
