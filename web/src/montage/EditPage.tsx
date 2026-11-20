@@ -328,6 +328,8 @@ function candidatesQuery(
         { shot, ...(q ? { q } : {}), ...(size ? { size } : {}), ...(scene ? { scene } : {}), landscape },
         signal,
       ),
+    // The key carries the draft's revision: the drawer opening beside the side asks nothing again.
+    staleTime: 60_000,
   };
 }
 
@@ -359,6 +361,16 @@ function MusicBar({ draft }: { draft: MontageDraft }) {
     </div>
   );
 }
+
+// What a screen reader hears of a drag: dnd-kit's own words are English.
+const dragWords = {
+  onDragStart: ({ active }: { active: { id: string | number } }) => `拿起了第 ${active.id} 镜`,
+  onDragOver: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+    over ? `第 ${active.id} 镜移到了第 ${over.id} 镜的位置` : `第 ${active.id} 镜不在任何位置上`,
+  onDragEnd: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+    over ? `第 ${active.id} 镜放在了第 ${over.id} 镜的位置` : `第 ${active.id} 镜放回了原处`,
+  onDragCancel: ({ active }: { active: { id: string | number } }) => `已取消，第 ${active.id} 镜放回了原处`,
+};
 
 // Tiles are a part's shots, as wide as they are long; an unlocked shot is
 // dragged to another place of its part (dnd-kit).
@@ -395,7 +407,15 @@ function Tiles({
     if (over && active.id !== over.id) onMove(Number(active.id), Number(over.id));
   };
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={ended}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={ended}
+      accessibility={{
+        announcements: dragWords,
+        screenReaderInstructions: { draggable: "按空格拿起这一镜，用方向键移动，再按空格放下，按 Esc 取消。" },
+      }}
+    >
       <SortableContext items={shots.map((shot) => shot.number)} strategy={horizontalListSortingStrategy}>
         <div className={styles.mtTiles}>
           {shots.map((shot) => (
