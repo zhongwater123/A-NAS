@@ -133,13 +133,23 @@ export default function EditPage({
   });
 
   if (draft.error) {
+    // A version that can only be played stays so: trying again does not help.
+    const played =
+      draft.error instanceof APIError &&
+      (draft.error.code === "not_editable" || draft.error.code === "analysis_changed");
     return (
       <main className={styles.mtMain}>
         <button type="button" className={`${styles.mtBtn} ${styles.small} ${styles.mtBack}`} onClick={onBack}>
           <ChevronLeft aria-hidden="true" />
           换一版
         </button>
-        <Failed error={draft.error} onRetry={() => void draft.refetch()} />
+        {played ? (
+          <p className={`${styles.mtNote} ${styles.mtHint}`} role="alert">
+            {errorText(draft.error, "montage")}
+          </p>
+        ) : (
+          <Failed error={draft.error} onRetry={() => void draft.refetch()} />
+        )}
       </main>
     );
   }

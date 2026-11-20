@@ -191,6 +191,8 @@ interface Seen {
   drafts: number;
   // What the draft has that the film has not: an edit not saved yet.
   edited?: Partial<MontageDraft>;
+  // The answer to opening a draft: a code to refuse it with.
+  draftRefused?: string;
 }
 const fresh = (): Seen => ({ generated: 0, polled: 0, changes: [], did: [], ops: [], drafts: 0 });
 
@@ -272,6 +274,7 @@ function serve(
     }),
     http.get("/api/v1/montage/versions/{versionId}/draft", ({ params, response }) => {
       seen.drafts++;
+      if (seen.draftRefused) return response(409).json(apiError(seen.draftRefused, "refused"));
       return response(200).json(draftOf(params.versionId, seen.edited));
     }),
     // The film as it is, whatever its draft has become.
@@ -1048,6 +1051,25 @@ describe("剪辑中心", () => {
       "src",
       "/api/v1/montage/drafts/draft%3Aversion%3A1/song?start=64.00",
     );
+  });
+
+  it("says a version analysed again with another model can only be recut", async () => {
+    const seen = fresh();
+    seen.draftRefused = "analysis_changed";
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪",
+    );
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "换一版" }));
+    expect(await screen.findByRole("article", { name: "方案一" })).toBeInTheDocument();
   });
 
   it("edits a version shot by shot on the server's draft", async () => {
