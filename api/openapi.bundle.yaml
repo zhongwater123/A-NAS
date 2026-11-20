@@ -4208,6 +4208,46 @@ paths:
                 $ref: '#/components/schemas/MontageProject'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/recut:
+    post:
+      operationId: recutMontageVersion
+      summary: 'Plan this version again from a sentence (#596): the member''s VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version''s. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - change
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                change:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  description: 'What to change, as a member''s ask: 结尾留长一点. The page says what the first version cannot do, as for the ask.'
+      responses:
+        '202':
+          description: The recut job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/versions/{versionId}/draft:
     get:
       operationId: getMontageVersionDraft
@@ -17144,6 +17184,9 @@ components:
           type: integer
           minimum: 0
           description: 'An edit: the draft''s revision it was rendered from.'
+        change:
+          type: string
+          description: 'A recut: the member''s sentence, 按“<change>”重剪自第 N 版.'
     MontageJobStep:
       type: object
       additionalProperties: false

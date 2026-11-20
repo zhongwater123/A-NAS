@@ -183,13 +183,17 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 	if err != nil {
 		return PlanBrief{}, err
 	}
-	brief, err = s.jobCompute.PlanBrief(ctx, PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
-		Chronological: in.Settings.Chronological, Picked: in.Picked})
+	request := PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
+		Chronological: in.Settings.Chronological, Picked: in.Picked}
+	if recut := in.Settings.Recut; recut != nil {
+		request.Change, request.Base = recut.Change, recut.Base
+	}
+	brief, err = s.jobCompute.PlanBrief(ctx, request)
 	if err != nil {
 		return PlanBrief{}, err
 	}
-	if brief.Template != PlanTemplate {
-		return PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, PlanTemplate)
+	if want := templateOf(in.Settings); brief.Template != want {
+		return PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, want)
 	}
 	encoded, err := json.Marshal(brief)
 	if err != nil {
