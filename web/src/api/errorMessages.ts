@@ -109,7 +109,11 @@ const domains = {
   montage: {
     not_found: "项目或任务已不存在",
     no_song: "先选一首歌",
-    job_in_progress: "这个项目已有任务在进行",
+    job_in_progress: "这个项目已有任务在进行，等这个任务做完",
+    draft_conflict: "修改稿在别的窗口改过，已重新读取",
+    not_editable: "这一版只能播放，不能修改",
+    search_model_changed: "分析模型已更新，重新分析后才能搜索",
+    search_unavailable: "现在搜不了素材，请稍后重试",
     job_state: "任务的状态已经变化，页面已刷新",
     assistant_unavailable: "没能登记 VNAS 的规划授权，请稍后重试",
     too_many_assets: "一次最多 500 个视频",

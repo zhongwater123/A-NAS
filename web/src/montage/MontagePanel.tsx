@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 
 import { AskPage } from "./AskPage";
 import styles from "./montage.module.css";
@@ -8,6 +8,9 @@ import { Home } from "./ProjectList";
 import { ProjectView } from "./ProjectView";
 import { SongPage } from "./SongPage";
 import { ShownProvider, useWindowShown } from "./shown";
+
+// The edit page (#596) loads when a version is first edited.
+const EditPage = lazy(() => import("./EditPage"));
 
 // MontagePanel is the 剪辑中心 window (docs/specs/montage-center.md), laid
 // out as the 第八版 prototype's pages: the home page, where a project is
@@ -20,7 +23,8 @@ export type MontageView =
   | { kind: "home" }
   | { kind: "new"; into?: string }
   | { kind: "project"; id: string }
-  | { kind: "page"; id: string; page: "song" | "ask"; from: "home" | "project" };
+  | { kind: "page"; id: string; page: "song" | "ask"; from: "home" | "project" }
+  | { kind: "edit"; id: string; versionId: string };
 
 export function MontagePanel({ userId }: { userId: string }) {
   const [client] = useState(
@@ -45,6 +49,7 @@ export function MontagePanel({ userId }: { userId: string }) {
               onOpen={open}
               onPage={(id, page) => setView({ kind: "page", id, page, from: "home" })}
               onNew={() => setView({ kind: "new" })}
+              onEdit={(id, versionId) => setView({ kind: "edit", id, versionId })}
             />
           )}
           {view.kind === "new" && (
@@ -72,7 +77,18 @@ export function MontagePanel({ userId }: { userId: string }) {
               onBack={home}
               onPage={(page) => setView({ kind: "page", id: view.id, page, from: "project" })}
               onAddVideos={() => setView({ kind: "new", into: view.id })}
+              onEdit={(versionId) => setView({ kind: "edit", id: view.id, versionId })}
             />
+          )}
+          {view.kind === "edit" && (
+            <Suspense fallback={null}>
+              <EditPage
+                key={view.versionId}
+                projectId={view.id}
+                versionId={view.versionId}
+                onBack={() => open(view.id)}
+              />
+            </Suspense>
           )}
         </div>
       </ShownProvider>

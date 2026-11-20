@@ -1,11 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Check,
   ChevronLeft,
   Clock,
-  Download,
-  Film,
   Loader2,
   Music2,
   Pencil,
@@ -15,13 +12,12 @@ import {
   Trash2,
   Video,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
-import { getPhoto, originalURL, thumbnailURL } from "../photos/api";
+import { thumbnailURL } from "../photos/api";
 import { clock, durationLabel } from "../photos/model";
-import { VideoPlayer } from "../photos/VideoPlayer";
 import { useDialogs } from "../ui/feedback";
 import { Spinner } from "../ui/workspace";
 import {
@@ -33,7 +29,6 @@ import {
   type MontageJob,
   type MontageProjectDetail,
   type MontageSong,
-  type MontageVersion,
   replan,
   retryAnalysis,
   retryJob,
@@ -43,14 +38,14 @@ import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { jobKey, projectKey, projectQuery, projectsKey, songQuery } from "./queries";
 import { useShown } from "./shown";
+import { Films } from "./Versions";
 import {
   actionLabels,
   actionsOf,
   active,
   failureText,
   type JobAction,
-  planName,
-  stageName,
+  jobStageName,
   stageOf,
   stateText,
   stepLabel,
@@ -58,7 +53,6 @@ import {
 
 // A job in progress is asked about every two seconds, while the window can be seen.
 const POLL_MS = 2_000;
-const when = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
 // The length of a project's videos together; none known yet reads as nothing.
 const total = (seconds: number) => (seconds >= 1 ? ` · ${durationLabel(seconds)}` : "");
 
@@ -70,11 +64,14 @@ export function ProjectView({
   onBack,
   onPage,
   onAddVideos,
+  onEdit,
 }: {
   id: string;
   onBack: () => void;
   onPage: (page: "song" | "ask") => void;
   onAddVideos: () => void;
+  // Opens the edit page of a version (#596).
+  onEdit: (versionId: string) => void;
 }) {
   const client = useQueryClient();
   const project = useQuery(projectQuery(id));
@@ -171,7 +168,7 @@ export function ProjectView({
         <p className={styles.mtError}>{errorText(rename.error ?? remove.error, "montage")}</p>
       )}
       <Videos detail={detail} seconds={seconds} onAdd={onAddVideos} />
-      <Films versions={detail.versions} />
+      <Films detail={detail} onEdit={onEdit} />
       <Go detail={detail} song={song.data} onPage={onPage} />
       {dialogs.dialog}
     </main>
@@ -327,8 +324,8 @@ export function Go({
               return (
                 own.length > 0 && (
                   <section key={stage}>
-                    <h3>{stageName(stage)}</h3>
-                    <ol aria-label={stageName(stage)}>
+                    <h3>{jobStageName(current, stage)}</h3>
+                    <ol aria-label={jobStageName(current, stage)}>
                       {own.map((step) => (
                         <li key={step.name} data-state={step.state}>
                           <i aria-hidden="true" />
@@ -422,136 +419,5 @@ export function Go({
         {start.error && <p className={styles.mtError}>{errorText(start.error, "montage")}</p>}
       </section>
     </>
-  );
-}
-
-// Films is the prototype's 挑一个 page: the latest job's 方案 side by side,
-// each played where the photo library plays its videos, and the films of
-// earlier jobs below, each of which plays here too.
-export function Films({ versions }: { versions: MontageVersion[] }) {
-  const [playing, setPlaying] = useState<number>();
-  if (!versions.length) return null;
-  const latest = versions[0].jobId;
-  const pair = versions.filter((version) => version.jobId === latest).sort((a, b) => a.plan - b.plan);
-  const earlier = versions.filter((version) => version.jobId !== latest);
-  const old = earlier.find((version) => version.number === playing && !version.gone);
-  return (
-    <section className={`${styles.mtPanel} ${styles.mtFinish}`} aria-label="成片">
-      <div className={styles.mtOk}>
-        <span className={styles.mtOkBadge} aria-hidden="true">
-          <Check />
-        </span>
-        <div>
-          <h2>成片</h2>
-          <p>{pair.length > 1 ? `${pair.length} 个方案，都已存进你的个人图库` : "已存进你的个人图库"}</p>
-        </div>
-      </div>
-      <div className={styles.mtFilms}>
-        {pair.map((version) => (
-          <FilmCard key={version.number} version={version} />
-        ))}
-      </div>
-      {earlier.length > 0 && (
-        <>
-          <div className={styles.mtActs}>
-            <span className={styles.mtFaint}>更早的版本</span>
-            <ul className={styles.mtVersions} aria-label="更早的版本">
-              {earlier.map((version) => (
-                <li key={version.number}>
-                  <b>第 {version.number} 版</b>
-                  {version.gone ? (
-                    <span>成片已不在相册</span>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        aria-pressed={playing === version.number}
-                        aria-label={`播放第 ${version.number} 版`}
-                        onClick={() => setPlaying(playing === version.number ? undefined : version.number)}
-                      >
-                        <Play aria-hidden="true" />
-                        播放
-                      </button>
-                      <a href={originalURL(version.filmAssetId, true)} aria-label={`下载第 ${version.number} 版`}>
-                        <Download aria-hidden="true" />
-                        下载
-                      </a>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-          {old && (
-            <div className={`${styles.mtFilm} ${styles.mtHint}`} role="group" aria-label={`第 ${old.number} 版`}>
-              <FilmPlayer key={old.filmAssetId} assetId={old.filmAssetId} />
-            </div>
-          )}
-        </>
-      )}
-    </section>
-  );
-}
-
-// FilmCard is one 方案's film, as the prototype's version card.
-function FilmCard({ version }: { version: MontageVersion }) {
-  const name = planName(version.plan);
-  return (
-    <article className={styles.mtFilmCard} aria-label={name}>
-      <div className={styles.mtFilm}>
-        {version.gone ? (
-          <div className={styles.mtCentered}>
-            <Film aria-hidden="true" />
-            成片已不在相册
-          </div>
-        ) : (
-          <FilmPlayer key={version.filmAssetId} assetId={version.filmAssetId} />
-        )}
-      </div>
-      <div className={styles.mtFilmBody}>
-        <div className={styles.mtFilmTitle}>
-          <h3>{name}</h3>
-          <span className={styles.mtTag}>第 {version.number} 版</span>
-        </div>
-        <p className={styles.mtFaint}>{when.format(new Date(version.createdAt))}</p>
-        {!version.gone && (
-          <a className={`${styles.mtBtn} ${styles.primary}`} href={originalURL(version.filmAssetId, true)}>
-            <Download aria-hidden="true" />
-            下载{name}
-          </a>
-        )}
-      </div>
-    </article>
-  );
-}
-
-// FilmPlayer plays a version where the photo library plays its videos.
-function FilmPlayer({ assetId }: { assetId: string }) {
-  const stage = useRef<HTMLDivElement>(null);
-  const asset = useQuery({ queryKey: ["photos", "asset", assetId], queryFn: () => getPhoto(assetId) });
-  if (asset.error) {
-    return (
-      <div className={styles.mtCentered}>
-        <Film aria-hidden="true" />
-        {errorText(asset.error, "photos")}
-      </div>
-    );
-  }
-  if (!asset.data) {
-    return (
-      <div className={styles.mtCentered}>
-        <Spinner small />
-      </div>
-    );
-  }
-  return (
-    <div ref={stage} style={{ position: "absolute", inset: 0 }}>
-      <VideoPlayer
-        asset={asset.data}
-        stage={stage}
-        autoPlay={false}
-        onDownload={() => window.location.assign(originalURL(asset.data.id, true))}
-      />
-    </div>
   );
 }

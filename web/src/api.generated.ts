@@ -8510,8 +8510,10 @@ export interface components {
                 number: number;
                 name: string;
                 summary: string;
-                /** @description The music part's strength, from the song's analysis. */
+                /** @description The music part's strength, from the song's analysis: 安静, 中等 or 高潮. */
                 level: string;
+                /** @description The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫. */
+                label: string;
                 start: number;
                 end: number;
             }[];

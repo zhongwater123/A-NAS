@@ -6,9 +6,10 @@ import { Spinner } from "../ui/workspace";
 import { Failed } from "./Failed";
 import { HeroReel } from "./HeroReel";
 import styles from "./montage.module.css";
-import { Films, Go } from "./ProjectView";
+import { Go } from "./ProjectView";
 import { projectQuery, projectsQuery, songQuery } from "./queries";
 import { useShown } from "./shown";
+import { Films } from "./Versions";
 
 const day = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
 
@@ -23,6 +24,7 @@ export function Home({
   onOpen,
   onPage,
   onNew,
+  onEdit,
 }: {
   // undefined: the newest; null: none.
   selected?: string | null;
@@ -30,6 +32,8 @@ export function Home({
   onOpen: (id: string) => void;
   onPage: (id: string, page: "song" | "ask") => void;
   onNew: () => void;
+  // Opens the edit page of a project's version (#596).
+  onEdit: (id: string, versionId: string) => void;
 }) {
   const projects = useQuery(projectsQuery);
   const list = projects.data ?? [];
@@ -110,7 +114,12 @@ export function Home({
         </button>
       </section>
       {chosen ? (
-        <Studio key={chosen.id} id={chosen.id} onPage={(page) => onPage(chosen.id, page)} />
+        <Studio
+          key={chosen.id}
+          id={chosen.id}
+          onPage={(page) => onPage(chosen.id, page)}
+          onEdit={(versionId) => onEdit(chosen.id, versionId)}
+        />
       ) : (
         list.length > 0 && (
           <section className={`${styles.mtPanel} ${styles.mtGo}`} aria-label="开始剪辑">
@@ -127,14 +136,22 @@ export function Home({
 
 // Studio is the selected project's editing, on the home page: its 方案 once
 // made, the job, and the bar that starts the film.
-function Studio({ id, onPage }: { id: string; onPage: (page: "song" | "ask") => void }) {
+function Studio({
+  id,
+  onPage,
+  onEdit,
+}: {
+  id: string;
+  onPage: (page: "song" | "ask") => void;
+  onEdit: (versionId: string) => void;
+}) {
   const project = useQuery(projectQuery(id));
   const song = useQuery(songQuery(id, useShown()));
   if (project.error) return <Failed inline error={project.error} onRetry={() => void project.refetch()} />;
   if (!project.data) return null;
   return (
     <>
-      <Films versions={project.data.versions} />
+      <Films detail={project.data} onEdit={onEdit} />
       <Go detail={project.data} song={song.data} onPage={onPage} />
     </>
   );
