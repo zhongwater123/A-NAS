@@ -114,7 +114,14 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		if err != nil {
 			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
-		if analysis.ObjectID != video.ObjectID || analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions {
+		changed := analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions
+		if run.kind == KindEdit && analysis.ObjectID == video.ObjectID && changed {
+			// The version was cut with windows the library has analysed
+			// again with another model since: it is played or recut now,
+			// not edited, and trying again changes nothing.
+			return nil, nil, 0, failed("%s", AnalysisChangedReason)
+		}
+		if analysis.ObjectID != video.ObjectID || changed {
 			return nil, nil, 0, errors.New("the photo library's analysis changed while the job ran")
 		}
 		if dimensions != 0 && dimensions != analysis.Dimensions {
