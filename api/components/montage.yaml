@@ -118,6 +118,7 @@ schemas:
       sourceVersionId: { type: string, description: "The version an edit or a recut came from." }
       sourceNumber: { type: integer, minimum: 1, description: "That version's number, while it is recorded." }
       draftRevision: { type: integer, minimum: 0, description: "An edit: the draft's revision it was rendered from." }
+      change: { type: string, description: "A recut: the member's sentence, 按“<change>”重剪自第 N 版." }
   MontageJobStep:
     type: object
     additionalProperties: false
