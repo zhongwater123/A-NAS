@@ -50,6 +50,10 @@ interface Props {
   // What goes full screen: the viewer's stage, so the controls come along.
   stage: RefObject<HTMLElement | null>;
   onDownload: () => void;
+  // The viewer shows one video and starts it at once. A page with several
+  // players, such as 剪辑中心's two 方案 side by side, passes false: each
+  // waits for its play button.
+  autoPlay?: boolean;
 }
 
 type Mode = VideoPlayback["mode"];
@@ -87,7 +91,7 @@ function bufferedAt(element: HTMLVideoElement, at: number) {
 // stream's own clock. A failure to play the original or a remux falls back
 // to a full conversion before it is reported.
 export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer(
-  { asset, stage: stageRef, onDownload },
+  { asset, stage: stageRef, onDownload, autoPlay = true },
   ref,
 ) {
   const caps = useMemo(() => browserCapabilities(), []);
@@ -113,7 +117,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
   const [scrub, setScrub] = useState<number>();
   const [hover, setHover] = useState<{ x: number; time: number }>();
   const pendingStart = useRef(0);
-  const wantPlay = useRef(true);
+  const wantPlay = useRef(autoPlay);
   const restart = useRef(0);
   const converted = mode !== undefined && mode !== "direct";
 
@@ -182,7 +186,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
 
   const decided = useEffectEvent((decision: VideoPlayback) => {
     setPlayback(decision);
-    begin(decision, decision.mode, 0, true);
+    begin(decision, decision.mode, 0, autoPlay);
   });
   const undecided = useEffectEvent((caught: unknown) => fail(messageOf(caught)));
   useEffect(() => {

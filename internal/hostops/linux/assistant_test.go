@@ -17,6 +17,7 @@ import (
 var assistantUnits = []string{
 	"anas-assistant@alice.service", "anas-assistant-api@alice.service", "anas-assistant-api@alice.socket",
 	"anas-assistant-cron@alice.service", "anas-assistant-curator@alice.service", "anas-assistant-curator@alice.timer",
+	"anas-assistant-plan@alice.service", "anas-assistant-planapi@alice.service", "anas-assistant-planapi@alice.socket",
 	"anas-assistant-net@alice.service",
 }
 
@@ -39,7 +40,9 @@ func installedAssistant(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	for _, template := range []string{"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket", "anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer", "anas-assistant-net@.service"} {
+	for _, template := range []string{"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket", "anas-assistant-cron@.service",
+		"anas-assistant-curator@.service", "anas-assistant-curator@.timer", "anas-assistant-plan@.service", "anas-assistant-planapi@.service",
+		"anas-assistant-planapi@.socket", "anas-assistant-net@.service"} {
 		if err := os.WriteFile(filepath.Join(units, template), []byte("[Service]\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +142,7 @@ type keptSystemd struct {
 
 func newKeptSystemd() *keptSystemd {
 	h := &keptSystemd{fakeHost: newFakeHost(), masked: map[string]bool{}, linked: map[string]bool{}, running: map[string]bool{}}
-	for _, unit := range []string{"anas-assistant-api@alice.socket", "anas-assistant-curator@alice.timer"} {
+	for _, unit := range []string{"anas-assistant-api@alice.socket", "anas-assistant-planapi@alice.socket", "anas-assistant-curator@alice.timer"} {
 		h.linked[unit], h.running[unit] = true, true
 	}
 	h.running["anas-assistant@alice.service"] = true
@@ -265,7 +268,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer") {
+	if host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer") {
 		t.Fatal("without a key no assistant is turned on")
 	}
 	state, err := executor.AssistantKey(ctx)
@@ -292,7 +295,8 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		"systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - -",
 		"systemctl restart --no-block anas-assistant-gateway.service",
 		"systemctl start --no-block anas-assistant-cron-waker.service",
-		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
+		"systemctl start --no-block anas-montage-planner.service",
+		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 	} {
 		if !host.ran(command) {
 			t.Errorf("did not run %q:\n%s", command, strings.Join(host.commands, "\n"))
@@ -305,7 +309,8 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 	}
 	// A start queued while alice's assistant stops (立即运行, her socket) replaces the stop
 	// job once; without the key it runs nothing, and stopping again finds it stopped.
-	stopAlice := "systemctl stop anas-assistant@alice.service anas-assistant-api@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service anas-assistant-net@alice.service"
+	stopAlice := "systemctl stop anas-assistant@alice.service anas-assistant-api@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service " +
+		"anas-assistant-plan@alice.service anas-assistant-planapi@alice.service anas-assistant-net@alice.service"
 	host.cancelled[stopAlice] = 1
 	state, err = executor.DeleteAssistantKey(ctx)
 	if err != nil || state.Configured {
@@ -315,8 +320,8 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		t.Fatalf("the credential is still there: %v", err)
 	}
 	for _, command := range []string{
-		"systemctl stop anas-assistant-cron-waker.service anas-assistant-gateway.service",
-		"systemctl disable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
+		"systemctl stop anas-assistant-cron-waker.service anas-montage-planner.service anas-assistant-gateway.service",
+		"systemctl disable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 		stopAlice,
 	} {
 		if !host.ran(command) {
@@ -384,5 +389,41 @@ func TestDisablingRemovesTheSocketTheMaskLeft(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(sockets, "bob.sock")); err != nil {
 		t.Fatalf("a file that is no socket was removed: %v", err)
+	}
+}
+
+// A planning grant for the montage center is the member's own, left while they were signed
+// in: closing the account removes it, so the waker starts no round of planning for it, and a
+// later account of the same name does not inherit it. Nobody else's is touched, and it goes
+// even where no assistant unit is installed.
+func TestDisablingAnAccountRemovesItsPlanningGrant(t *testing.T) {
+	for _, installed := range []bool{true, false} {
+		root := t.TempDir()
+		if installed {
+			root = installedAssistant(t)
+		}
+		host := newFakeHost()
+		executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+		plans := executor.AssistantPlanDir()
+		if want := filepath.Join(root, "var", "lib", "a-nas-host", "assistant", "plans"); plans != want {
+			t.Fatalf("planning grants in %s, want the Host Agent's own %s", plans, want)
+		}
+		if err := os.MkdirAll(plans, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, username := range []string{"alice", "bob"} {
+			if err := os.WriteFile(filepath.Join(plans, username), []byte(`{"issuedAt":"2026-11-18T10:00:00Z","rounds":5}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := executor.DisableCredential(context.Background(), "alice"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(plans, "alice")); !os.IsNotExist(err) {
+			t.Fatalf("installed %v: alice's planning grant after closing her account: %v", installed, err)
+		}
+		if _, err := os.Lstat(filepath.Join(plans, "bob")); err != nil {
+			t.Fatalf("installed %v: bob's planning grant: %v", installed, err)
+		}
 	}
 }

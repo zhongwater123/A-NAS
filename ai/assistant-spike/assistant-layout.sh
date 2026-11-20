@@ -165,8 +165,18 @@ case $cmd in
 ' "$account" "$hash"
       } > "$member/config.yaml.new"
       mv "$member/config.yaml.new" "$member/config.yaml"
+      # The settings of the planning instance, which its unit binds instead: the same with the
+      # servers of its own policy, which adds the montage center's planning server (the Host
+      # Agent writes config-plan.yaml beside config.yaml the same way).
+      plan_policy=$lib/managed-plan/config.yaml
+      [[ -f "$plan_policy" ]] || plan_policy=$lib/managed/config.yaml
+      { sed '/^mcp_servers:/,$d' "$member/config.yaml"
+        sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$plan_policy"
+        sed -n '/^dashboard:/,$p' "$member/config.yaml"
+      } > "$member/config-plan.yaml.new"
+      mv "$member/config-plan.yaml.new" "$member/config-plan.yaml"
       sed "s/{{member}}/$account/g" "$lib/member-skill.md" > "$member/skills/anas-member/SKILL.md"
-      chmod 0644 "$member/config.yaml" "$member/skills/anas-member/SKILL.md"
+      chmod 0644 "$member/config.yaml" "$member/config-plan.yaml" "$member/skills/anas-member/SKILL.md"
       if getent passwd "$product_user" >/dev/null; then
         install -d -m 0700 -o "$product_user" "$product_tokens"
         (umask 077; sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "$state/tokens/$account.env"           > "$product_tokens/$account.token")

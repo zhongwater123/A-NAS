@@ -34,3 +34,8 @@ b4154e17c43dd4944fc836fbe911279c5f02989f:internal/appstore/catalog/linkwarden/do
 # and then look for where it must not appear. The system test makes a random one instead.
 a6c1357d3c89aca2aa5a0cb4245972ab59e70303:internal/hostops/linux/assistant_test.go:generic-api-key:266
 723d1436428cd0d1118b3d4140bb3ca50ba1051f:web/src/settings/AssistantSection.test.tsx:generic-api-key:11
+
+# The montage planner's unit test (ai/tests/test_montage_planner.py): a made-up
+# round token of 32 hex digits, the shape the montage center's tokens have, for
+# a fake montage center on a socket in a temporary directory.
+f2f6bd51b5a0db09bdd73a3e992d985525f59ad4:ai/tests/test_montage_planner.py:generic-api-key:28

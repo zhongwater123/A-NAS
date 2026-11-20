@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 )
 
@@ -34,12 +36,16 @@ const (
 	assistantCredential  = "a-nas-assistant-deepseek"
 	assistantGatewayUnit = "anas-assistant-gateway.service"
 	assistantWakerUnit   = "anas-assistant-cron-waker.service"
+	// assistantPlannerUnit hands the montage center's planning to members'
+	// planning instances (docs/architecture/montage-planning-session.md).
+	assistantPlannerUnit = "anas-montage-planner.service"
 )
 
 // assistantTemplates are the assistant's unit templates (ADR 0024).
 var assistantTemplates = []string{
 	"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket",
 	"anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer",
+	"anas-assistant-plan@.service", "anas-assistant-planapi@.service", "anas-assistant-planapi@.socket",
 	// The member's private network with its bridge to the model, which the
 	// units above need: without them it would stop by itself, but only
 	// after this returns, and it still runs as the member.
@@ -47,14 +53,15 @@ var assistantTemplates = []string{
 }
 
 // assistantEntries are the units that start a member's assistant: the API
-// socket the File Broker connects to and the weekly curator timer. The others
-// run only when these start them.
-var assistantEntries = []string{"anas-assistant-api@.socket", "anas-assistant-curator@.timer"}
+// socket the File Broker connects to, the planning instance's socket root's
+// planner connects to, and the weekly curator timer. The others run only when
+// these start them.
+var assistantEntries = []string{"anas-assistant-api@.socket", "anas-assistant-planapi@.socket", "anas-assistant-curator@.timer"}
 
 // assistantServices are what runs of a member's assistant, which deleting the key stops.
 var assistantServices = []string{
 	"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-cron@.service",
-	"anas-assistant-curator@.service", "anas-assistant-net@.service",
+	"anas-assistant-curator@.service", "anas-assistant-plan@.service", "anas-assistant-planapi@.service", "anas-assistant-net@.service",
 }
 
 // The places a member's sandbox binds over the Hermes home (anas-assistant@.service): Hermes
@@ -128,6 +135,26 @@ func (e *Executor) AssistantTokenDir() string {
 // assistantTokenPath is the member's instance secret in AssistantTokenDir.
 func (e *Executor) assistantTokenPath(username string) string {
 	return filepath.Join(e.AssistantTokenDir(), username+".env")
+}
+
+// AssistantPlanDir holds the members' planning grants for the montage center, one file each
+// named by the account: the File Broker writes them behind the member's live session, and
+// root's planner reads them (ai/assistant/montage-planner.py). It is in the Host Agent's own state
+// directory, which no service can write to (docs/architecture/montage-center.md, 规划授权).
+func (e *Executor) AssistantPlanDir() string {
+	return filepath.Join(e.assistantState(), "plans")
+}
+
+// forgetPlanGrant removes the planning grant of an account that is being closed: a grant is
+// the member's own, and the name may be another member's later.
+func (e *Executor) forgetPlanGrant(username string) error {
+	if !accountid.ValidAssistantAccount(username) {
+		return nil
+	}
+	if err := os.Remove(filepath.Join(e.AssistantPlanDir(), username)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s's planning grant: %w", username, err)
+	}
+	return nil
 }
 
 // assistantMemberDir holds the member's Hermes settings and skill, which their sandbox binds.
@@ -210,7 +237,8 @@ func (e *Executor) SetAssistantKey(ctx context.Context, key string) (assistantke
 		return assistantkey.State{}, fmt.Errorf("save the assistant's key: %w", err)
 	}
 	var failures []error
-	for _, command := range [][]string{{"restart", "--no-block", assistantGatewayUnit}, {"start", "--no-block", assistantWakerUnit}} {
+	for _, command := range [][]string{{"restart", "--no-block", assistantGatewayUnit}, {"start", "--no-block", assistantWakerUnit},
+		{"start", "--no-block", assistantPlannerUnit}} {
 		if output, err := e.runner.Run(ctx, "systemctl", command, ""); err != nil {
 			failures = append(failures, commandError(command[0]+" "+command[2], err, output))
 		}
@@ -236,7 +264,7 @@ func (e *Executor) DeleteAssistantKey(ctx context.Context) (assistantkey.State, 
 		return assistantkey.State{}, fmt.Errorf("delete the assistant's key: %w", err)
 	}
 	var failures []error
-	if output, err := e.systemctlWithoutKey(ctx, "stop", assistantWakerUnit, assistantGatewayUnit); err != nil {
+	if output, err := e.systemctlWithoutKey(ctx, "stop", assistantWakerUnit, assistantPlannerUnit, assistantGatewayUnit); err != nil {
 		failures = append(failures, commandError("stop the model gateway", err, output))
 	}
 	// A disabled member's units are masked and stopped already (disableAssistant).
@@ -291,9 +319,10 @@ func (e *Executor) AssistantOn() bool {
 // disableAssistant stops every way an assistant can run for a disabled member.
 //
 // Starts keep arriving while it runs: the Product Service keeps a signed-in
-// member's instance (its socket starts the instance again), and the waker
-// starts due tasks. In systemd a start queued after a stop job replaces it,
-// and systemctl then fails with "Job for … canceled" while the unit runs on.
+// member's instance (its socket starts the instance again), the planner connects to
+// the planning instance's socket, and the waker starts due tasks. In systemd a start
+// queued after a stop job replaces it, and systemctl then fails with "Job for …
+// canceled" while the unit runs on.
 // So the units are masked before anything is stopped: from then on systemd
 // refuses those starts, and the stop jobs complete. Disabling, which starts no
 // jobs, comes first: systemctl leaves the boot and timer links of a unit that
@@ -303,6 +332,11 @@ func (e *Executor) AssistantOn() bool {
 // member: a mask wins in either order against preparing the member's assistant, whose
 // enabling a mask refuses, so an account is closed at once.
 func (e *Executor) disableAssistant(ctx context.Context, username string) error {
+	// The member's planning grant goes first, whatever becomes of the units: without it the
+	// planner hands no round of planning to the account.
+	if err := e.forgetPlanGrant(username); err != nil {
+		return err
+	}
 	units, err := e.assistantUnits(username, assistantTemplates)
 	if err != nil || len(units) == 0 {
 		return err
@@ -324,24 +358,32 @@ func (e *Executor) assistantSocketPath(username string) string {
 	return filepath.Join(e.systemRoot, "run", "a-nas-assistant", username+".sock")
 }
 
-// removeStaleAssistantSocket deletes the member's API socket once its units are masked and
-// stopped. Masking a running socket unit replaces its configuration, so its RemoveOnStop= no
-// longer applies when the mask stops it, and the file would stay: the Product Service would
-// then report an assistant that nothing listens for, and a name used again would find it.
+// assistantPlanSocketPath is the socket of the member's planning instance, which
+// anas-assistant-planapi@.socket listens on.
+func (e *Executor) assistantPlanSocketPath(username string) string {
+	return filepath.Join(e.systemRoot, "run", "a-nas-assistant-plan", username+".sock")
+}
+
+// removeStaleAssistantSocket deletes the member's API socket and that of the planning
+// instance once their units are masked and stopped. Masking a running socket unit replaces
+// its configuration, so its RemoveOnStop= no longer applies when the mask stops it, and the
+// file would stay: the Product Service would then report an assistant that nothing listens
+// for, and a name used again would find it.
 func (e *Executor) removeStaleAssistantSocket(username string) error {
-	path := e.assistantSocketPath(username)
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect %s's assistant socket: %w", username, err)
-	}
-	if info.Mode().Type() != os.ModeSocket {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove %s's assistant socket: %w", username, err)
+	for _, path := range []string{e.assistantSocketPath(username), e.assistantPlanSocketPath(username)} {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect %s's assistant socket: %w", username, err)
+		}
+		if info.Mode().Type() != os.ModeSocket {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove %s's assistant socket: %w", username, err)
+		}
 	}
 	return nil
 }
@@ -593,10 +635,25 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	if err != nil {
 		return err
 	}
+	// The planning instance's settings add the montage center's planning server from its own
+	// policy, which no other unit starts (docs/architecture/montage-planning-session.md).
+	planConfig := config
+	if managedPlan, err := os.ReadFile(filepath.Join(library, "managed-plan", "config.yaml")); err == nil {
+		if planConfig, err = memberConfig(username, hash, managedPlan); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the policy of the assistant's planning instance: %w", err)
+	}
+	// The scheduled tasks' own settings, which once added that server, are gone.
+	if err := os.Remove(filepath.Join(member, "config-cron.yaml")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	skillPath := filepath.Join(member, "skills", "anas-member", "SKILL.md")
 	for path, contents := range map[string][]byte{
 		configPath: config,
-		skillPath:  bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
+		filepath.Join(member, "config-plan.yaml"): planConfig,
+		skillPath: bytes.ReplaceAll(skill, []byte("{{member}}"), []byte(username)),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err

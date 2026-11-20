@@ -80,6 +80,18 @@ func (c *Client) RunAssistantTask(ctx context.Context, task string) error {
 	return err
 }
 
+// RegisterAssistantPlan registers a planning grant for the member signed in
+// on the context's session (docs/architecture/montage-center.md, 规划授权):
+// for seven days, root's planner may hand up to five rounds of the montage
+// center's planning to their planning instance
+// (docs/architecture/montage-planning-session.md). It answers wire.PlanRegistered, or why there is no
+// VNAS to plan with; an error is a failure to register, worth trying later.
+func (c *Client) RegisterAssistantPlan(ctx context.Context) (string, error) {
+	response, file, err := c.call(ctx, wire.Request{Op: wire.OpAssistantPlan})
+	wire.CloseFile(file)
+	return response.Plan, err
+}
+
 // watch closes the connection when the broker ends it or goes away. The
 // broker cuts the connection itself; this only releases it promptly.
 func (a *AssistantConn) watch() {

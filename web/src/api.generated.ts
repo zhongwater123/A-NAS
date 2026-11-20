@@ -2133,6 +2133,282 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        get: operations["getMontage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
+        get: operations["listMontageProjects"];
+        put?: never;
+        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        post: operations["createMontageProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found */
+        get: operations["getMontageProject"];
+        put?: never;
+        post?: never;
+        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
+        delete: operations["deleteMontageProject"];
+        options?: never;
+        head?: never;
+        /** Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with */
+        patch: operations["updateMontageProject"];
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
+        post: operations["addMontageProjectAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
+        post: operations["generateMontageFilm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found */
+        get: operations["getMontageJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome */
+        post: operations["cancelMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/drop-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
+        post: operations["dropMontageJobAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
+        post: operations["retryMontageJobAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
+        post: operations["retryMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/replan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
+        post: operations["replanMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day */
+        get: operations["listMontageNotices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
+        get: operations["getMontageSong"];
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        put: operations["putMontageSong"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/song/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The montage center's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
+        get: operations["getMontageSongAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
+        get: operations["getMontageHero"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The background film's poster (hero/hero.jpg); 404 without one. */
+        get: operations["getMontageHeroPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules": {
         parameters: {
             query?: never;
@@ -5665,7 +5941,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
@@ -7774,6 +8050,184 @@ export interface components {
         FamilyAssetIDs: {
             assetIds: string[];
         };
+        MontageProjectSummary: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
+            previewAssetIds?: string[];
+        };
+        MontageProjectPage: {
+            items: components["schemas"]["MontageProjectSummary"][];
+            next?: string;
+        };
+        /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
+        MontageRequestKey: string;
+        MontageAssetIDs: string[];
+        MontageProjectAsset: {
+            assetId: string;
+            /**
+             * @description unknown: the photo library did not answer this time.
+             * @enum {string}
+             */
+            status: "available" | "trashed" | "missing" | "unknown";
+            duration?: number;
+            /** Format: date-time */
+            takenAt?: string;
+            /** Format: date-time */
+            addedAt: string;
+        };
+        MontageVersion: {
+            /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
+            number: number;
+            /** @description The job that made it. */
+            jobId: string;
+            /** @description Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二. */
+            plan: number;
+            /** @description The film in the caller's photo library; play and download it there. */
+            filmAssetId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description The member deleted the film from the photo library. */
+            gone?: boolean;
+        };
+        MontageJobStep: {
+            /**
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @enum {string}
+             */
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
+            /**
+             * @description A step that stopped with the job shows the job's state.
+             * @enum {string}
+             */
+            state: "pending" | "running" | "done" | "queued" | "waiting" | "needs_input" | "failed" | "cancelled";
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageJob: {
+            id: string;
+            projectId: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
+            /** @description The step the job is at or stopped at. */
+            step?: string;
+            /**
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.
+             * @enum {string}
+             */
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            error?: string;
+            steps: components["schemas"]["MontageJobStep"][];
+            /** @description The videos missing, too long, or whose analysis failed. */
+            missingAssetIds?: string[];
+            /** @description The first 方案's film. */
+            version?: components["schemas"]["MontageVersion"];
+            /** @description Every 方案's film the job saved, in order. */
+            versions?: components["schemas"]["MontageVersion"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageProject: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            ask: string;
+            chronological: boolean;
+            assets: components["schemas"]["MontageProjectAsset"][];
+            /** @description The films saved, newest first. */
+            versions: components["schemas"]["MontageVersion"][];
+            /** @description The project's latest job, for the page to pick up where it was after a reload. */
+            job?: components["schemas"]["MontageJob"];
+        };
+        MontageNotice: {
+            /** @enum {string} */
+            kind: "waiting_for_planning" | "planning" | "needs_input" | "saved";
+            jobId: string;
+            projectId: string;
+            /** @description The project's name. */
+            project: string;
+            reason?: string;
+            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. */
+            detail?: string;
+            /** @description The film saved, for saved. */
+            filmAssetId?: string;
+            /** Format: date-time */
+            at: string;
+        };
+        MontageNotices: {
+            items: components["schemas"]["MontageNotice"][];
+        };
+        MontageSongSection: {
+            start: number;
+            end: number;
+            /**
+             * @description allin1's label.
+             * @enum {string}
+             */
+            label: "start" | "end" | "intro" | "outro" | "break" | "bridge" | "inst" | "solo" | "verse" | "chorus";
+        };
+        MontageSongPart: {
+            /** @description Seconds from the excerpt's start. */
+            start: number;
+            end: number;
+            /**
+             * @description The part's level in the film: quiet, middle or climax.
+             * @enum {string}
+             */
+            level: "安静" | "中等" | "高潮";
+            label: string;
+            /** @description allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it. */
+            allin1?: string;
+            /** @description The shots' slots, cut on the bar lines, in seconds from the excerpt's start. */
+            slots: number[][];
+        };
+        MontageSongSelection: {
+            tempo: number;
+            bar: number;
+            /** @description Its start and end in the song, in seconds. The film starts there and lasts as long. */
+            excerpt: number[];
+            seconds: number;
+            parts: components["schemas"]["MontageSongPart"][];
+            /** @description false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen. */
+            chorus: boolean;
+        };
+        MontageSong: {
+            id: string;
+            /** @description The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title. */
+            trackId?: string;
+            title: string;
+            duration: number;
+            /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */
+            transcode: boolean;
+            /** @enum {string} */
+            state: "analyzing" | "ready" | "unusable";
+            /**
+             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
+             * @enum {string}
+             */
+            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
+            /**
+             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
+             * @enum {string}
+             */
+            waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
+            tempo?: number;
+            beats?: number[];
+            downbeats?: number[];
+            sections?: components["schemas"]["MontageSongSection"][];
+            /** @description Where the eighth version's rule starts the excerpt: around the first chorus. */
+            defaultStart?: number;
+            selection?: components["schemas"]["MontageSongSelection"];
+        };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
@@ -7990,6 +8444,10 @@ export interface components {
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
         FamilyReactionName: components["schemas"]["FamilyReactionName"];
+        /** @description The `next` of the previous page. */
+        MontageCursor: string;
+        MontageProjectID: string;
+        MontageJobID: string;
     };
     requestBodies: never;
     headers: never;
@@ -8242,6 +8700,21 @@ export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type MontageProjectSummary = components['schemas']['MontageProjectSummary'];
+export type MontageProjectPage = components['schemas']['MontageProjectPage'];
+export type MontageRequestKey = components['schemas']['MontageRequestKey'];
+export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
+export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
+export type MontageVersion = components['schemas']['MontageVersion'];
+export type MontageJobStep = components['schemas']['MontageJobStep'];
+export type MontageJob = components['schemas']['MontageJob'];
+export type MontageProject = components['schemas']['MontageProject'];
+export type MontageNotice = components['schemas']['MontageNotice'];
+export type MontageNotices = components['schemas']['MontageNotices'];
+export type MontageSongSection = components['schemas']['MontageSongSection'];
+export type MontageSongPart = components['schemas']['MontageSongPart'];
+export type MontageSongSelection = components['schemas']['MontageSongSelection'];
+export type MontageSong = components['schemas']['MontageSong'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -8303,6 +8776,9 @@ export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
+export type ParameterMontageCursor = components['parameters']['MontageCursor'];
+export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
+export type ParameterMontageJobId = components['parameters']['MontageJobID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -12497,6 +12973,606 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    getMontage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The montage center is on */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listMontageProjects: {
+        parameters: {
+            query?: {
+                /** @description The `next` of the previous page. */
+                cursor?: components["parameters"]["MontageCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the caller's projects */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProjectPage"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    /** @description Empty names the project by its videos' dates. */
+                    name?: string;
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project the same requestKey made before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            /** @description The new project */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    updateMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    ask?: string;
+                    chronological?: boolean;
+                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
+                    songStart?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addMontageProjectAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    generateMontageFilm: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    cancelMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    dropMontageJobAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJobAnalysis: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    replanMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listMontageNotices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notices, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageNotices"];
+                };
+            };
+        };
+    };
+    getMontageSong: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The song */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    putMontageSong: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A track of GET /api/v1/music/tracks. */
+                    trackId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The song, being analysed or as analysed before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageSongAudio: {
+        parameters: {
+            query?: {
+                /** @description Seconds to start a decoded song from; ignored for other songs. */
+                start?: number;
+            };
+            header?: {
+                Range?: string;
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHero: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The film */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            /** @description Part of the film */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the film. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHeroPoster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listModules: {

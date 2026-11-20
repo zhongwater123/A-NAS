@@ -33,13 +33,20 @@ sed -e "s/^  default: deepseek-flash$/  default: ${SPIKE_MODEL:-spike-model}/" \
   "$src/ai/assistant/managed-config.yaml" > "$lib/managed/config.yaml"
 chmod 0644 "$lib/managed/config.yaml"
 install -m 0644 /dev/null "$lib/empty.env"
+# The policy of the planning instance, with the montage center's planning server, and the
+# prompt templates of a planning round, as the package installs them (scripts/build-packages.sh).
+# shellcheck source=../../scripts/lib/assistant-units.sh
+. "$src/scripts/lib/assistant-units.sh"
+install -d -m 0755 "$lib/managed-plan" "$lib/montage-prompts"
+derive_plan_policy "$lib/managed/config.yaml" "$src/ai/assistant/montage-mcp.yaml" "$lib/managed-plan/config.yaml"
+install -m 0644 "$src"/ai/anas_montage/prompts/*.md "$lib/montage-prompts/"
 ln -sfn /opt/a-nas/assistant-runtimes/spike "$lib/runtime"
 [[ -f "$lib/runtime/src/SOUL.md" ]] || { install -d /opt/a-nas/assistant-runtimes/spike/src && : > /opt/a-nas/assistant-runtimes/spike/src/SOUL.md; }
 
 # The mount points of the package's tmpfiles.d.
-install -d -m 0755 /run/a-nas-assistant /run/anas-assistant-gw /run/anas-assistant-skills \
-  /run/anas-assistant-photos /run/anas-assistant-companion /run/anas-change-agent
-for file in /run/anas-assistant-photos/photos.sock /run/anas-assistant-companion/companion.sock; do
+install -d -m 0755 /run/a-nas-assistant /run/a-nas-assistant-plan /run/anas-assistant-gw /run/anas-assistant-skills \
+  /run/anas-assistant-photos /run/anas-assistant-companion /run/anas-assistant-montage /run/anas-change-agent
+for file in /run/anas-assistant-photos/photos.sock /run/anas-assistant-companion/companion.sock /run/anas-assistant-montage/montage.sock; do
   [[ -e "$file" ]] || : > "$file"
 done
 
@@ -52,8 +59,6 @@ sed -i 's#^BindReadOnlyPaths=/run/a-nas/assistant-changes.sock:#BindReadOnlyPath
 # The units run while a key is saved; the spike has none.
 sed -i '/^ConditionPathExists=/d' "$units/anas-assistant@.service" "$units/anas-assistant-net@.service" \
   "$units/anas-assistant-cron-waker.service"
-# shellcheck source=../../scripts/lib/assistant-units.sh
-. "$src/scripts/lib/assistant-units.sh"
 derive_assistant_units "$units"
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
   "$units/anas-assistant@.service" > "$units/anas-assistant-probe@.service"

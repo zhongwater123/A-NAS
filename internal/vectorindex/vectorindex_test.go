@@ -3,6 +3,7 @@ package vectorindex_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -327,5 +328,38 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 	}
 	if took := time.Since(started); took > 5*time.Second {
 		t.Errorf("a hung instance held the call for %s", took)
+	}
+}
+
+// A video's window points go together when the video does: deleting by the
+// object field removes every one of them, and only them.
+func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, nil)
+	defer func() { _ = client.Close() }()
+	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "windows", Dimensions: 3, Keywords: []string{"object", "libraries"}}); err != nil {
+		t.Fatal(err)
+	}
+	var points []vectorindex.Point
+	for i, object := range []string{"video:a", "video:a", "video:a", "video:b"} {
+		points = append(points, vectorindex.Point{Key: fmt.Sprintf("%s#%d", object, i), Vector: unit(1, float32(i), 0),
+			Keywords: map[string][]string{"object": {object}, "libraries": {"shared"}}})
+	}
+	if err := client.Upsert(ctx, "windows", points); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "object", []string{"video:a", "video:none"}); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	if err := client.Scan(ctx, "windows", nil, func(entry vectorindex.Entry) error { left = append(left, entry.Key); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(left, []string{"video:b#3"}) {
+		t.Fatalf("left after deleting video:a = %v", left)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "", []string{"x"}); !errors.Is(err, vectorindex.ErrInvalid) {
+		t.Fatalf("DeleteMatching without a field = %v", err)
 	}
 }

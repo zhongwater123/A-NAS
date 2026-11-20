@@ -25,7 +25,7 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-# Imports Hermes's modules once its source is on sys.path.
+# Import Hermes's modules once its source is on sys.path.
 "assistant-spike/toolsets-check.py" = ["E402"]
 
 [lint.isort]

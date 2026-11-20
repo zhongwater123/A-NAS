@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-11-10
+更新时间：2026-11-20
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -1093,6 +1093,14 @@ A-NAS 依赖 Hermes 的面，按稳定程度排：
 2. managed scope 的键与工具集名字：工具集核对（[`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)）在升级后新增、改名或删除工具集时失败。
 3. `hermes curator run`、任务表 `cron/jobs.json` 的格式，以及定时任务的一轮（[`cron_round.py`](../../ai/assistant/cron_round.py)）：`hermes gateway run`、`hermes cron tick`、`hermes gateway stop`，加两处上游内部的查询，`hermes_cli.gateway_runtime.discover_gateway_endpoint`（gateway 是否就绪）与 `cron.executions.live_executions`（有没有任务在执行）；“立即运行”另用 `cron.jobs.trigger_job`（排到下一次调度），实例的启动脚本另用 `hermes_cli.gateway_runtime_start.spawn_unmanaged_gateway`（换成拒绝，名字没了实例就起不来）。2026-11-10 的升级卡在这里；内部查询改了名，这一轮会直接失败，系统测试的定时任务一节随之失败。
 4. `hermes serve` 的 JSON-RPC 与 REST 中白名单放行的部分，以及 Hermes 自己的登录：这是 Desktop 的后端，上游按自己的需要改，没有兼容承诺。
+   - 剪辑中心的规划（[规划会话](../architecture/montage-planning-session.md)，2026-11-20 起）还依赖：
+     - 环境变量 `HERMES_TUI_TOOLSETS`（`tui_gateway/agent_factory.py` 的 `_load_enabled_toolsets`）：规划进程是同一沙箱与主目录里的第二个 `hermes serve`（端口 9120，`anas-assistant-plan@.service`），设 `montage,memory,skills`，整个进程只给模型剪辑、记忆与技能工具。`montage` 要在成员配置的 `mcp_servers` 里且启用（`read_raw_config`），否则被当作未知名字丢掉，模型拿不到剪辑工具；
+     - 两个 `serve` 进程同时读写同一主目录的记忆、技能与 `state.db`；
+     - `skills.creation_nudge_interval`（`agent/agent_init.py`）：规划进程的策略设 1，每次规划后跑后台复盘；复盘在会话结束时被取消（`cancel_background_review_for_live_turn`），客户端断开约 20 秒后会话被回收，所以规划发起方连到 `review.summary` 事件或 150 秒；
+     - JSON-RPC 的 `client.capabilities`、`session.create`（返回 `stored_session_id`）、`session.title`、`prompt.submit`、`session.interrupt`，事件 `gateway.ready`、`tool.start`、`message.complete`（`status`）、`review.summary`，以及服务器发来的 `approval` 请求（答 `{"choice": "deny"}`）；
+     - 规划进程里的对话出现在成员平时实例的 `/api/sessions` 里。
+
+     带真实运行环境的系统测试走一次规划链路，逐项核对：模型拿到的工具正好是剪辑的 4 个与 `memory`、`skill_manage`、`skill_view`、`skills_list`，对话带标题留在历史里，复盘写出技能。上面任一项改了名，这一节随之失败。
 5. 复制进前端的 Desktop 聊天层。
 6. 带着的补丁。
 

@@ -217,17 +217,20 @@ class WakeTests(unittest.TestCase):
         self.assertTrue(self.starts(["a"], 31))
 
     def test_a_round_under_way_is_seen_as_running(self):
-        # systemctl is-active prints the state; its exit status is 0 for
-        # "active" alone, which a oneshot round never is.
-        for state, code, expected in [
-            ("activating", 3, True), ("deactivating", 3, True), ("active", 0, True),
-            ("inactive", 3, False), ("failed", 3, False), ("", 4, False),
+        # A oneshot round is activating for as long as it runs and never active, so the unit's
+        # state is read, not the exit status of is-active.
+        for state, expected in [
+            ("activating", True), ("deactivating", True), ("active", True), ("reloading", True),
+            ("inactive", False), ("failed", False), ("", False),
         ]:
             with self.subTest(state=state):
-                done = subprocess.CompletedProcess([], code, stdout=state + "\n", stderr="")
+                shown = f"ActiveState={state}\nInvocationID=0123abcd\n" if state else ""
+                done = subprocess.CompletedProcess([], 0, stdout=shown, stderr="")
                 with patch.object(waker.subprocess, "run", return_value=done) as run:
                     self.assertEqual(waker.running("anas-assistant-cron@alice.service"), expected)
-                self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "is-active", "anas-assistant-cron@alice.service"])
+                    self.assertEqual(waker.unit_state("anas-assistant-cron@alice.service"), (expected, "0123abcd" if state else ""))
+                self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "show", "-p", "ActiveState", "-p", "InvocationID",
+                                                         "anas-assistant-cron@alice.service"])
 
     def test_nothing_is_started_or_noted_while_a_round_runs(self):
         (self.runs / "alice").mkdir(parents=True)

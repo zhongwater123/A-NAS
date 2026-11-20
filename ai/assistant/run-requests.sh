@@ -20,10 +20,12 @@ account=${2:-}
 case ${1:-} in
   take)
     rm -rf -- "${taken:?}/$account"
-    [[ -d "$waiting/$account" && ! -L "$waiting/$account" ]] || exit 0
     install -d -m 0711 "$taken"
-    mv -- "$waiting/$account" "$taken/$account"
-    chgrp -- "$account" "$taken/$account"
+    if [[ -d "$waiting/$account" && ! -L "$waiting/$account" ]]; then
+      mv -- "$waiting/$account" "$taken/$account"
+    fi
+    [[ -d "$taken/$account" ]] || exit 0
+    chgrp -R -- "$account" "$taken/$account"
     chmod 0750 "$taken/$account"
     ;;
   done)

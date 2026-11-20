@@ -56,26 +56,38 @@ def accounts():
     return sorted(name[:-4] for name in names if name.endswith(".env") and ACCOUNT.match(name[:-4]))
 
 
+def regular_file(path, limit, dir_fd=None, owner=None):
+    """What a file holds that somebody else may have written: None unless it is a regular
+    file of at most limit bytes, read without following its final link or blocking while
+    opening a FIFO. With owner, also None unless it is that user's and nobody else may write
+    to it. path is relative to dir_fd when one is given."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            return None
+        if owner is not None and (info.st_uid != owner or info.st_mode & 0o022):
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            raw = source.read(limit + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return raw if len(raw) <= limit else None
+
+
 def due(account, now):
     """The jobs in the member's store that are enabled and due, each as a mark of the job and
     the instant it is due for: a job that ran is due for another instant, or for none. Empty
-    when none is due. The store is the member's file, so only a regular file is read, without
-    following its final link or blocking while opening a FIFO, and at most LIMIT bytes are
-    parsed and MARKS jobs marked."""
+    when none is due. The store is the member's file (regular_file), and at most LIMIT bytes
+    are parsed and MARKS jobs marked."""
     try:
-        fd = os.open(f"{DATA}/{account}/hermes/cron/jobs.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > LIMIT:
-                return []
-            with os.fdopen(fd, "rb", closefd=False) as store:
-                raw = store.read(LIMIT + 1)
-        finally:
-            os.close(fd)
-        if len(raw) > LIMIT:
-            return []
-        jobs = json.loads(raw).get("jobs")
-    except (OSError, ValueError, AttributeError, RecursionError):
+        jobs = json.loads(regular_file(f"{DATA}/{account}/hermes/cron/jobs.json", LIMIT) or b"null").get("jobs")
+    except (ValueError, AttributeError, RecursionError):
         return []
     marks = set()
     for job in jobs if isinstance(jobs, list) else []:
@@ -128,18 +140,25 @@ def asked(account):
         return False
 
 
-def running(unit):
-    """Whether a round of the unit is under way.
+def unit_state(unit):
+    """(running, invocation) of a unit.
 
     A round is a oneshot unit: activating for as long as it runs and never
     active, so the exit status of is-active, which is 0 for active alone,
-    says "not running" throughout the round.
+    says "not running" throughout the round. Its invocation tells one run of
+    the unit from the next.
     """
-    state = subprocess.run(
-        ["/usr/bin/systemctl", "is-active", unit],
+    shown = subprocess.run(
+        ["/usr/bin/systemctl", "show", "-p", "ActiveState", "-p", "InvocationID", unit],
         check=False, timeout=COMMAND_TIMEOUT, capture_output=True, text=True,
-    ).stdout.strip()
-    return state in {"activating", "active", "reloading", "deactivating"}
+    ).stdout
+    fields = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+    return fields.get("ActiveState") in {"activating", "active", "reloading", "deactivating"}, fields.get("InvocationID", "")
+
+
+def running(unit):
+    """Whether a round of the unit is under way."""
+    return unit_state(unit)[0]
 
 
 class HostConnection(http.client.HTTPConnection):

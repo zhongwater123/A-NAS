@@ -2,18 +2,16 @@
 // vaccine doses coming due and, for guardians, someone asking to join. The
 // server remembers what each member was told, so a hint shows once across
 // devices. Accounts outside the family are told nothing.
-import { ChevronRight, HeartHandshake, X } from "lucide-react";
+import { HeartHandshake } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { nameOf, usePeople } from "../people/people";
+import { DeskNotice } from "../ui/DeskNotice";
 import { type FamilyHint, listHints, markHintsSeen } from "./api";
 import styles from "./notices.module.css";
 
-const HIDE_MS = 15_000;
-
 export function FamilyNotices({ onOpen }: { onOpen: () => void }) {
   const [hints, setHints] = useState<FamilyHint[]>([]);
-  const [held, setHeld] = useState(false);
   const people = usePeople();
 
   useEffect(() => {
@@ -35,50 +33,17 @@ export function FamilyNotices({ onOpen }: { onOpen: () => void }) {
     if (keys.length) void markHintsSeen(keys).catch(() => undefined);
   };
 
-  useEffect(() => {
-    if (!hints.length || held) return;
-    const timer = window.setTimeout(dismiss, HIDE_MS);
-    return () => window.clearTimeout(timer);
-  });
-
   if (!hints.length) return null;
-  const lines = summarize(hints, (username) => nameOf(people, username));
   return (
-    // Pointing at the hint or focusing it keeps it up.
-    <div
-      className={styles.fnHolder}
-      data-vnas-overlay=""
-      onPointerEnter={() => setHeld(true)}
-      onPointerLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
-    >
-      <section className={styles.fnToast} role="status" aria-label="家庭中心提醒">
-        <span className={styles.fnMark} aria-hidden="true">
-          <HeartHandshake />
-        </span>
-        <div className={styles.fnCopy}>
-          <small>家庭中心</small>
-          {lines.map((line) => (
-            <strong key={line}>{line}</strong>
-          ))}
-          <button
-            type="button"
-            className={styles.fnOpen}
-            onClick={() => {
-              dismiss();
-              onOpen();
-            }}
-          >
-            去看看
-            <ChevronRight />
-          </button>
-        </div>
-        <button type="button" className={styles.fnClose} aria-label="关闭" onClick={dismiss}>
-          <X />
-        </button>
-      </section>
-    </div>
+    <DeskNotice
+      className={styles.fnNotice}
+      label="家庭中心提醒"
+      source="家庭中心"
+      icon={<HeartHandshake />}
+      lines={summarize(hints, (username) => nameOf(people, username))}
+      onOpen={onOpen}
+      onDismiss={dismiss}
+    />
   );
 }
 

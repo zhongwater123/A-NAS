@@ -79,6 +79,30 @@ type TextReader interface {
 	ReadText(ctx context.Context, image *os.File, schema json.RawMessage) (string, Reading, error)
 }
 
+// CardDescriber is the AI Worker's text reader describing a montage card
+// from its key frames (docs/architecture/photo-ai.md, 剪辑中心的分析). An
+// Embedder that is also a CardDescriber describes the cards of the videos a
+// montage grant asked for while its Info names a text reader.
+type CardDescriber interface {
+	// DescribeFrames describes one card from its key frames, in order, as
+	// card lays them out. It returns the reader's model, the prompt's
+	// template and the description, JSON the template's schema allows. Each
+	// beat's "frames" there are the first and last of its key frames,
+	// counted from 1 among frames; the Worker describes a card with more
+	// than its reader's context holds from some of them, so a description
+	// may have fewer beats than the card has key frames. Cancelling ctx
+	// stops it in the Worker.
+	DescribeFrames(ctx context.Context, frames []*os.File, card CardLayout) (model, template string, description json.RawMessage, err error)
+}
+
+// CardLayout places a card's key frames: each one's seconds from the card's
+// start, the beat each belongs to counted from 1, and the card's seconds.
+type CardLayout struct {
+	Offsets  []float64
+	Groups   []int
+	Duration float64
+}
+
 // Reading is what the text reader answered.
 type Reading struct {
 	// Text is the answer: the text, or the fields as JSON.
@@ -143,6 +167,9 @@ var (
 	// ErrAIRejected means the AI Worker cannot process this input; the same
 	// input would be rejected again.
 	ErrAIRejected = errors.New("the photo AI worker rejected the input")
+	// ErrAIInvalidResult means the model's answer did not fit what was
+	// asked for, however often the Worker asked again.
+	ErrAIInvalidResult = errors.New("the photo AI worker's answer did not fit its schema")
 )
 
 const (

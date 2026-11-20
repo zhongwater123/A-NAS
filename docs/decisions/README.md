@@ -54,6 +54,7 @@
 - [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 - [2026-11-13：VNAS 评分场景用哪个模型当评审](2026-11-13-assistant-eval-judge.md)
 - [2026-11-17：AI 助手 V1 的模型、开启范围、密钥与告知](2026-11-17-assistant-v1-cloud-model.md)
+- [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 
 ### 桌面与设置
 

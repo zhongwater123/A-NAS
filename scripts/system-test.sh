@@ -74,6 +74,38 @@ if [[ "${1:-}" != --inside ]]; then
   dpkg-deb --raw-extract "$work/previous/a-nas-host_${version}~previous_all.deb" "$legacy_host"
   sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
   dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
+  # The previous release also came before the montage center (ADR 0038): its
+  # product package has no anas-montage unit, so installing this release is
+  # the first with it, and rolling back takes the unit away as a real older
+  # release does. Its programs are this tree's, which need the montage
+  # account, so the account stays.
+  legacy_product=$work/legacy-product
+  previous_product=("$work"/previous/a-nas_*.deb)
+  dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # Nor has it the photo service's grant socket for the montage center, the
+  # montage center's socket for planning, or its planner.
+  rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-assistant.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-assistant.socket" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
+  sed -i -e '/systemctl stop anas-montage-assistant\.socket/d' -e 's/ anas-montage-assistant\.socket//g' \
+    -e 's/ anas-montage-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
+    -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
+    "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
+  sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
+    "$legacy_product/usr/lib/systemd/system/anas-photos.service"
+  ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+    "$legacy_product/usr/lib/systemd/system" ||
+    { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
+  dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
   (cd "$repo" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$version+next" \
@@ -553,7 +585,7 @@ check "smbd then listens only on the loopback and SMB interface's addresses" smb
 
 # --- Every service runs under its production unit (issue #38).
 # One unit per check: systemctl is-active A B succeeds when any of them is (#423).
-for unit in anas-host-agent anas-photos anas-api anas-shares anas-family smbd; do
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage smbd; do
   check "services are active: $unit" systemctl is-active --quiet "$unit"
 done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
@@ -937,14 +969,64 @@ check "but not as the Host Agent's" fails journal_has anas-host-agent "$forged_a
 check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
+# --- Montage center (ADR 0038): its own identity and store, and off until
+# ANAS_MONTAGE_ENABLED turns it on: then the Product Service forwards
+# /api/v1/montage and the montage service confirms the session itself.
+check "montage store belongs to the montage service alone" \
+  test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-montage"
+check "Product Service account cannot list the montage store" denied a-nas ls "$data/montage"
+check "the montage socket is the service's, for the Product Service's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
+check "the montage center is not served while its switch is off" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage"):$(status_of -b /tmp/alice.jar "$api/api/v1/montage/projects")" = 404:404
+printf 'Environment=ANAS_MONTAGE_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
+systemctl daemon-reload
+systemctl restart anas-api
+for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "with its switch on the desktop is told the montage center is there" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage")" = 204
+check "a member lists her montage projects through the montage service" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -c .)" = '{"items":[]}'
+check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/montage/projects")" = 401
+cat > /usr/local/lib/anas-montage-probe.py <<'PY'
+import socket, sys
+leaks = []
+for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
+    try:
+        socket.socket(family, kind).close()
+        leaks.append(f"opened a {family.name} socket")
+    except OSError:
+        pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
+  /usr/lib/systemd/system/anas-montage.service > /etc/systemd/system/anas-montage-probe.service
+systemctl daemon-reload
+check "the probe opens network sockets outside the montage service's sandbox" finds /usr/local/lib/anas-montage-probe.py 'opened a AF_INET socket'
+check "the montage service's sandbox opens no network socket" systemctl start anas-montage-probe.service
+rm /etc/systemd/system/anas-montage-probe.service
+systemctl daemon-reload
+
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo, share and family services hold databases open for writing
-# on it, which a read-only remount refuses.
+# in. The photo, share, family and montage services hold databases open for
+# writing on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares anas-family
+systemctl stop anas-photos anas-shares anas-family anas-montage
 check "the data volume remounts read-only" mount -o remount,ro "$data"
+systemctl start anas-montage
+montage_unavailable() {
+  for _ in $(seq 1 50); do
+    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -r .error.code)" == montage_unavailable ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
+systemctl stop anas-montage
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
 for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
@@ -963,12 +1045,14 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares anas-family
+systemctl start anas-photos anas-shares anas-family anas-montage
 check "once the volume is writable, the Host Agent reconciles it" \
   bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
 check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
+check "the montage center recovers on the writable volume" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/montage/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied a-nas ls "$data/spaces/private/alice"
@@ -1136,6 +1220,217 @@ check "administrator does not see the member's photo library" \
 check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied a-nas ls "$data/photos"
+
+# --- The montage center's project grants (ADR 0038): a socket systemd holds
+# for the montage account alone, and the photo service checks the peer's UID.
+cat > /usr/local/lib/photo-grants.py <<'PY'
+import json, socket, struct, sys
+conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+conn.connect("/run/a-nas-photos-grants/grants.sock")
+body = json.dumps({"op": "list"}).encode()
+conn.sendall(struct.pack(">I", len(body)) + body)
+header = conn.recv(4)
+if len(header) < 4:
+    sys.exit("closed without an answer")
+length = struct.unpack(">I", header)[0]
+answer = b""
+while len(answer) < length:
+    chunk = conn.recv(length - len(answer))
+    if not chunk:
+        sys.exit("closed before the whole answer")
+    answer += chunk
+reply = json.loads(answer)
+print(reply)
+sys.exit(0 if reply.get("ok") else 1)
+PY
+check "the grant socket is the montage account's alone" \
+  test "$(stat -c '%a %U' /run/a-nas-photos-grants/grants.sock):$(stat -c '%a %U' /run/a-nas-photos-grants)" = "600 a-nas-montage:755 root"
+check "the photo service answers the montage account on it" \
+  setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py
+check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
+check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
+
+# --- The compute worker is socket-activated with the production sandbox.
+# The small test runtime has only system Python, so its fixture answers a
+# fixed quality request and reports whether it can see the data volume or
+# create an IP socket. Real-content runs exercise the production entrypoint.
+# For the montage center's planning (ai/assistant-spike/system-test.sh) it
+# also writes the two steps' briefs, as plan_brief does, with the data and
+# schema of the eighth version's requests cut down to what the scripted VNAS
+# reads, and turns the second step's answer back; any other request is
+# refused, as the real Worker refuses what it cannot do.
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
+  install -d /run/systemd/system/anas-montage-compute.service.d
+  cat > /run/systemd/system/anas-montage-compute.service.d/system-test.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/python3 /usr/local/lib/montage-compute-fixture.py
+EOF
+  cat > /usr/local/lib/montage-compute-fixture.py <<'PY'
+import glob
+import json
+import os
+import socket
+from anas_ai import protocol
+
+# The template the montage center fills: the newest installed.
+TEMPLATE = max((os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")), default="")
+
+
+def with_body(request, fds):
+    """The request with the fields of its "body" array, a sealed file of JSON (internal/montagecompute)."""
+    fields = {}
+    for spec, fd in zip(request.get("arrays", []), fds):
+        if spec.get("name") == "body":
+            fields = json.loads(os.pread(fd, os.fstat(fd).st_size, 0) or b"{}")
+        os.close(fd)
+    return {**fields, **request}
+
+
+def pick_brief(request):
+    ids = [card["id"] for card in request["cards"]]
+    parts = request["music"]["parts"]
+
+    def part(slots):
+        scene = {"type": "object", "required": ["query", "cards"], "properties": {
+            "query": {"type": "string"},
+            "cards": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "enum": ids}}}}
+        return {"type": "object", "required": ["name", "summary", "link", "scenes"], "properties": {
+            "name": {"type": "string"}, "summary": {"type": "string"}, "link": {"type": "string"},
+            "scenes": {"type": "array", "minItems": 1, "maxItems": slots, "items": scene}}}
+
+    schema = {"type": "object", "required": ["design", "opening", "ending", "unmet", "parts"], "properties": {
+        "design": {"type": "string"}, "opening": {"type": "string"}, "ending": {"type": "string"},
+        "unmet": {"type": "array", "items": {"type": "string"}},
+        "parts": {"type": "array", "minItems": len(parts), "maxItems": len(parts),
+                  "prefixItems": [part(len(p["slots"])) for p in parts], "items": False}}}
+    data = {"catalog": [f"{card['id']} | {card['answer']['summary']}" for card in request["cards"]],
+            "partCount": len(parts), "targetSeconds": round(request["music"]["seconds"])}
+    return {"data": data, "schema": schema, "template": TEMPLATE}
+
+
+def shots_brief(request):
+    cards = {card["id"]: card for card in request["cards"]}
+    parts, slots, pictures = {}, [], []
+    for n, part in enumerate(request["picked"]["parts"], 1):
+        items = {}
+        for k, scene in enumerate(part["scenes"], 1):
+            beats = [f"{c}/{j}" for c in dict.fromkeys(scene["cards"]) if c in cards
+                     for j in range(1, len(cards[c]["answer"]["beats"]) + 1)]
+            items[f"画面{k}"] = {"type": "object", "required": ["beats", "shows", "link"], "properties": {
+                "beats": {"type": "array", "minItems": 1, "maxItems": len(beats), "items": {"type": "string", "enum": beats}},
+                "shows": {"type": "string"}, "link": {"type": "string"}}}
+        parts[f"段落{n}"] = {"type": "object", "required": list(items), "properties": items}
+        slots.append([[[2.0 * k, 2.0 * k + 2.0]] for k in range(len(items))])
+        pictures.append(len(items))
+    schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
+        "unmet": {"type": "array", "items": {"type": "string"}},
+        "parts": {"type": "object", "required": list(parts), "properties": parts}}}
+    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": TEMPLATE,
+            "slots": slots, "pictures": pictures}
+
+
+assert os.environ["LISTEN_PID"] == str(os.getpid())
+assert os.environ["LISTEN_FDS"] == "1"
+listener = socket.socket(fileno=3)
+while True:
+    conn, _ = listener.accept()
+    with conn:
+        # The photo library's analysis sends several arrays; their requests are refused below.
+        request, fds = protocol.read_request(conn, 16)
+        request = with_body(request, fds)
+        if request["op"] == "probe":
+            try:
+                with socket.socket(socket.AF_INET):
+                    network = True
+            except OSError:
+                network = False
+            reply = protocol.ok(data=os.path.isdir("/srv/a-nas/data/photos"), network=network)
+        elif request["op"] == "quality":
+            reply = protocol.ok(blur=2.0, shake=0.0, blocked=0.0, points=[None], reasons=[])
+        elif request["op"] == "plan_brief":
+            reply = protocol.ok(**(pick_brief(request) if request["step"] == "pick" else shots_brief(request)))
+        elif request["op"] == "shots_answer":
+            reply = protocol.ok(answer=request["answer"])
+        else:
+            reply = protocol.failure(protocol.CODE_INVALID_INPUT, f"the fixture does not {request['op']}")
+        protocol.write_response(conn, reply)
+PY
+  systemctl daemon-reload
+fi
+cat > /usr/local/lib/montage-compute-client.py <<'PY'
+import json
+import socket
+import struct
+import sys
+
+probe = len(sys.argv) > 1 and sys.argv[1] == "probe"
+request = {"op": "probe"} if probe else {
+    "op": "quality", "blurs": [2.0], "blocked": [0.0], "points": [None], "moves": []
+}
+body = json.dumps(request).encode()
+with socket.socket(socket.AF_UNIX) as conn:
+    conn.settimeout(15)
+    conn.connect("/run/a-nas-montage-compute/compute.sock")
+    conn.sendall(struct.pack(">I", len(body)) + body)
+    with conn.makefile("rb") as stream:
+        size, = struct.unpack(">I", stream.read(4))
+        answer = json.loads(stream.read(size))
+assert answer["ok"], answer
+if probe:
+    assert answer["data"] is False and answer["network"] is False, answer
+else:
+    assert answer["blur"] == 2.0 and answer["shake"] == 0.0 and answer["reasons"] == [], answer
+PY
+check "the compute socket is available to the photo service" \
+  test "$(stat -c '%a %G' /run/a-nas-montage-compute/compute.sock)" = "660 a-nas-photos"
+check "the photo service can activate the compute worker" \
+  runuser -u a-nas-photos -- python3 /usr/local/lib/montage-compute-client.py
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
+  check "the compute worker cannot see the data volume or create an IP socket" \
+    python3 /usr/local/lib/montage-compute-client.py probe
+fi
+compute_pid=$(systemctl show -p MainPID --value anas-montage-compute.service)
+check "kill the running compute worker" systemctl kill --kill-whom=main --signal=SIGKILL anas-montage-compute.service
+check "the compute worker answers the next connection after it is killed" \
+  python3 /usr/local/lib/montage-compute-client.py
+check "systemd replaced the compute worker" \
+  test "$(systemctl show -p MainPID --value anas-montage-compute.service)" != "$compute_pid"
+
+# --- Montage projects (ADR 0038): a project holds the videos its member
+# handed over, through a grant; another member cannot see it, and deleting
+# it leaves the videos in the photo library.
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25:duration=2 -c:v libx264 -pix_fmt yuv420p /tmp/clip.mp4
+clip=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F file=@/tmp/clip.mp4 \
+  "$api/api/v1/photos/libraries/$alice_library/uploads" | jq -r .id || true)
+project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"requestKey\":\"system-test\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+check "a member makes a montage project of her video" test -n "$clip" -a -n "$project" -a "$project" != null
+# The grant socket lists the grants not revoked; a revoked one is gone.
+project_grant_listed() {
+  local grants
+  grants=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py) || return 2
+  grep -qF "'projectId': '$project'" <<<"$grants"
+}
+check "the photo library holds the project's grant" project_grant_listed
+check "another member's project is not found" \
+  test "$(status_of -b /tmp/owner.jar "$api/api/v1/montage/projects/$project")" = 404
+check "deleting the project answers 204" \
+  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/montage/projects/$project")" = 204
+check "the video stays in the photo library" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/assets/$clip")" = 200
+# The montage service revokes it right after answering the deletion.
+project_grant_revoked() {
+  local _ listed
+  for _ in $(seq 1 50); do
+    listed=0
+    project_grant_listed || listed=$?
+    [[ $listed == 1 ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "and the project's grant is revoked" project_grant_revoked
 
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
@@ -1596,7 +1891,7 @@ journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -
 search_socket=/run/a-nas-search/search.sock
 # The Product Service holds a-nas-search through its unit's SupplementaryGroups,
 # not as a login group of a-nas.
-as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-search "$@"; }
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -1798,6 +2093,69 @@ movies_dir=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Cont
   -d '{"parentId":"","name":"Movies"}' "$api/api/v1/spaces/$shared/directories" | jq -r .id || true)
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25:duration=6 -f lavfi -i sine=duration=6 \
   -c:v libx264 -pix_fmt yuv420p -c:a ac3 /tmp/heat.mkv
+check "the isolated FFmpeg worker takes frames and assembles a faststart film" python3 - <<'PY'
+import json
+import shutil
+import socket
+import struct
+import subprocess
+from contextlib import ExitStack
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+def read_exact(stream, size):
+    data = stream.read(size)
+    assert len(data) == size, (len(data), size)
+    return data
+
+
+def message(stream):
+    size, = struct.unpack("!I", read_exact(stream, 4))
+    return read_exact(stream, size)
+
+
+def request(op, paths, **params):
+    body = json.dumps(dict(op=op, ack=True, **params)).encode()
+    packet = struct.pack("!I", len(body)) + body
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(60)
+        conn.connect("/run/a-nas-ffmpeg/ffmpeg.sock")
+        with ExitStack() as files:
+            fds = [files.enter_context(path.open("rb")).fileno() for path in paths]
+            sent = conn.sendmsg([packet], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, struct.pack(f"{len(fds)}i", *fds))])
+        conn.sendall(packet[sent:])
+        with conn.makefile("rb") as stream:
+            ack = json.loads(message(stream))
+            assert ack.get("accepted"), ack
+            response = json.loads(message(stream))
+            assert response.get("ok"), response
+            if op != "frames":
+                return read_exact(stream, response["size"])
+            for _ in params["times"]:
+                assert message(stream).startswith(b"\xff\xd8")
+            assert message(stream) == b""
+            trailer = json.loads(message(stream))
+            assert trailer.get("ok") and len(trailer["blur"]) == len(params["times"]), trailer
+
+
+with TemporaryDirectory() as temporary:
+    work = Path(temporary)
+    source, segment, film = (work / name for name in ("source.mkv", "segment.ts", "film.mp4"))
+    shutil.copyfile("/tmp/heat.mkv", source)
+    source.chmod(0o600)
+    request("frames", [source], times=[0.5, 1.5], format="jpeg", width=256, quality=3, blur=True)
+    segment.write_bytes(request("segment", [source], start=0.5, frames=30, offset=0))
+    segment.chmod(0o600)
+    data = request("assemble", [segment, source], frames=30, created="2026-08-04T10:30:00Z")
+    assert 0 < data.index(b"moov") < data.index(b"mdat")
+    film.write_bytes(data)
+    probe = subprocess.check_output([
+        "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=nb_frames",
+        "-of", "csv=p=0", str(film),
+    ])
+    assert probe.strip() == b"30", probe
+PY
 curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=$movies_dir" \
   -F "file=@/tmp/heat.mkv;filename=Heat (1995).mkv" "$api/api/v1/spaces/$shared/uploads" || true
 # Ordinary file previews use the same sandbox without creating a media library.
@@ -1904,6 +2262,50 @@ check "the member's music library holds the WavPack song with its tags" \
 check "the FFmpeg worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
 check "the FFmpeg worker decodes the song to FLAC from a start position" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
+# --- Montage songs (#559): a member chooses a song for a project from her
+# music library; the Product Service opens it through the File Broker as her
+# and the montage service keeps a copy of its own. allin1 is not installed
+# here, so the analysis waits for it.
+for who in alice owner; do
+  ffmpeg -hide_banner -loglevel error -y -f lavfi -i sine=frequency=330:duration=40 -c:a libmp3lame \
+    -metadata title="Song of $who" "/tmp/$who-song.mp3"
+done
+curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F "file=@/tmp/alice-song.mp3;filename=song.mp3" \
+  "$api/api/v1/spaces/$alice_private/uploads" || true
+curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "file=@/tmp/owner-song.mp3;filename=song.mp3" \
+  "$api/api/v1/spaces/$owner_private/uploads" || true
+track_of() { # JAR CSRF TITLE -> the track's ID once the library is scanned
+  curl -fsS -o /dev/null -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/music/library/scan" || true
+  for _ in $(seq 1 60); do
+    [[ "$(curl -fsS -b "$1" "$api/api/v1/music/library" | jq -r .scan.state || true)" == idle ]] && break
+    sleep 1
+  done
+  curl -fsS -b "$1" "$api/api/v1/music/tracks" | jq -r --arg title "$3" '[.items[] | select(.title == $title)][0].id'
+}
+alice_track=$(track_of /tmp/alice.jar "$alice_csrf" "Song of alice" || true)
+owner_track=$(track_of /tmp/owner.jar "$owner_csrf" "Song of owner" || true)
+song_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+  -d "{\"requestKey\":\"system-test-song\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+put_song() { # JAR CSRF TRACK -> status
+  status_of -X PUT -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d "{\"trackId\":\"$3\"}" \
+    "$api/api/v1/montage/projects/$song_project/song"
+}
+# A track that is not there answers 404 to anyone, so the refusal below says
+# something only once the owner has played this track by its ID himself.
+check "the owner plays his own song by its track ID" \
+  test "$(status_of --max-time 60 -b /tmp/owner.jar "$api/api/v1/music/tracks/$owner_track/stream")" = 200
+check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
+check "a member copies her own song into the montage center" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
+check "the copy is the montage service's alone, named by its content" \
+  bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-montage' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
+check "the song waits for allin1, which is not installed" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects/$song_project/song" | jq -r .state)" = analyzing
+check "she listens to the copy with Range" \
+  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/montage/projects/$song_project/song/audio")" = 206
+check "the montage account cannot read her space" denied a-nas-montage ls "$data/spaces/private/alice"
+check "deleting the project removes the copy no project uses" \
+  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/montage/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
+
 # A probe in the FFmpeg worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'
 import os, socket, sys
@@ -2481,7 +2883,22 @@ check "this release took the database back with the newer release's Down" test "
 check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "the upgrade copied the montage database on the data volume" \
+  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
+check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
+check "the previous release, which came before the montage center, has no montage unit" \
+  test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
+  not-found:inactive
+check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "nor the photo service's grant socket, which stopped before its unit went" \
+  test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
+  not-found:inactive
+for unit in anas-montage-compute.socket anas-montage-compute.service anas-montage-assistant.socket; do
+  check "rollback removed and stopped $unit" \
+    test "$(systemctl show -p LoadState --value "$unit"):$(systemctl show -p ActiveState --value "$unit")" = not-found:inactive
+done
+check "the compute worker is no longer running" fails systemctl is-active --quiet anas-montage-compute.service
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }
@@ -2508,6 +2925,11 @@ check "a-nas-check passes on the previous release" quiet a-nas-check
 check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}' a-nas-archive-keyring)" = "$next"
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
+check "after upgrading again the montage service has its account, store and socket" \
+  test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
+  "active:31003:700 a-nas-montage:660 a-nas-montage"
+check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
+  test "$(systemctl is-active anas-montage-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "two copies of the databases stay, under the same names on both disks" \

@@ -40,9 +40,22 @@ check "without a key no member has an assistant" \
 check "without a key the model gateway is not running" \
   test "$(systemctl is-active anas-assistant-gateway.service || true)" != active
 check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar "$api/api/v1/assistant-key")" = 403
+# The requests that may lead to planning in the montage center register a planning grant for
+# the member behind them first (docs/architecture/montage-center.md, 规划授权): the File Broker
+# writes it into the Host Agent's own state, for root's planner alone. Here the job asked for does
+# not exist, so the montage center answers 404 once the Product Service has passed the request
+# on; without VNAS it passes it on with no grant.
+replan() { # JAR CSRF: the status of asking to plan a job again
+  status_of -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/montage/jobs/job:AAAAAAAAAAAAAAAAAAAAAAAA/replan" || true
+}
+plans=/var/lib/a-nas-host/assistant/plans
+check "without VNAS a planning request reaches the montage center, and leaves no planning grant" \
+  test "$(replan /tmp/alice.jar "$alice_csrf")" = 404 -a ! -e "$plans/alice"
 
-# The scripted model stands where the gateway would reach DeepSeek.
-systemd-run --unit fake-model --quiet python3 /spike/fake_model.py tcp:127.0.0.1:18090 /var/log/fake-model.jsonl || true
+# The scripted model stands where the gateway would reach DeepSeek. Planning the montage
+# center's job below, its first call takes longer than two minutes.
+systemd-run --unit fake-model --quiet --setenv=FAKE_MODEL_PLAN_SLEEP=130 \
+  python3 /spike/fake_model.py tcp:127.0.0.1:18090 /var/log/fake-model.jsonl || true
 install -d /etc/systemd/system/anas-assistant-gateway.service.d
 printf '[Service]\nEnvironment=ANAS_ASSISTANT_UPSTREAM=http://127.0.0.1:18090\n' \
   >/etc/systemd/system/anas-assistant-gateway.service.d/system-test.conf
@@ -89,6 +102,16 @@ check "alice's Hermes home is hers alone" test "$(stat -c '%a %U %G' "$data/assi
 check "the members' settings are in the Host Agent's own state" \
   test "$(stat -c '%a %U' /var/lib/a-nas-host 2>/dev/null)" = "700 root" -a -f /var/lib/a-nas-host/assistant/members/alice/config.yaml
 check "alice now has VNAS" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available || true)" = true
+check "with VNAS a planning request registers her grant on its way to the montage center" \
+  test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 404:404
+check "the grants are root's alone, in the Host Agent's own state" \
+  test "$(stat -c '%a %U' "$plans" 2>/dev/null):$(stat -c '%a %U %F' "$plans/alice" 2>/dev/null):$(stat -c '%a %U %F' "$plans/bob" 2>/dev/null)" = \
+  "700 root:600 root regular file:600 root regular file"
+check "a grant says when it was issued and how many rounds it allows" \
+  jq -e '.rounds == 5 and (.issuedAt | fromdateiso8601) > (now - 300)' "$plans/alice"
+check "no grant is kept where the Product Service could write one" test ! -e /var/lib/a-nas/assistant-plans
+check "the Product Service's account cannot read the grants" denied a-nas ls "$plans"
+check "nor can the montage service's" denied a-nas-montage ls "$plans"
 check "the members write the probe's files into their spaces" quiet bash /spike/seed.sh "$data"
 # A real snapshot of alice's space, which the sandbox must not show.
 curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
@@ -125,6 +148,51 @@ for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.servi
 done
 check "without the bind, the sandbox's path is the empty mount point" \
   test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
+# The montage center's socket (docs/architecture/montage-planning-session.md) is the reverse:
+# only a member's planning instance binds it, a second `hermes serve` in her sandbox with the
+# policy and settings that add the montage server and its tools pinned to montage, memory and
+# skills; her ordinary instance, scheduled tasks and curator have none of it. Outside a bind
+# the socket is root's alone, and root is answered only for the account it names: that is the
+# planner, which hands the planning to her planning instance.
+montage_socket=/run/a-nas-montage-assistant/assistant.sock
+check "the montage service holds its socket for planning" systemctl is-active --quiet anas-montage-assistant.socket
+check "the montage center's socket is out of a member's reach outside the sandbox" \
+  denied alice python3 -c "$unix_connect" "$montage_socket"
+montage_claim() { # [HEADER]: the status of a claim of a planning round on it, as root
+  local header=()
+  [[ -z "${1:-}" ]] || header=(-H "$1")
+  curl -s -o /dev/null -w '%{http_code}' --unix-socket "$montage_socket" "${header[@]}" -X POST -d '{}' http://montage/v1/rounds/claim || true
+}
+check "the montage center refuses root unless it names the account" test "$(montage_claim)" = 403
+check "and answers root for the account it names: alice has nothing to plan yet" \
+  test "$(montage_claim 'X-A-NAS-Account: alice')" = 409
+check "an account that is not in use is refused" test "$(montage_claim 'X-A-NAS-Account: nobody')" = 401
+check "a member's planning instance binds the montage center's socket" \
+  grep -Fq "$montage_socket:/run/anas-assistant-montage/montage.sock" <<<"$(binds anas-assistant-plan@alice.service)"
+for unit in anas-assistant@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service; do
+  check "$unit does not bind the montage center's socket" \
+    test -n "$(binds "$unit")" -a "$(grep -cF "$montage_socket" <<<"$(binds "$unit")")" = 0
+done
+check "her planning instance does not bind the companion's socket either" \
+  test -n "$(binds anas-assistant-plan@alice.service)" -a "$(grep -cF "$companion_socket" <<<"$(binds anas-assistant-plan@alice.service)")" = 0
+plan_environment=$(systemctl show -p Environment --value anas-assistant-plan@alice.service || true)
+check "her planning instance gives the model the montage, memory and skill tools alone" \
+  grep -q 'HERMES_TUI_TOOLSETS=montage,memory,skills' <<<"$plan_environment"
+check "and reads the policy with the montage server" grep -q 'HERMES_MANAGED_DIR=/usr/lib/a-nas/assistant/managed-plan' <<<"$plan_environment"
+# Counted, not "no match": a policy that is missing or cannot be read has no line either.
+members=/var/lib/a-nas-host/assistant/members
+check "only that policy has the montage server" \
+  test "$(grep -c '^  montage:' /usr/lib/a-nas/assistant/managed-plan/config.yaml):$(grep -c '^  montage:' /usr/lib/a-nas/assistant/managed/config.yaml):$(grep -c '^  anas:' /usr/lib/a-nas/assistant/managed/config.yaml)" = 1:0:1
+check "and has every planning reviewed for what VNAS learned" \
+  quiet yq -e '.skills.creation_nudge_interval == 1' /usr/lib/a-nas/assistant/managed-plan/config.yaml
+check "the member's settings for planning carry it, the instance's do not" \
+  test "$(grep -c 'anas_montage_mcp.py' "$members/alice/config-plan.yaml"):$(grep -c 'anas_montage_mcp.py' "$members/alice/config.yaml"):$(grep -c 'anas_mcp.py' "$members/alice/config.yaml")" = 1:0:1
+check "her scheduled tasks are back on the ordinary policy" \
+  test ! -e /usr/lib/a-nas/assistant/managed-cron -a ! -e "$members/alice/config-cron.yaml"
+check "her planning instance has a socket of its own, root's alone" \
+  test "$(stat -c '%a %U' /run/a-nas-assistant-plan/alice.sock 2>/dev/null)" = "600 root"
+check "root's planner runs while the key is saved" systemctl is-active --quiet anas-montage-planner.service
+check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v2.md
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
@@ -495,11 +563,19 @@ if "$real_runtime"; then
   "$assistant_python" /spike/serve_client.py alice chat \
     'CALL cronjob_manage {"action": "create", "name": "系统测试任务", "schedule": "every 1m", "prompt": "SAY 共享空间今天没有变化 END"}' >/dev/null 2>&1 || true
   systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
+  # From here on only a round of her scheduled tasks asks the model.
+  round_from=$(date +%s.%N)
   jobs_file="$data/assistant/alice/hermes/cron/jobs.json"
   for _ in $(seq 1 60); do jq -e '.jobs[0].last_run_at' "$jobs_file" >/dev/null 2>&1 && break; sleep 5; done
   check "her task ran when due, in her sandbox, with her assistant stopped" \
     jq -e '.jobs[0].last_status == "ok"' "$jobs_file"
   check "her assistant itself stayed stopped" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  # A scheduled run is not followed by Hermes's background review of memory and skills. The
+  # scripted model notes each request that is a review; this run asked the model and none of
+  # its requests was one.
+  # shellcheck disable=SC2016 # $from is jq's
+  check "the scheduled run asked the model, and Hermes followed it with no background review" \
+    jq -es --argjson from "$round_from" '[.[] | select(.t >= $from)] | length >= 1 and all(.[]; .review == false)' /var/log/fake-model.jsonl
   echo "INFO assistant tasks: $(jq -c '.jobs[0] | {name, last_status, last_error}' "$jobs_file" 2>/dev/null || true)"
   # The round's gateway is gone, and with it the last unit that needed her private network.
   for _ in $(seq 1 30); do [[ "$(systemctl is-active anas-assistant-net@alice.service || true)" == active ]] || break; sleep 2; done
@@ -542,6 +618,87 @@ if "$real_runtime"; then
   echo "INFO assistant run now: $(journalctl -u anas-assistant-cron@alice.service -o cat --no-pager | grep 'queued to run now' | tail -n 1 || true)"
   check "she deletes the task" \
     test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
+  # --- The montage center's planning (docs/architecture/montage-planning-session.md): a job of
+  # hers comes to its planning step; root's planner claims a round for her and hands it to her
+  # planning instance as a conversation; the scripted model plays VNAS and plans both 方案 with
+  # the four montage tools, one of its calls taking longer than two minutes; the job goes on
+  # with what it handed in, the conversation stays in her VNAS history, and Hermes's background
+  # review writes what it learned as a skill.
+  #
+  # What comes before planning needs models this test does not install: the photo library's
+  # analysis of her video and allin1's analysis of her song. With the montage service stopped,
+  # the test gives the job what those steps would have kept, a catalog of four cards, and her
+  # song an analysis (montage-plan-seed.py); from there the job works out its keys and asks for
+  # its briefs itself, whose data and schema the compute Worker's stand-in writes
+  # (scripts/system-test.sh). Nothing in the product is opened for the test. The real compute
+  # Worker would take the four cards for real ones, so with the real content this is left out.
+  for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+    echo "INFO montage planning: left out with the real compute Worker, which the seeded cards are not for"
+  else
+    montage_job() { curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/jobs/$plan_job" || true; }
+    plan_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+      -d "{\"requestKey\":\"system-test-plan\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+    check "she makes a montage project of her video and her song" \
+      test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+        -d "{\"trackId\":\"$alice_track\"}" "$api/api/v1/montage/projects/$plan_project/song")" = 200
+    plan_name=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects/$plan_project" | jq -r .name || true)
+    plan_job=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+      -d '{"requestKey":"system-test-plan"}' "$api/api/v1/montage/projects/$plan_project/generate" | jq -r .id || true)
+    check "she starts it, which registers her planning grant on the way" \
+      bash -c "[[ -n '$plan_job' && '$plan_job' != null ]] && jq -e '(.issuedAt | fromdateiso8601) > (now - 120)' '$plans/alice' >/dev/null"
+    systemctl stop anas-montage-assistant.socket anas-montage.service || true
+    seeded=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups \
+      python3 /spike/montage-plan-seed.py "$data/montage/montage.db" "$plan_job" "$clip" 2>&1 || true)
+    systemctl start anas-montage.service anas-montage-assistant.socket || true
+    check "the test gives her job a catalog and her song an analysis" grep -q '^seeded ' <<<"$seeded"
+    echo "INFO montage planning: $seeded"
+    waits_for_vnas() { [[ "$(montage_job | jq -r '.state + " " + (.waitReason // "")')" == "waiting vnas" ]]; }
+    for _ in $(seq 1 60); do waits_for_vnas && break; sleep 2; done
+    check "her job comes to planning by itself and waits for VNAS" waits_for_vnas
+    echo "INFO montage planning: the job before its round: $(montage_job | jq -c '{state, step, waitReason, error}' || true)"
+    planner_said() { journalctl -u anas-montage-planner.service -o cat --no-pager | grep -q "$1"; }
+    for _ in $(seq 1 30); do planner_said "alice: round .* handed to VNAS" && break; sleep 2; done
+    check "root's planner claims a round for her and hands it to her planning instance" planner_said "alice: round .* handed to VNAS"
+    check "her planning instance runs apart from her ordinary one" \
+      test "$(systemctl show -p ActiveEnterTimestampMonotonic --value anas-assistant-plan@alice.service)" != 0
+    for _ in $(seq 1 240); do planner_said "alice: round .* ended" && break; sleep 2; done
+    check "the round ends with both 方案 handed in" planner_said "alice: round .* ended: complete"
+    check "the montage center took both steps of both 方案" test "$(journalctl -u anas-montage.service -o cat --no-pager |
+      grep 'planning step taken' | grep -cF "$plan_job")" = 4
+    past_planning() {
+      montage_job | jq -e '([.steps[] | select(.name == "pick" or .name == "shots") | .state] == ["done", "done"])
+        and (.step | IN("pick", "shots") | not)' >/dev/null
+    }
+    for _ in $(seq 1 60); do past_planning && break; sleep 2; done
+    check "her job goes past planning with what VNAS handed in" past_planning
+    echo "INFO montage planning: the job after its round: $(montage_job | jq -c '{state, step, waitReason, error}' || true)"
+    plan_requests=$(jq -sc '[.[] | select(.plan and (.review | not) and (.tools | length) > 0)]' /var/log/fake-model.jsonl || true)
+    plan_tools=$(jq -c '[.[].tools[]] | unique' <<<"$plan_requests" || true)
+    check "the model was offered the montage, memory and skill tools alone" test "$plan_tools" = \
+      '["mcp__montage__montage_brief","mcp__montage__montage_shots_brief","mcp__montage__montage_submit_outline","mcp__montage__montage_submit_shots","memory","skill_manage","skill_view","skills_list"]'
+    echo "INFO montage planning: tools offered: $plan_tools"
+    # What the scripted VNAS did, step by step, and what each step answered to.
+    jq -c '.[] | {decision: (.decision | {tool, text: ((.text // "") | .[0:160]), args: ((.args // "") | .[0:160])}),
+      after: [(.tail // [])[] | {role, calls, text: (.text | .[0:200])}]}' <<<"$plan_requests" 2>/dev/null |
+      sed 's/^/INFO montage planning step: /' || true
+    check "a model call of more than two minutes in the round was waited out" \
+      jq -e 'any(.[]; (.decision.sleep // 0) >= 120)' <<<"$plan_requests"
+    # shellcheck disable=SC2016 # $title is jq's
+    check "the planning stays in her VNAS history, titled for the project" jq -e --arg title "剪辑规划 · $plan_name" \
+      'any(.sessions[]; .title == $title)' <<<"$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/sessions" || true)"
+    check "Hermes's background review of the planning ran" \
+      jq -es 'any(.[]; .plan and .review and .decision.tool == "skill_manage")' /var/log/fake-model.jsonl
+    check "and wrote what it learned as a skill of hers" \
+      test -n "$(find "$data/assistant/alice/hermes/skills" -path '*/montage-planning-notes/SKILL.md' 2>/dev/null)"
+    check "the planner counted the round on her grant" \
+      jq -e '[.counts | to_entries[] | select(.key | startswith("alice|")) | .value] == [1]' /var/lib/anas-montage-planner/state.json
+    check "no marker is left for her" test ! -e /run/a-nas-montage/plans/alice
+    for _ in $(seq 1 90); do systemctl is-active --quiet anas-assistant-plan@alice.service || break; sleep 2; done
+    check "her planning instance stops once the planner has left it" \
+      test "$(systemctl is-active anas-assistant-plan@alice.service || true)" != active
+    echo "INFO montage planning: $(journalctl -u anas-montage-planner.service -o cat --no-pager | tail -n 6 | tr '\n' ';' || true)"
+  fi
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).
