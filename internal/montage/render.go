@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -243,6 +245,9 @@ func finite(values ...float64) bool {
 // job's failure, never a film.
 func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if len(answer.Short) > 0 {
+		if run.pins != nil {
+			return shortOfPins(run.pins, answer.Short)
+		}
 		return failed("%d slots were left empty", len(answer.Short))
 	}
 	if len(answer.Clips) == 0 || len(answer.Clips) > maxClips {
@@ -250,6 +255,8 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	}
 	total := 0
 	var slots [][2]int
+	// beats are the beats of each slot's shots.
+	var beats [][]string
 	var slot [2]int
 	for i, raw := range answer.Clips {
 		var clip Clip
@@ -290,8 +297,10 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 				return failed("slot %v does not follow frame %d", clip.Slot, total)
 			}
 			slots = append(slots, thisSlot)
+			beats = append(beats, nil)
 			slot = thisSlot
 		}
+		beats[len(beats)-1] = append(beats[len(beats)-1], clip.Beat)
 		total += frames
 		if total > slot[1] {
 			return failed("shot %d overfills its slot", i+1)
@@ -302,7 +311,7 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	}
 	if run.pins != nil {
 		// An edit keeps its draft's slots, in the draft's order.
-		if err := checkPinnedSlots(run.pins, slots); err != nil {
+		if err := checkPinnedSlots(run.pins, slots, beats); err != nil {
 			return err
 		}
 	} else if err := checkPlannedSlots(run.planned, slots); err != nil {
@@ -351,17 +360,49 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 }
 
 // checkPinnedSlots checks an edit's timeline fills its pins' slots, each
-// in its place.
-func checkPinnedSlots(pins []FillPin, filled [][2]int) error {
+// in its place, and that each is cut with the beat the member chose for it:
+// beats are the beats of each slot's shots. The fill passes over a pin whose
+// card has no footage left around its keyframe, as when the shots beside it
+// took it; a film that silently shows another beat there is not the draft,
+// so the member is told which shots to change.
+func checkPinnedSlots(pins []FillPin, filled [][2]int, beats [][]string) error {
 	if len(pins) != len(filled) {
 		return failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
 	}
+	var passed []string
 	for i, pin := range pins {
 		if want := [2]int{filmFrame(pin.Slot[0]), filmFrame(pin.Slot[1])}; filled[i] != want {
 			return failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
 		}
+		if !slices.Contains(beats[i], pin.Beat) {
+			passed = append(passed, strconv.Itoa(i+1))
+		}
+	}
+	if len(passed) > 0 {
+		return failed("第 %s 镜选的节拍放不进它的位置：同一段录像里相邻的镜头已经用到了那段画面。换一个节拍后再存", strings.Join(passed, "、"))
 	}
 	return nil
+}
+
+// shortOfPins says which of an edit's shots the fill could not fill: short
+// are the fill's unfilled slots, each [part, picture, start, end, frames].
+func shortOfPins(pins []FillPin, short []json.RawMessage) error {
+	var shots []string
+	for _, raw := range short {
+		var slot []float64
+		if err := json.Unmarshal(raw, &slot); err != nil || len(slot) < 4 {
+			continue
+		}
+		for i, pin := range pins {
+			if filmFrame(pin.Slot[0]) == filmFrame(slot[2]) {
+				shots = append(shots, strconv.Itoa(i+1))
+			}
+		}
+	}
+	if len(shots) == 0 {
+		return failed("%d slots were left empty", len(short))
+	}
+	return failed("第 %s 镜选的节拍不够长，也没有别的画面能补上。换一个节拍后再存", strings.Join(shots, "、"))
 }
 
 // --- render ---
