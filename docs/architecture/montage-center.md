@@ -743,7 +743,7 @@ montage/
 | GET | `/hero`、`/hero/poster` | 设备上的主页背景片与封面（剪辑中心数据目录下的 `hero/hero.mp4`、`hero.jpg`），不属于软件；没有时回答 404，页面改为轮播成员自己的视频 |
 | POST | `/versions/{id}/confirm` | 确认这一版（#596，以下各行见“出片后的二次编辑”） |
 | POST | `/versions/{id}/recut` | `{requestKey, change}`：回答 202 与 `recut` 任务；项目已有进行中的任务时回答 409 |
-| GET | `/versions/{id}/outline` | 这一版成片本身的规划与镜头，给选版页的版本卡片用：只读，不建修改稿，没存的修改不在里面 |
+| GET | `/versions/{id}/outline` | 这一版成片本身的规划与镜头，给选版页的版本卡片用：只读，不建修改稿，没存的修改不在里面。`unmet` 是规划时没找到的内容 |
 | GET | `/versions/{id}/draft` | 这一版的修改稿，没有就建：音乐段落与槽、每镜的节拍、锁定、粗预览用的片段、选段起点、配乐要不要转码（`songTranscode`）、修订号、能否撤销 |
 | POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo`。修订号对不上回答 409 `draft_conflict`；违反规则回答 422 `edit_refused`，`message` 是给成员看的原因；重洗要搜索，搜不了回答 503 `search_unavailable`，分析模型换了回答 409 `search_model_changed` |
 | GET | `/drafts/{id}/candidates` | `?shot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表，`shot` 是镜号（页面手上有的是镜号）；搜索的错误码同上 |
@@ -792,7 +792,7 @@ montage/
 - 粗预览的片段随修改稿一起回答：没改过的槽取版本时间线里的镜头，改过的槽取所选节拍的起点与一个槽长。
 
 **候选**：`GET /drafts/{id}/candidates?shot=&q=&size=&scene=&landscape=`
-- 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。
+- 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。写了 `q` 时最多列 60 个；没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。
 - 窗口换算成节拍：节拍的分数取它覆盖的窗口里最高的一个（同原型），只用来排序，不设门槛。
 - 景别取节拍描述的 `shot_size`，场景取卡片描述的 `scene`；筛选都在剪辑中心做，不进相册的检索。回答附场景的列表与个数。
 - 每个候选标明够不够长、已用在第几镜、横竖。
@@ -834,7 +834,7 @@ montage/
 - 原片用相册现有的视频播放。网页用两个 `<video>` 交替，下一段提前载入并跳到起点；以音乐的播放时间为准切换，不等跳转。
 - 不渲染，不占 FFmpeg 的后台槽位；相册的转码播放与缩略图用 `Streaming`、`Interactive`，和别人的播放一起排队。
 
-**版本卡片**：选版页每一版的缩略图条、剪辑思路与统计读 `GET /versions/{id}/outline`，是成片本身的镜头。不读修改稿：改过还没存的修改稿和上面那条成片不是一回事，光是看一眼选版页也不该建修改稿。
+**版本卡片**：选版页每一版的缩略图条、剪辑思路、统计与没找到的内容读 `GET /versions/{id}/outline`，是成片本身的镜头。没找到的内容取两步规划答案的 `unmet`，按先后合并、去掉重复；改过的版本取它所来自的规划。不读修改稿：改过还没存的修改稿和上面那条成片不是一回事，光是看一眼选版页也不该建修改稿。
 
 **确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
 
