@@ -165,6 +165,28 @@ class FillTest(unittest.TestCase):
         pins = [{"part": c["part"], "picture": c["picture"], "slot": c["slot"], "beat": c["beat"]} for c in plain["clips"]]
         self.assertEqual(self.filled({**tiny_case(), "pins": pins}, vectors), plain)
 
+    def test_a_pin_keeps_its_key_frame_from_the_slots_before_it(self):
+        # Two beats of one card a second apart: the first slot's shot, cut around its own key frame, would run over
+        # the second's, and the second pin would be passed over as footage already used.
+        vectors = np.eye(10, 8, dtype=np.float32) + 0.1
+        request = tiny_case()
+        request["cards"]["c1"]["times"] = [3.0, 4.0]
+        pins = [{"part": 1, "picture": 1, "slot": [0.0, 2.0], "beat": "c1/1"},
+                {"part": 1, "picture": 1, "slot": [2.0, 4.0], "beat": "c1/2"}]
+        pinned = self.filled({**request, "pins": pins}, vectors)
+        self.assertEqual([(c["beat"], c["slot"]) for c in pinned["clips"]], [("c1/1", [0.0, 2.0]), ("c1/2", [2.0, 4.0])])
+        first, second = pinned["clips"]
+        self.assertLessEqual(first["end"], 4.0)
+        self.assertGreaterEqual(second["start"], first["end"])
+        self.assertEqual(pinned["short"], [])
+        # Dragged the other way round, with the card ending soon after: the first slot's shot, moved back to fit, would
+        # run over the earlier key frame. It stops short of it, and what it lacks is reported, not taken from the pin.
+        request["cards"]["c1"] |= {"times": [3.5, 4.0], "end": 5.2}
+        swapped = self.filled({**request, "pins": [{**pins[0], "beat": "c1/2"}, {**pins[1], "beat": "c1/1"}]}, vectors)
+        self.assertEqual([(c["beat"], c["slot"]) for c in swapped["clips"]], [("c1/2", [0.0, 2.0]), ("c1/1", [2.0, 4.0])])
+        self.assertGreater(swapped["clips"][0]["start"], 3.5)
+        self.assertEqual([s[:4] for s in swapped["short"]], [[1, 1, 0.0, 2.0]])
+
     def test_pins_that_leave_a_gap_or_name_another_beat_are_refused(self):
         request = tiny_case()
         for pins in ([{"part": 1, "picture": 1, "slot": [0.0, 2.0], "beat": "c1/1"},

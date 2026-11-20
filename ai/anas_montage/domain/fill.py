@@ -75,7 +75,8 @@ def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, 
 
     pins（剪辑中心的二次编辑，#596）：按成片顺序列出每个槽 {part, picture, slot: [a, b], beat}，首尾相接铺满选段。
     给了 pins 时槽的位置与长短照它，不再按拍摄先后重排；每个槽的首段用它钉住的节拍，不够长时照原规则补段（结尾
-    最后一个槽照原规则放慢），补段不用别的槽钉住的节拍。不给 pins 时与第八版逐个相同。"""
+    最后一个槽照原规则放慢），补段不用别的槽钉住的节拍，前面的槽也不盖过后面的槽钉住的关键帧。卡片里实在没有
+    地方时，这个槽由别的节拍填，时间线里就没有它钉住的节拍：调用方据此得知。不给 pins 时与第八版逐个相同。"""
     labels = labels or {}
     cards, catalog, ix, joined = footage.cards, footage.catalog, footage.index, footage.parts
     seen_as = {}
@@ -129,9 +130,11 @@ def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, 
     best = {cards[b.rsplit("/", 1)[0]]["video"] for b, mark in labels.items() if mark == "3" and b.rsplit("/", 1)[0] in cards}
     clips, taken, short = [], [], []
 
-    def fill_slot(a, b, order, ending, may_slow, about, lead=None, barred=frozenset()):
+    def fill_slot(a, b, order, ending, may_slow, about, lead=None, barred=frozenset(), kept=None):
         """填一个槽 [a, b]：order 是挑节拍的先后；ending 时不数连续；may_slow 时首段不够长就放慢；about 是镜头的
-        段落与画面。lead 是钉住的节拍，排在最前面；barred 是别的槽钉住的节拍，不拿来补段。"""
+        段落与画面。lead 是钉住的节拍，排在最前面；barred 是别的槽钉住的节拍，不拿来补段；kept 是后面的槽钉住的
+        节拍的关键帧 {卡片: [秒]}，留给它们：这个槽的镜头不盖过去，不然那个节拍到时会因为画面已经用过而被跳过。"""
+        kept = kept or {}
         need, first = round(b * fps) - round(a * fps), True
         # 结尾的槽倒着填、填完再排顺序：那里不数连续。
         so_far = [(source(x["card"]), size(x["card"], x["beats"][0])) for x in clips]
@@ -156,6 +159,8 @@ def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, 
             seams = [q["at"] for q in joined.get(c["video"], [])]
             lo = max([lo] + [x for x in seams if x <= seen])
             hi = min([hi] + [x for x in seams if x > seen])
+            lo = max([lo] + [t + 0.02 for t in kept.get(cid, ()) if t < seen])
+            hi = min([hi] + [t for t in kept.get(cid, ()) if t > seen])
             start = max(lo, seen - need / fps / 3)
             start = max([start] + [y for v, _x, y in taken if v == cid and y <= seen + 0.01])
             room = min([hi] + [x for v, x, _y in taken if v == cid and x > start])
@@ -207,7 +212,12 @@ def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, 
             ending = p == many and k == len(parts[p - 1]["pictures"])
             last = n == len(pins) - 1
             mine = len(clips)
-            need = fill_slot(a, b, orders[p, k], ending, ending and last, about_of(p, k), lead=x["beat"], barred=barred)
+            kept = {}
+            for later in pins[n + 1:]:
+                cid, j = later["beat"].rsplit("/", 1)
+                kept.setdefault(cid, []).append(cards[cid]["times"][int(j) - 1])
+            need = fill_slot(a, b, orders[p, k], ending, ending and last, about_of(p, k), lead=x["beat"], barred=barred,
+                             kept=kept)
             if need > 0:
                 short.append((p, k, a, b, need))
             lead = clips[mine] if len(clips) > mine else None

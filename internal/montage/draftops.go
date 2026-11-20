@@ -72,7 +72,7 @@ func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, 
 		if !state.changed(shot) {
 			return draftState{}, "", refuse("第 %d 镜没有改过", op.Shot)
 		}
-		original := state.Slots[shot.First].Beat
+		original := state.original(shot)
 		if err := src.fits(state, i, original); err != nil {
 			return draftState{}, "", err
 		}
@@ -138,7 +138,7 @@ func (src *editSource) move(state draftState, from, to int) (draftState, string,
 	for n, k := range places {
 		next.Shots[k].Beat = moving[n].Beat
 		if !src.covers(moving[n].Beat, state.length(next.Shots[k]), slowMost) {
-			return draftState{}, "", refuse("第 %d 镜换到这里不够 %.1f 秒", slices.Index(places, k)+1, state.length(next.Shots[k]))
+			return draftState{}, "", refuse("换到第 %d 镜位置的镜头不够 %.1f 秒", k+1, state.length(next.Shots[k]))
 		}
 	}
 	return next, fmt.Sprintf("第 %d 镜已换到第 %d 镜的位置", from, to), nil

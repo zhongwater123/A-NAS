@@ -428,6 +428,19 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	if _, err := edit(DraftOp{Type: "revert", Shot: 4}); err != nil || beats(draft)[3] != "c3/2" {
 		t.Fatalf("after reverting = %v, %v", beats(draft), err)
 	}
+	// A shot that took the slots of the one before it is reverted to its
+	// own beat, not to the deleted shot's: c2/1 takes shot 1's slot, is
+	// replaced, and comes back.
+	if _, err := edit(DraftOp{Type: "delete", Shot: 1}); err != nil || !slices.Equal(beats(draft), []string{"c2/1", "c2/2", "c3/2"}) ||
+		draft.Shots[0].Changed {
+		t.Fatalf("after deleting the first shot = %v %+v, %v", beats(draft), draft.Shots[0], err)
+	}
+	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil || !draft.Shots[0].Changed {
+		t.Fatalf("after replacing the longer shot = %+v, %v", draft.Shots[0], err)
+	}
+	if _, err := edit(DraftOp{Type: "revert", Shot: 1}); err != nil || beats(draft)[0] != "c2/1" || draft.Shots[0].Changed {
+		t.Fatalf("after reverting the longer shot = %v %+v, %v", beats(draft), draft.Shots[0], err)
+	}
 }
 
 func TestTheLastShotCannotBeDeleted(t *testing.T) {
