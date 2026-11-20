@@ -69,9 +69,13 @@ def in_shooting_order(pieces: list[dict], slots: list, fps: int, rank: Callable[
     return [x for n in order for x in groups[n]]
 
 
-def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, fps: int, labels: dict | None = None
-         ) -> tuple[list[dict], list[tuple]]:
-    """(clips, short)：成片的镜头和没填满的槽。planned：shots-*.json；picked：第一步的回答。"""
+def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, fps: int, labels: dict | None = None,
+         pins: list[dict] | None = None) -> tuple[list[dict], list[tuple]]:
+    """(clips, short)：成片的镜头和没填满的槽。planned：shots-*.json；picked：第一步的回答。
+
+    pins（剪辑中心的二次编辑，#596）：按成片顺序列出每个槽 {part, picture, slot: [a, b], beat}，首尾相接铺满选段。
+    给了 pins 时槽的位置与长短照它，不再按拍摄先后重排；每个槽的首段用它钉住的节拍，不够长时照原规则补段（结尾
+    最后一个槽照原规则放慢），补段不用别的槽钉住的节拍。不给 pins 时与第八版逐个相同。"""
     labels = labels or {}
     cards, catalog, ix, joined = footage.cards, footage.catalog, footage.index, footage.parts
     seen_as = {}
@@ -105,92 +109,129 @@ def fill(m: dict, planned: dict, picked: dict, footage: Footage, held: Held, *, 
     def size(cid, j):
         return cards[cid]["answer"]["beats"][int(j) - 1]["shot_size"]
 
+    def order_of(pic, scene):
+        """一个画面挑节拍的先后：第二步列的节拍，它们卡片里的其他节拍（按离第一个的远近），第一步给这个画面的其他
+        卡片，最后才是和它们拍摄时间相邻的卡片。"""
+        listed = [b for b in dict.fromkeys(pic["beats"]) if b.rsplit("/", 1)[0] in cards]
+        pool = [f"{cid}/{n}" for cid in dict.fromkeys(b.rsplit("/", 1)[0] for b in listed)
+                for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+        if listed:
+            c0, j0 = listed[0].rsplit("/", 1)
+            anchor = cards[c0]["times"][int(j0) - 1]
+            pool.sort(key=lambda b: abs(cards[b.rsplit("/", 1)[0]]["times"][int(b.rsplit("/", 1)[1]) - 1] - anchor))
+        order = listed + [b for b in pool if b not in listed]
+        named = [f"{cid}/{n}" for cid in scene["cards"] if cid in cards
+                 for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+        order += [b for b in named if b not in order]
+        order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
+        return order
+
     best = {cards[b.rsplit("/", 1)[0]]["video"] for b, mark in labels.items() if mark == "3" and b.rsplit("/", 1)[0] in cards}
     clips, taken, short = [], [], []
-    many = len(planned["answer"]["parts"])
-    for p, (part, step1, slots_p) in enumerate(zip(planned["answer"]["parts"], picked["parts"], planned["slots"], strict=True), 1):
-        level = m["parts"][p - 1]["level"]
-        for k, (pic, slots) in enumerate(zip(part["pictures"], slots_p, strict=True), 1):
-            # 结尾画面选的节拍收尾：它的槽从最后一个往前填，这个节拍占最后一个槽，补这个槽的放在它前面。
-            ending = p == many and k == len(part["pictures"])
-            slots = one_take(slots, level)       # one_take 之前规划的高潮段还是一小节一个槽
+
+    def fill_slot(a, b, order, ending, may_slow, about, lead=None, barred=frozenset()):
+        """填一个槽 [a, b]：order 是挑节拍的先后；ending 时不数连续；may_slow 时首段不够长就放慢；about 是镜头的
+        段落与画面。lead 是钉住的节拍，排在最前面；barred 是别的槽钉住的节拍，不拿来补段。"""
+        need, first = round(b * fps) - round(a * fps), True
+        # 结尾的槽倒着填、填完再排顺序：那里不数连续。
+        so_far = [(source(x["card"]), size(x["card"], x["beats"][0])) for x in clips]
+        fits = [] if ending else [bt for bt in order if not breaks_run(
+            so_far, source(bt.rsplit("/", 1)[0]), size(*bt.rsplit("/", 1)), best, bool(labels))]
+        tried = fits + [bt for bt in order if bt not in fits]
+        if lead is not None:
+            tried = [lead] + [bt for bt in tried if bt != lead and bt not in barred]
+        for beat in tried:
+            if need <= 0:
+                break
+            cid, j = beat.rsplit("/", 1)
+            c = cards[cid]
+            # 关键帧（描述看到的那一帧）放在镜头三分之一处，不放在开头。
+            seen = c["times"][int(j) - 1]
+            if any(v == cid and x - 0.01 <= seen < y - 0.01 for v, x, y in taken):
+                continue
+            file = footage.source(c["video"])
+            lo, hi = held(beat, file, seen, max(c["start"], seen - need / fps), min(c["end"], seen + need / fps),
+                          file in footage.turned)
+            # 2026-11-17（用户）：拼接素材的镜头不出关键帧所在的那条原片；拼接点是硬切点，卡片是跨着它拼起来的。
+            seams = [q["at"] for q in joined.get(c["video"], [])]
+            lo = max([lo] + [x for x in seams if x <= seen])
+            hi = min([hi] + [x for x in seams if x > seen])
+            start = max(lo, seen - need / fps / 3)
+            start = max([start] + [y for v, _x, y in taken if v == cid and y <= seen + 0.01])
+            room = min([hi] + [x for v, x, _y in taken if v == cid and x > start])
+            frames = min(need, int((room - start) * fps))
+            slow = 1.0
+            if frames < need and first:      # 一个节拍填整个槽：在卡片里往前挪
+                earliest = max([lo] + [y for v, _x, y in taken if v == cid and y <= start + 0.01])
+                if room - earliest >= need / fps:
+                    start, frames = room - need / fps, need
+                else:
+                    start, frames = earliest, min(need, int((room - earliest) * fps))
+            shown = frames
+            if may_slow and first and 0 < frames < need:
+                # 结尾自己的节拍不够最后一个槽：放慢拉长，不接邻居。
+                shown = min(need, int(frames * SLOW_MOST))
+                slow = shown / frames
+            # 不留不到 PIECE_LEAST 的碎片：会剩下太短的一段时，这个镜头让出一些给后面的。
+            least = round(PIECE_LEAST * fps)
+            if shown < need and need - shown < least and shown - (least - (need - shown)) >= least:
+                shown -= least - (need - shown)
+                frames = min(frames, shown)
+                slow = shown / frames
+            if shown < min(need, least):
+                continue
+            end = start + frames / fps
+            clips.append({"card": cid, "beats": [int(j)], "start": start, "end": end, "video": c["video"],
+                          "key": c["times"][int(j) - 1], "part": about["part"], "partName": about["partName"],
+                          "picture": about["picture"], "level": about["level"], "slot": [a, b], "query": about["query"],
+                          "shows": about["shows"], "link": about["link"], "share": round(shown / fps, 3)}
+                         | ({"slow": round(slow, 3)} if slow != 1 else {}))
+            taken.append((cid, start, end))
+            need -= shown
+            first = False
+        return need
+
+    parts, many = planned["answer"]["parts"], len(planned["answer"]["parts"])
+
+    def about_of(p, k):
+        part, scene, pic = parts[p - 1], picked["parts"][p - 1]["scenes"][k - 1], parts[p - 1]["pictures"][k - 1]
+        return {"part": p, "partName": part["name"], "picture": k, "level": m["parts"][p - 1]["level"],
+                "query": scene["query"], "shows": pic["shows"], "link": pic["link"]}
+
+    if pins is not None:
+        orders, barred = {}, frozenset(x["beat"] for x in pins)
+        for n, x in enumerate(pins):
+            p, k, (a, b) = x["part"], x["picture"], x["slot"]
+            if (p, k) not in orders:
+                orders[p, k] = order_of(parts[p - 1]["pictures"][k - 1], picked["parts"][p - 1]["scenes"][k - 1])
+            ending = p == many and k == len(parts[p - 1]["pictures"])
+            last = n == len(pins) - 1
             mine = len(clips)
-            listed = [b for b in dict.fromkeys(pic["beats"]) if b.rsplit("/", 1)[0] in cards]
-            pool = [f"{cid}/{n}" for cid in dict.fromkeys(b.rsplit("/", 1)[0] for b in listed)
-                    for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
-            if listed:
-                c0, j0 = listed[0].rsplit("/", 1)
-                anchor = cards[c0]["times"][int(j0) - 1]
-                pool.sort(key=lambda b: abs(cards[b.rsplit("/", 1)[0]]["times"][int(b.rsplit("/", 1)[1]) - 1] - anchor))
-            order = listed + [b for b in pool if b not in listed]
-            # 然后是第一步给这个画面的其他卡片，最后才是和它们拍摄时间相邻的卡片。
-            named = [f"{cid}/{n}" for cid in step1["scenes"][k - 1]["cards"] if cid in cards
-                     for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
-            order += [b for b in named if b not in order]
-            order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
-            for a, b in reversed(slots) if ending else slots:
-                need, first = round(b * fps) - round(a * fps), True
-                # 结尾的槽倒着填、填完再排顺序：那里不数连续。
-                so_far = [(source(x["card"]), size(x["card"], x["beats"][0])) for x in clips]
-                fits = [] if ending else [bt for bt in order if not breaks_run(
-                    so_far, source(bt.rsplit("/", 1)[0]), size(*bt.rsplit("/", 1)), best, bool(labels))]
-                for beat in fits + [bt for bt in order if bt not in fits]:
-                    if need <= 0:
-                        break
-                    cid, j = beat.rsplit("/", 1)
-                    c = cards[cid]
-                    # 关键帧（描述看到的那一帧）放在镜头三分之一处，不放在开头。
-                    seen = c["times"][int(j) - 1]
-                    if any(v == cid and x - 0.01 <= seen < y - 0.01 for v, x, y in taken):
-                        continue
-                    file = footage.source(c["video"])
-                    lo, hi = held(beat, file, seen, max(c["start"], seen - need / fps), min(c["end"], seen + need / fps),
-                                  file in footage.turned)
-                    # 2026-11-17（用户）：拼接素材的镜头不出关键帧所在的那条原片；拼接点是硬切点，卡片是跨着它拼起来的。
-                    seams = [q["at"] for q in joined.get(c["video"], [])]
-                    lo = max([lo] + [x for x in seams if x <= seen])
-                    hi = min([hi] + [x for x in seams if x > seen])
-                    start = max(lo, seen - need / fps / 3)
-                    start = max([start] + [y for v, _x, y in taken if v == cid and y <= seen + 0.01])
-                    room = min([hi] + [x for v, x, _y in taken if v == cid and x > start])
-                    frames = min(need, int((room - start) * fps))
-                    slow = 1.0
-                    if frames < need and first:      # 一个节拍填整个槽：在卡片里往前挪
-                        earliest = max([lo] + [y for v, _x, y in taken if v == cid and y <= start + 0.01])
-                        if room - earliest >= need / fps:
-                            start, frames = room - need / fps, need
-                        else:
-                            start, frames = earliest, min(need, int((room - earliest) * fps))
-                    shown = frames
-                    if ending and first and a == slots[-1][0] and 0 < frames < need:
-                        # 结尾自己的节拍不够最后一个槽：放慢拉长，不接邻居。
-                        shown = min(need, int(frames * SLOW_MOST))
-                        slow = shown / frames
-                    # 不留不到 PIECE_LEAST 的碎片：会剩下太短的一段时，这个镜头让出一些给后面的。
-                    least = round(PIECE_LEAST * fps)
-                    if shown < need and need - shown < least and shown - (least - (need - shown)) >= least:
-                        shown -= least - (need - shown)
-                        frames = min(frames, shown)
-                        slow = shown / frames
-                    if shown < min(need, least):
-                        continue
-                    end = start + frames / fps
-                    clips.append({"card": cid, "beats": [int(j)], "start": start, "end": end, "video": c["video"],
-                                  "key": c["times"][int(j) - 1], "part": p, "partName": part["name"], "picture": k,
-                                  "level": level, "slot": [a, b], "query": step1["scenes"][k - 1]["query"],
-                                  "shows": pic["shows"], "link": pic["link"], "share": round(shown / fps, 3)}
-                                 | ({"slow": round(slow, 3)} if slow != 1 else {}))
-                    taken.append((cid, start, end))
-                    need -= shown
-                    first = False
-                if need > 0:
-                    short.append((p, k, a, b, need))
-            if ending and len(clips) > mine:
-                last = clips[mine]       # 最后一个槽的第一段是选的节拍；补的按拍摄顺序
-                rest = sorted(clips[mine + 1:], key=lambda c: (c["slot"][0], catalog.index(c["card"]) if c["slot"] == last["slot"] and c["card"] in catalog else 0))
-                clips[mine:] = [*rest, last]
-            clips[mine:] = in_shooting_order(clips[mine:], slots, fps,
-                                             lambda cid: catalog.index(cid) if cid in catalog else len(catalog))
+            need = fill_slot(a, b, orders[p, k], ending, ending and last, about_of(p, k), lead=x["beat"], barred=barred)
+            if need > 0:
+                short.append((p, k, a, b, need))
+            lead = clips[mine] if len(clips) > mine else None
+            if ending and last and lead and f"{lead['card']}/{lead['beats'][0]}" == x["beat"]:
+                clips[mine:] = [*clips[mine + 1:], lead]    # 结尾选的节拍收尾，补的放在它前面
+    else:
+        for p, (part, step1, slots_p) in enumerate(zip(parts, picked["parts"], planned["slots"], strict=True), 1):
+            level = m["parts"][p - 1]["level"]
+            for k, (pic, slots) in enumerate(zip(part["pictures"], slots_p, strict=True), 1):
+                # 结尾画面选的节拍收尾：它的槽从最后一个往前填，这个节拍占最后一个槽，补这个槽的放在它前面。
+                ending = p == many and k == len(part["pictures"])
+                slots = one_take(slots, level)       # one_take 之前规划的高潮段还是一小节一个槽
+                mine = len(clips)
+                order = order_of(pic, step1["scenes"][k - 1])
+                for a, b in reversed(slots) if ending else slots:
+                    need = fill_slot(a, b, order, ending, ending and a == slots[-1][0], about_of(p, k))
+                    if need > 0:
+                        short.append((p, k, a, b, need))
+                if ending and len(clips) > mine:
+                    last = clips[mine]       # 最后一个槽的第一段是选的节拍；补的按拍摄顺序
+                    rest = sorted(clips[mine + 1:], key=lambda c: (c["slot"][0], catalog.index(c["card"]) if c["slot"] == last["slot"] and c["card"] in catalog else 0))
+                    clips[mine:] = [*rest, last]
+                clips[mine:] = in_shooting_order(clips[mine:], slots, fps,
+                                                 lambda cid: catalog.index(cid) if cid in catalog else len(catalog))
     for c in clips:
         beats = cards[c["card"]]["answer"]["beats"]
         c |= {"beat": f"{c['card']}/{c['beats'][0]}", "frame": cards[c["card"]]["frames"][c["beats"][0] - 1],
