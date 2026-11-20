@@ -45,7 +45,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	base, err := json.Marshal(map[string]any{"outline": src.picked, "shots": src.planned.Answer.Parts})
+	base, err := recutBase(src)
 	if err != nil {
 		return Job{}, false, err
 	}
@@ -96,4 +96,23 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	s.wakeJobs()
 	job, err := s.Job(ctx, owner, jobID)
 	return job, created, err
+}
+
+// recutBase is the plan a recut starts from: the version's outline and, for
+// each part, its pictures as the second step answered them. Both are passed
+// on whole, with each part's and picture's link, which the template asks to
+// keep where the sentence does not touch; only what the earlier request did
+// not find (unmet) is left out, which the new round says for itself.
+func recutBase(src *editSource) (json.RawMessage, error) {
+	var outline map[string]json.RawMessage
+	var shots struct {
+		Answer struct {
+			Parts json.RawMessage `json:"parts"`
+		} `json:"answer"`
+	}
+	if err := errors.Join(json.Unmarshal(src.pickedRaw, &outline), json.Unmarshal(src.plannedRaw, &shots)); err != nil {
+		return nil, ErrNotEditable
+	}
+	delete(outline, "unmet")
+	return json.Marshal(map[string]any{"outline": outline, "shots": shots.Answer.Parts})
 }
