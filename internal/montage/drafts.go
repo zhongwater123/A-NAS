@@ -314,11 +314,13 @@ type draftSlot struct {
 }
 
 // draftShot is a shot of the draft: a beat over slots First to Last. A
-// shot over more than one slot took a deleted shot's slots.
+// shot over more than one slot took a deleted shot's slots; Home is the
+// slot that was its own, whose beat the version had there.
 type draftShot struct {
 	Beat   string `json:"beat"`
 	First  int    `json:"first"`
 	Last   int    `json:"last"`
+	Home   int    `json:"home"`
 	Locked bool   `json:"locked,omitempty"`
 }
 
@@ -355,7 +357,7 @@ func (src *editSource) slots() []draftSlot {
 func (src *editSource) newDraftState() draftState {
 	state := draftState{Slots: src.slots()}
 	for i, slot := range state.Slots {
-		state.Shots = append(state.Shots, draftShot{Beat: slot.Beat, First: i, Last: i})
+		state.Shots = append(state.Shots, draftShot{Beat: slot.Beat, First: i, Last: i, Home: i})
 	}
 	return state
 }
@@ -390,15 +392,20 @@ func (state draftState) usedBy(beat string) int {
 	return 0
 }
 
-// changed reports whether the shot's beat is none of the version's beats
-// over its slots.
-func (state draftState) changed(shot draftShot) bool {
-	for i := shot.First; i <= shot.Last; i++ {
-		if state.Slots[i].Beat == shot.Beat {
-			return false
-		}
+// original is the beat the version had where the shot is: its own slot's,
+// not that of a deleted shot whose slots it took.
+func (state draftState) original(shot draftShot) string {
+	home := shot.First
+	if shot.Home > shot.First && shot.Home <= shot.Last {
+		home = shot.Home
 	}
-	return true
+	return state.Slots[home].Beat
+}
+
+// changed reports whether the shot's beat is not the one the version had
+// there.
+func (state draftState) changed(shot draftShot) bool {
+	return state.original(shot) != shot.Beat
 }
 
 // Draft is a member's edit of a version, as the page shows it.
