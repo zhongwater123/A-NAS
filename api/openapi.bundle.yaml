@@ -4293,6 +4293,23 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/outline:
+    get:
+      operationId: getMontageVersionOutline
+      summary: 'The version as its film is, for its card on the choose page: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409)'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The version's outline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageVersionOutline'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/versions/{versionId}/draft:
     get:
       operationId: getMontageVersionDraft
@@ -17664,6 +17681,53 @@ components:
           description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
         selection:
           $ref: '#/components/schemas/MontageSongSelection'
+    MontageFilmPlan:
+      type: object
+      additionalProperties: false
+      required:
+        - design
+        - opening
+        - ending
+      description: The first step of the plan a version was cut by.
+      properties:
+        design:
+          type: string
+        opening:
+          type: string
+        ending:
+          type: string
+    MontageFilmPart:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - name
+        - summary
+        - level
+        - label
+        - start
+        - end
+      description: A part of the music and of the plan.
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        summary:
+          type: string
+        level:
+          type: string
+          description: 'The music part''s strength, from the song''s analysis: 安静, 中等 or 高潮.'
+        label:
+          type: string
+          description: The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫.
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
     MontageDraftShot:
       type: object
       additionalProperties: false
@@ -17740,6 +17804,62 @@ components:
         portrait:
           type: boolean
           description: '竖: its video is narrower than 16:9 and is shown on a blurred background.'
+    MontageFilmCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - shots
+        - videos
+        - portrait
+      description: A film's shots, the videos they come from, and how many of those are 竖.
+      properties:
+        shots:
+          type: integer
+          minimum: 0
+        videos:
+          type: integer
+          minimum: 0
+        portrait:
+          type: integer
+          minimum: 0
+    MontageVersionOutline:
+      type: object
+      additionalProperties: false
+      required:
+        - versionId
+        - projectId
+        - versionNumber
+        - seconds
+        - plan
+        - parts
+        - shots
+        - counts
+      description: 'A version as its film is: the plan it was cut by and its shots, for the version''s card. Unlike the draft, an edit not saved yet does not show here.'
+      properties:
+        versionId:
+          type: string
+        projectId:
+          type: string
+        versionNumber:
+          type: integer
+          minimum: 1
+        seconds:
+          type: number
+          minimum: 0
+          description: How long the film is.
+        plan:
+          $ref: '#/components/schemas/MontageFilmPlan'
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageFilmPart'
+        shots:
+          type: array
+          description: The film's shots, none of them changed, extended or locked.
+          items:
+            $ref: '#/components/schemas/MontageDraftShot'
+        counts:
+          $ref: '#/components/schemas/MontageFilmCounts'
     MontageDraft:
       type: object
       additionalProperties: false
@@ -17751,6 +17871,7 @@ components:
         - revision
         - canUndo
         - songStart
+        - songTranscode
         - seconds
         - plan
         - parts
@@ -17778,79 +17899,25 @@ components:
           type: number
           minimum: 0
           description: Where the version's excerpt starts in its song, in seconds.
+        songTranscode:
+          type: boolean
+          description: 'The draft''s song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does.'
         seconds:
           type: number
           minimum: 0
           description: How long the film is.
         plan:
-          type: object
-          additionalProperties: false
-          required:
-            - design
-            - opening
-            - ending
-          description: The first step of the plan the version was cut by.
-          properties:
-            design:
-              type: string
-            opening:
-              type: string
-            ending:
-              type: string
+          $ref: '#/components/schemas/MontageFilmPlan'
         parts:
           type: array
           items:
-            type: object
-            additionalProperties: false
-            required:
-              - number
-              - name
-              - summary
-              - level
-              - label
-              - start
-              - end
-            properties:
-              number:
-                type: integer
-                minimum: 1
-              name:
-                type: string
-              summary:
-                type: string
-              level:
-                type: string
-                description: 'The music part''s strength, from the song''s analysis: 安静, 中等 or 高潮.'
-              label:
-                type: string
-                description: The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫.
-              start:
-                type: number
-                minimum: 0
-              end:
-                type: number
-                minimum: 0
+            $ref: '#/components/schemas/MontageFilmPart'
         shots:
           type: array
           items:
             $ref: '#/components/schemas/MontageDraftShot'
         counts:
-          type: object
-          additionalProperties: false
-          required:
-            - shots
-            - videos
-            - portrait
-          properties:
-            shots:
-              type: integer
-              minimum: 0
-            videos:
-              type: integer
-              minimum: 0
-            portrait:
-              type: integer
-              minimum: 0
+          $ref: '#/components/schemas/MontageFilmCounts'
         message:
           type: string
           description: 'What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上.'

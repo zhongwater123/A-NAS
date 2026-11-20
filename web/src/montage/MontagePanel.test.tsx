@@ -128,6 +128,7 @@ function draftOf(versionId: string, extra: Partial<MontageDraft> = {}): MontageD
     revision: 0,
     canUndo: false,
     songStart: 60,
+    songTranscode: false,
     seconds: 12,
     plan: { design: "从海边走到山里", opening: "海", ending: "山" },
     parts: [
@@ -188,6 +189,8 @@ interface Seen {
   // The answer to the next step: a code to refuse it with.
   refuse?: { status: 409 | 422; code: string; message: string };
   drafts: number;
+  // What the draft has that the film has not: an edit not saved yet.
+  edited?: Partial<MontageDraft>;
 }
 const fresh = (): Seen => ({ generated: 0, polled: 0, changes: [], did: [], ops: [], drafts: 0 });
 
@@ -269,7 +272,12 @@ function serve(
     }),
     http.get("/api/v1/montage/versions/{versionId}/draft", ({ params, response }) => {
       seen.drafts++;
-      return response(200).json(draftOf(params.versionId));
+      return response(200).json(draftOf(params.versionId, seen.edited));
+    }),
+    // The film as it is, whatever its draft has become.
+    http.get("/api/v1/montage/versions/{versionId}/outline", ({ params, response }) => {
+      const { versionId, projectId, versionNumber, seconds, plan, parts, shots, counts } = draftOf(params.versionId);
+      return response(200).json({ versionId, projectId, versionNumber, seconds, plan, parts, shots, counts });
     }),
     http.post("/api/v1/montage/versions/{versionId}/confirm", ({ params, response }) => {
       seen.did.push(`confirm ${params.versionId}`);
@@ -946,6 +954,80 @@ describe("剪辑中心", () => {
     await userEvent.type(say, "开头短一点");
     await userEvent.click(within(first).getByRole("button", { name: "重剪" }));
     expect(await within(first).findByText(/等这个任务做完/)).toBeInTheDocument();
+  });
+
+  it("shows a version as its film is, whatever its draft has become", async () => {
+    const seen = fresh();
+    // The draft has one shot fewer, none of them 竖: an edit not saved yet.
+    seen.edited = { counts: { shots: 2, videos: 1, portrait: 0 } };
+    serve(
+      () =>
+        project({
+          versions: [{ ...saved[1], editable: false }, saved[0]],
+          job: job("done"),
+        }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    expect((await within(first).findByText("个镜头")).parentElement).toHaveTextContent("3");
+    expect(within(first).getByText("个竖拍").parentElement).toHaveAttribute("data-warn", "true");
+    // Looking at the versions makes no draft.
+    expect(seen.drafts).toBe(0);
+    // A version whose shots are not known is neither edited nor recut.
+    const second = within(page).getByRole("article", { name: "方案二" });
+    expect(within(second).getByRole("button", { name: "修改镜头" })).toBeDisabled();
+    expect(within(second).getByRole("textbox", { name: "对第 2 版的修改要求" })).toBeDisabled();
+    expect(within(second).getByText(/只能播放，不能修改或重剪/)).toBeInTheDocument();
+  });
+
+  it("marks the shots of a save that stopped for a missing video", async () => {
+    const seen = fresh();
+    const stopped = job("needs_input", {
+      kind: "edit",
+      waitReason: "asset_missing",
+      missingAssetIds: ["photo:b"],
+      step: "render",
+      steps: [{ name: "source", state: "done" }],
+    });
+    serve(
+      () => project({ versions: [...saved].reverse(), job: stopped }),
+      () => stopped,
+      seen,
+    );
+    const page = await openProject();
+    // An edit takes no video out: only cancelling is offered, and where to go is said.
+    expect(await within(page).findByText(/取消后在“修改镜头”里换掉用到它们的镜头/)).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "去掉这些继续" })).not.toBeInTheDocument();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    const edit = await screen.findByRole("main", { name: "第 1 版 · 精修镜头" });
+    expect(await within(edit).findByText(/第 2 镜用到的视频\s*已经不在相册里/)).toBeInTheDocument();
+    const sea = within(edit).getByRole("region", { name: "段落 1" });
+    expect(within(sea).getAllByText("素材不在了")).toHaveLength(1);
+  });
+
+  it("asks for a song that cannot seek from where the rough preview begins", async () => {
+    const seen = fresh();
+    seen.edited = { songTranscode: true };
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    const edit = await screen.findByRole("main", { name: "第 1 版 · 精修镜头" });
+    // From the second shot, four seconds into an excerpt that starts at a minute.
+    await userEvent.click(within(edit).getByRole("button", { name: /^第 2 镜，/ }));
+    await userEvent.click(await within(edit).findByRole("button", { name: "从这里预览" }));
+    const rough = await screen.findByRole("dialog", { name: "粗预览" });
+    expect(rough.querySelector("audio")).toHaveAttribute(
+      "src",
+      "/api/v1/montage/drafts/draft%3Aversion%3A1/song?start=64.00",
+    );
   });
 
   it("edits a version shot by shot on the server's draft", async () => {
