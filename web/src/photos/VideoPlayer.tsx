@@ -54,6 +54,10 @@ interface Props {
   // players, such as 剪辑中心's two 方案 side by side, passes false: each
   // waits for its play button.
   autoPlay?: boolean;
+  // A piece of the video, in seconds: it starts at start and stops at end.
+  // 剪辑中心's edit page tries a beat's piece this way.
+  start?: number;
+  end?: number;
 }
 
 type Mode = VideoPlayback["mode"];
@@ -91,7 +95,7 @@ function bufferedAt(element: HTMLVideoElement, at: number) {
 // stream's own clock. A failure to play the original or a remux falls back
 // to a full conversion before it is reported.
 export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer(
-  { asset, stage: stageRef, onDownload, autoPlay = true },
+  { asset, stage: stageRef, onDownload, autoPlay = true, start = 0, end },
   ref,
 ) {
   const caps = useMemo(() => browserCapabilities(), []);
@@ -186,7 +190,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
 
   const decided = useEffectEvent((decision: VideoPlayback) => {
     setPlayback(decision);
-    begin(decision, decision.mode, 0, autoPlay);
+    begin(decision, decision.mode, start, autoPlay);
   });
   const undecided = useEffectEvent((caught: unknown) => fail(messageOf(caught)));
   useEffect(() => {
@@ -263,9 +267,9 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
     if (!element || failure) return;
     if (ended) {
       if (converted) {
-        if (playback && mode) beginLatest.current(playback, mode, 0, true);
+        if (playback && mode) beginLatest.current(playback, mode, start, true);
       } else {
-        element.currentTime = 0;
+        element.currentTime = start;
         play();
       }
       return;
@@ -275,7 +279,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
       wantPlay.current = false;
       element.pause();
     }
-  }, [failure, ended, paused, converted, playback, mode, play]);
+  }, [failure, ended, paused, converted, playback, mode, play, start]);
 
   const toggleMute = useCallback(() => setMuted((value) => !value), []);
   const toggleFullscreen = useCallback(() => {
@@ -380,7 +384,14 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
           else setWaiting(false);
         }}
         onTimeUpdate={(event) => {
-          if (scrub === undefined) setTime((converted ? offset : 0) + event.currentTarget.currentTime);
+          const now = (converted ? offset : 0) + event.currentTarget.currentTime;
+          if (scrub === undefined) setTime(now);
+          if (end !== undefined && now >= end && !event.currentTarget.paused) {
+            // The piece is over: it plays again from its start.
+            wantPlay.current = false;
+            event.currentTarget.pause();
+            setEnded(true);
+          }
         }}
         onProgress={readRanges}
         onWaiting={() => setWaiting(true)}

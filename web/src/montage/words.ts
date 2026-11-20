@@ -1,5 +1,5 @@
 // What the montage window says about jobs (docs/specs/montage-center.md).
-import type { MontageJob } from "./api";
+import type { MontageJob, MontageVersion } from "./api";
 
 export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   analysis: "分析素材",
@@ -37,6 +37,16 @@ export const stepLabel = (name: StepName) => ownSteps[name.replace(/-\d+$/, "")]
 // The 方案 a job makes, by number.
 export const planNames: Record<number, string> = { 1: "方案一", 2: "方案二" };
 export const planName = (plan: number) => planNames[plan] ?? `方案 ${plan}`;
+// What a version is called: the 方案 a job planned, or what it came from (#596).
+export function versionTitle(version: MontageVersion): string {
+  const from = version.sourceNumber ? `第 ${version.sourceNumber} 版` : "之前的版本";
+  if (version.kind === "edit") return `改自${from}`;
+  if (version.kind === "recut") return `按“${version.change ?? ""}”重剪自${from}`;
+  return planName(version.plan);
+}
+// What the progress of a job's 方案 is called: an edit or a recut makes one version.
+export const jobStageName = (job: MontageJob, stage: number) =>
+  stage === 0 ? "准备" : job.kind === "edit" ? "存为新版本" : job.kind === "recut" ? "重剪" : planName(stage);
 
 export type JobAction = "drop" | "retryAnalysis" | "retry" | "replan";
 export const actionLabels: Record<JobAction, string> = {

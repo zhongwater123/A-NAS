@@ -130,6 +130,7 @@ type musicDoc struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
 		Level string  `json:"level"`
+		Label string  `json:"label"`
 	} `json:"parts"`
 }
 
@@ -472,12 +473,15 @@ type DraftPlan struct {
 
 // DraftPart is a part of the music and of the plan.
 type DraftPart struct {
-	Number  int     `json:"number"`
-	Name    string  `json:"name"`
-	Summary string  `json:"summary"`
-	Level   string  `json:"level"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
+	Number  int    `json:"number"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	Level   string `json:"level"`
+	// Label is the music's section (allin1's: intro, verse, chorus, build…);
+	// a build leads into a chorus (铺垫).
+	Label string  `json:"label"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
 }
 
 // DraftCounts are the draft's shots, the videos they come from, and how
@@ -517,7 +521,7 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 		Plan:  DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
 		Parts: []DraftPart{}, Shots: []DraftShot{}, source: src, state: state}
 	for n, part := range src.music.Parts {
-		about := DraftPart{Number: n + 1, Level: part.Level, Start: part.Start, End: part.End}
+		about := DraftPart{Number: n + 1, Level: part.Level, Label: part.Label, Start: part.Start, End: part.End}
 		if n < len(src.picked.Parts) {
 			about.Name, about.Summary = src.picked.Parts[n].Name, src.picked.Parts[n].Summary
 		}

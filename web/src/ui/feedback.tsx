@@ -21,6 +21,8 @@ type DialogRequest =
       title: string;
       message: ReactNode;
       confirm: string;
+      // What the other button says, when not 取消.
+      cancel?: string;
       danger: boolean;
       resolve: (ok: boolean) => void;
     };
@@ -37,7 +39,7 @@ export function useDialogs() {
     [],
   );
   const confirm = useCallback(
-    (options: { title: string; message: ReactNode; confirm: string; danger?: boolean }) =>
+    (options: { title: string; message: ReactNode; confirm: string; cancel?: string; danger?: boolean }) =>
       new Promise<boolean>((resolve) => setRequest({ kind: "confirm", danger: false, ...options, resolve })),
     [],
   );
@@ -104,7 +106,7 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
         )}
         <div className={feedbackStyles.phDialogActions}>
           <button type="button" onClick={() => onClose()}>
-            取消
+            {(request.kind === "confirm" && request.cancel) || "取消"}
           </button>
           <button
             ref={button}
