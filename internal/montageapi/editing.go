@@ -76,6 +76,34 @@ func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user a
 	httpjson.Write(w, http.StatusOK, candidates)
 }
 
+type saveDraftRequest struct {
+	RequestKey string `json:"requestKey"`
+}
+
+func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request saveDraftRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	job, _, err := h.store.SaveDraft(r.Context(), user.ID, r.PathValue("draftID"), request.RequestKey)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusAccepted, job)
+}
+
+// draftSong is the song of the version a draft edits, for the rough
+// preview: the one it was made with, whatever the project's is now.
+func (h *handler) draftSong(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	audio, err := h.store.OpenDraftSongAudio(r.Context(), user.ID, r.PathValue("draftID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.serveSong(w, r, audio)
+}
+
 func (h *handler) versionShots(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	list, err := h.store.VersionShots(r.Context(), user.ID, r.PathValue("versionID"))
 	h.shotList(w, r, list, err)

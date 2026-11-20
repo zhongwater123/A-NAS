@@ -15,10 +15,12 @@ export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   "fill-2": "填入方案二的镜头",
   "render-2": "渲染方案二",
   "save-2": "保存方案二",
+  // An edit's first step (#596); the page that shows an edit's progress is R6's.
+  source: "读取修改稿",
 };
 
 type StepName = keyof typeof stepNames;
-const shared: ReadonlySet<string> = new Set(["analysis", "catalog", "song"]);
+const shared: ReadonlySet<string> = new Set(["analysis", "catalog", "song", "source"]);
 // The steps as the page groups them: what every 方案 shares (0), then each 方案's own.
 export const stageOf = (name: StepName): number => (shared.has(name) ? 0 : name.endsWith("-2") ? 2 : 1);
 export const stageName = (stage: number) => (stage === 0 ? "准备" : planName(stage));

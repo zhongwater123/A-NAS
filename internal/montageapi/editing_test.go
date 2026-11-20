@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/montage"
@@ -41,5 +43,24 @@ func TestEditingErrorsAnswerWhatThePageActsOn(t *testing.T) {
 				t.Fatalf("%v answered %d %+v", c.err, w.Code, answer.Error)
 			}
 		})
+	}
+}
+
+func TestASongIsSentInRanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audio")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Range", "bytes=2-5")
+	w := httptest.NewRecorder()
+	(&handler{}).serveSong(w, request, montage.SongAudio{File: file, ContentType: "audio/mpeg"})
+	if w.Code != http.StatusPartialContent || w.Body.String() != "2345" || w.Header().Get("Content-Range") != "bytes 2-5/10" ||
+		w.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Fatalf("a range of the song = %d %q %v", w.Code, w.Body.String(), w.Header())
 	}
 }

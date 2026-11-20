@@ -104,7 +104,7 @@ schemas:
   MontageVersion:
     type: object
     additionalProperties: false
-    required: [id, number, jobId, plan, filmAssetId, createdAt, editable]
+    required: [id, number, jobId, plan, filmAssetId, createdAt, editable, kind]
     properties:
       id: { type: string, minLength: 1 }
       number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
@@ -114,6 +114,10 @@ schemas:
       createdAt: { type: string, format: date-time }
       gone: { type: boolean, description: "The member deleted the film from the photo library." }
       editable: { type: boolean, description: "Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played." }
+      kind: { type: string, enum: [plan, edit, recut], description: "plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again." }
+      sourceVersionId: { type: string, description: "The version an edit or a recut came from." }
+      sourceNumber: { type: integer, minimum: 1, description: "That version's number, while it is recorded." }
+      draftRevision: { type: integer, minimum: 0, description: "An edit: the draft's revision it was rendered from." }
   MontageJobStep:
     type: object
     additionalProperties: false
@@ -121,18 +125,19 @@ schemas:
     properties:
       name:
         type: string
-        description: "The shared steps, then each 方案's: the first 方案's plain, the second's with -2."
-        enum: [analysis, catalog, song, pick, shots, fill, render, save, pick-2, shots-2, fill-2, render-2, save-2]
+        description: "The shared steps, then each 方案's: the first 方案's plain, the second's with -2. An edit's are source, fill, render and save."
+        enum: [analysis, catalog, song, pick, shots, fill, render, save, pick-2, shots-2, fill-2, render-2, save-2, source]
       state: { type: string, enum: [pending, running, done, queued, waiting, needs_input, failed, cancelled], description: "A step that stopped with the job shows the job's state." }
       startedAt: { type: string, format: date-time }
       finishedAt: { type: string, format: date-time }
   MontageJob:
     type: object
     additionalProperties: false
-    required: [id, projectId, state, steps, createdAt]
+    required: [id, projectId, kind, state, steps, createdAt]
     properties:
       id: { type: string, minLength: 1 }
       projectId: { type: string, minLength: 1 }
+      kind: { type: string, enum: [generate, edit, recut], description: "generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence." }
       state: { type: string, enum: [queued, running, waiting, needs_input, done, failed, cancelled] }
       step: { type: string, description: The step the job is at or stopped at. }
       waitReason:
@@ -141,7 +146,7 @@ schemas:
         description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for."
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
-      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed.", items: { type: string } }
+      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.", items: { type: string } }
       version: { $ref: "#/schemas/MontageVersion", description: "The first 方案's film." }
       versions: { type: array, description: "Every 方案's film the job saved, in order.", items: { $ref: "#/schemas/MontageVersion" } }
       createdAt: { type: string, format: date-time }
