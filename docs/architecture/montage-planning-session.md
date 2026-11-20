@@ -1,9 +1,9 @@
 # 剪辑中心的规划会话
 
-状态：accepted（用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)），实现中
+状态：accepted（用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)），已实现（[#608](https://github.com/zhongwater123/A-NAS/pull/608)），2026-11-20 部署到实验 NAS 并完整出片一次
 更新时间：2026-11-20
 
-剪辑任务走到规划时，由成员自己的 VNAS 在后台做两步规划（大纲、挑节拍），两个方案。本文是交给 VNAS 的那一段：谁发起、在哪个进程里跑、云端看到什么、怎样等它结束、怎样重试、VNAS 怎样学习。剪辑中心其余部分（任务、步骤、简报与答案的校验、填槽、渲染、存回相册）不变，见剪辑中心的实施方案（随 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 合入）。
+剪辑任务走到规划时，由成员自己的 VNAS 在后台做两步规划（大纲、挑节拍），两个方案。本文是交给 VNAS 的那一段：谁发起、在哪个进程里跑、云端看到什么、怎样等它结束、怎样重试、VNAS 怎样学习。剪辑中心其余部分（任务、步骤、简报与答案的校验、填槽、渲染、存回相册）不变，见剪辑中心的[实施方案](montage-center.md)。
 
 它取代原来借成员定时任务单元跑一轮的做法（`montage_round.py`、规划令牌与领取回执、定时任务里的规划任务）。原因见[决定记录](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)与[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)。
 

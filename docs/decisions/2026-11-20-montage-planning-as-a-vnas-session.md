@@ -39,4 +39,4 @@
 
 - 设计：[剪辑中心的规划会话](../architecture/montage-planning-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）的补充
-- 剪辑中心的实施方案与 ADR 0038 随 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 合入，其中“规划”与“MCP 服务器”两节要按这里改
+- 剪辑中心的[实施方案](../architecture/montage-center.md#规划)与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 5 已按这里改写

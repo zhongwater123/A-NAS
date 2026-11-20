@@ -146,7 +146,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）；画面只以视图离开（`GET /assets/{id}/view`，`internal/photos/view.go`）：从像素重新编码、最长边不超过 1600 像素、不带原图元数据的 JPEG，供成员要求时交给模型去看；元数据按需从原图读出（`GET /assets/{id}/metadata`，`internal/photos/photometadata.go`）：EXIF 的全部标签与相机记下的拍摄位置，成员与助手都只能读自己看得到的照片的。
-- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
+- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见[剪辑中心实施方案](montage-center.md#项目授权)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
   - **套接字**：systemd 的 `anas-photos-grants.socket` 只给剪辑服务的账号（0600，属主 `a-nas-montage`），以 `grants` 之名交给相册服务；相册服务再核对对端 UID 是 31003。协议是 `unixmsg`，请求与回答的类型在 `internal/photosapi/grants.go`，原片的只读描述符随 `open` 的回答传出。这个套接字上的请求不算有人在用相册，不推迟 AI 工作。
     - 一次接受连接失败（如描述符用尽）只退避重试，不让相册服务退出；停止时先等进行中的授权请求答完再关 Catalog，每个请求连同对 Host Agent 的调用至多两分钟。
     - 套接字随相册服务启动（服务单元的 `Wants=`），安装脚本不单独重启它：相册服务在运行时 systemd 拒绝启动它，而助手的套接字随时可能把相册服务拉起来。升级或回滚前，旧版本的 `prerm` 停下它，回到没有它的版本时不留下没人读的监听。
