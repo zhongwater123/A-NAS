@@ -2433,7 +2433,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409). Another member's version is not_found */
+        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Another member's version is not_found */
         get: operations["getMontageVersionDraft"];
         put?: never;
         post?: never;
