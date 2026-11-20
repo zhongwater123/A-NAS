@@ -3,13 +3,16 @@ package photos_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"math"
 	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 )
 
 // members are named, as the photo service learns from the session lookup.
@@ -277,4 +280,83 @@ func TestARankedHitOutsideTheSearchedLibrariesIsDropped(t *testing.T) {
 	if err != nil || !slices.Equal(shown, []string{mine.ID}) {
 		t.Fatalf("recheck of bob's and alice's photo = %v, %v; want alice's alone", shown, err)
 	}
+}
+
+// A window search answers only from the grant's own videos: neither another
+// member's nor the same member's other project's, however like the text
+// they are, nor a point the index holds under the grant's video but keyed
+// to another. Another member's grant, a revoked one and none at all refuse
+// alike.
+func TestAWindowSearchFindsOnlyTheGrantsVideos(t *testing.T) {
+	ctx := context.Background()
+	f := newSearchFixture(t)
+	db := catalog(t, f.root)
+	const text = "sunset over the sea"
+	for _, object := range []string{f.hikeObject, f.gardenObject} {
+		if _, err := db.Exec("UPDATE video_windows SET vector = ? WHERE object_id = ?", queryVector(text), object); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := newWindowIndex(t, &f.montageFixture)
+	w.sync(t)
+	collection, err := w.index.Alias(ctx, "video_windows_v1")
+	if err != nil || collection == "" {
+		t.Fatalf("Alias() = %q, %v", collection, err)
+	}
+	forged := decodeFloats(queryVector(text))
+	if err := w.index.Upsert(ctx, collection, []vectorindex.Point{{Key: f.gardenObject + "#0", Vector: forged,
+		Keywords: map[string][]string{"object": {f.tripObject}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, index := range []photos.VectorIndex{w.index, nil} {
+		photos.UseVectorIndex(f.service, index)
+		for _, search := range []struct {
+			owner photos.Principal
+			grant photos.Grant
+			sees  []string
+		}{
+			{namedAlice, f.tripGrant, []string{f.trip.ID, f.beach.ID}},
+			{namedAlice, f.hikeGrant, []string{f.hike.ID}},
+			{namedBob, f.gardenGrant, []string{f.garden.ID}},
+		} {
+			matches, err := f.service.SearchWindows(ctx, granting(search.owner), search.grant.ID, []string{text}, photos.MaxWindowMatches)
+			if err != nil || len(matches[0]) == 0 {
+				t.Fatalf("SearchWindows(%s) = %+v, %v", search.grant.ProjectID, matches, err)
+			}
+			for _, match := range matches[0] {
+				if !slices.Contains(search.sees, match.AssetID) {
+					t.Fatalf("index %v: %s found %+v outside its videos", index != nil, search.grant.ProjectID, match)
+				}
+			}
+		}
+	}
+	missing := func(p photos.Principal, grantID string) error {
+		_, err := f.service.SearchWindows(ctx, granting(p), grantID, []string{text}, 5)
+		return err
+	}
+	if err := f.service.RevokeGrant(ctx, f.hikeGrant.ID); err != nil {
+		t.Fatal(err)
+	}
+	nothing := missing(namedBob, "grant:missing")
+	for name, err := range map[string]error{
+		"bob with alice's":   missing(namedBob, f.tripGrant.ID),
+		"alice with bob's":   missing(namedAlice, f.gardenGrant.ID),
+		"alice with revoked": missing(namedAlice, f.hikeGrant.ID),
+	} {
+		if !errors.Is(err, photos.ErrGrantNotFound) || err.Error() != nothing.Error() {
+			t.Errorf("%s: %v; want as for no grant, %v", name, err, nothing)
+		}
+	}
+	// Only the montage center's grant Principal searches.
+	if _, err := f.service.SearchWindows(ctx, namedAlice, f.tripGrant.ID, []string{text}, 5); !errors.Is(err, photos.ErrForbidden) {
+		t.Errorf("a member's own Principal searching a grant = %v", err)
+	}
+}
+
+func decodeFloats(encoded []byte) []float32 {
+	vector := make([]float32, len(encoded)/4)
+	for i := range vector {
+		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(encoded[4*i:]))
+	}
+	return vector
 }

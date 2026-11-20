@@ -20,7 +20,8 @@ import (
 // socket systemd holds for the montage account alone
 // (anas-photos-grants.socket, mode 0600); the photo service checks the
 // peer's UID as well. A request there is not someone using the photo
-// library: it does not hold background AI work back.
+// library: it does not hold background AI work back, except a search of
+// windows, which a member on the edit page waits for.
 
 // ActiveAccounts lists the accounts in use, as the Host Agent's session
 // lookup does.
@@ -38,8 +39,10 @@ type grantServer struct {
 	service  *atomic.Pointer[photos.Service]
 	sessions SessionResolver
 	accounts ActiveAccounts
-	peerUID  int
-	logger   *slog.Logger
+	// gate, when set, learns of the searches a member waits for.
+	gate    *Gate
+	peerUID int
+	logger  *slog.Logger
 	// base ends the Host Agent calls of the requests still open when
 	// stopping gives up waiting for them.
 	base   context.Context
@@ -52,9 +55,9 @@ type grantServer struct {
 }
 
 func newGrantServer(listener net.Listener, service *atomic.Pointer[photos.Service], sessions SessionResolver,
-	active ActiveAccounts, peerUID int, logger *slog.Logger) *grantServer {
+	active ActiveAccounts, gate *Gate, peerUID int, logger *slog.Logger) *grantServer {
 	base, cancel := context.WithCancel(context.Background())
-	return &grantServer{listener: listener, service: service, sessions: sessions, accounts: active, peerUID: peerUID,
+	return &grantServer{listener: listener, service: service, sessions: sessions, accounts: active, gate: gate, peerUID: peerUID,
 		logger: logger, base: base, cancel: cancel, stopped: make(chan struct{})}
 }
 
@@ -190,7 +193,12 @@ func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantReq
 			grant, err = service.RegisterGrant(ctx, photosapi.NewGrantPrincipal(user.UserID, user.Username), request.ProjectID, request.AssetIDs)
 			response.Grant = &grant
 		}
-	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis, photosapi.GrantSaveFilm:
+	case photosapi.GrantLookup, photosapi.GrantOpen, photosapi.GrantRemove, photosapi.GrantAnalyze, photosapi.GrantAnalysis, photosapi.GrantSaveFilm,
+		photosapi.GrantSearchWindows:
+		if request.Op == photosapi.GrantSearchWindows && g.gate != nil {
+			// As a photo search: someone is using the library until it is answered.
+			defer g.gate.Use()()
+		}
 		var owner photos.Principal
 		if owner, err = g.owner(ctx, service, request.GrantID); err != nil {
 			break
@@ -207,6 +215,8 @@ func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantReq
 			response.ObjectID, err = service.SaveFilm(ctx, owner, request.GrantID, request.VersionKey, request.Name, given)
 		case photosapi.GrantAnalyze:
 			err = service.AnalyzeGrant(ctx, owner, request.GrantID, request.AssetIDs, request.Retry)
+		case photosapi.GrantSearchWindows:
+			response.Matches, err = service.SearchWindows(ctx, owner, request.GrantID, request.Texts, request.K)
 		case photosapi.GrantAnalysis:
 			var analysis photos.GrantAnalysis
 			if analysis, opened, err = service.AnalysisOfGrant(ctx, owner, request.GrantID, request.AssetID); err == nil {
@@ -241,8 +251,13 @@ func (g *grantServer) handleWith(ctx context.Context, request photosapi.GrantReq
 		return refused(photosapi.GrantAssetNotFound, "the asset is not available"), nil
 	case errors.Is(err, photos.ErrInsufficientSpace):
 		return refused(photosapi.GrantNoSpace, "not enough space for the film"), nil
-	case errors.Is(err, photos.ErrInvalidName), errors.Is(err, photos.ErrUnsupportedType):
+	case errors.Is(err, photos.ErrInvalidName), errors.Is(err, photos.ErrUnsupportedType), errors.Is(err, photos.ErrInvalidQuery):
 		return refused(photosapi.GrantInvalid, err.Error()), nil
+	case errors.Is(err, photos.ErrWindowModelMismatch):
+		return refused(photosapi.GrantModelMismatch, "the windows were made with another model; analyse the videos again"), nil
+	case errors.Is(err, photos.ErrAIUnavailable):
+		g.logger.Warn("grant search could not encode its texts", "error", err)
+		return refused(photosapi.GrantAIUnavailable, "local AI is not available"), nil
 	}
 	g.logger.Error("grant request failed", "op", request.Op, "error", err)
 	return refused(photosapi.GrantUnavailable, "the photo library could not answer"), nil
@@ -258,9 +273,15 @@ type SessionsAndAccounts interface {
 // LocalGrants serves the grant operations in this process, for development,
 // with the same checks as the grant socket.
 func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *slog.Logger) photosapi.Grants {
+	return LocalGatedGrants(service, sessions, nil, logger)
+}
+
+// LocalGatedGrants is LocalGrants whose searches hold back the background
+// AI work gate lets through, as the grant socket's do.
+func LocalGatedGrants(service *photos.Service, sessions SessionsAndAccounts, gate *Gate, logger *slog.Logger) photosapi.Grants {
 	var opened atomic.Pointer[photos.Service]
 	opened.Store(service)
-	server := &grantServer{service: &opened, sessions: sessions, accounts: sessions, logger: logger}
+	server := &grantServer{service: &opened, sessions: sessions, accounts: sessions, gate: gate, logger: logger}
 	send := func(ctx context.Context, request photosapi.GrantRequest, given *os.File) (photosapi.GrantResponse, *os.File, error) {
 		response, file := server.handleWith(ctx, request, given)
 		if !response.OK {
