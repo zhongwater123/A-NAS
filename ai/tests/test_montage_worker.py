@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import socket
 import struct
 import tempfile
@@ -263,6 +264,49 @@ class BriefTest(unittest.TestCase):
                                          "段落2": {"画面1": {"beats": ["v2-0/1"], "shows": "人", "link": "走近"}}}}
         turned = worker.op_shots_answer({"answer": answer, "pictures": shots["pictures"], "picked": picked}, {})
         self.assertEqual(turned["answer"]["parts"][1]["pictures"][0]["beats"], ["v2-0/1"])
+
+    def test_a_recuts_briefs_carry_its_sentence_and_the_plan_it_starts_from(self):
+        from anas_montage import brief
+
+        cards = [described("v1-0", "photo:a", 0.0, 10.0), described("v2-0", "photo:b", 0.0, 12.0)]
+        picked = {"design": "从海边开始", "opening": "v1-0", "ending": "v2-0", "unmet": [],
+                  "parts": [{"name": "海", "summary": "海边", "link": "开场", "scenes": [{"query": "海边远景", "cards": ["v1-0"]}]},
+                            {"name": "人", "summary": "人", "link": "走近", "scenes": [{"query": "人望海", "cards": ["v2-0"]}]}]}
+        shots = [{"name": "海", "pictures": [{"beats": ["v1-0/2", "v1-0/1"], "shows": "海", "link": "开场"}]},
+                 {"name": "人", "pictures": [{"beats": ["v2-0/1"], "shows": "人", "link": "走近"}]}]
+        request = {"step": "pick", "cards": cards, "music": brief_music(), "ask": "", "chronological": True,
+                   "change": "结尾留长一点", "base": {"outline": picked, "shots": shots}}
+        pick = worker.op_plan_brief(request, {})
+        self.assertEqual(pick["template"], brief.RECUT_TEMPLATE)
+        self.assertEqual(pick["data"]["change"], "结尾留长一点")
+        self.assertEqual(pick["data"]["base"]["outline"]["design"], "从海边开始")
+        self.assertEqual(pick["data"]["base"]["shots"][0], [{"beats": ["v1-0/2", "v1-0/1"], "shows": "海", "link": "开场"}])
+        plain = worker.op_plan_brief({**request, "change": "", "base": None}, {})
+        self.assertEqual(plain["template"], brief.TEMPLATE)
+        self.assertNotIn("change", plain["data"])
+        self.assertEqual(plain["schema"], pick["schema"])
+        # The second step's data still waits for the outline taken; it carries the sentence and the base too.
+        second = worker.op_plan_brief({**request, "step": "shots", "picked": picked}, {})
+        self.assertEqual((second["template"], second["data"]["change"]), (brief.RECUT_TEMPLATE, "结尾留长一点"))
+        with self.assertRaises(KeyError):
+            worker.op_plan_brief({**request, "step": "shots"}, {})
+
+    def test_the_recut_template_starts_from_base_and_changes_only_what_change_asks(self):
+        from anas_montage import brief
+
+        prompts = os.path.join(os.path.dirname(brief.__file__), "prompts")
+        with open(os.path.join(prompts, brief.TEMPLATE + ".md"), encoding="utf-8") as f:
+            plan = f.read()
+        with open(os.path.join(prompts, brief.RECUT_TEMPLATE + ".md"), encoding="utf-8") as f:
+            recut = f.read()
+        self.assertIn("从 base 出发，只改 change 要求的地方", recut)
+        self.assertIn("只出一版", recut)
+        self.assertNotIn("还有下一版", recut)
+        # The same fields to fill, and the same two steps' rules as plan-v2.
+        fields = sorted(set(re.findall(r"\$[a-z_]+", recut)))
+        self.assertEqual(fields, sorted(set(re.findall(r"\$[a-z_]+", plan))))
+        self.assertEqual(recut[recut.index("## 第一步：大纲"):], plan[plan.index("## 第一步：大纲"):])
+        self.assertLess(recut.index("montage_submit_outline"), recut.index("montage_shots_brief"))
 
 
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")

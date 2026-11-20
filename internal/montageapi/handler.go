@@ -58,6 +58,7 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"GET /hero/poster":                     h.hero("poster"),
 		// Editing a film after it was made (#596).
 		"POST /versions/{versionID}/confirm":         h.confirmVersion,
+		"POST /versions/{versionID}/recut":           h.recut,
 		"GET /versions/{versionID}/draft":            h.versionDraft,
 		"POST /drafts/{draftID}/ops":                 h.editDraft,
 		"POST /drafts/{draftID}/save":                h.saveDraft,

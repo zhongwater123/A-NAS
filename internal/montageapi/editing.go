@@ -76,6 +76,29 @@ func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user a
 	httpjson.Write(w, http.StatusOK, candidates)
 }
 
+type recutRequest struct {
+	RequestKey string `json:"requestKey"`
+	Change     string `json:"change"`
+}
+
+// recut plans a version again from a sentence: like generating, it may come
+// to planning, so the planning grant is registered first.
+func (h *handler) recut(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
+	var request recutRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	job, _, err := h.store.RecutVersion(r.Context(), user.ID, r.PathValue("versionID"), request.RequestKey, request.Change)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusAccepted, job)
+}
+
 type saveDraftRequest struct {
 	RequestKey string `json:"requestKey"`
 }
