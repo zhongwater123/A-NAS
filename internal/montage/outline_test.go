@@ -1,6 +1,7 @@
 package montage
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -19,7 +20,7 @@ func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 			t.Fatal(err)
 		}
 		if outline.VersionNumber != 1 || outline.Plan.Design != "从海边走到山里" || len(outline.Parts) != 2 || outline.Seconds != 14 ||
-			outline.Counts != (DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) {
+			outline.Counts != (DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) || !slices.Equal(outline.Unmet, []string{"直升机", "雪地", "日落"}) {
 			t.Fatalf("the outline = %+v", outline)
 		}
 		var beats []string
@@ -54,5 +55,13 @@ func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 	}
 	if _, err := env.store.VersionOutline(ctx, editOther, env.version); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another member's outline = %v", err)
+	}
+}
+
+// What the plan did not find is a list of texts; anything else says nothing.
+func TestAnUnmetThatIsNotAListSaysNothing(t *testing.T) {
+	src := &editSource{picked: pickedDoc{Unmet: json.RawMessage(`"直升机"`)}}
+	if got := src.unmet(); got == nil || len(got) != 0 {
+		t.Fatalf("unmet = %#v", got)
 	}
 }

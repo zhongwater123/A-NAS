@@ -277,7 +277,9 @@ function serve(
     // The film as it is, whatever its draft has become.
     http.get("/api/v1/montage/versions/{versionId}/outline", ({ params, response }) => {
       const { versionId, projectId, versionNumber, seconds, plan, parts, shots, counts } = draftOf(params.versionId);
-      return response(200).json({ versionId, projectId, versionNumber, seconds, plan, parts, shots, counts });
+      // The first version's plan found no 直升机 among the videos.
+      const unmet = params.versionId === "version:1" ? ["直升机"] : [];
+      return response(200).json({ versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet });
     }),
     http.post("/api/v1/montage/versions/{versionId}/confirm", ({ params, response }) => {
       seen.did.push(`confirm ${params.versionId}`);
@@ -936,6 +938,8 @@ describe("剪辑中心", () => {
     expect(await within(first).findByText("从海边走到山里")).toBeInTheDocument();
     expect(within(first).getByText("海边")).toBeInTheDocument();
     expect(within(first).getByText("个竖拍").parentElement).toHaveAttribute("data-warn", "true");
+    // What the plan did not find among the videos is listed as it was written.
+    expect(within(first).getByText("素材里没找到：直升机")).toBeInTheDocument();
     await userEvent.click(within(first).getByRole("button", { name: "看完整规划" }));
     expect(within(first).getByText("爬")).toBeInTheDocument();
     await userEvent.click(within(first).getByRole("button", { name: "确认这一版" }));
@@ -945,6 +949,8 @@ describe("剪辑中心", () => {
     const say = within(first).getByRole("textbox", { name: "对第 1 版的修改要求" });
     await userEvent.type(say, "加字幕");
     expect(within(first).getByText("首版不加字幕")).toBeInTheDocument();
+    // A recut starts from the plan: the edits of 修改镜头 do not go with it.
+    expect(within(first).getByText(/“修改镜头”里的改动不会带进去/)).toBeInTheDocument();
     await userEvent.clear(say);
     await userEvent.type(say, "结尾留长一点");
     await userEvent.click(within(first).getByRole("button", { name: "重剪" }));
@@ -980,6 +986,20 @@ describe("剪辑中心", () => {
     expect(within(second).getByRole("button", { name: "修改镜头" })).toBeDisabled();
     expect(within(second).getByRole("textbox", { name: "对第 2 版的修改要求" })).toBeDisabled();
     expect(within(second).getByText(/只能播放，不能修改或重剪/)).toBeInTheDocument();
+    expect(within(second).queryByText(/素材里没找到/)).not.toBeInTheDocument();
+  });
+
+  it("says a recut of an edited version leaves its shots changed by hand behind", async () => {
+    const seen = fresh();
+    const edited = { ...saved[1], kind: "edit" as const, sourceVersionId: "version:1", sourceNumber: 1 };
+    serve(
+      () => project({ versions: [edited, saved[0]], job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const card = await within(page).findByRole("article", { name: "改自第 1 版" });
+    expect(within(card).getByText("重剪从这一版所来自的规划出发，手动换过的镜头不会带进去")).toBeInTheDocument();
   });
 
   it("marks the shots of a save that stopped for a missing video", async () => {

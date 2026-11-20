@@ -257,7 +257,7 @@ schemas:
   MontageVersionOutline:
     type: object
     additionalProperties: false
-    required: [versionId, projectId, versionNumber, seconds, plan, parts, shots, counts]
+    required: [versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet]
     description: "A version as its film is: the plan it was cut by and its shots, for the version's card. Unlike the draft, an edit not saved yet does not show here."
     properties:
       versionId: { type: string }
@@ -268,6 +268,7 @@ schemas:
       parts: { type: array, items: { $ref: "#/schemas/MontageFilmPart" } }
       shots: { type: array, description: "The film's shots, none of them changed, extended or locked.", items: { $ref: "#/schemas/MontageDraftShot" } }
       counts: { $ref: "#/schemas/MontageFilmCounts" }
+      unmet: { type: array, description: "What the plan found the videos do not have, as the planner wrote it: shown on the version's card.", items: { type: string } }
   MontageCandidate:
     type: object
     additionalProperties: false
