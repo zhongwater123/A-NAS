@@ -148,7 +148,12 @@ func (s *Store) steps(kind string, plans int) []step {
 				if plan > 1 {
 					return planKey(run.keys["pick"], plan), nil
 				}
-				return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
+				parts := []string{run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion}
+				if recut := run.settings.Recut; recut != nil {
+					// A recut plans anew from its version's plan and sentence.
+					parts = append(parts, RecutTemplate, recut.Change, string(recut.Base))
+				}
+				return digest(parts...), nil
 			}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
 			step{name: shots, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
 				return shotsKey(run.keys[pick], run.picked), nil

@@ -2444,6 +2444,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/versions/{versionId}/recut": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none */
+        post: operations["recutMontageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/versions/{versionId}/draft": {
         parameters: {
             query?: never;
@@ -8296,6 +8313,8 @@ export interface components {
             sourceNumber?: number;
             /** @description An edit: the draft's revision it was rendered from. */
             draftRevision?: number;
+            /** @description A recut: the member's sentence, 按“<change>”重剪自第 N 版. */
+            change?: string;
         };
         MontageJobStep: {
             /**
@@ -13989,6 +14008,42 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+        };
+    };
+    recutMontageVersion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    /** @description What to change, as a member's ask: 结尾留长一点. The page says what the first version cannot do, as for the ask. */
+                    change: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The recut job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     getMontageVersionDraft: {

@@ -72,6 +72,17 @@ type JobSettings struct {
 	// Edit is what an edit job renders (#596): the job and 方案 the
 	// version was planned in, and the draft's slots with their beats.
 	Edit *EditSettings `json:"edit,omitempty"`
+	// Recut is what a recut job plans from (#596): the version's plan and
+	// the member's sentence.
+	Recut *RecutSettings `json:"recut,omitempty"`
+}
+
+// RecutSettings is a recut's sentence and the plan it starts from: the
+// outline and shots the version was cut by, without the shots changed by
+// hand.
+type RecutSettings struct {
+	Change string          `json:"change"`
+	Base   json.RawMessage `json:"base"`
 }
 
 // EditSettings is the draft an edit job renders, as it stood when saved.
@@ -137,20 +148,23 @@ type Version struct {
 	SourceVersionID string `json:"sourceVersionId,omitempty"`
 	SourceNumber    int    `json:"sourceNumber,omitempty"`
 	DraftRevision   *int   `json:"draftRevision,omitempty"`
+	// Change is a recut's sentence: 按“<这句话>”重剪自第 N 版.
+	Change string `json:"change,omitempty"`
 }
 
 // versionColumns are what versionsOf scans, of versions v.
 const versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
 	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
 		AND f.name = CASE WHEN v.plan <= 1 THEN 'fill' ELSE 'fill-' || v.plan END AND f.result_json IS NOT NULL),
-	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision`
+	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision,
+	IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change') FROM jobs WHERE id = v.job_id), '')`
 
 func scanVersion(rows interface{ Scan(...any) error }) (Version, error) {
 	var version Version
 	var created string
 	var revision sql.NullInt64
 	if err := rows.Scan(&version.ID, &version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created, &version.Editable,
-		&version.Kind, &version.SourceVersionID, &version.SourceNumber, &revision); err != nil {
+		&version.Kind, &version.SourceVersionID, &version.SourceNumber, &revision, &version.Change); err != nil {
 		return Version{}, err
 	}
 	if revision.Valid {

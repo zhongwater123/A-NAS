@@ -38,6 +38,19 @@ import (
 // another refuses the round.
 const PlanTemplate = "plan-v2"
 
+// RecutTemplate is the template a recut's round fills: plan-v2's, starting
+// from the version's plan and changing only what the member's sentence asks
+// (#596).
+const RecutTemplate = "plan-v3"
+
+// templateOf is the template a job with these settings is planned with.
+func templateOf(settings JobSettings) string {
+	if settings.Recut != nil {
+		return RecutTemplate
+	}
+	return PlanTemplate
+}
+
 const (
 	// planGrantLife is how long a planning grant lets rounds start.
 	planGrantLife = 7 * 24 * time.Hour
@@ -538,10 +551,10 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 		if json.Unmarshal([]byte(settings), &kept) == nil {
 			claim.Project = kept.ProjectName
 		}
-		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), PlanTemplate
+		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), templateOf(kept)
 		now := sqlitedb.FormatTime(s.now())
 		if _, err := tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
-			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, claim.RoundID, claim.JobID, owner, claim.AttemptToken, now, epoch, PlanTemplate, pickKey); err != nil {
+			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, claim.RoundID, claim.JobID, owner, claim.AttemptToken, now, epoch, claim.Template, pickKey); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", claim.JobID)
