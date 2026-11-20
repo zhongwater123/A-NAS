@@ -214,7 +214,7 @@ montage/
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。窗口向量放在 memfd 里，是 `n × 768` 个小端 float32，只按长度校验 |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
-| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch`，AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)） |
+| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch`，AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)）。剪辑中心经 [`grantsearch.go`](../../internal/montage/grantsearch.go) 调用：`model_mismatch` 对成员是 409 `search_model_changed`，`ai_unavailable` 与相册答不了是 503 `search_unavailable` |
 | `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 

@@ -483,7 +483,8 @@ type Options struct {
 	JobCompute Compute
 	Editing    Editing
 	Planner    Planner
-	// Search finds windows by text, for editing a film (#596).
+	// Search finds windows by text, for editing a film (#596). Unset, it is
+	// the grants' own search when they have one (GrantSearch).
 	Search WindowSearch
 	// PlanMarkers is the directory of planning markers the waker reads;
 	// without it no member's VNAS is asked to plan.
@@ -504,6 +505,9 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	}
 	if options.Plans < 0 || options.Plans > MaxPlans {
 		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
+	}
+	if search, ok := options.Grants.(WindowGrants); ok && options.Search == nil {
+		options.Search = GrantSearch{Grants: search}
 	}
 	db, err := sqlitedb.Open(filepath.Join(root, DatabaseName), sqlitedb.Options{Durable: true})
 	if err != nil {
