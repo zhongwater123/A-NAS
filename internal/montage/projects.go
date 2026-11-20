@@ -96,6 +96,10 @@ type Project struct {
 	// PreviewAssetIDs are up to six of its videos, spread over the order
 	// they were added: the list shows their thumbnails.
 	PreviewAssetIDs []string `json:"previewAssetIds,omitempty"`
+	// ChosenVersionID is the version the member confirmed as the
+	// project's film (#596), and ChosenFilmAssetID that film.
+	ChosenVersionID   string `json:"chosenVersionId,omitempty"`
+	ChosenFilmAssetID string `json:"chosenFilmAssetId,omitempty"`
 }
 
 // previewCount is how many videos a project in the list shows.
@@ -212,14 +216,15 @@ type projectRow struct {
 	ask                    string
 	chronological          bool
 	created                time.Time
+	chosen                 string
 }
 
 func (s *Store) project(ctx context.Context, q queryer, owner, id string) (projectRow, error) {
 	var row projectRow
 	var created string
-	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at
+	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
 		FROM projects WHERE id = ? AND owner_user_id = ?`, id, owner).
-		Scan(&row.id, &row.owner, &row.name, &row.state, &row.grantID, &row.ask, &row.chronological, &created)
+		Scan(&row.id, &row.owner, &row.name, &row.state, &row.grantID, &row.ask, &row.chronological, &created, &row.chosen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return projectRow{}, ErrNotFound
 	}
@@ -534,8 +539,10 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
 		args = append(args, at, at, id)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.created_at, (SELECT COUNT(*) FROM project_assets a WHERE a.project_id = p.id)
-		FROM projects p WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, pageSize+1)...)
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.created_at, (SELECT COUNT(*) FROM project_assets a WHERE a.project_id = p.id),
+		IFNULL(v.id, ''), IFNULL(v.film_asset_id, '')
+		FROM projects p LEFT JOIN versions v ON v.id = p.chosen_version_id AND v.project_id = p.id
+		WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, pageSize+1)...)
 	if err != nil {
 		return ProjectPage{}, err
 	}
@@ -545,7 +552,7 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 	for rows.Next() {
 		var project Project
 		var created string
-		if err := rows.Scan(&project.ID, &project.Name, &created, &project.AssetCount); err != nil {
+		if err := rows.Scan(&project.ID, &project.Name, &created, &project.AssetCount, &project.ChosenVersionID, &project.ChosenFilmAssetID); err != nil {
 			return ProjectPage{}, err
 		}
 		if len(page.Items) == pageSize {
@@ -636,6 +643,11 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 	detail.AssetCount = len(detail.Assets)
 	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
 		return ProjectDetail{}, err
+	}
+	for _, version := range detail.Versions {
+		if version.ID == row.chosen {
+			detail.ChosenVersionID, detail.ChosenFilmAssetID = version.ID, version.FilmAssetID
+		}
 	}
 	var latest string
 	switch err := s.db.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest); {

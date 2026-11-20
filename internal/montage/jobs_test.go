@@ -549,6 +549,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	if env.jobFiles(job.ID) {
 		t.Fatal("the job's files outlived it")
 	}
+	// The version keeps the timeline it was made from, for editing it (#596).
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM versions WHERE job_id = ? AND json_array_length(timeline_json, '$.clips') = 2", job.ID); n != 1 {
+		t.Fatalf("%d versions keep their timeline", n)
+	}
 	notices, err := env.store.Notices(ctx, "user:alice")
 	if err != nil || len(notices) != 1 || notices[0].Kind != "saved" || notices[0].FilmID != done.Version.FilmAssetID {
 		t.Fatalf("notices = %+v, %v", notices, err)
