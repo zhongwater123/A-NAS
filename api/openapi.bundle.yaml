@@ -4237,6 +4237,198 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/confirm:
+    post:
+      operationId: confirmMontageVersion
+      summary: 'Confirm this version as the project''s film (#596): the list and the home page show it, the others stay as 其他版本. No film is deleted; another version can be confirmed later'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/draft:
+    get:
+      operationId: getMontageVersionDraft
+      summary: 'The caller''s draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409). Another member''s version is not_found'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageDraft'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/ops:
+    post:
+      operationId: editMontageDraft
+      summary: 'One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Nothing here calls a model or renders'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - baseRevision
+                - op
+              properties:
+                baseRevision:
+                  type: integer
+                  minimum: 0
+                op:
+                  $ref: '#/components/schemas/MontageDraftOp'
+      responses:
+        '200':
+          description: The draft after the step, with what it did
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageDraft'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/candidates:
+    get:
+      operationId: listMontageDraftCandidates
+      summary: 'The beats that could lead a shot: the rest of its card, the plan''s spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - name: shot
+          in: query
+          required: true
+          description: The shot's number from 1.
+          schema:
+            type: integer
+            minimum: 1
+        - name: q
+          in: query
+          description: Words to search the project's videos for.
+          schema:
+            type: string
+            maxLength: 200
+        - name: size
+          in: query
+          description: Only this shot size (景别).
+          schema:
+            type: string
+            maxLength: 64
+        - name: scene
+          in: query
+          description: Only this scene; 其他 for the scenes not listed.
+          schema:
+            type: string
+            maxLength: 64
+        - name: landscape
+          in: query
+          description: Only 16:9 videos.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageCandidates'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/shots:
+    get:
+      operationId: getMontageVersionShots
+      summary: 'The version''s shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The shot list
+          content:
+            text/csv:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/shots:
+    get:
+      operationId: getMontageDraftShots
+      summary: 'The draft''s shot list, as the version''s: a row a shot, the slots it covers, and for a shot that took a deleted shot''s slots, which'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+      responses:
+        '200':
+          description: The shot list
+          content:
+            text/csv:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/frames/{assetId}:
+    get:
+      operationId: getMontageFrame
+      summary: 'A frame of one of the project''s videos, a JPEG 320 on its longer side, for the edit page''s thumbnails. It is not kept: the video''s content does not change, so the browser keeps it'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: t
+          in: query
+          required: true
+          description: Milliseconds into the video.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2147483647
+      responses:
+        '200':
+          description: The frame
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules:
     get:
       operationId: listModules
@@ -9339,6 +9531,20 @@ components:
         minLength: 1
     MontageJobID:
       name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageVersionID:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageDraftID:
+      name: draftId
       in: path
       required: true
       schema:
@@ -16840,6 +17046,12 @@ components:
           description: Up to six of its videos, spread over the order they were added, for thumbnails.
           items:
             type: string
+        chosenVersionId:
+          type: string
+          description: The version the member confirmed as the project's film (#596).
+        chosenFilmAssetId:
+          type: string
+          description: The confirmed version's film; the list and the home page show it first.
     MontageProjectPage:
       type: object
       additionalProperties: false
@@ -16898,12 +17110,17 @@ components:
       type: object
       additionalProperties: false
       required:
+        - id
         - number
         - jobId
         - plan
         - filmAssetId
         - createdAt
+        - editable
       properties:
+        id:
+          type: string
+          minLength: 1
         number:
           type: integer
           minimum: 1
@@ -16924,6 +17141,9 @@ components:
         gone:
           type: boolean
           description: The member deleted the film from the photo library.
+        editable:
+          type: boolean
+          description: Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played.
     MontageJobStep:
       type: object
       additionalProperties: false
@@ -17078,6 +17298,12 @@ components:
         job:
           $ref: '#/components/schemas/MontageJob'
           description: The project's latest job, for the page to pick up where it was after a reload.
+        chosenVersionId:
+          type: string
+          description: The version the member confirmed as the project's film; the others stay, as "其他版本".
+        chosenFilmAssetId:
+          type: string
+          description: The confirmed version's film.
     MontageNotice:
       type: object
       additionalProperties: false
@@ -17292,6 +17518,325 @@ components:
           description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
         selection:
           $ref: '#/components/schemas/MontageSongSelection'
+    MontageDraftShot:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - beat
+        - assetId
+        - part
+        - picture
+        - slots
+        - start
+        - end
+        - from
+        - to
+        - query
+        - shotSize
+        - what
+        - locked
+        - changed
+        - extended
+        - portrait
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        beat:
+          type: string
+          description: 'card/n: the beat that leads the shot.'
+        assetId:
+          type: string
+          description: The video it comes from.
+        part:
+          type: integer
+          minimum: 1
+        picture:
+          type: integer
+          minimum: 1
+        slots:
+          type: array
+          minItems: 1
+          description: The music's slots it covers, from 1; more than one where it took a deleted shot's.
+          items:
+            type: integer
+            minimum: 1
+        start:
+          type: number
+          minimum: 0
+          description: Seconds into the film.
+        end:
+          type: number
+          minimum: 0
+        from:
+          type: number
+          minimum: 0
+          description: 'Seconds into its video the rough preview plays from: where the version had it, or the beat''s piece.'
+        to:
+          type: number
+          minimum: 0
+        query:
+          type: string
+          description: 'What the plan asked of its picture: 规划要.'
+        shotSize:
+          type: string
+        what:
+          type: string
+        locked:
+          type: boolean
+        changed:
+          type: boolean
+          description: '已换: not a beat the version had in these slots.'
+        extended:
+          type: boolean
+          description: '延长: it took a deleted shot''s slots.'
+        portrait:
+          type: boolean
+          description: '竖: its video is narrower than 16:9 and is shown on a blurred background.'
+    MontageDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - versionId
+        - projectId
+        - versionNumber
+        - revision
+        - canUndo
+        - songStart
+        - seconds
+        - plan
+        - parts
+        - shots
+        - counts
+        - updatedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        versionId:
+          type: string
+        projectId:
+          type: string
+        versionNumber:
+          type: integer
+          minimum: 1
+        revision:
+          type: integer
+          minimum: 0
+          description: A step is made on this revision (baseRevision).
+        canUndo:
+          type: boolean
+        songStart:
+          type: number
+          minimum: 0
+          description: Where the version's excerpt starts in its song, in seconds.
+        seconds:
+          type: number
+          minimum: 0
+          description: How long the film is.
+        plan:
+          type: object
+          additionalProperties: false
+          required:
+            - design
+            - opening
+            - ending
+          description: The first step of the plan the version was cut by.
+          properties:
+            design:
+              type: string
+            opening:
+              type: string
+            ending:
+              type: string
+        parts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - number
+              - name
+              - summary
+              - level
+              - start
+              - end
+            properties:
+              number:
+                type: integer
+                minimum: 1
+              name:
+                type: string
+              summary:
+                type: string
+              level:
+                type: string
+                description: The music part's strength, from the song's analysis.
+              start:
+                type: number
+                minimum: 0
+              end:
+                type: number
+                minimum: 0
+        shots:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageDraftShot'
+        counts:
+          type: object
+          additionalProperties: false
+          required:
+            - shots
+            - videos
+            - portrait
+          properties:
+            shots:
+              type: integer
+              minimum: 0
+            videos:
+              type: integer
+              minimum: 0
+            portrait:
+              type: integer
+              minimum: 0
+        message:
+          type: string
+          description: 'What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上.'
+        updatedAt:
+          type: string
+          format: date-time
+    MontageDraftOp:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+      description: One step of an edit (docs/specs/montage-center.md, 修改的规则). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred.
+      properties:
+        type:
+          type: string
+          enum:
+            - replace
+            - move
+            - delete
+            - lock
+            - unlock
+            - shuffle
+            - revert
+            - reset
+            - undo
+        shot:
+          type: integer
+          minimum: 1
+          description: 'The shot''s number, from 1: replace, move, delete, lock, unlock, revert.'
+        to:
+          type: integer
+          minimum: 1
+          description: 'move: the shot whose place it takes.'
+        beat:
+          type: string
+          minLength: 1
+          maxLength: 140
+          description: 'replace: the beat, card/n, as a candidate names it.'
+        seed:
+          type: integer
+          minimum: 0
+          description: 'shuffle: the same seed on the same draft picks the same beats.'
+    MontageCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - beat
+        - assetId
+        - from
+        - to
+        - shotSize
+        - what
+        - scene
+        - portrait
+        - fits
+      properties:
+        beat:
+          type: string
+        assetId:
+          type: string
+        from:
+          type: number
+          minimum: 0
+          description: The part of its video a try plays, in seconds.
+        to:
+          type: number
+          minimum: 0
+        shotSize:
+          type: string
+        what:
+          type: string
+        scene:
+          type: string
+        portrait:
+          type: boolean
+        fits:
+          type: boolean
+          description: Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen.
+        usedBy:
+          type: integer
+          minimum: 1
+          description: '已用在第 N 镜: the shot that has it; it cannot be chosen.'
+        score:
+          type: number
+          description: How alike the search found it; only to order by.
+        takenAt:
+          type: string
+          format: date-time
+    MontageCandidates:
+      type: object
+      additionalProperties: false
+      required:
+        - shot
+        - query
+        - sameCard
+        - planned
+        - results
+        - scenes
+      properties:
+        shot:
+          type: integer
+          minimum: 1
+        query:
+          type: string
+          description: The picture's description, which the search box starts with.
+        sameCard:
+          type: array
+          description: The other beats of the shot's card.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        planned:
+          type: array
+          description: The plan's spare beats for its picture.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        results:
+          type: array
+          description: With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        scenes:
+          type: array
+          maxItems: 9
+          description: 'The scenes the cards were described in, most cards first: eight, and the rest as 其他.'
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - scene
+              - cards
+            properties:
+              scene:
+                type: string
+              cards:
+                type: integer
+                minimum: 1
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$
