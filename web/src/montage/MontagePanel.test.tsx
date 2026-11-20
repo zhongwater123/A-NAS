@@ -187,8 +187,24 @@ afterEach(() => {
 
 // A job's two 方案, as the job and the project list them.
 const saved: MontageProjectDetail["versions"] = [
-  { number: 1, jobId: "job:1", plan: 1, filmAssetId: "photo:film-1", createdAt: "2026-11-18T10:05:00Z" },
-  { number: 2, jobId: "job:1", plan: 2, filmAssetId: "photo:film-2", createdAt: "2026-11-18T10:08:00Z" },
+  {
+    id: "version:1",
+    number: 1,
+    jobId: "job:1",
+    plan: 1,
+    filmAssetId: "photo:film-1",
+    createdAt: "2026-11-18T10:05:00Z",
+    editable: true,
+  },
+  {
+    id: "version:2",
+    number: 2,
+    jobId: "job:1",
+    plan: 2,
+    filmAssetId: "photo:film-2",
+    createdAt: "2026-11-18T10:08:00Z",
+    editable: true,
+  },
 ];
 
 describe("剪辑中心", () => {
@@ -497,14 +513,16 @@ describe("剪辑中心", () => {
 
   it("plays and downloads the films of earlier jobs", async () => {
     const earlier = {
+      id: "version:0",
       number: 1,
       jobId: "job:0",
       plan: 1,
       filmAssetId: "photo:film-0",
       createdAt: "2026-11-17T10:00:00Z",
+      editable: true,
     };
-    const gone = { ...earlier, number: 2, plan: 2, filmAssetId: "photo:film-00", gone: true };
-    const later = saved.map((version) => ({ ...version, number: version.number + 2 }));
+    const gone = { ...earlier, id: "version:00", number: 2, plan: 2, filmAssetId: "photo:film-00", gone: true };
+    const later = saved.map((version) => ({ ...version, id: `${version.id}+2`, number: version.number + 2 }));
     serve(
       () => project({ versions: [...later].reverse().concat(gone, earlier) }),
       () => job("done"),
