@@ -67,7 +67,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 		return nil, err
 	}
 	request := FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]Card{}, Catalog: run.catalog.Catalog,
-		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known}
+		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins}
 	for _, id := range run.catalog.Catalog {
 		request.Cards[id] = run.catalog.Cards[id]
 	}
@@ -208,11 +208,20 @@ func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os
 	if err != nil {
 		return nil, jobGrantError(err, []string{assetID})
 	}
+	want, known := "", false
 	for _, asset := range run.assets {
-		if asset.assetID == assetID && asset.objectID != object {
-			_ = file.Close()
-			return nil, &stepNeeds{reason: NeedMissing, missing: []string{assetID}}
+		if asset.assetID == assetID {
+			want, known = asset.objectID, true
 		}
+	}
+	if video, ok := run.assetOf(assetID); !known && ok {
+		// An edit's fill may take a piece from a video no shot of the draft
+		// leads: still the content the version was planned from.
+		want, known = video.ObjectID, true
+	}
+	if known && want != object {
+		_ = file.Close()
+		return nil, &stepNeeds{reason: NeedMissing, missing: []string{assetID}}
 	}
 	return file, nil
 }
@@ -291,7 +300,12 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if total != slot[1] {
 		return failed("the last slot ends at frame %d, filled to %d", slot[1], total)
 	}
-	if err := checkPlannedSlots(run.planned, slots); err != nil {
+	if run.pins != nil {
+		// An edit keeps its draft's slots, in the draft's order.
+		if err := checkPinnedSlots(run.pins, slots); err != nil {
+			return err
+		}
+	} else if err := checkPlannedSlots(run.planned, slots); err != nil {
 		return err
 	}
 	if total != run.excerpt.Frames {
@@ -332,6 +346,20 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 	}
 	if at != len(filled) {
 		return failed("the timeline has %d unplanned slots", len(filled)-at)
+	}
+	return nil
+}
+
+// checkPinnedSlots checks an edit's timeline fills its pins' slots, each
+// in its place.
+func checkPinnedSlots(pins []FillPin, filled [][2]int) error {
+	if len(pins) != len(filled) {
+		return failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
+	}
+	for i, pin := range pins {
+		if want := [2]int{filmFrame(pin.Slot[0]), filmFrame(pin.Slot[1])}; filled[i] != want {
+			return failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
+		}
 	}
 	return nil
 }
@@ -594,9 +622,13 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		timeline = string(encoded)
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
-			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now, timeline); err != nil {
+		// An edit's version is an edit of the version it came from, at the
+		// draft's revision; a generate job's was planned.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,
+				kind, source_version_id, draft_revision)
+			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE kind WHEN 'generate' THEN 'plan' ELSE kind END, source_version_id, draft_revision
+			FROM jobs WHERE id = ? ON CONFLICT (version_key) DO NOTHING`,
+			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now, timeline, run.id); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",

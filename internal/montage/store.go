@@ -355,6 +355,30 @@ DROP TABLE drafts;
 ALTER TABLE versions DROP COLUMN timeline_json;
 ALTER TABLE projects DROP COLUMN chosen_version_id;
 `},
+		// 9: jobs of three kinds (#596): generate, as before; edit, which
+		// renders a draft as a new version; recut. An edit or recut job and
+		// the version it saves name the version they came from, and an edit
+		// the draft's revision. A release from before knows neither: going
+		// back forgets them, while their films stay in the photo library.
+		{Up: `
+ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'generate' CHECK (kind IN ('generate', 'edit', 'recut'));
+ALTER TABLE jobs ADD COLUMN source_version_id TEXT;
+ALTER TABLE jobs ADD COLUMN draft_id TEXT;
+ALTER TABLE jobs ADD COLUMN draft_revision INTEGER;
+ALTER TABLE versions ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan' CHECK (kind IN ('plan', 'edit', 'recut'));
+ALTER TABLE versions ADD COLUMN source_version_id TEXT;
+ALTER TABLE versions ADD COLUMN draft_revision INTEGER;
+`, Down: `
+DELETE FROM versions WHERE kind <> 'plan';
+DELETE FROM jobs WHERE kind <> 'generate';
+ALTER TABLE versions DROP COLUMN draft_revision;
+ALTER TABLE versions DROP COLUMN source_version_id;
+ALTER TABLE versions DROP COLUMN kind;
+ALTER TABLE jobs DROP COLUMN draft_revision;
+ALTER TABLE jobs DROP COLUMN draft_id;
+ALTER TABLE jobs DROP COLUMN source_version_id;
+ALTER TABLE jobs DROP COLUMN kind;
+`},
 	},
 }
 

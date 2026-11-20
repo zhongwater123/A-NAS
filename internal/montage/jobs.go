@@ -69,7 +69,26 @@ type JobSettings struct {
 	Ask           string  `json:"ask"`
 	Chronological bool    `json:"chronological"`
 	ProjectName   string  `json:"projectName"`
+	// Edit is what an edit job renders (#596): the job and 方案 the
+	// version was planned in, and the draft's slots with their beats.
+	Edit *EditSettings `json:"edit,omitempty"`
 }
+
+// EditSettings is the draft an edit job renders, as it stood when saved.
+type EditSettings struct {
+	Job  string    `json:"job"`
+	Plan int       `json:"plan"`
+	Pins []FillPin `json:"pins"`
+}
+
+// The kinds of job and of version (#596).
+const (
+	KindGenerate = "generate"
+	KindEdit     = "edit"
+	KindRecut    = "recut"
+	// VersionPlan is a version a generate job planned.
+	VersionPlan = "plan"
+)
 
 // Step is where one step of a job stands.
 type Step struct {
@@ -83,6 +102,7 @@ type Step struct {
 type Job struct {
 	ID         string   `json:"id"`
 	ProjectID  string   `json:"projectId"`
+	Kind       string   `json:"kind"`
 	State      string   `json:"state"`
 	Step       string   `json:"step,omitempty"`
 	WaitReason string   `json:"waitReason,omitempty"`
@@ -111,18 +131,31 @@ type Version struct {
 	// version saved before timelines were kept has its job's fill, unless
 	// that is gone too; then it can only be played.
 	Editable bool `json:"editable"`
+	// Kind is plan, edit or recut; an edit or recut names the version it
+	// came from (改自第 N 版), and an edit the draft's revision.
+	Kind            string `json:"kind"`
+	SourceVersionID string `json:"sourceVersionId,omitempty"`
+	SourceNumber    int    `json:"sourceNumber,omitempty"`
+	DraftRevision   *int   `json:"draftRevision,omitempty"`
 }
 
 // versionColumns are what versionsOf scans, of versions v.
 const versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
 	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
-		AND f.name = CASE WHEN v.plan <= 1 THEN 'fill' ELSE 'fill-' || v.plan END AND f.result_json IS NOT NULL)`
+		AND f.name = CASE WHEN v.plan <= 1 THEN 'fill' ELSE 'fill-' || v.plan END AND f.result_json IS NOT NULL),
+	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision`
 
 func scanVersion(rows interface{ Scan(...any) error }) (Version, error) {
 	var version Version
 	var created string
-	if err := rows.Scan(&version.ID, &version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created, &version.Editable); err != nil {
+	var revision sql.NullInt64
+	if err := rows.Scan(&version.ID, &version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created, &version.Editable,
+		&version.Kind, &version.SourceVersionID, &version.SourceNumber, &revision); err != nil {
 		return Version{}, err
+	}
+	if revision.Valid {
+		n := int(revision.Int64)
+		version.DraftRevision = &n
 	}
 	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
 		version.CreatedAt = *at
@@ -240,9 +273,9 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	var created string
 	var finished sql.NullString
 	var plans int
-	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, state, step, wait_reason, error, created_at, finished_at, plans
+	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
-		Scan(&job.ID, &job.ProjectID, &job.State, &step, &reason, &message, &created, &finished, &plans)
+		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &step, &reason, &message, &created, &finished, &plans)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -277,7 +310,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 		return Job{}, err
 	}
 	// The steps of as many 方案 as the job started with.
-	for _, name := range s.stepNames(plans) {
+	for _, name := range s.stepNames(job.Kind, plans) {
 		st, ok := done[name]
 		if !ok {
 			st = Step{Name: name, State: "pending"}
@@ -289,6 +322,20 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 	}
 	if job.Versions, err = s.versionsOf(ctx, "job_id", jobID, "plan"); err != nil {
 		return Job{}, err
+	}
+	if len(job.Versions) == 0 && job.Kind == KindEdit {
+		// The same revision saved again: its film was saved once, by the
+		// job before, under the same version key.
+		var key string
+		err := s.db.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = 'save' AND state = 'done'", jobID).Scan(&key)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Job{}, err
+		}
+		if key != "" {
+			if job.Versions, err = s.versionsOf(ctx, "version_key", key, "plan"); err != nil {
+				return Job{}, err
+			}
+		}
 	}
 	if len(job.Versions) > 0 {
 		job.Version = &job.Versions[0]
@@ -402,7 +449,9 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	if err != nil {
 		return Job{}, err
 	}
-	if job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
+	// An edit takes no video out: the member replaces the shots that use it
+	// and saves again (docs/specs/montage-center.md, 存为新版本).
+	if job.Kind != KindGenerate || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	for _, id := range ids {
@@ -596,4 +645,10 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 // runsJobs reports whether the store has what jobs work with.
 func (s *Store) runsJobs() bool {
 	return s.jobCompute != nil && s.editing != nil && s.planner != nil && s.jobMusic != nil
+}
+
+// runsEdits reports whether this store can render a draft: as a film,
+// without a plan.
+func (s *Store) runsEdits() bool {
+	return s.jobCompute != nil && s.editing != nil && s.jobMusic != nil
 }

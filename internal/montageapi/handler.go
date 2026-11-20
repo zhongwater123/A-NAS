@@ -60,6 +60,8 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"POST /versions/{versionID}/confirm":         h.confirmVersion,
 		"GET /versions/{versionID}/draft":            h.versionDraft,
 		"POST /drafts/{draftID}/ops":                 h.editDraft,
+		"POST /drafts/{draftID}/save":                h.saveDraft,
+		"GET /drafts/{draftID}/song":                 h.draftSong,
 		"GET /drafts/{draftID}/candidates":           h.draftCandidates,
 		"GET /versions/{versionID}/shots":            h.versionShots,
 		"GET /drafts/{draftID}/shots":                h.draftShots,
