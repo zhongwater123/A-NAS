@@ -42,6 +42,8 @@ type editGrants struct {
 	// dimensions on the given axis.
 	windows map[string][]int
 	opened  []string
+	// identity is the windows' model now: the versions were cut with "".
+	identity string
 }
 
 func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
@@ -60,7 +62,7 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 			raw = binary.LittleEndian.AppendUint32(raw, math.Float32bits(value))
 		}
 	}
-	return photos.GrantAnalysis{ObjectID: "object:" + assetID, Dimensions: 4, List: list}, raw, nil
+	return photos.GrantAnalysis{ObjectID: "object:" + assetID, Identity: g.identity, Dimensions: 4, List: list}, raw, nil
 }
 
 func (g *editGrants) Lookup(_ context.Context, _ string, ids []string) ([]photos.GrantedAsset, error) {
@@ -179,8 +181,8 @@ func newEditEnv(t *testing.T) *editEnv {
 	}
 	taken := time.Date(2026, 8, 23, 13, 38, 50, 0, time.UTC)
 	analysis, _ := json.Marshal(analysisResult{Videos: []analysedVideo{
-		{AssetID: videoA, ObjectID: "object:" + videoA, Width: 1920, Height: 1080, TakenAt: &taken, Windows: windowsOf(20)},
-		{AssetID: videoB, ObjectID: "object:" + videoB, Width: 1080, Height: 1920, Windows: windowsOf(6)},
+		{AssetID: videoA, ObjectID: "object:" + videoA, Dimensions: 4, Width: 1920, Height: 1080, TakenAt: &taken, Windows: windowsOf(20)},
+		{AssetID: videoB, ObjectID: "object:" + videoB, Dimensions: 4, Width: 1080, Height: 1920, Windows: windowsOf(6)},
 	}})
 	catalog, _ := json.Marshal(catalogResult{Cards: cards, Catalog: []string{"c1", "c2", "c3", "c4"}})
 	music := `{"seconds":14,"parts":[{"start":0,"end":8,"level":"主歌","slots":[[0,4],[4,8]]},{"start":8,"end":14,"level":"高潮","slots":[[8,11],[11,14]]}]}`
@@ -708,5 +710,24 @@ func TestAThumbnailIsAFrameOfTheProjectsVideo(t *testing.T) {
 	}
 	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", "asset:film1", 0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a video not in the project = %v", err)
+	}
+}
+
+// Once the photo library analysed a version's videos again with another
+// model, the version can only be played or recut: its draft does not open,
+// also when the draft was made before.
+func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
+		t.Fatal(err)
+	}
+	env.grants.identity = "another-model|win=2s1f"
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrAnalysisChanged) {
+		t.Fatalf("the draft of a version analysed again = %v", err)
+	}
+	env.grants.identity = ""
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
+		t.Fatalf("the draft with the windows it was cut with = %v", err)
 	}
 }

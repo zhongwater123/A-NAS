@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -28,6 +29,10 @@ var (
 	// ErrNotEditable: the version's timeline is not known; it can only be
 	// played.
 	ErrNotEditable = errors.New("the version cannot be edited")
+	// ErrAnalysisChanged: the photo library analysed the version's videos
+	// again with another model since the version was cut. The version can
+	// only be played, or recut (docs/specs/montage-center.md, 修改的规则).
+	ErrAnalysisChanged = errors.New("the videos were analysed again with another model")
 	// ErrSearchUnavailable: the photo library cannot search windows now.
 	ErrSearchUnavailable = errors.New("searching the videos is not available")
 	// ErrSearchModel: the text model is not the one the windows were
@@ -539,6 +544,9 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draf
 	if err != nil {
 		return Draft{}, err
 	}
+	if err := s.checkAnalysis(ctx, src); err != nil {
+		return Draft{}, err
+	}
 	var id string
 	err = s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -572,6 +580,33 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draf
 		return Draft{}, err
 	}
 	return s.readDraft(ctx, owner, id, src)
+}
+
+// checkAnalysis answers ErrAnalysisChanged when the photo library's windows
+// of a video the version's cards come from are not those the version was cut
+// with: another model or dimensions, or none now. A video the library no
+// longer has, or holds as other content, is left to the steps that use it.
+func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
+	checked := map[string]bool{}
+	for _, id := range src.catalog {
+		video := src.cards[id].Video
+		was, ok := src.videos[video]
+		if checked[video] || !ok {
+			continue
+		}
+		checked[video] = true
+		now, _, err := s.grants.Analysis(ctx, src.grantID, video)
+		if code := photosapi.GrantErrorCode(err); code == photosapi.GrantAssetNotFound {
+			continue
+		}
+		if err != nil {
+			return grantError(err)
+		}
+		if now.ObjectID == was.ObjectID && (now.Identity != was.Identity || now.Dimensions != was.Dimensions) {
+			return ErrAnalysisChanged
+		}
+	}
+	return nil
 }
 
 // readDraft reads owner's draft as it stands, with its source when known.

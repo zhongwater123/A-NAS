@@ -124,6 +124,8 @@ func failEdit(w http.ResponseWriter, err error) bool {
 		httpjson.WriteError(w, http.StatusConflict, "draft_conflict", "the draft changed since; read it again")
 	case errors.Is(err, montage.ErrNotEditable):
 		httpjson.WriteError(w, http.StatusConflict, "not_editable", "the version can only be played")
+	case errors.Is(err, montage.ErrAnalysisChanged):
+		httpjson.WriteError(w, http.StatusConflict, "analysis_changed", "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪")
 	case errors.Is(err, montage.ErrSearchModel):
 		httpjson.WriteError(w, http.StatusConflict, "search_model_changed", "分析模型已更新，重新分析后才能搜索")
 	case errors.Is(err, montage.ErrSearchUnavailable):

@@ -20,6 +20,7 @@ func TestEditingErrorsAnswerWhatThePageActsOn(t *testing.T) {
 		{&montage.EditRefusal{Reason: "这个节拍已用在第 3 镜"}, http.StatusUnprocessableEntity, "edit_refused", "这个节拍已用在第 3 镜"},
 		{fmt.Errorf("wrapped: %w", montage.ErrDraftConflict), http.StatusConflict, "draft_conflict", ""},
 		{montage.ErrNotEditable, http.StatusConflict, "not_editable", ""},
+		{montage.ErrAnalysisChanged, http.StatusConflict, "analysis_changed", "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"},
 		{montage.ErrSearchModel, http.StatusConflict, "search_model_changed", "分析模型已更新，重新分析后才能搜索"},
 		{montage.ErrSearchUnavailable, http.StatusServiceUnavailable, "search_unavailable", ""},
 		{montage.ErrNotFound, http.StatusNotFound, "not_found", ""},
