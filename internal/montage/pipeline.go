@@ -133,7 +133,9 @@ type FillNeed struct {
 // Clip is one shot of the film: Start to End seconds of Video, shown for
 // Share seconds (longer than the source when Slow stretches it) in Slot.
 type Clip struct {
-	Card  string     `json:"card"`
+	Card string `json:"card"`
+	// Beat is the beat of the card the shot was cut around, "card/n".
+	Beat  string     `json:"beat,omitempty"`
 	Video string     `json:"video"`
 	Start float64    `json:"start"`
 	End   float64    `json:"end"`
