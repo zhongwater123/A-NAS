@@ -1,0 +1,351 @@
+/* 待办: a plain list on a light page, green for what to do, the danger colour
+   for what is due within three days or overdue. */
+.td-app {
+  --td-paper: var(--color-bg);
+  --td-card: var(--color-surface);
+  --td-ink: var(--color-text);
+  --td-muted: var(--color-muted);
+  --td-faint: var(--color-faint);
+  --td-line: var(--color-line);
+  --td-hover: rgba(20, 30, 45, 0.05);
+  --td-accent: var(--color-success);
+  --td-accent-soft: var(--color-success-soft);
+  --td-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The window's dialogs and toasts (ui/modal, ui/feedback) read these. */
+  --ph-surface: var(--td-card);
+  --ph-ink: var(--td-ink);
+  --ph-ink-2: var(--td-muted);
+  --ph-muted: var(--td-faint);
+  --ph-line: var(--td-line);
+  --ph-hover: var(--td-hover);
+  --ph-accent: var(--td-accent);
+  --ph-accent-soft: var(--td-accent-soft);
+  --ph-danger: var(--color-danger);
+  --ph-ease: var(--td-ease);
+  --ph-toasts-bottom: 20px;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--td-ink);
+  background: var(--td-paper);
+  font-size: 13px;
+  line-height: 1.6;
+  container: todowindow / inline-size;
+}
+:where(.td-app) :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+:where(.td-app) button {
+  cursor: pointer;
+}
+:where(.td-app) button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+:where(.td-app) :focus-visible {
+  outline: 2px solid var(--td-accent);
+  outline-offset: 2px;
+}
+
+.td-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 18px 24px 12px;
+}
+.td-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.td-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+}
+.td-head p {
+  margin: 0;
+  color: var(--td-muted);
+  font-size: 12px;
+}
+
+.td-primary,
+.td-secondary {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.td-primary {
+  border: 0;
+  color: #fff;
+  background: var(--td-accent);
+}
+.td-primary:not(:disabled):hover {
+  filter: brightness(0.95);
+}
+.td-secondary {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  background: var(--td-card);
+  font-size: 12px;
+}
+.td-secondary:not(:disabled):hover {
+  background: var(--td-hover);
+}
+.td-icon-button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--td-muted);
+  background: none;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.td-icon-button:not(:disabled):hover,
+.td-icon-button[data-state="open"] {
+  color: var(--td-ink);
+  background: var(--td-hover);
+}
+
+.td-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 24px 24px;
+}
+.td-centered {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  color: var(--td-muted);
+}
+.td-centered p {
+  margin: 0;
+}
+.td-section {
+  margin-top: var(--space-4);
+}
+.td-section h3 {
+  margin: 0 0 6px;
+  color: var(--td-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.td-empty {
+  margin: 0;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  color: var(--td-muted);
+  background: var(--td-card);
+  text-align: center;
+}
+
+.td-reminders {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.td-reminders li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-soft);
+}
+.td-reminders strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.td-rows {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--td-card);
+  box-shadow: var(--shadow-card);
+  list-style: none;
+}
+.td-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: 8px 10px 8px 16px;
+  transition: background 0.6s;
+}
+.td-row + .td-row {
+  border-top: 1px solid var(--td-line);
+}
+.td-row.marked {
+  background: var(--td-accent-soft);
+}
+.td-row-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.td-row-main strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.td-meta {
+  overflow: hidden;
+  color: var(--td-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.td-due {
+  flex: none;
+  color: var(--td-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.urgent {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+.td-row-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.td-rows.closed .td-row-main strong {
+  color: var(--td-muted);
+  font-weight: 500;
+}
+
+/* Menus open outside the window, above every window. */
+.td-menu {
+  z-index: 10000;
+  min-width: 130px;
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow:
+    0 0 0 1px rgba(20, 30, 45, 0.08),
+    0 12px 32px rgba(15, 22, 44, 0.18);
+  font-size: 13px;
+}
+.td-menu-item {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+}
+.td-menu-item[data-highlighted] {
+  background: rgba(20, 30, 45, 0.06);
+}
+
+/* The dialog's form. */
+.td-form {
+  display: grid;
+  gap: 14px;
+}
+.td-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.td-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.td-field label {
+  display: grid;
+  gap: 6px;
+}
+.td-field label > span {
+  color: var(--td-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.td-field input,
+.td-field select {
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--td-card);
+}
+.td-field input:focus,
+.td-field select:focus {
+  border-color: var(--td-accent);
+  box-shadow: 0 0 0 3px var(--td-accent-soft);
+}
+.td-field-hint {
+  color: var(--td-faint);
+  font-size: 11.5px;
+}
+.td-problem {
+  margin: 0;
+  color: var(--color-danger);
+}
+.td-grow {
+  flex: 1;
+}
+
+/* A narrow window stacks the form and drops the subtitle. */
+@container todowindow (width < 520px) {
+  .td-head {
+    padding: 14px 16px 8px;
+  }
+  .td-head p {
+    display: none;
+  }
+  .td-scroll {
+    padding: 0 12px 16px;
+  }
+  .td-form-row {
+    grid-template-columns: 1fr;
+  }
+  .td-row {
+    flex-wrap: wrap;
+    padding-left: 12px;
+  }
+  .td-due {
+    order: 3;
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .td-row {
+    transition: none;
+  }
+}

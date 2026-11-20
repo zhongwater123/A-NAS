@@ -16,6 +16,8 @@ export interface Person {
 }
 
 export interface People {
+  // Every account, as the profile list returns them; for choosing someone.
+  profiles: Profile[];
   byId: (id: string | undefined) => Profile | undefined;
   byUsername: (username: string | undefined) => Profile | undefined;
 }

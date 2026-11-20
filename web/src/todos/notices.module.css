@@ -1,0 +1,8 @@
+/* 待办's reminder on the desktop (ui/DeskNotice), in the desktop's stack of
+   notices under the status bar (desktop.module.css .notice-stack), in the
+   window's green. Kept apart from the window's styles, which load with the
+   window. */
+.tn-notice {
+  --desk-notice-mark: linear-gradient(155deg, #4fd19c, #14875f);
+  --desk-notice-link: var(--color-success);
+}

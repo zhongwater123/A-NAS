@@ -9,9 +9,9 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
     container agent, and each member's AI assistant (ADR 0024). Every operation that takes a JSON body
-    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 64 KiB for the montage center, 65 KiB for
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
     feedback resolved.
 servers:
@@ -137,6 +137,12 @@ paths:
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
+  /api/v1/todos: { $ref: "paths/todos.yaml#/~1api~1v1~1todos" }
+  /api/v1/todos/reminders: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders" }
+  /api/v1/todos/reminders/seen: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders~1seen" }
+  /api/v1/todos/{todoId}: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}" }
+  /api/v1/todos/{todoId}/status: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1status" }
+  /api/v1/todos/{todoId}/snooze: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1snooze" }
   /api/v1/montage: { $ref: "paths/montage.yaml#/~1api~1v1~1montage" }
   /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
   /api/v1/montage/projects/{projectId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}" }
@@ -339,6 +345,7 @@ components:
     FamilyRecordID: { $ref: "components/family.yaml#/parameters/FamilyRecordID" }
     FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
     FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
+    TodoID: { $ref: "components/todos.yaml#/parameters/TodoID" }
     ScoringBatchID: { $ref: "components/scoring.yaml#/parameters/ScoringBatchID" }
     ScoringAnchorID: { $ref: "components/scoring.yaml#/parameters/ScoringAnchorID" }
     ScoringClaimToken: { $ref: "components/scoring.yaml#/parameters/ScoringClaimToken" }
@@ -508,6 +515,15 @@ components:
     FamilyTimelineEntry: { $ref: "components/family.yaml#/schemas/FamilyTimelineEntry" }
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
+    TodoDate: { $ref: "components/todos.yaml#/schemas/TodoDate" }
+    TodoCategory: { $ref: "components/todos.yaml#/schemas/TodoCategory" }
+    TodoScope: { $ref: "components/todos.yaml#/schemas/TodoScope" }
+    TodoStatus: { $ref: "components/todos.yaml#/schemas/TodoStatus" }
+    TodoStage: { $ref: "components/todos.yaml#/schemas/TodoStage" }
+    Todo: { $ref: "components/todos.yaml#/schemas/Todo" }
+    TodoFields: { $ref: "components/todos.yaml#/schemas/TodoFields" }
+    TodoEdit: { $ref: "components/todos.yaml#/schemas/TodoEdit" }
+    TodoReminder: { $ref: "components/todos.yaml#/schemas/TodoReminder" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
     ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }
     ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }

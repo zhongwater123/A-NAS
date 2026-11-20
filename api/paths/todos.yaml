@@ -1,0 +1,74 @@
+/api/v1/todos:
+  get:
+    operationId: listTodos
+    summary: "The to-dos the caller can see: every open one, by due date with those without one last, then those closed in the last 30 days, most recently closed first"
+    responses:
+      "200": { description: To-dos, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/todos.yaml#/schemas/Todo" } } } } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createTodo
+    summary: "Add a to-do by hand; every to-do added by hand is shared with every active account"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/TodoFields" } } } }
+    responses:
+      "201": { description: The to-do, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/Todo" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/{todoId}:
+  parameters: [{ $ref: "../components/todos.yaml#/parameters/TodoID" }]
+  patch:
+    operationId: updateTodo
+    summary: "Replace a to-do's fields, clearing those left out; changed when someone saved after the given version. A new due date starts its reminders over"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/TodoEdit" } } } }
+    responses:
+      "200": { description: The to-do, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/Todo" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/{todoId}/status:
+  put:
+    operationId: setTodoStatus
+    summary: "Mark a to-do done or ignored, recording who and when, or open it again, which clears the snooze and starts its reminders over. Setting the status it has changes nothing; this is not an edit and keeps the version"
+    parameters: [{ $ref: "../components/todos.yaml#/parameters/TodoID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [status], properties: { status: { $ref: "../components/todos.yaml#/schemas/TodoStatus" } } } } } }
+    responses:
+      "200": { description: The to-do, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/Todo" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/{todoId}/snooze:
+  put:
+    operationId: snoozeTodo
+    summary: "Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict"
+    parameters: [{ $ref: "../components/todos.yaml#/parameters/TodoID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [days], properties: { days: { type: integer, minimum: 1, maximum: 30 } } } } } }
+    responses:
+      "200": { description: The to-do, content: { application/json: { schema: { $ref: "../components/todos.yaml#/schemas/Todo" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/reminders:
+  get:
+    operationId: listTodoReminders
+    summary: "What to remind the caller of now, by due date: each open to-do they can see that is due within 3 days, due today or overdue, once a stage until they acknowledge it. Snoozed ones and those without a due date are left out"
+    responses:
+      "200": { description: Reminders, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/todos.yaml#/schemas/TodoReminder" } } } } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/reminders/seen:
+  post:
+    operationId: acknowledgeTodoReminders
+    summary: "Record that the caller acknowledged these reminders, for them alone. Only keys the caller's reminders list now are recorded; others are ignored, so a to-do closed meanwhile does not fail the request"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [keys], properties: { keys: { type: array, maxItems: 200, items: { type: string, minLength: 1, maxLength: 200, pattern: "^todo:" } } } } } } }
+    responses:
+      "204": { description: Recorded }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

@@ -39,7 +39,7 @@
 - [镜像缺盘的开机路径是否做成虚拟机回归测试](../decisions/2026-11-06-mirror-boot-vm-test.md)
 - [助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](../decisions/2026-10-15-assistant-help-and-onboarding.md)
 - [助手说“下次从笔记接着聊”的措辞是否调整](../decisions/2026-10-20-assistant-notes-wording.md)
-- [家庭中心规格中补充的默认规则](../decisions/2026-10-29-family-center-default-rules.md)
+- 规格中补充的默认规则：[家庭中心](../decisions/2026-10-29-family-center-default-rules.md)、[家庭待办](../decisions/2026-11-17-family-todos-default-rules.md)
 - [版权人与贡献者授权](../decisions/2026-11-17-copyright-holder-and-contributor-grants.md)
 - 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
 - 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
@@ -63,3 +63,4 @@
 13. 照片打分：按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
 14. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：部署后按[手册](../runbooks/enable-ai-assistant.md)核对接管与验证；实验 NAS 改用镜像以它为前提。
 15. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+16. 家庭待办（[规格](../specs/family-todos.md)，#503）。

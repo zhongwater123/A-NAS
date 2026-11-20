@@ -2133,6 +2133,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The to-dos the caller can see: every open one, by due date with those without one last, then those closed in the last 30 days, most recently closed first */
+        get: operations["listTodos"];
+        put?: never;
+        /** Add a to-do by hand; every to-do added by hand is shared with every active account */
+        post: operations["createTodo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What to remind the caller of now, by due date: each open to-do they can see that is due within 3 days, due today or overdue, once a stage until they acknowledge it. Snoozed ones and those without a due date are left out */
+        get: operations["listTodoReminders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that the caller acknowledged these reminders, for them alone. Only keys the caller's reminders list now are recorded; others are ignored, so a to-do closed meanwhile does not fail the request */
+        post: operations["acknowledgeTodoReminders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Replace a to-do's fields, clearing those left out; changed when someone saved after the given version. A new due date starts its reminders over */
+        patch: operations["updateTodo"];
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark a to-do done or ignored, recording who and when, or open it again, which clears the snooze and starts its reminders over. Setting the status it has changes nothing; this is not an edit and keeps the version */
+        put: operations["setTodoStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict */
+        put: operations["snoozeTodo"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage": {
         parameters: {
             query?: never;
@@ -6692,6 +6797,107 @@ export interface components {
             vaccines: components["schemas"]["FamilyVaccineCatalog"];
             growthStandard: string;
         };
+        /**
+         * Format: date
+         * @description A calendar date without time of day or zone; today is the device's local date.
+         */
+        TodoDate: string;
+        /**
+         * @description What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one.
+         * @enum {string}
+         */
+        TodoCategory: "bill" | "medical" | "insurance" | "id_document" | "contract" | "other";
+        /**
+         * @description shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared.
+         * @enum {string}
+         */
+        TodoScope: "shared" | "private";
+        /** @enum {string} */
+        TodoStatus: "open" | "done" | "ignored";
+        /**
+         * @description soon: due within 3 days; today: due today; overdue: the due date has passed.
+         * @enum {string}
+         */
+        TodoStage: "soon" | "today" | "overdue";
+        Todo: {
+            id: string;
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+            /** @description Username of the owner when it was set, shown once the account is gone. */
+            ownerName?: string;
+            /** @description Amount in fen (分) of renminbi; there is no other currency. */
+            amountCents?: number;
+            scope: components["schemas"]["TodoScope"];
+            status: components["schemas"]["TodoStatus"];
+            /** @description The day reminders resume; the to-do is snoozed while today is before it. */
+            snoozedUntil?: components["schemas"]["TodoDate"];
+            /** @description Grows when the to-do is snoozed, opened again or given another due date, which starts its reminders over. */
+            remindRound: number;
+            /**
+             * @description Where it came from; manual: added by hand.
+             * @enum {string}
+             */
+            source: "manual";
+            /** @description Counts edits to the fields; changing the status or snoozing does not change it. */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Account ID of who added it. */
+            createdById: string;
+            /** @description Username of who added it, when they added it. */
+            createdByName: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /**
+             * Format: date-time
+             * @description Set while it is done or ignored.
+             */
+            closedAt?: string;
+            /** @description Account ID of who marked it done or ignored. */
+            closedById?: string;
+            /** @description Username of who marked it done or ignored, when they did. */
+            closedByName?: string;
+        };
+        TodoFields: {
+            /** @description Repeating a request with the same key returns the first to-do. */
+            requestKey?: string;
+            /** @description At most 10 characters, which a shared screen can show whole. */
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An active account's ID; absent means the whole family. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+        };
+        TodoEdit: {
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An account's ID; absent means the whole family. A new owner must be an active account. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+            /** @description The version the edit was made from. */
+            version: number;
+        };
+        TodoReminder: {
+            /** @description Names this reminder to the caller; acknowledging it stops this stage until the reminders start over. */
+            key: string;
+            todoId: string;
+            stage: components["schemas"]["TodoStage"];
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due: components["schemas"]["TodoDate"];
+            scope: components["schemas"]["TodoScope"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+        };
         ScoringMe: {
             /** @description The caller is an A-NAS administrator and so administers photo scoring. */
             admin: boolean;
@@ -8431,6 +8637,7 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
+        TodoID: string;
         ScoringBatchID: string;
         ScoringAnchorID: number;
         ScoringClaimToken: string;
@@ -8601,6 +8808,15 @@ export type FamilyVaccineSchedule = components['schemas']['FamilyVaccineSchedule
 export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
 export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
+export type TodoDate = components['schemas']['TodoDate'];
+export type TodoCategory = components['schemas']['TodoCategory'];
+export type TodoScope = components['schemas']['TodoScope'];
+export type TodoStatus = components['schemas']['TodoStatus'];
+export type TodoStage = components['schemas']['TodoStage'];
+export type Todo = components['schemas']['Todo'];
+export type TodoFields = components['schemas']['TodoFields'];
+export type TodoEdit = components['schemas']['TodoEdit'];
+export type TodoReminder = components['schemas']['TodoReminder'];
 export type ScoringMe = components['schemas']['ScoringMe'];
 export type ScoringScale = components['schemas']['ScoringScale'];
 export type ScoringRaterBatch = components['schemas']['ScoringRaterBatch'];
@@ -8767,6 +8983,7 @@ export type ParameterFamilyBabyId = components['parameters']['FamilyBabyID'];
 export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID'];
 export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
 export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
+export type ParameterTodoId = components['parameters']['TodoID'];
 export type ParameterScoringBatchId = components['parameters']['ScoringBatchID'];
 export type ParameterScoringAnchorId = components['parameters']['ScoringAnchorID'];
 export type ParameterScoringClaimToken = components['parameters']['ScoringClaimToken'];
@@ -12973,6 +13190,212 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    listTodos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To-dos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Todo"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoFields"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoReminders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoReminder"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    acknowledgeTodoReminders: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    keys: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoEdit"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    setTodoStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["TodoStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    snoozeTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    days: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     getMontage: {

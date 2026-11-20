@@ -119,7 +119,11 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares), sharesapi.Endpoints())
 	}
 	if h.Family != nil {
-		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		// The family service also keeps the family's to-dos, which every
+		// account uses, member or not.
+		for _, prefix := range []string{familyapi.PathPrefix, familyapi.TodosPrefix} {
+			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		}
 	}
 	if h.Montage != nil {
 		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.ProductEndpoints())
