@@ -196,6 +196,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册物体检测与混合检索实施方案](photo-objects.md)
 - [相册人物与宠物实施方案](photo-people.md)
 - [相册照片中的文字（OCR）实施方案](photo-ocr.md)（proposed）
+- [剪辑中心首版实施方案](montage-center.md)（proposed）与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)
 - [向量索引技术设计](vector-index.md)与 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - [存储与文件架构](storage-and-files.md)
 - [Web 桌面结构与约定](web-desktop.md)
