@@ -287,6 +287,10 @@ func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (m
 	return montage.FillAnswer{}, errors.New("no job runs here")
 }
 
+func (idleCompute) Likeness(context.Context, []float32, []float32, int) (float64, error) {
+	return 0, errors.New("no job runs here")
+}
+
 func (idleCompute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {
 	return montage.PlanBrief{}, errors.New("no job runs here")
 }

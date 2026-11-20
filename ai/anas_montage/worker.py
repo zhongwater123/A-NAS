@@ -28,7 +28,13 @@ Operations:
   fill          the timeline (domain.fill.fill). "known" holds the clear
                 spans found so far, keyed as the prototype caches them; one
                 still unknown answers "need" for the caller to measure
-                (clear) and call again.
+                (clear) and call again. "pins" (#596) lists the film's slots
+                in order, each with the beat that leads it, for a film edited
+                after it was made.
+  likeness      how alike two beats look: arrays a and b (float32, n × d),
+                the window vectors each beat covers; answers the cosine of
+                their means (#596: which neighbour a deleted shot's slot goes
+                to).
   plan          the request of a planning step: "step" pick or shots.
   shots_answer  the second step's answer, back to lists.
 """
@@ -232,10 +238,49 @@ def op_fill(request, arrays):
 
     try:
         clips, short = fillrules.fill(request["music"], request["planned"], request["picked"], footage, held,
-                                      fps=int(request["fps"]), labels=request.get("labels") or {})
+                                      fps=int(request["fps"]), labels=request.get("labels") or {}, pins=pins(request))
     except Need as need:
         return {"need": need.need}
     return {"clips": clips, "short": [list(s) for s in short]}
+
+
+def pins(request):
+    """The fill's pins as the domain reads them, or None: every slot in film order, each led by a beat of a card given,
+    each beginning where the one before ends."""
+    given = request.get("pins")
+    if given is None:
+        return None
+    if not isinstance(given, list) or not given:
+        raise Refused("pins list the film's slots")
+    parts = request["planned"]["answer"]["parts"]
+    out, at = [], None
+    for x in given:
+        try:
+            p, k, (a, b), beat = int(x["part"]), int(x["picture"]), (float(x["slot"][0]), float(x["slot"][1])), str(x["beat"])
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise Refused("a pin is {part, picture, slot: [a, b], beat}") from None
+        if not (1 <= p <= len(parts) and 1 <= k <= len(parts[p - 1]["pictures"])):
+            raise Refused(f"pin {beat} names picture {k} of part {p}, which the plan has not got")
+        cid, _, j = beat.rpartition("/")
+        if cid not in request["cards"] or not j.isdigit() or not 1 <= int(j) <= len(request["cards"][cid]["answer"]["beats"]):
+            raise Refused(f"pin {beat} is not a beat of the cards given")
+        if not (math.isfinite(a) and math.isfinite(b)) or (at is not None and abs(a - at) > 1e-6) or b <= a:
+            raise Refused("pins follow one another")
+        out.append({"part": p, "picture": k, "slot": [a, b], "beat": beat})
+        at = b
+    return out
+
+
+def op_likeness(_request, arrays):
+    """The cosine of two beats' mean window vectors."""
+    a, b = arrays.get("a"), arrays.get("b")
+    if a is None or b is None or a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[1] or not len(a) or not len(b):
+        raise Refused("a and b are n × d window vectors of the same d")
+    x, y = a.astype(np.float32).mean(axis=0), b.astype(np.float32).mean(axis=0)
+    norm = float(np.linalg.norm(x) * np.linalg.norm(y))
+    if not math.isfinite(norm) or norm == 0:
+        raise Refused("a beat's windows have no direction")
+    return {"likeness": float(x @ y) / norm}
 
 
 def options(request):
@@ -281,7 +326,7 @@ def op_shots_answer(request, _arrays):
 
 OPS = {"cards": op_cards, "quality_part": op_quality_part, "quality": op_quality, "catalog": op_catalog,
        "clear": op_clear, "fill": op_fill, "plan": op_plan, "shots_answer": op_shots_answer, "music": music_ops.op_music,
-       "plan_brief": op_plan_brief}
+       "plan_brief": op_plan_brief, "likeness": op_likeness}
 
 
 def with_body(request, body):
