@@ -179,3 +179,57 @@ func TestARecutsBriefCarriesItsSentenceAndBase(t *testing.T) {
 		t.Fatalf("a brief of plan-v2 for a recut = %v", err)
 	}
 }
+
+// The base is the plan as it was answered, with how each part and picture
+// links to the one before: the template asks to keep them where the
+// sentence does not touch (#612 review).
+func TestARecutsBaseKeepsThePlansLinks(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	env.store.Exec(t, `UPDATE steps SET result_json = ? WHERE job_id = 'job:1' AND name = 'pick'`,
+		`{"design":"从海边走到山里","opening":"海","ending":"山","unmet":"直升机","parts":[
+			{"name":"海边","summary":"走","link":"从清晨的海面进入","scenes":[{"query":"海边散步","cards":["c1","c2"]}]},
+			{"name":"山里","summary":"爬","link":"顺着海浪声转到山路","scenes":[{"query":"海浪","cards":["c2"]},{"query":"山路","cards":["c3","c4"]}]}]}`)
+	env.store.Exec(t, `UPDATE steps SET result_json = ? WHERE job_id = 'job:1' AND name = 'shots'`,
+		`{"answer":{"parts":[{"name":"海边","pictures":[{"beats":["c1/1","c2/1","c1/3"],"shows":"海","link":"开场"}]},
+			{"name":"山里","pictures":[{"beats":["c2/2"],"shows":"浪","link":"同一片海"},{"beats":["c3/2","c3/1"],"shows":"路","link":"脚步接脚步"}]}]}}`)
+	job, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:links", "结尾留长一点")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base string
+	if err := env.store.db.QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
+		t.Fatal(err)
+	}
+	for _, kept := range []string{"顺着海浪声转到山路", "从清晨的海面进入", "脚步接脚步", "同一片海", `"shows":"路"`} {
+		if !strings.Contains(base, kept) {
+			t.Errorf("the base lacks %s: %s", kept, base)
+		}
+	}
+	if strings.Contains(base, "unmet") || strings.Contains(base, "直升机") {
+		t.Errorf("the base carries what the earlier request did not find: %s", base)
+	}
+}
+
+// Remove takes videos out of the grant, as dropping them from a job asks.
+func (g *editGrants) Remove(context.Context, string, []string) error { return nil }
+
+// A recut goes on without a video gone since its version was made, as a
+// generate job does; only an edit does not (#612 review).
+func TestARecutGoesOnWithoutAMissingVideo(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	job, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:missing", "结尾留长一点")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.store.Exec(t, `UPDATE jobs SET state = ?, wait_reason = ?, missing_json = ? WHERE id = ?`,
+		JobNeedsInput, NeedMissing, `["`+videoB+`"]`, job.ID)
+	dropped, err := env.store.DropAssets(ctx, editOwner, job.ID, []string{videoB})
+	if err != nil || dropped.State == JobNeedsInput {
+		t.Fatalf("DropAssets() on a recut = %+v, %v", dropped, err)
+	}
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM job_assets WHERE job_id = ?", job.ID); n != 1 {
+		t.Fatalf("the recut keeps %d videos", n)
+	}
+}
