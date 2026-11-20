@@ -319,15 +319,9 @@ func (s *Store) DraftShots(ctx context.Context, owner, draftID string) ([]byte, 
 			}
 		}
 		if own.Last > own.First {
-			home := own.First
-			for i := own.First; i <= own.Last; i++ {
-				if state.Slots[i].Beat == own.Beat {
-					home = i
-				}
-			}
 			var taken []string
 			for i := own.First; i <= own.Last; i++ {
-				if i != home {
+				if state.Slots[i].Beat != state.original(own) {
 					taken = append(taken, strconv.Itoa(i+1))
 				}
 			}
