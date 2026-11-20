@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-20：媒体 Worker 拒绝描述符过多的请求时，客户端偶发报“不可用”](2026-11-20-refused-worker-request-broken-pipe.md)
 - [2026-11-19：伙伴的“这一步完成”测试与阶段合并的 5 秒赛跑](2026-11-19-companion-step-done-test-races-the-stage-merge.md)
 - [2026-11-19：剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](2026-11-19-montage-job-stalls-on-the-experimental-nas.md)
 - [2026-11-18：向量索引测试在 gRPC 发布 Ready 状态前断言预热完成](2026-11-18-vectorindex-ready-observation.md)
