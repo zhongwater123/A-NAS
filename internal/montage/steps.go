@@ -68,6 +68,8 @@ type jobRun struct {
 	planned  json.RawMessage
 	timeline timelineResult
 	render   renderResult
+	// pins are an edit's slots with their beats (#596), nil otherwise.
+	pins []FillPin
 }
 
 type jobAsset struct{ assetID, objectID string }
@@ -126,7 +128,10 @@ func planKey(pickKey string, plan int) string {
 // next; the last one's save ends the job. The list is the one place that
 // says the order: what a job shows (Job) and which steps a new input makes
 // stale (startStep) read it.
-func (s *Store) steps(plans int) []step {
+func (s *Store) steps(kind string, plans int) []step {
+	if kind == KindEdit {
+		return s.editSteps()
+	}
 	steps := []step{
 		{name: "analysis", key: s.analysisKey, do: s.analyse,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.analysis) }},
@@ -169,8 +174,8 @@ func (s *Store) steps(plans int) []step {
 }
 
 // stepNames are the names of the steps of a job that makes plans 方案, in order.
-func (s *Store) stepNames(plans int) []string {
-	steps := s.steps(plans)
+func (s *Store) stepNames(kind string, plans int) []string {
+	steps := s.steps(kind, plans)
 	names := make([]string, len(steps))
 	for i, st := range steps {
 		names[i] = st.name
@@ -242,7 +247,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	if err != nil {
 		return err
 	}
-	steps := s.steps(job.plans)
+	steps := s.steps(job.kind, job.plans)
 	for i, st := range steps {
 		if s.cancelRequested(ctx, job.id) {
 			return errCancelled
@@ -542,15 +547,14 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	for _, asset := range looked {
 		status[asset.AssetID] = asset
 	}
-	var missing []string
-	trashed := false
+	var missing, trashed []string
 	for _, id := range ids {
 		asset, ok := status[id]
 		switch {
 		case !ok || asset.Status == photos.GrantMissing:
 			missing = append(missing, id)
 		case asset.Status == photos.GrantTrashed:
-			trashed = true
+			trashed = append(trashed, id)
 		case asset.ObjectID != objects[id]:
 			missing = append(missing, id)
 		}
@@ -558,8 +562,13 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	if len(missing) > 0 {
 		return &stepNeeds{reason: NeedMissing, missing: missing}
 	}
-	if trashed {
-		return &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
+	if len(trashed) > 0 {
+		wait := &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
+		if job.kind == KindEdit {
+			// The edit page marks the shots of the videos in the trash.
+			wait.missing = trashed
+		}
+		return wait
 	}
 	return nil
 }
