@@ -217,7 +217,7 @@ montage/
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。窗口向量放在 memfd 里，是 `n × 768` 个小端 float32，只按长度校验 |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
-| `searchWindows(grantId, texts, k)` | 修改页的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch` |
+| `searchWindows(grantId, texts, k)` | 修改页的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch`，AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)） |
 | `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 
@@ -309,7 +309,7 @@ montage/
   - 用独立的 `window_outbox` 同步。触发器建在 `video_windows` 和资产的图库变化上。现有的 `vector_outbox` 主键只有 `object_id`，同步循环也只认 `images_*`，不能复用。
   - `internal/vectorindex` 新增按 `object` 过滤删除的类型化操作，因为一个对象有多少个窗口点，删除时 Catalog 行已经没了。
   - 对账与“集合丢失就立即重建”按集合分别做。
-- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；二次编辑的文字搜镜头（`searchWindows`，#596）是第一个检索的读者，在 [#599](https://github.com/zhongwater123/A-NAS/issues/599) 中满足它，见[向量索引](vector-index.md#剪辑中心的窗口集合)。
+- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；二次编辑的文字搜镜头（`searchWindows`，#596）是第一个检索的读者，[#599](https://github.com/zhongwater123/A-NAS/issues/599) 已改为经别名读写，见[向量索引](vector-index.md#剪辑中心的窗口集合)。
 - **不建 HNSW**：点数在十万级以内，精确扫描就够。内存账：一组 47 分钟的素材约 1,460 个点、4.5 MB，Catalog 与 Qdrant 各一份。
 - **与 #207 的关系**：#207 的视频分段可以从这些窗口派生，由 #207 的设计决定。
 

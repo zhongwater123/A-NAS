@@ -204,7 +204,7 @@ func Run(parent context.Context, config Config) error {
 	}
 	var grants *grantServer
 	if grantListener != nil {
-		grants = newGrantServer(grantListener, &opened, config.Sessions, active,
+		grants = newGrantServer(grantListener, &opened, config.Sessions, active, gate,
 			cmp.Or(config.GrantPeerUID, accountid.MontageServiceUID), config.Logger)
 		go func() { serveError <- grants.serve() }()
 	}
