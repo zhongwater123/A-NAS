@@ -153,15 +153,18 @@ type editSource struct {
 	// its own, or for an edited version the one it came from.
 	planJob string
 	planNo  int
-	clips   []timelineClip
-	cards   map[string]Card
-	about   map[string]cardAbout
-	catalog []string
-	videos  map[string]analysedVideo
-	planned plannedDoc
-	picked  pickedDoc
-	music   musicDoc
-	excerpt Excerpt
+	// pickedRaw and plannedRaw are the plan's two steps as they were
+	// answered, whole: picked and planned read only what editing shows.
+	pickedRaw, plannedRaw json.RawMessage
+	clips                 []timelineClip
+	cards                 map[string]Card
+	about                 map[string]cardAbout
+	catalog               []string
+	videos                map[string]analysedVideo
+	planned               plannedDoc
+	picked                pickedDoc
+	music                 musicDoc
+	excerpt               Excerpt
 }
 
 // versionSource reads what owner's version was cut from. A version saved
@@ -218,6 +221,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		json.Unmarshal(results[planStep("shots", src.planNo)], &src.planned) != nil {
 		return nil, ErrNotEditable
 	}
+	src.pickedRaw, src.plannedRaw = results[planStep("pick", src.planNo)], results[planStep("shots", src.planNo)]
 	for _, raw := range filled.Clips {
 		var clip timelineClip
 		if err := json.Unmarshal(raw, &clip); err != nil {
