@@ -172,8 +172,8 @@ anas-photos
 | `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
 | `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案；答案由任务的步骤从 `plan_answers` 取来写入，`round_id` 不再填写。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
 | `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、kind、source_version_id、draft_revision、timeline_json、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关。`kind` 同任务；`timeline_json` 是这一版的时间线，存回时在同一个事务里写入，修改稿、粗预览与镜头清单都从它读 |
-| `drafts` | id、owner_user_id、project_id、base_version_id、revision、slots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`slots_json` 按音乐槽记节拍、是否改过、是否锁定，删掉的槽记由哪一镜补上 |
-| `draft_revisions` | draft_id、revision、op、seed、slots_json、created_at | 每一步一行，只留最近 100 个；撤销回到上一行的 `slots_json`，本身也写一行 |
+| `drafts` | id、owner_user_id、project_id、base_version_id、revision、slots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`slots_json` 记这一版的音乐槽，和按成片顺序盖住它们的镜头：每镜的节拍、盖住第几到第几个槽（删掉一镜就是把它的槽并给前一镜或后一镜）、哪个槽是它自己的（`home`，“还原这一镜”与“已换”按它判断）、是否锁定 |
+| `draft_revisions` | draft_id、revision、op、seed、back、slots_json、created_at | 每一步一行。`back` 是撤销这一步回到的修订：普通的一步是它之前的修订，撤销的一步是被撤销那一步的 `back`，所以连续撤销一直往回走，不会变成重做。保留最近 100 个修订和撤销链上的修订，最多 101 行，所以不管其中几步是撤销，都能撤销最近 100 步 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | id、owner_user_id、sha256、title、duration、state、reason、analysis_version、analysis_json、created_at | 成员选过的歌：副本的摘要、分析结果（节拍、重拍、段落、副歌、响度）与不可用的原因 |
 
@@ -358,7 +358,7 @@ montage/
 | `music` | 剪辑中心 | allin1 的结构（节拍、重拍、段落与标签）、响度序列、目标秒数、起点 | 选段、音乐段落、小节槽 | `domain/music.py` |
 | `plan` | 剪辑中心 | 目录、音乐段落、要求、顺序；第二步再加第一步的答案 | 一步规划的数据、这一轮的精确 Schema 与规则模板的版本；规则本身见“规划” | `domain/plan.py`（`pick_request`、`shots_request`）、`domain/prompts.py`、`domain/music.py` 的音乐说明 |
 | `shots_answer` | 剪辑中心 | 第二步的答案 | 整理后的镜头 | `domain/plan.py` |
-| `fill` | 剪辑中心 | 大纲、镜头、卡片、槽、窗口向量、已知的无遮挡区间；可选的 `pins`（槽 → 卡片与节拍，#596） | 时间线（每个镜头的起止帧）与没填满的槽；或者 `need`：还缺哪一段的无遮挡区间 | `domain/fill.py` |
+| `fill` | 剪辑中心 | 大纲、镜头、卡片、槽、窗口向量、已知的无遮挡区间；可选的 `pins`（按成片顺序列出每个槽与钉住的节拍，#596） | 时间线（每个镜头的起止帧）与没填满的槽；或者 `need`：还缺哪一段的无遮挡区间 | `domain/fill.py` |
 | `likeness` | 剪辑中心 | 两个节拍各自覆盖的窗口向量 | 两组均值的余弦（#596：删除一镜时选哪一边延长） | 新增，第八版没有 |
 | `clear` | 剪辑中心 | 关键帧与一段 256×144 的灰度帧 | 关键帧两侧的无遮挡区间 | `domain/picture.py` |
 
@@ -743,10 +743,11 @@ montage/
 | GET | `/hero`、`/hero/poster` | 设备上的主页背景片与封面（剪辑中心数据目录下的 `hero/hero.mp4`、`hero.jpg`），不属于软件；没有时回答 404，页面改为轮播成员自己的视频 |
 | POST | `/versions/{id}/confirm` | 确认这一版（#596，以下各行见“出片后的二次编辑”） |
 | POST | `/versions/{id}/recut` | `{requestKey, change}`：回答 202 与 `recut` 任务；项目已有进行中的任务时回答 409 |
-| GET | `/versions/{id}/draft` | 这一版的修改稿，没有就建：音乐段落与槽、每槽的节拍、锁定、粗预览用的片段、选段起点、修订号、能否撤销 |
-| POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo`；修订号对不上回答 409 |
-| GET | `/drafts/{id}/candidates` | `?slot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表 |
-| GET | `/drafts/{id}/song` | 粗预览用的配乐副本，支持 Range |
+| GET | `/versions/{id}/outline` | 这一版成片本身的规划与镜头，给选版页的版本卡片用：只读，不建修改稿，没存的修改不在里面 |
+| GET | `/versions/{id}/draft` | 这一版的修改稿，没有就建：音乐段落与槽、每镜的节拍、锁定、粗预览用的片段、选段起点、配乐要不要转码（`songTranscode`）、修订号、能否撤销 |
+| POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo`。修订号对不上回答 409 `draft_conflict`；违反规则回答 422 `edit_refused`，`message` 是给成员看的原因；重洗要搜索，搜不了回答 503 `search_unavailable`，分析模型换了回答 409 `search_model_changed` |
+| GET | `/drafts/{id}/candidates` | `?shot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表，`shot` 是镜号（页面手上有的是镜号）；搜索的错误码同上 |
+| GET | `/drafts/{id}/song` | 粗预览用的配乐副本：浏览器能播的支持 Range；不能播的即时解码成 FLAC，不能跳转，用 `?start=` 指定从哪一秒起 |
 | POST | `/drafts/{id}/save` | `{requestKey}`：回答 202 与 `edit` 任务，按当前修订存为新版本；项目已有进行中的任务时回答 409 |
 | GET | `/versions/{id}/shots`、`/drafts/{id}/shots` | 镜头清单（CSV） |
 | GET | `/projects/{id}/frames/{assetId}` | `?t=` 毫秒：缩略图 |
@@ -782,19 +783,26 @@ montage/
 
 **修改稿**
 - `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍，修订号 0。槽的键是段落、画面与小节槽的序号，和 `fill` 的嵌套相同。
-- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按规格“修改的规则”校验；写一行 `draft_revisions`、更新 `drafts`；超过 100 个修订时删掉最旧的。回答新的修改稿。
-- 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。节拍够不够长按 `fill` 的放慢上限（2.5 倍）算。
+- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按规格“修改的规则”校验，不成立回答 422 `edit_refused`；写一行 `draft_revisions`、更新 `drafts`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
+- 这一版的时间线读不出来时（见上），修改稿、候选与镜头清单都回答 409 `not_editable`。
+- 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。换镜头、拖动时节拍够不够长按 `fill` 的放慢上限（2.5 倍）算；删除一镜时“卡片盖得住两段之和”按不放慢算。
+- 这里的校验不知道 `fill` 实际会从卡片的哪一段取画面，所以存为新版本时还要核对一次，见“重新填槽”。
 - 删除时两边都够长，调一次计算 Worker 的 `likeness` 选更像的一边。
 - `shuffle` 先用一次 `searchWindows` 查全部没锁画面的 `query`，再按种子挑；种子写进修订，同一种子结果相同。
 - 粗预览的片段随修改稿一起回答：没改过的槽取版本时间线里的镜头，改过的槽取所选节拍的起点与一个槽长。
 
-**候选**：`GET /drafts/{id}/candidates?slot=&q=&size=&scene=&landscape=`
+**候选**：`GET /drafts/{id}/candidates?shot=&q=&size=&scene=&landscape=`
 - 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。
 - 窗口换算成节拍：节拍的分数取它覆盖的窗口里最高的一个（同原型），只用来排序，不设门槛。
 - 景别取节拍描述的 `shot_size`，场景取卡片描述的 `scene`；筛选都在剪辑中心做，不进相册的检索。回答附场景的列表与个数。
 - 每个候选标明够不够长、已用在第几镜、横竖。
 
-**重新填槽**：`fill` 增加可选输入 `pins`（槽键 → 卡片与节拍）。钉住的槽首段用这个节拍，不够长时照原规则放慢或补段，无遮挡区间照旧经重入取帧。不带 `pins` 时结果与现在逐个相同，第八版的黄金比对不变。
+**重新填槽**：`fill` 增加可选输入 `pins`：按成片顺序列出每个槽（段落、画面、起止）和它钉住的节拍，首尾相接铺满选段；一镜并了被删镜头的槽时，是一个更长的槽。
+- 钉住的槽首段用这个节拍，不够长时照原规则补段（结尾最后一个槽照原规则放慢），无遮挡区间照旧经重入取帧。补段不用别的槽钉住的节拍。
+- 带 `pins` 时槽的位置与长短照它，不再按拍摄先后重排：成员拖动过的顺序要保留。
+- 前面的槽不盖过后面的槽钉住的关键帧。不然同一张卡片上相邻的两个节拍分别钉在相邻的槽里时，后一个会因为画面已经用过而被跳过。
+- 卡片里实在没有地方时，这个槽由别的节拍填。剪辑中心校验时间线时逐槽核对：槽的起止与修改稿相同，槽里有它钉住的节拍。对不上或没填满，`edit` 任务失败，原因写明是第几镜、请成员换一个节拍后再存，不存出一条和修改稿不一样的成片。
+- 不带 `pins` 时结果与现在逐个相同，第八版的黄金比对不变。
 
 **任务的种类**：`jobs.kind` 决定 `steps()` 给出的步骤表。
 
@@ -805,12 +813,13 @@ montage/
 | `recut` | 来源版本的任务快照，加这句话 | 分析 → 目录 → 歌曲 → 规划两步（一个方案）→ 填槽 → 渲染 → 存回 | 任务 ID 加渲染键 |
 
 - 一个项目同一时刻只有一个没结束的任务：建任务时在同一个事务里查，已有就回答 409 `job_in_progress`。原来只有 `generate` 这样做，现在三种都是。
-- `edit` 任务里素材缺失或进了回收站，照规格停下或暂停，`missing_json` 附用到它们的槽号；`drop-assets` 对 `edit` 任务回答 409。
+- `edit` 任务只看管各镜首段用到的视频。它们缺失或进了回收站时，照规格停下或暂停，`missing_json` 列出这些视频，页面据此标出用到它们的镜头；`drop-assets` 对 `edit` 任务回答 409，`recut` 任务照 `generate` 去掉后继续。
+- 迁移回退：加 `kind` 的那一步，Down 自己删掉 `edit`、`recut` 任务名下的步骤、素材、轮次、规划和它们存下的版本的修改稿。回退时外键是关着的，级联不生效。
 - `edit` 与 `recut` 任务不改项目的设置，也不改 `project_assets`。
 
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
-- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。
+- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。
 - 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。回合脚本同时认 v2 与 v3。
 - 这句话照“一句话要求”限 200 字，也过“不支持的要求”的词表。
 
@@ -821,9 +830,11 @@ montage/
 - 不存盘，也不经过计算 Worker，所以不会一边占着 FFmpeg 槽位一边等计算 Worker。
 
 **粗预览**
-- `GET /drafts/{id}/song` 送出来源版本任务快照里的配乐副本，支持 Range；选段起点在修改稿的回答里。
+- `GET /drafts/{id}/song` 送出来源版本任务快照里的配乐副本，支持 Range；选段起点在修改稿的回答里。浏览器不能播的歌和配乐页的试听一样即时解码，不能跳转：修改稿用 `songTranscode` 说明，网页从预览起点用 `?start=` 请求，时钟从那里算。
 - 原片用相册现有的视频播放。网页用两个 `<video>` 交替，下一段提前载入并跳到起点；以音乐的播放时间为准切换，不等跳转。
 - 不渲染，不占 FFmpeg 的后台槽位；相册的转码播放与缩略图用 `Streaming`、`Interactive`，和别人的播放一起排队。
+
+**版本卡片**：选版页每一版的缩略图条、剪辑思路与统计读 `GET /versions/{id}/outline`，是成片本身的镜头。不读修改稿：改过还没存的修改稿和上面那条成片不是一回事，光是看一眼选版页也不该建修改稿。
 
 **确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
 
