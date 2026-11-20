@@ -88,6 +88,7 @@ export const heroPosterURL = "/api/v1/montage/hero/poster";
 // --- editing a film after it was made (#596) ---
 
 export type MontageDraft = components["schemas"]["MontageDraft"];
+export type MontageVersionOutline = components["schemas"]["MontageVersionOutline"];
 export type MontageDraftShot = components["schemas"]["MontageDraftShot"];
 export type MontageDraftOp = components["schemas"]["MontageDraftOp"];
 export type MontageCandidates = components["schemas"]["MontageCandidates"];
@@ -106,6 +107,9 @@ export const recutVersion = (versionId: string, change: string) =>
       body: { requestKey: key(), change },
     }),
   );
+// A version as its film is, for its card: no draft is made, and an edit not saved yet does not show.
+export const getVersionOutline = (versionId: string, signal?: AbortSignal) =>
+  call(client.GET("/api/v1/montage/versions/{versionId}/outline", { ...version(versionId), signal }));
 export const getVersionDraft = (versionId: string, signal?: AbortSignal) =>
   call(client.GET("/api/v1/montage/versions/{versionId}/draft", { ...version(versionId), signal }));
 export const editDraft = (draftId: string, baseRevision: number, op: MontageDraftOp) =>
@@ -114,7 +118,9 @@ export const draftCandidates = (draftId: string, query: CandidateQuery, signal?:
   call(client.GET("/api/v1/montage/drafts/{draftId}/candidates", { params: { path: { draftId }, query }, signal }));
 export const saveDraft = (draftId: string) =>
   call(client.POST("/api/v1/montage/drafts/{draftId}/save", { ...draft(draftId), body: { requestKey: key() } }));
-export const draftSongURL = (draftId: string) => `/api/v1/montage/drafts/${encodeURIComponent(draftId)}/song`;
+// The draft's song. One decoded on the way cannot seek: it is asked for from start seconds, as the project's.
+export const draftSongURL = (draftId: string, start?: number) =>
+  `/api/v1/montage/drafts/${encodeURIComponent(draftId)}/song${start === undefined ? "" : `?start=${start.toFixed(2)}`}`;
 export const versionShotsURL = (versionId: string) => `/api/v1/montage/versions/${encodeURIComponent(versionId)}/shots`;
 export const draftShotsURL = (draftId: string) => `/api/v1/montage/drafts/${encodeURIComponent(draftId)}/shots`;
 // A frame of a project's video, 320 on its longer side; the browser keeps it.

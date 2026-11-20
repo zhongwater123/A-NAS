@@ -7,8 +7,10 @@ export const projectsKey = ["montage", "projects"] as const;
 export const projectKey = (projectId: string) => ["montage", "project", projectId] as const;
 export const songKey = (projectId: string) => ["montage", "song", projectId] as const;
 export const jobKey = (jobId?: string) => ["montage", "job", jobId] as const;
-// A version's draft (#596), as the version's card and its edit page read it.
+// A version's draft (#596), as its edit page reads it, and the version as
+// its film is, as its card shows it: a film does not change.
 export const draftKey = (versionId: string) => ["montage", "draft", versionId] as const;
+export const outlineKey = (versionId: string) => ["montage", "outline", versionId] as const;
 
 export const projectsQuery = {
   queryKey: projectsKey,

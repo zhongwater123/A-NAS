@@ -9,14 +9,15 @@ import { Spinner } from "../ui/workspace";
 import {
   confirmVersion,
   frameURL,
-  getVersionDraft,
-  type MontageDraft,
+  getVersionOutline,
+  type MontageDraftShot,
   type MontageProjectDetail,
   type MontageVersion,
+  type MontageVersionOutline,
   recutVersion,
 } from "./api";
 import styles from "./montage.module.css";
-import { draftKey, jobKey, projectKey, projectsKey } from "./queries";
+import { jobKey, outlineKey, projectKey, projectsKey } from "./queries";
 import { limitsOf, versionTitle } from "./words";
 
 const when = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -133,12 +134,13 @@ function FilmCard({
 }) {
   const client = useQueryClient();
   const title = versionTitle(version);
-  // The version's shots and plan come with its draft, made the first time.
-  const draft = useQuery({
-    queryKey: draftKey(version.id),
-    queryFn: ({ signal }) => getVersionDraft(version.id, signal),
+  // The film's own shots and plan: not its draft's, which an edit not saved
+  // yet has changed. A film does not change, so they are read once.
+  const outline = useQuery({
+    queryKey: outlineKey(version.id),
+    queryFn: ({ signal }) => getVersionOutline(version.id, signal),
     enabled: version.editable,
-    staleTime: 60_000,
+    staleTime: Number.POSITIVE_INFINITY,
   });
   const confirm = useMutation({
     mutationFn: () => confirmVersion(version.id),
@@ -174,7 +176,7 @@ function FilmCard({
           <FilmPlayer key={version.filmAssetId} assetId={version.filmAssetId} />
         )}
       </div>
-      {draft.data && <Strip projectId={detail.id} draft={draft.data} />}
+      {outline.data && <Strip projectId={detail.id} shots={outline.data.shots} />}
       <div className={styles.mtFilmBody}>
         <div className={styles.mtFilmTitle}>
           <h3>{title}</h3>
@@ -182,12 +184,13 @@ function FilmCard({
           {chosen && <span className={`${styles.mtTag} ${styles.ok}`}>已确认</span>}
         </div>
         <p className={styles.mtFaint}>{when.format(new Date(version.createdAt))}</p>
-        {draft.data && <Plan draft={draft.data} />}
-        {!version.editable && <p className={styles.mtFaint}>这一版只能播放：它的镜头记录已经不在了</p>}
+        {outline.data && <Plan outline={outline.data} />}
+        {!version.editable && <p className={styles.mtFaint}>这一版只能播放，不能修改或重剪：它的镜头记录已经不在了</p>}
         <form className={styles.mtSayIt} onSubmit={submit}>
           <input
             value={change}
             maxLength={CHANGE_MOST}
+            disabled={!version.editable}
             placeholder="说一句要改什么，比如：结尾留长一点"
             aria-label={`对第 ${version.number} 版的修改要求`}
             onChange={(event) => setChange(event.target.value)}
@@ -195,7 +198,7 @@ function FilmCard({
           <button
             type="submit"
             className={`${styles.mtBtn} ${styles.small}`}
-            disabled={!change.trim() || recut.isPending || version.gone}
+            disabled={!change.trim() || recut.isPending || version.gone || !version.editable}
           >
             <Wand2 aria-hidden="true" />
             重剪
@@ -241,10 +244,10 @@ function FilmCard({
 }
 
 // Strip is a version's shots as thumbnails, each as wide as its slots.
-export function Strip({ projectId, draft }: { projectId: string; draft: MontageDraft }) {
+export function Strip({ projectId, shots }: { projectId: string; shots: MontageDraftShot[] }) {
   return (
     <div className={styles.mtStrip} aria-hidden="true">
-      {draft.shots.map((shot) => (
+      {shots.map((shot) => (
         <img
           key={shot.number}
           src={frameURL(projectId, shot.assetId, shot.from)}
@@ -259,13 +262,13 @@ export function Strip({ projectId, draft }: { projectId: string; draft: MontageD
 
 // Plan is the plan a version was cut by: the design, the parts in a row, and
 // the whole plan unfolded; then its numbers.
-function Plan({ draft }: { draft: MontageDraft }) {
+function Plan({ outline }: { outline: MontageVersionOutline }) {
   const [open, setOpen] = useState(false);
   return (
     <div className={styles.mtPlan}>
-      {draft.plan.design && <p className={styles.mtDesign}>{draft.plan.design}</p>}
+      {outline.plan.design && <p className={styles.mtDesign}>{outline.plan.design}</p>}
       <p className={styles.mtChain}>
-        {draft.parts.map((part) => (
+        {outline.parts.map((part) => (
           <span key={part.number}>{part.name || `第 ${part.number} 段`}</span>
         ))}
       </p>
@@ -275,10 +278,10 @@ function Plan({ draft }: { draft: MontageDraft }) {
       {open && (
         <dl className={styles.mtPlanAll}>
           <dt>开头</dt>
-          <dd>{draft.plan.opening}</dd>
+          <dd>{outline.plan.opening}</dd>
           <dt>结尾</dt>
-          <dd>{draft.plan.ending}</dd>
-          {draft.parts.map((part) => (
+          <dd>{outline.plan.ending}</dd>
+          {outline.parts.map((part) => (
             <div key={part.number}>
               <dt>{part.name || `第 ${part.number} 段`}</dt>
               <dd>{part.summary}</dd>
@@ -288,15 +291,15 @@ function Plan({ draft }: { draft: MontageDraft }) {
       )}
       <div className={styles.mtStats}>
         <div>
-          <b>{draft.counts.shots}</b>
+          <b>{outline.counts.shots}</b>
           <span>个镜头</span>
         </div>
         <div>
-          <b>{draft.counts.videos}</b>
+          <b>{outline.counts.videos}</b>
           <span>段原片</span>
         </div>
-        <div data-warn={draft.counts.portrait > 0 || undefined}>
-          <b>{draft.counts.portrait}</b>
+        <div data-warn={outline.counts.portrait > 0 || undefined}>
+          <b>{outline.counts.portrait}</b>
           <span>个竖拍</span>
         </div>
       </div>

@@ -39,7 +39,7 @@ import {
 } from "./api";
 import { Failed } from "./Failed";
 import styles from "./montage.module.css";
-import { draftKey, jobKey, projectKey } from "./queries";
+import { draftKey, jobKey, projectKey, projectQuery } from "./queries";
 import { RoughCut } from "./RoughCut";
 import { FilmPlayer } from "./Versions";
 
@@ -77,6 +77,8 @@ export default function EditPage({
     queryKey: draftKey(versionId),
     queryFn: ({ signal }) => getVersionDraft(versionId, signal),
   });
+  // The project's latest job: a save of this page that stopped shows here.
+  const lastSave = useQuery(projectQuery(projectId)).data?.job;
   const { toast, element: toasts } = useToasts();
   const dialogs = useDialogs();
   const [selected, setSelected] = useState(1);
@@ -103,7 +105,17 @@ export default function EditPage({
       if (next.message)
         toast({
           text: next.message,
-          action: next.canUndo ? { label: "撤销", run: () => step.mutate({ type: "undo" }) } : undefined,
+          // Undo goes back the draft's latest step: an older message's would
+          // undo another step than the one it names.
+          action: next.canUndo
+            ? {
+                label: "撤销",
+                run: () =>
+                  current().revision === next.revision
+                    ? step.mutate({ type: "undo" })
+                    : toast({ text: "之后又改过了：用最新一条提示上的“撤销”", tone: "error" }),
+              }
+            : undefined,
         });
     },
     onError: failure,
@@ -140,6 +152,11 @@ export default function EditPage({
   }
   const d = draft.data;
   const shot = d.shots.find((each) => each.number === selected) ?? d.shots[0];
+  // A save that stopped for videos gone or in the trash names them: the
+  // shots that use them are the ones to replace.
+  const stopped = lastSave && lastSave.kind === "edit" && lastSave.state !== "done" ? lastSave : undefined;
+  const gone = new Set(stopped?.missingAssetIds ?? []);
+  const lacking = d.shots.filter((each) => gone.has(each.assetId));
   const unlocked = d.shots.filter((each) => !each.locked).length;
   const changed = d.shots.filter((each) => each.changed).length;
   const extended = d.shots.filter((each) => each.extended).length;
@@ -218,6 +235,14 @@ export default function EditPage({
           存为新版本
         </button>
       </div>
+      {lacking.length > 0 && (
+        <p className={styles.mtError} role="status">
+          第 {lacking.map((each) => each.number).join("、")} 镜用到的视频
+          {stopped?.waitReason === "asset_trashed" ? "在回收站里" : "已经不在相册里"}。
+          {stopped?.state === "needs_input" || stopped?.state === "waiting" ? "先在项目页取消这次保存，" : ""}
+          换掉这些镜头后再存为新版本。
+        </p>
+      )}
       <div className={styles.mtEditBody}>
         <div>
           <MusicBar draft={d} />
@@ -236,6 +261,7 @@ export default function EditPage({
                   projectId={projectId}
                   draft={d}
                   shots={own}
+                  gone={gone}
                   selected={shot.number}
                   open={open}
                   disabled={busy}
@@ -282,6 +308,29 @@ export default function EditPage({
   );
 }
 
+// candidatesQuery asks for the beats that could lead a shot of the draft as
+// it stands, searched and filtered or not.
+function candidatesQuery(
+  draft: MontageDraft,
+  shot: number,
+  {
+    q = "",
+    size = "",
+    scene = "",
+    landscape = false,
+  }: { q?: string; size?: string; scene?: string; landscape?: boolean },
+) {
+  return {
+    queryKey: ["montage", "candidates", draft.id, draft.revision, shot, q, size, scene, landscape],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      draftCandidates(
+        draft.id,
+        { shot, ...(q ? { q } : {}), ...(size ? { size } : {}), ...(scene ? { scene } : {}), landscape },
+        signal,
+      ),
+  };
+}
+
 // MusicBar is the music's parts in a row, coloured by strength, each with its start.
 function MusicBar({ draft }: { draft: MontageDraft }) {
   return (
@@ -317,6 +366,7 @@ function Tiles({
   projectId,
   draft,
   shots,
+  gone,
   selected,
   open,
   disabled,
@@ -327,6 +377,8 @@ function Tiles({
   projectId: string;
   draft: MontageDraft;
   shots: MontageDraftShot[];
+  // The videos a stopped save could not read.
+  gone: Set<string>;
   selected: number;
   open: boolean;
   disabled: boolean;
@@ -351,6 +403,7 @@ function Tiles({
               key={`${shot.number}:${shot.beat}`}
               projectId={projectId}
               shot={shot}
+              gone={gone.has(shot.assetId)}
               strength={strengthOf(draft.parts[shot.part - 1] ?? { level: "", label: "" })}
               selected={shot.number === selected}
               open={open && shot.number === selected}
@@ -368,6 +421,7 @@ function Tiles({
 function Tile({
   projectId,
   shot,
+  gone,
   strength,
   selected,
   open,
@@ -377,6 +431,7 @@ function Tile({
 }: {
   projectId: string;
   shot: MontageDraftShot;
+  gone: boolean;
   strength: Strength;
   selected: boolean;
   open: boolean;
@@ -417,6 +472,7 @@ function Tile({
           {shot.changed && <span className={`${styles.mtTag} ${styles.changed}`}>已换</span>}
           {shot.extended && <span className={`${styles.mtTag} ${styles.changed}`}>延长</span>}
           {shot.portrait && <span className={`${styles.mtTag} ${styles.warn}`}>竖</span>}
+          {gone && <span className={`${styles.mtTag} ${styles.warn}`}>素材不在了</span>}
         </span>
         <i className={styles.mtTileLevel} data-strength={strength} />
         <span className={styles.mtTileMeta}>
@@ -466,10 +522,8 @@ function Drawer({
   onClose: () => void;
   onPlay: () => void;
 }) {
-  const near = useQuery({
-    queryKey: ["montage", "candidates", draft.id, draft.revision, shot.number],
-    queryFn: ({ signal }) => draftCandidates(draft.id, { shot: shot.number }, signal),
-  });
+  // The same request as the side's before anything is searched or filtered: one answer serves both.
+  const near = useQuery(candidatesQuery(draft, shot.number, {}));
   const part = draft.parts[shot.part - 1];
   const strength = part ? strengthOf(part) : "mid";
   const choices = [...(near.data?.sameCard ?? []), ...(near.data?.planned ?? [])];
@@ -612,15 +666,7 @@ function Side({
   const [size, setSize] = useState("");
   const [scene, setScene] = useState("");
   const [landscape, setLandscape] = useState(false);
-  const results = useQuery({
-    queryKey: ["montage", "candidates", draft.id, draft.revision, shot.number, q, size, scene, landscape],
-    queryFn: ({ signal }) =>
-      draftCandidates(
-        draft.id,
-        { shot: shot.number, ...(q ? { q } : {}), ...(size ? { size } : {}), ...(scene ? { scene } : {}), landscape },
-        signal,
-      ),
-  });
+  const results = useQuery(candidatesQuery(draft, shot.number, { q, size, scene, landscape }));
   const viewer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (preview) viewer.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });

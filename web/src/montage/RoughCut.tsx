@@ -14,7 +14,8 @@ import styles from "./montage.module.css";
 // the next shot loaded and at its start before its cut comes. A video the
 // browser cannot play comes converted by the photo library, which cannot
 // seek, so it is asked for from the piece's start; there the cut may show
-// black for a moment.
+// black for a moment. A song decoded on the way cannot seek either: it is
+// asked for from where the preview begins, and its clock counts from there.
 
 interface Source {
   url: string;
@@ -50,9 +51,17 @@ const play = (element: HTMLMediaElement | null | undefined) =>
 export function RoughCut({ draft, from, onClose }: { draft: MontageDraft; from: number; onClose: () => void }) {
   const audio = useRef<HTMLAudioElement>(null);
   const first = useRef<HTMLVideoElement>(null);
-  const second = useRef<HTMLVideoElement>(null);
+  const other = useRef<HTMLVideoElement>(null);
   const source = useSources();
   const begin = Math.max(0, from - 1);
+  // Where in the song the preview begins, and where the audio's own clock
+  // is zero: there for a song decoded from it, the song's start otherwise.
+  const beginAt = draft.songStart + (draft.shots[begin]?.start ?? 0);
+  const zero = draft.songTranscode ? beginAt : 0;
+  // placed: the music is where the preview begins. Before that its clock
+  // says nothing of which shot shows. second: the second last shown.
+  const placed = useRef(false);
+  const second = useRef(Number.NaN);
   const [showing, setShowing] = useState(0);
   const [index, setIndex] = useState(begin);
   const [time, setTime] = useState(draft.shots[begin]?.start ?? 0);
@@ -60,7 +69,7 @@ export function RoughCut({ draft, from, onClose }: { draft: MontageDraft; from: 
   // Which shot each element holds, and the element showing now.
   const holds = useRef<[number, number]>([-1, -1]);
   const front = useRef(0);
-  const player = (e: number) => (e === 0 ? first : second).current;
+  const player = (e: number) => (e === 0 ? first : other).current;
 
   // load puts shot k into element e, at the start of its piece.
   const load = useEffectEvent(async (e: number, k: number) => {
@@ -86,9 +95,13 @@ export function RoughCut({ draft, from, onClose }: { draft: MontageDraft; from: 
   // to the front, and the other loads the shot after it.
   const tick = useEffectEvent(() => {
     const music = audio.current;
-    if (!music) return;
-    const at = music.currentTime - draft.songStart;
-    setTime(at);
+    if (!music || !placed.current) return;
+    const at = zero + music.currentTime - draft.songStart;
+    // The bar shows whole seconds: nothing is drawn again between them.
+    if (Math.floor(at) !== second.current) {
+      second.current = Math.floor(at);
+      setTime(at);
+    }
     if (at >= draft.seconds) {
       music.pause();
       player(0)?.pause();
@@ -113,7 +126,8 @@ export function RoughCut({ draft, from, onClose }: { draft: MontageDraft; from: 
     const music = audio.current;
     if (!music) return;
     const go = () => {
-      music.currentTime = draft.songStart + (draft.shots[begin]?.start ?? 0);
+      if (!draft.songTranscode) music.currentTime = beginAt;
+      placed.current = true;
       void Promise.resolve()
         .then(() => music.play())
         .catch(() => setFailed(true));
@@ -138,9 +152,13 @@ export function RoughCut({ draft, from, onClose }: { draft: MontageDraft; from: 
     <div className={styles.mtRough} role="dialog" aria-label="粗预览">
       <div className={styles.mtRoughStage}>
         <video ref={first} muted playsInline preload="auto" data-front={showing === 0 || undefined} />
-        <video ref={second} muted playsInline preload="auto" data-front={showing === 1 || undefined} />
+        <video ref={other} muted playsInline preload="auto" data-front={showing === 1 || undefined} />
       </div>
-      <audio ref={audio} src={draftSongURL(draft.id)} preload="auto" />
+      <audio
+        ref={audio}
+        src={draft.songTranscode ? draftSongURL(draft.id, beginAt) : draftSongURL(draft.id)}
+        preload="auto"
+      />
       <div className={styles.mtRoughBar}>
         <span>
           {shot ? `第 ${shot.number} 镜` : ""} · {clock(Math.max(0, time))} / {clock(draft.seconds)}
