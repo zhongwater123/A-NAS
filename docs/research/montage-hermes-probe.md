@@ -1,9 +1,9 @@
 # 剪辑规划在 Hermes 定时任务里运行的验证（Hermes 探针 P1）
 
-> 状态：开发机完成（2026-11-18）；两项必过都过了；真实模型、实验 NAS 与转正后的固定提交未测  
-> 更新日期：2026-11-18  
+> 状态：已被取代（2026-11-20）。本文验证的是借定时任务跑一轮规划，M9 照它实施；实机验收时卡在“等待 VNAS”，用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)改为成员规划进程里的一次对话（[规划会话](../architecture/montage-planning-session.md)）。本文只作记录：开发机完成（2026-11-18），两项必过都过了  
+> 更新日期：2026-11-20  
 > 适用范围：Hermes 上游 `8fd9f706` 加补丁 0001（当前主线固定的提交，`ai/assistant-spike/run.sh`），2026-11-18 在开发机 C 的 Colima `anas` 虚拟机（aarch64）里用 `run.sh build` 重建，运行环境压缩包 sha256 `eec1ae2753dd62f8732c2dce5fd0db978bc167f601a2687de7dc8a882fb6ea65`（重建不可复现，与 `runtime.json` 记的不同，源码相同）；spike 容器 `anas-systemd:trixie`；替身模型 `fake_model.py`；替身的 montage 服务器 `montage_stub_mcp.py`  
-> 关联：[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#发起与结束)的“规划”（PR [#518](https://github.com/zhongwater123/A-NAS/pull/518)）、[评审意见](https://github.com/zhongwater123/A-NAS/pull/518#pullrequestreview-5950219461)、[Hermes Agent 可行性研究](hermes-agent-runtime.md)、[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)、测试 [`montage-plan.sh`](../../ai/assistant-spike/montage-plan.sh)
+> 关联：[剪辑中心实施方案](../architecture/montage-center.md#规划)的“规划”、[评审意见](https://github.com/zhongwater123/A-NAS/pull/518#pullrequestreview-5950219461)、[Hermes Agent 可行性研究](hermes-agent-runtime.md)、[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)、测试 [`montage-plan.sh`](https://github.com/zhongwater123/A-NAS/blob/3ddad5c50d025af69d8dd1ef9eecce1e4e6a3ea5/ai/assistant-spike/montage-plan.sh)（探针的脚本没有合入主线，在 [#546](https://github.com/zhongwater123/A-NAS/pull/546) 的提交 `3ddad5c5` 里）
 
 剪辑中心方案让规划由 NAS 在后台发起：在成员的定时任务单元里，把这一轮作为一个 Hermes 任务交给 gateway，只开放 montage 工具组，结束后不跑后台复盘。评审人要求动工前先做探针，确认 Hermes 的内部接口可用，并把“只开放 montage”列为必过项；方案另把“不跑后台复盘”列为必过项。本文用替身模型和替身的 montage 服务器，在 spike 容器里逐项验证这一轮要用到的 Hermes 机制。
 

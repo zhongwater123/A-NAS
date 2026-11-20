@@ -1,9 +1,9 @@
 # 剪辑配乐在 NAS 上的节拍与副歌分析（配乐探针 P2）
 
 > 状态：开发机完成（2026-11-18）；节拍与重拍过门槛，副歌没过。同日用户决定改用 allin1、商业版权待议，本文的做法留作退路；实验 NAS 的 CPU 未测  
-> 更新日期：2026-11-18  
+> 更新日期：2026-11-20  
 > 适用范围：beat_this 上游提交 `b95c8ab`（2026-11-18 的 main），检查点 `small0`（sha256 `6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b`）；导出用 PyTorch 2.5.1（CPU）、opset 17，ONNX 文件 sha256 `f30b8009f2a44ca1ab946b1a655c144fc50a7c9bc75dc0c33276c8f358ec8af6`；推理用 onnxruntime 1.31.0（与设备的 `ai/requirements.in` 相同）；开发机 C 的 Colima `anas` 虚拟机（aarch64，6 核，8 GiB）  
-> 关联：[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)的“配乐”（PR [#518](https://github.com/zhongwater123/A-NAS/pull/518)）、[评审意见](https://github.com/zhongwater123/A-NAS/pull/518#pullrequestreview-5950219461)、探针脚本 [`ai/eval/montage_music.py`](../../ai/eval/montage_music.py)
+> 关联：[剪辑中心实施方案](../architecture/montage-center.md#配乐)的“配乐”、[评审意见](https://github.com/zhongwater123/A-NAS/pull/518#pullrequestreview-5950219461)、探针脚本 [`ai/eval/montage_music.py`](https://github.com/zhongwater123/A-NAS/blob/3ddad5c50d025af69d8dd1ef9eecce1e4e6a3ea5/ai/eval/montage_music.py)（没有合入主线，在 [#546](https://github.com/zhongwater123/A-NAS/pull/546) 的提交 `3ddad5c5` 里）
 
 剪辑中心的配乐改为从成员自己的音乐库选或上传（PR #518 的评审，2026-11-18）。第八版读 allin1 算好的段落标签，而 allin1 依赖 PyTorch、Demucs 与 madmom，设备的 AI 运行环境里都没有，madmom 的模型文件又是 CC BY-NC-SA 4.0，不能进可再分发的产品。方案改为在 NAS 上自己分析：beat_this 找节拍与重拍，色度自相似找副歌。本文是动工前的配乐探针，用 10 首测试歌回答三件事：beat_this 能不能只靠 NumPy 与 onnxruntime 跑出和上游一样的结果；节拍与副歌准不准；在 CPU 上要多久、占多少内存。
 
@@ -105,7 +105,7 @@ allin1 本身不是标准答案，这里看的是两者是否一致。拟的门�
 | 首版仍只用 10 首测试歌，把 allin1 的结果放进设备；M10 的开关默认关闭，只在实验 NAS 上打开（方案写的退路） | 成员不能用自己的歌，首版不能对外开放 |
 | 另找能在 CPU 上跑、许可允许分发的段落模型 | 没有现成的：allin1 要 Demucs 分离音轨，评审人记的是 CPU 上一首 2–5 分钟，权重的许可也要另核；SongFormer 约 7 亿参数，作者说 CPU 上太慢（[讨论](https://huggingface.co/spaces/ASLP-lab/SongFormer/discussions/1)） |
 
-**2026-11-18 的决定**：用户决定在 NAS 上接入 allin1，它的商业版权列为待议点（许可的核对见 PR #518 的[决定记录](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)）。本文的 beat_this 与色度自相似留作退路：待议的结论是不能随产品分发时，按上表第一种或第三种做法补副歌。
+**2026-11-18 的决定**：用户决定在 NAS 上接入 allin1，它的商业版权列为待议点（许可的核对见[决定记录](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)）。本文的 beat_this 与色度自相似留作退路：待议的结论是不能随产品分发时，按上表第一种或第三种做法补副歌。
 
 ## 复现
 
