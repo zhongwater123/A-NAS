@@ -1,5 +1,5 @@
 // What the montage window says about jobs (docs/specs/montage-center.md).
-import type { MontageJob } from "./api";
+import type { MontageJob, MontageVersion } from "./api";
 
 export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   analysis: "分析素材",
@@ -37,6 +37,16 @@ export const stepLabel = (name: StepName) => ownSteps[name.replace(/-\d+$/, "")]
 // The 方案 a job makes, by number.
 export const planNames: Record<number, string> = { 1: "方案一", 2: "方案二" };
 export const planName = (plan: number) => planNames[plan] ?? `方案 ${plan}`;
+// What a version is called: the 方案 a job planned, or what it came from (#596).
+export function versionTitle(version: MontageVersion): string {
+  const from = version.sourceNumber ? `第 ${version.sourceNumber} 版` : "之前的版本";
+  if (version.kind === "edit") return `改自${from}`;
+  if (version.kind === "recut") return `按“${version.change ?? ""}”重剪自${from}`;
+  return planName(version.plan);
+}
+// What the progress of a job's 方案 is called: an edit or a recut makes one version.
+export const jobStageName = (job: MontageJob, stage: number) =>
+  stage === 0 ? "准备" : job.kind === "edit" ? "存为新版本" : job.kind === "recut" ? "重剪" : planName(stage);
 
 export type JobAction = "drop" | "retryAnalysis" | "retry" | "replan";
 export const actionLabels: Record<JobAction, string> = {
@@ -71,8 +81,12 @@ const reasons: Record<Reason, { text: (videos: number) => string; actions?: JobA
 };
 
 // actionsOf are the ways out of a job that needs the member, besides cancelling.
+// An edit takes no video out: the member cancels, replaces the shots that use
+// it on the edit page, and saves again.
 export const actionsOf = (job: MontageJob): JobAction[] =>
-  (job.state === "needs_input" && job.waitReason && reasons[job.waitReason].actions) || [];
+  ((job.state === "needs_input" && job.waitReason && reasons[job.waitReason].actions) || []).filter(
+    (action) => job.kind !== "edit" || action !== "drop",
+  );
 
 export const active = (job?: MontageJob) =>
   Boolean(job && (job.state === "queued" || job.state === "running" || job.state === "waiting"));
@@ -96,6 +110,8 @@ export function stateText(job: MontageJob): string {
       if (job.waitReason === "vnas_unknown" && job.step?.endsWith("-2")) return "VNAS 没有交回方案二的规划，重新规划？";
       // What failed, as the planner reported it.
       if (job.waitReason === "plan_error" && job.error) return `规划出错：${job.error}`;
+      if (job.kind === "edit" && job.waitReason === "asset_missing")
+        return `${reason?.text(videos)}。取消后在“修改镜头”里换掉用到它们的镜头，再存为新版本`;
       return reason?.text(videos) ?? "需要你处理";
     case "done":
       return "成片已存进相册";

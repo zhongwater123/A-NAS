@@ -278,6 +278,15 @@
     responses:
       "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/versions/{versionId}/outline:
+  get:
+    operationId: getMontageVersionOutline
+    summary: "The version as its film is, for its card on the choose page: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409)"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }]
+    responses:
+      "200": { description: The version's outline, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageVersionOutline" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/versions/{versionId}/draft:
   get:
     operationId: getMontageVersionDraft

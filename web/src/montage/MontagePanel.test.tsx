@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { asset } from "../test/handlers/photos";
 import { apiError, http, server } from "../test/server";
-import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api";
+import type {
+  MontageDraft,
+  MontageDraftShot,
+  MontageJob,
+  MontageProjectDetail,
+  MontageSong,
+  ProjectChange,
+} from "./api";
 import { MontagePanel } from "./MontagePanel";
 import { excerptAudio } from "./SongPage";
 
@@ -84,6 +91,91 @@ function track(id: string, title: string, artist: string, durationMs: number) {
   };
 }
 
+// A version's draft: two parts of the music, three shots, the second 竖.
+function draftOf(versionId: string, extra: Partial<MontageDraft> = {}): MontageDraft {
+  const shot = (
+    number: number,
+    part: number,
+    start: number,
+    end: number,
+    beat: string,
+    more: Partial<MontageDraftShot> = {},
+  ) => ({
+    number,
+    beat,
+    assetId: number === 2 ? "photo:b" : "photo:a",
+    part,
+    picture: 1,
+    slots: [number],
+    start,
+    end,
+    from: start + 1,
+    to: end + 1,
+    query: number === 3 ? "山路" : "海边散步",
+    shotSize: "全景",
+    what: `第 ${number} 镜的画面`,
+    locked: false,
+    changed: false,
+    extended: false,
+    portrait: number === 2,
+    ...more,
+  });
+  return {
+    id: `draft:${versionId}`,
+    versionId,
+    projectId: "project:1",
+    versionNumber: Number(versionId.replace(/\D/g, "")) || 1,
+    revision: 0,
+    canUndo: false,
+    songStart: 60,
+    songTranscode: false,
+    seconds: 12,
+    plan: { design: "从海边走到山里", opening: "海", ending: "山" },
+    parts: [
+      { number: 1, name: "海边", summary: "走", level: "中等", label: "verse", start: 0, end: 8 },
+      { number: 2, name: "山里", summary: "爬", level: "高潮", label: "chorus", start: 8, end: 12 },
+    ],
+    shots: [shot(1, 1, 0, 4, "c1/1"), shot(2, 1, 4, 8, "c2/1"), shot(3, 2, 8, 12, "c3/2")],
+    counts: { shots: 3, videos: 2, portrait: 1 },
+    updatedAt: "2026-11-20T09:00:00Z",
+    ...extra,
+  };
+}
+
+const candidates = (shot: number) => ({
+  shot,
+  query: "海边散步",
+  sameCard: [
+    {
+      beat: "c1/2",
+      assetId: "photo:a",
+      from: 6,
+      to: 10,
+      shotSize: "近景",
+      what: "浪花",
+      scene: "海边",
+      portrait: false,
+      fits: true,
+    },
+  ],
+  planned: [],
+  results: [
+    {
+      beat: "c3/1",
+      assetId: "photo:a",
+      from: 20,
+      to: 24,
+      shotSize: "远景",
+      what: "山路",
+      scene: "山路",
+      portrait: false,
+      fits: true,
+      usedBy: 3,
+    },
+  ],
+  scenes: [{ scene: "海边", cards: 2 }],
+});
+
 interface Seen {
   generated: number;
   // How often the job was asked about.
@@ -92,8 +184,17 @@ interface Seen {
   chosen?: string;
   changes: ProjectChange[];
   did: string[];
+  // The steps of the edit, with the revision each was made on.
+  ops: { baseRevision: number; op: { type: string; shot?: number; beat?: string } }[];
+  // The answer to the next step: a code to refuse it with.
+  refuse?: { status: 409 | 422; code: string; message: string };
+  drafts: number;
+  // What the draft has that the film has not: an edit not saved yet.
+  edited?: Partial<MontageDraft>;
+  // The answer to opening a draft: a code to refuse it with.
+  draftRefused?: string;
 }
-const fresh = (): Seen => ({ generated: 0, polled: 0, changes: [], did: [] });
+const fresh = (): Seen => ({ generated: 0, polled: 0, changes: [], did: [], ops: [], drafts: 0 });
 
 function serve(
   detail: () => MontageProjectDetail,
@@ -170,6 +271,57 @@ function serve(
     http.post("/api/v1/montage/jobs/{jobId}/replan", ({ response }) => {
       seen.did.push("replan");
       return response(200).json(job("queued"));
+    }),
+    http.get("/api/v1/montage/versions/{versionId}/draft", ({ params, response }) => {
+      seen.drafts++;
+      if (seen.draftRefused) return response(409).json(apiError(seen.draftRefused, "refused"));
+      return response(200).json(draftOf(params.versionId, seen.edited));
+    }),
+    // The film as it is, whatever its draft has become.
+    http.get("/api/v1/montage/versions/{versionId}/outline", ({ params, response }) => {
+      const { versionId, projectId, versionNumber, seconds, plan, parts, shots, counts } = draftOf(params.versionId);
+      // The first version's plan found no 直升机 among the videos.
+      const unmet = params.versionId === "version:1" ? ["直升机"] : [];
+      return response(200).json({ versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet });
+    }),
+    http.post("/api/v1/montage/versions/{versionId}/confirm", ({ params, response }) => {
+      seen.did.push(`confirm ${params.versionId}`);
+      return response(200).json({ ...detail(), chosenVersionId: params.versionId });
+    }),
+    http.post("/api/v1/montage/versions/{versionId}/recut", async ({ request, response }) => {
+      const asked = (await request.json()) as { change: string };
+      seen.did.push(`recut ${asked.change}`);
+      if (seen.refuse) return response(409).json(apiError(seen.refuse.code, seen.refuse.message));
+      return response(202).json(job("queued", { kind: "recut", steps: [] }));
+    }),
+    http.post("/api/v1/montage/drafts/{draftId}/ops", async ({ params, request, response }) => {
+      const step = (await request.json()) as Seen["ops"][number];
+      seen.ops.push(step);
+      const refuse = seen.refuse;
+      if (refuse) {
+        seen.refuse = undefined;
+        return response(refuse.status).json(apiError(refuse.code, refuse.message));
+      }
+      const message =
+        step.op.type === "undo" ? "已撤销" : step.op.type === "replace" ? `第 ${step.op.shot} 镜已替换` : "";
+      return response(200).json(
+        draftOf(params.draftId.replace("draft:", ""), {
+          revision: step.baseRevision + 1,
+          canUndo: step.op.type !== "undo",
+          message,
+        }),
+      );
+    }),
+    http.get("/api/v1/montage/drafts/{draftId}/candidates", ({ request, response }) =>
+      response(200).json(candidates(Number(new URL(request.url).searchParams.get("shot")))),
+    ),
+    // The rough preview plays the videos' originals.
+    http.get("/api/v1/photos/assets/{assetId}/video/playback", ({ response }) =>
+      response(200).json({ mode: "direct", duration: 30 }),
+    ),
+    http.post("/api/v1/montage/drafts/{draftId}/save", ({ response }) => {
+      seen.did.push("save");
+      return response(202).json(job("queued", { kind: "edit", steps: [{ name: "source", state: "pending" }] }));
     }),
   );
 }
@@ -775,5 +927,212 @@ describe("剪辑中心", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始剪辑" }));
     await waitFor(() => expect(seen.generated).toBe(1));
     expect(await screen.findByText("排队中")).toBeInTheDocument();
+  });
+  it("confirms a version, and recuts one from a sentence", async () => {
+    const seen = fresh();
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    // What the version is: its plan, its parts in a row and its numbers, 竖 marked.
+    expect(await within(first).findByText("从海边走到山里")).toBeInTheDocument();
+    expect(within(first).getByText("海边")).toBeInTheDocument();
+    expect(within(first).getByText("个竖拍").parentElement).toHaveAttribute("data-warn", "true");
+    // What the plan did not find among the videos is listed as it was written.
+    expect(within(first).getByText("素材里没找到：直升机")).toBeInTheDocument();
+    await userEvent.click(within(first).getByRole("button", { name: "看完整规划" }));
+    expect(within(first).getByText("爬")).toBeInTheDocument();
+    await userEvent.click(within(first).getByRole("button", { name: "确认这一版" }));
+    expect(await within(first).findByRole("button", { name: "已确认" })).toBeDisabled();
+    expect(seen.did).toContain("confirm version:1");
+    // A sentence recuts the version; what the first version cannot do is said under it.
+    const say = within(first).getByRole("textbox", { name: "对第 1 版的修改要求" });
+    await userEvent.type(say, "加字幕");
+    expect(within(first).getByText("首版不加字幕")).toBeInTheDocument();
+    // A recut starts from the plan: the edits of 修改镜头 do not go with it.
+    expect(within(first).getByText(/“修改镜头”里的改动不会带进去/)).toBeInTheDocument();
+    await userEvent.clear(say);
+    await userEvent.type(say, "结尾留长一点");
+    await userEvent.click(within(first).getByRole("button", { name: "重剪" }));
+    await waitFor(() => expect(seen.did).toContain("recut 结尾留长一点"));
+    // Another job in progress: the page says to wait for it.
+    seen.refuse = { status: 409, code: "job_in_progress", message: "the project already has a job in progress" };
+    await userEvent.type(say, "开头短一点");
+    await userEvent.click(within(first).getByRole("button", { name: "重剪" }));
+    expect(await within(first).findByText(/等这个任务做完/)).toBeInTheDocument();
+  });
+
+  it("shows a version as its film is, whatever its draft has become", async () => {
+    const seen = fresh();
+    // The draft has one shot fewer, none of them 竖: an edit not saved yet.
+    seen.edited = { counts: { shots: 2, videos: 1, portrait: 0 } };
+    serve(
+      () =>
+        project({
+          versions: [{ ...saved[1], editable: false }, saved[0]],
+          job: job("done"),
+        }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    expect((await within(first).findByText("个镜头")).parentElement).toHaveTextContent("3");
+    expect(within(first).getByText("个竖拍").parentElement).toHaveAttribute("data-warn", "true");
+    // Looking at the versions makes no draft.
+    expect(seen.drafts).toBe(0);
+    // A version whose shots are not known is neither edited nor recut.
+    const second = within(page).getByRole("article", { name: "方案二" });
+    expect(within(second).getByRole("button", { name: "修改镜头" })).toBeDisabled();
+    expect(within(second).getByRole("textbox", { name: "对第 2 版的修改要求" })).toBeDisabled();
+    expect(within(second).getByText(/只能播放，不能修改或重剪/)).toBeInTheDocument();
+    expect(within(second).queryByText(/素材里没找到/)).not.toBeInTheDocument();
+  });
+
+  it("says a recut of an edited version leaves its shots changed by hand behind", async () => {
+    const seen = fresh();
+    const edited = { ...saved[1], kind: "edit" as const, sourceVersionId: "version:1", sourceNumber: 1 };
+    serve(
+      () => project({ versions: [edited, saved[0]], job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const card = await within(page).findByRole("article", { name: "改自第 1 版" });
+    expect(within(card).getByText("重剪从这一版所来自的规划出发，手动换过的镜头不会带进去")).toBeInTheDocument();
+  });
+
+  it("marks the shots of a save that stopped for a missing video", async () => {
+    const seen = fresh();
+    const stopped = job("needs_input", {
+      kind: "edit",
+      waitReason: "asset_missing",
+      missingAssetIds: ["photo:b"],
+      step: "render",
+      steps: [{ name: "source", state: "done" }],
+    });
+    serve(
+      () => project({ versions: [...saved].reverse(), job: stopped }),
+      () => stopped,
+      seen,
+    );
+    const page = await openProject();
+    // An edit takes no video out: only cancelling is offered, and where to go is said.
+    expect(await within(page).findByText(/取消后在“修改镜头”里换掉用到它们的镜头/)).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "去掉这些继续" })).not.toBeInTheDocument();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    const edit = await screen.findByRole("main", { name: "第 1 版 · 精修镜头" });
+    expect(await within(edit).findByText(/第 2 镜用到的视频\s*已经不在相册里/)).toBeInTheDocument();
+    const sea = within(edit).getByRole("region", { name: "段落 1" });
+    expect(within(sea).getAllByText("素材不在了")).toHaveLength(1);
+  });
+
+  it("asks for a song that cannot seek from where the rough preview begins", async () => {
+    const seen = fresh();
+    seen.edited = { songTranscode: true };
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    const edit = await screen.findByRole("main", { name: "第 1 版 · 精修镜头" });
+    // From the second shot, four seconds into an excerpt that starts at a minute.
+    await userEvent.click(within(edit).getByRole("button", { name: /^第 2 镜，/ }));
+    await userEvent.click(await within(edit).findByRole("button", { name: "从这里预览" }));
+    const rough = await screen.findByRole("dialog", { name: "粗预览" });
+    expect(rough.querySelector("audio")).toHaveAttribute(
+      "src",
+      "/api/v1/montage/drafts/draft%3Aversion%3A1/song?start=64.00",
+    );
+  });
+
+  it("says a version analysed again with another model can only be recut", async () => {
+    const seen = fresh();
+    seen.draftRefused = "analysis_changed";
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪",
+    );
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "换一版" }));
+    expect(await screen.findByRole("article", { name: "方案一" })).toBeInTheDocument();
+  });
+
+  it("edits a version shot by shot on the server's draft", async () => {
+    const seen = fresh();
+    serve(
+      () => project({ versions: [...saved].reverse(), job: job("done") }),
+      () => job("done"),
+      seen,
+    );
+    const page = await openProject();
+    const first = await within(page).findByRole("article", { name: "方案一" });
+    await userEvent.click(within(first).getByRole("button", { name: "修改镜头" }));
+    const edit = await screen.findByRole("main", { name: "第 1 版 · 精修镜头" });
+    // The music's parts coloured by strength, the shots grouped by part.
+    expect(within(edit).getByText("海边", { selector: "[data-strength] *, [data-strength]" })).toHaveAttribute(
+      "data-strength",
+      "mid",
+    );
+    const sea = within(edit).getByRole("region", { name: "段落 1" });
+    expect(within(sea).getByText("竖")).toBeInTheDocument();
+    expect(within(sea).getByText("↔ 拖动换顺序")).toBeInTheDocument();
+    // A shot opens under its part, with the beats it could have; a double click puts one in.
+    await userEvent.click(within(sea).getByRole("button", { name: /^第 1 镜，/ }));
+    const drawer = await within(sea).findByRole("group", { name: "第 1 镜" });
+    expect(within(drawer).getByText("规划要：海边散步")).toBeInTheDocument();
+    await userEvent.dblClick(await within(drawer).findByRole("button", { name: "海边 · 浪花" }));
+    await waitFor(() =>
+      expect(seen.ops).toEqual([{ baseRevision: 0, op: { type: "replace", shot: 1, beat: "c1/2" } }]),
+    );
+    // Each step says what it did, with 撤销, which is a step on the new revision.
+    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(seen.ops[1]).toEqual({ baseRevision: 1, op: { type: "undo" } }));
+    // A step refused says why; one on a revision another window moved reads the draft again.
+    seen.refuse = { status: 422, code: "edit_refused", message: "前后两镜都不够长，换一个镜头代替" };
+    await userEvent.click(within(drawer).getByRole("button", { name: "删除这一镜" }));
+    expect(await screen.findByText("前后两镜都不够长，换一个镜头代替")).toBeInTheDocument();
+    const before = seen.drafts;
+    seen.refuse = { status: 409, code: "draft_conflict", message: "the draft changed since; read it again" };
+    await userEvent.click(within(sea).getByRole("button", { name: "锁定第 2 镜" }));
+    expect(await screen.findByText("修改稿在别的窗口改过，已重新读取")).toBeInTheDocument();
+    await waitFor(() => expect(seen.drafts).toBeGreaterThan(before));
+    // Nothing locked: a shuffle asks first.
+    await userEvent.click(within(edit).getByRole("button", { name: "重洗没锁的" }));
+    expect(await screen.findByText("还没有锁定镜头，重洗会换掉全部 3 个镜头。")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "先去锁定" }));
+    expect(seen.ops.some((step) => step.op.type === "shuffle")).toBe(false);
+    await userEvent.click(within(edit).getByRole("button", { name: "重洗没锁的" }));
+    await userEvent.click(await screen.findByRole("button", { name: "全部重洗" }));
+    await waitFor(() => expect(seen.ops.at(-1)?.op).toEqual({ type: "shuffle" }));
+    expect(within(edit).getByRole("link", { name: "导出镜头清单" })).toHaveAttribute(
+      "href",
+      "/api/v1/montage/drafts/draft%3Aversion%3A1/shots",
+    );
+    // The rough preview plays the draft over its song.
+    await userEvent.click(within(edit).getByRole("button", { name: "粗预览" }));
+    const rough = await screen.findByRole("dialog", { name: "粗预览" });
+    expect(within(rough).getByText("粗预览，不含放慢、竖拍垫底与淡出")).toBeInTheDocument();
+    expect(rough.querySelector("audio")).toHaveAttribute("src", "/api/v1/montage/drafts/draft%3Aversion%3A1/song");
+    await userEvent.click(within(rough).getByRole("button", { name: "关闭粗预览" }));
+    // Saved as a new version: back on the project, the job shows as generating's does.
+    await userEvent.click(within(edit).getByRole("button", { name: "存为新版本" }));
+    const back = await screen.findByRole("main", { name: "2026-08-02 至 08-04" });
+    expect(seen.did).toContain("save");
+    expect(await within(back).findByRole("list", { name: "准备" })).toHaveTextContent("读取修改稿");
   });
 });
