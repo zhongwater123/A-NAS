@@ -222,6 +222,18 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	return montage.FillAnswer{Clips: clips}, nil
 }
 
+// Likeness is how many of the dimensions both beats' first windows share.
+func (c *compute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
+	if dimensions <= 0 || len(a) < dimensions || len(b) < dimensions {
+		return 0, fmt.Errorf("%w: no windows", montage.ErrWorkerRefused)
+	}
+	var dot float64
+	for d := range dimensions {
+		dot += float64(a[d] * b[d])
+	}
+	return dot, nil
+}
+
 // PlanBrief briefs either step with a schema that wants a non-empty list of
 // parts, each a name of at most the catalog's card ids. As the Worker's
 // plan_brief, it reads each card's beats by their number among the card's
@@ -536,6 +548,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	}
 	if env.jobFiles(job.ID) {
 		t.Fatal("the job's files outlived it")
+	}
+	// The version keeps the timeline it was made from, for editing it (#596).
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM versions WHERE job_id = ? AND json_array_length(timeline_json, '$.clips') = 2", job.ID); n != 1 {
+		t.Fatalf("%d versions keep their timeline", n)
 	}
 	notices, err := env.store.Notices(ctx, "user:alice")
 	if err != nil || len(notices) != 1 || notices[0].Kind != "saved" || notices[0].FilmID != done.Version.FilmAssetID {

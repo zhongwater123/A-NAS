@@ -134,6 +134,80 @@ class FillTest(unittest.TestCase):
         self.assertEqual(first["short"], [])
 
 
+    def filled(self, request, vectors):
+        """The fill to its end, every span it asks for taken as clear."""
+        request = {**request, "known": {}}
+        for _ in range(20):
+            answer = worker.op_fill(request, {"vectors": vectors})
+            if "need" not in answer:
+                return answer
+            request["known"][answer["need"]["name"]] = [answer["need"]["lo"], answer["need"]["hi"]]
+        self.fail("the fill kept asking")
+
+    def test_pins_lead_each_slot_where_the_film_had_it(self):
+        vectors = np.eye(10, 8, dtype=np.float32) + 0.1
+        request = tiny_case()
+        plain = self.filled(request, vectors)
+        self.assertEqual([c["beat"] for c in plain["clips"]], ["c1/1", "c1/2"])
+        pins = [{"part": 1, "picture": 1, "slot": [0.0, 2.0], "beat": "c1/2"},
+                {"part": 1, "picture": 1, "slot": [2.0, 4.0], "beat": "c1/1"}]
+        swapped = self.filled({**request, "pins": pins}, vectors)
+        self.assertEqual([(c["beat"], c["slot"]) for c in swapped["clips"]], [("c1/2", [0.0, 2.0]), ("c1/1", [2.0, 4.0])])
+        self.assertEqual(swapped["short"], [])
+        # A pinned slot that a deleted neighbour's slot went to is one longer slot.
+        merged = self.filled({**request, "pins": [{"part": 1, "picture": 1, "slot": [0.0, 4.0], "beat": "c1/2"}]}, vectors)
+        self.assertEqual(merged["clips"][0]["beat"], "c1/2")
+        self.assertEqual(sum(round(c["share"] * 30) for c in merged["clips"]), 120)
+
+    def test_pins_that_repeat_the_film_give_it_again(self):
+        vectors = np.eye(10, 8, dtype=np.float32) + 0.1
+        plain = self.filled(tiny_case(), vectors)
+        pins = [{"part": c["part"], "picture": c["picture"], "slot": c["slot"], "beat": c["beat"]} for c in plain["clips"]]
+        self.assertEqual(self.filled({**tiny_case(), "pins": pins}, vectors), plain)
+
+    def test_a_pin_keeps_its_key_frame_from_the_slots_before_it(self):
+        # Two beats of one card a second apart: the first slot's shot, cut around its own key frame, would run over
+        # the second's, and the second pin would be passed over as footage already used.
+        vectors = np.eye(10, 8, dtype=np.float32) + 0.1
+        request = tiny_case()
+        request["cards"]["c1"]["times"] = [3.0, 4.0]
+        pins = [{"part": 1, "picture": 1, "slot": [0.0, 2.0], "beat": "c1/1"},
+                {"part": 1, "picture": 1, "slot": [2.0, 4.0], "beat": "c1/2"}]
+        pinned = self.filled({**request, "pins": pins}, vectors)
+        self.assertEqual([(c["beat"], c["slot"]) for c in pinned["clips"]], [("c1/1", [0.0, 2.0]), ("c1/2", [2.0, 4.0])])
+        first, second = pinned["clips"]
+        self.assertLessEqual(first["end"], 4.0)
+        self.assertGreaterEqual(second["start"], first["end"])
+        self.assertEqual(pinned["short"], [])
+        # Dragged the other way round, with the card ending soon after: the first slot's shot, moved back to fit, would
+        # run over the earlier key frame. It stops short of it, and what it lacks is reported, not taken from the pin.
+        request["cards"]["c1"] |= {"times": [3.5, 4.0], "end": 5.2}
+        swapped = self.filled({**request, "pins": [{**pins[0], "beat": "c1/2"}, {**pins[1], "beat": "c1/1"}]}, vectors)
+        self.assertEqual([(c["beat"], c["slot"]) for c in swapped["clips"]], [("c1/2", [0.0, 2.0]), ("c1/1", [2.0, 4.0])])
+        self.assertGreater(swapped["clips"][0]["start"], 3.5)
+        self.assertEqual([s[:4] for s in swapped["short"]], [[1, 1, 0.0, 2.0]])
+
+    def test_pins_that_leave_a_gap_or_name_another_beat_are_refused(self):
+        request = tiny_case()
+        for pins in ([{"part": 1, "picture": 1, "slot": [0.0, 2.0], "beat": "c1/1"},
+                      {"part": 1, "picture": 1, "slot": [2.5, 4.0], "beat": "c1/2"}],
+                     [{"part": 1, "picture": 1, "slot": [0.0, 4.0], "beat": "c1/3"}],
+                     [{"part": 2, "picture": 1, "slot": [0.0, 4.0], "beat": "c1/1"}],
+                     []):
+            with self.subTest(pins=pins), self.assertRaises(worker.Refused):
+                worker.op_fill({**request, "pins": pins}, {"vectors": np.ones((10, 8), np.float32)})
+
+    def test_likeness_is_the_cosine_of_the_mean_windows(self):
+        a = np.array([[1, 0], [1, 0]], np.float32)
+        self.assertAlmostEqual(worker.op_likeness({}, {"a": a, "b": a * 3})["likeness"], 1.0, places=6)
+        self.assertAlmostEqual(worker.op_likeness({}, {"a": a, "b": np.array([[0, 1]], np.float32)})["likeness"], 0.0, places=6)
+        self.assertAlmostEqual(worker.op_likeness({}, {"a": a, "b": np.array([[1, 1], [1, -1], [0, 2]], np.float32)})["likeness"],
+                               2 / 3 / np.hypot(2 / 3, 2 / 3), places=6)
+        for b in (np.ones((1, 3), np.float32), np.zeros((0, 2), np.float32), np.zeros((2, 2), np.float32)):
+            with self.subTest(b=b.shape), self.assertRaises(worker.Refused):
+                worker.op_likeness({}, {"a": a, "b": b})
+
+
 def described(cid, video, start, end):
     """A card as the photo library describes it: the reader's beats name their key frames, not their spans."""
     return {"id": cid, "video": video, "start": start, "end": end, "times": [start + 1, start + 4], "frames": [f"{cid}/1", f"{cid}/2"],

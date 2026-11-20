@@ -582,10 +582,21 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 	}
 	now := sqlitedb.FormatTime(s.now())
+	// The version keeps its timeline, which editing it reads (#596). A save
+	// replayed after a restart has not loaded the fill: its version has
+	// its job's fill to read instead.
+	var timeline any
+	if len(run.timeline.Clips) > 0 {
+		encoded, err := json.Marshal(timelineResult{Clips: run.timeline.Clips})
+		if err != nil {
+			return nil, err
+		}
+		timeline = string(encoded)
+	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
-			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
+			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now, timeline); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",

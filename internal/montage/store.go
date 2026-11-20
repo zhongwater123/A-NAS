@@ -320,6 +320,41 @@ ALTER TABLE projects DROP COLUMN song_track;
 		// stopped short of the model's planning, which says when the job
 		// asks again (retryWait).
 		{Up: "ALTER TABLE rounds ADD COLUMN failure TEXT NOT NULL DEFAULT ''", Down: "ALTER TABLE rounds DROP COLUMN failure"},
+		// 8: editing a film after it was made (#596, ADR 0039). A project
+		// keeps the version its member chose; a version its timeline, which
+		// the save writes and a version from before is given from its job's
+		// fill. A draft is a member's edit of one version, slot by slot; each
+		// step is a revision, the last hundred kept, and back is the revision
+		// undoing it goes to.
+		{Up: `
+ALTER TABLE projects ADD COLUMN chosen_version_id TEXT;
+ALTER TABLE versions ADD COLUMN timeline_json TEXT;
+CREATE TABLE drafts (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    base_version_id TEXT NOT NULL UNIQUE REFERENCES versions(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    slots_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX drafts_by_owner ON drafts(owner_user_id);
+CREATE TABLE draft_revisions (
+    draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    op TEXT NOT NULL,
+    seed INTEGER,
+    back INTEGER,
+    slots_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (draft_id, revision)
+);
+`, Down: `
+DROP TABLE draft_revisions;
+DROP TABLE drafts;
+ALTER TABLE versions DROP COLUMN timeline_json;
+ALTER TABLE projects DROP COLUMN chosen_version_id;
+`},
 	},
 }
 
@@ -346,6 +381,11 @@ type Store struct {
 	editing    Editing
 	planner    Planner
 	jobMusic   Music
+	// search finds windows by text for editing (#596); without it searching
+	// and shuffling are not available.
+	search WindowSearch
+	// thumbnails holds a place for each thumbnail being taken.
+	thumbnails chan struct{}
 	// jobWake tells RunJobs a job is due; running holds the running job's
 	// cancel.
 	jobWake chan struct{}
@@ -408,6 +448,8 @@ type Options struct {
 	JobCompute Compute
 	Editing    Editing
 	Planner    Planner
+	// Search finds windows by text, for editing a film (#596).
+	Search WindowSearch
 	// PlanMarkers is the directory of planning markers the waker reads;
 	// without it no member's VNAS is asked to plan.
 	PlanMarkers string
@@ -437,7 +479,7 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	}
 	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
-		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner,
+		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner, search: options.Search, thumbnails: make(chan struct{}, MaxThumbnails),
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
 		planMarkers: options.PlanMarkers, plans: options.Plans}
 	if store.plans == 0 {

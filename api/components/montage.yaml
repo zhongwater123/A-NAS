@@ -2,6 +2,8 @@ parameters:
   MontageProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
   MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
+  MontageVersionID: { name: versionId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  MontageDraftID: { name: draftId, in: path, required: true, schema: { type: string, minLength: 1 } }
 schemas:
   MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
   MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
@@ -15,6 +17,8 @@ schemas:
       assetCount: { type: integer, minimum: 0 }
       createdAt: { type: string, format: date-time }
       previewAssetIds: { type: array, maxItems: 6, description: "Up to six of its videos, spread over the order they were added, for thumbnails.", items: { type: string } }
+      chosenVersionId: { type: string, description: "The version the member confirmed as the project's film (#596)." }
+      chosenFilmAssetId: { type: string, description: "The confirmed version's film; the list and the home page show it first." }
   MontageProjectPage:
     type: object
     additionalProperties: false
@@ -46,6 +50,8 @@ schemas:
       assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
       versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/MontageVersion" } }
       job: { $ref: "#/schemas/MontageJob", description: "The project's latest job, for the page to pick up where it was after a reload." }
+      chosenVersionId: { type: string, description: "The version the member confirmed as the project's film; the others stay, as \"其他版本\"." }
+      chosenFilmAssetId: { type: string, description: "The confirmed version's film." }
   MontageSongSection:
     type: object
     additionalProperties: false
@@ -98,14 +104,16 @@ schemas:
   MontageVersion:
     type: object
     additionalProperties: false
-    required: [number, jobId, plan, filmAssetId, createdAt]
+    required: [id, number, jobId, plan, filmAssetId, createdAt, editable]
     properties:
+      id: { type: string, minLength: 1 }
       number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
       jobId: { type: string, description: "The job that made it." }
       plan: { type: integer, minimum: 1, description: "Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二." }
       filmAssetId: { type: string, description: "The film in the caller's photo library; play and download it there." }
       createdAt: { type: string, format: date-time }
       gone: { type: boolean, description: "The member deleted the film from the photo library." }
+      editable: { type: boolean, description: "Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played." }
   MontageJobStep:
     type: object
     additionalProperties: false
@@ -157,3 +165,118 @@ schemas:
     required: [items]
     properties:
       items: { type: array, items: { $ref: "#/schemas/MontageNotice" } }
+  MontageDraftOp:
+    type: object
+    additionalProperties: false
+    required: [type]
+    description: >-
+      One step of an edit (docs/specs/montage-center.md, 修改的规则). replace puts beat in shot; move moves shot to
+      where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or
+      after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the
+      beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset
+      puts back the whole version; undo goes back a step, up to the last hundred.
+    properties:
+      type: { type: string, enum: [replace, move, delete, lock, unlock, shuffle, revert, reset, undo] }
+      shot: { type: integer, minimum: 1, description: "The shot's number, from 1: replace, move, delete, lock, unlock, revert." }
+      to: { type: integer, minimum: 1, description: "move: the shot whose place it takes." }
+      beat: { type: string, minLength: 1, maxLength: 140, description: "replace: the beat, card/n, as a candidate names it." }
+      seed: { type: integer, minimum: 0, description: "shuffle: the same seed on the same draft picks the same beats." }
+  MontageDraftShot:
+    type: object
+    additionalProperties: false
+    required: [number, beat, assetId, part, picture, slots, start, end, from, to, query, shotSize, what, locked, changed, extended, portrait]
+    properties:
+      number: { type: integer, minimum: 1 }
+      beat: { type: string, description: "card/n: the beat that leads the shot." }
+      assetId: { type: string, description: "The video it comes from." }
+      part: { type: integer, minimum: 1 }
+      picture: { type: integer, minimum: 1 }
+      slots: { type: array, minItems: 1, description: "The music's slots it covers, from 1; more than one where it took a deleted shot's.", items: { type: integer, minimum: 1 } }
+      start: { type: number, minimum: 0, description: "Seconds into the film." }
+      end: { type: number, minimum: 0 }
+      from: { type: number, minimum: 0, description: "Seconds into its video the rough preview plays from: where the version had it, or the beat's piece." }
+      to: { type: number, minimum: 0 }
+      query: { type: string, description: "What the plan asked of its picture: 规划要." }
+      shotSize: { type: string }
+      what: { type: string }
+      locked: { type: boolean }
+      changed: { type: boolean, description: "已换: not a beat the version had in these slots." }
+      extended: { type: boolean, description: "延长: it took a deleted shot's slots." }
+      portrait: { type: boolean, description: "竖: its video is narrower than 16:9 and is shown on a blurred background." }
+  MontageDraft:
+    type: object
+    additionalProperties: false
+    required: [id, versionId, projectId, versionNumber, revision, canUndo, songStart, seconds, plan, parts, shots, counts, updatedAt]
+    properties:
+      id: { type: string, minLength: 1 }
+      versionId: { type: string }
+      projectId: { type: string }
+      versionNumber: { type: integer, minimum: 1 }
+      revision: { type: integer, minimum: 0, description: "A step is made on this revision (baseRevision)." }
+      canUndo: { type: boolean }
+      songStart: { type: number, minimum: 0, description: "Where the version's excerpt starts in its song, in seconds." }
+      seconds: { type: number, minimum: 0, description: "How long the film is." }
+      plan:
+        type: object
+        additionalProperties: false
+        required: [design, opening, ending]
+        description: The first step of the plan the version was cut by.
+        properties: { design: { type: string }, opening: { type: string }, ending: { type: string } }
+      parts:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [number, name, summary, level, start, end]
+          properties:
+            number: { type: integer, minimum: 1 }
+            name: { type: string }
+            summary: { type: string }
+            level: { type: string, description: "The music part's strength, from the song's analysis." }
+            start: { type: number, minimum: 0 }
+            end: { type: number, minimum: 0 }
+      shots: { type: array, items: { $ref: "#/schemas/MontageDraftShot" } }
+      counts:
+        type: object
+        additionalProperties: false
+        required: [shots, videos, portrait]
+        properties: { shots: { type: integer, minimum: 0 }, videos: { type: integer, minimum: 0 }, portrait: { type: integer, minimum: 0 } }
+      message: { type: string, description: "What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上." }
+      updatedAt: { type: string, format: date-time }
+  MontageCandidate:
+    type: object
+    additionalProperties: false
+    required: [beat, assetId, from, to, shotSize, what, scene, portrait, fits]
+    properties:
+      beat: { type: string }
+      assetId: { type: string }
+      from: { type: number, minimum: 0, description: "The part of its video a try plays, in seconds." }
+      to: { type: number, minimum: 0 }
+      shotSize: { type: string }
+      what: { type: string }
+      scene: { type: string }
+      portrait: { type: boolean }
+      fits: { type: boolean, description: "Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen." }
+      usedBy: { type: integer, minimum: 1, description: "已用在第 N 镜: the shot that has it; it cannot be chosen." }
+      score: { type: number, description: "How alike the search found it; only to order by." }
+      takenAt: { type: string, format: date-time }
+  MontageCandidates:
+    type: object
+    additionalProperties: false
+    required: [shot, query, sameCard, planned, results, scenes]
+    properties:
+      shot: { type: integer, minimum: 1 }
+      query: { type: string, description: "The picture's description, which the search box starts with." }
+      sameCard: { type: array, description: "The other beats of the shot's card.", items: { $ref: "#/schemas/MontageCandidate" } }
+      planned: { type: array, description: "The plan's spare beats for its picture.", items: { $ref: "#/schemas/MontageCandidate" } }
+      results: { type: array, description: "With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape.", items: { $ref: "#/schemas/MontageCandidate" } }
+      scenes:
+        type: array
+        maxItems: 9
+        description: "The scenes the cards were described in, most cards first: eight, and the rest as 其他."
+        items:
+          type: object
+          additionalProperties: false
+          required: [scene, cards]
+          properties: { scene: { type: string }, cards: { type: integer, minimum: 1 } }
+

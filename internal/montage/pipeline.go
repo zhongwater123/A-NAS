@@ -33,6 +33,9 @@ type Compute interface {
 	// ShotsAnswer turns the second step's answer back into the outline's
 	// pictures, as the fill reads them.
 	ShotsAnswer(ctx context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error)
+	// Likeness is how alike two beats look: the cosine of the means of the
+	// window vectors each covers, a and b of dimensions values a window.
+	Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error)
 }
 
 // PlanBriefRequest asks for a planning step's brief: the catalog's cards in
@@ -91,7 +94,10 @@ type FillRow struct {
 }
 
 // FillRequest is the fill's input: the catalog's cards, the windows beneath
-// them, the excerpt, the plans and the clear spans already found.
+// them, the excerpt, the plans and the clear spans already found. Pins,
+// for a film edited after it was made (#596), list its slots in film order
+// with the beat that leads each; without them the fill is the eighth
+// version's.
 type FillRequest struct {
 	FPS     int                   `json:"fps"`
 	Rows    []FillRow             `json:"rows"`
@@ -101,6 +107,16 @@ type FillRequest struct {
 	Planned json.RawMessage       `json:"planned"`
 	Picked  json.RawMessage       `json:"picked"`
 	Known   map[string][2]float64 `json:"known"`
+	Pins    []FillPin             `json:"pins,omitempty"`
+}
+
+// FillPin is one slot of an edited film: the plan's part and picture it
+// belongs to, its span in the film and the beat ("card/n") that leads it.
+type FillPin struct {
+	Part    int        `json:"part"`
+	Picture int        `json:"picture"`
+	Slot    [2]float64 `json:"slot"`
+	Beat    string     `json:"beat"`
 }
 
 // FillNeed is the clear span the fill needs next.
