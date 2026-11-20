@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -379,8 +381,8 @@ func (threeHourVideo) Probe(context.Context, *os.File) (ffmpegworker.Probe, erro
 
 // seedWindows stores a done window analysis of the one video in the Catalog
 // at root, as the AI runner would: count windows of 2 seconds with vectors
-// of dimensions, every value its window's index.
-func seedWindows(t *testing.T, root string, count, dimensions int) {
+// of dimensions, every value its window's index, made with identity.
+func seedWindows(t *testing.T, root string, count, dimensions int, identity string) {
 	t.Helper()
 	db, err := sql.Open("sqlite3", filepath.Join(root, "catalog.db"))
 	if err != nil {
@@ -401,7 +403,7 @@ func seedWindows(t *testing.T, root string, count, dimensions int) {
 			binary.LittleEndian.PutUint32(vector[4*d:], math.Float32bits(float32(i)))
 		}
 		if _, err := tx.Exec(`INSERT INTO video_windows(object_id, idx, start_ms, end_ms, flat, vector, identity, created_at)
-VALUES(?, ?, ?, ?, ?, ?, 'model|win', '2026-11-18T00:00:00Z')`, object, i, 2000*i, 2000*(i+1), i%2 == 0, vector); err != nil {
+VALUES(?, ?, ?, ?, ?, ?, ?, '2026-11-18T00:00:00Z')`, object, i, 2000*i, 2000*(i+1), i%2 == 0, vector, identity); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -426,7 +428,7 @@ func TestALongVideosAnalysisComesWhole(t *testing.T) {
 	var grants []string
 	r := start(t, func(config *photoservice.Config) {
 		videoID, grants = grantedStore(t, config.Root, options, 1)
-		seedWindows(t, config.Root, windows, dimensions)
+		seedWindows(t, config.Root, windows, dimensions, "model|win")
 		config.Sessions = &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
 		config.Photos = options
 		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
@@ -446,5 +448,89 @@ func TestALongVideosAnalysisComesWhole(t *testing.T) {
 	}
 	if value := math.Float32frombits(binary.LittleEndian.Uint32(vectors[len(vectors)-4:])); value != windows-1 {
 		t.Fatalf("the last window's vector holds %v", value)
+	}
+}
+
+// textEncoder encodes every text as the same vector, the one of its model.
+type textEncoder struct{}
+
+func (textEncoder) Info(context.Context) (photos.EmbedderInfo, error) {
+	return photos.EmbedderInfo{Model: "model", Dimensions: 4}, nil
+}
+func (textEncoder) EmbedImage(context.Context, *os.File) ([]float32, error) {
+	return nil, photos.ErrAIUnavailable
+}
+func (textEncoder) EmbedQuery(context.Context, string) ([]float32, error) {
+	return []float32{0.5, 0.5, 0.5, 0.5}, nil
+}
+
+// The montage center searches a grant's windows through the socket, any
+// number of texts at once; windows of another model, and requests out of
+// bounds, are refused with their own codes.
+func TestTheGrantSocketSearchesWindows(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "grants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	grantSocket := filepath.Join(dir, "grants.sock")
+	options := photos.Options{DisableCapacityReserve: true, Media: probedVideo{}}
+	var videoID string
+	var grants []string
+	r := start(t, func(config *photoservice.Config) {
+		videoID, grants = grantedStore(t, config.Root, options, 1)
+		// 12 seconds: 6 windows.
+		seedWindows(t, config.Root, 6, 4, "model|win=2s1f,frame=edge512,jpeg82,rot=display,dim=4,l2")
+		config.Sessions = &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
+		config.Photos, config.AI = options, textEncoder{}
+		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
+	})
+	r.ready.Store(true)
+	client := photosapi.GrantClient(grantSocket)
+	texts := make([]string, photos.MaxWindowSearchTexts+3)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("text %d", i)
+	}
+	var matches [][]photos.WindowMatch
+	waitFor(t, func() bool { matches, err = client.SearchWindows(ctx, grants[0], texts, 4); return err == nil })
+	// As many windows as the montage center asks for, k = 200: the texts go
+	// a few a request.
+	if wide, err := client.SearchWindows(ctx, grants[0], texts, photos.MaxWindowMatches); err != nil || len(wide) != len(texts) || len(wide[0]) != 6 {
+		t.Fatalf("SearchWindows(k=%d) = %d lists, %v", photos.MaxWindowMatches, len(wide), err)
+	}
+	if len(matches) != len(texts) {
+		t.Fatalf("SearchWindows() answered %d lists for %d texts", len(matches), len(texts))
+	}
+	for _, list := range matches {
+		// Every value of a window's vector is its index: the last is most alike.
+		if len(list) != 4 || list[0] != (photos.WindowMatch{AssetID: videoID, Window: 5, Score: 10}) || list[3].Window != 2 {
+			t.Fatalf("SearchWindows() = %+v", list)
+		}
+	}
+	// The montage center's edit page reads the same windows through it.
+	hits, err := montage.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
+	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (montage.WindowHit{AssetID: videoID, Window: 5, Score: 10}) {
+		t.Fatalf("montage search = %+v, %v", hits, err)
+	}
+	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, photos.MaxWindowMatches+1); photosapi.GrantErrorCode(err) != photosapi.GrantInvalid {
+		t.Fatalf("SearchWindows() of too many windows = %v", err)
+	}
+	if _, err := client.SearchWindows(ctx, "grant:missing", []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
+		t.Fatalf("SearchWindows() of no grant = %v", err)
+	}
+	db, err := sql.Open("sqlite3", filepath.Join(r.root, "catalog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("UPDATE video_windows SET identity = 'model-before|win' WHERE idx = 0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantModelMismatch {
+		t.Fatalf("SearchWindows() of another model's windows = %v", err)
+	}
+	if _, err := (montage.GrantSearch{Grants: client}).SearchWindows(ctx, grants[0], []string{"sea"}, 4); !errors.Is(err, montage.ErrSearchModel) {
+		t.Fatalf("montage search of another model's windows = %v", err)
 	}
 }

@@ -82,6 +82,9 @@ func TestRequestsAreTyped(t *testing.T) {
 		"key as field":  client.CreateCollection(ctx, vectorindex.Collection{Name: "c", Dimensions: 2, Keywords: []string{"key"}}),
 		"no dimensions": client.CreateCollection(ctx, vectorindex.Collection{Name: "c"}),
 		"no limit":      searchErrLimit(client, 0),
+		"unnamed alias": func() error { _, err := client.Alias(ctx, ""); return err }(),
+		"alias to none": client.SwitchAlias(ctx, "windows", ""),
+		"alias as self": client.SwitchAlias(ctx, "windows", "windows"),
 		"batch, no limit": func() error {
 			_, err := client.SearchBatch(ctx, "c", []vectorindex.Query{{Vector: []float32{1},
 				Scope: vectorindex.Scope{Field: "libraries", Values: []string{"a"}}}})
@@ -333,6 +336,59 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 
 // A video's window points go together when the video does: deleting by the
 // object field removes every one of them, and only them.
+// An alias moves from one collection to another in one change, and back;
+// deleting the collection it names takes it along.
+func TestAnAliasSwitchesBetweenCollections(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, nil)
+	defer func() { _ = client.Close() }()
+	for i, name := range []string{"old", "new"} {
+		if err := client.CreateCollection(ctx, vectorindex.Collection{Name: name, Dimensions: 2, Keywords: []string{"object"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Upsert(ctx, name, []vectorindex.Point{{Key: name, Vector: unit(1, float32(i)),
+			Keywords: map[string][]string{"object": {"a"}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() string {
+		t.Helper()
+		named, err := client.Alias(ctx, "windows")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return named
+	}
+	if named := read(); named != "" {
+		t.Fatalf("Alias() before any = %q", named)
+	}
+	for _, name := range []string{"old", "old", "new", "old"} {
+		if err := client.SwitchAlias(ctx, "windows", name); err != nil {
+			t.Fatalf("SwitchAlias(%s) = %v", name, err)
+		}
+		if named := read(); named != name {
+			t.Fatalf("Alias() after switching to %s = %q", name, named)
+		}
+		// The alias reads as the collection it names.
+		hits, err := client.Search(ctx, "windows", vectorindex.Query{Vector: unit(1, 0),
+			Scope: vectorindex.Scope{Field: "object", Values: []string{"a"}}, Limit: 5, Exact: true})
+		if err != nil || !slices.Equal(hitKeys(hits), []string{name}) {
+			t.Fatalf("search through the alias of %s = %v, %v", name, hits, err)
+		}
+	}
+	// An alias is not a collection of its own.
+	if collections, err := client.Collections(ctx); err != nil || len(collections) != 2 || slices.Contains(collections, "windows") {
+		t.Fatalf("Collections() = %v, %v", collections, err)
+	}
+	if err := client.DeleteCollection(ctx, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if named := read(); named != "" {
+		t.Fatalf("Alias() after its collection went = %q", named)
+	}
+}
+
 func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
