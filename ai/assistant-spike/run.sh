@@ -26,9 +26,17 @@
 #
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
+#   (SPIKE_UPSTREAM is HOST or HOST/PREFIX, default api.deepseek.com; Qwen on Model Studio:
+#   SPIKE_MODEL=qwen3.8-flash SPIKE_UPSTREAM=dashscope.aliyuncs.com/compatible-mode)
 #   ai/assistant-spike/run.sh scenarios FILE [--answer ANSWER]   how the member answers: scenarios.py
 #     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
+#
+# Scored suites (scenarios/*.yaml, docs/development/assistant-scenarios.md): the same command
+# with a .yaml file, e.g. "scenarios scenarios/approval.yaml --baseline /spike/baselines/approval.<model>.json".
+# Results go to $HERMES_SPIKE_DIR/results (the container's /var/lib/vnas-eval/results). The
+# llm-rubric judge needs VNAS_JUDGE_KEY_FILE given to sandbox (and VNAS_JUDGE_MODEL or
+# VNAS_JUDGE_BASE to scenarios when not Qwen3.8-Max on Model Studio).
 #
 # setup.sh makes accounts and spaces by hand (assistant-layout.sh spaces), then installs the
 # assistant (assistant-install.sh) and the probe's files (seed.sh). scripts/system-test.sh
@@ -76,6 +84,12 @@ case "${1:-}" in
     if [[ -n "${SPIKE_MODEL:-}" ]]; then
       key_mount=(-v "${SPIKE_KEY_FILE:?set SPIKE_KEY_FILE}:/etc/anas-spike/model.key:ro")
     fi
+    # The scored suites' judge (vnas_eval/judge.py) runs in scenarios.py, outside the sandbox.
+    if [[ -n "${VNAS_JUDGE_KEY_FILE:-}" ]]; then
+      key_mount+=(-v "$VNAS_JUDGE_KEY_FILE:/etc/anas-spike/judge.key:ro")
+    fi
+    mkdir -p "$work/results"
+    key_mount+=(-v "$work/results:/var/lib/vnas-eval/results")
     # SPIKE_PRODUCT_UID=<uid> puts each member's assistant socket and the change
     # broker's socket in $run on the host, owned by that UID, so a product
     # service running on the host (the UI prototype) reaches them.
@@ -102,14 +116,22 @@ case "${1:-}" in
       sleep 0.5
     done
     # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
-    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
+    docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_NO_CACHE="${SPIKE_NO_CACHE:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
       "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
     ;;
   scenarios)
-    docker exec "$name" /opt/a-nas/assistant-runtimes/spike/venv/bin/python -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
+    judge=()
+    if docker exec "$name" test -f /etc/anas-spike/judge.key; then
+      judge=(-e VNAS_JUDGE_KEY_FILE=/etc/anas-spike/judge.key -e VNAS_JUDGE_MODEL="${VNAS_JUDGE_MODEL:-}"
+        -e VNAS_JUDGE_BASE="${VNAS_JUDGE_BASE:-}")
+    fi
+    repo_commit=$(git -C "$here" rev-parse --short HEAD 2>/dev/null || true)
+    [[ -z $(git -C "$here" status --porcelain -- . 2>/dev/null) ]] || repo_commit+="+dirty"
+    docker exec -e VNAS_EVAL_REPO="$repo_commit" "${judge[@]}" "$name" \
+      /opt/a-nas/assistant-runtimes/spike/venv/bin/python -u /spike/scenarios.py "/spike/${2:-scenarios.txt}" "${@:3}"
     ;;
   test)
     shift

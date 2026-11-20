@@ -14,7 +14,11 @@ The key is the systemd credential a-nas-assistant-deepseek ($CREDENTIALS_DIRECTO
 the Host Agent encrypts when the administrator saves it. The spike and the system test, which
 have no administrator, name a key file in ANAS_ASSISTANT_KEY_FILE and their stand-in model in
 ANAS_ASSISTANT_UPSTREAM (http://HOST:PORT); the spike's research also logs the messages, with
-GATEWAY_LOG_MESSAGES=1.
+GATEWAY_LOG_MESSAGES=1. Its scored scenarios may reach another OpenAI-compatible service, at a
+path below its host (https://HOST/PREFIX, PREFIX put before /v1/...), through a relay such as
+LiteLLM, whose response cache GATEWAY_NO_CACHE=1 goes past: repeated runs of a scenario must be
+answered each time (docs/development/assistant-scenarios.md). Every request names the gateway
+in its User-Agent, which a load balancer in front of such a relay may require.
 """
 import contextlib
 import grp
@@ -38,7 +42,10 @@ CREDENTIAL = "a-nas-assistant-deepseek"
 KEY_FILE = os.environ.get("ANAS_ASSISTANT_KEY_FILE") or os.path.join(os.environ.get("CREDENTIALS_DIRECTORY", ""), CREDENTIAL)
 KEY = Path(KEY_FILE).read_text(encoding="utf-8").strip()
 UPSTREAM = urllib.parse.urlsplit(os.environ.get("ANAS_ASSISTANT_UPSTREAM", "https://api.deepseek.com"))
+PREFIX = UPSTREAM.path.rstrip("/")
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "0") == "1"
+NO_CACHE = os.environ.get("GATEWAY_NO_CACHE", "0") == "1"
+USER_AGENT = "a-nas-assistant-gateway"
 MEMBERS = "a-nas-users"
 # What Hermes asks of the model (model.base_url in the managed policy ends in /v1); nothing else
 # reaches DeepSeek with the key.
@@ -99,8 +106,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward(self, method, body=b""):
         upstream = upstream_connection()
-        headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*")}
-        upstream.request(method, urllib.parse.urlsplit(self.path).path, body=body or None, headers=headers)
+        headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "Accept": self.headers.get("Accept", "*/*"),
+                   "User-Agent": USER_AGENT}
+        upstream.request(method, PREFIX + urllib.parse.urlsplit(self.path).path, body=body or None, headers=headers)
         resp = upstream.getresponse()
         self.send_response(resp.status)
         self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))
@@ -144,6 +152,9 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw or b"{}")
             if not isinstance(body, dict):
                 body = {}
+        if NO_CACHE and method == "POST" and body:
+            # LiteLLM's per-request switch; a Cache-Control header does not reach its cache.
+            raw = json.dumps({**body, "cache": {"no-cache": True}}, ensure_ascii=False).encode()
         try:
             status, usage = self.forward(method, raw)
         except OSError as error:

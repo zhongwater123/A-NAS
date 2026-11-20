@@ -82,9 +82,18 @@ transient() {
 }
 if [[ -n "${SPIKE_MODEL:-}" ]]; then
   # Real model: the gateway holds the key; the sandbox cannot see the key file. The spike's
-  # research logs the messages too.
+  # research logs the messages too. SPIKE_NO_CACHE=1 goes past a LiteLLM relay's response
+  # cache (GATEWAY_NO_CACHE in gateway.py); SPIKE_NO_CACHE=none says the upstream keeps no
+  # response cache at all (a provider's own API, e.g. DeepSeek's). The markers tell
+  # scenarios.py, which records them with the results.
+  rm -f /etc/anas-spike/upstream-no-cache /etc/anas-spike/upstream-uncached
+  case "${SPIKE_NO_CACHE:-}" in
+    1) touch /etc/anas-spike/upstream-no-cache ;;
+    none) touch /etc/anas-spike/upstream-uncached ;;
+  esac
   transient model-gateway --quiet -E ANAS_ASSISTANT_KEY_FILE=/etc/anas-spike/model.key \
     -E ANAS_ASSISTANT_UPSTREAM="https://${SPIKE_UPSTREAM:-api.deepseek.com}" -E GATEWAY_LOG_MESSAGES=1 \
+    -E GATEWAY_NO_CACHE="${SPIKE_NO_CACHE:-}" \
     python3 "$lib/gateway.py" /run/anas-assistant-gw/model.sock /var/log/gateway.jsonl
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
