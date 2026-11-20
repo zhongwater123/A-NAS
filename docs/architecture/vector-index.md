@@ -124,7 +124,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 ### 剪辑中心的窗口集合
 
-剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 的实施方案“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
+剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
 - **名称**：`video_windows_v1_<分析身份的 SHA-256 前 8 位>_<随机 8 位>`；分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。payload 是 `object` 与 `libraries`，两者都建 keyword 索引；点的键是 `<object>#<窗口序号>`。不建 HNSW 图。
 - **集合的身份**：取最新写入的窗口的身份（`video_windows.created_at`，重算时覆盖写会刷新它），和图片按最新向量选模型一样。所以换模型后第一块写入，集合就换成新身份，不必等最后插入的那个视频重算。
 - **outbox**：Catalog migration 18 的 `window_outbox`，触发器建在 `video_windows` 的增删改，以及有窗口的对象的资产增删与图库、回收站变化上。不与 `vector_outbox` 共用：那张表的主键只有 `object_id`，同步只认 `images_*`。

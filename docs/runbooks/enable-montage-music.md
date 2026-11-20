@@ -109,6 +109,6 @@
 ## 关联
 
 - 设计：[剪辑中心的配乐](../architecture/montage-music.md)
-- 规格：[剪辑中心规格的“配乐”](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)
+- 规格：[剪辑中心规格的“配乐”](../specs/montage-center.md#配乐)
 - ADR：[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（运行环境与模型的交付做法）、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
 - 需求：[#559](https://github.com/zhongwater123/A-NAS/issues/559)
