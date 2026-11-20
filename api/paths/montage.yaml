@@ -270,3 +270,91 @@
       "200": { description: The poster, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/versions/{versionId}/confirm:
+  post:
+    operationId: confirmMontageVersion
+    summary: "Confirm this version as the project's film (#596): the list and the home page show it, the others stay as 其他版本. No film is deleted; another version can be confirmed later"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/versions/{versionId}/draft:
+  get:
+    operationId: getMontageVersionDraft
+    summary: "The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409). Another member's version is not_found"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }]
+    responses:
+      "200": { description: The draft, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageDraft" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/drafts/{draftId}/ops:
+  post:
+    operationId: editMontageDraft
+    summary: "One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Nothing here calls a model or renders"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageDraftID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [baseRevision, op]
+            properties:
+              baseRevision: { type: integer, minimum: 0 }
+              op: { $ref: "../components/montage.yaml#/schemas/MontageDraftOp" }
+    responses:
+      "200": { description: "The draft after the step, with what it did", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageDraft" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/drafts/{draftId}/candidates:
+  get:
+    operationId: listMontageDraftCandidates
+    summary: "The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it"
+    parameters:
+      - { $ref: "../components/montage.yaml#/parameters/MontageDraftID" }
+      - { name: shot, in: query, required: true, description: The shot's number from 1., schema: { type: integer, minimum: 1 } }
+      - { name: q, in: query, description: Words to search the project's videos for., schema: { type: string, maxLength: 200 } }
+      - { name: size, in: query, description: Only this shot size (景别)., schema: { type: string, maxLength: 64 } }
+      - { name: scene, in: query, description: "Only this scene; 其他 for the scenes not listed.", schema: { type: string, maxLength: 64 } }
+      - { name: landscape, in: query, description: Only 16:9 videos., schema: { type: boolean } }
+    responses:
+      "200": { description: The candidates, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageCandidates" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/versions/{versionId}/shots:
+  get:
+    operationId: getMontageVersionShots
+    summary: "The version's shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }]
+    responses:
+      "200": { description: The shot list, content: { text/csv: { schema: { type: string } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/drafts/{draftId}/shots:
+  get:
+    operationId: getMontageDraftShots
+    summary: "The draft's shot list, as the version's: a row a shot, the slots it covers, and for a shot that took a deleted shot's slots, which"
+    parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageDraftID" }]
+    responses:
+      "200": { description: The shot list, content: { text/csv: { schema: { type: string } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/projects/{projectId}/frames/{assetId}:
+  get:
+    operationId: getMontageFrame
+    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the edit page's thumbnails. It is not kept: the video's content does not change, so the browser keeps it"
+    parameters:
+      - { $ref: "../components/montage.yaml#/parameters/MontageProjectID" }
+      - { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      - { name: t, in: query, required: true, description: Milliseconds into the video., schema: { type: integer, minimum: 0, maximum: 2147483647 } }
+    responses:
+      "200": { description: The frame, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

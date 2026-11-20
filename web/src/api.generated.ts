@@ -2427,6 +2427,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/versions/{versionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm this version as the project's film (#596): the list and the home page show it, the others stay as 其他版本. No film is deleted; another version can be confirmed later */
+        post: operations["confirmMontageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409). Another member's version is not_found */
+        get: operations["getMontageVersionDraft"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Nothing here calls a model or renders */
+        post: operations["editMontageDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it */
+        get: operations["listMontageDraftCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The version's shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film */
+        get: operations["getMontageVersionShots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The draft's shot list, as the version's: a row a shot, the slots it covers, and for a shot that took a deleted shot's slots, which */
+        get: operations["getMontageDraftShots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/frames/{assetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the edit page's thumbnails. It is not kept: the video's content does not change, so the browser keeps it */
+        get: operations["getMontageFrame"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules": {
         parameters: {
             query?: never;
@@ -8091,6 +8210,10 @@ export interface components {
             createdAt: string;
             /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
             previewAssetIds?: string[];
+            /** @description The version the member confirmed as the project's film (#596). */
+            chosenVersionId?: string;
+            /** @description The confirmed version's film; the list and the home page show it first. */
+            chosenFilmAssetId?: string;
         };
         MontageProjectPage: {
             items: components["schemas"]["MontageProjectSummary"][];
@@ -8113,6 +8236,7 @@ export interface components {
             addedAt: string;
         };
         MontageVersion: {
+            id: string;
             /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
             number: number;
             /** @description The job that made it. */
@@ -8125,6 +8249,8 @@ export interface components {
             createdAt: string;
             /** @description The member deleted the film from the photo library. */
             gone?: boolean;
+            /** @description Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played. */
+            editable: boolean;
         };
         MontageJobStep: {
             /**
@@ -8180,6 +8306,10 @@ export interface components {
             versions: components["schemas"]["MontageVersion"][];
             /** @description The project's latest job, for the page to pick up where it was after a reload. */
             job?: components["schemas"]["MontageJob"];
+            /** @description The version the member confirmed as the project's film; the others stay, as "其他版本". */
+            chosenVersionId?: string;
+            /** @description The confirmed version's film. */
+            chosenFilmAssetId?: string;
         };
         MontageNotice: {
             /** @enum {string} */
@@ -8260,6 +8390,120 @@ export interface components {
             /** @description Where the eighth version's rule starts the excerpt: around the first chorus. */
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
+        };
+        MontageDraftShot: {
+            number: number;
+            /** @description card/n: the beat that leads the shot. */
+            beat: string;
+            /** @description The video it comes from. */
+            assetId: string;
+            part: number;
+            picture: number;
+            /** @description The music's slots it covers, from 1; more than one where it took a deleted shot's. */
+            slots: number[];
+            /** @description Seconds into the film. */
+            start: number;
+            end: number;
+            /** @description Seconds into its video the rough preview plays from: where the version had it, or the beat's piece. */
+            from: number;
+            to: number;
+            /** @description What the plan asked of its picture: 规划要. */
+            query: string;
+            shotSize: string;
+            what: string;
+            locked: boolean;
+            /** @description 已换: not a beat the version had in these slots. */
+            changed: boolean;
+            /** @description 延长: it took a deleted shot's slots. */
+            extended: boolean;
+            /** @description 竖: its video is narrower than 16:9 and is shown on a blurred background. */
+            portrait: boolean;
+        };
+        MontageDraft: {
+            id: string;
+            versionId: string;
+            projectId: string;
+            versionNumber: number;
+            /** @description A step is made on this revision (baseRevision). */
+            revision: number;
+            canUndo: boolean;
+            /** @description Where the version's excerpt starts in its song, in seconds. */
+            songStart: number;
+            /** @description How long the film is. */
+            seconds: number;
+            /** @description The first step of the plan the version was cut by. */
+            plan: {
+                design: string;
+                opening: string;
+                ending: string;
+            };
+            parts: {
+                number: number;
+                name: string;
+                summary: string;
+                /** @description The music part's strength, from the song's analysis. */
+                level: string;
+                start: number;
+                end: number;
+            }[];
+            shots: components["schemas"]["MontageDraftShot"][];
+            counts: {
+                shots: number;
+                videos: number;
+                portrait: number;
+            };
+            /** @description What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上. */
+            message?: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description One step of an edit (docs/specs/montage-center.md, 修改的规则). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred. */
+        MontageDraftOp: {
+            /** @enum {string} */
+            type: "replace" | "move" | "delete" | "lock" | "unlock" | "shuffle" | "revert" | "reset" | "undo";
+            /** @description The shot's number, from 1: replace, move, delete, lock, unlock, revert. */
+            shot?: number;
+            /** @description move: the shot whose place it takes. */
+            to?: number;
+            /** @description replace: the beat, card/n, as a candidate names it. */
+            beat?: string;
+            /** @description shuffle: the same seed on the same draft picks the same beats. */
+            seed?: number;
+        };
+        MontageCandidate: {
+            beat: string;
+            assetId: string;
+            /** @description The part of its video a try plays, in seconds. */
+            from: number;
+            to: number;
+            shotSize: string;
+            what: string;
+            scene: string;
+            portrait: boolean;
+            /** @description Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen. */
+            fits: boolean;
+            /** @description 已用在第 N 镜: the shot that has it; it cannot be chosen. */
+            usedBy?: number;
+            /** @description How alike the search found it; only to order by. */
+            score?: number;
+            /** Format: date-time */
+            takenAt?: string;
+        };
+        MontageCandidates: {
+            shot: number;
+            /** @description The picture's description, which the search box starts with. */
+            query: string;
+            /** @description The other beats of the shot's card. */
+            sameCard: components["schemas"]["MontageCandidate"][];
+            /** @description The plan's spare beats for its picture. */
+            planned: components["schemas"]["MontageCandidate"][];
+            /** @description With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape. */
+            results: components["schemas"]["MontageCandidate"][];
+            /** @description The scenes the cards were described in, most cards first: eight, and the rest as 其他. */
+            scenes: {
+                scene: string;
+                cards: number;
+            }[];
         };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
@@ -8481,6 +8725,8 @@ export interface components {
         MontageCursor: string;
         MontageProjectID: string;
         MontageJobID: string;
+        MontageVersionID: string;
+        MontageDraftID: string;
     };
     requestBodies: never;
     headers: never;
@@ -8750,6 +8996,11 @@ export type MontageSongSection = components['schemas']['MontageSongSection'];
 export type MontageSongPart = components['schemas']['MontageSongPart'];
 export type MontageSongSelection = components['schemas']['MontageSongSelection'];
 export type MontageSong = components['schemas']['MontageSong'];
+export type MontageDraftShot = components['schemas']['MontageDraftShot'];
+export type MontageDraft = components['schemas']['MontageDraft'];
+export type MontageDraftOp = components['schemas']['MontageDraftOp'];
+export type MontageCandidate = components['schemas']['MontageCandidate'];
+export type MontageCandidates = components['schemas']['MontageCandidates'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -8814,6 +9065,8 @@ export type ParameterFamilyReactionName = components['parameters']['FamilyReacti
 export type ParameterMontageCursor = components['parameters']['MontageCursor'];
 export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
 export type ParameterMontageJobId = components['parameters']['MontageJobID'];
+export type ParameterMontageVersionId = components['parameters']['MontageVersionID'];
+export type ParameterMontageDraftId = components['parameters']['MontageDraftID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -13659,6 +13912,205 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    confirmMontageVersion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageDraft"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    editMontageDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    baseRevision: number;
+                    op: components["schemas"]["MontageDraftOp"];
+                };
+            };
+        };
+        responses: {
+            /** @description The draft after the step, with what it did */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageDraft"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listMontageDraftCandidates: {
+        parameters: {
+            query: {
+                /** @description The shot's number from 1. */
+                shot: number;
+                /** @description Words to search the project's videos for. */
+                q?: string;
+                /** @description Only this shot size (景别). */
+                size?: string;
+                /** @description Only this scene; 其他 for the scenes not listed. */
+                scene?: string;
+                /** @description Only 16:9 videos. */
+                landscape?: boolean;
+            };
+            header?: never;
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageCandidates"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionShots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shot list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    getMontageDraftShots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shot list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    getMontageFrame: {
+        parameters: {
+            query: {
+                /** @description Milliseconds into the video. */
+                t: number;
+            };
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+                assetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frame */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
