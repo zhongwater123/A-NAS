@@ -56,6 +56,14 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"GET /notices":                         h.notices,
 		"GET /hero":                            h.hero("film"),
 		"GET /hero/poster":                     h.hero("poster"),
+		// Editing a film after it was made (#596).
+		"POST /versions/{versionID}/confirm":         h.confirmVersion,
+		"GET /versions/{versionID}/draft":            h.versionDraft,
+		"POST /drafts/{draftID}/ops":                 h.editDraft,
+		"GET /drafts/{draftID}/candidates":           h.draftCandidates,
+		"GET /versions/{versionID}/shots":            h.versionShots,
+		"GET /drafts/{draftID}/shots":                h.draftShots,
+		"GET /projects/{projectID}/frames/{assetID}": h.frame,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -102,6 +110,9 @@ func (h *handler) withUser(next route) http.HandlerFunc {
 const maxJSONBytes = 64 << 10
 
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
+	if failEdit(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, montage.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
