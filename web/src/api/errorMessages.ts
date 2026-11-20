@@ -112,6 +112,7 @@ const domains = {
     job_in_progress: "这个项目已有任务在进行，等这个任务做完",
     draft_conflict: "修改稿在别的窗口改过，已重新读取",
     not_editable: "这一版只能播放，不能修改",
+    analysis_changed: "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪",
     search_model_changed: "分析模型已更新，重新分析后才能搜索",
     search_unavailable: "现在搜不了素材，请稍后重试",
     job_state: "任务的状态已经变化，页面已刷新",
