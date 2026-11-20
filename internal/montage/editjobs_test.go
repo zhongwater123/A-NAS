@@ -40,7 +40,7 @@ func (g *editGrants) SaveFilm(_ context.Context, grantID, versionKey, _ string, 
 
 // Fill answers a pinned fill as the Worker would for beats that fill their
 // slots: each slot one piece of its beat, from a third before its keyframe.
-func (editCompute) Fill(_ context.Context, request FillRequest, _ []float32, _ int) (FillAnswer, error) {
+func (*editCompute) Fill(_ context.Context, request FillRequest, _ []float32, _ int) (FillAnswer, error) {
 	if request.Pins == nil {
 		return FillAnswer{}, errors.New("an edit's fill without pins")
 	}

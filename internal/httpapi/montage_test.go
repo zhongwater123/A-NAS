@@ -188,7 +188,8 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	before := served
 	for route, body := range map[string]string{
 		path + "/generate": `{"requestKey":"g4"}`, jobPath + "/replan": "", jobPath + "/retry-analysis": "",
-		jobPath + "/drop-assets": `{"assetIds":["` + videos[1] + `"]}`,
+		jobPath + "/drop-assets":                   `{"assetIds":["` + videos[1] + `"]}`,
+		"/api/v1/montage/versions/version:x/recut": `{"requestKey":"r1","change":"结尾留长一点"}`,
 	} {
 		response := owner.do(http.MethodPost, route, body, nil, http.StatusServiceUnavailable)
 		if !strings.Contains(response.Body.String(), `"assistant_unavailable"`) {

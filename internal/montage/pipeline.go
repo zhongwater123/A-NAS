@@ -48,6 +48,10 @@ type PlanBriefRequest struct {
 	Ask           string          `json:"ask"`
 	Chronological bool            `json:"chronological"`
 	Picked        json.RawMessage `json:"picked,omitempty"`
+	// Change and Base, for a recut (#596): the member's sentence, and the
+	// outline and shots of the version it starts from.
+	Change string          `json:"change,omitempty"`
+	Base   json.RawMessage `json:"base,omitempty"`
 }
 
 // PlanBrief is a step's brief: Data and Schema go to the model; Slots and

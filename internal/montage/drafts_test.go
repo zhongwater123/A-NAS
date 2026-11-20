@@ -93,10 +93,15 @@ func (g *editGrants) Open(_ context.Context, _, assetID string) (*os.File, strin
 	return file, "object:" + assetID, nil
 }
 
-// editCompute's likeness is the dot product of the first windows.
-type editCompute struct{ Compute }
+// editCompute's likeness is the dot product of the first windows; it
+// keeps the briefs asked for, and briefs a recut for plan-v2 when stale.
+type editCompute struct {
+	Compute
+	briefed []PlanBriefRequest
+	stale   bool
+}
 
-func (editCompute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
+func (*editCompute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
 	var dot float64
 	for d := range dimensions {
 		dot += float64(a[d] * b[d])
@@ -176,7 +181,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	for i := 10; i < 15; i++ {
 		env.grants.windows[videoA][i] = 1
 	}
-	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: editCompute{}, Search: env.search, Editing: env.frames, Planner: FixedPlanner{},
+	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: &editCompute{}, Search: env.search, Editing: env.frames, Planner: FixedPlanner{},
 		Now: func() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +223,8 @@ func newEditEnv(t *testing.T) *editEnv {
 			[]any{videoA, "object:" + videoA, at, videoB, "object:" + videoB, at}},
 		{`INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, state, not_before, created_at, updated_at, plans)
 			VALUES('job:1', ?, 'project:1', 'k', '{}', 'done', ?, ?, ?, 2)`, []any{editOwner, at, at, at}},
+		{`INSERT INTO job_assets(job_id, asset_id, object_id) VALUES('job:1', ?, ?), ('job:1', ?, ?)`,
+			[]any{videoA, "object:" + videoA, videoB, "object:" + videoB}},
 	} {
 		store.Exec(t, statement.query, statement.args...)
 	}
