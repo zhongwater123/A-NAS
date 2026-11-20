@@ -1,0 +1,10 @@
+Package: a-nas-hotspot-radio
+Version: @VERSION@
+Architecture: @ARCH@
+Section: net
+Priority: optional
+Maintainer: A-NAS <a-nas@localhost>
+Depends: @DEPENDS@
+Description: A-NAS experimental hotspot radio dependencies
+ Installs MediaTek firmware and wireless inspection tools for hotspot
+ radio validation. It does not configure network interfaces.

@@ -12,6 +12,8 @@
 # - The Docker and Caddy packages that a-nas-host depends on are the upstream
 #   files deploy/upstream/packages.json pins (ADR 0015), fetched into
 #   CONTENT/upstream once.
+# - The target's hotspot radio metapackage and its pinned Debian packages
+#   are available in the repository for optional installation.
 # - a-nas-archive-keyring carries the public key that signs the repository.
 #
 # A commit with a release tag goes to the release distribution and to dev,
@@ -53,7 +55,7 @@ commit=$(git -C "$repo" rev-parse --short=12 HEAD)
 
 # The packages the gates passed, at this version.
 products=()
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy a-nas-hotspot-radio; do
   deb=$(find "$build/packages" -maxdepth 1 -name "${package}_${version}_*.deb" -print -quit 2>/dev/null)
   [[ -n "$deb" ]] || { echo "missing $package $version: run make packages" >&2; exit 2; }
   products+=("$deb")
@@ -111,6 +113,10 @@ done
 upstream=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream")
 mapfile -t upstream <<<"$upstream"
 debs+=("${upstream[@]}")
+arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+radio=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream" "$repo/deploy/upstream/hotspot-radio-$arch.json")
+mapfile -t radio <<<"$radio"
+debs+=("${radio[@]}")
 "$repo/scripts/apt-repository.sh" keyring "$incoming" "$version" "$public"
 debs+=("$incoming/a-nas-archive-keyring_${version}_all.deb")
 publish dev
