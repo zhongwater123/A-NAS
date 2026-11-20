@@ -222,6 +222,18 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	return montage.FillAnswer{Clips: clips}, nil
 }
 
+// Likeness is how many of the dimensions both beats' first windows share.
+func (c *compute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
+	if dimensions <= 0 || len(a) < dimensions || len(b) < dimensions {
+		return 0, fmt.Errorf("%w: no windows", montage.ErrWorkerRefused)
+	}
+	var dot float64
+	for d := range dimensions {
+		dot += float64(a[d] * b[d])
+	}
+	return dot, nil
+}
+
 // PlanBrief briefs either step with a schema that wants a non-empty list of
 // parts, each a name of at most the catalog's card ids. As the Worker's
 // plan_brief, it reads each card's beats by their number among the card's
