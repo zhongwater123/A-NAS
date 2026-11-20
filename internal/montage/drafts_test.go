@@ -44,6 +44,10 @@ type editGrants struct {
 	opened  []string
 	// identity is the windows' model now: the versions were cut with "".
 	identity string
+	// trashed are the videos in the trash; films the films saved, by
+	// version key.
+	trashed map[string]bool
+	films   map[string]string
 }
 
 func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
@@ -68,7 +72,11 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 func (g *editGrants) Lookup(_ context.Context, _ string, ids []string) ([]photos.GrantedAsset, error) {
 	var found []photos.GrantedAsset
 	for _, id := range ids {
-		found = append(found, photos.GrantedAsset{AssetID: id, ObjectID: "object:" + id, Status: photos.GrantAvailable})
+		status := photos.GrantAvailable
+		if g.trashed[id] {
+			status = photos.GrantTrashed
+		}
+		found = append(found, photos.GrantedAsset{AssetID: id, ObjectID: "object:" + id, Status: status})
 	}
 	return found, nil
 }
@@ -121,6 +129,8 @@ func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []st
 type editFrames struct {
 	Editing
 	asked []ffmpegworker.FramesRequest
+	// rendered counts the frames of the film being rendered.
+	rendered int
 }
 
 func (e *editFrames) Frames(_ context.Context, _ *os.File, request ffmpegworker.FramesRequest, each func([]byte) error) (ffmpegworker.FramesResult, error) {
@@ -166,7 +176,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	for i := 10; i < 15; i++ {
 		env.grants.windows[videoA][i] = 1
 	}
-	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: editCompute{}, Search: env.search, Editing: env.frames,
+	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: editCompute{}, Search: env.search, Editing: env.frames, Planner: FixedPlanner{},
 		Now: func() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)

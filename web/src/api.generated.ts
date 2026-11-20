@@ -2460,6 +2460,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/drafts/{draftId}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), and a draft changed since it was read draft_conflict (409). A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model */
+        post: operations["saveMontageDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project's song is now, as the project's song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft's songStart. */
+        get: operations["getMontageDraftSong"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/drafts/{draftId}/candidates": {
         parameters: {
             query?: never;
@@ -8218,13 +8252,24 @@ export interface components {
             gone?: boolean;
             /** @description Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played. */
             editable: boolean;
+            /**
+             * @description plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.
+             * @enum {string}
+             */
+            kind: "plan" | "edit" | "recut";
+            /** @description The version an edit or a recut came from. */
+            sourceVersionId?: string;
+            /** @description That version's number, while it is recorded. */
+            sourceNumber?: number;
+            /** @description An edit: the draft's revision it was rendered from. */
+            draftRevision?: number;
         };
         MontageJobStep: {
             /**
-             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2. An edit's are source, fill, render and save.
              * @enum {string}
              */
-            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2" | "source";
             /**
              * @description A step that stopped with the job shows the job's state.
              * @enum {string}
@@ -8238,6 +8283,11 @@ export interface components {
         MontageJob: {
             id: string;
             projectId: string;
+            /**
+             * @description generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
+             * @enum {string}
+             */
+            kind: "generate" | "edit" | "recut";
             /** @enum {string} */
             state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
             /** @description The step the job is at or stopped at. */
@@ -8249,7 +8299,7 @@ export interface components {
             waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
-            /** @description The videos missing, too long, or whose analysis failed. */
+            /** @description The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them. */
             missingAssetIds?: string[];
             /** @description The first 方案's film. */
             version?: components["schemas"]["MontageVersion"];
@@ -13909,6 +13959,87 @@ export interface operations {
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    saveMontageDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The edit job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageDraftSong: {
+        parameters: {
+            query?: {
+                /** @description Seconds to start a decoded song from; ignored for other songs. */
+                start?: number;
+            };
+            header?: {
+                Range?: string;
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };

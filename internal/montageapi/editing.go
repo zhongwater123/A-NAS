@@ -76,6 +76,34 @@ func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user a
 	httpjson.Write(w, http.StatusOK, candidates)
 }
 
+type saveDraftRequest struct {
+	RequestKey string `json:"requestKey"`
+}
+
+func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request saveDraftRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	job, _, err := h.store.SaveDraft(r.Context(), user.ID, r.PathValue("draftID"), request.RequestKey)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusAccepted, job)
+}
+
+// draftSong is the song of the version a draft edits, for the rough
+// preview: the one it was made with, whatever the project's is now.
+func (h *handler) draftSong(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	audio, err := h.store.OpenDraftSongAudio(r.Context(), user.ID, r.PathValue("draftID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.serveSong(w, r, audio)
+}
+
 func (h *handler) versionShots(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	list, err := h.store.VersionShots(r.Context(), user.ID, r.PathValue("versionID"))
 	h.shotList(w, r, list, err)
@@ -125,7 +153,7 @@ func failEdit(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, montage.ErrNotEditable):
 		httpjson.WriteError(w, http.StatusConflict, "not_editable", "the version can only be played")
 	case errors.Is(err, montage.ErrAnalysisChanged):
-		httpjson.WriteError(w, http.StatusConflict, "analysis_changed", "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪")
+		httpjson.WriteError(w, http.StatusConflict, "analysis_changed", montage.AnalysisChangedReason)
 	case errors.Is(err, montage.ErrSearchModel):
 		httpjson.WriteError(w, http.StatusConflict, "search_model_changed", "分析模型已更新，重新分析后才能搜索")
 	case errors.Is(err, montage.ErrSearchUnavailable):

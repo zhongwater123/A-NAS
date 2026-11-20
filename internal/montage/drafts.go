@@ -40,6 +40,10 @@ var (
 	ErrSearchModel = errors.New("the windows were analysed with another model")
 )
 
+// AnalysisChangedReason tells the member why a version analysed again can
+// no longer be edited, on the edit page and on a save that found it.
+const AnalysisChangedReason = "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"
+
 // EditRefusal is a step the rules do not allow; Reason says why, for the
 // member.
 type EditRefusal struct{ Reason string }
@@ -145,15 +149,19 @@ type cardAbout struct {
 type editSource struct {
 	versionID, projectID, owner, grantID, jobID string
 	number, plan                                int
-	clips                                       []timelineClip
-	cards                                       map[string]Card
-	about                                       map[string]cardAbout
-	catalog                                     []string
-	videos                                      map[string]analysedVideo
-	planned                                     plannedDoc
-	picked                                      pickedDoc
-	music                                       musicDoc
-	excerpt                                     Excerpt
+	// planJob and planNo are the job and 方案 the version was planned in:
+	// its own, or for an edited version the one it came from.
+	planJob string
+	planNo  int
+	clips   []timelineClip
+	cards   map[string]Card
+	about   map[string]cardAbout
+	catalog []string
+	videos  map[string]analysedVideo
+	planned plannedDoc
+	picked  pickedDoc
+	music   musicDoc
+	excerpt Excerpt
 }
 
 // versionSource reads what owner's version was cut from. A version saved
@@ -172,10 +180,23 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		return nil, err
 	}
 	src.grantID = grantID.String
+	src.planJob, src.planNo = src.jobID, src.plan
+	var settingsJSON string
+	if err := s.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", src.jobID).Scan(&settingsJSON); err != nil {
+		return nil, err
+	}
+	var settings JobSettings
+	if err := json.Unmarshal([]byte(settingsJSON), &settings); err == nil && settings.Edit != nil {
+		src.planJob, src.planNo = settings.Edit.Job, settings.Edit.Plan
+	}
 	results := map[string][]byte{}
-	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", src.plan), planStep("shots", src.plan), planStep("fill", src.plan)} {
+	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", src.planNo), planStep("shots", src.planNo), planStep("fill", src.plan)} {
+		job := src.planJob
+		if name == planStep("fill", src.plan) {
+			job = src.jobID
+		}
 		var result sql.NullString
-		err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", src.jobID, name).Scan(&result)
+		err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", job, name).Scan(&result)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -193,8 +214,8 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	if timeline.String == "" || json.Unmarshal([]byte(timeline.String), &filled) != nil || len(filled.Clips) == 0 ||
 		json.Unmarshal(results["analysis"], &analysis) != nil || json.Unmarshal(results["catalog"], &catalog) != nil ||
 		json.Unmarshal(results["song"], &src.excerpt) != nil || json.Unmarshal(src.excerpt.Music, &src.music) != nil ||
-		json.Unmarshal(results[planStep("pick", src.plan)], &src.picked) != nil ||
-		json.Unmarshal(results[planStep("shots", src.plan)], &src.planned) != nil {
+		json.Unmarshal(results[planStep("pick", src.planNo)], &src.picked) != nil ||
+		json.Unmarshal(results[planStep("shots", src.planNo)], &src.planned) != nil {
 		return nil, ErrNotEditable
 	}
 	for _, raw := range filled.Clips {

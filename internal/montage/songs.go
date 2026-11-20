@@ -446,11 +446,15 @@ func (s *Store) songRowFor(ctx context.Context, tx *sql.Tx, owner, sha, title, c
 	return id, err
 }
 
-// A copy is needed by the current project or by the settings captured
-// by an unfinished job, even after the project has changed its song.
+// A copy is needed by the current project, by the settings captured by an
+// unfinished job, even after the project has changed its song, and by any
+// version's job: editing a version renders and previews it with the song it
+// was made with (#596).
 const unusedSongs = `NOT EXISTS (SELECT 1 FROM projects WHERE song_id = songs.id)
 	AND NOT EXISTS (SELECT 1 FROM jobs WHERE owner_user_id = songs.owner_user_id AND ` + activeStateQuery + `
-		AND json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.songId') = songs.id)`
+		AND json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.songId') = songs.id)
+	AND NOT EXISTS (SELECT 1 FROM versions v JOIN jobs j ON j.id = v.job_id WHERE j.owner_user_id = songs.owner_user_id
+		AND json_extract(CASE WHEN json_valid(j.settings_json) THEN j.settings_json END, '$.songId') = songs.id)`
 
 func forgetUnusedSongs(ctx context.Context, q queryer, owner string) error {
 	_, err := q.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ? AND "+unusedSongs, owner)
@@ -679,20 +683,7 @@ func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (Son
 	if err != nil {
 		return SongAudio{}, err
 	}
-	row, err := s.song(ctx, s.db, chosen.songID.String)
-	if err != nil {
-		return SongAudio{}, err
-	}
-	file, err := os.Open(s.songPath(row.sha))
-	if err != nil {
-		return SongAudio{}, err
-	}
-	info, err := file.Stat()
-	if err != nil {
-		return SongAudio{}, errors.Join(err, file.Close())
-	}
-	return SongAudio{File: file, ContentType: row.contentType, ModifiedAt: info.ModTime(),
-		Song: SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == ""}}, nil
+	return s.openSong(ctx, chosen.songID.String)
 }
 
 // DecodeSong streams audio, a song OpenSongAudio opened, as FLAC from start

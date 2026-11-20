@@ -29,6 +29,7 @@ function job(state: MontageJob["state"], extra: Partial<MontageJob> = {}): Monta
   return {
     id: "job:1",
     projectId: "project:1",
+    kind: "generate",
     state,
     createdAt: "2026-11-18T10:00:00Z",
     steps: steps.map((name, i) => ({
@@ -195,6 +196,7 @@ const saved: MontageProjectDetail["versions"] = [
     filmAssetId: "photo:film-1",
     createdAt: "2026-11-18T10:05:00Z",
     editable: true,
+    kind: "plan",
   },
   {
     id: "version:2",
@@ -204,6 +206,7 @@ const saved: MontageProjectDetail["versions"] = [
     filmAssetId: "photo:film-2",
     createdAt: "2026-11-18T10:08:00Z",
     editable: true,
+    kind: "plan",
   },
 ];
 
@@ -520,6 +523,7 @@ describe("剪辑中心", () => {
       filmAssetId: "photo:film-0",
       createdAt: "2026-11-17T10:00:00Z",
       editable: true,
+      kind: "plan" as const,
     };
     const gone = { ...earlier, id: "version:00", number: 2, plan: 2, filmAssetId: "photo:film-00", gone: true };
     const later = saved.map((version) => ({ ...version, id: `${version.id}+2`, number: version.number + 2 }));

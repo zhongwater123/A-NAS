@@ -4265,6 +4265,81 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/save:
+    post:
+      operationId: saveMontageDraft
+      summary: 'Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), and a draft changed since it was read draft_conflict (409). A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+      responses:
+        '202':
+          description: The edit job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/song:
+    get:
+      operationId: getMontageDraftSong
+      description: 'The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project''s song is now, as the project''s song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft''s songStart.'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+        - name: start
+          in: query
+          description: Seconds to start a decoded song from; ignored for other songs.
+          schema:
+            type: number
+            minimum: 0
+      responses:
+        '200':
+          description: Audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the song.
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/drafts/{draftId}/candidates:
     get:
       operationId: listMontageDraftCandidates
@@ -17023,6 +17098,7 @@ components:
         - filmAssetId
         - createdAt
         - editable
+        - kind
       properties:
         id:
           type: string
@@ -17050,6 +17126,24 @@ components:
         editable:
           type: boolean
           description: Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played.
+        kind:
+          type: string
+          enum:
+            - plan
+            - edit
+            - recut
+          description: 'plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.'
+        sourceVersionId:
+          type: string
+          description: The version an edit or a recut came from.
+        sourceNumber:
+          type: integer
+          minimum: 1
+          description: That version's number, while it is recorded.
+        draftRevision:
+          type: integer
+          minimum: 0
+          description: 'An edit: the draft''s revision it was rendered from.'
     MontageJobStep:
       type: object
       additionalProperties: false
@@ -17059,7 +17153,7 @@ components:
       properties:
         name:
           type: string
-          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2.'
+          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2. An edit''s are source, fill, render and save.'
           enum:
             - analysis
             - catalog
@@ -17074,6 +17168,7 @@ components:
             - fill-2
             - render-2
             - save-2
+            - source
         state:
           type: string
           enum:
@@ -17098,6 +17193,7 @@ components:
       required:
         - id
         - projectId
+        - kind
         - state
         - steps
         - createdAt
@@ -17108,6 +17204,13 @@ components:
         projectId:
           type: string
           minLength: 1
+        kind:
+          type: string
+          enum:
+            - generate
+            - edit
+            - recut
+          description: generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
         state:
           type: string
           enum:
@@ -17147,7 +17250,7 @@ components:
             $ref: '#/components/schemas/MontageJobStep'
         missingAssetIds:
           type: array
-          description: The videos missing, too long, or whose analysis failed.
+          description: The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.
           items:
             type: string
         version:
