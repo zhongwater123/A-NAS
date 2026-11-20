@@ -5,7 +5,7 @@
 // under another, and each feature sets its colours through the --desk-notice-*
 // variables of a class of its own.
 import { ChevronRight, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useState } from "react";
 
 import styles from "./deskNotice.module.css";
 
@@ -41,12 +41,16 @@ export function DeskNotice({
   className?: string;
 }) {
   const [held, setHeld] = useState(false);
+  const dismiss = useEffectEvent(onDismiss);
+  // The desktop re-renders the notice every few seconds as it polls; the
+  // timer starts over only when what the notice says changes or it is let go.
+  const says = lines.map((line) => (typeof line === "string" ? line : line.key)).join("\n");
 
   useEffect(() => {
-    if (!lines.length || held) return;
-    const timer = window.setTimeout(onDismiss, HIDE_MS);
+    if (!says || held) return;
+    const timer = window.setTimeout(dismiss, HIDE_MS);
     return () => window.clearTimeout(timer);
-  });
+  }, [says, held]);
 
   if (!lines.length) return null;
   return (

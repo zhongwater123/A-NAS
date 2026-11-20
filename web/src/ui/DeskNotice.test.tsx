@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Bell } from "lucide-react";
+import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DeskNotice } from "./DeskNotice";
@@ -54,6 +55,34 @@ describe("a feature's notice on the desktop", () => {
     fireEvent.click(screen.getByRole("button", { name: "知道了" }));
     expect(onAction).toHaveBeenCalledOnce();
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("still hides itself while the desktop around it re-renders every 10 seconds", () => {
+    const onDismiss = vi.fn();
+    function Desktop() {
+      const [, setTick] = useState(0);
+      useEffect(() => {
+        const poll = window.setInterval(() => setTick((tick) => tick + 1), 10_000);
+        return () => window.clearInterval(poll);
+      }, []);
+      // A new callback each render, as the desktop passes its arrows.
+      return (
+        <DeskNotice
+          label="测试提醒"
+          source="测试"
+          icon={<Bell />}
+          lines={["一件事"]}
+          onOpen={() => {}}
+          onDismiss={() => onDismiss()}
+        />
+      );
+    }
+    render(<Desktop />);
+    // One second at a time, so each poll's re-render is committed before the next.
+    for (let second = 0; second < 14; second++) act(() => vi.advanceTimersByTime(1_000));
+    expect(onDismiss).not.toHaveBeenCalled();
+    for (let second = 0; second < 2; second++) act(() => vi.advanceTimersByTime(1_000));
+    expect(onDismiss).toHaveBeenCalledOnce();
   });
 
   it("hides itself after a while, unless the pointer or the focus is on it", () => {
