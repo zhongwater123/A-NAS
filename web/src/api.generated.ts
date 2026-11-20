@@ -8508,6 +8508,8 @@ export interface components {
             /** @description The film's shots, none of them changed, extended or locked. */
             shots: components["schemas"]["MontageDraftShot"][];
             counts: components["schemas"]["MontageFilmCounts"];
+            /** @description What the plan found the videos do not have, as the planner wrote it: shown on the version's card. */
+            unmet: string[];
         };
         MontageDraft: {
             id: string;

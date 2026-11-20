@@ -103,6 +103,7 @@ type plannedPicture struct {
 
 type plannedDoc struct {
 	Answer struct {
+		Unmet json.RawMessage `json:"unmet"`
 		Parts []struct {
 			Name     string           `json:"name"`
 			Pictures []plannedPicture `json:"pictures"`
@@ -111,9 +112,10 @@ type plannedDoc struct {
 }
 
 type pickedDoc struct {
-	Design  string `json:"design"`
-	Opening string `json:"opening"`
-	Ending  string `json:"ending"`
+	Design  string          `json:"design"`
+	Opening string          `json:"opening"`
+	Ending  string          `json:"ending"`
+	Unmet   json.RawMessage `json:"unmet"`
 	Parts   []struct {
 		Name    string `json:"name"`
 		Summary string `json:"summary"`
@@ -572,6 +574,8 @@ type VersionOutline struct {
 	Parts         []DraftPart `json:"parts"`
 	Shots         []DraftShot `json:"shots"`
 	Counts        DraftCounts `json:"counts"`
+	// Unmet is what the plan found the videos do not have.
+	Unmet []string `json:"unmet"`
 }
 
 // VersionOutline reads owner's version as its film is. It makes no draft,
@@ -583,7 +587,27 @@ func (s *Store) VersionOutline(ctx context.Context, owner, versionID string) (Ve
 	}
 	film := src.view("", 0, false, src.newDraftState(), time.Time{})
 	return VersionOutline{VersionID: film.VersionID, ProjectID: film.ProjectID, VersionNumber: film.VersionNumber, Seconds: film.Seconds,
-		Plan: film.Plan, Parts: film.Parts, Shots: film.Shots, Counts: film.Counts}, nil
+		Plan: film.Plan, Parts: film.Parts, Shots: film.Shots, Counts: film.Counts, Unmet: src.unmet()}, nil
+}
+
+// unmet is what the version's plan said the videos do not have
+// (docs/specs/montage-center.md, 成片存进相册): the outline's and the
+// shots', each once, in order. An answer that is not a list of texts
+// says nothing.
+func (src *editSource) unmet() []string {
+	unmet := []string{}
+	for _, raw := range []json.RawMessage{src.picked.Unmet, src.planned.Answer.Unmet} {
+		var texts []string
+		if len(raw) == 0 || json.Unmarshal(raw, &texts) != nil {
+			continue
+		}
+		for _, text := range texts {
+			if text = strings.TrimSpace(text); text != "" && !slices.Contains(unmet, text) {
+				unmet = append(unmet, text)
+			}
+		}
+	}
+	return unmet
 }
 
 // previewPiece is the part of a shot's video the rough preview plays: where

@@ -17740,6 +17740,7 @@ components:
         - parts
         - shots
         - counts
+        - unmet
       description: 'A version as its film is: the plan it was cut by and its shots, for the version''s card. Unlike the draft, an edit not saved yet does not show here.'
       properties:
         versionId:
@@ -17766,6 +17767,11 @@ components:
             $ref: '#/components/schemas/MontageDraftShot'
         counts:
           $ref: '#/components/schemas/MontageFilmCounts'
+        unmet:
+          type: array
+          description: 'What the plan found the videos do not have, as the planner wrote it: shown on the version''s card.'
+          items:
+            type: string
     MontageDraft:
       type: object
       additionalProperties: false

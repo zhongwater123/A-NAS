@@ -204,6 +204,13 @@ function FilmCard({
             重剪
           </button>
         </form>
+        {version.editable && (version.kind === "edit" || change.trim()) && (
+          <p className={styles.mtFaint}>
+            {version.kind === "edit"
+              ? "重剪从这一版所来自的规划出发，手动换过的镜头不会带进去"
+              : "重剪从这一版的规划出发，“修改镜头”里的改动不会带进去"}
+          </p>
+        )}
         {limits.length > 0 && <p className={styles.mtFaint}>{limits.join("；")}</p>}
         {(recut.error || confirm.error) && (
           <p className={styles.mtError}>{errorText(recut.error ?? confirm.error, "montage")}</p>
@@ -272,6 +279,9 @@ function Plan({ outline }: { outline: MontageVersionOutline }) {
           <span key={part.number}>{part.name || `第 ${part.number} 段`}</span>
         ))}
       </p>
+      {outline.unmet.length > 0 && (
+        <p className={`${styles.mtNote} ${styles.mtHint}`}>素材里没找到：{outline.unmet.join("；")}</p>
+      )}
       <button type="button" className={styles.mtLink} aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? "收起" : "看完整规划"}
       </button>
