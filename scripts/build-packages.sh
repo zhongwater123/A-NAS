@@ -22,6 +22,8 @@
 #   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
 #   stay installed when the product rolls back, as Docker itself does.
+# - a-nas-hotspot-radio: optional MediaTek radio dependencies, built for
+#   the same target architecture as the rest of the deployment.
 #
 # OUT then holds this version's packages alone: those of an earlier build go,
 # so that the system test and make release find the ones just built.
@@ -55,7 +57,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy a-nas-hotspot-radio; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -66,6 +68,7 @@ done
 # The same commit builds the same packages.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
+bash "$repo/scripts/build-hotspot-radio-package.sh" "$out" "$version"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 

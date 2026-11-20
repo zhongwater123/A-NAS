@@ -117,10 +117,12 @@ if [[ "${1:-}" != --inside ]]; then
   done
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
+  radio=$(bash "$repo/scripts/fetch-upstream-packages.sh" "$repo/build/upstream" "$repo/deploy/upstream/hotspot-radio-amd64.json")
+  mapfile -t radio <<<"$radio"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
     "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" "${radio[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -735,12 +737,21 @@ check "member sharing works through production service sandboxes" sharing_smoke
 # pins. Docker waits for the address pool the App Center's runbook gives it
 # (ADR 0013), then the container agent reaches it.
 upstream_pinned() {
-  local name pinned
+  local name pinned lock=${1:-/src/deploy/upstream/packages.json}
   while read -r name pinned; do
     [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
-  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' "$lock")
 }
 check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "a standard install leaves the hotspot radio package optional" \
+  test "$(dpkg-query -W -f='${db:Status-Status}' a-nas-hotspot-radio 2>/dev/null || true)" != installed
+check "apt installs the hotspot radio package using only the signed A-NAS repository" \
+  quiet apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/a-nas.sources -o Dir::Etc::sourceparts=- \
+  install -y --no-install-recommends --no-remove "a-nas-hotspot-radio=$version"
+check "the hotspot radio package installs the pinned Debian dependencies" \
+  upstream_pinned /src/deploy/upstream/hotspot-radio-amd64.json
+check "the hotspot radio package supplies the MT7612U firmware and iw" \
+  bash -c 'test -r /usr/lib/firmware/mt7662.bin && test -r /usr/lib/firmware/mt7662_rom_patch.bin && iw --version'
 check "Docker waits for its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
