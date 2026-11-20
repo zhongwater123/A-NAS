@@ -36,6 +36,8 @@ type VectorIndex interface {
 	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
 	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
+	Alias(ctx context.Context, alias string) (string, error)
+	SwitchAlias(ctx context.Context, alias, collection string) error
 }
 
 const (
@@ -78,6 +80,9 @@ func imagesCollectionName(model, nonce string) string {
 type VectorSyncEvent struct {
 	// Kind is "created" for a new collection, which queues every vector,
 	// "synced" for a round that brought objects in line, or "reconciled".
+	// The windows collection also has "reused" for an earlier collection
+	// taken up again, which queues every video as a new one does, and
+	// "switched" for its alias moving to the collection sync filled.
 	Kind       string
 	Collection string
 	Upserted   int

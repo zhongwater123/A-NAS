@@ -229,6 +229,12 @@ type montageFixture struct {
 	embedder *fakeEmbedder
 	gate     *lockedGate
 	compute  *fakeCompute
+	// search, when set, makes the fixture's embedder encode search texts;
+	// vectors and fell are the index ranking reads and the record of why
+	// it read the Catalog instead.
+	search  bool
+	vectors photos.VectorIndex
+	fell    *fallbacks
 }
 
 func newMontageFixture(t *testing.T) montageFixture {
@@ -244,7 +250,14 @@ func newMontageFixture(t *testing.T) montageFixture {
 // open opens the store, again after a restart.
 func (f *montageFixture) open(t *testing.T) {
 	t.Helper()
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true})
+	options := photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true, Vectors: f.vectors}
+	if f.search {
+		options.AI = f.embedder
+	}
+	if f.fell != nil {
+		options.OnVectorFallback = f.fell.record
+	}
+	service, err := photos.Open(f.root, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,6 +558,27 @@ type indexRecorder struct {
 	mu       sync.Mutex
 	upserts  []int
 	refusing string
+	// searches counts the searches of a windows collection.
+	searches int
+}
+
+func (x *indexRecorder) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
+	if strings.HasPrefix(collection, "video_windows_v1_") {
+		x.mu.Lock()
+		x.searches++
+		x.mu.Unlock()
+	}
+	return x.Client.SearchBatch(ctx, collection, queries)
+}
+
+// searched returns how many searches of a windows collection there were
+// since it was last asked.
+func (x *indexRecorder) searched() int {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	n := x.searches
+	x.searches = 0
+	return n
 }
 
 func (x *indexRecorder) Upsert(ctx context.Context, collection string, points []vectorindex.Point) error {
@@ -599,19 +633,14 @@ func (w windowIndex) sync(t *testing.T) {
 	t.Fatal("SyncWindows() never caught up")
 }
 
-// points counts the points in the windows collection, by object.
+// points counts the points in the windows collection a search reads, the
+// one its alias names, by object.
 func (w windowIndex) points(t *testing.T) (map[string]int, string) {
 	t.Helper()
 	ctx := context.Background()
-	names, err := w.index.Collections(ctx)
+	collection, err := w.index.Alias(ctx, "video_windows_v1")
 	if err != nil {
 		t.Fatal(err)
-	}
-	var collection string
-	for _, name := range names {
-		if strings.HasPrefix(name, "video_windows_v1_") {
-			collection = name
-		}
 	}
 	counts := map[string]int{}
 	if collection == "" {
