@@ -98,7 +98,8 @@ type Job struct {
 
 // Version is a film a job saved.
 type Version struct {
-	Number int `json:"number"`
+	ID     string `json:"id"`
+	Number int    `json:"number"`
 	// JobID and Plan: the job that made it, and which of its 方案 it is.
 	JobID       string    `json:"jobId"`
 	Plan        int       `json:"plan"`
@@ -106,6 +107,27 @@ type Version struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	// Gone: the member deleted the film from the photo library.
 	Gone bool `json:"gone,omitempty"`
+	// Editable: its timeline is known, so that it can be edited (#596). A
+	// version saved before timelines were kept has its job's fill, unless
+	// that is gone too; then it can only be played.
+	Editable bool `json:"editable"`
+}
+
+// versionColumns are what versionsOf scans, of versions v.
+const versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
+	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
+		AND f.name = CASE WHEN v.plan <= 1 THEN 'fill' ELSE 'fill-' || v.plan END AND f.result_json IS NOT NULL)`
+
+func scanVersion(rows interface{ Scan(...any) error }) (Version, error) {
+	var version Version
+	var created string
+	if err := rows.Scan(&version.ID, &version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created, &version.Editable); err != nil {
+		return Version{}, err
+	}
+	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
+		version.CreatedAt = *at
+	}
+	return version, nil
 }
 
 func scanTime(value sql.NullString) *time.Time {
@@ -285,20 +307,16 @@ func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
 
 // versionsOf lists the versions whose column is value, ordered by order.
 func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT number, job_id, plan, film_asset_id, created_at FROM versions WHERE "+column+" = ? ORDER BY "+order, value)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+versionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	versions := []Version{}
 	for rows.Next() {
-		var version Version
-		var created string
-		if err := rows.Scan(&version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created); err != nil {
+		version, err := scanVersion(rows)
+		if err != nil {
 			return nil, err
-		}
-		if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
-			version.CreatedAt = *at
 		}
 		versions = append(versions, version)
 	}
