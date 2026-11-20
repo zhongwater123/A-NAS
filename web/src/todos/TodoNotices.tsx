@@ -5,16 +5,16 @@
 // they know; on the local console, whose page never leaves, it comes back
 // when someone wakes the screen. On the family's shared screen a medical
 // matter shows only its category, and private to-dos only how many there are.
-import { ChevronRight, ListTodo, X } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { untilNextDay } from "../lib/time";
+import { DeskNotice } from "../ui/DeskNotice";
 import { reminderLines } from "./format";
 import styles from "./notices.module.css";
 import { acknowledgeTodoReminder, loadTodoReminders, useTodoReminders } from "./reminders";
 
 const SHOWN = 3;
-const HIDE_MS = 12_000;
 
 export function TodoNotices({
   shared,
@@ -30,7 +30,6 @@ export function TodoNotices({
   const reminders = useTodoReminders();
   // Reminders hidden on this page; the server still has them unacknowledged.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
-  const [held, setHeld] = useState(false);
 
   // Read after signing in and whenever the page comes back into view. A page
   // that stays open, such as the local console, reads again just after
@@ -66,81 +65,34 @@ export function TodoNotices({
   }, [onWake]);
 
   const showing = reminders.filter((reminder) => !hidden.has(reminder.key));
-  const showingKeys = showing.map((reminder) => reminder.key).join(" ");
-  const hide = () => setHidden((current) => new Set([...current, ...showing.map((reminder) => reminder.key)]));
-  // A notice taken away under the pointer gets no pointerleave: the next one is not held.
-  if (!showingKeys && held) setHeld(false);
-  useEffect(() => {
-    if (!showingKeys || held) return;
-    const timer = window.setTimeout(
-      () => setHidden((current) => new Set([...current, ...showingKeys.split(" ")])),
-      HIDE_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [showingKeys, held]);
-
+  // Nothing to show takes the notice away, so a pointer that was over it,
+  // and gets no pointerleave, does not hold the next one up.
   if (!showing.length) return null;
+  const hide = () => setHidden((current) => new Set([...current, ...showing.map((reminder) => reminder.key)]));
   const { lines, privateCount } = reminderLines(showing, shared);
   const shown = lines.slice(0, SHOWN);
   const more = lines.length - shown.length;
-  const acknowledge = () => {
-    const keys = shown.map((line) => line.key);
-    if (keys.length) void acknowledgeTodoReminder(keys).catch(() => undefined);
-  };
   return (
-    // Pointing at the notice or focusing it keeps it up.
-    <div
-      className={styles.tnHolder}
-      // VNAS does not look at the desktop's notices when it reads the desktop.
-      data-vnas-overlay=""
-      onPointerEnter={() => setHeld(true)}
-      onPointerLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
-    >
-      <section className={styles.tnToast} role="status" aria-label="待办提醒">
-        <span className={styles.tnMark} aria-hidden="true">
-          <ListTodo />
-        </span>
-        <div className={styles.tnCopy}>
-          <small>待办</small>
-          <ul>
-            {shown.map((line) => (
-              <li key={line.key}>
-                <strong>{line.title}</strong>
-                <span>{line.when}</span>
-              </li>
-            ))}
-            {privateCount > 0 && (
-              <li>
-                <strong>你有 {privateCount} 件自己的待办要看</strong>
-              </li>
-            )}
-          </ul>
-          {more > 0 && <p className={styles.tnMore}>另有 {more} 件</p>}
-          <div className={styles.tnActions}>
-            {shown.length > 0 && (
-              <button type="button" className={styles.tnKnown} onClick={acknowledge}>
-                知道了
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.tnOpen}
-              onClick={() => {
-                hide();
-                onOpen(showing[0].todoId);
-              }}
-            >
-              去看看
-              <ChevronRight />
-            </button>
-          </div>
-        </div>
-        <button type="button" className={styles.tnClose} aria-label="关闭" onClick={hide}>
-          <X />
-        </button>
-      </section>
-    </div>
+    <DeskNotice
+      className={styles.tnNotice}
+      label="待办提醒"
+      source="待办"
+      icon={<ListTodo />}
+      lines={[
+        ...shown.map((line) => ({ key: line.key, text: line.title, note: line.when })),
+        ...(privateCount > 0 ? [`你有 ${privateCount} 件自己的待办要看`] : []),
+      ]}
+      more={more > 0 ? `另有 ${more} 件` : undefined}
+      action={
+        shown.length > 0
+          ? {
+              label: "知道了",
+              onClick: () => void acknowledgeTodoReminder(shown.map((line) => line.key)).catch(() => undefined),
+            }
+          : undefined
+      }
+      onOpen={() => onOpen(showing[0].todoId)}
+      onDismiss={hide}
+    />
   );
 }

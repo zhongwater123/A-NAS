@@ -70,7 +70,7 @@ describe("TodoNotices", () => {
     expect(screen.getByRole("status", { name: "待办提醒" })).toBeTruthy();
     fireEvent.pointerLeave(holder);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(13_000);
+      await vi.advanceTimersByTimeAsync(16_000);
     });
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
     expect(served.sent.acknowledged).toEqual([]);
@@ -92,7 +92,7 @@ describe("TodoNotices", () => {
     });
     expect(await screen.findByText("交水费")).toBeTruthy();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(13_000);
+      await vi.advanceTimersByTimeAsync(16_000);
     });
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
   });
@@ -104,7 +104,7 @@ describe("TodoNotices", () => {
     render(<TodoNotices shared onWake={onWake} onOpen={vi.fn()} />);
     await screen.findByRole("status", { name: "待办提醒" });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(13_000);
+      await vi.advanceTimersByTimeAsync(16_000);
     });
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
 

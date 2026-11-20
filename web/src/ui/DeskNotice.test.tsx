@@ -33,6 +33,29 @@ describe("a feature's notice on the desktop", () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
+  it("keeps a thing to a line with its note, says what it leaves out, and offers the feature's own action", () => {
+    const onAction = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <DeskNotice
+        label="测试提醒"
+        source="测试"
+        icon={<Bell />}
+        lines={[{ key: "a", text: "交水费", note: "今天截止" }, "还有一句"]}
+        more="另有 2 件"
+        action={{ label: "知道了", onClick: onAction }}
+        onOpen={vi.fn()}
+        onDismiss={onDismiss}
+      />,
+    );
+    expect(screen.getByText("交水费").nextSibling?.textContent).toBe("今天截止");
+    expect(screen.getByText("还有一句")).toBeTruthy();
+    expect(screen.getByText("另有 2 件")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
   it("hides itself after a while, unless the pointer or the focus is on it", () => {
     const { onDismiss } = show(["一件事"]);
     const notice = screen.getByRole("status").parentElement as HTMLElement;
