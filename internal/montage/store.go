@@ -360,6 +360,8 @@ ALTER TABLE projects DROP COLUMN chosen_version_id;
 		// the version it saves name the version they came from, and an edit
 		// the draft's revision. A release from before knows neither: going
 		// back forgets them, while their films stay in the photo library.
+		// Foreign keys are off while a step goes back, so the Down takes
+		// away itself what hangs on those jobs and versions.
 		{Up: `
 ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'generate' CHECK (kind IN ('generate', 'edit', 'recut'));
 ALTER TABLE jobs ADD COLUMN source_version_id TEXT;
@@ -369,7 +371,16 @@ ALTER TABLE versions ADD COLUMN kind TEXT NOT NULL DEFAULT 'plan' CHECK (kind IN
 ALTER TABLE versions ADD COLUMN source_version_id TEXT;
 ALTER TABLE versions ADD COLUMN draft_revision INTEGER;
 `, Down: `
+UPDATE projects SET chosen_version_id = NULL WHERE chosen_version_id IN (SELECT id FROM versions WHERE kind <> 'plan');
+DELETE FROM draft_revisions WHERE draft_id IN (SELECT id FROM drafts WHERE base_version_id IN (SELECT id FROM versions WHERE kind <> 'plan'));
+DELETE FROM drafts WHERE base_version_id IN (SELECT id FROM versions WHERE kind <> 'plan');
 DELETE FROM versions WHERE kind <> 'plan';
+DELETE FROM job_assets WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
+DELETE FROM steps WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
+DELETE FROM rounds WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
+DELETE FROM plans WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
+DELETE FROM plan_answers WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
+DELETE FROM plan_briefs WHERE job_id IN (SELECT id FROM jobs WHERE kind <> 'generate');
 DELETE FROM jobs WHERE kind <> 'generate';
 ALTER TABLE versions DROP COLUMN draft_revision;
 ALTER TABLE versions DROP COLUMN source_version_id;
