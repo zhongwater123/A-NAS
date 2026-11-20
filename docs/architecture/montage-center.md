@@ -1,7 +1,7 @@
 # 剪辑中心首版实施方案
 
-状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
-更新时间：2026-11-18
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
+更新时间：2026-11-20
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
@@ -66,13 +66,12 @@ anas-api ──转发 /api/v1/montage──▶ anas-montage：项目、规划、
   │ “开始”前经文件代理               │ ⑤ 任务等规划时留下记号
   │ 登记规划授权                     ├──▶ 相册授权套接字：③ 登记授权 ④ 请求分析、读结果
   ▼                                  │                    ⑧ 取原片描述符 ⑨ 存回成片
-唤醒服务（root）                      ├──▶ FFmpeg Worker：⑦ 填槽取灰度帧、逐段渲染、拼接配乐
-  有授权、有记号时启动                ├──▶ 剪辑计算 Worker：选段、目录与规划数据、填槽
-                                      └──▶ 配乐分析 Worker：allin1（节拍、重拍、段落）
-  成员的定时任务单元
+规划发起方（root）                    ├──▶ FFmpeg Worker：⑦ 填槽取灰度帧、逐段渲染、拼接配乐
+  有授权、有记号时领取一轮，          ├──▶ 剪辑计算 Worker：选段、目录与规划数据、填槽
+  在规划进程里开一次对话、等它结束    └──▶ 配乐分析 Worker：allin1（节拍、重拍、段落）
      │
      ▼
-Hermes（成员的 VNAS，在成员自己的沙箱里）
+Hermes 规划进程（成员的 VNAS，同一个沙箱与主目录，只有剪辑、记忆、技能工具）
   ⑥ 经剪辑的助手套接字调 montage MCP 工具，回到 anas-montage：读目录、交大纲、交镜头
 anas-photos
   ├─ 剪辑分析（只为请求过的视频）：窗口向量 → 卡片 → 画质 → 描述
@@ -91,7 +90,7 @@ anas-photos
   5. 填槽与校验；
   6. 渲染；
   7. 存回相册。
-- **规划**：任务走到规划时，NAS 在后台发起，成员不用开着桌面。root 的唤醒服务核对成员点“开始”时登记的规划授权，在成员自己的定时任务单元里跑一轮 VNAS。VNAS 调 montage MCP 工具读卡片目录，交回两步规划；剪辑中心按 Schema 和剪辑规则校验后才收下。
+- **规划**：任务走到规划时，NAS 在后台发起，成员不用开着桌面。root 的规划发起方核对成员点“开始”时登记的规划授权，在成员的规划进程里开一次对话（[规划会话](montage-planning-session.md)）。VNAS 调 montage MCP 工具读卡片目录，交回两步规划；剪辑中心按 Schema 和剪辑规则校验后才收下。
 - **成片**：渲染结果经授权存进成员的个人图库，播放、下载都是相册里的普通视频。剪辑中心只记下“哪个版本对应哪个相册资产”。
 
 **主要的失败行为**
@@ -166,7 +165,7 @@ anas-photos
 | `jobs` | id、owner_user_id、project_id、request_key、settings_json、state、step、attempts、not_before、lease_until、heartbeat_at、cancel_requested、wait_reason、error_class、error、missing_json、save_started、plans、plan_wanted、plan_wanted_at、plan_epoch | `settings_json` 是任务开始时的歌、起点、要求与是否按拍摄时间，见“持久任务”。`save_started` 是存回栅栏：存回请求发出后置 1，结果确认前取消回答 409，重启后重放同一个版本键。`plans` 是这个任务出几个方案（最多 2；升级前开始的任务是 1，照开始时的样子做完）。`plan_wanted` 与 `plan_wanted_at` 表示等一轮规划及从何时起；`plan_epoch` 在重新规划、去掉素材时加一，旧轮次随之作废 |
 | `job_assets` | job_id、asset_id、object_id | 任务开始时的素材集合 |
 | `steps` | job_id、name、input_key、state、result_ref、started_at、finished_at | 每一步的输入摘要和结果 |
-| `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome、epoch、template、input_key、called_at | 规划的每一轮。`epoch` 与 `input_key` 是领取时任务的规划代数与方案一第一步的输入键，每次工具调用都拿它们和任务现在的值比，对不上就回答“这一轮已结束”；`called_at` 是模型第一次调用工具的时间，规划时限从它算起。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是 Hermes 任务的编号。`reported_at` 是回合脚本报告 `end` 或已清理的时间，`stale` 列出还没有它的轮次 |
+| `rounds` | id、job_id、owner_user_id、attempt_token、run_ref、state、claimed_at、started_at、ended_at、reported_at、outcome、epoch、template、input_key、called_at、failure | 规划的每一轮，一轮就是规划进程里的一次对话。`epoch` 与 `input_key` 是领取时任务的规划代数与方案一第一步的输入键，每次工具调用都拿它们和任务现在的值比，对不上就回答“这一轮已结束”；`called_at` 是模型最近一次调用工具的时间，规划时限从它算起。`state` 依次为 `claimed`、`started`、`ended`，或 `abandoned`；`run_ref` 是对话的存储编号，成员的 VNAS 历史里能找到它。`reported_at` 是规划发起方报告结果的时间；`failure` 是没开始或出错的原因（`unreachable`、`error`），重试的等待按它算 |
 | `plan_grants` | owner_user_id、username、registered_at | 最近一次经过规划授权登记的请求时间（anas-api 带来 `X-A-NAS-Assistant: on`）。只用来决定留不留记号，授权本身在文件代理那里 |
 | `plan_answers` | job_id、step、input_key、round_id、answer_json、accepted_at | 工具收下的答案，按（任务、步骤、这一步的输入键）只留第一份。任务自己的步骤按输入键取出，再写进 `plans`。`step` 只有 `pick`、`shots`，方案二也写这两个值，靠输入键区分 |
 | `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
@@ -480,44 +479,26 @@ montage/
 
 ## 规划
 
-本节的接线按 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)后的布局写（2026-11-18 合并，M9 按它实施）：
-- 助手的脚本在 `ai/assistant/`，装在 `/usr/lib/a-nas/assistant/`，沙箱里同一路径只读；
-- 定时任务单元 `anas-assistant-cron@` 由 `scripts/lib/assistant-units.sh` 从对话实例的单元生成；
-- 成员的 Hermes 设置由 Host Agent 写在 `/var/lib/a-nas-host/assistant/members/<账号>/`。
+规划由成员自己的 VNAS 在后台做：root 的规划发起方把一轮交给成员的规划进程，作为一次对话，模型调 montage MCP 工具读数据、交答案。交接的机制（规划进程、规划发起方、轮数、重试、学习）只在[剪辑中心的规划会话](montage-planning-session.md)里写；本节写剪辑中心这一侧：工具、规则、授权的登记、去重与用量。
 
-机制与转正前的设计相同：规划授权、定时任务单元里的一轮、固定的提示词模板、这一轮只开放 `montage`。
+最初按定时任务单元跑一轮（唤醒服务、回合脚本、领取回执、`hermes cron tick`）实施，2026-11-19 的实机验收里卡在“等待 VNAS”（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)），用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)改为对话，[#608](https://github.com/zhongwater123/A-NAS/pull/608) 实现。
 
 ### MCP 服务器
 
-- 新增 `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。
-  - `untrusted` 不行：每次调用都要审批，而规划跑在定时任务单元里，`approvals.cron_mode` 是 `deny`，没有人能批准。
-- 服务器名不加进任何 `platform_toolsets`。规划这一轮的任务建时带 `enabled_toolsets=["montage"]`：Hermes 让任务自己的工具组优先于 `platform_toolsets.cron`，点名了某个 MCP 服务器时不再把别的服务器并进来（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 1）。成员自己的定时任务和对话都看不到剪辑工具，每次请求也不多带它们的 Schema。
-- **规划这一轮只开放 `montage` 工具组**，是 P1 的必过项（评审人 2026-11-18），P1 已实测通过：模型只拿到 montage 的 4 个工具，提示它调用终端，终端没有执行。现在 `platform_toolsets.cron` 有文件、终端、代码执行、委派、看图、看视频、记忆、会话搜索、技能、待办、`anas` 与 `companion`。只开放 `montage` 有两个理由：
-  - 剪辑服务被攻破时，借 brief 的结果诱导的是一个没人在场的模型；它不能有终端、文件与相册工具。
-  - “只发文字、不发画面”要有保证：这一轮里不能还开着相册与看图的工具。
-  - 成员自己的定时任务照旧用 `platform_toolsets.cron` 的全部工具。
-- **这一轮结束后不跑后台复盘**，同样是 P1 的必过项，已实测通过：Hermes 给所有定时任务的运行都固定传 `skip_background_review=True`，不用另外设置（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 2）。复盘手上有记忆、技能与只读的文件工具，测试里已经把诱导文字写进过记忆（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 的后果），所以 Hermes 升级时要核对这一点没变（见“发起与结束”的升级核对）。
-- **成员的记忆会随这一轮发给模型**：Hermes 对定时任务固定传 `skip_memory=False`，成员 `MEMORY.md` 的内容进这一轮的系统提示，按任务关不掉（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 3）。这一轮没有 `memory` 工具，写不了记忆。和成员自己的定时任务、对话一样，用云端模型时这些内容会发给服务商；规格的“边界与失败”写明。
-- 套接字：
-  - systemd 的 `anas-montage-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；
-  - 只绑定进成员的定时任务单元 `anas-assistant-cron@<账号>`，在沙箱里是 `/run/anas-assistant-montage/montage.sock`；对话实例和整理单元不绑定；
-  - 成员自己的定时任务也跑在这个单元里，同一个 UID 分不清调用来自哪一次运行。所以工具调用要带着进行中那一轮的 token，影响只限于本人的任务，答案还要过校验；
-  - 照相册助手套接字的做法：套接字单元随软件包默认开启，tmpfiles 建沙箱里的挂载点，`assistant-units.sh` 只在定时任务单元的那段 sed 里加这一处绑定。
-- 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号（相册助手套接字用的同一项查询，要为剪辑中心开启），只回答这位成员自己的任务。成员不必在线。
-- 套接字上有两类调用：MCP 服务器的工具（下表），和回合脚本的 `stale`、`claim`、`started`、`abandon`、`end`（见“发起与结束”）。
-- **只有定时任务单元有 montage 服务器**：托管策略的 `mcp_servers` 会整段复制进成员的配置。若对话实例也带上它，就会起这个子进程，而那里没有剪辑的套接字。P1 实测这时它列零个工具，对话照常，但每个在线实例多占约 78 MiB（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 6）。所以定时任务单元单独一份：
-  - 软件包另装一份托管策略 `managed-cron/`，就是原托管策略加上 montage 服务器；
-  - Host Agent 按它另写成员的 `config-cron.yaml`；
-  - 定时任务单元的 `HERMES_MANAGED_DIR` 指向 `managed-cron`，成员配置的绑定也换成 `config-cron.yaml`；
-  - 对话实例与整理单元两样都没有。
-- 沙箱里的终端用的也是同一个 UID，所以套接字限制请求大小（80 KiB）与频率（每位成员每秒 5 次，突发 20 次）。
+- `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
+- 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `montage,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
+- **云端看不到画面**：规划进程里没有看图、看视频、读文件、终端、相册与桌面的工具，工具只给文字与结构化数据（用户 2026-11-20 决定 3）。
+- 套接字：systemd 的 `anas-montage-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-montage/montage.sock`。
+- 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号，只回答这位成员自己的任务。UID 0 的对端（规划发起方）用 `X-A-NAS-Account` 指明成员。
+- 套接字上有两类调用：MCP 服务器的工具（下表，`/v1/tools/*`），和规划发起方的 `claim`、`started`、`abandon`、`end`（`/v1/rounds/*`）。
+- 同一个 UID 在沙箱里还能用终端（成员平时的 VNAS），所以工具调用要带着进行中那一轮的 token，套接字还限制请求大小（80 KiB）与频率（每位成员每秒 5 次，突发 20 次）。
 
 | 工具 | 输入 | 输出 |
 |---|---|---|
 | `montage_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第一步的数据（卡片目录、音乐段落、成员的要求）与这一轮的精确 Schema |
-| `montage_submit_outline` | `jobId`、`attemptToken`、大纲 | `{status: "accepted"}`；或 `{status: "rejected", reasons}`，让模型改了再交 |
+| `montage_submit_outline` | `jobId`、`attemptToken`、大纲 | `accepted`，附下一步该调什么；或 `rejected` 与原因，让模型改了再交 |
 | `montage_shots_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第二步的数据（按收下的大纲生成的画面与可选节拍）与精确 Schema；大纲还没收下时回答“先交大纲” |
-| `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline`；还有方案要规划时回答 `{status: "next_plan"}` |
+| `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline`；还有方案要规划时回答 `next_plan`，全部收下时回答“做完了，只回答 [SILENT]” |
 
 - **一轮规划两个方案**：一次生成只用掉规划授权 5 轮中的 1 轮。
   - 工具作用于“当前方案”：第一个还没存进相册、第二步还没有答案的方案；按 `plan_answers` 判断，不看 `plans`，因为模型交完方案一时任务可能还没来得及取走。方案一的镜头收下、后面还有方案时回答 `next_plan`，同一次调用重试也得到同样的回答；模板要求模型回到 `montage_brief` 做下一版。
@@ -525,101 +506,63 @@ montage/
   - brief：第一步的 brief 两个方案相同，存在方案一的键下，只做一次；第二步的按各自的键存。方案二的 `montage_brief` 在返回前另拼上 `plan` 与 `earlierOutlines`（方案一收下的大纲），让它换一种讲法；这两项不存进 `plan_briefs`。
   - 一轮的身份只记方案一第一步的键（`rounds.input_key`），领取时也按它连接 `steps`。
   - 这一轮在方案二交齐之前结束：方案一照常往下做、存进相册，方案二进入 `needs_input(vnas_unknown)`，由成员决定是否重新规划，不自动再开一轮（#514：模型可能已经调用过）。
+- **答案的上限**写在 brief 的 Schema 里，模型交之前就知道：每个方案的场景数等于段落数（`prefixItems`，`items: false`）；文字答案每项最多 120 字，全部文字最多 1,500 字，枚举不计（[#607](https://github.com/zhongwater123/A-NAS/pull/607)）。
 
 **规则、数据与 Schema 分开**
 - 第八版的提示词把规则和数据写在一起，Schema 又按每个任务动态生成：卡片 ID 是枚举，段落数固定，第二步的画面和可选节拍取决于第一步的答案。交给 VNAS 时拆成三样：
-  - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次运行的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
+  - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次对话的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；第一次读 brief 就带着 `plan` 与 `earlierOutlines` 时，只做数据指明的这一版）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`，沙箱里只读。回合脚本按领取回答里的模板版本选取，只填进经过校验的几项：这一轮的编号与 token（十六进制）、目标秒数（整数）。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
-- 计算 Worker 的 `plan` 输出数据、Schema 与模板版本。两步的规则一开始就给模型（第二步的 system 文字只依赖目标时长，不依赖第一步的答案）；第一步的数据由 `montage_brief` 返回，第二步的数据等大纲收下后再生成。
-- 定时任务的运行里没有人回答审批，需要确认的操作一律拒绝，`clarify` 也不给。提示词仍要求不调用终端与代码、不委派，也不把描述写进记忆。
+- 后台对话里没有人回答审批，规划发起方对审批请求一律答拒绝。提示词仍要求不把描述写进记忆。
 
-**校验错误怎样退回**：服务器用低层的 `Server` 实现，参数在工具里自己校验，不合格时返回普通结果 `status: "rejected"`，不用 `isError`。原因是 Hermes 把 `isError` 计入熔断：连续 3 次后，这个服务器 60 秒内的调用一律不可达（[Hermes 研究](../research/hermes-agent-runtime.md)）。MCP 规范本身推荐用 `isError` 让模型自我纠正，这里不用只是因为这个熔断。
+**校验错误怎样退回**：服务器用低层的 `Server` 实现，参数在工具里自己校验，不合格时返回普通结果 `status: "rejected"`，不用 `isError`。原因是 Hermes 把 `isError` 计入熔断：连续 3 次后，这个服务器 60 秒内的调用一律不可达（[Hermes 研究](../research/hermes-agent-runtime.md)）。剪辑服务回答 400 时，MCP 服务器也把它转成 `rejected`。
 
 ### 规划授权
 
-成员不在线时，规划仍要在成员的 VNAS 里调用模型。[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 的会话闸门不让后台服务凭自己的身份驱动成员的助手；定时任务能在成员离线时运行，是因为任务是成员自己建的。所以后台规划也要成员在场时留下授权，思路与“项目授权”相同。
+成员不在线时，规划仍要在成员的 VNAS 里调用模型。[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10 的会话闸门不让后台服务凭自己的身份驱动成员的助手，所以后台规划要成员在场时留下授权，思路与“项目授权”相同。
 
-- **登记**：成员做规格默认规则里列出的几项操作（开始、重新规划、去掉素材、重试分析，之后都可能要规划）时，anas-api 在转发之前，带着这次请求的会话调用文件代理的新操作 `assistant_plan`。
-  - 文件代理照“立即运行”（`assistant_run`）核对会话有效、账号在用；另外核对这个账号有 VNAS，即 Host Agent 为它准备的 `/var/lib/a-nas-host/assistant/tokens/<账号>.env` 存在，和唤醒服务认定“有助手”的办法相同。`assistant_run` 本身只查账号名的格式，不查这一项。
-  - 核对通过就写 `/var/lib/a-nas/assistant-plans/<账号>`，内容是签发时间与轮数上限 5。只有文件代理写它，再次登记时整个替换。
-  - `assistant_plan` 用正常的回答区分三种结果：已登记、设备没有开启 VNAS、这个账号没有 VNAS。错误码 `unavailable` 只留给临时故障（会话目录读不了、记录写不进）。`assistant_run` 把“设备没开”也答成 `unavailable`，这里不照搬，否则 anas-api 分不清。
+- **登记**：成员做规格默认规则里列出的几项操作（开始、重新规划、去掉素材、重试分析，之后都可能要规划）时，anas-api 在转发之前，带着这次请求的会话调用文件代理的 `assistant_plan`。
+  - 文件代理核对会话有效、账号在用、这个账号有 VNAS（Host Agent 为它准备的 `/var/lib/a-nas-host/assistant/tokens/<账号>.env` 存在）。
+  - 核对通过就写 `/var/lib/a-nas-host/assistant/plans/<账号>`，内容是签发时间与轮数上限 5。只有文件代理写它，再次登记时整个替换。
+  - `assistant_plan` 用正常的回答区分三种结果：已登记、设备没有开启 VNAS、这个账号没有 VNAS。错误码 `unavailable` 只留给临时故障。
 
     | 文件代理的回答 | anas-api 怎么做 | 剪辑中心 |
     |---|---|---|
-    | 已登记 | 转发，带 `X-A-NAS-Assistant: on` | 把这个时间记进 `montage.db` |
+    | 已登记 | 转发，带 `X-A-NAS-Assistant: on` | 把这个时间记进 `montage.db` 的 `plan_grants` |
     | 设备没有开启 VNAS、这个账号没有 VNAS | 转发，带 `X-A-NAS-Assistant: off` | 任务照常建，页面写明“VNAS 没有开启”；开启后点“重新规划” |
     | `unavailable`，或连不上文件代理 | 回答 503 `assistant_unavailable`，不转发 | 页面提示稍后再试 |
 
   - 转发代理只去掉 Cookie、CSRF 与 Authorization 头，别的头照样转发（`internal/serviceproxy`）。所以 anas-api 在 `/api/v1/montage` 的挂载层对所有请求都先去掉 `X-A-NAS-Assistant`，只在上面几项请求里自己设置；剪辑中心也只在这几项请求上读它。
-- **按成员，不按任务**：同一成员的几个任务共用这 5 轮。一个任务通常只用 1 轮（两步在同一次运行里交完）。
-- **计数**：唤醒服务在自己的 `StateDirectory` 里，按签发时间记下这次签发已经被领取了几轮（见“发起与结束”第 2 步）。授权文件只有文件代理写、计数只有唤醒服务写，不会有两个进程改同一个文件。签发超过 7 天，或已经领取满 5 轮，就不再启动。
-- **谁能用**：只有 root 的唤醒服务读授权文件，剪辑中心读不到也改不了它。账号停用后，唤醒服务照它现有的检查不再启动这个账号的单元。
+- **按成员，不按任务**：同一成员的几个任务共用这 5 轮。一个任务通常只用 1 轮（两个方案在同一次对话里交完）。
+- **计数与使用**：只有 root 的规划发起方读授权文件、按签发时间计数；剪辑中心读不到也改不了它。签发超过 7 天或领取满 5 轮就不再发起。
 - **被攻破时**：
   - 剪辑服务只能让已授权的成员在有效期内跑至多 5 轮规划，没有授权的成员不受影响。
-  - 它决定不了提示词，只能经 brief 的结果送数据。这一轮只开放 `montage`（见“MCP 服务器”），模型即使被诱导，也碰不到文件、终端、相册与记忆，能做的只是交回不合格的答案；submit 的参数只收卡片编号、段落序号一类枚举和整数，文字字段限长（见“校验”）。
-  - 这一轮结束后也不跑后台复盘（见“MCP 服务器”），诱导的内容写不进记忆与技能。
+  - 它决定不了提示词，只能经 brief 的结果送数据。规划进程里没有文件、终端、相册与看图的工具，模型即使被诱导，能做的只是交回不合格的答案，或在复盘时把诱导文字写进记忆与技能。后者用户 2026-11-20 接受（决定 4），成员在“记忆”页查看与删除。
   - 产品服务只能为正在登录的成员登记授权，与 ADR 0024 决定 10 的威胁模型相同。
 
-### 发起与结束
+**等待与提示**
+- 任务走到规划时进入 `waiting(vnas)`，剪辑中心写空文件 `/run/a-nas-montage/plans/<账号>`，表示这位成员有任务在等规划；没有任务在等、或最近一次登记已超过 7 天时删掉，页面直接给“重新规划”。记号在运行目录里，启动时按 `jobs` 表重建。
+- 一轮的时限：领取后 5 分钟没开始就作废；开始后距最后一次调用工具 20 分钟、或开始后 65 分钟仍没结束，就结束。等了 10 分钟还没被领取时，页面写“VNAS 还没有接手”，并给出“重新规划”。
+- 重试按原因等待，页面写明在等什么、几分钟后再试（规划会话的“重试”）。
+- 桌面外壳懒加载的 `MontageNotices` 照家庭中心的 `FamilyNotices` 做，只显示提示，不发起规划。内容见规格“本稿补充的默认规则”的桌面提示。
 
-按[决定记录](../decisions/2026-11-17-montage-center-first-version.md)第 10 项，规划由 NAS 在后台发起。它照定时任务的做法，跑在成员自己的定时任务单元 `anas-assistant-cron@<账号>` 里（[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)）：同一个沙箱、同一条通往模型的桥，没有实例凭据，成员不登录也能跑。
-
-1. **留记号**：任务走到规划时进入 `waiting(vnas)`，剪辑中心写空文件 `/run/a-nas-montage/plans/<账号>`，表示这位成员有任务在等规划。
-   - 这一轮被领取、作废后还在退避、或这位成员没有任务在等规划时，删掉记号。
-   - 记号在运行目录里，服务重启后没了，所以启动时按 `jobs` 表重建。
-   - 剪辑中心把最近一次经过登记的请求时间记在 `montage.db` 里（见“规划授权”）。那次登记已超过 7 天时不留记号，页面直接给“重新规划”。
-2. **唤醒**：root 的唤醒服务（`cron-waker.py`）每 30 秒看一次这个目录。
-   - **判断单元在运行**：定时任务单元是 `Type=oneshot`，整轮运行期间状态都是 `activating`，`systemctl is-active` 不算它在运行。所以看 `ActiveState`：`activating`、`active`、`deactivating` 都算在运行。
-   - **全机一轮**：它为规划启动的那一次运行还没结束时，不再发起规划，因为一轮要起一个 gateway（内存见“风险”）。放出后第一次看到单元在运行时记下它的 `InvocationID`；单元不在运行了，或 `InvocationID` 变了（成员的“立即运行”又启动了一次），名额就结束，不会被同一位成员一直占着。这一次运行里可能还在跑成员自己的定时任务，最长 1 小时（`TimeoutStartSec=1h`），后面的成员要等它结束。
-   - **挑成员**：按记号的先后，找第一个满足全部条件的成员：账号名合法、账号在用、有 VNAS（照它对定时任务的检查）；授权签发不到 7 天、领取不满 5 轮；这位成员的单元没在运行；不在退避中。不满足的只是跳过，不挡后面的成员。
-   - **放记号并启动**：在自己另一个运行目录里放 `/run/anas-assistant-montage-plans/<账号>`，再启动这位成员的单元。目录不和唤醒服务记各账号的文件放在一起，因为账号名可能就叫 `plans`。启动失败时删掉这个文件。
-   - **计数**：放文件之前，先在自己的 `StateDirectory` 里记下账号、签发时间与放出时间，并把这次签发的计数加一。单元已经停了而文件还在（这次启动并进了别的一轮，或单元没起来），就删掉文件，退回这一轮。唤醒服务重启时运行目录会被清掉，放出了却不见的文件按用掉计：宁可少用一轮，也不超过 5 轮。
-   - **退避**：单元结束后，剪辑中心的记号还在，说明这一轮没有领取（gateway 起不来、已有别人的 gateway）。这位成员按 2、4、8……分钟退避，最长 1 小时。
-3. **领取**：`run-requests.sh take` 以 root 运行，除了“立即运行”的请求，也把唤醒服务放的文件移进这一轮的目录，名为 `montage-plan`。回合脚本（`cron_round.py` 加一段，或拆出 `montage_round.py`）：
-   - **每一轮都先清理，而且在启动 gateway 之前**：gateway 就绪几秒后，它自己的调度器就会运行到期的任务（[研究](../research/hermes-agent-runtime.md#2026-11-11-在沙箱里验证-gateway)），而中途被杀的运行留下的任务很可能还是到期的。
-     - 不管有没有 `montage-plan`，都调 `stale`，取剪辑中心记下的这位成员已领取、却没报告 `end` 的那些轮；删掉名字是“剪辑规划 <这一轮的编号>”的任务和它们的运行，再报告已清理，剪辑中心就不再列出它们。
-     - `stale` 调不通时，先把所有名字是“剪辑规划 <编号>”的任务暂停，再启动 gateway。暂停可以恢复，下一轮再按 `stale` 删。
-     - 删任务之前先删它的运行会话，做法见第 5 步。
-   - **只在这一轮的目录里有 `montage-plan` 时领取**：成员自己的到期任务和“立即运行”启动的轮次不领取，所以 5 轮的上限和全机一轮不会被绕过。
-   - **只在自己启动 gateway 时领取**：已有别人的 gateway 服务这个主目录（API Server 通道）时不领取，因为那个 gateway 连不到剪辑的套接字。
-   - gateway 就绪后调 `claim`。剪辑中心只在这位成员的记号还在时接受：原子地为最早的等规划任务建一轮，回答 `roundId`、`attemptToken`、模板版本与目标秒数，并删掉记号。
-4. **交给 Hermes**：
-   - **先查模型**：经通往模型的桥 `GET /v1/models`，不调用模型、不消耗 token（P1 用替身模型实测回答 200；转正后的模型网关放行这条，见 `ai/assistant/gateway.py`）。设备上没有密钥或桥不通时，调 `abandon`，原因写明，不往下走。沙箱看不到密钥，所以只能这样查。
-   - **建任务**：用 Hermes 自己的 `create_job(paused=True, enabled_toolsets=["montage"])` 建成暂停的任务，定时任务的一轮不会运行它（P1 实测）。名字是“剪辑规划 <这一轮的编号>”，提示词按模板拼出。Hermes 在运行开始时把任务的下次运行往后推一个周期，单元中途被杀后它一个周期后还会再跑（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 5），所以第 3 步的清理是必需的；M9 定为周期一天、建时暂停、由回合脚本触发，不用 `repeat=1`：这一轮结束时回合脚本连同运行会话删掉它，被杀时留到下一轮的清理；`repeat=1` 跑完会被 Hermes 自己删掉，运行会话却留下，清理还是少不了。
-   - 建任务、删任务与删会话的脚本以成员身份用 `python -P` 运行：助手目录里有模型网关的 `gateway.py`，脚本目录排在模块搜索路径最前面时会盖住 Hermes 的 `gateway` 包。规划这部分是 `montage_round.py`，由 `cron_round.py` 把脚本目录追加到搜索路径末尾后导入。模板要求最后只回答 `[SILENT]`，这样 A-NAS 的任务提示把这次运行记为已读，不弹出（`tasknotices.go`）。
-   - **记 `started`**：带上任务编号。这一轮已作废或已结束时剪辑中心拒绝，脚本删掉任务、不再往下走；记下 `started` 之后，剪辑中心不再接受 `abandon`。
-   - **使任务到期**：用 `trigger_job`，和到期的定时任务一起由 `hermes cron tick` 交出去。先记 `started` 再使任务到期，所以没有 `started` 的一轮一定没调用过模型。
-   - 运行期间，这条任务会出现在成员的“定时任务”里。不按名字隐藏：任务表在成员可写的目录里，对话里的 VNAS 也能建任务，按名字隐藏会让人建出成员看不见的定时任务。
-5. **结束**：Hermes 的执行记录里不再有这次运行后，回合脚本删掉这次运行的会话和这个任务，再调 `end`，带上 Hermes 记下的结束状态与错误。
-   - 删运行就是删会话。运行会话的编号是 `local-<哈希>`，按 `SessionDB.list_cron_job_runs` 找，先 `SessionDB.delete_session` 删会话、再 `remove_job` 删任务，两样都不留（[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的结论 4）。
-   - 单元中途被杀时，留下的任务在下一轮开始时按第 3 步清理。
-6. **结果**：
-   - **两步答案都收下**：任务往下走。
-   - **领取后、`started` 之前失败**（没有密钥、模板版本对不上、单元被杀）：回合脚本调 `abandon`；没有报告时，领取 5 分钟后按作废处理。这一轮没有调用过模型，任务回到 `waiting(vnas)` 并写明原因；剪辑中心按 1、2、4……分钟退避（最长 30 分钟）后再留记号。
-   - **`started` 之后没交齐**（`end` 已报告；或模型第一次调用工具起 30 分钟没交齐；或交给 Hermes 后 65 分钟一次工具都没调用）：进入 `needs_input(vnas_unknown)`，不自动再开一轮，因为模型可能已经调用过（#514）。成员点“重新规划”时重新登记授权、再留记号。
-   - **等了 10 分钟还没被领取**（没有 VNAS、授权用完或过期、单元起不来、成员自己的定时任务占着单元、别人的规划在跑）：任务仍是 `waiting(vnas)`，页面写“VNAS 还没有接手”，并给出“重新规划”，点了会刷新授权。
-7. **提示**：桌面外壳懒加载的 `MontageNotices` 照家庭中心的 `FamilyNotices` 做，只显示提示，不发起规划。内容见规格“本稿补充的默认规则”的桌面提示。
-
-**VNAS 不可用**：账号或设备没有开启 VNAS、设备上没有密钥、gateway 起不来时，任务停在 `waiting(vnas)`，项目页和提示写明原因。按 [AI 助手 V1 的决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)，VNAS 默认对全部成员开启，管理员填写密钥后可用（2026-11-18 合并）。
-
-**取消**：剪辑中心把进行中的一轮记为已结束，之后交来的答案一律回答“任务已取消”，提示词要求见到这句就结束运行。不强行停掉 gateway，因为里面可能还在跑成员自己的定时任务。Hermes 的 `remove_job` 删除正在运行的任务时会中止这次运行（读源码得知），M9 实测后可以由回合脚本在下一次 `stale` 时直接删掉被取消的这一轮。
+**取消**：剪辑中心把进行中的一轮记为已结束，之后交来的答案一律回答“任务已取消”，提示词要求见到这句就结束对话。
 
 ### 去重与结果关联
 
-- `attemptToken` 在领取这一轮时生成，记进 `rounds`；回合脚本把它填进提示词，模型调工具时带上。没有进行中的一轮时，`brief` 和 `submit` 都拒绝。
+- `attemptToken` 在领取这一轮时生成，记进 `rounds`；规划发起方把它填进提示词，模型调工具时带上。没有进行中的一轮时，`brief` 和 `submit` 都拒绝。
 - 每一步只收第一份通过校验的答案，后来的提交回答“已收下”，不覆盖。
 - 一轮结束（报告结束、作废或超时）后，带这一轮 token 的答案回答“这一轮已结束”。
 - 剪辑中心在等待规划时重启：一轮进行中就不另开新的一轮，直到它结束或超时。这样不会重复调用模型，满足 #514“调用成功但本地提交中断，不能无条件再次触发模型调用”的要求。
-- token 只用来关联这一轮，不是凭据。同一成员在这个单元里的其他运行也能交答案，影响只限于本人的任务，而且答案要过校验。
+- token 只用来关联这一轮，不是凭据；答案还要过校验。
 
 **用量**
 - 2026-11-17 用开发机直连 Claude 重剪 5 组：每版两步合计 0.25–0.43 美元，第一步输入约 4.8–18.5 千 token，第二步约 6.9–15.2 千 token。
-- 经 VNAS 后，每次请求还要带 Hermes 的系统提示（约 13,000 字符）、成员的记忆、montage 的 4 个工具定义和逐轮累积的上下文。P1 用的是替身模型，M9 在实验 NAS 上按 DeepSeek 实测。
+- 经 VNAS 后，每次请求还要带 Hermes 的系统提示、成员的记忆与技能、8 个工具定义（记忆与技能 4 个、剪辑 4 个）和逐轮累积的上下文。实验 NAS 的第一次完整出片（2026-11-20，DeepSeek）：规划 3 分 37 秒，第一次交大纲在 2 分 49 秒；复盘在结束后 49 秒报告。模型网关不记 token 用量，花费还没有实测数。
 
-**和第八版的差异**：第八版用独立的 system prompt 直接调用 Claude；改由 VNAS 规划后，模型前面多了 Hermes 的系统提示、定时任务的运行说明和工具调用，答案质量可能不同。验收时在固定样本上对比。
+**和第八版的差异**：第八版用独立的 system prompt 直接调用 Claude；改由 VNAS 规划后，模型前面多了 Hermes 的系统提示、成员的记忆与技能和工具调用，答案质量可能不同。验收时在固定样本上对比。
 
 ## 持久任务
 
@@ -793,6 +736,8 @@ montage/
 | M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)） | 配乐：anas-api 经文件代理复制、配乐分析 Worker 与 allin1 的运行环境、权重的交付、`music`、试听与起点 | M4、M6 | allin1 的运行环境、权重摘要与开发机结构文件的对照测试同一个 PR |
 | M9（[#560](https://github.com/zhongwater123/A-NAS/issues/560)） | montage MCP 服务器、助手套接字与定时任务单元的挂载、规划授权（文件代理的 `assistant_plan`、anas-api 对四条请求的登记与挂载层去掉同名头）、唤醒服务的规划部分（按 `ActiveState` 判断运行、`StateDirectory` 记计数、单独的运行目录放记号、按成员退避）、`run-requests.sh take` 一并移走它、回合脚本的清理、领取与模型检查、桌面提示。动工前按转正后的布局重写“规划”一节的接线 | M8a、P1、AI 助手 V1 转正 | MCP 服务器、managed-config、定时任务单元单独的成员配置、单元挂载、规划授权、唤醒服务与 Host Agent 按 UID 查询同一个 PR；系统测试覆盖“没有授权就不启动”；把 `create_job`、删除任务与删除运行的会话加进研究文档“以后怎么升级”的核对清单 |
 | M10（[#561](https://github.com/zhongwater123/A-NAS/issues/561)） | 网页全流程，打开开关；本方案的状态、`CURRENT.md` | M8a、M8b、M9、AI 助手 V1 转正 | — |
+| 实机验收的修复（[#605](https://github.com/zhongwater123/A-NAS/pull/605)、[#607](https://github.com/zhongwater123/A-NAS/pull/607)） | 剪辑分析不再被相册的前台门控挡住、主页不再播放成员的视频、轮次编号的格式；接缝上的六处缺陷（答案上限写进 Schema、选段的帧、规划时限按最后一次调用算等），见[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md) | M10 | — |
+| 规划会话（[#608](https://github.com/zhongwater123/A-NAS/pull/608)） | 规划进程、规划发起方、按原因重试；去掉 M9 的回合脚本、唤醒服务的规划部分与 `managed-cron` | 用户 2026-11-20 的[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md) | 系统测试带真实运行环境走一遍规划 |
 
 - **先后**：P1、P2 已做完。M1–M8b 不碰助手，M0 之后照常推进；allin1 的商业版权待议不挡开发，挡 M10 打开开关；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
 - 第八版代码在 PR #454 的分支上（2026-11-17）。M6 从提交 `19f2d6db` 复制 `domain/`，并在 PR 描述里写明来源。
@@ -818,13 +763,12 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 | allin1 的商业版权（待议，见“配乐”） | 不能随产品分发时，首版不能对外打开配乐分析 | 待议期间只在开发机与实验 NAS 上运行；结论不利时退回 beat_this 与色度自相似，副歌按[配乐研究](https://github.com/zhongwater123/A-NAS/pull/546)的做法补 | M10 之前 |
 | allin1 在 NAS 的 CPU 上慢、占内存（PyTorch 加 Demucs） | 选歌后要等几分钟才能试听；和描述、渲染同时进行时内存更紧 | 配乐分析一次一首、后台优先级；M8b 在实验 NAS 上实测，按 8 GB 的预算比 | 实施中验证 |
 | 描述在 NAS 的 CPU 上很慢（按读文字中位 105 秒一张推算） | 一组素材的描述要几个小时；相册自己的 AI 积压跟着推迟 | 不设门槛；前台有人用时让路；实验 NAS 上记录耗时，作为性能评估的输入；以后可经局域网算力（[#196](https://github.com/zhongwater123/A-NAS/pull/196)）分流，只改相册一处 | 实施中验证 |
-| 8 GB 内存（目标机型的上限，评审人 2026-11-18 确认）：4B 约 3.5 GiB，FFmpeg 切片上限 3 GiB，再加上相册、Qdrant 和服务本身 | 描述和渲染同时进行时有压力 | 描述在相册的准入里，加载前留出内存余量；剪辑中心一次只渲染一段。实验 NAS 是 16 GB，首版闭环记下的峰值要按 8 GB 的预算比，不能当作够用的证据 | 实施中验证 |
+| 8 GB 内存（目标机型的上限，评审人 2026-11-18 确认）：4B 约 3.5 GiB，FFmpeg 切片上限 3 GiB，再加上相册、Qdrant 和服务本身 | 描述和渲染同时进行时有压力 | 描述在相册的准入里，加载前留出内存余量；剪辑中心一次只渲染一段。实验 NAS 是 16 GB，首版闭环记下的峰值要按 8 GB 的预算比，不能当作够用的证据。2026-11-20 第一次完整出片时，FFmpeg 切片的内存峰值到了 3 GiB 的上限 | 实施中验证 |
 | 关键帧超过 12 张的竖拍长卡片 | 超出 8,192 的上下文，这张卡片描述失败、不进目录 | 和第八版行为相同；实验 NAS 上统计失败的卡片数，多了再评估加大上下文 | 实施中验证 |
-| 规划用的任务靠 Hermes 的内部接口（`create_job`、`trigger_job`、执行记录、删除运行的会话），和 `cron_round.py` 一样 | 规划不可靠；Hermes 升级时可能失效 | P1 已验证这些接口在当前固定的提交上可用；内部接口变了让这一轮明确失败，照[以后怎么升级](../research/hermes-agent-runtime.md#以后怎么升级)一起核对；升级后不再可用时退回哪种做法，先问评审人 | 实施中验证 |
-| 一轮规划要起一个 gateway：三个 MCP 服务器时约占 410–610 MB（[gateway 运行方式的决定](../decisions/2026-11-10-hermes-gateway-runtime.md)），P1 在开发机上实测规划这一轮（`anas`、`companion`、`montage` 三个）为 642 MiB | 8 GB 内存更紧 | 唤醒服务全机同一时刻只启动一轮规划；M9 与实验 NAS 上实测峰值 | 实施中验证 |
+| 规划会话靠 `hermes serve` 的接口（`/auth/password-login`、`/api/ws` 的 JSON-RPC、`session.title`、`review.summary`）与进程级的 `HERMES_TUI_TOOLSETS` | Hermes 升级时规划可能失效，或规划进程多出看图的工具 | 带真实运行环境的系统测试走一遍规划，并检查模型只拿到规定的工具；照[以后怎么升级](../research/hermes-agent-runtime.md#以后怎么升级)一起核对 | 升级时核对 |
+| 规划进程是成员沙箱里的第二个 `hermes serve` | 8 GB 内存更紧 | 规划发起方全机同一时间只规划一个；没有连接 45 秒后进程退出；实验 NAS 上记峰值 | 实施中验证 |
 | 改由 VNAS 规划后答案质量下降 | 成片变差 | 在固定样本上人工对比；关键规则放在提示词模板里 | 实施中验证 |
-| Hermes 的后台复盘可能把卡片描述或诱导文字写进成员的记忆或技能 | 描述留在助手目录里；诱导在以后的对话里生效 | Hermes 对定时任务的运行固定不跑复盘，P1 已实测；升级 Hermes 时核对；描述已去掉号码 | 升级时核对 |
-| 定时任务单元多一个 MCP 子进程，对话实例里也多一个空闲的（P1 实测约 78 MiB） | 内存变多 | 定时任务单元单独一份成员配置，对话实例不带 montage；M9 实测 | 实施中验证 |
+| 规划对话的后台复盘可能把卡片描述或诱导文字写进成员的记忆或技能 | 描述留在助手目录里；诱导在以后的对话里生效 | 用户 2026-11-20 接受（同 2026-10-15 对普通对话的决定）；成员在“记忆”页查看与删除；描述已去掉号码 | 不处理 |
 | [FFmpeg 槽位与内存的决定](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)仍是 pending | 渲染并发和内存上限可能再变 | 剪辑只用 `Background`，跟着最终数值走 | 不处理 |
 | 窗口集合首版没有读者 | 多一份同步、对账与内存 | 按用户决定照 #514 做；不建 HNSW | 不处理 |
 | 剪辑渲染与剪辑分析同时占着全机仅有的 2 个后台 FFmpeg 槽位 | 缩略图、影视与音乐扫描变慢 | 各自同一时刻只发 1 个；跟着 FFmpeg 槽位的决定调整 | 实施中验证 |
@@ -839,6 +783,19 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 - 代码：`make check`、`make race-test`（任务调度是并发代码）、`scripts/system-test.sh`；
 - 改了契约要运行 `make api`。
 
+### 首版闭环的基线
+
+2026-11-20 在实验 NAS（16 GB）上第一次完整出片，规划用 DeepSeek。素材 3 段视频，共 5.9 GB、638 秒；歌曲选段约 1 分钟。分析在此之前已做完，不在下表。
+
+| 步骤 | 用时 | 资源 |
+|---|---|---|
+| 规划（一次对话，两个方案） | 3 分 37 秒；第一次交大纲在 2 分 49 秒；复盘在结束后 49 秒报告 | 模型网关不记 token 用量 |
+| 填槽（每个方案） | 1 分 54 秒、1 分 57 秒，几乎全在 FFmpeg 取帧 | — |
+| 渲染（每个方案） | 72 秒、70 秒 | 约 30 个 FFmpeg 实例，合计约 300 秒 CPU，单个 430–545 MB；FFmpeg 切片的内存峰值到了 3 GiB 上限 |
+| 存回相册 | 约 1.4 秒 | 成片 104 MB 与 94 MB |
+
+这些是 16 GB 机器上的数，按 8 GB 的预算比还不够（见“风险”）；规格“首版闭环”的第 2、3 步（刷新恢复、重启后不重做）还没做。
+
 ## 关联
 
 - **需求与原型**：
@@ -846,16 +803,17 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
   - 原型代码 PR [#454](https://github.com/zhongwater123/A-NAS/pull/454)，[第八版说明](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/README.md)。
 - **决定**：
   - [剪辑中心首版的数据归属与几项做法](../decisions/2026-11-17-montage-center-first-version.md)；
-  - [Hermes 的固定提交怎么越过 gateway 运行时](../decisions/2026-11-10-hermes-gateway-runtime.md)（定时任务单元的做法）；
+  - [剪辑中心的规划怎样交给 VNAS](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)；
   - [方案中补充的默认做法](../decisions/2026-11-17-montage-center-default-rules.md)；
   - [相册放视频，视频不参与 AI](../decisions/2026-10-19-videos-in-the-photo-library.md)。
 - **ADR**：
   - 本方案的 [0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；
   - 相关的 [0001](../adr/0001-use-go-for-product-services.md)、[0006](../adr/0006-use-a-managed-photo-library.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
-- **架构**：[总览](OVERVIEW.md)、[家庭中心](family-center.md)、[相册 AI](photo-ai.md)、[OCR 方案](photo-ocr.md)、[向量索引](vector-index.md)。
+- **架构**：[规划会话](montage-planning-session.md)、[配乐](montage-music.md)、[总览](OVERVIEW.md)、[家庭中心](family-center.md)、[相册 AI](photo-ai.md)、[OCR 方案](photo-ocr.md)、[向量索引](vector-index.md)。
 - **规格**：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)。
 - **代码**：
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；
   - 助手：[`ai/assistant/managed-config.yaml`](../../ai/assistant/managed-config.yaml)、[`internal/assistantapi`](../../internal/assistantapi/rpc.go)；
-  - 后台规划沿用的定时任务：[`cron-waker.py`](../../ai/assistant/cron-waker.py)、[`cron_round.py`](../../ai/assistant/cron_round.py)、[`run-requests.sh`](../../ai/assistant/run-requests.sh)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go)、[`tasks.go`](../../internal/assistantapi/tasks.go)。
+  - 规划：[`montage-planner.py`](../../ai/assistant/montage-planner.py)、[`anas_montage_mcp.py`](../../ai/assistant/anas_montage_mcp.py)、[`planning.go`](../../internal/montage/planning.go)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)。
+- **调查**：[剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)。

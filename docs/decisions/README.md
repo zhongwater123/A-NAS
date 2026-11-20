@@ -53,7 +53,6 @@
 - [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)
 - [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 - [2026-11-17：AI 助手 V1 的模型、开启范围、密钥与告知](2026-11-17-assistant-v1-cloud-model.md)
-- [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 
 ### 桌面与设置
 
@@ -79,6 +78,7 @@
 - [2026-11-17：剪辑中心首版的数据归属与几项做法](2026-11-17-montage-center-first-version.md)
 - [2026-11-17：剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)
 - [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
+- [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 
 ### 网页搜索
 
