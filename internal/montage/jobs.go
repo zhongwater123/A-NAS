@@ -464,8 +464,9 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		return Job{}, err
 	}
 	// An edit takes no video out: the member replaces the shots that use it
-	// and saves again (docs/specs/montage-center.md, 存为新版本).
-	if job.Kind != KindGenerate || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
+	// and saves again (docs/specs/montage-center.md, 存为新版本). A recut
+	// plans anew as generating does, and goes on without them the same way.
+	if job.Kind == KindEdit || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	for _, id := range ids {
