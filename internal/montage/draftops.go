@@ -354,6 +354,7 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 	if err != nil {
 		return draftState{}, "", err
 	}
+	//nolint:gosec // G404: the seed makes a shuffle again as it was (kept with its revision); nothing rests on guessing it.
 	random := mathrand.New(mathrand.NewPCG(uint64(seed), bits.ReverseBytes64(uint64(seed))))
 	next := state.clone()
 	used := map[string]bool{}
@@ -408,8 +409,8 @@ func reservedLater(state draftState, i int, beat string) bool {
 }
 
 func cardOf(beat string) string {
-	if at := strings.LastIndex(beat, "/"); at >= 0 {
-		return beat[:at]
+	if card, _, found := strings.CutLast(beat, "/"); found {
+		return card
 	}
 	return beat
 }

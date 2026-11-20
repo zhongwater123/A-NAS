@@ -725,21 +725,8 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 // from latest goes back through, so that the last keptRevisions steps can
 // be undone however many of them were undos themselves.
 func trimRevisions(ctx context.Context, tx *sql.Tx, draftID string, latest int) error {
-	rows, err := tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
+	backs, err := revisionBacks(ctx, tx, draftID)
 	if err != nil {
-		return err
-	}
-	backs := map[int]sql.NullInt64{}
-	for rows.Next() {
-		var revision int
-		var back sql.NullInt64
-		if err := rows.Scan(&revision, &back); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		backs[revision] = back
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	keep := map[int]bool{latest: true}
@@ -760,4 +747,24 @@ func trimRevisions(ctx context.Context, tx *sql.Tx, draftID string, latest int) 
 		}
 	}
 	return nil
+}
+
+// revisionBacks is each kept revision of a draft with the one undoing it
+// goes back to.
+func revisionBacks(ctx context.Context, tx *sql.Tx, draftID string) (map[int]sql.NullInt64, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	backs := map[int]sql.NullInt64{}
+	for rows.Next() {
+		var revision int
+		var back sql.NullInt64
+		if err := rows.Scan(&revision, &back); err != nil {
+			return nil, err
+		}
+		backs[revision] = back
+	}
+	return backs, rows.Err()
 }

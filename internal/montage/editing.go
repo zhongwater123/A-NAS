@@ -126,10 +126,10 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 		if query.Landscape && candidate.Portrait {
 			return false
 		}
-		switch {
-		case query.Scene == "":
+		switch query.Scene {
+		case "":
 			return true
-		case query.Scene == otherScene:
+		case otherScene:
 			return !slices.ContainsFunc(scenes, func(c SceneCount) bool { return c.Scene == candidate.Scene && c.Scene != otherScene })
 		}
 		return candidate.Scene == query.Scene
