@@ -40,6 +40,10 @@ var (
 	ErrSearchModel = errors.New("the windows were analysed with another model")
 )
 
+// AnalysisChangedReason tells the member why a version analysed again can
+// no longer be edited, on the edit page and on a save that found it.
+const AnalysisChangedReason = "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"
+
 // EditRefusal is a step the rules do not allow; Reason says why, for the
 // member.
 type EditRefusal struct{ Reason string }

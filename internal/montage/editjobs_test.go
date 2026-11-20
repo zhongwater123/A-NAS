@@ -297,3 +297,27 @@ func TestAnEditsTimelineIsCutWithTheDraftsBeats(t *testing.T) {
 		t.Fatalf("a slot left short = %v", err)
 	}
 }
+
+// A save that finds the version's videos analysed again with another model
+// stops at once and says why, rather than trying again (#611).
+func TestASaveOfAVersionAnalysedAgainStops(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.grants.identity = "another-model|win=2s1f"
+	env.runJobs(t)
+	stopped, err := env.store.Job(ctx, editOwner, job.ID)
+	if err != nil || stopped.State != JobFailed || stopped.Error != AnalysisChangedReason {
+		t.Fatalf("a save of a version analysed again = %+v, %v", stopped, err)
+	}
+	if env.frames.rendered != 0 || len(env.grants.films) != 0 {
+		t.Fatalf("it rendered %d frames and saved %d films", env.frames.rendered, len(env.grants.films))
+	}
+}
