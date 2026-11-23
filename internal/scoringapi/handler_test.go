@@ -346,7 +346,7 @@ func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
 		t.Fatalf("choosing alice: %d", code)
 	}
 	batches := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil)
-	if !strings.Contains(batches.Body.String(), `"dimensions":[{"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true},{"id":"composition","name":"构图","description":"","custom":false}]`) {
+	if !strings.Contains(batches.Body.String(), `"dimensions":[{"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true},{"id":"composition","name":"构图","description":"画面安排得好不好，主体清不清楚","custom":false}]`) {
 		t.Fatalf("alice's batches: %s", batches.Body)
 	}
 }
