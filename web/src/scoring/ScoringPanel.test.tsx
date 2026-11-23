@@ -282,6 +282,32 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 5 } });
   });
 
+  it("scores a batch of five levels with 1 to 5 and the arrows from 3, showing the level", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, scale: "five" });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await shownPhoto();
+    const slider = screen.getByRole("slider", { name: "分数" });
+    // Nothing to type, and 0 is no level.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("点选一档，或按 1–5")).toBeTruthy();
+    await user.keyboard("0");
+    expect(slider.getAttribute("aria-valuetext")).toBe("未打分");
+    await user.keyboard("{ArrowLeft}");
+    expect(slider.getAttribute("aria-valuetext")).toBe("一般");
+    await user.keyboard("2");
+    expect(slider.getAttribute("aria-valuetext")).toBe("较差");
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(slider.getAttribute("aria-valuetext")).toBe("好");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 4 } });
+  });
+
   it("keeps every score from a rater of a batch that hides them, and answers in its tenths", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "tenths", hideDecimals: true });
     window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
@@ -440,9 +466,14 @@ describe("ScoringPanel for an administrator", () => {
     expect(within(dialog).queryByRole("group", { name: "新的打分项" })).toBeNull();
     expect(made.at(-1)).toEqual({ name: "空间层次", description: "前景、中景、远景是否分明" });
     expect(within(dialog).getByText("长边不足 2400 像素的照片不加入批次。", { exact: false })).toBeTruthy();
-    // The number line with two decimals, shown to raters, unless chosen otherwise.
-    expect((within(dialog).getByRole("radio", { name: /两位小数/ }) as HTMLInputElement).checked).toBe(true);
+    // Five levels, the first card, unless chosen otherwise; they have no
+    // decimals to hide.
+    const scales = within(dialog).getAllByRole("radio") as HTMLInputElement[];
+    expect(scales[0].checked && scales[0].value).toBe("five");
     const shown = () => within(dialog).queryByRole("checkbox", { name: /打分人看得到小数/ }) as HTMLInputElement | null;
+    expect(shown()).toBeNull();
+    // A number line with decimals shows them to raters unless told not to.
+    await user.click(within(dialog).getByRole("radio", { name: /两位小数/ }));
     expect(shown()?.checked).toBe(true);
     await user.click(within(dialog).getByRole("radio", { name: /一位小数/ }));
     await user.click(shown()!);
