@@ -104,6 +104,10 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
 
+## 可选硬件包
+
+部署包包含 `a-nas-hotspot-radio` 及所选架构的锁定 Debian 依赖。按[热点网卡手册](prepare-experimental-nas-hotspot-radio.md)选择安装和验收。
+
 ## 以后的版本：设置 → 系统更新
 
 装上带系统更新的版本（[规格](../specs/system-update.md)）、`site.conf` 写了 `ANAS_UPDATE_STAGING` 之后，以后的版本只做第 1、2 步：

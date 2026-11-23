@@ -33,7 +33,7 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/signing.sh
 . "$repo_root/scripts/lib/signing.sh"
 # The packages the A-NAS releases version, which KEEP prunes.
-product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-archive-keyring)$'
+product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-archive-keyring|a-nas-hotspot-radio)$'
 
 flat() {
   local out=$1 repo dist=$3 gnupg=$4 keep=${5:-} index key entries list count oldest other package version file sha
