@@ -32,8 +32,9 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/signing.sh
 . "$repo_root/scripts/lib/signing.sh"
-# The packages the A-NAS releases version, which KEEP prunes.
-product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-archive-keyring)$'
+# The packages the A-NAS releases version, which KEEP prunes: those
+# scripts/build-packages.sh builds for each release, and the keyring.
+product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-docker-policy|a-nas-archive-keyring)$'
 
 flat() {
   local out=$1 repo dist=$3 gnupg=$4 keep=${5:-} index key entries list count oldest other package version file sha

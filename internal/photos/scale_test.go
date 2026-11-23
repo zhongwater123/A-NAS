@@ -221,7 +221,7 @@ func TestScaleThumbnailCost(t *testing.T) {
 		t.Fatal(err)
 	}
 	median, worst := measure(t, 5, func() error {
-		_, _, _, err := renderThumbnail(bytes.NewReader(original.Bytes()), 6)
+		_, _, _, err := renderUpright(context.Background(), bytes.NewReader(original.Bytes()), 6, thumbnailEdge, thumbnailQuality)
 		return err
 	})
 	t.Logf("12-megapixel JPEG (%.1f MiB): thumbnail median %s, max %s; 20,000 such photos take about %s",
