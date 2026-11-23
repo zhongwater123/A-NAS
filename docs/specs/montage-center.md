@@ -1,7 +1,7 @@
 # 剪辑中心
 
 状态：implemented（首版 M0–M10 于 2026-11-19 合入；2026-11-20 规划改为成员规划进程里的一次对话，[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)，[#608](https://github.com/zhongwater123/A-NAS/pull/608)；出片后的二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 实施中，[#596](https://github.com/zhongwater123/A-NAS/issues/596)）
-更新时间：2026-11-20
+更新时间：2026-11-23
 
 ## 目标
 

@@ -1,7 +1,7 @@
 # 剪辑中心首版实施方案
 
 状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
-更新时间：2026-11-20
+更新时间：2026-11-23
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
@@ -765,7 +765,7 @@ montage/
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
 - brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。
-- 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。回合脚本同时认 v2 与 v3。
+- 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
 - 这句话照“一句话要求”限 200 字，也过“不支持的要求”的词表。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
