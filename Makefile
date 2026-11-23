@@ -126,8 +126,10 @@ web-build: web-install
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
 
+# The changed Go and Web files, the way fmt-check and web-lint expect them;
+# the coding agents' hooks run the same script after each edit (AGENTS.md).
 fmt:
-	gofmt -w $$($(GO_FILES))
+	scripts/format-changed.sh
 
 fmt-check:
 	@files="$$(gofmt -l $$($(GO_FILES)))"; \
