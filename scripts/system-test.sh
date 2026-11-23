@@ -1086,6 +1086,23 @@ check "SMB write is owned by the member's UID" \
 check "Web lists the file written over SMB" grep -qx alice-smb.txt <(entries /tmp/alice.jar "$alice_private")
 check "administrator cannot open the member's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED owner alice ls
 check "member cannot open the administrator's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED alice owner ls
+# smb_keeps_the_reserve USER SHARE: what an SMB client is told is free is what
+# the data volume has beyond its reserve, 10 GiB of this 64 GiB volume
+# (internal/capacity), so that Windows refuses a copy that would eat into it
+# (#181). A little room is left for what the services write meanwhile.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_keeps_the_reserve() {
+  local out unit blocks told avail
+  out=$(smb "$1" "$2" du 2>&1)
+  printf '%s\n' "$out" >>"$hidden"
+  # smbclient indents "N blocks of size S. F blocks available" with tabs.
+  read -r blocks unit told < <(sed -n 's/^[^0-9]*\([0-9][0-9]*\) blocks of size \([0-9][0-9]*\)\. \([0-9][0-9]*\) blocks available.*/\1 \2 \3/p' <<<"$out")
+  [[ -n ${told:-} && $blocks -gt 0 ]] || return 1
+  avail=$(($(stat -f -c '%a * %S' "$data") - (10 << 30)))
+  printf 'told %s free, beyond the reserve %s\n' "$((told * unit))" "$avail" >>"$hidden"
+  ((told * unit <= avail + (64 << 20) && told * unit >= avail - (64 << 20)))
+}
+check "SMB clients are told the space beyond the data volume's reserve" smb_keeps_the_reserve alice alice
 check "administrator reads Shared over SMB" quiet smb owner Shared "get shared.txt /tmp/shared-smb.txt"
 check "SMB read of Shared returns the Web upload" cmp -s /tmp/shared.txt /tmp/shared-smb.txt
 

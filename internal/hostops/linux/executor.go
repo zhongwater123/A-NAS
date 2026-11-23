@@ -375,6 +375,8 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     bind interfaces only = yes
     disable netbios = yes
     smb ports = 445
+    dfree command = %s
+    dfree cache time = 10
 
 [homes]
     comment = A-NAS private space
@@ -390,7 +392,7 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup,
+%s`, interfaces, SambaFreeCommand, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup,
 		strings.Replace(sambaShareOptions, "veto files = /.a-nas-trash/", "veto files = /.a-nas-trash/Agent空间/", 1))
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
@@ -444,6 +446,12 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	}
 	return nil
 }
+
+// SambaFreeCommand tells SMB clients what is free on the data volume beyond
+// the reserve every A-NAS writer keeps (internal/capacity), so that Windows
+// refuses a copy that would eat into it before it starts, as the Web does
+// (#181). The a-nas package installs it (deploy/samba/dfree.sh).
+const SambaFreeCommand = "/usr/lib/a-nas/smb-dfree"
 
 // sambaListeningSettings are the settings smbd reads only when it starts:
 // where it listens.
