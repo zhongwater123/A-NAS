@@ -23,7 +23,12 @@
 - 每人一个账号。
 - 不设到期。
 - 为开发者组收紧 sshd。
-- `dev-ocr`：“是之前测试OCR用的，已经废弃，可以搬走或是销毁”。
+- `dev-ocr`：“是之前测试OCR用的，已经废弃，可以搬走或是销毁”。盘点后用户选“搬模型数据集，其余删”。2026-11-23 用一次性 root 脚本执行：
+  - 三个模型（qwen3.5-4b、gemma-4-e4b、gemma-4-e4b-qat，共约 15 GB）搬到 `/srv/eval/models/`；
+  - CC-OCR 评测集搬到 `/srv/eval/datasets/cc-ocr`；
+  - 评测脚本与运行记录搬到 `/srv/eval/archive/ocr-eval-2026-10-29/`；
+  - 删除账号与其余 2.2 GB；
+  - root 名下唯一的钥匙 `claude-ocr-eval@OCR_test` 与 dev-ocr 的是同一把，已停用（改名为 `/root/.ssh/authorized_keys.disabled-20261123`）。
 
 ## 关联
 
