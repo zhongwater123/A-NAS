@@ -838,11 +838,12 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	if _, err := store.db.Exec("UPDATE batches SET hide_decimals = 1, scale = 'three'"); err == nil {
 		t.Fatal("three levels with their decimals hidden")
 	}
-	// Version 5 rebuilt batches for five levels and kept its photos.
+	// Version 5 rebuilt batches for five levels and kept its photos and scores,
+	// overall now being the 1 added above.
 	if _, err := store.db.Exec("UPDATE batches SET scale = 'five'"); err != nil {
 		t.Fatalf("five levels: %v", err)
 	}
-	if rebuilt, err := store.Stats(context.Background(), "b1"); err != nil || len(rebuilt) != 1 || rebuilt[0].Dimensions[0].Mean != 3.2 {
+	if rebuilt, err := store.Stats(context.Background(), "b1"); err != nil || len(rebuilt) != 1 || rebuilt[0].Dimensions[0].Mean != 1 || rebuilt[0].Dimensions[1].Mean != 2.8 {
 		t.Fatalf("after the rebuild %+v, %v", rebuilt, err)
 	}
 	var version int

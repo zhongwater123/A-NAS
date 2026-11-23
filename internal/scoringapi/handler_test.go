@@ -334,7 +334,7 @@ func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
 			Custom bool   `json:"custom"`
 		} `json:"items"`
 	}](t, a.call("admin-token", http.MethodGet, dimensions, nil))
-	if len(catalogue.Items) != 7 || catalogue.Items[0].ID != "overall" || catalogue.Items[6].ID != "custom_1" || !catalogue.Items[6].Custom {
+	if len(catalogue.Items) != 9 || catalogue.Items[0].ID != "overall" || catalogue.Items[8].ID != "custom_1" || !catalogue.Items[8].Custom {
 		t.Fatalf("catalogue: %+v", catalogue)
 	}
 	if code := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
