@@ -154,6 +154,20 @@ const (
 	skillsCopyDirectory = ".claude/skills"
 )
 
+// Every coding agent reads the root AGENTS.md in full at the start of every
+// session, and a directory's AGENTS.md whenever it works there; a long file
+// costs context each time and buries the rules that matter. The Claude Code
+// team keeps its shared file near 2.5k tokens. On 2026-11-23 the root file
+// was cut from 10.7 to about 8 KB, so these caps leave room for a few rules
+// and fail before it turns back into a manual: details go into the linked
+// documents, a directory's rules into its own AGENTS.md.
+const (
+	agentsFile           = "AGENTS.md"
+	rootAgentsMaxBytes   = 10 << 10
+	localAgentsMaxBytes  = 3 << 10
+	agentsCapExplanation = "keep only the rules every session needs and link the details"
+)
+
 func main() {
 	root, err := findRepositoryRoot()
 	if err != nil {
@@ -239,6 +253,15 @@ func validateDocumentation(root string) ([]string, int) {
 		data, readErr := os.ReadFile(filePath) //nolint:gosec // G122: a developer tool reading the checkout's own documents.
 		if readErr != nil {
 			return readErr
+		}
+		if path.Base(relativePath) == agentsFile {
+			limit := localAgentsMaxBytes
+			if relativePath == agentsFile {
+				limit = rootAgentsMaxBytes
+			}
+			if len(data) > limit {
+				problems = append(problems, fmt.Sprintf("%s is %d bytes, over the %d-byte cap: %s", relativePath, len(data), limit, agentsCapExplanation))
+			}
 		}
 		// A snapshot is an old current-state page, status phrases included.
 		snapshot := path.Dir(relativePath) == statusDirectory && snapshotFileName.MatchString(path.Base(relativePath))
