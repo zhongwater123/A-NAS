@@ -1,0 +1,10 @@
+Package: a-nas-hotspot-radio
+Version: @VERSION@
+Architecture: @ARCH@
+Section: net
+Priority: optional
+Maintainer: A-NAS <a-nas@localhost>
+Depends: @DEPENDS@
+Description: A-NAS phone hotspot dependencies
+ Installs MediaTek firmware, wireless inspection tools and the daemons
+ used by the optional A-NAS phone hotspot.

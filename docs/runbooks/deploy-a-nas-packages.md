@@ -104,6 +104,12 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
 
+## 可选硬件包
+
+产品发布包含同架构的可选 `a-nas-hotspot-radio` 及锁定 Debian 依赖。系统更新会更新已安装的热点包。在提供热点包的版本之间回退时，热点包也回退到相同版本。回到尚未提供热点的版本时保留依赖包和安装选择，旧产品没有热点服务。
+
+ARM64 的热点依赖可单独签名发布。运行 `ANAS_TARGET_ARCH=arm64 bash scripts/release.sh --hotspot-radio-only REPO CONTENT`，目标使用单独的 ARM64 软件源目录。发布到 GitHub 平铺源时，`ANAS_TARGET_ARCH=arm64 make publish` 选择 `apt-dev-arm64` 或 `apt-release-arm64`。这是已有 ARM64 产品环境的可选依赖源。按[热点网卡手册](prepare-experimental-nas-hotspot-radio.md)配置证书、安装和验收。
+
 ## 以后的版本：设置 → 系统更新
 
 装上带系统更新的版本（[规格](../specs/system-update.md)）、`site.conf` 写了 `ANAS_UPDATE_STAGING` 之后，以后的版本只做第 1、2 步：

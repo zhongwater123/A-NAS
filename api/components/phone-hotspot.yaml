@@ -1,0 +1,25 @@
+schemas:
+  PhoneHotspotStatus:
+    type: object
+    required: [state]
+    properties:
+      state:
+        type: string
+        enum: [unavailable, "off", starting, "on", stopping, failed]
+      reason:
+        type: string
+        enum: [dependencies_missing, no_wired_uplink, no_idle_radio, ap_failed, dhcp_failed, web_unavailable, tls_unavailable, isolation_failed, cleanup_failed, service_failed]
+      connection:
+        description: Present when the hotspot is on. The response is not cacheable.
+        type: object
+        required: [ssid, password, url]
+        properties:
+          ssid: { type: string }
+          password: { type: string }
+          url: { type: string }
+  PhoneHotspotRequest:
+    type: object
+    additionalProperties: false
+    required: [enabled]
+    properties:
+      enabled: { type: boolean }
