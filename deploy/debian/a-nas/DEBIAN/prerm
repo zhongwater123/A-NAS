@@ -17,6 +17,15 @@
 set -euo pipefail
 
 if [[ -d /run/systemd/system ]]; then
+  # Stop while the unit and its cleanup program are still installed, including
+  # when downgrading to a release that does not have the hotspot.
+  case "${1:-}" in
+    remove | upgrade)
+      if [[ "$(systemctl show -p LoadState --value anas-phone-hotspot.service)" == loaded ]]; then
+        systemctl stop anas-phone-hotspot.service
+      fi
+      ;;
+  esac
   case "${1:-}" in
     remove)
       systemctl stop anas-montage-planner.service 'anas-assistant-planapi@*.service' 'anas-assistant-plan@*.service' || true

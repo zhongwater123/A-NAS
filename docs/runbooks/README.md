@@ -20,6 +20,7 @@
 - [启用相册物体检测](enable-photo-objects.md)（verified；2026-10-13 部署 `bb1ec71bff65`）
 - [启用向量索引](enable-vector-index.md)（draft；实验 NAS 已执行第 1–4 步与第 6 步，第 5 步的读路径核对待部署后执行）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
+- [准备实验 NAS 的热点网卡](prepare-experimental-nas-hotspot-radio.md)（draft）
 - [启用互联网访问](enable-internet-access.md)（draft；边缘服务器已准备，NAS 一侧与开放待执行）
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [启用网页搜索](enable-web-search.md)（draft；实验 NAS 已执行第 1–3 步，空闲外发待查明）
