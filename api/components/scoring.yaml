@@ -6,8 +6,8 @@ parameters:
 schemas:
   ScoringDimensionID:
     type: string
-    pattern: "^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
-    description: "What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning."
+    pattern: "^(overall|composition|light_color|quality|emotion|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
+    description: "What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning."
   ScoringDimension:
     type: object
     additionalProperties: false
@@ -15,7 +15,7 @@ schemas:
     properties:
       id: { $ref: "#/schemas/ScoringDimensionID" }
       name: { type: string, description: "The name raters see, such as 构图." }
-      description: { type: string, description: "What raters look at; empty for the built-in ones and for custom ones made without." }
+      description: { type: string, description: "What raters look at; empty for sharpness, narrative and preference and for custom ones made without." }
       custom: { type: boolean, description: An administrator made it. }
   ScoringDimensions:
     type: array

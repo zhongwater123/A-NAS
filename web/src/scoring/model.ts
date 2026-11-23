@@ -8,7 +8,7 @@ import type { operations, ScoringBatch, ScoringExportField, ScoringRatingInput, 
 // only the API speaks points with two decimals.
 export const maxScore = 500;
 
-// overall is 总分. A batch of it alone shows no item names.
+// overall is 总体. A batch of it alone shows no item names.
 export const overall = "overall";
 
 export type StageAction =
@@ -106,6 +106,20 @@ export const levelsOf: Record<LevelScale, readonly Level[]> = {
   ],
 };
 
+// 情绪 describes rather than judges, so its five levels have words of their
+// own; every other 打分项, custom ones too, has the scale's.
+const emotionLevels: readonly Level[] = [
+  { score: 100, word: "很平静" },
+  { score: 200, word: "安静" },
+  { score: 300, word: "中间" },
+  { score: 400, word: "有张力" },
+  { score: 500, word: "激烈" },
+];
+
+// levelsFor is the levels of a scale with the words of a 打分项.
+export const levelsFor = (scale: LevelScale, dimension?: string): readonly Level[] =>
+  scale === "five" && dimension === "emotion" ? emotionLevels : levelsOf[scale];
+
 export const isLevels = (scale: Scale): scale is LevelScale => scale === "three" || scale === "five";
 
 // The step between two scores of a number line, in hundredths.
@@ -114,8 +128,8 @@ const places: Record<Scale, number> = { hundredths: 2, tenths: 1, whole: 0, thre
 
 // The level nearest to hundredths, a tie going up; below the lowest is the
 // lowest.
-const levelOf = (hundredths: number, scale: LevelScale) =>
-  levelsOf[scale].reduce((best, level) =>
+const levelOf = (hundredths: number, scale: LevelScale, dimension?: string) =>
+  levelsFor(scale, dimension).reduce((best, level) =>
     Math.abs(level.score - hundredths) <= Math.abs(best.score - hundredths) ? level : best,
   );
 
@@ -128,9 +142,9 @@ export function snapScore(hundredths: number, scale: Scale): number {
 }
 
 // formatScore shows hundredths as the scale writes them: 3.47, 3.5, 3, or
-// the level's word, 中 or 一般.
-export const formatScore = (hundredths: number, scale: Scale = "hundredths") =>
-  isLevels(scale) ? levelOf(hundredths, scale).word : (hundredths / 100).toFixed(places[scale]);
+// the level's word for the 打分项, 中, 一般 or for 情绪 中间.
+export const formatScore = (hundredths: number, scale: Scale = "hundredths", dimension?: string) =>
+  isLevels(scale) ? levelOf(hundredths, scale, dimension).word : (hundredths / 100).toFixed(places[scale]);
 
 // typeable tells the scales whose scores a rater can type: the number
 // lines whose numbers the rater sees.

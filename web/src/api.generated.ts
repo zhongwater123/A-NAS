@@ -8228,13 +8228,13 @@ export interface components {
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
         };
-        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
+        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
             id: components["schemas"]["ScoringDimensionID"];
             /** @description The name raters see, such as 构图. */
             name: string;
-            /** @description What raters look at; empty for the built-in ones and for custom ones made without. */
+            /** @description What raters look at; empty for sharpness, narrative and preference and for custom ones made without. */
             description: string;
             /** @description An administrator made it. */
             custom: boolean;

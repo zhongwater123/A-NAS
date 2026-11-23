@@ -12,8 +12,8 @@ import (
 
 // Dimension is something raters score a photo on, a 打分项: one of the
 // built-in ones, or one an administrator made, which every later batch can
-// choose too. Description tells raters what to look at; built-in ones have
-// none.
+// choose too. Description tells raters what to look at; the scoring
+// handbook's built-in ones have one, the three older ones none.
 type Dimension struct {
 	ID          string
 	Name        string
@@ -21,18 +21,26 @@ type Dimension struct {
 	Custom      bool
 }
 
-// Overall is 总分.
+// Overall is 总体, which was named 总分 before.
 const Overall = "overall"
 
 // Sharpness is 清晰度.
 const Sharpness = "sharpness"
 
-// BuiltIn lists the 打分项 every module has. Their IDs are stored and
-// exported, so an ID never changes meaning; a new one is added, not renamed.
+// Emotion is 情绪, which describes a photo rather than judges it: five
+// levels name it from calm to intense (scales.go).
+const Emotion = "emotion"
+
+// BuiltIn lists the 打分项 every module has, in the order a new batch offers
+// them: the scoring handbook's five, then the older three. Their IDs are
+// stored and exported, so an ID never changes meaning; a new one is added,
+// not renamed, though a name may change.
 var BuiltIn = []Dimension{
-	{ID: Overall, Name: "总分"},
-	{ID: "composition", Name: "构图"},
-	{ID: "light_color", Name: "光影色彩"},
+	{ID: Overall, Name: "总体", Description: "整体拍得好不好，有没有让人想多看一会儿的感觉"},
+	{ID: "composition", Name: "构图", Description: "画面安排得好不好，主体清不清楚"},
+	{ID: "light_color", Name: "光影色彩", Description: "光线和颜色好不好看"},
+	{ID: "quality", Name: "画质", Description: "按正常大小看有没有抖动、虚焦、噪点，不用 100% 查看"},
+	{ID: Emotion, Name: "情绪", Description: "平静还是激烈，只看感觉不看好坏：1 平静，5 激烈"},
 	{ID: Sharpness, Name: "清晰度"},
 	{ID: "narrative", Name: "叙事意境"},
 	{ID: "preference", Name: "喜好程度"},

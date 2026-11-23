@@ -60,16 +60,20 @@ func (scale Scale) fits(score int) bool {
 	return true
 }
 
-// describe says in the export what a score of the scale is.
-func (scale Scale) describe() string {
-	switch scale {
-	case Tenths:
+// describe says in the export what a score of the scale is on a 打分项:
+// five levels name 情绪 from calm to intense, every other one from poor to
+// good.
+func (scale Scale) describe(dimension string) string {
+	switch {
+	case scale == Tenths:
 		return "0 到 5，一位小数"
-	case Whole:
+	case scale == Whole:
 		return "0 到 5 的整数"
-	case Three:
+	case scale == Three:
 		return "三档：1 差，3 中，5 好"
-	case Five:
+	case scale == Five && dimension == Emotion:
+		return "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈"
+	case scale == Five:
 		return "五档：1 很差，2 较差，3 一般，4 好，5 很好"
 	}
 	return "0 到 5，两位小数"

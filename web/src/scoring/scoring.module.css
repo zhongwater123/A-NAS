@@ -1362,7 +1362,7 @@
   transform: scaleX(1);
 }
 /* The item being set, large and in the needle's colour above the reading,
-   so that nobody scores 构图 thinking it is 总分; it rises in at each change. */
+   so that nobody scores 构图 thinking it is 总体; it rises in at each change. */
 .sc-which {
   display: flex;
   align-items: baseline;

@@ -718,6 +718,27 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 			}
 		}
 	}
+	// Five levels name 情绪 from calm to intense, the rest from poor to good.
+	if got := Five.describe(Emotion); got != "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈" {
+		t.Errorf("情绪 on five levels: %s", got)
+	}
+	if got := Five.describe("custom_1"); got != "五档：1 很差，2 较差，3 一般，4 好，5 很好" {
+		t.Errorf("a custom 打分项 on five levels: %s", got)
+	}
+}
+
+func TestTheHandbooksDimensionsComeFirst(t *testing.T) {
+	ids := make([]string, len(BuiltIn))
+	for i, dimension := range BuiltIn {
+		ids[i] = dimension.ID
+		if i < 5 && dimension.Description == "" {
+			t.Errorf("%s has no description", dimension.ID)
+		}
+	}
+	want := []string{Overall, "composition", "light_color", "quality", Emotion, Sharpness, "narrative", "preference"}
+	if !slices.Equal(ids, want) || BuiltIn[0].Name != "总体" {
+		t.Fatalf("built-in %v, %s first", ids, BuiltIn[0].Name)
+	}
 }
 
 func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
@@ -769,7 +790,7 @@ func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
 	if err != nil || len(records) != 2 || records[1][3] != "3" || records[1][4] != "5" {
 		t.Fatalf("records %q, %v", records, err)
 	}
-	if manifest.Batch.Scale != Three || manifest.Batch.HideDecimals || !strings.HasPrefix(manifest.Columns[3].Description, "三档：1 差，3 中，5 好") {
+	if manifest.Batch.Scale != Three || manifest.Batch.HideDecimals || !strings.HasSuffix(manifest.Columns[3].Description, "三档：1 差，3 中，5 好；跳过和标记没有分数") {
 		t.Fatalf("manifest %+v", manifest)
 	}
 }

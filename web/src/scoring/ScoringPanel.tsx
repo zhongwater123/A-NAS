@@ -215,7 +215,9 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
     <div className={styles.scCover}>
       {recent.map((item) => {
         // A batch that hides scores from raters shows none here either.
-        const score = batch.hideDecimals ? undefined : formatScore(Math.round(item.score * 100), batch.scale);
+        const score = batch.hideDecimals
+          ? undefined
+          : formatScore(Math.round(item.score * 100), batch.scale, batch.dimensions[0].id);
         const alt =
           score === undefined
             ? "你打过的照片"

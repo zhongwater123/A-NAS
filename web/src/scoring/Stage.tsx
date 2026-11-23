@@ -220,7 +220,7 @@ export function Stage({
   const scale = batch.scale;
   const scoresHidden = batch.hideDecimals;
   const typing = typeable(scale, scoresHidden);
-  // A batch of 总分 alone shows no item names, as it always did; any other
+  // A batch of 总体 alone shows no item names, as it always did; any other
   // names what is being scored.
   const named = several || dimensions[0].id !== overall;
   // Answers keep the first item in score, and the ruler lands a scored photo
@@ -813,7 +813,7 @@ export function Stage({
               alt={
                 scoresHidden
                   ? `你打过${named ? dimension.name : ""}的照片`
-                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale)} 分的照片`
+                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale, dimension.id)} 分的照片`
               }
               draggable={false}
               className={styles.scPrint}
@@ -822,7 +822,7 @@ export function Stage({
             <figcaption className={styles.scCaption}>
               你打过
               {named && <em>{dimension.name}</em>}
-              {!scoresHidden && <b>{formatScore(sideScore, scale)}</b>}
+              {!scoresHidden && <b>{formatScore(sideScore, scale, dimension.id)}</b>}
             </figcaption>
           </figure>
         )}
@@ -932,7 +932,7 @@ export function Stage({
                           ●
                         </b>
                       ) : (
-                        <b>{formatScore(score, scale)}</b>
+                        <b>{formatScore(score, scale, candidate.id)}</b>
                       )}
                     </button>
                   </li>
@@ -948,6 +948,7 @@ export function Stage({
             active={side?.token}
             arriving={arriving}
             scale={scale}
+            dimension={dimension.id}
             hidden={scoresHidden}
             onChange={(next) => {
               setArmed(false);
@@ -983,7 +984,7 @@ export function Stage({
                 </span>
               ) : (
                 <>
-                  <span className={styles.scLevel}>{formatScore(value, scale)}</span>
+                  <span className={styles.scLevel}>{formatScore(value, scale, dimension.id)}</span>
                   <span className={styles.scOutOf}>{value / 100} 分</span>
                 </>
               )}

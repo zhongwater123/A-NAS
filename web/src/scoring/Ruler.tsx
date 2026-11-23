@@ -1,7 +1,7 @@
 import { Fragment, type PointerEvent, type RefObject, useRef, useState } from "react";
 
 import { claimThumbnailURL } from "./api";
-import { formatScore, isLevels, lanes, levelsOf, maxScore, type Scale, snapScore } from "./model";
+import { formatScore, isLevels, lanes, levelsFor, levelsOf, maxScore, type Scale, snapScore } from "./model";
 import styles from "./scoring.module.css";
 import { useSize } from "./useSize";
 
@@ -99,6 +99,7 @@ export function Ruler({
   active,
   arriving,
   scale,
+  dimension,
   hidden,
   onChange,
   onRelease,
@@ -112,6 +113,8 @@ export function Ruler({
   active?: string;
   arriving?: string;
   scale: Scale;
+  // The 打分项 being scored, whose words the levels take.
+  dimension?: string;
   // The rater sees no scores: only the place on the number line.
   hidden: boolean;
   onChange: (hundredths: number) => void;
@@ -124,7 +127,7 @@ export function Ruler({
   const [hover, setHover] = useState<number>();
   const [hoveredThumb, setHoveredThumb] = useState<string>();
   const dragged = useRef(false);
-  const ladder = isLevels(scale) ? levelsOf[scale] : undefined;
+  const ladder = isLevels(scale) ? levelsFor(scale, dimension) : undefined;
   const line = ladder === undefined;
   const fine = scale === "hundredths" || scale === "tenths";
   const at = (hundredths: number) => `${share(hundredths, scale) * 100}%`;
@@ -145,13 +148,13 @@ export function Ruler({
   // only on a line with decimals the rater sees.
   const reading = fine && !hidden ? (dragging ? value : hover) : undefined;
   const peek = hoveredThumb !== undefined || active !== undefined;
-  const said = (hundredths: number) => (hidden ? "已选" : formatScore(hundredths, scale));
+  const said = (hundredths: number) => (hidden ? "已选" : formatScore(hundredths, scale, dimension));
   const markAlt = (mark: Mark) =>
     hidden
       ? "你打过的照片"
       : line
-        ? `${formatScore(mark.score, scale)} 分的照片`
-        : `打了“${formatScore(mark.score, scale)}”的照片`;
+        ? `${formatScore(mark.score, scale, dimension)} 分的照片`
+        : `打了“${formatScore(mark.score, scale, dimension)}”的照片`;
 
   const onThumb = (event: PointerEvent<HTMLDivElement>) =>
     (event.target as HTMLElement).closest(`.${styles.scThumb}`) !== null;
@@ -310,7 +313,7 @@ export function Ruler({
         <div
           className={styles.scLastDot}
           style={{ insetInlineStart: at(last) }}
-          title={hidden ? "上一张" : `上一张 ${formatScore(last, scale)}`}
+          title={hidden ? "上一张" : `上一张 ${formatScore(last, scale, dimension)}`}
           aria-hidden="true"
         />
       )}
@@ -336,7 +339,7 @@ export function Ruler({
           style={{ insetInlineStart: at(reading) }}
           aria-hidden="true"
         >
-          {formatScore(reading, scale)}
+          {formatScore(reading, scale, dimension)}
         </div>
       )}
     </div>
