@@ -23,6 +23,7 @@
 - 每人一个账号。
 - 不设到期。
 - 为开发者组收紧 sshd。
+- 设备所有者用自己的 `guoyi` 检查开发者的工作：我建议把它加进 `anas-eval` 与 `systemd-journal`，用户当天加上了；开发者的 home 仍只有 root 能看。
 - `dev-ocr`：“是之前测试OCR用的，已经废弃，可以搬走或是销毁”。盘点后用户选“搬模型数据集，其余删”。2026-11-23 用一次性 root 脚本执行：
   - 三个模型（qwen3.5-4b、gemma-4-e4b、gemma-4-e4b-qat，共约 15 GB）搬到 `/srv/eval/models/`；
   - CC-OCR 评测集搬到 `/srv/eval/datasets/cc-ocr`；

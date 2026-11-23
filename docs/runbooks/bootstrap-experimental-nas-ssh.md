@@ -5,17 +5,27 @@
 
 ## 实验 NAS 接入
 
-以下配置记录于 2026-10-27；连接前仍须按本手册核对目标与指纹。
+以下记录于 2026-11-23；连接前仍须按本手册核对目标与指纹。
 
 | 项目 | 当前状态 |
 |---|---|
 | 主机名 | `a-nas-dev` |
 | 系统 | Debian 13 trixie amd64 |
-| SSH | OpenSSH 已启用；开发机 A 以 `anas-dev`、开发机 B 以 `guoyi` 的密钥登录已验证 |
-| 开发账号 | `anas-dev`（暂存制品）与 `guoyi`（只读联调），均无 `sudo` 权限；实习生等开发者的个人账号 `dev-<缩写>` 见[另一份手册](manage-developer-ssh-accounts.md) |
+| SSH | OpenSSH 已启用；全局仍允许密码登录，开发者组另有只认钥匙的规则（`90-a-nas-devs.conf`） |
 | 地址 | DHCP 地址，不写入仓库；每次使用前按需确认 |
 
-尚未关闭密码登录；完成恢复路径与第二把管理员密钥设计前不做 SSH 全局加固。
+尚未关闭全局的密码登录；完成恢复路径与管理员钥匙设计前不做 SSH 全局加固。
+
+### 账号与职责
+
+下表是能登录 Shell 的账号。A-NAS 自己的身份都不能登录，不在此列：成员账号见 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 与[存储与文件的“身份与一致性”](../architecture/storage-and-files.md#身份与一致性)，服务身份以 [`deploy/sysusers.d`](../../deploy/sysusers.d/a-nas.conf) 为准，按需分配的动态身份见各功能的架构文档。
+
+| 账号 | 用途与负责人 | 登录方式 | 组与权限 |
+|---|---|---|---|
+| `root` | 设备所有者按运行手册执行 root 步骤 | 本机控制台，或在已有会话中 `su -`。没有 SSH 钥匙：原有的一把 2026-11-23 停用（[决定记录](../decisions/2026-11-23-developer-ssh-accounts.md)）；SSH 不接受 root 的密码 | 全部 |
+| `guoyi`（UID 1000） | 设备所有者的个人账号，Debian 安装时创建；开发机 B 也用它做只读联调 | 密码，或自己 `~/.ssh/authorized_keys` 中的钥匙（开发机 B 一把） | 不在 `sudo`；在 `systemd-journal`（读全部系统日志）与 `anas-eval`（读写 `/srv/eval`）中，用于检查开发者的工作；读不到成员数据与开发者的 home |
+| `anas-dev`（UID 1001） | 部署者暂存发布包与 root 脚本（[部署手册](deploy-a-nas-packages.md)） | 自己 `~/.ssh/authorized_keys` 中的钥匙：开发机 A、开发机 B，另有两把带限制的临时钥匙（一把已过期） | 无特权组；端口转发只能到 `127.0.0.1:8080`（`99-a-nas-dev.conf`）。root 运行它暂存的脚本前先核对 SHA-256 |
+| 开发者 `dev-<缩写>`（UID 1000–1999） | 实习生等开发者：只读排查、看日志、在 `/srv/eval` 跑评测；由设备所有者按[开发者账号手册](manage-developer-ssh-accounts.md)开设和撤销 | 只认 root 名下 `/etc/ssh/authorized_keys/<账号>` 中的钥匙 | `anas-devs`、`anas-eval`、`systemd-journal`；名单用 `nas-dev-account.sh list` 查看，不写入仓库 |
 
 ## 开发机 B 的连接配置
 
