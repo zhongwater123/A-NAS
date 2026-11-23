@@ -16,9 +16,9 @@ RuntimeDirectoryPreserve=yes
 UMask=0077
 Environment=LC_ALL=C
 NoNewPrivileges=yes
-# The launcher joins the private network with SYS_ADMIN, and uses SETPCAP
-# to drop capabilities before executing the proxy and wireless daemons.
-CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SETPCAP
+# The launcher joins the private network with SYS_ADMIN and removes Caddy's
+# private runtime files with DAC_OVERRIDE. SETPCAP drops both before serving.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SETPCAP
 RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_PACKET AF_INET AF_INET6
 ProtectSystem=strict
 ProtectHome=yes

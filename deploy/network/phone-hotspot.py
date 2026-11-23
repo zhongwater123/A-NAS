@@ -324,7 +324,10 @@ def serve():
     else:
         raise HotspotError("web_unavailable")
 
-    ap = start("setpriv", "--bounding-set=-sys_admin", TOOLS["hostapd"], str(RUNTIME / "hostapd.conf"), namespace=namespace)
+    ap = start(
+        "setpriv", "--bounding-set=-sys_admin,-dac_override", TOOLS["hostapd"], str(RUNTIME / "hostapd.conf"),
+        namespace=namespace,
+    )
     for _ in range(12):
         if ap.poll() is not None:
             raise HotspotError("ap_failed")
@@ -334,7 +337,7 @@ def serve():
     else:
         raise HotspotError("ap_failed")
     dhcp = start(
-        "setpriv", "--bounding-set=-sys_admin", TOOLS["dnsmasq"], "--keep-in-foreground",
+        "setpriv", "--bounding-set=-sys_admin,-dac_override", TOOLS["dnsmasq"], "--keep-in-foreground",
         f"--conf-file={RUNTIME}/dnsmasq.conf", namespace=namespace,
     )
     time.sleep(1)

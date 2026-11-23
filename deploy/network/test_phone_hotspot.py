@@ -60,6 +60,30 @@ class HotspotTests(unittest.TestCase):
             self.assertEqual(list(runtime.iterdir()), [runtime / "interface.json"])
 
     @unittest.skipUnless(os.environ.get("ANAS_PHONE_HOTSPOT_NETWORK_TEST") == "1", "needs an isolated root network")
+    def test_unit_can_remove_private_caddy_runtime_files(self):
+        unit = Path(__file__).parents[1] / "systemd/system/anas-phone-hotspot.service"
+        capabilities = next(line for line in unit.read_text(encoding="ascii").splitlines()
+                            if line.startswith("CapabilityBoundingSet=")).split("=", 1)[1].split()
+        bounding_set = ",".join(["-all", *("+" + cap.removeprefix("CAP_").lower() for cap in capabilities)])
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            data = runtime / "web" / "data"
+            data.mkdir(parents=True, mode=0o700)
+            user = hotspot.pwd.getpwnam("caddy")
+            os.chown(data, user.pw_uid, user.pw_gid)
+            (data / "autosave.json").touch()
+            cleanup = """
+import runpy, sys
+from pathlib import Path
+clean = runpy.run_path(sys.argv[1])["cleanup"]
+clean.__globals__["RUNTIME"] = Path(sys.argv[2])
+clean()
+"""
+            hotspot.command("setpriv", f"--bounding-set={bounding_set}", "--no-new-privs", hotspot.TOOLS["python"],
+                            "-B", "-c", cleanup, str(Path(__file__).with_name("phone-hotspot.py")), str(runtime))
+            self.assertEqual(list(runtime.iterdir()), [])
+
+    @unittest.skipUnless(os.environ.get("ANAS_PHONE_HOTSPOT_NETWORK_TEST") == "1", "needs an isolated root network")
     def test_https_proxy_survives_host_filter_reload_without_capturing_wired_route(self):
         self.assertNotEqual(os.readlink("/proc/self/ns/net"), os.readlink("/proc/1/ns/net"))
         with tempfile.TemporaryDirectory(dir="/run") as directory:
