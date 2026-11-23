@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "radix-ui";
 import { useState } from "react";
 
@@ -32,6 +32,15 @@ const reasons: Record<NonNullable<PhoneHotspotStatus["reason"]>, string> = {
 };
 
 export function NetworkSection() {
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: 1 } } }));
+  return (
+    <QueryClientProvider client={client}>
+      <PhoneHotspotSettings />
+    </QueryClientProvider>
+  );
+}
+
+function PhoneHotspotSettings() {
   const cache = useQueryClient();
   const [revealedPassword, revealPassword] = useState<string>();
   const status = useQuery({
