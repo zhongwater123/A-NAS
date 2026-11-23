@@ -135,11 +135,13 @@ var (
 	// decision record unless it is hard to reverse, which makes it an ADR.
 	// Its status lives only on its own 状态 line, as an investigation's
 	// does. A decided record names the day, so that looking back finds when
-	// it changed. The current state's 待用户决定 links every pending record
-	// and every proposed ADR, so that nothing waits for the user unseen, as
-	// proposed ADRs did for weeks.
+	// it changed. The index marks a pending record （pending）, as the ADR
+	// index marks a proposed ADR, so that nothing waits for the user unseen,
+	// as proposed ADRs did for weeks. The current state used to link each of
+	// them by hand: that list took a quarter of the page and grew with every
+	// open question, so the page now links the two indexes instead.
 	decisionStatuses    = map[string]bool{"pending": true, "decided": true, "superseded": true}
-	decisionIndexStatus = regexp.MustCompile(`^\s*[（(]\s*(?i:pending|decided|superseded)\b`)
+	decisionIndexStatus = regexp.MustCompile(`^\s*[（(]\s*((?i:pending|decided|superseded))\b`)
 	isoDate             = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
@@ -255,7 +257,7 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateADRIndex(adrDocuments)...)
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
-	problems = append(problems, validateDecisions(decisions, adrDocuments, string(current))...)
+	problems = append(problems, validateDecisions(decisions, string(current))...)
 	problems = append(problems, validateSnapshots(snapshots, string(current))...)
 	return problems, files
 }
@@ -329,16 +331,16 @@ func sameCommit(a, b string) bool {
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
-// validateDecisions checks that the index lists every decision record without
-// a status, that each 状态 line starts with pending, decided (with its date)
-// or superseded, and that the current state's 待用户决定 links every pending
-// decision and every proposed ADR but no settled decision. decisions and adrs
-// map the slash-separated paths of the Markdown files in docs/decisions and
-// docs/adr to their contents; current is the current state's.
-func validateDecisions(decisions, adrs map[string]string, current string) []string {
+// validateDecisions checks that the index lists every decision record and
+// marks exactly the pending ones （pending）, that each 状态 line starts with
+// pending, decided (with its date) or superseded, and that the current
+// state's 待用户决定 links both indexes and no single decision record or ADR.
+// decisions maps the slash-separated paths of the Markdown files in
+// docs/decisions to their contents; current is the current state's.
+func validateDecisions(decisions map[string]string, current string) []string {
 	var problems []string
 	index, indexed := decisions[decisionIndex]
-	listed := map[string]bool{}
+	listed, marked := map[string]bool{}, map[string]bool{}
 	for line := range strings.SplitSeq(index, "\n") {
 		match := indexEntry.FindStringSubmatch(line)
 		if match == nil {
@@ -349,12 +351,15 @@ func validateDecisions(decisions, adrs map[string]string, current string) []stri
 			continue
 		}
 		listed[name] = true
-		if decisionIndexStatus.MatchString(match[2]) {
-			problems = append(problems, fmt.Sprintf("%s gives %s a status: keep it only on the decision's 状态 line", decisionIndex, name))
+		switch status := decisionIndexStatus.FindStringSubmatch(match[2]); {
+		case status == nil:
+		case strings.EqualFold(status[1], "pending"):
+			marked[name] = true
+		default:
+			problems = append(problems, fmt.Sprintf("%s marks %s %s: the index marks only pending, other statuses stay on the decision's 状态 line", decisionIndex, name, strings.ToLower(status[1])))
 		}
 	}
 
-	waiting := waitingLinks(current)
 	for _, name := range slices.Sorted(maps.Keys(decisions)) {
 		base := path.Base(name)
 		if !datedFileName.MatchString(base) {
@@ -373,19 +378,28 @@ func validateDecisions(decisions, adrs map[string]string, current string) []stri
 			problems = append(problems, fmt.Sprintf("%s: start the 状态 line under the title with pending, decided or superseded", name))
 		case status == "decided" && !isoDate.MatchString(match[2]):
 			problems = append(problems, fmt.Sprintf("%s: give the day it was decided on the 状态 line, as in decided（2026-11-03，用户）", name))
-		case status == "pending" && !waiting[name]:
-			problems = append(problems, fmt.Sprintf("%s is pending, but %s does not link it under %s", name, currentDocument, waitingHeading))
-		case status != "pending" && waiting[name]:
-			problems = append(problems, fmt.Sprintf("%s is %s, but %s still links it under %s", name, status, currentDocument, waitingHeading))
+		case status == "pending" && listed[base] && !marked[base]:
+			problems = append(problems, fmt.Sprintf("%s is pending, but %s does not mark it （pending）", name, decisionIndex))
+		case status != "pending" && marked[base]:
+			problems = append(problems, fmt.Sprintf("%s is %s, but %s still marks it （pending）", name, status, decisionIndex))
 		}
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(adrs)) {
-		if !adrFileName.MatchString(path.Base(name)) {
-			continue
+	if current == "" {
+		return problems
+	}
+	waiting := waitingLinks(current)
+	for _, name := range slices.Sorted(maps.Keys(waiting)) {
+		base := path.Base(name)
+		if (path.Dir(name) == decisionDirectory && datedFileName.MatchString(base)) || (path.Dir(name) == adrDirectory && adrFileName.MatchString(base)) {
+			problems = append(problems, fmt.Sprintf("%s links %s under %s: the indexes mark what waits for the user, so link %s and %s there instead", currentDocument, name, waitingHeading, decisionIndex, adrIndex))
 		}
-		if match, _ := headerStatus(adrs[name]); match != nil && strings.EqualFold(match[1], "proposed") && !waiting[name] {
-			problems = append(problems, fmt.Sprintf("%s is proposed, but %s does not link it under %s", name, currentDocument, waitingHeading))
+	}
+	// The page that every session reads first must still lead to both
+	// queues: a pull request short of room could cut the two links unnoticed.
+	for _, index := range []string{decisionIndex, adrIndex} {
+		if !waiting[index] {
+			problems = append(problems, fmt.Sprintf("%s does not link %s under %s: the page must lead to what waits for the user", currentDocument, index, waitingHeading))
 		}
 	}
 	return problems
