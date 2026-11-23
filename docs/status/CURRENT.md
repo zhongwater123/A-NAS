@@ -15,7 +15,7 @@
   - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `76a8ba1f3e6dfb14`；AI Worker 的内存上限为总内存减 2.5 GiB（13202 MiB）。
   - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
   - 虚拟伙伴的动画池 `36492963e4112f55`（A-NAS-assets 固定副本，#445）。
-  - Caddy 是官方源的 2.11.9，另装了 `wireguard-tools`；互联网入口关闭（`/etc/a-nas/internet.env` 不存在），第一版暂缓（[决定](../decisions/2026-11-09-home-network-first.md)）。
+  - Caddy 2.11.9 来自 A-NAS 软件源，另装了 `wireguard-tools`；互联网入口关闭（`/etc/a-nas/internet.env` 不存在），第一版暂缓（[决定](../decisions/2026-11-09-home-network-first.md)）。
 - AI 助手 V1：2026-11-19 由 `a-nas` 接管试用（[手册](../runbooks/enable-ai-assistant.md#从试用接管)），成员都能用。
 - 剪辑中心由 drop-in `montage-demo.conf` 只在本机打开（[手册](../runbooks/demo-montage-center.md)）；配乐分析[手动装](../runbooks/enable-montage-music.md)，不随 release 发布。
 - 照片打分模块以脚本装在本机（11-13 安装，11-17 更新，[手册](../runbooks/install-and-remove-photo-scoring.md)）。
