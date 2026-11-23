@@ -363,6 +363,67 @@ func TestValidateDocumentationKeepsDecisionsInOnePlace(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentationKeepsTheSkillsCopyIdentical(t *testing.T) {
+	skill := "---\nname: probe\ndescription: A probe.\n---\n\n# Probe\n"
+	tests := map[string]struct {
+		copied map[string]string
+		want   []string
+	}{
+		"identical": {copied: map[string]string{".claude/skills/probe/SKILL.md": skill}},
+		"edited copy": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill + "more\n"},
+			want:   []string{".claude/skills/probe/SKILL.md differs from .agents/skills/probe/SKILL.md"},
+		},
+		"missing copy": {
+			copied: map[string]string{},
+			want:   []string{".claude/skills/probe/SKILL.md differs"},
+		},
+		"copy without source": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill, ".claude/skills/old/SKILL.md": skill},
+			want:   []string{".claude/skills/old/SKILL.md has no source in .agents/skills"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{".agents/skills/probe/SKILL.md": skill})
+			writeDocuments(t, root, test.copied)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+func TestValidateDocumentationCapsAgentsFiles(t *testing.T) {
+	tests := map[string]struct {
+		documents map[string]string
+		want      []string
+	}{
+		"within the caps": {documents: map[string]string{
+			agentsFile:       strings.Repeat("x", rootAgentsMaxBytes),
+			"web/AGENTS.md":  strings.Repeat("x", localAgentsMaxBytes),
+			"web/NOTES.md":   strings.Repeat("x", rootAgentsMaxBytes+1),
+			"docs/AGENTS.md": "# Docs\n",
+		}},
+		"root over": {
+			documents: map[string]string{agentsFile: strings.Repeat("x", rootAgentsMaxBytes+1)},
+			want:      []string{fmt.Sprintf("AGENTS.md is %d bytes, over the %d-byte cap", rootAgentsMaxBytes+1, rootAgentsMaxBytes)},
+		},
+		"local over": {
+			documents: map[string]string{"internal/x/AGENTS.md": strings.Repeat("x", localAgentsMaxBytes+1)},
+			want:      []string{fmt.Sprintf("internal/x/AGENTS.md is %d bytes, over the %d-byte cap", localAgentsMaxBytes+1, localAgentsMaxBytes)},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, test.documents)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
 func TestValidateDocumentationKeepsTheQueuesLinked(t *testing.T) {
 	header := "# 当前状态\n\n更新时间：2026-11-23\n\n- 已部署：`a40311de890b`\n"
 	missing := func(index string) string {

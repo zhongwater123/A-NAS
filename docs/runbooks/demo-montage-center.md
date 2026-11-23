@@ -34,7 +34,6 @@
    git status --short   # 必须为空
    make check
    ```
-   - [#578](https://github.com/zhongwater123/A-NAS/pull/578) 合并之前，把 `main` 换成 `feat/montage-web`。
    - 完成标准：`make check` 通过（`src/companion/Companion.test.tsx` 的偶发超时可以单独重跑确认）。记下 `git rev-parse --short HEAD`。
 2. **开发机 B：构建配乐分析的运行环境与权重**，按[启用配乐分析](enable-montage-music.md)的第 1–3 步，得到 11 个 `.deb`。
 3. **开发机 B：发布并推送**，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的第 1、2 步：

@@ -36,3 +36,11 @@
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `verb-object.md`。高风险步骤必须在执行前给出稳定目标身份、预期变化和停止条件；每一步都写明完成标准。
+
+## 交给 root 执行的命令
+
+开发者没有 root，root 操作由维护者在 NAS 的终端里执行。终端会截断长段粘贴（2026-10-10 一段 40 行的 heredoc 末尾被吞，写出的脚本不完整），半截的 root 脚本很危险。所以超过几行的 root 操作这样交付：
+
+1. 以 `anas-dev` 把脚本暂存为 `~anas-dev/<名称>-<提交>.sh`，用 `bash -n` 检查语法，算出它的 SHA-256。
+2. 交给维护者三行短命令：用 `install -m 0700` 把脚本放进 `/root/`；用 `sha256sum --check` 核对上一步给出的哈希；运行它并 `| tee /tmp/a-nas-<名称>.log; chmod 644 /tmp/a-nas-<名称>.log`，开发者再用只读账号读日志。
+3. 只读的诊断也这样做：脚本把结果写进 `/tmp/anas-*.txt` 并 `chmod 644`。

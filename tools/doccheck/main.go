@@ -145,6 +145,29 @@ var (
 	isoDate             = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
+// The skills live in .agents/skills, where Codex and other agents find them.
+// Claude Code reads only .claude/skills (checked with 2.1.330 on 2026-11-23),
+// and a symlink turns into a plain file in a Windows checkout, so that folder
+// holds a copy that `make skills` writes and this check keeps identical.
+const (
+	skillsDirectory     = ".agents/skills"
+	skillsCopyDirectory = ".claude/skills"
+)
+
+// Every coding agent reads the root AGENTS.md in full at the start of every
+// session, and a directory's AGENTS.md whenever it works there; a long file
+// costs context each time and buries the rules that matter. The Claude Code
+// team keeps its shared file near 2.5k tokens. On 2026-11-23 the root file
+// was cut from 10.7 to about 8 KB, so these caps leave room for a few rules
+// and fail before it turns back into a manual: details go into the linked
+// documents, a directory's rules into its own AGENTS.md.
+const (
+	agentsFile           = "AGENTS.md"
+	rootAgentsMaxBytes   = 10 << 10
+	localAgentsMaxBytes  = 3 << 10
+	agentsCapExplanation = "keep only the rules every session needs and link the details"
+)
+
 func main() {
 	root, err := findRepositoryRoot()
 	if err != nil {
@@ -231,6 +254,15 @@ func validateDocumentation(root string) ([]string, int) {
 		if readErr != nil {
 			return readErr
 		}
+		if path.Base(relativePath) == agentsFile {
+			limit := localAgentsMaxBytes
+			if relativePath == agentsFile {
+				limit = rootAgentsMaxBytes
+			}
+			if len(data) > limit {
+				problems = append(problems, fmt.Sprintf("%s is %d bytes, over the %d-byte cap: %s", relativePath, len(data), limit, agentsCapExplanation))
+			}
+		}
 		// A snapshot is an old current-state page, status phrases included.
 		snapshot := path.Dir(relativePath) == statusDirectory && snapshotFileName.MatchString(path.Base(relativePath))
 		if !statusPhraseKeepers[relativePath] && !snapshot {
@@ -259,7 +291,59 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
 	problems = append(problems, validateDecisions(decisions, string(current))...)
 	problems = append(problems, validateSnapshots(snapshots, string(current))...)
+	problems = append(problems, validateSkillsCopy(root)...)
 	return problems, files
+}
+
+// validateSkillsCopy checks that .claude/skills holds exactly the files of
+// .agents/skills, byte for byte.
+func validateSkillsCopy(root string) []string {
+	skills, err := readTree(filepath.Join(root, filepath.FromSlash(skillsDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	copied, err := readTree(filepath.Join(root, filepath.FromSlash(skillsCopyDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(skills)) {
+		if data, ok := copied[name]; !ok || data != skills[name] {
+			problems = append(problems, fmt.Sprintf("%s/%s differs from %s/%s: edit %s and run make skills", skillsCopyDirectory, name, skillsDirectory, name, skillsDirectory))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(copied)) {
+		if _, ok := skills[name]; !ok {
+			problems = append(problems, fmt.Sprintf("%s/%s has no source in %s: run make skills", skillsCopyDirectory, name, skillsDirectory))
+		}
+	}
+	return problems
+}
+
+// readTree returns the files below dir by slash-separated relative path; a
+// missing dir has none.
+func readTree(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) && filePath == dir {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(filePath) //nolint:gosec // G122: a developer tool reading the checkout's own skills.
+		if err != nil {
+			return err
+		}
+		relativePath, _ := filepath.Rel(dir, filePath)
+		files[filepath.ToSlash(relativePath)] = string(data)
+		return nil
+	})
+	return files, err
 }
 
 // validateNextSteps checks that each item under the current state's 下一步
