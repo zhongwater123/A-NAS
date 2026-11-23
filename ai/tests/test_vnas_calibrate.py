@@ -207,13 +207,16 @@ class KeptSetTest(unittest.TestCase):
 
     def test_every_rubric_is_still_in_the_suites(self):
         current = {r for turns in rubrics_of().values() for t in turns for r in t}
-        kept = read_jsonl(SPIKE / "calibration" / "set.jsonl")
-        self.assertTrue(kept)
-        stale = sorted({i["rubric"] for i in kept} - current)
-        self.assertEqual(stale, [], "评分要求改了写法，要重新校准（docs/development/assistant-scenarios.md 评审校准）")
-        self.assertEqual(len({i["id"] for i in kept}), len(kept))
-        for i in kept:
-            self.assertEqual(i["id"].rsplit("/", 1)[1].removeprefix("w-"), fingerprint(i["rubric"], i["turn"]))
+        sets = sorted((SPIKE / "calibration").glob("set*.jsonl"))
+        self.assertGreaterEqual(len(sets), 2)   # one per round
+        for path in sets:
+            kept = read_jsonl(path)
+            self.assertTrue(kept, path.name)
+            stale = sorted({i["rubric"] for i in kept} - current)
+            self.assertEqual(stale, [], f"{path.name}：评分要求改了写法，要重新校准（docs/development/assistant-scenarios.md 评审校准）")
+            self.assertEqual(len({i["id"] for i in kept}), len(kept), path.name)
+            for i in kept:
+                self.assertEqual(i["id"].rsplit("/", 1)[1].removeprefix("w-"), fingerprint(i["rubric"], i["turn"]))
 
 
 if __name__ == "__main__":
