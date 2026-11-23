@@ -31,6 +31,11 @@ afterEach(() => {
 });
 
 const shownPhoto = () => screen.findByRole("img", { name: "要打分的照片" });
+// Opens the batch on its card and closes the tutorial it shows first.
+async function openBatch(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "开始打分" }));
+  await user.click(await screen.findByRole("button", { name: "完成" }));
+}
 // The stage's count sets its number apart from the words around it.
 const counted = (text: string) => (_: string, element: Element | null) =>
   element?.matches("[aria-live]") === true && element.textContent === text;
@@ -57,7 +62,7 @@ describe("ScoringPanel for a rater", () => {
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
 
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     expect(screen.getByText("看构图与光线")).toBeTruthy();
     expect(await screen.findByText("4.50 分")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "开始打分" }));
@@ -137,6 +142,8 @@ describe("ScoringPanel for a rater", () => {
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "继续打分" }));
+    // The tutorial comes first on every visit; the guide only the first time.
+    await user.click(await screen.findByRole("button", { name: "完成" }));
     await shownPhoto();
     await user.keyboard("3");
     await user.click(screen.getByRole("button", { name: /确定/ }));
@@ -154,7 +161,7 @@ describe("ScoringPanel for a rater", () => {
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     await shownPhoto();
     const items = screen.getByRole("list", { name: "打分项" });
     const current = () => within(items).getByRole("button", { current: "step" }).textContent;
@@ -246,7 +253,7 @@ describe("ScoringPanel for a rater", () => {
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     await shownPhoto();
     // The custom one comes first, with what it asks to look at.
     expect(screen.getByText("整张照片的颜色是否协调")).toBeTruthy();
@@ -258,6 +265,44 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 3, scores: { overall: 4 } } });
   });
 
+  it("shows the handbook's tutorial each time a batch opens, with photos to try, and 完成 skips it", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      scale: "five",
+      dimensions: dimensionsOf("overall", "sharpness"),
+    });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
+    // The rules of a five-level batch, without the one about a 打分项 it lacks.
+    expect(screen.getByText("只打整数")).toBeTruthy();
+    expect(screen.queryByText("情绪是描述")).toBeNull();
+    // 总体 as the handbook explains it, under the batch's name; 清晰度 has
+    // no section of its own.
+    expect(screen.getByRole("heading", { name: /总体/ })).toBeTruthy();
+    expect(screen.getByText("这张照片整体拍得好不好，有没有让人想多看一会儿的感觉？")).toBeTruthy();
+    expect(screen.getByText("清晰度")).toBeTruthy();
+    // A try: the handbook's level shows only once the rater picked one.
+    const first = screen.getAllByRole("group", { name: "这张照片的总体你打几分" })[0];
+    expect(screen.queryByText("手册 3 分")).toBeNull();
+    await user.click(within(first).getByRole("button", { name: "4" }));
+    expect(screen.getByText("手册 3 分")).toBeTruthy();
+    expect(screen.getByText("差 1 分")).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "先试着打一个分，或直接看答案" })[0]);
+    expect(screen.getByText("手册 5 分")).toBeTruthy();
+    // Back to the batches, and the tutorial shows again on the next visit.
+    await user.click(screen.getByRole("button", { name: "批次" }));
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
+    expect(screen.queryByText("手册 3 分")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "完成" }));
+    await shownPhoto();
+  });
+
   it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "three" });
     window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
@@ -265,7 +310,7 @@ describe("ScoringPanel for a rater", () => {
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     await shownPhoto();
     const slider = screen.getByRole("slider", { name: "分数" });
     // Nothing to type, and 2 is no level.
@@ -289,7 +334,7 @@ describe("ScoringPanel for a rater", () => {
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     await shownPhoto();
     const slider = screen.getByRole("slider", { name: "分数" });
     // Nothing to type, and 0 is no level.
@@ -315,7 +360,7 @@ describe("ScoringPanel for a rater", () => {
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     await shownPhoto();
     expect(screen.queryByRole("textbox")).toBeNull();
     await user.keyboard("{ArrowRight}{ArrowRight}");
@@ -347,7 +392,7 @@ describe("ScoringPanel for a rater", () => {
     try {
       const user = userEvent.setup();
       render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
-      await user.click(await screen.findByRole("button", { name: "开始打分" }));
+      await openBatch(user);
       await shownPhoto();
       await user.keyboard("{z>}");
       expect(await screen.findByRole("status", { name: "正在载入 100% 原图" })).toBeTruthy();

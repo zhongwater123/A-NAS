@@ -502,6 +502,221 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The tutorial: the handbook read through before a batch, with photos to
+   try a score on before the handbook's shows. */
+.sc-tutorial {
+  max-width: 880px;
+  line-height: 1.7;
+}
+.sc-tutorial-lead {
+  color: var(--sc-ink-2);
+}
+.sc-tutorial-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-inline-start: 1.4em;
+  color: var(--sc-ink-2);
+}
+.sc-rules {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.sc-rules > div {
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--sc-raise);
+  box-shadow: inset 0 0 0 1px var(--sc-line);
+}
+.sc-rules dt {
+  font-weight: 600;
+}
+.sc-rules dd {
+  margin: 0;
+  color: var(--sc-ink-2);
+}
+@container scoringwindow (max-width: 620px) {
+  .sc-rules > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+.sc-tutorial-item {
+  padding-top: 18px;
+  border-top: 1px solid var(--sc-line);
+}
+.sc-guide .sc-tutorial-item h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--sc-ink);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.sc-tutorial-item h3 small {
+  color: var(--sc-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.sc-tutorial-ask {
+  color: var(--sc-ink);
+  font-size: 16px;
+}
+.sc-tutorial-item p {
+  margin: 0;
+}
+.sc-cues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sc-cues li {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--sc-raise-2);
+  color: var(--sc-ink-2);
+  font-size: 12.5px;
+}
+.sc-level-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sc-level-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: baseline;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--sc-raise);
+  color: var(--sc-ink-2);
+}
+.sc-level-list b {
+  color: var(--sc-ink);
+  font: 400 17px / 1 var(--sc-serif);
+}
+.sc-tries {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+@container scoringwindow (max-width: 760px) {
+  .sc-tries {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.sc-try {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+.sc-try img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #101010;
+}
+.sc-try figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sc-try-levels {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.sc-try-levels button {
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--sc-raise-2);
+  box-shadow: inset 0 0 0 1px var(--sc-line);
+  color: var(--sc-ink-2);
+  font: 400 17px / 1 var(--sc-serif);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
+}
+.sc-try-levels button:hover {
+  background: var(--sc-raise-3);
+  color: var(--sc-ink);
+}
+.sc-try-levels button.on {
+  background: var(--sc-accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--sc-accent);
+  color: var(--sc-accent);
+}
+.sc-try-levels button.answer {
+  box-shadow: inset 0 0 0 1.5px var(--sc-ok);
+  color: var(--sc-ok);
+}
+.sc-try-levels button.on.answer {
+  background: var(--sc-ok-soft);
+}
+.sc-try-answer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  color: var(--sc-ink-2);
+  font-size: 13px;
+}
+.sc-try-answer b {
+  color: var(--sc-ok);
+}
+.sc-try-answer span {
+  color: var(--sc-ink-3);
+}
+.sc-try-reveal {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sc-ink-3);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.sc-try-reveal:hover {
+  color: var(--sc-ink);
+}
+.sc-pitfalls {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--sc-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--sc-accent-line);
+}
+.sc-pitfalls b {
+  color: var(--sc-accent);
+  font-size: 13px;
+}
+.sc-pitfalls ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-inline-start: 1.2em;
+  color: var(--sc-ink-2);
+}
+
 .sc-overlay {
   position: absolute;
   z-index: 20;
