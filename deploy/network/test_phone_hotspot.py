@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,41 @@ class HotspotTests(unittest.TestCase):
                 self.assertTrue(hotspot.wired_default([{"dev": "br0"}]))
                 (root / "eth0" / "phy80211").mkdir()
                 self.assertFalse(hotspot.wired_default([{"dev": "br0"}]))
+
+    def test_bridge_requires_a_wired_uplink_among_its_non_guest_ports(self):
+        tap = {"ifname": "guest0", "linkinfo": {"info_kind": "tun", "info_data": {"type": "tap"}}}
+        veth = {"ifname": "peer0", "linkinfo": {"info_kind": "veth"}}
+        wired = {"ifname": "eth0"}
+        vlan = {"ifname": "vlan10", "linkinfo": {"info_kind": "vlan"}}
+        wifi = {"ifname": "radio0"}
+        cases = [
+            ([wired, tap], True),
+            ([vlan, veth], True),
+            ([tap, veth], False),
+            ([wired, wifi, tap], False),
+            ([wired, {"ifname": "unknown0"}], False),
+            ([], False),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("br0", "eth0", "vlan10", "radio0", "guest0", "peer0", "unknown0"):
+                (root / name).mkdir()
+                (root / name / "type").write_text("1", encoding="ascii")
+            (root / "eth0" / "device").mkdir()
+            (root / "vlan10" / "lower_eth0").symlink_to(root / "eth0")
+            (root / "radio0" / "device").mkdir()
+            (root / "radio0" / "phy80211").mkdir()
+            bridge = root / "br0"
+            (bridge / "bridge").mkdir()
+            for ports, expected in cases:
+                with self.subTest(ports=ports):
+                    for link in bridge.glob("lower_*"):
+                        link.unlink()
+                    for port in ports:
+                        (bridge / f"lower_{port['ifname']}").symlink_to(root / port["ifname"])
+                    listing = subprocess.CompletedProcess([], 0, stdout=json.dumps(ports))
+                    with patch.object(hotspot, "NET", root), patch.object(hotspot, "command", return_value=listing):
+                        self.assertEqual(hotspot.wired_default([{"dev": "br0"}]), expected)
 
     def test_hot_unplug_does_not_leave_credentials(self):
         with tempfile.TemporaryDirectory() as directory:

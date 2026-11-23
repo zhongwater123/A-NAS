@@ -71,6 +71,18 @@ def write(name, text):
     temp.replace(RUNTIME / name)
 
 
+def guest_bridge_ports(bridge):
+    # TAP and veth connect guests or containers; neither proves a wired uplink.
+    ports = json.loads(command("ip", "-j", "-d", "link", "show", "master", bridge.name).stdout)
+    guests = set()
+    for port in ports:
+        info = port.get("linkinfo", {})
+        kind = info.get("info_kind")
+        if kind == "veth" or (kind == "tun" and info.get("info_data", {}).get("type") == "tap"):
+            guests.add(port["ifname"])
+    return guests
+
+
 def ethernet(interface, visited=frozenset()):
     if interface in visited or (interface / "phy80211").exists() or (interface / "wireless").exists():
         return False
@@ -78,6 +90,11 @@ def ethernet(interface, visited=frozenset()):
         if read(interface / "type") != "1":
             return False
         lowers = [path.resolve(strict=True) for path in interface.glob("lower_*")]
+        if (interface / "bridge").is_dir():
+            guests = guest_bridge_ports(interface)
+            lowers = [lower for lower in lowers if lower.name not in guests]
+            if not lowers:
+                return False
         if lowers:
             return all(ethernet(lower, visited | {interface}) for lower in lowers)
         return (interface / "device").exists()
