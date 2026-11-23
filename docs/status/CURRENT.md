@@ -31,37 +31,22 @@
 
 ## 待用户决定
 
-只列链接，问题、选项与经过在被链接的文档中。
+逐条的清单在两个索引里，问题、选项与经过在各篇文档中：
 
-- [活动记录保留多久](../decisions/2026-10-22-activity-record-retention.md)
-- [FFmpeg Worker 的槽位、分层与内存上限](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)
-- [相册视频实现时选的默认做法](../decisions/2026-10-20-photo-video-defaults.md)
-- [文件管理的图片缩略图是否改用服务端生成](../decisions/2026-10-13-file-manager-image-thumbnails.md)
-- [镜像缺盘的开机路径是否做成虚拟机回归测试](../decisions/2026-11-06-mirror-boot-vm-test.md)
-- [助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](../decisions/2026-10-15-assistant-help-and-onboarding.md)
-- [助手说“下次从笔记接着聊”的措辞是否调整](../decisions/2026-10-20-assistant-notes-wording.md)
-- [家庭中心规格中补充的默认规则](../decisions/2026-10-29-family-center-default-rules.md)
-- [版权人与贡献者授权](../decisions/2026-11-17-copyright-holder-and-contributor-grants.md)
-- 设备分档：[处理器口径](../decisions/2026-11-18-tier-cpu-comparison.md)、[隐藏或标注](../decisions/2026-11-18-unsupported-feature-display.md)、[按档区分](../decisions/2026-11-18-deliberate-tiering.md)、[低端 AI](../decisions/2026-11-18-ai-on-low-tier.md)
-- 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
-- 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
-- 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，已暂缓）与 [ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
-- 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
+- [决定索引](../decisions/README.md#索引)中标 `（pending）` 的决定记录。
+- [ADR 索引](../adr/README.md#索引)中标 `（proposed）` 的 ADR，以及标 `（draft）` 的草稿 ADR 的 PR。
 
 ## 下一步
 
+已部署功能的实机验收逐项写在验收手册，这里只有第 2 条指向它。
+
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成全部验收项，全部通过后才打标签。
-2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对；每完成一节，就从手册中删去这一节。成员分享（[#400](https://github.com/zhongwater123/A-NAS/pull/400)）补验重启后的首次创建和保存。
-3. 向量索引：按[手册第 5 步](../runbooks/enable-vector-index.md#步骤)核对相册排序从索引读的结果（[读路径](../architecture/vector-index.md#读路径)）。
-4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
-5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
-6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-7. 相册 OCR 步骤 6：在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)），含 VNAS 用读出的文字回答（[方案](../architecture/photo-ocr.md#助手的工具)）。
-8. 家庭中心 M2：认领、隐藏（[规格](../specs/family-center.md)）。
-9. 家庭局域网版的 NAS 侧（发现、配对、HTTPS）：等“开始做”（[决定](../decisions/2026-11-09-home-network-first.md)）。
-10. 硬盘用途 M2：按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)做拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
-11. 虚拟伙伴（大肥鱼）V1（[规格](../specs/virtual-companion.md)）：在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-12. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
-13. AI 助手 V1（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：按[手册的“验证”](../runbooks/enable-ai-assistant.md#验证)试用；实验 NAS 改用镜像以它为前提。
-14. 剪辑中心：按[验收手册](../runbooks/accept-features-on-experimental-nas.md#剪辑中心)核对其余各项；allin1 版权待议；二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的 R1–R6 实施（#596）。
-15. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对；每完成一节，就从手册中删去这一节。
+3. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
+4. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
+5. 家庭中心 M2：认领、隐藏（[规格](../specs/family-center.md)）。
+6. 家庭局域网版的 NAS 侧（发现、配对、HTTPS）：等“开始做”（[决定](../decisions/2026-11-09-home-network-first.md)）。
+7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
+8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
+9. 剪辑中心：allin1 版权待议；二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的 R1–R6 实施（#596）。
+10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

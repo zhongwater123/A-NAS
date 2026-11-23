@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-11-12
+更新时间：2026-11-23
 
 ## 目的
 
@@ -70,6 +70,8 @@
 - 人物与宠物（#119、#134）：首次扫描已有照片，记录每张耗时与 Worker 内存，再用家庭照片验收命名、合并、移出与搜索。
 - 超大图片（#265）：上传超出解码预算的图片（如 16384 × 16384 的 16 位 PNG）被拒绝并说明原因，相册服务没有因内存上限重启（[调查](../investigations/2026-10-26-photo-decode-memory-budget.md)）。
 - 视频（#146）：用 iPhone（HEVC、竖拍、实况 MOV）、安卓与摄像机的真实文件验收导入、封面、播放与转码负载。Catalog 已到第 13 次迁移，回滚到更早的 release 前须先彻底删除视频资产。
+- 向量索引（#411）：按[启用向量索引第 5 步](enable-vector-index.md#步骤)核对相册排序从索引读的结果与精确扫描一致（[读路径](../architecture/vector-index.md#读路径)）。
+- 读文字（OCR 步骤 6）：按[实施方案](../architecture/photo-ocr.md)在实验 NAS 上验收，含 VNAS 用读出的文字回答（[助手的工具](../architecture/photo-ocr.md#助手的工具)）。
 
 ### 家庭中心
 
@@ -108,6 +110,7 @@
 ### 网页搜索
 
 - 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
+- 空闲时的外发流量：按[启用手册](enable-web-search.md)查明没有人搜索时 SearXNG 向外发了什么。
 
 ### AI 助手（试用）
 
@@ -116,6 +119,11 @@
 - 记忆：复盘自建的 `anas-photos` 出现在该账号“记忆”的“VNAS 自己总结”中（[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。
 - 对话窗口：打开曾经崩溃的那段对话；仍显示“这个对话暂时无法显示”时，把浏览器控制台中 `VNAS conversation render failed` 之后的报错补进[调查](../investigations/2026-10-21-vnas-window-crash-and-stacked-cards.md)。
 - 助手随 `a-nas` 一起更新（[启用 AI 助手](enable-ai-assistant.md)）。
+- V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：按[启用手册的“验证”](enable-ai-assistant.md#验证)试用。
+
+### 虚拟伙伴
+
+- V1（[规格](../specs/virtual-companion.md)）：测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
 
 ### 剪辑中心
 
