@@ -26,7 +26,10 @@ func TestPhoneHotspotReadsPythonConnectionFile(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	worker := filepath.Join("..", "..", "..", "deploy", "network", "phone-hotspot.py")
+	worker := os.Getenv("ANAS_PHONE_HOTSPOT_TEST_WORKER")
+	if worker == "" {
+		worker = filepath.Join("..", "..", "..", "deploy", "network", "phone-hotspot.py")
+	}
 	produce := `
 import runpy
 import sys
