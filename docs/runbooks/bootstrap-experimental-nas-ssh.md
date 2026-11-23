@@ -1,7 +1,7 @@
 # 配置实验 NAS 的 SSH 开发账号
 
 状态：verified
-更新时间：2026-10-27
+更新时间：2026-11-23
 
 ## 实验 NAS 接入
 
@@ -12,7 +12,7 @@
 | 主机名 | `a-nas-dev` |
 | 系统 | Debian 13 trixie amd64 |
 | SSH | OpenSSH 已启用；开发机 A 以 `anas-dev`、开发机 B 以 `guoyi` 的密钥登录已验证 |
-| 开发账号 | `anas-dev`（暂存制品）与 `guoyi`（只读联调），均无 `sudo` 权限 |
+| 开发账号 | `anas-dev`（暂存制品）与 `guoyi`（只读联调），均无 `sudo` 权限；实习生等开发者的个人账号 `dev-<缩写>` 见[另一份手册](manage-developer-ssh-accounts.md) |
 | 地址 | DHCP 地址，不写入仓库；每次使用前按需确认 |
 
 尚未关闭密码登录；完成恢复路径与第二把管理员密钥设计前不做 SSH 全局加固。
