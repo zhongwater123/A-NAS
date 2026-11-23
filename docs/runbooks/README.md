@@ -5,7 +5,7 @@
 ## 索引
 
 - [配置实验 NAS 的 SSH 开发账号](bootstrap-experimental-nas-ssh.md)（verified）
-- [为开发者开、撤实验 NAS 的 SSH 账号](manage-developer-ssh-accounts.md)（draft；脚本在一次性容器中验证，实验 NAS 已执行 `setup`，开账号待名单）
+- [为开发者开、撤实验 NAS 的 SSH 账号](manage-developer-ssh-accounts.md)（draft；脚本在一次性容器中验证；2026-11-23 实验 NAS 已执行 `setup` 并开了 4 个账号，开发者首次登录待核对）
 - [部署 M1 API 到实验 NAS](deploy-m1-api-to-experimental-nas.md)（historical；已被系统服务部署取代）
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
 - [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（superseded；仅 SSH 隧道仍适用）
