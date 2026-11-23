@@ -13,6 +13,7 @@
 - 目标：Experimental NAS 当前的 release，开始前记下 `dpkg-query -W a-nas`。
 - 风险：只用可丢弃测试数据；安装应用、上传与扫描会占用数据卷空间与 CPU。
 - 停止条件：数据卷离线或只读、服务反复重启、出现非预期的数据丢失时停止，按[调查模板](../investigations/_TEMPLATE.md)记录。
+- 先小后大：几个服务接力完成的功能（如剪辑中心），先用最小样本走通全程，例如一段一分钟以内的视频和一首歌，确认每一步都能走完、每处等待都写明在等什么；再换真实数据测用时、内存与质量。先上真实数据，链路上的问题会藏在几十分钟的分析之后（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
 
 ## 步骤
 
@@ -115,6 +116,16 @@
 - 记忆：复盘自建的 `anas-photos` 出现在该账号“记忆”的“VNAS 自己总结”中（[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。
 - 对话窗口：打开曾经崩溃的那段对话；仍显示“这个对话暂时无法显示”时，把浏览器控制台中 `VNAS conversation render failed` 之后的报错补进[调查](../investigations/2026-10-21-vnas-window-crash-and-stacked-cards.md)。
 - 助手随 `a-nas` 一起更新（[启用 AI 助手](enable-ai-assistant.md)）。
+
+### 剪辑中心
+
+按[演示手册](demo-montage-center.md)打开并走一次之后（2026-11-20 已完整出片一次，[基线](../architecture/montage-center.md#首版闭环的基线)），再核对：
+
+- 生成途中刷新页面、关闭再打开窗口，进度从服务端恢复；途中 `systemctl restart anas-montage`，已完成的分析与规划不重做：相册描述的 AI Worker 调用次数与规划的轮数都不增加（[规格](../specs/montage-center.md#首版闭环实验-nas)第 2、3 步）。
+- 成员在 VNAS 历史里打开“剪辑规划 · <项目名>”，说一句要求（如“开场太快了”），复盘记下；下一次规划的对话用上了它（[规划会话](../architecture/montage-planning-session.md#学习)）。
+- 品杰一组：两个方案与第八版直连 Claude 的成片人工对比，记下差异（[规格](../specs/montage-center.md#剪辑行为迁移)）。
+- 渲染时在相册播放一段需要转码的视频，播放不卡；记下 FFmpeg 切片的内存峰值（2026-11-20 到了 3 GiB 上限）。
+- 配乐分析按[手册](enable-montage-music.md)第 5 步实测。
 
 ## 验证
 

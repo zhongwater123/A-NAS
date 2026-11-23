@@ -149,6 +149,14 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
   -v "$PWD:/src" <同上镜像> bash /src/scripts/smoke-photo-service.sh
 ```
 
+## 跨进程契约
+
+`make api` 生成的类型与响应校验只覆盖浏览器与产品服务之间（[接口契约](api-contract.md#接口契约)）。服务之间、Go 与 Python 之间、服务与 Hermes 之间没有生成的类型，两边各写各的测试，就会各自通过而接不上：2026-11-19 剪辑中心生成 26 个字母的轮次编号，回合脚本只认 24 个，两边的测试各用各的编号，都通过了（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
+
+- 这类接缝的样例（请求、回答、编号与 token 的格式）只放一处，两边的测试都读它；或者一边的测试从另一边的实现读出格式，例如 [`planner_ids_test.go`](../../internal/montage/planner_ids_test.go) 从规划发起方读出它认的编号，用剪辑中心真实生成的编号核对。
+- 能生成就生成：接缝两边有一边能导出 JSON Schema 时，另一边按它校验，不再手写一份。
+- 剪辑中心的领取、简报、答案、填槽请求与选段还没有共用的样例（[规划会话的“测试”](../architecture/montage-planning-session.md#测试)）。
+
 ## 系统测试
 
 root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，从签名软件源用 apt 安装 A-NAS 的软件包（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)），再按用户检查：
@@ -198,6 +206,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
   - 沙箱探针在沙箱外运行时，要报出具体的发现；
   - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标用 `expect_hidden`，由系统测试在沙箱外确认存在。
 - 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
+- CI 没有 Hermes 的运行环境，AI 助手与剪辑规划在 CI 里只查沙箱与布局。这两项的改动合入后、交部署之前，设 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑一次（[变体](../../.claude/skills/system-test/SKILL.md#变体)）：它让真实的 Hermes 走一遍对话，并让脚本化模型在规划进程里走一遍剪辑规划。
 
 ## CI
 

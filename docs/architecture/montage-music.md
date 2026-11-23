@@ -3,7 +3,7 @@
 状态：M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)）已实现选歌复制、配乐分析 Worker、`music` 选段、试听与起点；allin1 的商业版权待议，待议期间配乐分析只在开发机与实验 NAS 上运行，见“版权待议期间”
 更新时间：2026-11-19
 
-本文是[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)为准。
+本文是[剪辑中心实施方案](montage-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](../specs/montage-center.md#配乐)为准。
 
 ## 数据流
 
@@ -75,7 +75,7 @@
 
 ### 版权待议期间
 
-许可的核对与要议的问题见[决定记录](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)。
+许可的核对与要议的问题见[决定记录](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)。
 
 - allin1、Demucs 的权重与这个运行环境都不进任何 release，只在开发机与实验 NAS 上按[启用手册](../runbooks/enable-montage-music.md)手动装；
 - 没装时剪辑中心照常运行，选的歌停在 `analyzing`，写明在等配乐分析；
@@ -150,7 +150,7 @@
 
 ## 关联
 
-- 规格与方案（在 `docs/montage-center-design` 分支，[#518](https://github.com/zhongwater123/A-NAS/pull/518)）：[剪辑中心规格的“配乐”](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)、[实施方案的“配乐”](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/architecture/montage-center.md#配乐)、[决定记录“allin1 的商业版权”](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)
+- 规格与方案：[剪辑中心规格的“配乐”](../specs/montage-center.md#配乐)、[实施方案的“配乐”](montage-center.md#配乐)、[决定记录“allin1 的商业版权”](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)
 - 需求：[#559](https://github.com/zhongwater123/A-NAS/issues/559)（M8b 配乐），父 issue [#514](https://github.com/zhongwater123/A-NAS/issues/514)
 - ADR：[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（运行环境与模型的交付做法）
 - 手册：[在实验 NAS 上启用配乐分析](../runbooks/enable-montage-music.md)
