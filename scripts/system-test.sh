@@ -752,6 +752,28 @@ check "the hotspot radio package installs the pinned Debian dependencies" \
   upstream_pinned /src/deploy/upstream/hotspot-radio-amd64.json
 check "the hotspot radio package supplies the MT7612U firmware and iw" \
   bash -c 'test -r /usr/lib/firmware/mt7662.bin && test -r /usr/lib/firmware/mt7662_rom_patch.bin && iw --version'
+hotspot="$api/api/v1/network/phone-hotspot"
+check "the packaged phone hotspot starts off" \
+  test "$(curl -fsS -b /tmp/owner.jar "$hotspot" | jq -r .state)" = off
+check "a household member cannot read the phone hotspot" \
+  test "$(status_of -b /tmp/alice.jar "$hotspot")" = 403
+hotspot_routes=$(ip -4 route show default)
+check "the administrator can request the packaged hotspot" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":true}' "$hotspot"
+for _ in $(seq 1 50); do
+  [[ "$(systemctl show -p ActiveState --value anas-phone-hotspot.service)" != failed ]] || break
+  sleep 0.2
+done
+check "the packaged hotspot reports missing hardware without connection details" \
+  jq -e '.state == "failed" and (.reason == "no_wired_uplink" or .reason == "no_idle_radio") and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "a failed hotspot start preserves the host default route" test "$(ip -4 route show default)" = "$hotspot_routes"
+check "a failed hotspot start leaves no hotspot filter table" \
+  bash -c '! nft list tables | grep -Fxq "table inet anas_phone_hotspot"'
+check "the administrator can stop the packaged hotspot after a failed start" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":false}' "$hotspot"
 check "Docker waits for its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true

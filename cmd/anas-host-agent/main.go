@@ -195,7 +195,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
+		SystemLogs: journal.New(), WebSearch: executor, PhoneHotspot: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
 		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped, Deletions: sessions,
 	}, logger)
 	mux := http.NewServeMux()

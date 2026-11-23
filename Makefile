@@ -408,7 +408,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
-	$(RUFF) check --config ai/ruff.toml deploy/docker
+	$(RUFF) check --config ai/ruff.toml deploy/docker deploy/network
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).

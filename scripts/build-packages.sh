@@ -128,6 +128,7 @@ install -m 0755 "$repo"/deploy/debian/a-nas/DEBIAN/{preinst,postinst} "$lib/rele
 install -m 0755 "$build/anas-api" "$build/anas-host-agent" "$build/anas-container-agent" \
   "$repo/scripts/install-media-pool.sh" "$repo/scripts/install-screensavers.sh" "$lib/"
 install -m 0755 "$repo/scripts/run-kiosk.sh" "$lib/kiosk-launcher"
+install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 
 # The AI Worker (ADR 0016): its code, each model role's manifest and a link
 # to the role's file in its content package, the runtime and llama.cpp.

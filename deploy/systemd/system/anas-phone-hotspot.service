@@ -1,0 +1,25 @@
+[Unit]
+Description=A-NAS phone hotspot
+Documentation=https://github.com/zhongwater123/A-NAS
+After=network.target caddy.service
+
+[Service]
+Type=notify
+ExecStart=/usr/lib/a-nas/phone-hotspot
+ExecStopPost=/usr/lib/a-nas/phone-hotspot cleanup
+TimeoutStartSec=35s
+TimeoutStopSec=15s
+RuntimeDirectory=anas-phone-hotspot
+RuntimeDirectoryMode=0700
+# The startup failure code remains available to Settings until the next start.
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Environment=LC_ALL=C
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETGID CAP_SETUID
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_PACKET AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes

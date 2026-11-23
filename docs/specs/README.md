@@ -25,6 +25,7 @@
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [互联网访问](internet-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [宿主机网络与手机直连热点](host-network-and-phone-hotspot.md)（draft）
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented）

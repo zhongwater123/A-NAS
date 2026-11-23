@@ -37,6 +37,30 @@
       "file": "pool/main/libn/libnl3/libnl-genl-3-200_3.7.0-2_amd64.deb",
       "sizeBytes": 18136,
       "sha256": "8f2f81ef4c6f8636f0b0cb2ff40b3c54a497d121f49c485620ae43c94782cd94"
+    },
+    {
+      "name": "dnsmasq-base",
+      "source": "debian",
+      "version": "2.91-1+deb13u2",
+      "file": "pool/main/d/dnsmasq/dnsmasq-base_2.91-1+deb13u2_amd64.deb",
+      "sizeBytes": 507160,
+      "sha256": "fcf9e2d93795a0ca043fd22f0de96748c718b9411a5a48f9c0bb1bdb267d4639"
+    },
+    {
+      "name": "libnl-route-3-200",
+      "source": "debian",
+      "version": "3.7.0-2",
+      "file": "pool/main/libn/libnl3/libnl-route-3-200_3.7.0-2_amd64.deb",
+      "sizeBytes": 181704,
+      "sha256": "1c8c95542688996cff8e954583642b10a3bd78b69954f565fda62144c2bc3897"
+    },
+    {
+      "name": "hostapd",
+      "source": "debian",
+      "version": "2:2.10-24",
+      "file": "pool/main/w/wpa/hostapd_2.10-24_amd64.deb",
+      "sizeBytes": 870404,
+      "sha256": "d9c659fa9818a36bb378f5593e1f181084efe02e9d54ce77d879fcd86743a69a"
     }
   ]
 }

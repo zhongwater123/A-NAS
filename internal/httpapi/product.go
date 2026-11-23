@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
@@ -98,7 +99,8 @@ type ProductDependencies struct {
 	SystemLogs systemlog.Reader
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
-	WebSearch *websearchapi.API
+	WebSearch    *websearchapi.API
+	PhoneHotspot phonehotspot.Switch
 	// AssistantKey serves Settings → VNAS, the AI assistant's model key (ADR 0024); nil
 	// leaves its routes out.
 	AssistantKey *assistantkeyapi.API

@@ -5,6 +5,6 @@ Section: net
 Priority: optional
 Maintainer: A-NAS <a-nas@localhost>
 Depends: @DEPENDS@
-Description: A-NAS experimental hotspot radio dependencies
- Installs MediaTek firmware and wireless inspection tools for hotspot
- radio validation. It does not configure network interfaces.
+Description: A-NAS phone hotspot dependencies
+ Installs MediaTek firmware, wireless inspection tools and the daemons
+ used by the optional A-NAS phone hotspot.

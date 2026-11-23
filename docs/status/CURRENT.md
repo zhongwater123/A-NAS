@@ -62,4 +62,6 @@
 12. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点。
 13. 照片打分：按[手册](../runbooks/install-and-remove-photo-scoring.md)安装试点。
 14. AI 助手 V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：部署后按[手册](../runbooks/enable-ai-assistant.md)核对接管与验证；实验 NAS 改用镜像以它为前提。
-$117. [手机直连热点](../runbooks/prepare-experimental-nas-hotspot-radio.md)待正式接入。
+15. 剪辑中心：按[验收手册](../runbooks/accept-features-on-experimental-nas.md#剪辑中心)核对其余各项；allin1 版权待议；二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的 R1–R6 实施（#596）。
+16. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+17. [手机直连热点](../runbooks/prepare-experimental-nas-hotspot-radio.md)待正式包实机验收。

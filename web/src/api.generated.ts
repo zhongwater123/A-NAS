@@ -1042,6 +1042,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network/phone-hotspot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the phone hotspot state and its active connection details */
+        get: operations["getPhoneHotspot"];
+        /** Start or stop the phone hotspot on the dedicated Wi-Fi radio */
+        put: operations["updatePhoneHotspot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web-search/query": {
         parameters: {
             query?: never;
@@ -6004,6 +6022,21 @@ export interface components {
             /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
         };
+        PhoneHotspotStatus: {
+            /** @enum {string} */
+            state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
+            /** @enum {string} */
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "subnet_conflict" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "service_failed";
+            /** @description Present when the hotspot is on. The response is not cacheable. */
+            connection?: {
+                ssid: string;
+                password: string;
+                url: string;
+            };
+        };
+        PhoneHotspotRequest: {
+            enabled: boolean;
+        };
         /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
         WebSearchPausedEngine: {
             /** @description The website name the window shows; the legacy field name is retained. */
@@ -8543,6 +8576,8 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type PhoneHotspotStatus = components['schemas']['PhoneHotspotStatus'];
+export type PhoneHotspotRequest = components['schemas']['PhoneHotspotRequest'];
 export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
@@ -10850,6 +10885,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebSearchStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getPhoneHotspot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hotspot status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updatePhoneHotspot: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotRequest"];
+            };
+        };
+        responses: {
+            /** @description Hotspot operation accepted or the service is unavailable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
                 };
             };
             400: components["responses"]["ProductError"];

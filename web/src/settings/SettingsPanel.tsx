@@ -12,6 +12,7 @@ import {
   Search,
   SquareTerminal,
   UsersRound,
+  Wifi,
   X,
 } from "lucide-react";
 import {
@@ -36,6 +37,7 @@ import { AccountSection } from "./AccountSection";
 import { AssistantSection } from "./AssistantSection";
 import { roleLabel } from "./labels";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
+import { NetworkSection } from "./NetworkSection";
 import { OverviewSection } from "./OverviewSection";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { Avatar, type SettingsKit, SettingsKitContext } from "./parts";
@@ -57,6 +59,7 @@ export type SettingsSection =
   | "account"
   | "overview"
   | "storage"
+  | "network"
   | "system-update"
   | "personalization"
   | "users"
@@ -78,6 +81,7 @@ const sectionGroups: SectionLink[][] = [
   [
     { id: "overview", label: "概览", icon: LayoutDashboard },
     { id: "storage", label: "存储", icon: HardDrive },
+    { id: "network", label: "网络", icon: Wifi, adminOnly: true },
     { id: "system-update", label: "系统更新", icon: CircleFadingArrowUp, adminOnly: true },
     { id: "task-manager", label: "任务管理器", icon: Activity },
   ],
@@ -264,6 +268,7 @@ export function SettingsPanel({
               {current === "system-update" && <SystemUpdateSection onOpenLogs={() => openLogs("system")} />}
               {current === "personalization" && <PersonalizationSection />}
               {current === "web-search" && <WebSearchSection />}
+              {current === "network" && <NetworkSection />}
               {current === "assistant" && <AssistantSection onKeyChange={onAssistantKeyChange} />}
               {current === "users" && (
                 <UsersSection

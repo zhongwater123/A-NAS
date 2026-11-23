@@ -16,6 +16,10 @@
 
 按主题列出，同一主题内按日期排列。AI 助手的大部分决定在 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 中，网页搜索的在 [ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md) 中。
 
+### 网络
+
+- [2026-11-19：宿主机网络与手机直连热点的首版范围](2026-11-19-host-network-and-phone-hotspot-v1.md)
+
 ### 文件与存储
 
 - [2026-10-12：备份中心先只做快照保护](2026-10-12-backup-center-snapshots-only.md)
