@@ -43,7 +43,7 @@ type Memory struct{ enabled atomic.Bool }
 func (m *Memory) PhoneHotspot(context.Context) (State, error) {
 	if m.enabled.Load() {
 		return State{State: On, Connection: &Connection{
-			SSID: "A-NAS-3EB129", Password: "preview-hotspot-only", URL: "http://192.168.173.1/",
+			SSID: "A-NAS-3EB129", Password: "preview-hotspot-only", URL: "https://hotspot.example.test:8443/",
 		}}, nil
 	}
 	return State{State: Off}, nil

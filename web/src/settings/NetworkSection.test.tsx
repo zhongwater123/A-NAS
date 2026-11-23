@@ -16,7 +16,7 @@ it("opens Network without a parent query provider and controls the phone hotspot
   const off: PhoneHotspotStatus = { state: "off" };
   const on: PhoneHotspotStatus = {
     state: "on",
-    connection: { ssid: "A-NAS-3EB129", password: "preview-hotspot-only", url: "http://192.168.173.1/" },
+    connection: { ssid: "A-NAS-3EB129", password: "preview-hotspot-only", url: "https://hotspot.example.test:8443/" },
   };
   let status = off;
   server.use(
@@ -34,7 +34,7 @@ it("opens Network without a parent query provider and controls the phone hotspot
   expect(await screen.findByText("已关闭")).toBeInTheDocument();
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
-  expect(await screen.findByText("http://192.168.173.1/")).toBeInTheDocument();
+  expect(await screen.findByText("https://hotspot.example.test:8443/")).toBeInTheDocument();
   expect(toggle).toBeChecked();
   expect(screen.queryByText("preview-hotspot-only")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "显示密码" }));
@@ -43,5 +43,5 @@ it("opens Network without a parent query provider and controls the phone hotspot
   await user.click(toggle);
   expect(await screen.findByText("已关闭")).toBeInTheDocument();
   expect(screen.queryByText("preview-hotspot-only")).not.toBeInTheDocument();
-  expect(screen.queryByText("http://192.168.173.1/")).not.toBeInTheDocument();
+  expect(screen.queryByText("https://hotspot.example.test:8443/")).not.toBeInTheDocument();
 });

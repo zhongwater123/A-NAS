@@ -49,6 +49,10 @@ out=$(cd "$1" && pwd)
 version=$2
 repo=$(cd "$(dirname "$0")/.." && pwd)
 build=${3:-$repo/build}
+target=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+product_arch=$(sed -n 's/^Architecture: //p' "$repo/deploy/debian/a-nas/DEBIAN/control")
+[[ "$target" == "$product_arch" ]] ||
+  { echo "the product build supports $product_arch here; build the optional radio package separately for $target" >&2; exit 2; }
 # A Debian upstream version without a revision (scripts/release-version.sh).
 if [[ ! "$version" =~ ^[0-9][A-Za-z0-9.+~]*$ ]]; then
   echo "not a Debian version: $version (see scripts/release-version.sh)" >&2

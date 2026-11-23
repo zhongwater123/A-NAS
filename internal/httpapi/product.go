@@ -273,7 +273,7 @@ func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Requ
 	if h.AssistantKeeper != nil {
 		h.AssistantKeeper.Forget(token)
 	}
-	//nolint:gosec // G124: Secure only through the internet entry; the LAN entry is plain HTTP (ADR 0012).
+	//nolint:gosec // G124: The LAN entry also supports plain HTTP (ADR 0012).
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: overHTTPS(r)})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -323,12 +323,16 @@ func (h *productHandler) setSessionCookie(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// overHTTPS reports whether the browser reached the device over HTTPS, which
-// only the internet entry serves (ADR 0032); a Secure cookie would not come
-// back over the LAN entry's plain HTTP.
+// Caddy overwrites the forwarding headers before reaching the loopback
+// listener. Both the internet and the isolated hotspot terminate TLS in Caddy.
 func overHTTPS(r *http.Request) bool {
 	_, internet := webentry.Internet(r)
-	return internet
+	if internet || r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return err == nil && net.ParseIP(host).IsLoopback() &&
+		r.Header.Get("X-Forwarded-For") != "" && r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 type sessionResponse struct {

@@ -6026,7 +6026,7 @@ export interface components {
             /** @enum {string} */
             state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
             /** @enum {string} */
-            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "subnet_conflict" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "service_failed";
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed";
             /** @description Present when the hotspot is on. The response is not cacheable. */
             connection?: {
                 ssid: string;

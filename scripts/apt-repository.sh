@@ -134,6 +134,17 @@ case "${1:-}" in
     gnupg=$(absolute "$4")
     shift 4
     [[ "$dist" == release || "$dist" == dev ]] || { echo "DIST is release or dev, not $dist" >&2; exit 2; }
+    arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+    case "$arch" in amd64 | arm64) ;; *) echo "unsupported repository architecture: $arch" >&2; exit 2 ;; esac
+    for deb in "$@"; do
+      package_arch=$(dpkg-deb -f "$deb" Architecture)
+      [[ "$package_arch" == "$arch" || "$package_arch" == all ]] ||
+        { echo "$(basename "$deb") has architecture $package_arch, expected $arch or all" >&2; exit 2; }
+    done
+    for release in "$repo"/dists/{dev,release}/Release; do
+      [[ ! -f "$release" ]] || grep -qx "Architectures: $arch" "$release" ||
+        { echo "repository architecture differs: publish $arch to a separate directory" >&2; exit 2; }
+    done
     key=$(signing_key "$gnupg") || { echo "no key in $gnupg can sign (apt-repository.sh key, release-key.sh install)" >&2; exit 2; }
     # A protected key needs its passphrase, which reaches aptly in a tmpfs.
     secret=() sign=(-gpg-key="$key!")
@@ -150,9 +161,9 @@ case "${1:-}" in
     name=$(basename "$repo")
     state=.$name.aptly
     install -d "$base/$state"
-    printf '{"rootDir": "/base/%s", "architectures": ["amd64"], "gpgProvider": "gpg",
+    printf '{"rootDir": "/base/%s", "architectures": ["%s"], "gpgProvider": "gpg",
  "FileSystemPublishEndpoints": {"repository": {"rootDir": "/base/%s", "linkMethod": "hardlink", "verifyMethod": "md5"}}}\n' \
-      "$state" "$name" >"$base/$state/aptly.conf"
+      "$state" "$arch" "$name" >"$base/$state/aptly.conf"
     # The packages, one mount for their directory each.
     mounts=() debs=() index=0
     declare -A seen=()
@@ -169,8 +180,8 @@ case "${1:-}" in
     in_image "${secret[@]}" "$gnupg:/gnupg" "$base:/base" "${mounts[@]}" -- \
       env APTLY_CONFIG="/base/$state/aptly.conf" PUBLISHED="/base/$name" bash -c '
       set -euo pipefail
-      dist=$1 sign=$2
-      shift 2
+      dist=$1 sign=$2 arch=$3
+      shift 3
       IFS=, read -ra sign <<<"$sign"
       aptly=(aptly -config="$APTLY_CONFIG")
       "${aptly[@]}" repo show "$dist" >/dev/null 2>&1 ||
@@ -178,7 +189,7 @@ case "${1:-}" in
       # What the published distribution has and the state lacks: everything,
       # when this machine carries on a repository that another machine
       # published and copied here (docs/runbooks/manage-release-key.md).
-      index=$PUBLISHED/dists/$dist/main/binary-amd64/Packages
+      index=$PUBLISHED/dists/$dist/main/binary-$arch/Packages
       if [[ -f "$index" ]]; then
         have=$("${aptly[@]}" repo show -with-packages "$dist" | sed -n "s/^  //p")
         missing=()
@@ -200,7 +211,7 @@ case "${1:-}" in
         "${aptly[@]}" publish repo -batch "${sign[@]}" -origin=A-NAS -label=A-NAS "$dist" filesystem:repository: >/dev/null
       fi
       echo "$dist: $("${aptly[@]}" repo show "$dist" | sed -n "s/^Number of packages: //p") package versions"' \
-      publish "$dist" "$(IFS=,; echo "${sign[*]}")" "${debs[@]}"
+      publish "$dist" "$(IFS=,; echo "${sign[*]}")" "$arch" "${debs[@]}"
     ;;
   sums)
     [[ $# -ge 3 ]] || { echo "usage: $0 sums GNUPGHOME DIR..." >&2; exit 2; }

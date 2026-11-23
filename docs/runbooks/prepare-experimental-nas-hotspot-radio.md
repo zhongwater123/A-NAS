@@ -32,8 +32,10 @@
 
 2026-11-20 已通过 SSH 复核，`lsusb -t` 显示 `mt76x2u`，`iw list` 列出 `AP`，有线默认路由保持 `enp2s0`，Web 健康检查正常。
 
-- 使用正式包时，从现有有线入口打开「设置 → 网络」，开启手机直连热点。用手机连接页面显示的 Wi-Fi，然后访问页面上的 WebOS 地址。切回有线入口关闭热点，复查有线默认路由与有线端的 `/healthz`。服务启动失败时先看设置页原因；宿主机日志为 `journalctl -u anas-phone-hotspot.service`。
-- 如需从控制台结束正式热点，执行 `systemctl stop anas-phone-hotspot.service`。确认无线接口上没有 `192.168.173.1/24`，`nft list tables` 不再有 `inet anas_phone_hotspot`，再按下文决定是否移除可选包。
+- 为每台 NAS 准备热点专用域名及与之匹配的证书。热点内的 DNS 直接返回 NAS 热点地址，手机在热点内访问时无需连接公有 DNS。证书可以用 NAS 的有线侧提前签发并更新。
+- 管理员在 NAS 上创建 root 专属的 `/etc/a-nas/phone-hotspot/`，目录权限为 `0700`。将单行域名写入 `domain`，证书链保存为 `fullchain.pem`，私钥保存为 `privkey.pem`，文件由 root 所有且私钥权限为 `0600`。公有 CA 证书使用 NAS 系统信任库。内网 CA 的根证书放在 `trust.pem`，并在连接前通过可信渠道把同一 CA 配到手机信任库。
+- 从有线入口打开「设置 → 网络」，开启手机直连热点。手机连接页面显示的 Wi-Fi 后，打开页面给出的 HTTPS 地址并核对浏览器接受证书，再登录和上传。切回有线入口关闭热点，复查有线端的 `/healthz`。服务启动失败时先看设置页原因，宿主机日志由 `journalctl -u anas-phone-hotspot.service` 查询。
+- 如需从控制台结束正式热点，执行 `systemctl stop anas-phone-hotspot.service`。确认无线接口回到宿主机且无热点地址，再按下文决定是否移除可选包。更新证书后，下次开启热点会加载新的证书。
 
 - `lsusb -t` 显示无线接口绑定 `mt76x2u`，`iw dev` 有无线接口，`iw list` 的 `Supported interface modes` 含 `AP`。用 `ip -4 route show default` 确认有线出口，再从开发机验证 NAS Web `/healthz`。
 - 如需撤销，仅在确认是本次绑定的设备后，把接口名写入同一驱动目录的 `unbind`。如需移除本次部署，先执行 `apt-get -s remove a-nas-hotspot-radio` 核对计划。只在确认新增的依赖无其它用途后移除它们。回退后再次核对有线默认路由与 Web 健康检查。

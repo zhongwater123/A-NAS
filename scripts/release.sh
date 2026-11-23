@@ -30,8 +30,14 @@
 # Usage: scripts/release.sh REPO CONTENT
 set -euo pipefail
 
+radio_only=false
+if [[ ${1:-} == --hotspot-radio-only ]]; then
+  radio_only=true
+  shift
+fi
+
 if [[ $# -ne 2 ]]; then
-  echo "usage: $0 REPO CONTENT" >&2
+  echo "usage: $0 [--hotspot-radio-only] REPO CONTENT" >&2
   exit 2
 fi
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -52,26 +58,34 @@ version=$("$repo/scripts/release-version.sh")
 dist=release
 [[ "$version" == *dev* ]] && dist=dev
 commit=$(git -C "$repo" rev-parse --short=12 HEAD)
+arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+case "$arch" in amd64 | arm64) ;; *) echo "unsupported release architecture: $arch" >&2; exit 2 ;; esac
+export ANAS_TARGET_ARCH=$arch
 
 # The packages the gates passed, at this version.
 products=()
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy a-nas-hotspot-radio; do
-  deb=$(find "$build/packages" -maxdepth 1 -name "${package}_${version}_*.deb" -print -quit 2>/dev/null)
-  [[ -n "$deb" ]] || { echo "missing $package $version: run make packages" >&2; exit 2; }
-  products+=("$deb")
-done
-validated=$(sed -n 's/^commit=//p' "$build/.validated-build" 2>/dev/null || true)
-[[ "$validated" == "$commit" ]] || { echo "make check has not passed at $commit (build/.validated-build)" >&2; exit 2; }
-for binary in api:anas-api host_agent:anas-host-agent; do
-  grep -qx "${binary%%:*}_sha256=$(sha256sum "$build/${binary#*:}" | cut -d ' ' -f 1)" "$build/.validated-build" ||
-    { echo "build/${binary#*:} is not the one make check passed" >&2; exit 2; }
-done
-(cd "$build/packages" && sha256sum --check --quiet --strict "$build/.system-tested" 2>/dev/null) ||
-  { echo "the system test has not passed with these packages: make system-test (build/.system-tested)" >&2; exit 2; }
+if ! "$radio_only"; then
+  for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-docker-policy a-nas-hotspot-radio; do
+    package_arch=all
+    case "$package" in a-nas | a-nas-hotspot-radio) package_arch=$arch ;; esac
+    deb=$build/packages/${package}_${version}_$package_arch.deb
+    [[ -f "$deb" && "$(dpkg-deb -f "$deb" Architecture)" == "$package_arch" ]] ||
+      { echo "missing $package $version for $package_arch: run make packages for this release architecture" >&2; exit 2; }
+    products+=("$deb")
+  done
+  validated=$(sed -n 's/^commit=//p' "$build/.validated-build" 2>/dev/null || true)
+  [[ "$validated" == "$commit" ]] || { echo "make check has not passed at $commit (build/.validated-build)" >&2; exit 2; }
+  for binary in api:anas-api host_agent:anas-host-agent; do
+    grep -qx "${binary%%:*}_sha256=$(sha256sum "$build/${binary#*:}" | cut -d ' ' -f 1)" "$build/.validated-build" ||
+      { echo "build/${binary#*:} is not the one make check passed" >&2; exit 2; }
+  done
+  (cd "$build/packages" && sha256sum --check --quiet --strict "$build/.system-tested" 2>/dev/null) ||
+    { echo "the system test has not passed with these packages: make system-test (build/.system-tested)" >&2; exit 2; }
+fi
 
 # The key that signs, and the public key the keyring carries.
 if [[ -n "${ANAS_RELEASE_TEST_KEY:-}" ]]; then
-  gnupg=$HOME/.local/share/a-nas/release-test-key
+  gnupg=${ANAS_RELEASE_TEST_GNUPGHOME:-$HOME/.local/share/a-nas/release-test-key}
   echo "signing with the test key in $gnupg"
   "$repo/scripts/apt-repository.sh" key "$gnupg" >/dev/null
   public=$gnupg
@@ -101,19 +115,22 @@ publish() {
 # once published.
 incoming=$(mktemp -d "$repository/.incoming.XXXXXX")
 trap 'rm -rf -- "$incoming"' EXIT
-ANAS_CONTENT_REPOSITORY=$repository "$repo/scripts/build-content-packages.sh" "$incoming" "$content"
-# Every content package this release depends on, new or already published,
-# goes into its distributions.
-debs=("${products[@]}")
-for name in $(content_packages "$repo"); do
-  deb=$(find "$incoming" "$repository/pool" -name "${name}_1_*.deb" -print -quit 2>/dev/null)
-  [[ -n "$deb" ]] || { echo "missing $name: its content in $content (scripts/build-content-packages.sh)" >&2; exit 2; }
-  debs+=("$deb")
-done
-upstream=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream")
-mapfile -t upstream <<<"$upstream"
-debs+=("${upstream[@]}")
-arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+if "$radio_only"; then
+  "$repo/scripts/build-hotspot-radio-package.sh" "$incoming" "$version"
+  debs=("$incoming/a-nas-hotspot-radio_${version}_$arch.deb")
+else
+  ANAS_CONTENT_REPOSITORY=$repository "$repo/scripts/build-content-packages.sh" "$incoming" "$content"
+  # Every content package this release depends on goes into its distributions.
+  debs=("${products[@]}")
+  for name in $(content_packages "$repo"); do
+    deb=$(find "$incoming" "$repository/pool" -name "${name}_1_*.deb" -print -quit 2>/dev/null)
+    [[ -n "$deb" ]] || { echo "missing $name: its content in $content (scripts/build-content-packages.sh)" >&2; exit 2; }
+    debs+=("$deb")
+  done
+  upstream=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream")
+  mapfile -t upstream <<<"$upstream"
+  debs+=("${upstream[@]}")
+fi
 radio=$("$repo/scripts/fetch-upstream-packages.sh" "$content/upstream" "$repo/deploy/upstream/hotspot-radio-$arch.json")
 mapfile -t radio <<<"$radio"
 debs+=("${radio[@]}")

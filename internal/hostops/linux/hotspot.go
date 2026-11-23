@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,10 @@ func (e *Executor) hotspotFile(parts ...string) string {
 }
 
 func (e *Executor) hasHotspotTools() (bool, error) {
-	for _, name := range []string{"hostapd", "hostapd_cli", "dnsmasq", "iw", "nft", "ip"} {
-		if _, err := os.Stat(e.hotspotFile("usr", "sbin", name)); errors.Is(err, os.ErrNotExist) {
+	tools := []string{"sbin/hostapd", "sbin/hostapd_cli", "sbin/dnsmasq", "sbin/iw", "sbin/ip",
+		"bin/caddy", "bin/socat", "bin/unshare", "bin/nsenter", "bin/setpriv", "bin/sleep", "bin/python3"}
+	for _, name := range tools {
+		if _, err := os.Stat(e.hotspotFile("usr", name)); errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		} else if err != nil {
 			return false, fmt.Errorf("inspect hotspot dependencies: %w", err)
@@ -51,11 +54,16 @@ func (e *Executor) PhoneHotspot(ctx context.Context) (phonehotspot.State, error)
 		if json.Unmarshal(data, &connection) != nil || connection.SSID == "" || connection.Password == "" || connection.URL == "" {
 			return phonehotspot.State{}, errors.New("invalid phone hotspot connection")
 		}
+		endpoint, err := url.Parse(connection.URL)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil {
+			return phonehotspot.State{}, errors.New("invalid phone hotspot HTTPS address")
+		}
 		return phonehotspot.State{State: phonehotspot.On, Connection: &connection}, nil
 	case "failed":
 		reason, _ := os.ReadFile(e.hotspotFile("run", "anas-phone-hotspot", "reason"))
 		switch code := strings.TrimSpace(string(reason)); code {
-		case "dependencies_missing", "no_wired_uplink", "no_idle_radio", "subnet_conflict", "ap_failed", "dhcp_failed", "web_unavailable":
+		case "dependencies_missing", "no_wired_uplink", "no_idle_radio", "ap_failed", "dhcp_failed",
+			"web_unavailable", "tls_unavailable", "isolation_failed", "cleanup_failed":
 			return phonehotspot.State{State: phonehotspot.Failed, Reason: code}, nil
 		}
 		return phonehotspot.State{State: phonehotspot.Failed, Reason: "service_failed"}, nil

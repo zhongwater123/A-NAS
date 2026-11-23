@@ -24,10 +24,12 @@ const reasons: Record<NonNullable<PhoneHotspotStatus["reason"]>, string> = {
   dependencies_missing: "此设备需要安装 A-NAS 热点支持包。",
   no_wired_uplink: "请先确认 NAS 已通过网线连接网络。",
   no_idle_radio: "请插入一块空闲且支持热点的 MT7612U USB 无线网卡。",
-  subnet_conflict: "热点网段 192.168.173.0/24 已被 NAS 的其他网络使用。",
   ap_failed: "无线网卡无法开启或维持热点。请检查网卡后重试。",
   dhcp_failed: "热点无法为手机分配 IP 地址。请重试。",
   web_unavailable: "热点暂时无法访问 A-NAS 网页。请检查有线端的网页是否正常。",
+  tls_unavailable: "请先配置手机可验证的热点 HTTPS 证书和域名。",
+  isolation_failed: "无线网卡无法进入热点的独立网络，请检查网卡与驱动。",
+  cleanup_failed: "上一次热点关闭时仍有资源待清理。请检查网卡后重试。",
   service_failed: "热点服务遇到系统错误。请重试。",
 };
 

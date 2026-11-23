@@ -82,6 +82,9 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # This target predates the hotspot and has no matching radio package.
+  sed -i '/^Suggests: a-nas-hotspot-radio/d' "$legacy_product/DEBIAN/control"
+  rm "$legacy_product/usr/lib/systemd/system/anas-phone-hotspot.service" "$legacy_product/usr/lib/a-nas/phone-hotspot"
   # Nor has it the photo service's grant socket for the montage center, the
   # montage center's socket for planning, or its planner.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
@@ -121,7 +124,7 @@ if [[ "${1:-}" != --inside ]]; then
   mapfile -t radio <<<"$radio"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
     "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
-    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
     "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" "${radio[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
@@ -771,6 +774,9 @@ check "the packaged hotspot reports missing hardware without connection details"
 check "a failed hotspot start preserves the host default route" test "$(ip -4 route show default)" = "$hotspot_routes"
 check "a failed hotspot start leaves no hotspot filter table" \
   bash -c '! nft list tables | grep -Fxq "table inet anas_phone_hotspot"'
+check "the hotspot HTTPS proxy isolates wired routes and survives a host ruleset reload" \
+  quiet env ANAS_PHONE_HOTSPOT_NETWORK_TEST=1 PYTHONDONTWRITEBYTECODE=1 unshare --net \
+  python3 -m unittest discover -s /src/deploy/network
 check "the administrator can stop the packaged hotspot after a failed start" \
   quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -X PUT -d '{"enabled":false}' "$hotspot"
@@ -3069,6 +3075,8 @@ check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
 check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
+check "the updated release includes the matching installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$next"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
@@ -3101,6 +3109,8 @@ state=$(update_settled || true)
 check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
+check "automatic rollback restores the installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$version"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
 check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check

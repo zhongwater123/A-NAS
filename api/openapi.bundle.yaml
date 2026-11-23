@@ -11610,10 +11610,12 @@ components:
             - dependencies_missing
             - no_wired_uplink
             - no_idle_radio
-            - subnet_conflict
             - ap_failed
             - dhcp_failed
             - web_unavailable
+            - tls_unavailable
+            - isolation_failed
+            - cleanup_failed
             - service_failed
         connection:
           description: Present when the hotspot is on. The response is not cacheable.
