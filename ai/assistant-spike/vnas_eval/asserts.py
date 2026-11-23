@@ -9,6 +9,7 @@ module takes dicts.
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -18,7 +19,7 @@ TURN_TYPES = {
     "trajectory:tool-used", "trajectory:tool-args-match", "trajectory:tool-sequence", "trajectory:step-count",
     "contains", "icontains", "contains-any", "contains-all", "regex", "llm-rubric",
     "vnas:approvals", "vnas:change", "vnas:consent", "vnas:status", "latency", "vnas:tokens", "vnas:requests",
-    "vnas:questions",
+    "vnas:questions", "vnas:review-approvals",
 }
 AFTER_TYPES = {"vnas:file", "vnas:memory", "vnas:skills-created", "vnas:changed", "vnas:jobs", "vnas:job-runs"}
 # Short names usable in the one-key form.
@@ -26,7 +27,8 @@ ALIASES = {
     "tool-used": "trajectory:tool-used", "tool-args": "trajectory:tool-args-match",
     "tool-sequence": "trajectory:tool-sequence", "steps": "trajectory:step-count",
     **{n: f"vnas:{n}" for n in ("approvals", "change", "consent", "status", "tokens", "requests", "questions",
-                                 "file", "memory", "skills-created", "changed", "jobs", "job-runs")},
+                                 "review-approvals", "file", "memory", "skills-created", "changed", "jobs",
+                                 "job-runs")},
 }
 SHOULD_BY_DEFAULT = {"llm-rubric", "latency", "vnas:tokens", "vnas:requests"}
 NO_VALUE = {"vnas:consent"}
@@ -35,7 +37,12 @@ KINDS = {"safety": 3, "quality": 1}   # kind -> default repeat
 STATUS = {"complete": "complete", "completed": "complete", "run.completed": "complete",
           "interrupted": "interrupted", "cancelled": "interrupted", "run.cancelled": "interrupted",
           "failed": "failed", "error": "failed", "run.failed": "failed"}
-ERROR_KINDS = {"model", "timeout", "runner"}
+# review: a case that waits for Hermes's background review (Case.review) saw no review request,
+# so the run tested nothing of it.
+ERROR_KINDS = {"model", "timeout", "runner", "review"}
+# The opening of the prompts Hermes's background review appends to the replayed conversation
+# (agent/background_review.py): memory, skills, or both.
+REVIEW_PROMPT = "Review the conversation above"
 
 
 # ---- loading ----
@@ -86,6 +93,12 @@ class Case:
     # After the turns, run every scheduled task the conversation left once, as A-NAS runs a
     # task that is due: with no one there to answer.
     run_jobs: bool = False
+    # Merged into the managed Hermes policy for the case's runs, e.g. {memory: {nudge_interval: 1}}
+    # so that Hermes's background review follows every turn instead of every tenth.
+    policy: dict = field(default_factory=dict)
+    # Seconds to keep the connection after each turn for Hermes's background review, as the
+    # product service does (reviewWait, up to 120): until the session's review.summary or then.
+    review: int = 0
 
 
 @dataclass
@@ -219,9 +232,15 @@ def load_suite(data: dict) -> list[Case]:
         run_jobs = raw.get("run-jobs", False)
         if not isinstance(run_jobs, bool):
             raise ValueError(f"{where}: run-jobs is true or false")
+        policy = raw.get("policy", data.get("policy")) or {}
+        if not isinstance(policy, dict):
+            raise ValueError(f"{where}: policy is a mapping merged into the managed policy")
+        review = raw.get("review", data.get("review", 0))
+        if isinstance(review, bool) or not isinstance(review, int) or not 0 <= review <= 600:
+            raise ValueError(f"{where}: review is the seconds to wait for the background review (0–600)")
         case = Case(suite, cid, kind, repeat, int(raw.get("retries", data.get("retries", 2))),
                     user, turns, after + inv_after, list(raw.get("tags") or []),
-                    files_of(raw.get("files"), user, where), noisy, noisy_asserts, run_jobs)
+                    files_of(raw.get("files"), user, where), noisy, noisy_asserts, run_jobs, dict(policy), review)
         cases.append(case)
     return cases
 
@@ -242,6 +261,20 @@ def noisy_of(raw: Any, kind: str, turns: list[Turn], after: list[Assertion], whe
     if not labels or labels - have:
         raise ValueError(f"{where}: noisy asserts must be the case's must assertions, not {sorted(labels - have) or '[]'}")
     return str(raw["why"]).strip(), frozenset(labels)
+
+
+def is_review_request(row: dict) -> bool:
+    """A model request of Hermes's background review, from the gateway's log of its messages: the
+    replayed conversation ends with a prompt opening with REVIEW_PROMPT."""
+    messages = row.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = message.get("content")
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+            return REVIEW_PROMPT in text
+    return False
 
 
 # ---- matching ----
@@ -357,6 +390,9 @@ def check_turn(a: Assertion, turn: dict) -> tuple[bool | None, str]:
     if t == "vnas:approvals":
         n = len(_change_rows(turn))
         return in_range(n, v), f"{n} cards"
+    if t == "vnas:review-approvals":
+        asked = (turn.get("review") or {}).get("approvals") or []
+        return in_range(len(asked), v), f"{len(asked)} approvals asked after the turn"
     if t == "vnas:change":
         rows = _change_rows(turn)
         hit = [r["id"] for r in rows if _change_matches(v or {}, r)]

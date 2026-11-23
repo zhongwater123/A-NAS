@@ -51,6 +51,7 @@ import sys
 import time
 from pathlib import Path
 
+from vnas_eval.asserts import is_review_request
 from vnas_eval.member import clarify_reply, described
 
 parser = argparse.ArgumentParser()
@@ -151,12 +152,15 @@ class Turn:
     Hermes and says whether the approval was still pending, stop() stops the turn. record is
     the turn's evidence for scoring (vnas_eval.asserts)."""
 
-    def __init__(self, session, said, answers, clarify=("cancel",)):
+    def __init__(self, session, said, answers, clarify=("cancel",), review=0):
         self.session, self.said, self.answers, self.clarifies = session, said, list(answers), list(clarify)
+        self.review = review    # seconds to wait for the background review after the turn
         self.submissions = {}   # session or run -> arguments of the last 提交更改 started in it
         self.changes, self.late = [], []
         self.record = {"say": said, "answers": list(answers), "tools": [], "approvals": [], "changes": [],
                        "clarifications": [], "answer": "", "status": "complete"}
+        if review:
+            self.record["review"] = {"summary": None, "waited": None, "approvals": [], "requests": 0, "tokens": 0}
 
     def answer(self):
         return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
@@ -276,7 +280,47 @@ async def serve_turn(gw, sid, turn):
             turn.record["status"] = payload.get("status") or "complete"
             print(f"  turn {turn.record['status']}")
             break
+    if turn.review:
+        await watch_review(gw, sid, turn)
     await turn.finish()
+
+
+async def watch_review(gw, sid, turn):
+    """After the turn, as the product service does (reviewWait): keep the connection until the
+    session's review.summary, or turn.review seconds when the review changes nothing (Hermes then
+    sends none). An approval asked for now comes from the background review, which no member
+    sees: the product service refuses it, and so does this."""
+    from serve_client import RpcError
+    rec = turn.record["review"]
+    started = time.monotonic()
+    while (left := started + turn.review - time.monotonic()) > 0:
+        try:
+            frame = await asyncio.wait_for(gw.events.get(), left)
+        except TimeoutError:
+            break
+        kind, payload = frame.get("type"), frame.get("payload") or {}
+        if kind == "server.request":
+            params = payload.get("params") or {}
+            if params.get("session_id") != sid:
+                continue
+            if payload.get("method") == "approval":
+                rec["approvals"].append({"request": kept(params)})
+                print(f"  review ⏸ approval after the turn → deny {short(params, 200)}")
+                try:
+                    await gw.call("approval.respond", {"session_id": sid, "request_id": params.get("request_id"),
+                                                       "choice": "deny"})
+                except RpcError as exc:
+                    print(f"    Hermes ← deny: error {short(str(exc), 160)}")
+            elif payload.get("method") == "clarify":
+                response = clarify_reply("cancel", params.get("questions") or [])
+                if response is not None:
+                    await gw.reply(payload.get("id"), response)
+            continue
+        if kind == "review.summary" and frame.get("session_id") in (None, sid):
+            rec["summary"] = payload.get("text") or ""
+            print(f"  review: {short(rec['summary'], 200)}")
+            break
+    rec["waited"] = round(time.monotonic() - started, 1)
 
 
 async def serve_conversation(lines):
@@ -287,8 +331,8 @@ async def serve_conversation(lines):
         # Without this Hermes withdraws every approval at once: this client answers server requests.
         await gw.call("client.capabilities", {"server_requests": True})
         sid = await gw.new_session()
-        for answers, said, clarify in lines:
-            yield sid, Turn(sid, said, answers, clarify), lambda turn: serve_turn(gw, sid, turn)
+        for answers, said, clarify, review in lines:
+            yield sid, Turn(sid, said, answers, clarify, review), lambda turn: serve_turn(gw, sid, turn)
 
 
 # ---- API Server: session stream, /v1/runs/{id}/approval ----
@@ -359,8 +403,9 @@ async def api_turn(session, turn):
 async def api_conversation(lines):
     _, created = hermes("POST", "/api/sessions", {})
     session = created["session"]["id"]
-    # The API Server has no clarify request: Turn.clarifies goes unused there.
-    for answers, said, clarify in lines:
+    # The API Server has no clarify request: Turn.clarifies goes unused there. Nor review.summary:
+    # a case that waits for the background review runs on hermes serve only (run_suite).
+    for answers, said, clarify, _review in lines:
         yield session, Turn(session, said, answers, clarify), lambda turn: api_turn(session, turn)
 
 
@@ -395,6 +440,13 @@ async def converse(lines):
             print(f"\n### [{','.join(turn.answers)}] {turn.said}")
             await run(turn)
             records = model_records(log_before)
+            # The background review's requests are not the turn's: counted apart (Turn.review).
+            review_rows = [r for r in records if is_review_request(r)]
+            records = [r for r in records if not is_review_request(r)]
+            if "review" in turn.record:
+                turn.record["review"].update(
+                    requests=len(review_rows),
+                    tokens=sum((r.get("usage") or {}).get("total_tokens", 0) for r in review_rows))
             tokens = sum((r.get("usage") or {}).get("total_tokens", 0) for r in records)
             turn.record.update(requests=len(records), tokens=tokens, seconds=round(time.time() - started, 1))
             if problem := model_error(records, turn.record["status"]):
@@ -429,7 +481,7 @@ async def print_only(path):
         lines = []
         for line in paragraph:
             answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
-            lines.append(([a.strip() for a in answers.split(",")], said.strip(), [opts.clarify]))
+            lines.append(([a.strip() for a in answers.split(",")], said.strip(), [opts.clarify], 0))
         await converse(lines)
 
 
@@ -476,6 +528,45 @@ def environment():
 def stop_instance():
     """The member's instance stopped, so it starts again from the restored home on the next connection."""
     subprocess.run(["/usr/bin/systemctl", "stop", f"anas-assistant-api@{USER}.service", f"anas-assistant@{USER}.service"], check=False)
+
+
+class ManagedPolicy:
+    """The managed Hermes policy (MANAGED) with a case's additions merged in key by key, as
+    policy.sh does for the test scripts: a block the policy already has keeps its other keys.
+    The merged policy is written as JSON, which is YAML too: dumped as YAML, a string like "off"
+    comes out bare and Hermes, reading YAML 1.1, takes it for false. The installed policy comes
+    back when the suite ends, however it ends."""
+
+    def __init__(self):
+        self.original = MANAGED.read_text(encoding="utf-8")
+        self.current: dict = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.current:
+            MANAGED.write_text(self.original, encoding="utf-8")
+            stop_instance()
+
+    def use(self, extra: dict) -> bool:
+        """Put the policy with *extra* in place; True when that changed it."""
+        if extra == self.current:
+            return False
+        if not extra:
+            MANAGED.write_text(self.original, encoding="utf-8")
+        else:
+            from ruamel.yaml import YAML
+
+            def merge(base, add):
+                for key, value in add.items():
+                    base[key] = merge(base.get(key) or {}, value) if isinstance(value, dict) else value
+                return base
+
+            merged = merge(YAML(typ="safe").load(self.original), extra)
+            MANAGED.write_text(json.dumps(merged, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        self.current = dict(extra)
+        return True
 
 
 def sync_bundled_skills(layout):
@@ -536,18 +627,31 @@ async def run_suite(path):
         seed.take()
     print(f"suite {data['suite']}: {len(cases)} cases, channel {CHANNEL}, model {env['model']}, judge {env['judge']}")
 
+    if CHANNEL != "serve" and any(case.review for case in cases):
+        print("a case waits for the background review: that needs the hermes serve channel")
+        return 2
     records = {}
-    with (out / "runs.jsonl").open("a", encoding="utf-8") as runs:
+    with ManagedPolicy() as policy, (out / "runs.jsonl").open("a", encoding="utf-8") as runs:
         for case in cases:
             outcomes = []
+            # A changed policy takes effect when the instance starts again.
+            restart = policy.use(case.policy)
+            if case.policy:
+                print(f"managed policy for {case.id} adds: {json.dumps(case.policy, ensure_ascii=False)}")
             while True:
-                if seed:
+                if seed or restart:
                     stop_instance()
+                    restart = False
+                if seed:
                     seed.restore()
                 plant(layout, case.files)
                 skills_before, files_before = skill_files(layout), snapshot(layout)
                 print(f"\n======== {case.id} ({case.kind}) run {len(outcomes) + 1}")
-                turns, errors = await converse([(t.answers, t.say, t.clarify) for t in case.turns])
+                turns, errors = await converse([(t.answers, t.say, t.clarify, case.review) for t in case.turns])
+                if case.review and not errors and not any((t.get("review") or {}).get("requests") for t in turns):
+                    errors.append({"kind": "review", "turn": len(turns),
+                                   "detail": f"no background review request in {case.review} s after a turn"})
+                    print("  no background review ran: this run tested nothing of it")
                 job_runs = []
                 if case.run_jobs and not errors:
                     # A due task runs in the cron unit's round, the member's instance stopped.
@@ -559,7 +663,10 @@ async def run_suite(path):
                 result = score_run(case, {"turns": turns, "errors": errors}, world, judge)
                 record = {"schema": 1, "suite": case.suite, "case": case.id, "run": len(outcomes) + 1,
                           "env": env, "turns": turns, "errors": errors + result.get("errors", []), "result": result,
-                          **({"job_runs": job_runs} if case.run_jobs else {}), "changed": world.changed()}
+                          **({"job_runs": job_runs} if case.run_jobs else {}), "changed": world.changed(),
+                          **({"policy": case.policy} if case.policy else {}),
+                          # What the background review left in memory, to read when it wrote something.
+                          **({"memory": world.memory()} if case.review else {})}
                 runs.write(json.dumps(record, ensure_ascii=False) + "\n")
                 runs.flush()
                 records.setdefault(case.id, []).append(record)
