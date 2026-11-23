@@ -42,7 +42,7 @@ func TestValidateDocumentationSkipsDependenciesAndOtherCheckouts(t *testing.T) {
 }
 
 func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
-	header := "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n"
+	header := "# 当前状态\n\n更新时间：2026-10-23\n" + waitingSection + "\n- 已部署：`80b602275b86`\n\n"
 	for size, wantProblem := range map[int]bool{currentMaxBytes: false, currentMaxBytes + 1: true} {
 		root := t.TempDir()
 		writeRequiredDocuments(t, root)
@@ -60,7 +60,7 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
+		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n" + waitingSection,
 		acceptanceRunbook:               "# 验收\n\n待合并的修复部署后再验收：[快照](../investigations/2026-10-21-snapshots.md)。\n",
 		investigationIndex:              "- [2026-10-21：快照](2026-10-21-snapshots.md)\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
@@ -117,7 +117,7 @@ func TestValidateDocumentationNamesOneDeployedCommit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			writeRequiredDocuments(t, root)
-			writeDocuments(t, root, map[string]string{currentDocument: header + test.body})
+			writeDocuments(t, root, map[string]string{currentDocument: header + test.body + waitingSection})
 			assertProblems(t, validateDocumentationProblems(root), test.want)
 		})
 	}
@@ -137,7 +137,7 @@ func TestValidateDocumentationKeepsNextStepsToWhatIsLeft(t *testing.T) {
 			"4. " + strings.Repeat("长", nextStepMaxRunes-2) + "[链接](../specs/" + strings.Repeat("x", 200) + ".md)\n" +
 			"5. " + strings.Repeat("长", nextStepMaxRunes-1) + "[链接](../specs/long.md)\n" +
 			"\n这一段不是条目，" + strings.Repeat("长", nextStepMaxRunes) + "。\n" +
-			"\n## 备注\n\n- 这里可以写已部署。\n",
+			"\n## 备注\n\n- 这里可以写已部署。\n" + waitingSection,
 	})
 
 	assertProblems(t, validateDocumentationProblems(root), []string{
@@ -148,7 +148,7 @@ func TestValidateDocumentationKeepsNextStepsToWhatIsLeft(t *testing.T) {
 }
 
 func TestValidateDocumentationChainsStatusSnapshots(t *testing.T) {
-	current := "# 当前状态\n\n更新时间：2026-11-18\n\n- 已部署：`c738affa140b`，软件包\n"
+	current := "# 当前状态\n\n更新时间：2026-11-18\n\n- 已部署：`c738affa140b`，软件包\n" + waitingSection
 	snapshot := func(deployed, next string) string {
 		return "# 状态快照\n\n本页是历史快照，现状见[当前状态](CURRENT.md)。\n\n下一次部署：`" + next + "`\n\n" +
 			"- 已部署：`" + deployed + "`（尚未部署的 #245 随下一次部署）\n"
@@ -363,6 +363,41 @@ func TestValidateDocumentationKeepsDecisionsInOnePlace(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentationKeepsTheQueuesLinked(t *testing.T) {
+	header := "# 当前状态\n\n更新时间：2026-11-23\n\n- 已部署：`a40311de890b`\n"
+	missing := func(index string) string {
+		return currentDocument + " does not link " + index + " under " + waitingHeading
+	}
+	tests := map[string]struct {
+		current string
+		want    []string
+	}{
+		"both indexes":  {current: header + waitingSection},
+		"no section":    {current: header, want: []string{missing(decisionIndex), missing(adrIndex)}},
+		"empty section": {current: header + "\n" + waitingHeading + "\n\n没有待定的事。\n", want: []string{missing(decisionIndex), missing(adrIndex)}},
+		"one mistyped": {
+			current: header + "\n" + waitingHeading + "\n\n- [决定索引](../decisions/README.md#索引)、[ADR 索引](../adr/READ.md)\n",
+			want:    []string{missing(adrIndex)},
+		},
+		"under another heading": {
+			current: header + "\n## 下一步\n\n- 见[决定索引](../decisions/README.md)与 [ADR 索引](../adr/README.md)。\n",
+			want:    []string{missing(decisionIndex), missing(adrIndex)},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: test.current})
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+// waitingSection is the section every current-state page needs: links to the
+// two indexes that mark what waits for the user.
+const waitingSection = "\n## 待用户决定\n\n- [决定索引](../decisions/README.md#索引)、[ADR 索引](../adr/README.md#索引)\n"
+
 func validateDocumentationProblems(root string) []string {
 	problems, _ := validateDocumentation(root)
 	return problems
@@ -386,7 +421,7 @@ func writeRequiredDocuments(t *testing.T, root string) {
 	for _, name := range requiredDocuments {
 		documents[name] = "# Test\n"
 	}
-	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n"
+	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n" + waitingSection
 	writeDocuments(t, root, documents)
 }
 

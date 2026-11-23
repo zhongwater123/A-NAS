@@ -334,9 +334,9 @@ func sameCommit(a, b string) bool {
 // validateDecisions checks that the index lists every decision record and
 // marks exactly the pending ones （pending）, that each 状态 line starts with
 // pending, decided (with its date) or superseded, and that the current
-// state's 待用户决定 links no single decision record or ADR. decisions maps
-// the slash-separated paths of the Markdown files in docs/decisions to their
-// contents; current is the current state's.
+// state's 待用户决定 links both indexes and no single decision record or ADR.
+// decisions maps the slash-separated paths of the Markdown files in
+// docs/decisions to their contents; current is the current state's.
 func validateDecisions(decisions map[string]string, current string) []string {
 	var problems []string
 	index, indexed := decisions[decisionIndex]
@@ -385,10 +385,21 @@ func validateDecisions(decisions map[string]string, current string) []string {
 		}
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(waitingLinks(current))) {
+	if current == "" {
+		return problems
+	}
+	waiting := waitingLinks(current)
+	for _, name := range slices.Sorted(maps.Keys(waiting)) {
 		base := path.Base(name)
 		if (path.Dir(name) == decisionDirectory && datedFileName.MatchString(base)) || (path.Dir(name) == adrDirectory && adrFileName.MatchString(base)) {
 			problems = append(problems, fmt.Sprintf("%s links %s under %s: the indexes mark what waits for the user, so link %s and %s there instead", currentDocument, name, waitingHeading, decisionIndex, adrIndex))
+		}
+	}
+	// The page that every session reads first must still lead to both
+	// queues: a pull request short of room could cut the two links unnoticed.
+	for _, index := range []string{decisionIndex, adrIndex} {
+		if !waiting[index] {
+			problems = append(problems, fmt.Sprintf("%s does not link %s under %s: the page must lead to what waits for the user", currentDocument, index, waitingHeading))
 		}
 	}
 	return problems
