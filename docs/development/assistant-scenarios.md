@@ -22,7 +22,8 @@ ai/assistant-spike/run.sh scenarios scenarios/approval.yaml --baseline /spike/ba
 - 结果在宿主机的 `$HERMES_SPIKE_DIR/results/<时间>-<套件>-<型号>/`：`runs.jsonl` 每遍一行，`summary.json` 每个用例一行结论，`report.md` 是报告。
 - 退出码：`0` 没有要拦的；`1` 有安全类用例新失败；`2` 没有新失败，但有安全类用例没能跑完，结论不完整。
 - 套件写了 `requires: [real-model]`，替身模型下整套跳过。
-- 直连 DeepSeek 时，Hermes 在回合结束后给会话起标题的请求常收到 400（2026-11-19 的全量里约一半的遍数），随即重试；执行器每遍结束停实例时常把这次重试切断，网关日志里记为 `unreachable`（`BrokenPipeError`，同一次全量约 50 条）。两者都不在评分的回合里，不影响结果。
+- 要看耗时的回归（定基线、对照基线）插着电跑。2026-11-20 笔记本用电池时，approve-add-item 一轮从基线的 13 秒变成 21–31 秒，多出的时间在 Hermes 建会话（CPU 降频）；合并前后的代码同时各跑 3 遍一样慢，与代码无关。耗时有变化时，先排除机器：在同一时间、同一台机器上对比改动前后的代码（`git archive` 旧提交到另一个目录，`HERMES_SPIKE_NAME` 换一个容器名）。
+- 直连 DeepSeek 时，网关日志里有 400 和 `unreachable`（`BrokenPipeError`，2026-11-19 的全量里各约 50 条），都是 Hermes 给会话起标题的请求，不在评分的回合里，不影响结果。原因（2026-11-23 查明）：起标题要求 `response_format` 为 `json_schema`，DeepSeek 只支持 `json_object`，回 400“This response_format type is unavailable now”；Hermes 去掉格式重试，只在本进程里记住，实例一重启又重来一遍。Hermes 自带的 DeepSeek 配置本来会预先去掉这个格式，但[托管配置](../../ai/assistant/managed-config.yaml)写的是 `provider: custom`、`base_url` 指向本机网关，Hermes 认不出是 DeepSeek。执行器停实例时常把还没完成的起标题请求切断，就记成 `unreachable`。在评测容器里改成 `provider: deepseek`（实例另需一个占位的 `DEEPSEEK_API_KEY`，真密钥仍由网关加）后，起标题在会话开始时一次成功，approve-add-item 3 遍照常通过；主对话的请求从 `reasoning_effort: medium` 变成 `thinking: enabled`。改不改托管配置见[尚未决定](#尚未决定)。
 
 报告也可以离线重出，或在读完报告后把这次结果设为基线（`accept` 拒绝安全类用例没有全部通过的结果，原因必填）：
 
@@ -290,6 +291,7 @@ promptfoo 的执行器只能在一轮对话结束后看结果，而这里一轮�
 
 - 评审用的 `qwen3.8-max` 快照名。中转目前只返回不带日期的 `qwen3.8-max`，有固定快照后再钉住。
 - 校准达标以后 llm-rubric 怎么用：仍只作参考，还是让某几条评分要求参与判定。
+- 托管配置要不要从 `provider: custom` 改成 `provider: deepseek`：能省掉每次开会话那个必定失败的起标题请求，并让 Hermes 按 DeepSeek 的方式设置思考开关；但主对话的请求参数会变，改之前要跑三个套件全量对照 DeepSeek 基线（见“运行”里起标题请求那一条）。
 
 ## 关联
 
