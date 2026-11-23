@@ -7,6 +7,15 @@
 3. 涉及产品概念、领域命名或资源身份时，读 `CONTEXT.md`。
 4. 文档类型或事实归属不明确时，使用 `docs/README.md` 路由；其余情况只加载下面与任务匹配的文档。
 
+## 局部规则
+
+改下面这些目录前，先读其中的 AGENTS.md：它们写着在那里必须遵守的约定，Claude Code 读那里的文件时会自动加载，Codex 只在会话从那个目录启动时才加载。
+
+- [web/AGENTS.md](web/AGENTS.md)：Web 桌面（生成的接口类型、界面基础组件、样式、测试）。
+- [api/AGENTS.md](api/AGENTS.md)：产品 API 契约。
+- [internal/hostops/AGENTS.md](internal/hostops/AGENTS.md)：Host Agent 的 root 一侧，适用于 `.golangci.yml` 中 `host-agent` 规则列出的全部包。
+- [ai/assistant/AGENTS.md](ai/assistant/AGENTS.md)：AI 助手 VNAS。
+
 ## 文档路由
 
 - 组件边界、数据流或系统不变量：读 `docs/architecture/OVERVIEW.md` 和相关 ADR。
@@ -41,11 +50,18 @@
 - `make check` 要联网：安装 Go 与 npm 依赖，`vuln-check` 还要下载 Go、PyPI 与 npm 的漏洞公告。所以新公告发布后，它可能在代码没变时失败。这时先升级受影响的 Go 版本或依赖，即“有新公告就先修”。
 - 纯文档变更运行 `make docs-check`。
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
-- 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/api-contract.md#接口契约`。
+- 改了 `api/` 下的接口契约：运行 `make api` 并提交它写出的三个生成文件，详见 [api/AGENTS.md](api/AGENTS.md)。
+- 先跑与改动相关的单个测试：Go 用 `go test ./internal/<包> -run <名称>`，Web 用 `cd web && npx vitest run src/<文件>`，`ai/` 用 `cd ai && python3 -m unittest <模块>`；Windows 开发机上的 Go 在 WSL 中运行（[测试与验证](docs/development/testing.md)）。
 - 改了 Go 或 Web 代码，提交前运行 `make fmt`（[`scripts/format-changed.sh`](scripts/format-changed.sh)，只格式化改动的文件；Claude Code 与 Codex 的钩子在每次编辑后自动运行它）；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/testing.md#静态检查`）。
 - 改了跨进程接缝（服务之间、Go 与 Python、服务与 Hermes）：两边的测试读同一份样例，见 `docs/development/testing.md#跨进程契约`；AI 助手与剪辑规划交部署前另跑一次带真实运行环境的系统测试。
 - 其他变更运行能证明结果的最小相关检查。
 - 改完全部文件再跑检查：一次格式化，一次门禁。只为尽快暴露失败才先跑针对性的测试，之后的改动由门禁覆盖，不再重跑它。开发机上几个会话共用 WSL，每多跑一轮都要多等几十分钟。
+
+## 安全
+
+- 改特权、权限、身份或沙箱相关的代码前，读[系统不变量](docs/architecture/OVERVIEW.md#不变量)与其中链接的 ADR：产品服务以非 root 运行、Host Agent 只收高层意图、文件授权只有 ACL 等；Host Agent 一侧另见 [internal/hostops/AGENTS.md](internal/hostops/AGENTS.md)。
+- 不读、不打印、不提交密钥与凭据；各工具怎样拦截见下文“编码工具”。
+- 发现安全问题不写成公开 issue，按 [CONTRIBUTING.md 的“评审”](CONTRIBUTING.md#评审)交给维护者私下记录。
 
 ## 编码工具
 
@@ -58,8 +74,9 @@
   - [fake-preview](.agents/skills/fake-preview/SKILL.md)：在独立的 `*.localhost` 主机名上启动 Fake 预览栈。
 
   Claude Code 只读 `.claude/skills/`，那里是副本：改 `.agents/skills/` 后运行 `make skills`，两者不一致时 `make docs-check` 失败。
-- 编辑后的格式化：`.claude/settings.json` 与 `.codex/hooks.json` 都在编辑后调用 `scripts/format-changed.sh`；改其中一个工具的钩子，另一个同步改。Codex 只在信任本项目后加载项目钩子；其他工具和人运行 `make fmt`。
-- 密钥：`.claude/settings.json` 禁止 Claude Code 读取密钥文件；Codex 靠它自己的沙箱与审批设置。任何工具都不读、不提交密钥。
+- 编辑后的格式化：`.claude/settings.json` 与 `.codex/hooks.json` 都在编辑后调用 `scripts/format-changed.sh`；改其中一个工具的钩子，另一个同步改。其他工具和人运行 `make fmt`。
+- Codex 只在信任本项目后才加载本文件、局部 AGENTS.md 与项目钩子：用 Codex 开发前，先在 Codex 中信任本项目。
+- 密钥的拦截：`.claude/settings.json` 禁止 Claude Code 读取密钥文件；Codex 靠它自己的沙箱与审批设置。
 - 个人设置不进仓库：Claude Code 写进被 Git 忽略的 `.claude/settings.local.json`，Codex 写进 `~/.codex/config.toml`。
 
 ## 多会话协作
