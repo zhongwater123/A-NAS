@@ -16,6 +16,7 @@ import {
   share,
   snapScore,
   stageAction,
+  typeable,
   uprightSize,
 } from "./model";
 
@@ -90,6 +91,25 @@ describe("scores", () => {
     expect(pickScore(200, "three")).toBeUndefined();
     expect(pickScore(500, "three")).toBe(500);
     expect(pickScore(200, "whole")).toBe(200);
+  });
+
+  it("scores five levels in whole points from 1, each with its word", () => {
+    // A reference score below 1 is shown as the lowest level.
+    expect([0, 149, 150, 347, 500].map((score) => snapScore(score, "five"))).toEqual([100, 100, 200, 300, 500]);
+    expect([100, 200, 300, 400, 500].map((score) => formatScore(score, "five"))).toEqual([
+      "很差",
+      "较差",
+      "一般",
+      "好",
+      "很好",
+    ]);
+    expect(pickScore(0, "five")).toBeUndefined();
+    expect(pickScore(400, "five")).toBe(400);
+    expect(typeable("five", false)).toBe(false);
+    expect(nudgeScore(undefined, -10, "five")).toBe(300);
+    expect(nudgeScore(300, 10, "five")).toBe(400);
+    expect(nudgeScore(500, 10, "five")).toBe(500);
+    expect(nudgeScore(100, -1, "five")).toBe(100);
   });
 
   it("moves a score by one step of its scale with the arrows, from the middle when there is none", () => {

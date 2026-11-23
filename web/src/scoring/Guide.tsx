@@ -3,11 +3,21 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
-import { formatScore, overall, snapScore } from "./model";
+import { formatScore, isLevels, overall, snapScore } from "./model";
 import styles from "./scoring.module.css";
 
 // How to pick a score on each scale, and the keys that move it.
 function Picking({ scale, hidden }: Pick<ScoringRaterBatch, "scale"> & { hidden: boolean }) {
+  if (scale === "five") {
+    return (
+      <>
+        <li>在下方点选一档：1 很差、2 较差、3 一般、4 好、5 很好，没有小数</li>
+        <li>
+          <kbd>1</kbd>–<kbd>5</kbd> 直接选档，<kbd>←</kbd> <kbd>→</kbd> 换一档
+        </li>
+      </>
+    );
+  }
   if (scale === "three") {
     return (
       <>
@@ -73,7 +83,7 @@ export function GuideContent({
 }) {
   const several = batch.dimensions.length > 1;
   const { scale, hideDecimals: hidden } = batch;
-  const levels = scale === "three";
+  const levels = isLevels(scale);
   const release = levels ? "点选一档后松开" : "在数轴上点选或拖动后松开";
   const anchorScore = (score: number) => {
     const shown = formatScore(snapScore(Math.round(score * 100), scale), scale);

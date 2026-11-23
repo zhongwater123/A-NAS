@@ -13,14 +13,18 @@ const (
 	Whole Scale = "whole"
 	// Three is three levels: 差 1, 中 3 and 好 5.
 	Three Scale = "three"
+	// Five is five levels, the whole points without 0: 很差 1, 较差 2,
+	// 一般 3, 好 4 and 很好 5.
+	Five Scale = "five"
 )
 
-// Scales lists every scale in the order the window offers them.
-var Scales = []Scale{Hundredths, Tenths, Whole, Three}
+// Scales lists every scale in the order the window offers them, the default
+// for a new batch first.
+var Scales = []Scale{Five, Hundredths, Tenths, Whole, Three}
 
 func (scale Scale) valid() bool {
 	switch scale {
-	case Hundredths, Tenths, Whole, Three:
+	case Hundredths, Tenths, Whole, Three, Five:
 		return true
 	}
 	return false
@@ -50,6 +54,8 @@ func (scale Scale) fits(score int) bool {
 		return score%100 == 0
 	case Three:
 		return score == 100 || score == 300 || score == 500
+	case Five:
+		return score >= 100 && score%100 == 0
 	}
 	return true
 }
@@ -63,6 +69,8 @@ func (scale Scale) describe() string {
 		return "0 到 5 的整数"
 	case Three:
 		return "三档：1 差，3 中，5 好"
+	case Five:
+		return "五档：1 很差，2 较差，3 一般，4 好，5 很好"
 	}
 	return "0 到 5，两位小数"
 }
@@ -76,6 +84,8 @@ func (scale Scale) says() string {
 		return "a whole number from 0 to 5"
 	case Three:
 		return "1, 3 or 5"
+	case Five:
+		return "a whole number from 1 to 5"
 	}
 	return "0 to 5"
 }

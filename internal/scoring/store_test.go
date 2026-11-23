@@ -705,6 +705,7 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 		{Tenths, []int{0, 350, 500}, []int{347, 5}},
 		{Whole, []int{0, 300, 500}, []int{350, 50}},
 		{Three, []int{100, 300, 500}, []int{0, 200, 400, 350}},
+		{Five, []int{100, 200, 300, 400, 500}, []int{0, 50, 250, 350}},
 	} {
 		for _, score := range c.fits {
 			if !c.scale.fits(score) {
@@ -722,7 +723,7 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	for _, bad := range []BatchInput{{Scale: "stars"}, {Scale: Whole, HideDecimals: true}, {Scale: Three, HideDecimals: true}} {
+	for _, bad := range []BatchInput{{Scale: "stars"}, {Scale: Whole, HideDecimals: true}, {Scale: Three, HideDecimals: true}, {Scale: Five, HideDecimals: true}} {
 		bad.Name, bad.Source, bad.Required, bad.Dimensions = "坏", "坏", 1, []string{Overall}
 		if _, err := h.store.CreateBatch(ctx, "user:admin", bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%q hiding decimals %v accepted: %v", bad.Scale, bad.HideDecimals, err)
@@ -816,8 +817,15 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	if _, err := store.db.Exec("UPDATE batches SET hide_decimals = 1, scale = 'three'"); err == nil {
 		t.Fatal("three levels with their decimals hidden")
 	}
+	// Version 5 rebuilt batches for five levels and kept its photos.
+	if _, err := store.db.Exec("UPDATE batches SET scale = 'five'"); err != nil {
+		t.Fatalf("five levels: %v", err)
+	}
+	if rebuilt, err := store.Stats(context.Background(), "b1"); err != nil || len(rebuilt) != 1 || rebuilt[0].Dimensions[0].Mean != 3.2 {
+		t.Fatalf("after the rebuild %+v, %v", rebuilt, err)
+	}
 	var version int
-	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(schema.Steps) {
 		t.Fatalf("version %d, %v", version, err)
 	}
 }
@@ -847,7 +855,7 @@ func TestAVersionOneDatabaseScoresOverallAlone(t *testing.T) {
 		t.Fatalf("the old batch %+v, %v", batch, err)
 	}
 	var version int
-	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(schema.Steps) {
 		t.Fatalf("version %d, %v", version, err)
 	}
 }

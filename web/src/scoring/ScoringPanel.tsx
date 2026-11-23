@@ -9,7 +9,7 @@ import workspaceStyles from "../ui/workspace.module.css";
 import { BatchesPage, RatersPage } from "./Admin";
 import { claimThumbnailURL, listBatches, listRecent, type ScoringRaterBatch, scoringError } from "./api";
 import { GuideContent } from "./Guide";
-import { formatCount, formatScore } from "./model";
+import { formatCount, formatScore, isLevels } from "./model";
 import { Stage } from "./Stage";
 import styles from "./scoring.module.css";
 import { type ScoringAccess, scoringAccess } from "./status";
@@ -219,7 +219,7 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
         const alt =
           score === undefined
             ? "你打过的照片"
-            : batch.scale === "three"
+            : isLevels(batch.scale)
               ? `你打了“${score}”的照片`
               : `你打了 ${score} 分的照片`;
         return (

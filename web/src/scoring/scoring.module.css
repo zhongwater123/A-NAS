@@ -1060,6 +1060,18 @@
 .sc-zone.on small {
   color: rgba(240, 180, 90, 0.75);
 }
+/* Five levels: narrower places, whose number already says the key. */
+.sc-ruler.five .sc-zone {
+  gap: 8px;
+}
+.sc-ruler.five .sc-zone b {
+  margin-inline-end: -0.12em;
+  font-size: 19px;
+  letter-spacing: 0.12em;
+}
+.sc-ruler.five .sc-zone kbd {
+  display: none;
+}
 .sc-ruler.levels .sc-last-dot {
   top: 124px;
 }
@@ -2170,7 +2182,7 @@
 /* 打分方式: four cards, each with what a score looks like on it. */
 .sc-scales {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 @container scoringwindow (max-width: 760px) {

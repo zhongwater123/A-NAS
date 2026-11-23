@@ -44,8 +44,8 @@ schemas:
       rater: { type: boolean, description: An administrator chose the caller as a rater. }
   ScoringScale:
     type: string
-    enum: [hundredths, tenths, whole, three]
-    description: "How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好)."
+    enum: [five, hundredths, tenths, whole, three]
+    description: "How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好)."
   ScoringRaterBatch:
     type: object
     additionalProperties: false

@@ -80,39 +80,61 @@ export function stageAction(
 export const clampScore = (hundredths: number) => Math.min(maxScore, Math.max(0, Math.round(hundredths)));
 
 // A batch's scale: the number line from 0 to 5 with two decimals, with one,
-// in whole points, or three levels. Every score stays in hundredths.
+// in whole points, or three or five levels. Every score stays in hundredths.
 export type Scale = ScoringScale;
 
-// The three levels: 差 1, 中 3 and 好 5.
-export const levels = [
-  { score: 100, word: "差" },
-  { score: 300, word: "中" },
-  { score: 500, word: "好" },
-] as const;
+// The scales of levels: places to click, each with its word.
+export type LevelScale = "three" | "five";
+export interface Level {
+  score: number;
+  word: string;
+}
+
+// The levels of each: 差 1, 中 3 and 好 5; 很差 1 to 很好 5.
+export const levelsOf: Record<LevelScale, readonly Level[]> = {
+  three: [
+    { score: 100, word: "差" },
+    { score: 300, word: "中" },
+    { score: 500, word: "好" },
+  ],
+  five: [
+    { score: 100, word: "很差" },
+    { score: 200, word: "较差" },
+    { score: 300, word: "一般" },
+    { score: 400, word: "好" },
+    { score: 500, word: "很好" },
+  ],
+};
+
+export const isLevels = (scale: Scale): scale is LevelScale => scale === "three" || scale === "five";
 
 // The step between two scores of a number line, in hundredths.
-const steps: Record<Exclude<Scale, "three">, number> = { hundredths: 1, tenths: 10, whole: 100 };
-const places: Record<Scale, number> = { hundredths: 2, tenths: 1, whole: 0, three: 0 };
+const steps: Record<Exclude<Scale, LevelScale>, number> = { hundredths: 1, tenths: 10, whole: 100 };
+const places: Record<Scale, number> = { hundredths: 2, tenths: 1, whole: 0, three: 0, five: 0 };
 
-// The level nearest to hundredths, a tie going up.
-const levelOf = (hundredths: number) => (hundredths < 200 ? levels[0] : hundredths < 400 ? levels[1] : levels[2]);
+// The level nearest to hundredths, a tie going up; below the lowest is the
+// lowest.
+const levelOf = (hundredths: number, scale: LevelScale) =>
+  levelsOf[scale].reduce((best, level) =>
+    Math.abs(level.score - hundredths) <= Math.abs(best.score - hundredths) ? level : best,
+  );
 
 // snapScore puts hundredths on the scale: the nearest step of the number
 // line, or the nearest level.
 export function snapScore(hundredths: number, scale: Scale): number {
-  if (scale === "three") return levelOf(hundredths).score;
+  if (isLevels(scale)) return levelOf(hundredths, scale).score;
   const step = steps[scale];
   return clampScore(Math.round(hundredths / step) * step);
 }
 
 // formatScore shows hundredths as the scale writes them: 3.47, 3.5, 3, or
-// the level's word, 中.
+// the level's word, 中 or 一般.
 export const formatScore = (hundredths: number, scale: Scale = "hundredths") =>
-  scale === "three" ? levelOf(hundredths).word : (hundredths / 100).toFixed(places[scale]);
+  isLevels(scale) ? levelOf(hundredths, scale).word : (hundredths / 100).toFixed(places[scale]);
 
 // typeable tells the scales whose scores a rater can type: the number
 // lines whose numbers the rater sees.
-export const typeable = (scale: Scale, hidden: boolean) => scale !== "three" && !hidden;
+export const typeable = (scale: Scale, hidden: boolean) => !isLevels(scale) && !hidden;
 
 // typingRule says what parseScore takes on a scale.
 export const typingRule: Record<Scale, string> = {
@@ -120,6 +142,7 @@ export const typingRule: Record<Scale, string> = {
   tenths: "0 到 5 之间，最多一位小数",
   whole: "0 到 5 之间的整数",
   three: "1、3 或 5",
+  five: "1 到 5 之间的整数",
 };
 
 const typingPatterns: Record<Scale, RegExp> = {
@@ -127,6 +150,7 @@ const typingPatterns: Record<Scale, RegExp> = {
   tenths: /^\d(\.\d)?$/,
   whole: /^\d$/,
   three: /^[135]$/,
+  five: /^[1-5]$/,
 };
 
 // parseScore reads what the rater typed: 0 to 5 with as many decimals as
@@ -139,20 +163,23 @@ export function parseScore(text: string, scale: Scale = "hundredths"): number | 
 }
 
 // pickScore is the score a key 0 to 5 picks on the scale, or undefined:
-// three levels take 1, 3 and 5 only.
+// three levels take 1, 3 and 5 only, five levels 1 to 5.
 export function pickScore(hundredths: number, scale: Scale): number | undefined {
-  if (scale === "three") return levels.some((level) => level.score === hundredths) ? hundredths : undefined;
+  if (isLevels(scale)) return levelsOf[scale].some((level) => level.score === hundredths) ? hundredths : undefined;
   return hundredths;
 }
 
 // nudgeScore moves a score by an arrow key: by is in hundredths for the
 // line with two decimals (0.1, or 0.01 with Shift), else one step of the
-// scale in by's direction. With no score yet it starts in the middle.
+// scale in by's direction, one level on a scale of levels. With no score
+// yet it starts in the middle.
 export function nudgeScore(now: number | undefined, by: number, scale: Scale): number {
   const up = by > 0;
-  if (scale === "three") {
+  if (isLevels(scale)) {
     if (now === undefined) return 300;
-    return Math.min(500, Math.max(100, now + (up ? 200 : -200)));
+    const ladder = levelsOf[scale];
+    const at = ladder.indexOf(levelOf(now, scale));
+    return ladder[Math.min(ladder.length - 1, Math.max(0, at + (up ? 1 : -1)))].score;
   }
   if (now === undefined) return scale === "whole" ? (up ? 300 : 200) : 250;
   return clampScore(now + (scale === "hundredths" ? by : up ? steps[scale] : -steps[scale]));
@@ -164,6 +191,7 @@ export const scaleKeys: Record<Scale, string> = {
   tenths: "← → 0.1",
   whole: "← → 1 分",
   three: "1 差　3 中　5 好",
+  five: "1–5 选档　← → 换一档",
 };
 // The same with the decimals hidden from the rater.
 export const hiddenKeys: Record<"hundredths" | "tenths", string> = {

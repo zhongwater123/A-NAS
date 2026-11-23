@@ -161,9 +161,17 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
 
-// migrations take the database from each version to the next; its version
-// is how many have run.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
+// schema takes the database from each version to the next; its version is
+// how many steps have run (sqlitedb.Schema). The first four were released
+// without a Down; every later step has one.
+var schema = sqlitedb.Schema{
+	Name: "scoring.db",
+	Steps: []sqlitedb.Step{
+		{Up: schemaV1}, {Up: schemaV2}, {Up: schemaV3}, {Up: schemaV4},
+		{Up: schemaV5, Down: schemaV5Down},
+	},
+	WithoutDown: 4,
+}
 
 const schemaV1 = `
 CREATE TABLE raters (
@@ -301,31 +309,60 @@ ALTER TABLE batches ADD COLUMN hide_decimals INTEGER NOT NULL DEFAULT 0
 	CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'));
 `
 
+// schemaV5 lets a batch be scored on five levels. SQLite cannot change a
+// column's CHECK, so batches is rebuilt with every row as it was; the step
+// runs with foreign keys off, so that items and anchors keep their batch.
+const schemaV5 = `
+CREATE TABLE batches_v5 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three', 'five')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v5 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v5 RENAME TO batches;
+`
+
+// schemaV5Down takes batches back to version 4's scales. A five-level batch
+// becomes whole points, whose scores include all of its own.
+const schemaV5Down = `
+CREATE TABLE batches_v4 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v4 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions,
+		CASE scale WHEN 'five' THEN 'whole' ELSE scale END, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v4 RENAME TO batches;
+`
+
 func (s *Store) migrate(ctx context.Context) error {
-	var version int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return err
-	}
-	switch {
-	case version == len(migrations):
-		return nil
-	case version > len(migrations):
-		return fmt.Errorf("scoring database version %d is newer than this module (%d)", version, len(migrations))
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, step := range migrations[version:] {
-		if _, err := tx.ExecContext(ctx, step); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.Migrate(ctx, s.db, schema)
 }
 
 // each runs scan for every row of query and closes the rows.

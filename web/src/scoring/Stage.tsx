@@ -1023,6 +1023,8 @@ export function Stage({
               typedValue === undefined ? (
                 scale === "three" ? (
                   "点选一档，或按 1、3、5"
+                ) : scale === "five" ? (
+                  "点选一档，或按 1–5"
                 ) : (
                   "在数轴上点选，或按 0–5"
                 )

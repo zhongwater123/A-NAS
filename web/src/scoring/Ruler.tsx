@@ -1,7 +1,7 @@
 import { Fragment, type PointerEvent, type RefObject, useRef, useState } from "react";
 
 import { claimThumbnailURL } from "./api";
-import { formatScore, lanes, levels, maxScore, type Scale, snapScore } from "./model";
+import { formatScore, isLevels, lanes, levelsOf, maxScore, type Scale, snapScore } from "./model";
 import styles from "./scoring.module.css";
 import { useSize } from "./useSize";
 
@@ -19,7 +19,7 @@ const thumbMaxWidth = 84;
 // Lanes count up from the baseline; lane 0 sits just above it.
 const laneTops = [84, 42, 0];
 const baseline = 132;
-// Three levels: the places to click start here, under the lowest lane.
+// Levels: the places to click start here, under the lowest lane.
 const zoneTop = 124;
 const zoneGap = 12;
 // The loupe: ticks within this many hundredths of the needle grow.
@@ -38,8 +38,13 @@ export const thumbWidth = (mark: Pick<Mark, "width" | "height">) =>
   Math.min(thumbMaxWidth, (thumbHeight * mark.width) / Math.max(1, mark.height));
 
 // share is where a score stands across the ruler, 0 to 1: on the number
-// line from 0 to 5, or for three levels in the middle of three equal places.
-const share = (hundredths: number, scale: Scale) => hundredths / (scale === "three" ? 600 : maxScore);
+// line from 0 to 5, or for levels in the middle of its level's equal place.
+function share(hundredths: number, scale: Scale): number {
+  if (!isLevels(scale)) return hundredths / maxScore;
+  const ladder = levelsOf[scale];
+  const level = ladder.findIndex((candidate) => candidate.score === snapScore(hundredths, scale));
+  return (level + 0.5) / ladder.length;
+}
 
 // spread is where each mark stands across a ruler width px wide, 0 to 1.
 // Where every score shares a few places, the marks of one stand side by
@@ -47,15 +52,16 @@ const share = (hundredths: number, scale: Scale) => hundredths / (scale === "thr
 // number lines with decimals each stands at its score.
 function spread(marks: Mark[], scale: Scale, width: number): number[] {
   const at = marks.map((mark) => share(mark.score, scale));
-  if ((scale !== "whole" && scale !== "three") || width <= 0) return at;
+  if ((scale !== "whole" && !isLevels(scale)) || width <= 0) return at;
   const groups = new Map<number, { mark: Mark; index: number }[]>();
   marks.forEach((mark, index) => groups.set(mark.score, [...(groups.get(mark.score) ?? []), { mark, index }]));
   for (const [score, members] of groups) {
-    if (scale === "three") {
-      const level = levels.findIndex((candidate) => candidate.score === score);
+    if (isLevels(scale)) {
+      const ladder = levelsOf[scale];
+      const level = ladder.findIndex((candidate) => candidate.score === score);
       if (level < 0) continue;
-      const room = width / 3 - zoneGap;
-      const left = (level * width) / 3 + zoneGap / 2;
+      const room = width / ladder.length - zoneGap;
+      const left = (level * width) / ladder.length + zoneGap / 2;
       members.forEach(({ index }, n) => {
         at[index] = (left + ((n + 0.5) * room) / members.length) / width;
       });
@@ -79,12 +85,12 @@ function spread(marks: Mark[], scale: Scale, width: number): number[] {
 // and once set a faint line shows where a click would land. The pointer's
 // reading takes the numerals' row below the baseline, where no thumbnail
 // covers it. With the decimals hidden the scale keeps only whole and half
-// points and shows no reading. Whole points are six stops; three levels are
-// three places to click. A pale dot marks the last photo's score. Above the
-// scale the rater's own latest scores stand as whole thumbnails at their
-// scores, in up to three lanes; the one under the pointer or set beside the
-// photo comes to the front and the others step back. Releasing the pointer
-// after a pick tells the stage, which moves on.
+// points and shows no reading. Whole points are six stops; three and five
+// levels are as many places to click. A pale dot marks the last photo's
+// score. Above the scale the rater's own latest scores stand as whole
+// thumbnails at their scores, in up to three lanes; the one under the pointer
+// or set beside the photo comes to the front and the others step back.
+// Releasing the pointer after a pick tells the stage, which moves on.
 export function Ruler({
   value,
   label,
@@ -118,14 +124,15 @@ export function Ruler({
   const [hover, setHover] = useState<number>();
   const [hoveredThumb, setHoveredThumb] = useState<string>();
   const dragged = useRef(false);
-  const line = scale !== "three";
+  const ladder = isLevels(scale) ? levelsOf[scale] : undefined;
+  const line = ladder === undefined;
   const fine = scale === "hundredths" || scale === "tenths";
   const at = (hundredths: number) => `${share(hundredths, scale) * 100}%`;
   const valueAt = (clientX: number) => {
     const box = rulerRef.current?.getBoundingClientRect();
-    if (!box || box.width === 0) return value ?? hover ?? (line ? 0 : levels[1].score);
+    if (!box || box.width === 0) return value ?? hover ?? (ladder ? 300 : 0);
     const across = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
-    if (!line) return levels[Math.min(levels.length - 1, Math.floor(across * levels.length))].score;
+    if (ladder) return ladder[Math.min(ladder.length - 1, Math.floor(across * ladder.length))].score;
     return snapScore(across * maxScore, scale);
   };
   const places = spread(marks, scale, width);
@@ -174,7 +181,13 @@ export function Ruler({
   return (
     <div
       ref={rulerRef}
-      className={[styles.scRuler, !line && styles.levels, dragging && styles.dragging, peek && styles.peek]
+      className={[
+        styles.scRuler,
+        !line && styles.levels,
+        scale === "five" && styles.five,
+        dragging && styles.dragging,
+        peek && styles.peek,
+      ]
         .filter(Boolean)
         .join(" ")}
       role="slider"
@@ -233,26 +246,25 @@ export function Ruler({
             </div>
           );
         })}
-      {!line &&
-        levels.map((level, index) => {
-          const on = set && value === level.score;
-          return (
-            <div
-              key={level.score}
-              className={[styles.scZone, on && styles.on, !on && hover === level.score && styles.hover]
-                .filter(Boolean)
-                .join(" ")}
-              style={{
-                insetInlineStart: `calc(${(index * 100) / levels.length}% + ${zoneGap / 2}px)`,
-                inlineSize: `calc(${100 / levels.length}% - ${zoneGap}px)`,
-              }}
-            >
-              <b>{level.word}</b>
-              <small>{level.score / 100}</small>
-              <kbd aria-hidden="true">{level.score / 100}</kbd>
-            </div>
-          );
-        })}
+      {ladder?.map((level, index) => {
+        const on = set && value === level.score;
+        return (
+          <div
+            key={level.score}
+            className={[styles.scZone, on && styles.on, !on && hover === level.score && styles.hover]
+              .filter(Boolean)
+              .join(" ")}
+            style={{
+              insetInlineStart: `calc(${(index * 100) / ladder.length}% + ${zoneGap / 2}px)`,
+              inlineSize: `calc(${100 / ladder.length}% - ${zoneGap}px)`,
+            }}
+          >
+            <b>{level.word}</b>
+            <small>{level.score / 100}</small>
+            <kbd aria-hidden="true">{level.score / 100}</kbd>
+          </div>
+        );
+      })}
       {marks.map((mark, index) => {
         const top = laneTops[placed[index]];
         const near = set && (fine ? Math.abs(mark.score - value) <= nearby : mark.score === value);
