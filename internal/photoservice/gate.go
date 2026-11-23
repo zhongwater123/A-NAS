@@ -106,7 +106,7 @@ func (g *Gate) Use() (done func()) {
 // not otherwise; need is the memory the AI Worker's models take, 0 for work
 // that loads none (photos.Gate).
 func (g *Gate) Open(_ context.Context, need uint64) (bool, string) {
-	return g.check(need, false)
+	return g.check(need, false, false)
 }
 
 // Continue reports whether background AI work already running may go on,
@@ -115,12 +115,25 @@ func (g *Gate) Open(_ context.Context, need uint64) (bool, string) {
 // the device's other work waiting on those only holds the next item back
 // (photos.RunningGate).
 func (g *Gate) Continue(_ context.Context, need uint64) (bool, string) {
-	return g.check(need, true)
+	return g.check(need, true, false)
 }
 
-// check is Open, or, while running, Continue.
-func (g *Gate) check(need uint64, running bool) (bool, string) {
-	if g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
+// OpenForMember is Open for work a member waits for, such as the montage
+// center's analysis (photos.MemberGate): someone using the photo library
+// does not hold it back.
+func (g *Gate) OpenForMember(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, false, true)
+}
+
+// ContinueForMember is Continue for work a member waits for.
+func (g *Gate) ContinueForMember(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, true, true)
+}
+
+// check is Open, or, while running, Continue; for a member's work it leaves
+// out whether someone uses the library.
+func (g *Gate) check(need uint64, running, member bool) (bool, string) {
+	if !member && (g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet) {
 		return false, "foreground"
 	}
 	for _, check := range pressureLimits {

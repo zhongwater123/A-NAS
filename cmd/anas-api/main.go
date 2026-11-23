@@ -54,6 +54,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
@@ -382,6 +383,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids, assistantKey)
+	hotspot, _ := operations.(phonehotspot.Switch)
+	if config.Mode == ModeFake {
+		hotspot = &phonehotspot.Memory{}
+	}
 	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations),
 		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
@@ -408,6 +413,7 @@ func run(logger *slog.Logger) error {
 		AssistantKey:    assistantkeyapi.New(assistantKey, logger),
 		SystemLogs:      systemLogs,
 		WebSearch:       websearchapi.New(webSearch, websearch.NewRelease(config.WebSearch.Release), logger),
+		PhoneHotspot:    hotspot,
 		SystemUpdate:    systemUpdate,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.

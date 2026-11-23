@@ -395,3 +395,45 @@ func TestRunningWorkStopsForUseAndMemoryAlone(t *testing.T) {
 		t.Fatalf("Continue() while the library is in use = %v, %q", ok, reason)
 	}
 }
+
+// The work a member waits for, such as the montage center's analysis, does
+// not wait for the photo library to be quiet, but it waits for memory and
+// for the device's other work as any background work does.
+func TestAMembersWorkIsNotHeldBackByUseOfTheLibrary(t *testing.T) {
+	now := time.Date(2026, 11, 19, 20, 0, 0, 0, time.UTC)
+	cpu, free := 0.0, uint64(MemoryReserve*2)
+	gate := &Gate{
+		quiet: time.Minute,
+		now:   func() time.Time { return now },
+		pressure: func(resource string) (float64, error) {
+			if resource == "cpu" {
+				return cpu, nil
+			}
+			return 0, nil
+		},
+		available: func() (uint64, error) { return free, nil },
+	}
+	ctx := context.Background()
+	done := gate.Use()
+	defer done()
+	if ok, reason := gate.Open(ctx, 0); ok || reason != "foreground" {
+		t.Fatalf("Open() while the library is in use = %v, %q", ok, reason)
+	}
+	if ok, reason := gate.OpenForMember(ctx, 0); !ok {
+		t.Fatalf("OpenForMember() while the library is in use = closed (%s)", reason)
+	}
+	if ok, reason := gate.ContinueForMember(ctx, 0); !ok {
+		t.Fatalf("ContinueForMember() while the library is in use = closed (%s)", reason)
+	}
+	cpu = 30
+	if ok, reason := gate.OpenForMember(ctx, 0); ok || reason != "cpu_pressure" {
+		t.Fatalf("OpenForMember() under processor pressure = %v, %q", ok, reason)
+	}
+	if ok, reason := gate.ContinueForMember(ctx, 0); !ok {
+		t.Fatalf("ContinueForMember() under processor pressure alone = closed (%s)", reason)
+	}
+	cpu, free = 0, MemoryReserve-1
+	if ok, reason := gate.ContinueForMember(ctx, 0); ok || reason != "memory_low" {
+		t.Fatalf("ContinueForMember() with memory short = %v, %q", ok, reason)
+	}
+}

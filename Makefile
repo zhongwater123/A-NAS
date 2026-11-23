@@ -169,6 +169,7 @@ vendor-check:
 # regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/network
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
@@ -271,8 +272,8 @@ ops-check:
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
-	@# The montage center's socket for members' scheduled tasks: open to every UID in a directory only root
-	@# enters, bound into the cron unit alone, and stopped before the montage service it would start again.
+	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
+	@# the members' planning instances alone, and stopped before the montage service it would start again.
 	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
 	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
 	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
@@ -280,10 +281,13 @@ ops-check:
 	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
 	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
 	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-montage-planner.service
+	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-montage-planner.service
 	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
 	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
 	@# Planning grants are in the Host Agent's own state, never under a service's directory.
-	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/cron-waker.py
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/montage-planner.py
 	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
@@ -405,7 +409,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
-	$(RUFF) check --config ai/ruff.toml deploy/docker
+	$(RUFF) check --config ai/ruff.toml deploy/docker deploy/network
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).

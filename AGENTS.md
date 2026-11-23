@@ -32,6 +32,7 @@
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
 - 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/api-contract.md#接口契约`。
 - 改 Web 代码后先运行 `cd web && npm run format`；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/testing.md#静态检查`）。
+- 改了跨进程接缝（服务之间、Go 与 Python、服务与 Hermes）：两边的测试读同一份样例，见 `docs/development/testing.md#跨进程契约`；AI 助手与剪辑规划交部署前另跑一次带真实运行环境的系统测试。
 - 其他变更运行能证明结果的最小相关检查。
 
 ## Claude Code
@@ -42,6 +43,13 @@
   - [check-in-wsl](.claude/skills/check-in-wsl/SKILL.md)：在 Windows 开发机上运行门禁；
   - [system-test](.claude/skills/system-test/SKILL.md)：systemd 系统测试；
   - [fake-preview](.claude/skills/fake-preview/SKILL.md)：在独立的 `*.localhost` 主机名上启动 Fake 预览栈。
+
+## 多会话协作
+
+- 一个分支同一时间只有一个写入者，子代理与子会话也算；接手别人的分支，先等对方推送并停手。交给子代理或子会话的简报写明分支、基线提交与完成标准。
+- 开工和接手时先 `git fetch`，按 `origin/main` 上的文档与代码判断现状，不凭记忆或旧检出。
+- 转述子代理、子会话或其他开发者的结论前，自己看 diff、检查输出或运行结果；没核实的写明“未核实”。
+- 几个进程接力完成的功能，按 [CONTRIBUTING.md 的“跨组件的功能”](CONTRIBUTING.md#跨组件的功能)：先通最简链路、接缝有负责人、先实测再设计、合完再整体跑一次、合并列车期间冻结。
 
 ## 完工
 
@@ -57,5 +65,5 @@
 - Git 提交记录实现历史，文档记录代码无法表达的原因、边界、复现方法和操作知识。
 - `CURRENT.md` 只保留当前事实和下一步，不写逐会话流水账。“下一步”只写还没做的事，做完就删；部署后改写“已部署”一行之前，先把本页存为状态快照（`docs/README.md` 写入规则 8）。
 - ADR 只记录难以逆转且存在真实权衡的决定；用户作出的可以改回来的决定写决定记录，同一个决定只写一处。
-- `CURRENT.md` 的“待用户决定”只列链接：`pending` 的决定记录与 `proposed` 的 ADR；问题、选项与经过写在被链接的文档中。
+- 等用户定的事不在 `CURRENT.md` 逐条列出：`pending` 的决定记录在决定索引中标 `（pending）`，`proposed` 的 ADR 在 ADR 索引中标 `（proposed）`，`CURRENT.md` 只链接这两个索引。等实机验收的事写在验收手册，不写进“下一步”。
 - 涉及真实磁盘的写操作必须由运行手册给出目标识别、确认、回滚和验证步骤。

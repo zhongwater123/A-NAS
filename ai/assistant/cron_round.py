@@ -32,12 +32,6 @@ from cron.jobs import load_jobs, trigger_job
 from hermes_cli.gateway_runtime import discover_gateway_endpoint
 from hermes_constants import get_hermes_home
 
-# The montage center's planning (montage_round.py) sits beside this script. Run with -P, the script's directory
-# is not on the path; appended, it comes after Hermes's own packages, which keeps its gateway.py from hiding
-# Hermes's gateway package.
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import montage_round
-
 HERMES = os.path.join(os.path.dirname(sys.executable), "hermes")
 READY = 180  # seconds for the gateway to serve the home; about 8 on the development machine
 HANDOVER = 90  # seconds for a job that was due to be taken up once the tick handed it over
@@ -187,16 +181,9 @@ def main():
     started = time.monotonic()
     deadline = started + ROUND
     queue(requested())
-    # Before any gateway can run them: the planning jobs an earlier round left behind. Nothing of the montage
-    # center's planning (clean, begin, finish) lets a failure out: the member's own tasks run all the same.
-    montage_round.clean()
     if ready(home).state == "ready":
         # Somebody else's gateway serves the home: its jobs run there, and it is not this round's to stop.
         say("a gateway already serves this home; handing it the jobs that are due")
-        if montage_round.wanted(RUNS):
-            # That gateway does not reach the montage center's socket, so nothing is claimed and no receipt
-            # is left: the waker gives the planning grant's round back and starts another later.
-            say("the montage center's planning waits for a round with a gateway of its own")
         before = due()
         tick = hermes("cron", "tick", timeout=TICK)
         wait_handover(before, deadline)
@@ -208,13 +195,10 @@ def main():
     try:
         wait_ready(gateway, home)
         say(f"the gateway is ready after {time.monotonic() - started:.0f} s")
-        # Only a gateway of this round's own reaches the montage center's socket.
-        planned = montage_round.begin(RUNS)
         before = due()
         tick = hermes("cron", "tick", timeout=TICK)
         wait_handover(before, deadline)
         stopped, stopping = stop(gateway, deadline)
-        montage_round.finish(planned)
         status = 0 if tick == 0 and stopped else 1
     finally:
         # Still there: Hermes is stopping it, or nobody got it to stop (the round failed

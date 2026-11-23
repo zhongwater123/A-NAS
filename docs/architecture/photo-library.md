@@ -72,7 +72,7 @@ HEIC、动态照片和普通视频经 `photos.Options.Media` 使用隔离 FFmpeg
 - **封面**：缩略图任务对视频对象调用 Worker 的 `frame`，取 `min(时长/10, 1)` 秒处的一帧，在那里取不到时取第一帧；FFmpeg 已按显示矩阵转正。查看器的 1600 px 封面按需渲染、不缓存，与 HEIC 预览相同。
 - **AI 排除**：入队向量、检测、人脸（含按图库重新入队）的 SQL 都带 `notVideo` 条件，所以没有任何代码路径能为视频对象排 AI 任务；AI 进度不计视频对象，搜索只按名称与用户标签匹配视频、也不把它们计入“尚未识别完”，找相似对视频返回不存在；AI 聚合、聚合计数与找相似的候选明确排除视频，即使视频有了向量（例如将来覆盖视频的索引）也不出现。哪些内容对象参与本地 AI 只由一条规则决定（[`video.go`](../../internal/photos/video.go) 的 `inLocalAI`，以及已读出候选上的同名方法）：AI 任务入队、向量索引同步、AI 聚合、找相似与搜索的语义排序都用它，不各自判断视频。成员的 AI 助手（`Principal.Assistant`）看不到视频，这是 Policy 的资产规则（见下文“资产可见性”）。
 - **播放**：`VideoPlayback` 按浏览器报告的能力（`caps`）决定直接播放、转封装或转码，规则与影视中心共用 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)（[影视中心的播放](media-center.md#播放)）：相册把导入时读到的第一条音轨当作默认音轨，按 `video/3gpp` 标出 3GPP，没有画质与音轨选择，所以转码总是最高 1080 行、8000 kbps。直接播放读 `/video/original`（QuickTime 与 3GP 以 `video/mp4` 返回，浏览器按 MP4 播放），转换经 Worker 的 `stream` 生成分段 MP4，同时最多两路（`mediaplay.Conversions`），新请求最多等 4 秒，仍无空位时返回 `media_busy`。转换由请求持有，断开即取消。
-- **前台活动**：相册服务把每个仍在服务中的用户请求（播放中的视频、长时间上传）都计为前台使用，`Gate.Use` 结束后才开始 5 分钟静默计时。
+- **前台活动**：相册服务把每个仍在服务中的用户请求（播放中的视频、长时间上传）都计为前台使用，`Gate.Use` 结束后才开始 5 分钟静默计时。剪辑中心的分析不等这 5 分钟（[剪辑中心的分析](photo-ai.md#任务与调度)）。
 - **回滚**：降级到第 12 次迁移前，必须先彻底删除所有视频资产（回收站清空），再删除 `videos` 表并把 `user_version` 设为 12；旧版本不认识视频对象，会把它们当作图片生成缩略图并排入 AI。
 
 ## 持久化与崩溃一致性
@@ -146,7 +146,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）；画面只以视图离开（`GET /assets/{id}/view`，`internal/photos/view.go`）：从像素重新编码、最长边不超过 1600 像素、不带原图元数据的 JPEG，供成员要求时交给模型去看；元数据按需从原图读出（`GET /assets/{id}/metadata`，`internal/photos/photometadata.go`）：EXIF 的全部标签与相机记下的拍摄位置，成员与助手都只能读自己看得到的照片的。
-- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
+- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见[剪辑中心实施方案](montage-center.md#项目授权)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
   - **套接字**：systemd 的 `anas-photos-grants.socket` 只给剪辑服务的账号（0600，属主 `a-nas-montage`），以 `grants` 之名交给相册服务；相册服务再核对对端 UID 是 31003。协议是 `unixmsg`，请求与回答的类型在 `internal/photosapi/grants.go`，原片的只读描述符随 `open` 的回答传出。这个套接字上的请求不算有人在用相册，不推迟 AI 工作。
     - 一次接受连接失败（如描述符用尽）只退避重试，不让相册服务退出；停止时先等进行中的授权请求答完再关 Catalog，每个请求连同对 Host Agent 的调用至多两分钟。
     - 套接字随相册服务启动（服务单元的 `Wants=`），安装脚本不单独重启它：相册服务在运行时 systemd 拒绝启动它，而助手的套接字随时可能把相册服务拉起来。升级或回滚前，旧版本的 `prerm` 停下它，回到没有它的版本时不留下没人读的监听。

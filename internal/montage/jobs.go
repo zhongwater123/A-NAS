@@ -43,6 +43,7 @@ const (
 	NeedMusic        = "music_invalid"
 	NeedVNASUnknown  = "vnas_unknown"
 	NeedPlanInvalid  = "plan_invalid"
+	NeedPlanError    = "plan_error" // the planning failed twice before the model planned
 	NeedStorageFull  = "storage_full"
 	jobLease         = 5 * time.Minute
 	jobMaxAttempts   = 3
@@ -483,15 +484,16 @@ func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 }
 
 // Replan plans again from the step not yet taken, when the plan was not
-// handed back, kept failing its checks, or waits for a VNAS that has not
-// taken it. A round still in progress is over: what it hands back from now on
-// is not kept, and its refusals do not count against the new epoch.
+// handed back, kept failing its checks, the planning failed, or it waits for a
+// VNAS that has not taken it. A round still in progress is over: what it hands
+// back from now on is not kept, and its refusals and failures do not count
+// against the new epoch.
 func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
 	}
-	if !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, WaitVNAS}, job.WaitReason) {
+	if !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, NeedPlanError, WaitVNAS}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
