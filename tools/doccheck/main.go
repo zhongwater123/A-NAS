@@ -143,6 +143,15 @@ var (
 	isoDate             = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
+// The skills live in .agents/skills, where Codex and other agents find them.
+// Claude Code reads only .claude/skills (checked with 2.1.330 on 2026-11-23),
+// and a symlink turns into a plain file in a Windows checkout, so that folder
+// holds a copy that `make skills` writes and this check keeps identical.
+const (
+	skillsDirectory     = ".agents/skills"
+	skillsCopyDirectory = ".claude/skills"
+)
+
 func main() {
 	root, err := findRepositoryRoot()
 	if err != nil {
@@ -257,7 +266,59 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
 	problems = append(problems, validateDecisions(decisions, adrDocuments, string(current))...)
 	problems = append(problems, validateSnapshots(snapshots, string(current))...)
+	problems = append(problems, validateSkillsCopy(root)...)
 	return problems, files
+}
+
+// validateSkillsCopy checks that .claude/skills holds exactly the files of
+// .agents/skills, byte for byte.
+func validateSkillsCopy(root string) []string {
+	skills, err := readTree(filepath.Join(root, filepath.FromSlash(skillsDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	copied, err := readTree(filepath.Join(root, filepath.FromSlash(skillsCopyDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(skills)) {
+		if data, ok := copied[name]; !ok || data != skills[name] {
+			problems = append(problems, fmt.Sprintf("%s/%s differs from %s/%s: edit %s and run make skills", skillsCopyDirectory, name, skillsDirectory, name, skillsDirectory))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(copied)) {
+		if _, ok := skills[name]; !ok {
+			problems = append(problems, fmt.Sprintf("%s/%s has no source in %s: run make skills", skillsCopyDirectory, name, skillsDirectory))
+		}
+	}
+	return problems
+}
+
+// readTree returns the files below dir by slash-separated relative path; a
+// missing dir has none.
+func readTree(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) && filePath == dir {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(filePath) //nolint:gosec // G122: a developer tool reading the checkout's own skills.
+		if err != nil {
+			return err
+		}
+		relativePath, _ := filepath.Rel(dir, filePath)
+		files[filepath.ToSlash(relativePath)] = string(data)
+		return nil
+	})
+	return files, err
 }
 
 // validateNextSteps checks that each item under the current state's 下一步

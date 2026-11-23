@@ -367,6 +367,37 @@ func TestValidateDocumentationKeepsDecisionsInOnePlace(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentationKeepsTheSkillsCopyIdentical(t *testing.T) {
+	skill := "---\nname: probe\ndescription: A probe.\n---\n\n# Probe\n"
+	tests := map[string]struct {
+		copied map[string]string
+		want   []string
+	}{
+		"identical": {copied: map[string]string{".claude/skills/probe/SKILL.md": skill}},
+		"edited copy": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill + "more\n"},
+			want:   []string{".claude/skills/probe/SKILL.md differs from .agents/skills/probe/SKILL.md"},
+		},
+		"missing copy": {
+			copied: map[string]string{},
+			want:   []string{".claude/skills/probe/SKILL.md differs"},
+		},
+		"copy without source": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill, ".claude/skills/old/SKILL.md": skill},
+			want:   []string{".claude/skills/old/SKILL.md has no source in .agents/skills"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{".agents/skills/probe/SKILL.md": skill})
+			writeDocuments(t, root, test.copied)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
 func validateDocumentationProblems(root string) []string {
 	problems, _ := validateDocumentation(root)
 	return problems

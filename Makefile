@@ -43,7 +43,7 @@ GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt skills fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -130,6 +130,13 @@ GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_
 # the coding agents' hooks run the same script after each edit (AGENTS.md).
 fmt:
 	scripts/format-changed.sh
+
+# Claude Code reads skills only from .claude/skills, other agents from
+# .agents/skills (AGENTS.md): edit the second and copy it with this target;
+# docs-check fails while the two differ.
+skills:
+	rm -rf .claude/skills
+	cp -R .agents/skills .claude/skills
 
 fmt-check:
 	@files="$$(gofmt -l $$($(GO_FILES)))"; \

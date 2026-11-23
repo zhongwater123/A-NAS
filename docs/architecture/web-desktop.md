@@ -63,7 +63,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
   - 功能的模块不进任何层，因此总是覆盖 `ui/` 与全局样式，结果与样式表的加载顺序无关；
   - 例外：带 `!important` 的声明按相反的层顺序比较，不要用它覆盖 `ui/` 的规则。
 - **不跨功能借用：** 两个功能需要同样的外观时，把部件与样式移进 `ui/`，不要导入另一个功能的样式文件。功能要调整 `ui/` 部件时，传 `className` 或设置部件读取的 CSS 变量，不要在自己的模块里选择部件的类。
-- **检查：** 改动样式或懒加载后，在 Fake 预览栈中逐窗口核对外观（[fake-preview](../../.claude/skills/fake-preview/SKILL.md)）。
+- **检查：** 改动样式或懒加载后，在 Fake 预览栈中逐窗口核对外观（[fake-preview](../../.agents/skills/fake-preview/SKILL.md)）。
 
 ### 令牌
 

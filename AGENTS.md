@@ -31,18 +31,24 @@
 - 纯文档变更运行 `make docs-check`。
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
 - 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/api-contract.md#接口契约`。
-- 改 Web 代码后先运行 `cd web && npm run format`；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/testing.md#静态检查`）。
+- 改了 Go 或 Web 代码，提交前运行 `make fmt`（[`scripts/format-changed.sh`](scripts/format-changed.sh)，只格式化改动的文件；Claude Code 与 Codex 的钩子在每次编辑后自动运行它）；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/testing.md#静态检查`）。
 - 改了跨进程接缝（服务之间、Go 与 Python、服务与 Hermes）：两边的测试读同一份样例，见 `docs/development/testing.md#跨进程契约`；AI 助手与剪辑规划交部署前另跑一次带真实运行环境的系统测试。
 - 其他变更运行能证明结果的最小相关检查。
 
-## Claude Code
+## 编码工具
 
-- 本文件是唯一的项目指令文件，Claude Code 直接读取。不要新建 `CLAUDE.md` 或 `CLAUDE.local.md`：任一级目录中出现它们，Claude Code 就不再读本文件；确需时在其中写一行 `@AGENTS.md`。
-- `.claude/settings.json` 是共享设置：禁止读取密钥文件，并在编辑后对 Go 文件运行 gofmt。个人覆盖写进被 Git 忽略的 `.claude/settings.local.json`。
-- 可复用流程写成技能，其他工具也可以照着做：
-  - [check-in-wsl](.claude/skills/check-in-wsl/SKILL.md)：在 Windows 开发机上运行门禁；
-  - [system-test](.claude/skills/system-test/SKILL.md)：systemd 系统测试；
-  - [fake-preview](.claude/skills/fake-preview/SKILL.md)：在独立的 `*.localhost` 主机名上启动 Fake 预览栈。
+本仓库由 Claude Code、Codex 等多种工具协同开发。规则、流程与格式化写在仓库里，各工具的配置目录只做适配。
+
+- 本文件是唯一的项目指令文件，Codex 与 Claude Code 都直接读取。不要新建 `CLAUDE.md` 或 `CLAUDE.local.md`：工作目录或它的上级目录中有其中任何一个，Claude Code 就不再读本文件；确需时在其中只写一行 `@AGENTS.md`。
+- 可复用流程写成技能，放在 `.agents/skills/`（Codex 等工具读这里），任何工具和人都可以照着做：
+  - [check-in-wsl](.agents/skills/check-in-wsl/SKILL.md)：在 Windows 开发机上运行门禁；
+  - [system-test](.agents/skills/system-test/SKILL.md)：systemd 系统测试；
+  - [fake-preview](.agents/skills/fake-preview/SKILL.md)：在独立的 `*.localhost` 主机名上启动 Fake 预览栈。
+
+  Claude Code 只读 `.claude/skills/`，那里是副本：改 `.agents/skills/` 后运行 `make skills`，两者不一致时 `make docs-check` 失败。
+- 编辑后的格式化：`.claude/settings.json` 与 `.codex/hooks.json` 都在编辑后调用 `scripts/format-changed.sh`；改其中一个工具的钩子，另一个同步改。Codex 只在信任本项目后加载项目钩子；其他工具和人运行 `make fmt`。
+- 密钥：`.claude/settings.json` 禁止 Claude Code 读取密钥文件；Codex 靠它自己的沙箱与审批设置。任何工具都不读、不提交密钥。
+- 个人设置不进仓库：Claude Code 写进被 Git 忽略的 `.claude/settings.local.json`，Codex 写进 `~/.codex/config.toml`。
 
 ## 多会话协作
 
