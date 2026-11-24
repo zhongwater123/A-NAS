@@ -320,9 +320,15 @@ describe("ScoringPanel for a rater", () => {
     expect(screen.queryByText(/凭第一感觉打“总体”/)).toBeNull();
     // Three levels have no 2 or 4, in the rules or the tries.
     expect(screen.queryByText("只打整数")).toBeNull();
-    expect(screen.getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。")).toBeTruthy();
+    expect(
+      screen.getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。"),
+    ).toBeTruthy();
     const first = screen.getAllByRole("group", { name: "这张照片的构图你打几分" })[0];
-    expect(within(first).getAllByRole("button").map((button) => button.textContent)).toEqual(["1", "3", "5"]);
+    expect(
+      within(first)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["1", "3", "5"]);
   });
 
   it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
