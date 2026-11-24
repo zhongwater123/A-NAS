@@ -124,7 +124,7 @@ python $E songs --method v2 --onnx ~/montage-probe/beat_this-small0.onnx --truth
 ```
 
 - 检查点由 beat_this 从作者的服务器（`cloud.cp.jku.at`）下载，代码与权重都是 MIT；上游 README 写明部分训练数据有版权或受限的 CC 许可。
-- `truth.json` 每首一项：`name`、`audio`、`allin1`（allin1 的结构文件）、`chorus`（人工确认的副歌秒数，没有就是 `null`）。歌在开发机 C 的 `~/Music/QQ音乐`，allin1 的结果在 `~/A-NAS-datasets/剪辑对比/第四版/剪法24（2026-11-08）/structure-*.json`，`truth.json` 在 `~/A-NAS-datasets/montage-probe/`。这些都是商业歌曲，不进仓库。
+- `truth.json` 每首一项：`name`、`audio`、`allin1`（allin1 的结构文件）、`chorus`（人工确认的副歌秒数，没有就是 `null`）。歌在开发机 C 的 `~/Music/QQ音乐`，allin1 的结果在 `~/A-NAS-datasets/剪辑对比/规划与成片/structure-*.json`，`truth.json` 在 `~/A-NAS-datasets/montage-probe/`。这些都是商业歌曲，不进仓库。
 
 ## 未做
 

@@ -11,7 +11,7 @@
 | 本机工具 | Homebrew 安装的 Go 1.27.3、ShellCheck 0.11.0、bash 5.3、Colima 0.10.3 与 Docker CLI；Node.js 26.11.1、npm 11.20.0；Ruff 0.17.1 按[静态检查](../testing.md#静态检查)装在 `~/.local/opt/ruff` |
 | `~/.anas-env` | 把 Ruff 与 `/opt/homebrew/bin` 放在 `PATH` 最前面：macOS 自带的 `/bin/bash` 是 3.2，`ops-check` 需要 bash 4 以上 |
 | Linux 虚拟机 | Colima 配置 `anas`：vz、6 核、8 GiB，Ubuntu 24.04 arm64，只供 A-NAS 使用；本机的 `default` 配置留给其他项目 |
-| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2（见[静态检查](../testing.md)）、Ruff 0.17.1，zizmor 1.32.0 与 pip-audit 2.10.1 在 venv `~/.local/opt/zizmor` 中；gcc 13.3、`file` 与 qemu-user-static 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
+| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2（见[静态检查](../testing.md#静态检查)）、Ruff 0.17.1，zizmor 1.32.0 与 pip-audit 2.10.1 在 venv `~/.local/opt/zizmor` 中；gcc 13.3、`file` 与 qemu-user-static 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
 | 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`、系统测试镜像 `anas-systemd:trixie` |
 | 模型 | `~/A-NAS-models`，目录结构与 `scripts/fetch-models.sh` 的 `layout` 相同（`embeddinggemma-2-740m`、`faces/yunet`、`faces/auraface`、`pets/dinov2-small`、`dfine-obj365`），另有 `faces/sface`；文件按 `deploy/models/*.json` 中的地址下载，并核对 SHA-256。D-FINE 只有官方权重 `dfine_m_obj365.pth`：在 arm64 上按清单导出的 ONNX 大小相同但 SHA-256 不同，Worker 与打包都会拒绝，放在 `dfine-obj365/arm64-export`，只供本机评估；`dfine-obj365/official` 用 `scripts/fetch-models.sh ~/A-NAS-models` 拉取（[拉取模型](../ai-development.md#拉取模型)） |
 | 测试照片 | `~/A-NAS-datasets/shared-gallery/<月份>/`：实验 NAS 相册共享图库的原图（JPEG、PNG 与一段 MP4），每月附 NAS 记录的清单 `manifest-*.json`，`SHA256SUMS` 为本机计算值。相册没有打包下载，按月经 Web 的相册接口取原图 |
@@ -28,8 +28,9 @@
 
 ```bash
 colima start anas --cpu 6 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs
-docker context use colima    # colima start 会把 Docker 上下文切到 colima-anas；本机其他项目要用 default 时切回
 ```
+
+启动后 Docker 上下文会切到 `colima-anas`。下面的 A-NAS 步骤用 `colima ssh -p anas` 指定虚拟机。处理其他项目时，若要切回本机原有的 Colima 默认实例，再运行 `docker context use colima`。
 
 虚拟机中的工具链：
 
@@ -70,10 +71,10 @@ EOF
 
 ## Fake 预览
 
-与 [fake-preview](../../../.agents/skills/fake-preview/SKILL.md) 相同，只是构建和运行都在虚拟机中。Colima 会把虚拟机里监听 `127.0.0.1` 的端口转发到本机，所以本机浏览器可以直接打开 `http://<名称>.localhost:<端口>`：
+先按[配置](#配置)启动 `anas` 虚拟机并准备工具。在 Mac 终端进入检出根目录。下面用会话名 `anas-preview` 和端口 `18080` 演示；同时运行多个预览时，每个会话使用自己的名称和空闲端口，并在下列命令和地址中同步替换。构建和服务都在虚拟机中运行。
 
 ```bash
-colima ssh -p anas -- bash -s -- "$PWD" <名称> <端口> <<'EOF'
+colima ssh -p anas -- bash -s -- "$PWD" anas-preview 18080 <<'EOF'
 set -euo pipefail
 . ~/.anas-env
 src=$1 dst=~/anas-check/$(basename "$1") state=~/anas-preview/$2
@@ -91,16 +92,18 @@ EOF
 
 改动代码后先停止原预览，再运行构建命令；构建失败立即退出，查看 `~/anas-preview/<名称>/build.log`。检查和预览共用副本，勿同时运行。
 
-首次启用管理员时，要在虚拟机里请求回环地址；使用 12–64 个字符的测试密码：
+首次创建管理员时，在 Mac 终端运行下段命令，由虚拟机请求回环地址。把引号内的账号和密码替换为自己的测试值，密码长度为 12–64 个字符：
 
 ```bash
 colima ssh -p anas -- bash -s <<'EOF'
 curl -fsS -X POST -H 'Content-Type: application/json' \
-  -d '{"username":"<账号>","password":"<测试密码>"}' http://127.0.0.1:<端口>/api/v1/setup/admin
+  -d '{"username":"<账号>","password":"<测试密码>"}' http://127.0.0.1:18080/api/v1/setup/admin
 EOF
 ```
 
-停止预览：`colima ssh -p anas -- bash -c 'kill "$(cat ~/anas-preview/<名称>/pid)"'`。
+Colima 把端口转发到 Mac。在本机浏览器打开 `http://anas-preview.localhost:18080`，用刚创建的测试账号登录，看到桌面即预览成功。
+
+停止这个预览：`colima ssh -p anas -- bash -c 'kill "$(cat ~/anas-preview/anas-preview/pid)"'`。
 
 ## 注意事项
 

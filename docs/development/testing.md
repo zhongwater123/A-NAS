@@ -92,7 +92,7 @@ tar -xzf /tmp/lychee.tar.gz -C /tmp
 install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 ```
 
-开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。 它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
 
 Ruff、pip-audit、zizmor 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
@@ -210,9 +210,15 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 ## CI
 
-`.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
+每个 PR 和每次推送到 `main` 都会触发 [CI 工作流](../../.github/workflows/ci.yml)。`main` 规则集按名称要求 `Project checks`、`Go tests with the race detector` 和 `System test (Debian 13, systemd)` 三项检查，改名时需同步规则集。工作流先运行 `Change scope`，再按事件与文件选择作业。
 
-PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.agents/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
+| 变更 | 实际运行 |
+|---|---|
+| 纯文档 PR | `Project checks` 运行 `make docs-check`。竞态测试、系统测试及两个架构的热点签名包测试按作业条件跳过，GitHub 接受跳过的必需作业。 |
+| 其他 PR，或无法判断范围 | 完整 `make check`、Go 竞态测试、Debian 系统测试，以及 amd64 和 arm64 的热点签名包安装测试。 |
+| 推送到 `main` | 每个合并提交均运行全量，便于定位哪个合并破坏了主线。 |
+
+[范围判定脚本](../../scripts/ci-scope.sh)只把 `docs/` 下的文件、根目录 Markdown 和 `.agents/skills/`、`.claude/skills/` 下的 Markdown 归为文档。即使主题是文档，只要还改了 `tools/doccheck/`、工作流或其他路径，就走全量。保留工作流触发、在作业内判定范围，可让分支保护收到检查结果。另有独立的[密钥扫描](#安全扫描)，纯文档 PR 也会运行。
 
 ## 安全扫描
 

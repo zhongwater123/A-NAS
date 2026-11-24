@@ -15,14 +15,21 @@ import type {
 } from "../../api.generated";
 import { http } from "../server";
 
-const builtIn = (id: string, name: string): ScoringDimension => ({ id, name, description: "", custom: false });
+const builtIn = (id: string, name: string, description = ""): ScoringDimension => ({
+  id,
+  name,
+  description,
+  custom: false,
+});
 
 // Every 打分项 a batch can choose, as the module lists them: the built-in
-// ones, then one an administrator made.
+// ones, the scoring handbook's first, then one an administrator made.
 export const scoringCatalogue: ScoringDimension[] = [
-  builtIn("overall", "总分"),
-  builtIn("composition", "构图"),
-  builtIn("light_color", "光影色彩"),
+  builtIn("overall", "总体", "整体拍得好不好，有没有让人想多看一会儿的感觉"),
+  builtIn("composition", "构图", "画面安排得好不好，主体清不清楚"),
+  builtIn("light_color", "光影色彩", "光线和颜色好不好看"),
+  builtIn("quality", "画质", "按正常大小看有没有抖动、虚焦、噪点，不用 100% 查看"),
+  builtIn("emotion", "情绪", "平静还是激烈，只看感觉不看好坏：1 平静，5 激烈"),
   builtIn("sharpness", "清晰度"),
   builtIn("narrative", "叙事意境"),
   builtIn("preference", "喜好程度"),

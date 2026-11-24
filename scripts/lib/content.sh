@@ -15,7 +15,8 @@ TARGET_PYTHON=3.13
 
 # Each model role is ROLE:EXTENSION:MANIFEST, the manifest under
 # deploy/models. The AI Worker's unit finds the role's file as
-# /usr/lib/a-nas/ai/ROLE.EXTENSION and its manifest as ROLE.json.
+# /usr/lib/a-nas/ai/ROLE.EXTENSION and its manifest as ROLE.json. A bundle,
+# a tarball whose manifest lists the members to unpack, is a directory there.
 ai_roles=(
   model:litertlm:embeddinggemma-2-740m
   detector:onnx:dfine-m-obj365
@@ -24,6 +25,12 @@ ai_roles=(
   animal-embedder:onnx:dinov2-small
   ocr-model:gguf:qwen3.5-4b-q4_k_m
   ocr-mmproj:gguf:qwen3.5-4b-mmproj-f16
+)
+
+# Linked by the Worker for internal evaluation; excluded from release dependencies and images.
+# shellcheck disable=SC2034 # Used by build-packages.sh, build-content-packages.sh and system-test.sh.
+aesthetic_role=(
+  aesthetic-scorer:bundle:qwen35-4b-aesthetic-scorer
 )
 
 # pin_field FILE KEY: a field of a pin, failing when it is missing.
@@ -51,8 +58,16 @@ model_files() {
 
 # model_link_file MANIFEST: the file in the model's directory that the AI
 # Worker's link points at: the model's file, or its first part, from which
-# llama.cpp finds the others.
-model_link_file() { jq -r '(.parts // [])[0].file // .file' "$1"; }
+# llama.cpp finds the others. Nothing for a bundle, whose link is the
+# directory itself.
+model_link_file() { jq -r 'if .members then "" else (.parts // [])[0].file // .file end' "$1"; }
+
+# model_link MANIFEST: where the AI Worker's link for the model points.
+model_link() {
+  local file
+  file=$(model_link_file "$1")
+  echo "/opt/a-nas/models/$(pin_field "$1" sha256)${file:+/$file}"
+}
 
 # ai_runtime_id REPO: the AI Worker's runtime, named by its lock and Python.
 ai_runtime_id() {

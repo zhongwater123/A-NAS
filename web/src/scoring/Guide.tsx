@@ -3,15 +3,31 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
-import { formatScore, overall, snapScore } from "./model";
+import { formatScore, isLevels, overall, snapScore } from "./model";
 import styles from "./scoring.module.css";
 
 // How to pick a score on each scale, and the keys that move it.
-function Picking({ scale, hidden }: Pick<ScoringRaterBatch, "scale"> & { hidden: boolean }) {
+function Picking({ scale, hidden, dimensions }: Pick<ScoringRaterBatch, "scale" | "dimensions"> & { hidden: boolean }) {
+  if (scale === "five") {
+    return (
+      <>
+        <li>在下方点选一档：1 很差、2 较差、3 一般、4 好、5 很好，没有小数</li>
+        {dimensions.some((dimension) => dimension.id === "emotion") && (
+          <li>情绪的五档不是好坏：1 很平静、2 安静、3 中间、4 有张力、5 激烈</li>
+        )}
+        <li>
+          <kbd>1</kbd>–<kbd>5</kbd> 直接选档，<kbd>←</kbd> <kbd>→</kbd> 换一档
+        </li>
+      </>
+    );
+  }
   if (scale === "three") {
     return (
       <>
         <li>在下方点选一档：差、中、好</li>
+        {dimensions.some((dimension) => dimension.id === "emotion") && (
+          <li>情绪的三档不是好坏：1 平静、3 中间、5 激烈</li>
+        )}
         <li>
           <kbd>1</kbd> 差，<kbd>3</kbd> 中，<kbd>5</kbd> 好，<kbd>←</kbd> <kbd>→</kbd> 换一档
         </li>
@@ -73,13 +89,13 @@ export function GuideContent({
 }) {
   const several = batch.dimensions.length > 1;
   const { scale, hideDecimals: hidden } = batch;
-  const levels = scale === "three";
+  const levels = isLevels(scale);
   const release = levels ? "点选一档后松开" : "在数轴上点选或拖动后松开";
   const anchorScore = (score: number) => {
-    const shown = formatScore(snapScore(Math.round(score * 100), scale), scale);
+    const shown = formatScore(snapScore(Math.round(score * 100), scale), scale, batch.dimensions[0].id);
     return levels ? shown : `${shown} 分`;
   };
-  // A batch of 总分 alone has nothing to list.
+  // A batch of 总体 alone has nothing to list.
   const named = several || batch.dimensions[0].id !== overall;
   const [anchors, setAnchors] = useState<ScoringAnchor[]>();
   const [failure, setFailure] = useState("");
@@ -119,7 +135,7 @@ export function GuideContent({
       <section>
         <h3>怎样打分</h3>
         <ul className={styles.scKeys}>
-          <Picking scale={scale} hidden={hidden} />
+          <Picking scale={scale} hidden={hidden} dimensions={batch.dimensions} />
           {several ? (
             <>
               <li>
