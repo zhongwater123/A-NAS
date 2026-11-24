@@ -13,7 +13,7 @@ import (
 )
 
 // The photo library's grants are what a store searches with.
-var _ WindowGrants = photosapi.Grants{}
+var _ WindowSearch = photosapi.Grants{}
 
 // grantCall answers searchWindows as the photo library would, through the
 // request's JSON, or refuses with code.
@@ -64,7 +64,7 @@ func TestAStoreSearchesWithThePhotoLibrarysGrants(t *testing.T) {
 	if asked.GrantID != "grant-1" || !slices.Equal(asked.Texts, []string{"a", "b"}) || asked.K != 3 {
 		t.Fatalf("asked %+v", asked)
 	}
-	want := [][]WindowHit{{{AssetID: "video-a", Window: 7, Score: 0.5}}, {{AssetID: "video-b", Window: 8, Score: 0.5}}}
+	want := [][]photos.WindowMatch{{{AssetID: "video-a", Window: 7, Score: 0.5}}, {{AssetID: "video-b", Window: 8, Score: 0.5}}}
 	if len(hits) != len(want) || !slices.Equal(hits[0], want[0]) || !slices.Equal(hits[1], want[1]) {
 		t.Fatalf("hits %+v, want %+v", hits, want)
 	}

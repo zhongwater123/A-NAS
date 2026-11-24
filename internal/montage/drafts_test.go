@@ -119,12 +119,12 @@ func (*editCompute) Likeness(_ context.Context, a, b []float32, dimensions int) 
 
 // editSearch finds, for any text, the windows listed in hits.
 type editSearch struct {
-	hits  []WindowHit
+	hits  []photos.WindowMatch
 	texts [][]string
 	err   error
 }
 
-func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []string, _ int) ([][]WindowHit, error) {
+func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []string, _ int) ([][]photos.WindowMatch, error) {
 	if grantID != "grant:1" {
 		return nil, errors.New("another grant")
 	}
@@ -132,7 +132,7 @@ func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []st
 	if s.err != nil {
 		return nil, s.err
 	}
-	out := make([][]WindowHit, len(texts))
+	out := make([][]photos.WindowMatch, len(texts))
 	for i := range texts {
 		out[i] = s.hits
 	}
@@ -557,10 +557,10 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 	ctx := t.Context()
 	// Every window of both videos is found, the later ones better.
 	for i := range 20 {
-		env.search.hits = append(env.search.hits, WindowHit{AssetID: videoA, Window: i, Score: float64(i)})
+		env.search.hits = append(env.search.hits, photos.WindowMatch{AssetID: videoA, Window: i, Score: float64(i)})
 	}
 	for i := range 6 {
-		env.search.hits = append(env.search.hits, WindowHit{AssetID: videoB, Window: i, Score: float64(i) + 0.5})
+		env.search.hits = append(env.search.hits, photos.WindowMatch{AssetID: videoB, Window: i, Score: float64(i) + 0.5})
 	}
 	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
 	if err != nil {
@@ -650,7 +650,7 @@ func TestCandidatesForAShot(t *testing.T) {
 	if err != nil || len(filtered.Results) != 0 {
 		t.Fatalf("landscape 山路 = %v, %v", names(filtered.Results), err)
 	}
-	env.search.hits = []WindowHit{{AssetID: videoB, Window: 0, Score: 0.9}, {AssetID: videoA, Window: 15, Score: 0.4}}
+	env.search.hits = []photos.WindowMatch{{AssetID: videoB, Window: 0, Score: 0.9}, {AssetID: videoA, Window: 15, Score: 0.4}}
 	found, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"})
 	if err != nil {
 		t.Fatal(err)

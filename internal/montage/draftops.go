@@ -254,21 +254,6 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 
 // --- searching ---
 
-// WindowSearch finds, among a grant's videos, the windows most like each of
-// texts: the photo library's searchWindows (#599). It answers ErrSearchModel
-// when the windows were analysed with another model than the text's.
-type WindowSearch interface {
-	SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]WindowHit, error)
-}
-
-// WindowHit is a window like a text: its video, its number among the
-// video's windows, and how alike.
-type WindowHit struct {
-	AssetID string  `json:"assetId"`
-	Window  int     `json:"window"`
-	Score   float64 `json:"score"`
-}
-
 // searchWindows is how many windows a text asks for.
 const searchWindows = 200
 

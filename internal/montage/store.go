@@ -506,7 +506,7 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if options.Plans < 0 || options.Plans > MaxPlans {
 		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
 	}
-	if search, ok := options.Grants.(WindowGrants); ok && options.Search == nil {
+	if search, ok := options.Grants.(WindowSearch); ok && options.Search == nil {
 		options.Search = GrantSearch{Grants: search}
 	}
 	db, err := sqlitedb.Open(filepath.Join(root, DatabaseName), sqlitedb.Options{Durable: true})
