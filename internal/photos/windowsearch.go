@@ -26,8 +26,10 @@ import (
 // ignored. As image ranking does (vectorsearch.go), the index only picks the
 // windows that can rank, and those are scored exactly from the Catalog, so
 // the answer is the same as an exact scan of the Catalog, which answers
-// instead whenever the index cannot: it fails or rests after failing, or
-// the collection its alias names is not the one of the text's model.
+// instead whenever the index cannot: it fails or rests after failing, it
+// has no collection of the text's model, or that collection is not full
+// yet. The alias (windowsync.go) marks the full collection; the search
+// reads the collection by its own name, never one of another model.
 
 const (
 	// MaxWindowSearchTexts bounds the texts one search asks about,
@@ -262,8 +264,9 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 		s.reportVectorFallback("the vector index failed recently", nil)
 		return nil, false, nil
 	}
-	// Sync keeps the collection it writes in line with the Catalog; the
-	// alias names it once every video is written.
+	// Sync keeps the collection it writes in line with the Catalog, and
+	// puts the alias on it once every video is written: only then is it
+	// read, by its own name.
 	target, err := s.currentWindowsCollection(ctx)
 	if err != nil {
 		return nil, false, err

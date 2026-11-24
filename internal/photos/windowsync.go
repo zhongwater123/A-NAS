@@ -24,11 +24,14 @@ import (
 // every chunk. The Catalog stays the record, and a lost collection is built
 // again from it.
 //
-// The montage center's text search reads the collection (windowsearch.go),
-// through the alias windowsAlias: a new model's collection is filled while
-// the alias still names the old one, and the alias moves to it once nothing
-// waits in the outbox. The old collection stays until the model after, so
-// that a model taken back takes its collection back too.
+// The montage center's text search reads the collection (windowsearch.go)
+// by its own name, as sync writes it; the alias windowsAlias only marks the
+// collection that is full. A new model's collection is filled while the
+// alias still names the old one, and the alias moves to it once nothing
+// waits in the outbox. Until then a search reads the Catalog: its texts are
+// of the new model, so nothing reads the old collection. That one stays
+// until the model after, and a model taken back takes its collection up
+// again, every video written into it anew.
 
 const (
 	windowsIndex            = "windows"

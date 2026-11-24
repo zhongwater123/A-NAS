@@ -327,9 +327,11 @@ func TestWindowSearchRefusesWindowsOfAnotherModel(t *testing.T) {
 	}
 }
 
-// The alias names the collection a search reads. A new model's collection
-// is filled beside the old one, which searches keep reading until the alias
-// moves; the old one stays, and the model before taken back takes it back.
+// The alias marks the collection a search may read: the one sync has
+// filled. A new model's collection is filled beside the old one, and until
+// the alias moves to it a search reads the Catalog, not the old collection,
+// whose vectors are of another model than its texts. The old one stays, and
+// the model before taken back takes it up again.
 func TestTheWindowsAliasMovesOnceTheNewCollectionIsFull(t *testing.T) {
 	ctx := context.Background()
 	f := newSearchFixture(t)
