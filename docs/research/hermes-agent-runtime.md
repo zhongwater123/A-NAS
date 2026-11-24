@@ -164,6 +164,7 @@ owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`：systemd 设了 
 - simple quota（btrfs-progs 6.14）为子卷设 64 MiB 上限后，写到约 64 MiB 时返回 “Disk quota exceeded”（2026-10-14）。
 - 在已有空间、快照与相册的数据卷上开启（开发机内核 6.18）并给每个助手目录设 64 MiB：alice 在 `files/` 中写 100 MiB，写到 67,092,480 字节时停止；之后快照与 Web 上传正常（2026-10-15）。
 - 内核 6.7 以前 `quota` 子命令失败，系统测试只记 INFO。实验 NAS（6.12）上的影响在 #116 中确认。
+- Hermes 运行时把同一子卷写满，Hermes 会在下一次写 WAL 索引（`state.db-shm`，共享映射）时被 SIGBUS 结束，因为 Btrfs 无法为写时复制预留空间。修复要把 Hermes 的状态与工作区分开计量，见[调查](../investigations/2026-11-24-assistant-hermes-sigbus-at-quota.md)（2026-11-24）。
 
 ### 实例、凭据与删除账号
 
