@@ -1,7 +1,7 @@
 # 部署 A-NAS 软件包
 
-状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；尚未在 Experimental NAS 上执行）
-更新时间：2026-11-13
+状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；Experimental NAS 自 2026-11-17 起按本手册升级，最近一次见[当前状态](../status/CURRENT.md)）
+更新时间：2026-11-23
 
 ## 目的
 
@@ -25,7 +25,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
 - 目标：Experimental NAS（主机名 `a-nas-dev`）或新机器。Debian 13，安装时启用 `non-free-firmware` 组件，安装程序按硬件装上固件与微码；能访问 Debian 的镜像源。`a-nas-host`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）依赖的 Debian 包从镜像源装，Docker、Caddy 与产品从 A-NAS 软件源装（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 - 签名密钥：A-NAS 存档密钥，开发机 B 与开发机 A 各用自己的子密钥签名（[管理发布签名密钥](manage-release-key.md)）。测试密钥只签开发机自己的测试软件源；换了密钥的软件源，各台机器要重新做一次第 4 步。近期以局域网推送发布（[决定记录](../decisions/2026-11-13-release-by-lan-push.md)）：开发机 B 构建并签名，软件源目录经开发机 A 或开发机 B 推送到 NAS 的暂存账号（第 2 步）。GitHub 的 `zhongwater123/A-NAS-dist` 是备选，平时不发布。
 - 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB，Docker 与 Caddy 每更新一次约 92 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。开发机上 `make release` 在 `/var/tmp` 逐个组装内容包，最大的约 2.6 GiB，用完即删；2026-11-11 用全部真实内容第一次运行，用时 22 分钟，软件源 4.1 GB。
-- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享与家庭的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
+- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享、家庭与剪辑服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享、家庭与剪辑的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
 - 停止条件：
   - 第 4 步的哈希与开发者给出的不一致；
   - apt 报告签名或哈希错误（`NO_PUBKEY`、`BADSIG`、`Hash Sum mismatch`）；
@@ -103,6 +103,12 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    a-nas-site
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
+
+## 可选硬件包
+
+产品发布包含同架构的可选 `a-nas-hotspot-radio` 及锁定 Debian 依赖。系统更新会更新已安装的热点包。在提供热点包的版本之间回退时，热点包也回退到相同版本。回到尚未提供热点的版本时保留依赖包和安装选择，旧产品没有热点服务。
+
+ARM64 的热点依赖可单独签名发布。运行 `ANAS_TARGET_ARCH=arm64 bash scripts/release.sh --hotspot-radio-only REPO CONTENT`，目标使用单独的 ARM64 软件源目录。发布到 GitHub 平铺源时，`ANAS_TARGET_ARCH=arm64 make publish` 选择 `apt-dev-arm64` 或 `apt-release-arm64`。这是已有 ARM64 产品环境的可选依赖源。按[热点网卡手册](prepare-experimental-nas-hotspot-radio.md)配置证书、安装和验收。
 
 ## 以后的版本：设置 → 系统更新
 

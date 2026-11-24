@@ -80,6 +80,49 @@
   animation: none;
 }
 
+/*
+ * The device is in critical trouble (health.ts): a still red dot at the companion's feet, on dsh-pet's
+ * stage, which moves with the pet as the root does and has its own pseudo-elements free. Below the
+ * clips' feet, which they draw from about 0.06 of the pet's size above the stage's bottom, and in front
+ * of them, so a leg or the tail does not hide it; the pointer goes through to the pet.
+ */
+.layer[data-companion-trouble] :global(.dsh-pet-stage)::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.02);
+  left: calc(50% + var(--dsh-pet-size, 240px) * 0.06);
+  width: calc(var(--dsh-pet-size, 240px) * 0.05);
+  height: calc(var(--dsh-pet-size, 240px) * 0.05);
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 92%),
+    0 1px 4px rgb(0 0 0 / 28%);
+  pointer-events: none;
+}
+
+/* Facing right, dsh-pet mirrors the clip (its video), not the stage: the feet, and the dot, are on the other side. */
+.layer[data-companion-trouble] :global(.dsh-pet-root[data-facing="right"] .dsh-pet-stage)::after {
+  left: calc(50% - var(--dsh-pet-size, 240px) * 0.11);
+}
+
+/*
+ * A line the companion says keeps its line breaks (a click's answer puts what to do on the second
+ * line; VNAS's lines may break too), which dsh-pet's bubble row would run together. At most 16 lines
+ * show, the rest end in an ellipsis: VNAS may send 200 characters, every one a line break, and the
+ * bubble has no height of its own to stop at, so it would grow over the whole desktop. 200 characters
+ * without a break take at most 15 lines (the bubble is about 14.7 characters wide, bubble.ts), so the
+ * cap cuts only breaks. Above dsh-pet's own row rule, whose display:flex it replaces.
+ */
+.layer :global(.dsh-pet-bubble .pet-bub-row) {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: pre-line;
+  -webkit-line-clamp: 16;
+  -webkit-box-orient: vertical;
+}
+
 /* The companion rests: so does the sign. */
 .layer[data-companion-rest] :global(.dsh-pet-root)::after {
   animation-play-state: paused;

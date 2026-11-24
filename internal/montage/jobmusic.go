@@ -106,8 +106,17 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 	return start, nil
 }
 
+// excerptVersion is how an excerpt is worked out from the song's analysis:
+// a new one makes the jobs' song steps, and what follows them, again.
+// frames-even: Excerpt.Frames rounds a half frame to even, as the fill
+// (ai/anas_montage/domain/fill.py) and filmFrame do; it rounded away from
+// zero, and an excerpt of 90.15 s was 2705 frames against the fill's 2704,
+// which failed the job at its fill.
+const excerptVersion = "frames-even"
+
 func (row songRow) excerptKey(start float64) string {
-	sum := sha256.Sum256([]byte(row.sha + "\x00" + row.analysis.Structure.Model + "\x00" + row.version + "\x00" + strconv.FormatFloat(start, 'g', -1, 64)))
+	sum := sha256.Sum256([]byte(row.sha + "\x00" + row.analysis.Structure.Model + "\x00" + row.version + "\x00" + strconv.FormatFloat(start, 'g', -1, 64) +
+		"\x00" + excerptVersion))
 	return "song:" + hex.EncodeToString(sum[:])
 }
 
@@ -208,7 +217,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		return Excerpt{}, err
 	}
 	return Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
-		Frames: int(math.Round(selection.Seconds * FilmRate))}, nil
+		Frames: filmFrame(selection.Seconds)}, nil
 }
 
 // Audio opens owner's song's copy, for the film's sound.
