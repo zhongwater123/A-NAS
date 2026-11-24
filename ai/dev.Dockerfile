@@ -15,7 +15,7 @@ RUN /opt/anas-ai/bin/pip install --no-cache-dir onnxruntime==1.31.0 protobuf==7.
 # The aesthetic scorer (docs/architecture/photo-ai.md#美学打分): PyTorch's CPU
 # build, from its own index as ai/requirements.in names it.
 RUN /opt/anas-ai/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-      torch==2.8.0+cpu torchvision==0.23.0+cpu \
+      torch==2.14.1+cpu torchvision==0.29.1+cpu \
  && /opt/anas-ai/bin/pip install --no-cache-dir transformers==5.20.2 safetensors==0.8.0 pydantic==2.13.4
 # Label calibration on the development machine only (ai/eval).
 RUN /opt/anas-ai/bin/pip install --no-cache-dir scikit-learn==1.7.2

@@ -95,7 +95,7 @@ case "${1:-}" in
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-      --tmpfs /run --tmpfs /run/lock -v "$work/out:/spike-out:ro" -v "$here:/spike:ro" "${key_mount[@]}" \
+      --tmpfs /run --tmpfs /run/lock -v "$work/out:/spike-out:ro" -v "$here:/spike:ro" -v "$here/../..:/src:ro" "${key_mount[@]}" \
       anas-systemd:trixie >/dev/null
     for _ in $(seq 1 50); do
       docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break

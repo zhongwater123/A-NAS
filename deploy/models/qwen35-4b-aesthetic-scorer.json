@@ -11,6 +11,7 @@
   "directory": "qwen35-4b-aesthetic-scorer-1.0.0",
   "members": [
     "MANIFEST.json",
+    "licenses/Qwen3.5-4B-LICENSE.txt",
     "model/head.pt",
     "model/tower/config.json",
     "model/tower/model.safetensors",

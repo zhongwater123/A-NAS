@@ -194,7 +194,8 @@ export function useMemberName() {
   const family = useFamily();
   const people = usePeople();
   return (accountId: string, username: string) => {
-    const profile = people.byId(accountId) ?? people.byUsername(username);
+    // A deleted account's name may belong to a newer account.
+    const profile = accountId ? people.byId(accountId) : people.byUsername(username);
     const name = profile?.nickname || profile?.username || username;
     const role = memberOf(family, accountId)?.role;
     return { name, role };

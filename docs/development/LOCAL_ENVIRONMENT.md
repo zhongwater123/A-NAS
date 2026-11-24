@@ -21,7 +21,7 @@
 | 检查、Qdrant 依赖、Root 集成测试、系统测试与 CI | [测试与验证](testing.md) |
 | 编辑 API、生成类型和响应校验 | [API 契约开发](api-contract.md) |
 | 模型测试、AI 运行环境、数据集与评估 | [AI 开发与评估](ai-development.md) |
-| Windows Fake 预览与会话隔离 | [fake-preview](../../.claude/skills/fake-preview/SKILL.md) |
+| Windows Fake 预览与会话隔离 | [fake-preview](../../.agents/skills/fake-preview/SKILL.md) |
 | macOS Fake 预览 | [Colima 预览](environments/macos.md#fake-预览) |
 | 实验 NAS 身份、SSH 指纹、密钥和连接配置 | [SSH 运行手册](../runbooks/bootstrap-experimental-nas-ssh.md) |
 | 暂存、安装和回滚实验 NAS 服务 | [实验存储运行手册](../runbooks/provision-v1.0.1-experimental-storage.md) |

@@ -8,10 +8,13 @@ import {
   formatScore,
   formatSeconds,
   lanes,
+  nudgeScore,
   orientationMatrix,
   parseScore,
+  pickScore,
   Stopwatch,
   share,
+  snapScore,
   stageAction,
   uprightSize,
 } from "./model";
@@ -68,6 +71,36 @@ describe("scores", () => {
     expect(parseScore("-1")).toBeUndefined();
     expect(formatScore(347)).toBe("3.47");
     expect(formatScore(0)).toBe("0.00");
+  });
+
+  it("keeps each scale's scores: a tenth, a whole point or a level", () => {
+    expect(snapScore(347, "tenths")).toBe(350);
+    expect(snapScore(349, "whole")).toBe(300);
+    expect(snapScore(351, "whole")).toBe(400);
+    expect([0, 199, 200, 399, 400, 500].map((score) => snapScore(score, "three"))).toEqual([
+      100, 100, 300, 300, 500, 500,
+    ]);
+    expect(formatScore(350, "tenths")).toBe("3.5");
+    expect(formatScore(300, "whole")).toBe("3");
+    expect(formatScore(300, "three")).toBe("中");
+    expect(parseScore("3.5", "tenths")).toBe(350);
+    expect(parseScore("3.47", "tenths")).toBeUndefined();
+    expect(parseScore("3", "whole")).toBe(300);
+    expect(parseScore("3.5", "whole")).toBeUndefined();
+    expect(pickScore(200, "three")).toBeUndefined();
+    expect(pickScore(500, "three")).toBe(500);
+    expect(pickScore(200, "whole")).toBe(200);
+  });
+
+  it("moves a score by one step of its scale with the arrows, from the middle when there is none", () => {
+    expect(nudgeScore(undefined, 10, "hundredths")).toBe(250);
+    expect(nudgeScore(347, -1, "hundredths")).toBe(346);
+    expect(nudgeScore(350, 1, "tenths")).toBe(360);
+    expect(nudgeScore(undefined, -10, "whole")).toBe(200);
+    expect(nudgeScore(500, 10, "whole")).toBe(500);
+    expect(nudgeScore(undefined, 10, "three")).toBe(300);
+    expect(nudgeScore(300, -10, "three")).toBe(100);
+    expect(nudgeScore(100, -10, "three")).toBe(100);
   });
 
   it("stacks thumbnails that would overlap and keeps apart ones that do not", () => {

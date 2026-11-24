@@ -26,7 +26,6 @@ from qv_head.release import (
     TOWER_PATH,
     ReleaseError,
     ReleaseManifest,
-    load_manifest,
     verify_files,
 )
 from qv_head.schema import Record
@@ -67,8 +66,7 @@ def decode_image(data: bytes) -> Image.Image:
 class Scorer:
     """A verified bundle loaded on one device."""
 
-    def __init__(self, root: Path, *, device: str = "cpu") -> None:
-        manifest = load_manifest(root)
+    def __init__(self, root: Path, manifest: ReleaseManifest, *, device: str = "cpu") -> None:
         verify_files(root, manifest, MODEL_FILES)
         precision = "bf16" if device.startswith("cuda") else "fp32"
         settings = manifest.tower.model_copy(update={"precision": precision})

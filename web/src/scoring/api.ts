@@ -93,8 +93,12 @@ export const claimThumbnailURL = (claimToken: string) => `${prefix}/claims/${enc
 export const anchorImageURL = (batchId: string, anchorId: number) =>
   `${prefix}/batches/${encodeURIComponent(batchId)}/anchors/${anchorId}/image`;
 
-// listDimensions is every 打分项 a batch can choose, in order.
-export const listDimensions = async () => (await call(client.GET("/api/v1/modules/scoring/me"))).dimensions;
+// listDimensions is every 打分项 a batch can choose: the built-in ones, then
+// the custom ones, oldest first.
+export const listDimensions = async () => (await call(client.GET("/api/v1/modules/scoring/admin/dimensions"))).items;
+// createDimension makes a custom 打分项 every later batch can choose too.
+export const createDimension = (body: { name: string; description: string }) =>
+  call(client.POST("/api/v1/modules/scoring/admin/dimensions", { body }));
 export const listSources = async () =>
   (await call(client.GET("/api/v1/modules/scoring/admin/sources"))).items.map((s) => s.name);
 export const listAdminBatches = async () => (await call(client.GET("/api/v1/modules/scoring/admin/batches"))).items;
@@ -138,6 +142,7 @@ const messages: Record<string, string> = {
   already_rated: "这张照片你已经打过分了",
   batch_importing: "批次还在导入",
   batch_in_use: "批次已有打分，不能删除，也不能改打分项",
+  dimension_exists: "已有同名的打分项",
   original_changed: "原图已不在，或已不是导入时的照片",
   photos_folder_missing: "共享空间里没有“照片打分”文件夹",
 };

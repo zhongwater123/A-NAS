@@ -98,12 +98,13 @@ func TestOnlyReasonablePicturesAreAccepted(t *testing.T) {
 		"dimensions": {huge, avatar.ErrTooLarge},
 		"bytes":      {make([]byte, avatar.MaxUploadBytes+1), avatar.ErrTooLarge},
 		"decoder":    {imagetest.PanickingPicture(), avatar.ErrUnsupported},
+		"palette":    {imagetest.OutsidePalettePicture(), avatar.ErrUnsupported},
 	} {
 		if _, err := avatar.Normalize(test.picture); !errors.Is(err, test.want) {
 			t.Errorf("%s: Normalize() error = %v, want %v", name, err, test.want)
 		}
 	}
-	// The decoder's panic is logged; pictures refused before or by the
-	// decoder are not.
+	// The decoder's panic is logged; pictures refused before, by or after
+	// the decoder are not.
 	imagetest.RequirePanicLogged(t, panics(), "avatar")
 }

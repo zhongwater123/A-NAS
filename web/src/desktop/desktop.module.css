@@ -831,23 +831,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
   cursor: none;
   background: #000;
 }
-.icon-files {
-  background: linear-gradient(155deg, #48ceff, #3174ed);
-}
-/* 照片打分: an amber tile, in its title bar too. */
-.icon-scoring,
-.app-window-scoring .window-app-icon {
-  background: linear-gradient(155deg, #ffbe55, #e8642c);
-}
-.icon-trash,
 .icon-settings {
   background: linear-gradient(155deg, #c9cdd3, #777e89);
 }
 .icon-resources {
   background: linear-gradient(155deg, #253346, #05090f);
-}
-.icon-store {
-  background: linear-gradient(155deg, #798dff, #4f52dd);
 }
 /* 影视中心 is the one black tile; its own sunset mark carries the colour. */
 .icon-video {
@@ -856,12 +844,12 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-video::before {
   opacity: 0.55;
 }
-.icon-download {
-  background: linear-gradient(155deg, #66eb83, #11b944);
-}
-/* 分享: warm orange, apart from 传输中心's green. */
+/* 分享: warm orange. */
 .icon-share {
   background: linear-gradient(155deg, #ffb25e, #f2621c);
+}
+.icon-montage {
+  background: linear-gradient(155deg, #8f7bff, #4b2fd6);
 }
 /* Docker's own whale and blue (#2496ed). */
 .icon-docker {
@@ -931,21 +919,6 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .launcher-icon.icon-photos svg {
   width: 36px;
   height: 36px;
-}
-/* 备份中心 owns the one teal tile; its shield is cut in the same deep teal. */
-.icon-backup {
-  background: linear-gradient(155deg, #3ddbc4, #0f8ea3);
-}
-.icon-music {
-  background: linear-gradient(155deg, #ff506d, #d92471);
-}
-.icon-websearch {
-  background: linear-gradient(155deg, #3d6bff, #1b2a8c);
-}
-/* 家庭中心: a warm coral tile behind a cream house, in its title bar too. */
-.icon-family,
-.app-window-family .window-app-icon {
-  background: linear-gradient(155deg, #ffad7a, #e8573a);
 }
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
@@ -1351,6 +1324,20 @@ button.net-rates {
   width: 20px;
   height: 20px;
 }
+/* These images include their own tile and fill each existing icon slot. */
+.window-app-icon:has(> svg[data-app-artwork]) {
+  background: none;
+}
+:is(.desktop-icon, .launcher-icon, .dock-icon):has(> svg[data-app-artwork])::before {
+  content: none;
+}
+:is(.desktop-icon, .launcher-icon, .dock-icon, .dock-preview-icon, .dock-preview-placeholder, .window-app-icon)
+  > svg[data-app-artwork] {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  filter: none;
+}
 /* A full-bleed mark covers the tile's hairline, so it draws its own. */
 .window-app-icon :global(.assistant-glyph) {
   width: 100%;
@@ -1403,9 +1390,6 @@ button.net-rates {
   container: assistantwindow / inline-size;
 }
 /* 备份中心 */
-.app-window-backup .window-app-icon {
-  background: linear-gradient(155deg, #3ddbc4, #0f8ea3);
-}
 .window-content-backup {
   position: relative;
   overflow: hidden;

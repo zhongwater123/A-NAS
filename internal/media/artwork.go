@@ -19,6 +19,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/imagerender"
 )
 
 // maxArtworkPixels bounds the memory artwork takes to decode twice: a larger
@@ -242,7 +243,7 @@ func (s *Service) scaleArtwork(ctx context.Context, r io.ReadSeeker, size artwor
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	decoded, err := imaging.Decode(r, imaging.AutoOrientation(true))
+	decoded, err := imagerender.Decode(r, imaging.AutoOrientation(true))
 	if err != nil {
 		return nil, decodeFailure(err)
 	}

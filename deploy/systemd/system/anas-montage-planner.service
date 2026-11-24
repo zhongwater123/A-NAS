@@ -1,0 +1,32 @@
+[Unit]
+Description=Hands the A-NAS montage center's planning to members' VNAS
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/architecture/montage-planning-session.md
+# For each member with a job waiting for a plan and a planning grant, it claims a round on
+# the montage center's socket, holds the planning as one conversation with the member's
+# planning instance (anas-assistant-plan@.service, reached through its root-only socket) and
+# reports how it ended; one round on the whole device at a time (montage-planner.py). Without
+# the administrator's model key the assistant is off, and so is this (the Host Agent starts
+# and stops it with the key).
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
+After=anas-host-agent.service anas-montage.service
+
+[Service]
+Type=simple
+# The Hermes runtime's Python has websockets, for Hermes's own JSON-RPC on /api/ws.
+ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py
+Restart=always
+RestartSec=10s
+# The rounds each planning grant has had.
+StateDirectory=anas-montage-planner
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+# The montage service's planning markers, the File Broker's planning grants and the
+# instances' secrets in the Host Agent's own state, which only root reads; a grant counts only
+# as root's own file there (montage-planner.py). The sockets it connects to are root's.
+ReadOnlyPaths=-/run/a-nas-montage -/var/lib/a-nas-host/assistant/plans -/var/lib/a-nas-host/assistant/tokens
+
+[Install]
+WantedBy=multi-user.target

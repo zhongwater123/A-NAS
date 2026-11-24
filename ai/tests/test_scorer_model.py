@@ -37,12 +37,11 @@ class RealScorerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.scorer = providers.AestheticScorer(SCORER, MANIFEST)
+        cls.addClassCleanup(cls.scorer.release)
         cls.photo = thumbnail()
 
     def test_describes_itself(self):
-        self.assertTrue(self.scorer.model.startswith(
-            "qwen35-4b-aesthetic-scorer-1.0.0@tea8d5b62a513+h18d96b2f91b8+torch-"), self.scorer.model)
-        self.assertTrue(self.scorer.model.endswith("+px65536-1048576"), self.scorer.model)
+        self.assertIn("qwen35-4b-aesthetic-scorer@1.0.0+manifest-f93c9be0", self.scorer.model)
         self.assertEqual(self.scorer.memory, 2 << 30)
 
     def test_scores_a_thumbnail_the_same_each_time(self):
@@ -71,7 +70,7 @@ class RealScorerTest(unittest.TestCase):
     def test_release_drops_the_model_and_the_next_photo_loads_it(self):
         before = self.scorer.score(self.photo, providers.RunHandle())
         self.scorer.release()
-        self.assertIsNone(self.scorer._scorer)
+        self.assertIsNone(self.scorer._process)
         self.assertEqual(before, self.scorer.score(self.photo, providers.RunHandle()))
 
 

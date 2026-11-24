@@ -86,7 +86,7 @@ func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 		t.Fatalf("pictured user = %#v", pictured)
 	}
 	withoutCSRF := *alice
-	withoutCSRF.csrf = "wrong"
+	withoutCSRF.csrf = ""
 	withoutCSRF.do(http.MethodDelete, "/api/v1/session/avatar", "", nil, http.StatusForbidden)
 
 	var session struct{ User accounts.User }

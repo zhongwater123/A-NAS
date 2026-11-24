@@ -32,6 +32,8 @@ const (
 	ConflictRename ConflictPolicy = "rename"
 	// ConflictReplace moves the existing file to the trash, where it can be
 	// restored, and puts the upload in its place. A folder is never replaced.
+	// Only the file that was there when the upload began is replaced: a name
+	// taken or a file put there while the bytes arrive keeps both.
 	ConflictReplace ConflictPolicy = "replace"
 )
 
@@ -90,6 +92,23 @@ type PendingUpload struct {
 	temporary string
 	path      string
 	written   atomic.Int64
+	// replaces is the file a ConflictReplace upload found under its name when
+	// it began, the only one it may move to the trash; nil when there was none.
+	replaces *replacedFile
+}
+
+// replacedFile identifies a file as it was when an upload set out to replace
+// it. Another file under the same name, or the same one written since, is not
+// the file the user agreed to replace.
+type replacedFile struct {
+	name    string
+	inode   uint64
+	size    int64
+	modTime time.Time
+}
+
+func (r replacedFile) is(info FileInfo) bool {
+	return info.Kind == KindFile && info.Inode == r.inode && info.Size == r.size && info.ModTime.Equal(r.modTime)
 }
 
 // Offset is how many bytes have been written.
@@ -156,13 +175,19 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 			return nil, err
 		}
 	}
+	var replaces *replacedFile
+	if request.Conflict == ConflictReplace {
+		if replaces, err = s.fileToReplace(ctx, space.ID, parentID, parentPath, request.Name); err != nil {
+			return nil, err
+		}
+	}
 	file, temporaryPath, err := s.fs.CreateTemp(ctx, parentPath, uploadTemporaryPrefix)
 	if err != nil {
 		return nil, err
 	}
 	upload := &PendingUpload{
 		SpaceID: space.ID, ParentID: parentID, Name: request.Name, Size: request.Size, Conflict: request.Conflict,
-		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath,
+		file: file, temporary: filepath.Base(temporaryPath), path: temporaryPath, replaces: replaces,
 	}
 	s.holdTemporary(upload.temporary, true)
 	return upload, nil
@@ -250,14 +275,8 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	temporary := filepath.Join(parentPath, upload.temporary)
 	s.keepModTime(ctx, temporary, upload.modTime)
 	replaced := false
-	if upload.Conflict == ConflictReplace {
-		existing := upload.Name
-		if twin, found, err := s.caseTwin(ctx, space.ID, upload.ParentID, upload.Name, ""); err != nil {
-			return CommittedUpload{}, err
-		} else if found && twin.Kind == EntryKindFile {
-			existing = twin.Name
-		}
-		if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, existing)); err != nil {
+	if upload.replaces != nil {
+		if replaced, err = s.trashForReplacement(ctx, actor, space.ID, root, upload.ParentID, filepath.Join(parentPath, upload.replaces.name), upload.replaces); err != nil {
 			return CommittedUpload{}, err
 		}
 	}
@@ -406,10 +425,34 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	return entry, target, nil
 }
 
+// fileToReplace returns the file that holds name in a folder, in any letter
+// case, as a ConflictReplace upload finds it when it begins. A folder is
+// never replaced, so it is not returned.
+func (s *Service) fileToReplace(ctx context.Context, spaceID, parentID, parentPath, name string) (*replacedFile, error) {
+	existing := name
+	if twin, found, err := s.caseTwin(ctx, spaceID, parentID, name, ""); err != nil {
+		return nil, err
+	} else if found && twin.Kind == EntryKindFile {
+		existing = twin.Name
+	}
+	info, err := s.fs.Lstat(ctx, filepath.Join(parentPath, existing))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Kind != KindFile {
+		return nil, nil
+	}
+	return &replacedFile{name: existing, inode: info.Inode, size: info.Size, modTime: info.ModTime}, nil
+}
+
 // trashForReplacement moves the file at target to the actor's trash so an
-// upload can take its place. A folder is kept, and the upload goes beside it.
+// upload or a restored item can take its place. A folder is kept, and so is a
+// file other than only, when only is set: the newcomer then goes beside it.
 // The caller's change must be in flight.
-func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, spaceID, root, parentID, target string) (bool, error) {
+func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, spaceID, root, parentID, target string, only *replacedFile) (bool, error) {
 	info, err := s.fs.Lstat(ctx, target)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -417,7 +460,7 @@ func (s *Service) trashForReplacement(ctx context.Context, actor accounts.User, 
 	if err != nil {
 		return false, err
 	}
-	if info.Kind != KindFile {
+	if info.Kind != KindFile || (only != nil && !only.is(info)) {
 		return false, nil
 	}
 	relative, err := filepath.Rel(root, target)

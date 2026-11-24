@@ -59,7 +59,7 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	volume := filepath.Join(root, "volume")
 	fs := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api, closeShares, err := configuredShares(ctx, Config{Mode: ModeFake, DataMount: volume}, users, fs, nil, logger)
+	api, _, closeShares, err := configuredShares(ctx, Config{Mode: ModeFake, DataMount: volume}, users, fs, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,15 +30,21 @@ import { Guide } from "./Guide";
 import { Loupe } from "./Loupe";
 import {
   type Answer,
-  clampScore,
   formatCount,
   formatScore,
+  hiddenKeys,
+  nudgeScore,
   Outbox,
   type OutboxState,
   overall,
   parseScore,
+  pickScore,
   Stopwatch,
+  scaleKeys,
+  snapScore,
   stageAction,
+  typeable,
+  typingRule,
 } from "./model";
 import { type Mark, Ruler } from "./Ruler";
 import styles from "./scoring.module.css";
@@ -71,8 +77,6 @@ const breakAfter = 40 * 60_000;
 const pauseResets = 5 * 60_000;
 // The ruler shows this many of the rater's latest scores.
 const marksShown = 12;
-// The arrow keys start here on an item that has no score yet.
-const startScore = 250;
 // A value picked with the pointer moves on after this long, time to see
 // where it landed; pressing again or a key keeps it.
 const advanceAfter = 350;
@@ -114,10 +118,11 @@ function sizeOf(element: Element | null) {
 }
 
 // answerOf is what the page sends for an answer given now: the kind and, for
-// a score, overall and the other 打分项 in points, how long the photo was
-// looked at, and the sizes it was seen at.
+// a score, the batch's first 打分项 and the others in points, how long the
+// photo was looked at, and the sizes it was seen at.
 function answerOf(
   kind: ScoringRatingInput["kind"],
+  first: string,
   values: Record<string, number> | undefined,
   watch: Stopwatch,
   stage: Element | null,
@@ -131,8 +136,8 @@ function answerOf(
     pixelRatio: Math.min(16, window.devicePixelRatio || 1),
   };
   if (kind === "score" && values) {
-    body.score = values[overall] / 100;
-    const others = Object.entries(values).filter(([id]) => id !== overall);
+    body.score = values[first] / 100;
+    const others = Object.entries(values).filter(([id]) => id !== first);
     if (others.length > 0) {
       body.scores = Object.fromEntries(others.map(([id, value]) => [id, value / 100])) as ScoringScores;
     }
@@ -153,9 +158,6 @@ const captionRoom = 40;
 // compareLinger, so a pointer crossing the gaps does not flicker.
 const compareDelay = 110;
 const compareLinger = 160;
-const keysHint = "← → 0.1　⇧ 0.01　0–5 整数分";
-const keysHintItems = "← → 0.1　⇧ 0.01　↑ ↓ 换项";
-const emptyHint = "在数轴上点选，或按 0–5";
 
 // fitIn is the size a photo of width by height is shown at in a box: whole,
 // as large as fits, never enlarged past its own size. With the box not
@@ -213,6 +215,17 @@ export function Stage({
   const outbox = outboxFor(batch.id);
   const dimensions = batch.dimensions;
   const several = dimensions.length > 1;
+  // The batch's scale; scoresHidden keeps every score from the rater, who sees
+  // the place on the number line alone.
+  const scale = batch.scale;
+  const scoresHidden = batch.hideDecimals;
+  const typing = typeable(scale, scoresHidden);
+  // A batch of 总分 alone shows no item names, as it always did; any other
+  // names what is being scored.
+  const named = several || dimensions[0].id !== overall;
+  // Answers keep the first item in score, and the ruler lands a scored photo
+  // at it.
+  const first = dimensions[0].id;
   const last = dimensions.length - 1;
   const [claims, setClaims] = useState<ScoringClaim[]>([]);
   const [revising, setRevising] = useState<ScoringClaim>();
@@ -314,7 +327,7 @@ export function Stage({
         live &&
         setMarks(
           items.map((recent) => {
-            const scores: Record<string, number> = { [overall]: Math.round(recent.score * 100) };
+            const scores: Record<string, number> = { [first]: Math.round(recent.score * 100) };
             for (const [id, score] of Object.entries(recent.scores)) {
               if (score !== undefined) scores[id] = Math.round(score * 100);
             }
@@ -326,7 +339,7 @@ export function Stage({
     return () => {
       live = false;
     };
-  }, [batch.id]);
+  }, [batch.id, first]);
 
   // The photos in the queue are decoded ahead of their turn.
   useEffect(() => {
@@ -456,7 +469,7 @@ export function Stage({
   }, [delivery.waiting]);
 
   const ready = Boolean(shown) && visible === shown?.token && !guide && !rest;
-  const typedValue = typed === undefined ? value : parseScore(typed);
+  const typedValue = typed === undefined ? value : parseScore(typed, scale);
   const typedValid = typed === undefined || typedValue !== undefined;
   // What the photo has with what is typed now.
   const withTyped: Values = typedValue === undefined ? values : { ...values, [dimension.id]: typedValue };
@@ -465,7 +478,7 @@ export function Stage({
   const canNext = ready && typedValid && complete(withTyped);
 
   const setValue = (hundredths: number) => {
-    setValues((current) => ({ ...current, [dimension.id]: clampScore(hundredths) }));
+    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale) }));
     setTyped(undefined);
   };
 
@@ -484,7 +497,7 @@ export function Stage({
   const answer = (kind: ScoringRatingInput["kind"], scores?: Record<string, number>) => {
     if (!shown || !ready) return;
     setArmed(false);
-    const { body, now } = answerOf(kind, scores, watch.current, root.current, image.current);
+    const { body, now } = answerOf(kind, first, scores, watch.current, root.current, image.current);
     outbox.push({ token: shown.token, body });
     answered.current.add(shown.token);
     endCompare();
@@ -665,14 +678,13 @@ export function Stage({
     event.stopPropagation();
     if (action.kind !== "zoom") setArmed(false);
     switch (action.kind) {
-      case "set":
-        setValue(action.score);
+      case "set": {
+        const picked = pickScore(action.score, scale);
+        if (picked !== undefined) setValue(picked);
         break;
+      }
       case "nudge":
-        setValues((current) => {
-          const now = current[dimension.id];
-          return { ...current, [dimension.id]: now === undefined ? startScore : clampScore(now + action.by) };
-        });
+        setValues((current) => ({ ...current, [dimension.id]: nudgeScore(current[dimension.id], action.by, scale) }));
         setTyped(undefined);
         break;
       case "item":
@@ -719,13 +731,18 @@ export function Stage({
   const boxHeight = side ? wallSize.height - captionRoom : wallSize.height;
   const rulerMarks: Mark[] = marks.map((mark) => ({
     token: mark.token,
-    score: mark.scores[dimension.id] ?? mark.scores[overall] ?? 0,
+    score: mark.scores[dimension.id] ?? mark.scores[first] ?? 0,
     width: mark.width,
     height: mark.height,
   }));
   // The last photo's score on this item, as a pale dot; not while changing it.
   const lastScore = revising ? undefined : marks.at(-1)?.scores[dimension.id];
-  const label = several ? dimension.name : "分数";
+  const label = named ? dimension.name : "分数";
+  // The keys that move a set score, under the reading.
+  const fine = scale === "hundredths" || scale === "tenths";
+  const keysHint =
+    (scoresHidden && fine ? hiddenKeys[scale] : scaleKeys[scale]) +
+    (several ? "　↑ ↓ 换项" : fine && !scoresHidden ? "　0–5 整数分" : scale === "whole" ? "　0–5" : "");
   let body;
   if (loading) {
     body = (
@@ -762,7 +779,7 @@ export function Stage({
     );
   } else if (shown && visible === shown.token) {
     const fitted = fitIn(shown.width, shown.height, boxWidth, boxHeight);
-    const sideScore = side && (side.scores[dimension.id] ?? side.scores[overall] ?? 0);
+    const sideScore = side && (side.scores[dimension.id] ?? side.scores[first] ?? 0);
     body = (
       <>
         {/* A click looks at the photo at 100% and another comes back; Z held does the same from the keyboard. */}
@@ -793,15 +810,19 @@ export function Stage({
             <img
               key={side.token}
               src={claimImageURL(side.token)}
-              alt={`你打过${several ? dimension.name : ""} ${formatScore(sideScore)} 分的照片`}
+              alt={
+                scoresHidden
+                  ? `你打过${named ? dimension.name : ""}的照片`
+                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale)} 分的照片`
+              }
               draggable={false}
               className={styles.scPrint}
               style={fitIn(side.width, side.height, boxWidth, boxHeight)}
             />
             <figcaption className={styles.scCaption}>
               你打过
-              {several && <em>{dimension.name}</em>}
-              <b>{formatScore(sideScore)}</b>
+              {named && <em>{dimension.name}</em>}
+              {!scoresHidden && <b>{formatScore(sideScore, scale)}</b>}
             </figcaption>
           </figure>
         )}
@@ -904,7 +925,15 @@ export function Stage({
                       onClick={() => go(index)}
                     >
                       <span>{candidate.name}</span>
-                      <b>{score === undefined ? "—" : formatScore(score)}</b>
+                      {score === undefined ? (
+                        <b>—</b>
+                      ) : scoresHidden ? (
+                        <b className={styles.scItemSet} aria-label="已选">
+                          ●
+                        </b>
+                      ) : (
+                        <b>{formatScore(score, scale)}</b>
+                      )}
                     </button>
                   </li>
                 );
@@ -918,6 +947,8 @@ export function Stage({
             last={lastScore}
             active={side?.token}
             arriving={arriving}
+            scale={scale}
+            hidden={scoresHidden}
             onChange={(next) => {
               setArmed(false);
               setValue(next);
@@ -930,52 +961,76 @@ export function Stage({
           />
         </div>
         <div className={styles.scReading}>
-          {several && (
+          {named && (
             <div className={styles.scWhich} aria-live="polite">
               <strong key={dimension.id}>{dimension.name}</strong>
-              <small>
-                {item + 1} / {dimensions.length}
-              </small>
+              {several && (
+                <small>
+                  {item + 1} / {dimensions.length}
+                </small>
+              )}
             </div>
           )}
-          <div className={styles.scScoreLine}>
-            <input
-              className={styles.scScoreInput}
-              value={typed ?? (value === undefined ? "" : formatScore(value))}
-              placeholder="—"
-              inputMode="decimal"
-              aria-label={`${label}，0 到 5，最多两位小数`}
-              aria-invalid={!typedValid}
-              onChange={(event) => {
-                setArmed(false);
-                setTyped(event.target.value);
-                const parsed = parseScore(event.target.value);
-                if (parsed !== undefined) setValues((current) => ({ ...current, [dimension.id]: parsed }));
-              }}
-              onBlur={() => typedValid && setTyped(undefined)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  confirm();
-                } else if (event.key === "Escape") {
-                  setTyped(undefined);
-                  root.current?.focus({ preventScroll: true });
-                }
-              }}
-            />
-            <span className={styles.scOutOf}>/ 5</span>
-          </div>
+          {named && dimension.description && <p className={styles.scAbout}>{dimension.description}</p>}
+          {!typing && (
+            <div className={styles.scScoreLine} aria-live="polite">
+              {value === undefined ? (
+                <span className={styles.scNoScore}>—</span>
+              ) : scoresHidden ? (
+                <span className={styles.scPlaced}>
+                  <i aria-hidden="true" />
+                  已选
+                </span>
+              ) : (
+                <>
+                  <span className={styles.scLevel}>{formatScore(value, scale)}</span>
+                  <span className={styles.scOutOf}>{value / 100} 分</span>
+                </>
+              )}
+            </div>
+          )}
+          {typing && (
+            <div className={styles.scScoreLine}>
+              <input
+                className={styles.scScoreInput}
+                value={typed ?? (value === undefined ? "" : formatScore(value, scale))}
+                placeholder="—"
+                inputMode="decimal"
+                aria-label={`${label}，${typingRule[scale]}`}
+                aria-invalid={!typedValid}
+                onChange={(event) => {
+                  setArmed(false);
+                  setTyped(event.target.value);
+                  const parsed = parseScore(event.target.value, scale);
+                  if (parsed !== undefined) setValues((current) => ({ ...current, [dimension.id]: parsed }));
+                }}
+                onBlur={() => typedValid && setTyped(undefined)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    confirm();
+                  } else if (event.key === "Escape") {
+                    setTyped(undefined);
+                    root.current?.focus({ preventScroll: true });
+                  }
+                }}
+              />
+              <span className={styles.scOutOf}>/ 5</span>
+            </div>
+          )}
           <p className={`${styles.scSay}${typedValid ? "" : ` ${styles.error}`}`}>
             {typedValid ? (
               typedValue === undefined ? (
-                emptyHint
-              ) : several ? (
-                keysHintItems
+                scale === "three" ? (
+                  "点选一档，或按 1、3、5"
+                ) : (
+                  "在数轴上点选，或按 0–5"
+                )
               ) : (
                 keysHint
               )
             ) : (
-              <span role="alert">0 到 5 之间，最多两位小数</span>
+              <span role="alert">{typingRule[scale]}</span>
             )}
           </p>
           <button

@@ -2,6 +2,7 @@ package systemupdate
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,14 +22,24 @@ type Memory struct {
 }
 
 // NewMemory starts with current installed and candidate ready to install.
-func NewMemory(current, candidate string, delay time.Duration) *Memory {
+// With image, the device runs the A-NAS image: the candidate brings a new
+// base, which waits for a restart once installed.
+func NewMemory(current, candidate string, delay time.Duration, image bool) *Memory {
 	now := time.Now()
-	return &Memory{delay: delay, state: State{
+	m := &Memory{delay: delay, state: State{
 		Phase: PhaseReady, Current: current, Candidate: candidate, Previous: "", Suites: []string{"release", "dev"},
 		CheckedAt: now.Add(-20 * time.Minute), InstalledAt: now.Add(-49 * time.Hour), Settings: DefaultSettings(),
 		Records: []Record{{At: now.Add(-49 * time.Hour), Kind: RecordUpdated, Version: current, By: "owner"}},
 	}}
+	if image {
+		m.state.Suites = nil
+		m.state.Image = &Image{Base: "1001", Product: "1001", Candidate: "1002", Restart: true}
+	}
+	return m
 }
+
+// broken reports whether a version is one the memory service fails.
+func broken(version string) bool { return strings.HasSuffix(version, "+broken") }
 
 // settle completes an operation whose time has come.
 func (m *Memory) settle() {
@@ -63,8 +74,12 @@ func (m *Memory) RequestSystemUpdate(_ context.Context, request Request) (Status
 		m.finish = func(s *State) { s.Phase, s.DownloadedBytes = PhaseReady, s.DownloadBytes }
 	case RequestInstall:
 		state.Phase, state.Target, state.From, state.By, state.StartedAt = PhaseInstalling, state.Candidate, state.Current, request.By, now
+		if state.Image != nil && state.Image.Restart {
+			m.finish = func(s *State) { s.Phase = PhaseRestartPending }
+			break
+		}
 		m.finish = func(s *State) {
-			if len(s.Target) > 7 && s.Target[len(s.Target)-7:] == "+broken" {
+			if broken(s.Target) {
 				s.Reject(s.Target)
 				s.Problem = &Problem{Code: ProblemCheck, Detail: "FAIL anas-api.service is failed; see journalctl -u anas-api.service"}
 				s.Record(Record{At: time.Now(), Kind: RecordRolledBack, Version: s.Target, From: s.From, By: s.By, Problem: s.Problem})
@@ -73,6 +88,26 @@ func (m *Memory) RequestSystemUpdate(_ context.Context, request Request) (Status
 				s.Record(Record{At: time.Now(), Kind: RecordUpdated, Version: s.Target, From: s.From, By: s.By})
 				s.Previous, s.Current, s.InstalledAt, s.Phase, s.Problem = s.From, s.Target, time.Now(), PhaseUpToDate, nil
 			}
+			s.Candidate, s.Target, s.From, s.By = "", "", "", ""
+		}
+	case RequestRestart:
+		if state.Phase != PhaseRestartPending {
+			m.finish = nil
+			break
+		}
+		// The device restarts; the page loses the service meanwhile.
+		m.finish = func(s *State) {
+			if broken(s.Target) {
+				s.Reject(s.Target)
+				s.Problem = &Problem{Code: ProblemBoot, Detail: "the base 1002 did not pass its boot check; systemd-boot went back to 1001"}
+				s.Record(Record{At: time.Now(), Kind: RecordRolledBack, Version: s.Target, From: s.From, By: s.By, Problem: s.Problem})
+				s.Phase = PhaseRolledBack
+			} else {
+				s.Record(Record{At: time.Now(), Kind: RecordUpdated, Version: s.Target, From: s.From, By: s.By})
+				s.Previous, s.Current, s.InstalledAt, s.Phase, s.Problem = s.From, s.Target, time.Now(), PhaseUpToDate, nil
+				s.Image.Base, s.Image.Product = s.Image.Candidate, s.Image.Candidate
+			}
+			s.Image.Candidate, s.Image.Restart = "", false
 			s.Candidate, s.Target, s.From, s.By = "", "", "", ""
 		}
 	case RequestRevert:

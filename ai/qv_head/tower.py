@@ -17,7 +17,6 @@ from transformers import AutoImageProcessor
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5VisionModel
 
 from qv_head.config import TowerSettings
-from qv_head.weights import TOWER_DIR, TOWER_WEIGHTS_FILE, verify_tower
 
 
 class TowerError(ValueError):
@@ -60,7 +59,7 @@ class TowerFeatures:
         self.settings = settings
         self.device = device
         hidden = model.config.hidden_size
-        self.layer_names = tuple(f"block{i + 1}" for i in settings.taps) + ("merger",)
+        self.layer_names = (*(f"block{i + 1}" for i in settings.taps), "merger")
         self.layer_dims = (hidden,) * len(settings.taps) + (
             model.config.out_hidden_size,
         )
@@ -120,14 +119,3 @@ def open_tower(tower_dir: Path, settings: TowerSettings, device: str) -> TowerFe
     )
     processor = AutoImageProcessor.from_pretrained(tower_dir)
     return TowerFeatures(model, processor, settings, device)
-
-
-def load_tower(
-    models_dir: Path, settings: TowerSettings, device: str
-) -> tuple[TowerFeatures, str]:
-    """Verify and load the extracted tower; returns it and its weights hash."""
-
-    check_runtime(device, settings.precision)
-    weights = verify_tower(models_dir)
-    features = open_tower(models_dir / TOWER_DIR, settings, device)
-    return features, weights.find(TOWER_WEIGHTS_FILE).sha256

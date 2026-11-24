@@ -8,7 +8,6 @@ std turn it back into the 1-5 scale.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -16,7 +15,7 @@ import torch
 from torch import nn
 
 from qv_head.config import JobConfig
-from qv_head.data import sha256_file
+from qv_head.release import sha256_file
 from qv_head.schema import EVA_DIMENSIONS
 
 CHECKPOINT_FORMAT = 1
@@ -70,41 +69,6 @@ class FeatureHead(nn.Module):
         """z-scores -> 1-5 scores (not clipped)."""
 
         return z * self.target_std + self.target_mean
-
-
-def build_head(
-    config: JobConfig, train_features: torch.Tensor, train_targets: torch.Tensor
-) -> FeatureHead:
-    """A fresh head with feature and target statistics of the train rows."""
-
-    return FeatureHead(
-        train_features.shape[1],
-        hidden_dim=config.head.hidden_dim,
-        dropout=config.head.dropout,
-        feature_mean=train_features.mean(dim=0),
-        feature_std=train_features.std(dim=0),
-        target_mean=train_targets.mean(dim=0).tolist(),
-        target_std=train_targets.std(dim=0).tolist(),
-    )
-
-
-def save_head(
-    path: Path, head: FeatureHead, config: JobConfig, tower_sha256: str
-) -> None:
-    """Write the head and what it was trained on; replaces atomically."""
-
-    temporary = path.with_suffix(".tmp")
-    torch.save(
-        {
-            "format": CHECKPOINT_FORMAT,
-            "config": config.model_dump(mode="json"),
-            "feature_dim": int(head.feature_mean.shape[0]),
-            "tower_sha256": tower_sha256,
-            "state_dict": head.state_dict(),
-        },
-        temporary,
-    )
-    os.replace(temporary, path)
 
 
 def load_head(path: Path, sha256: str) -> tuple[FeatureHead, JobConfig, str]:

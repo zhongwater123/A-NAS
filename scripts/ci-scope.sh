@@ -4,7 +4,8 @@
 # prints docs-only=false otherwise, and always for a push to main.
 #
 # Documentation is whatever is under docs/, a Markdown file at the root, and the
-# project skills' Markdown under .claude/skills/. Markdown elsewhere ships with
+# project skills' Markdown under .agents/skills/ and its copy in .claude/skills/
+# (AGENTS.md). Markdown elsewhere ships with
 # the product (the assistant's skills, the app catalog's notices) and counts as
 # code. A failure prints nothing, and CI then runs every check.
 #
@@ -31,7 +32,7 @@ fi
 docs_only=true
 while IFS= read -r path; do
   case $path in
-    docs/* | .claude/skills/*.md) ;;
+    docs/* | .agents/skills/*.md | .claude/skills/*.md) ;;
     */*) docs_only=false ;;
     *.md) ;;
     *) docs_only=false ;;

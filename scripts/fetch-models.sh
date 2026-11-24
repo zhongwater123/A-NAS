@@ -56,6 +56,8 @@ layout() {
     dinov2-small) echo pets/dinov2-small ;;
     qwen3.5-4b-q4_k_m | qwen3.5-4b-mmproj-f16) echo ocr/qwen3.5-4b ;;
     qwen35-4b-aesthetic-scorer) echo aesthetic/qwen35-4b-aesthetic-scorer ;;
+    allin1-harmonix-all) echo montage-music/allin1 ;;
+    htdemucs) echo montage-music/htdemucs ;;
     *) return 1 ;;
   esac
 }

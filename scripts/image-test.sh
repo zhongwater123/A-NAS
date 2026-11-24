@@ -2,24 +2,29 @@
 # The device image's test (ADR 0034 step 5, docs/runbooks/build-device-image.md):
 # builds images of the release under test with scripts/build-image.sh from a
 # signed repository, as the system test makes one, writes the first to a VM's
-# disk and updates it the way a device is updated, with systemd-sysupdate
-# reading the pushed update files:
+# disk and updates it the way a device is updated: pushes into the device's
+# staging directory, and requests to its update service as the Host Agent
+# leaves them (docs/specs/system-update.md):
 #
 #   1001  the release under test: the disk a new device gets
 #   1002  the next release (a Product Service with one more database step):
 #         a new product only, the base and the content unchanged
-#   1003  a base that differs by a file: a new base, which needs a restart
-#   1004  a base whose check fails: systemd-boot goes back to 1003
+#   1003  a base that differs by a file, with the next release's product
+#         under a version of its own: a new base, which needs a restart
+#   1004  a base whose check fails, under a third version, installed in the
+#         install window: the device restarts at once, and systemd-boot goes
+#         back to the base before
 #
 # It checks that the disk boots with the product and every kind of content
 # merged, and the root file system grown to the disk; that the product
-# updates without a restart, its database step applied, and goes back; that a
-# new base is blessed after its check, even with a check that failed before
-# it, and a broken one is left after three tries; that a power cut while a
-# base is written leaves the device on its version; that unchanged content is
-# not copied again; that a new base's /etc files and package accounts reach
-# the device and a removed /etc file stays removed; and that /etc,
-# /var/lib/a-nas and the data volume stay.
+# updates without a restart, its database step applied, and goes back; that
+# a power cut while a base is written leaves the device on its version and
+# the install is offered again; that a new base waits for a restart, starts
+# its own product and is blessed after its check, and that going back from
+# it restarts into the base before with its product; that a broken base is
+# left after three tries for the base before and its product, and the update
+# service says so; that unchanged content and an unchanged base are not
+# written again; and that /etc and /var/lib/a-nas stay.
 #
 # Usage: make packages && scripts/image-test.sh [STEP...]
 # Steps: build vm clean (default: build vm). IMAGE_TEST_DIR (default
@@ -56,9 +61,11 @@ step_build() {
   # The next release's Product Service embeds the web UI that make web-build
   # leaves here; without it, it stops at start.
   [[ -f "$repo_root/internal/webui/dist/index.html" ]] || { echo "the web UI is not built: run make packages" >&2; return 2; }
-  local version next
+  local version next next2 next3
   version=$(dpkg-deb --field "${products[0]}" Version)
-  next=$version+next
+  # next2 and next3 are the next release's programs under versions of their
+  # own: the device does not take a version it went back from again.
+  next=$version+next next2=$version+next2 next3=$version+next3
   local repository=$small/repository gnupg=$small/gnupg
   rm -rf -- "$small" "$T/updates" "$T"/stage-* "$T/logs"
   mkdir -p "$small"
@@ -70,7 +77,9 @@ step_build() {
   (cd "$repo_root" && go build -tags rollbacktest -trimpath -ldflags "-X main.version=$next" \
     -o "$small/next-programs/anas-api" ./cmd/anas-api)
   bash "$repo_root/scripts/build-packages.sh" "$small/next" "$next" "$small/next-programs" >/dev/null
-  for release in "$version" "$next"; do
+  bash "$repo_root/scripts/build-packages.sh" "$small/next2" "$next2" "$small/next-programs" >/dev/null
+  bash "$repo_root/scripts/build-packages.sh" "$small/next3" "$next3" "$small/next-programs" >/dev/null
+  for release in "$version" "$next" "$next2" "$next3"; do
     bash "$repo_root/scripts/apt-repository.sh" keyring "$small/keyring" "$release" "$gnupg" >/dev/null
   done
   local content=$repo_root/build/stand-in-content upstream
@@ -83,6 +92,8 @@ step_build() {
   bash "$repo_root/scripts/apt-repository.sh" publish "$repository" dev "$gnupg" \
     "$repo_root"/build/packages/a-nas{,-host,-console,-docker-policy}_*.deb \
     "$small"/next/a-nas{,-host,-console,-docker-policy}_*.deb \
+    "$small"/next2/a-nas{,-host,-console,-docker-policy}_*.deb \
+    "$small"/next3/a-nas{,-host,-console,-docker-policy}_*.deb \
     "$content"/*.deb "$small"/keyring/*.deb "${upstream[@]}" >/dev/null
 
   # The test's own additions to the base: SSH for the test, an /etc file that
@@ -105,24 +116,25 @@ step_build() {
   # build SEQUENCE VERSION EXTRA: one image, then what a device would have
   # seen after it: each directory's signed SHA256SUMS and the files there.
   # Nothing this test publishes is pruned, so the files stay in updates/.
+  local updates=$T/updates/x86-64
   build() {
     ANAS_IMAGE_EXTRA=$extra/$3 bash "$repo_root/scripts/build-image.sh" "$repository" "$2" "$1" "$T/updates" "$gnupg"
     local stage=$T/stage-$1 dir
-    for dir in "$T"/updates/os "$T"/updates/product "$T"/updates/content-*; do
+    for dir in "$updates"/os "$updates"/product "$updates"/content-*; do
       [[ -d "$dir" ]] || continue
       mkdir -p "$stage/$(basename "$dir")"
       cp "$dir"/SHA256SUMS "$dir"/SHA256SUMS.gpg "$stage/$(basename "$dir")/"
     done
-    (cd "$T/updates" && find . -type f ! -name 'SHA256SUMS*' -printf '%P\n' | LC_ALL=C sort) >"$stage/files"
+    (cd "$updates" && find os product content-* -type f ! -name 'SHA256SUMS*' | LC_ALL=C sort) >"$stage/files"
     # install/ keeps the latest disk alone; the VM starts from the first,
     # kept on this machine's own disk: a container reading gigabytes from a
     # Windows drive met a read error.
-    if [[ $1 == 1001 ]]; then mv "$T/updates/install/a-nas_1001.raw.zst" "$small/first-disk.raw.zst"; fi
+    if [[ $1 == 1001 ]]; then mv "$updates/install/a-nas_1001.raw.zst" "$small/first-disk.raw.zst"; fi
   }
   build 1001 "$version" base
   build 1002 "$next" base
-  build 1003 "$next" 1003
-  build 1004 "$next" 1004
+  build 1003 "$next2" 1003
+  build 1004 "$next3" 1004
 }
 
 step_vm() {

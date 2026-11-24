@@ -14,18 +14,22 @@
 # Debian version stays in the release files. Each SEQUENCE is published once:
 # one that is not above the last one UPDATES published is refused.
 #
-# UPDATES keeps the device's update files from release to release, each kind
-# in a directory of its own with a SHA256SUMS that the key in GNUPGHOME signs
-# (scripts/apt-repository.sh sums), as systemd-sysupdate reads them:
+# UPDATES keeps the device's update files from release to release, in a
+# directory per architecture (x86-64/), each kind in a directory of its own
+# with a SHA256SUMS that the key in GNUPGHOME signs (scripts/apt-repository.sh
+# sums). A device's update service reads them (docs/specs/system-update.md),
+# and systemd-sysupdate writes the base:
 #   os/                 the base image: Debian, a-nas-host and a-nas-console,
 #                       as a /usr partition and a UKI, published only when what
 #                       it holds changed, numbered by the release that changed it
-#   product/            the a-nas package as a system extension, every release
+#   product/            the a-nas package as a system extension, every release,
+#                       and the release file a-nas-release_SEQUENCE.json: the
+#                       base, product and content of the release, each file
+#                       with its size and SHA-256
 #   content-ROLE/       each kind of content (scripts/lib/content.sh) as a
 #                       system extension, published when the release pins new
-#                       content, numbered by that release; a device keeps the
-#                       last two of a kind merged side by side, so a product
-#                       from before the change still finds its own
+#                       content, numbered by that release; a device keeps what
+#                       its product and the one before use merged side by side
 #   install/            the whole disk of this release, to write to a new
 #                       device's system disk
 #   index/              what was published, for the next release to compare
@@ -42,14 +46,18 @@
 set -euo pipefail
 shopt -s inherit_errexit
 
+# The image's architecture as systemd names it (mkosi.conf's Architecture=):
+# it names the directory of update files and the extensions' ARCHITECTURE=.
+arch=x86-64
+
 if [[ "${1:-}" != --inside ]]; then
   [[ $# -eq 5 ]] || { sed -n '5,6p' "$0" >&2; exit 2; }
   repo_root=$(cd "$(dirname "$0")/.." && pwd)
   repository=$(cd "$1" && pwd)
   version=$2 sequence=$3
   [[ "$sequence" =~ ^[1-9][0-9]*$ ]] || { echo "SEQUENCE is a number, not $sequence" >&2; exit 2; }
-  mkdir -p "$4"
-  updates=$(cd "$4" && pwd)
+  mkdir -p "$4/$arch"
+  updates=$(cd "$4/$arch" && pwd)
   gnupg=$(cd "$5" && pwd)
   last=$(cat "$updates/index/sequence" 2>/dev/null || echo 0)
   ((sequence > last)) || { echo "$updates published image $last already: SEQUENCE $sequence must be above it" >&2; exit 2; }
@@ -102,6 +110,33 @@ if [[ "${1:-}" != --inside ]]; then
   image_builder_start "$work"
   image_builder_run -v "$repo_root:/src:ro" -v "$inputs:/inputs:ro" -v "$updates:/updates" -- \
     bash /src/scripts/build-image.sh --inside "$version" "$sequence" "$(id -u):$(id -g)"
+
+  # The release file: which base, product and content this release is, each
+  # file with its size and SHA-256. The device's update service checks it
+  # against the product directory's signed SHA256SUMS, and each file against
+  # it (internal/systemupdate/updater/image.go). Those of releases whose
+  # product is gone go with it.
+  read -r base _ <"$updates/index/base"
+  files=("product/a-nas-product_$sequence.raw" "os/a-nas_$base.usr.raw.xz" "os/a-nas_$base.efi")
+  content='{}'
+  while read -r role pinned _; do
+    content=$(jq -c --arg role "$role" --arg pinned "$pinned" '. + {($role): $pinned}' <<<"$content")
+    files+=("content-$role/a-nas-content-${role}_$pinned.raw")
+  done <"$updates/index/content"
+  listed='{}'
+  for name in "${files[@]}"; do
+    listed=$(jq -c --arg name "$name" --argjson size "$(stat -c %s "$updates/$name")" \
+      --arg sum "$(sha256sum "$updates/$name" | cut -d ' ' -f 1)" '. + {($name): {size: $size, sha256: $sum}}' <<<"$listed")
+  done
+  jq -n --arg sequence "$sequence" --arg version "$version" --arg arch "$arch" --arg host "$(cat "$updates/index/host")" \
+    --arg base "$base" --argjson content "$content" --argjson files "$listed" \
+    '{sequence: $sequence, version: $version, architecture: $arch, hostId: $host, base: $base, content: $content, files: $files}' \
+    >"$updates/product/a-nas-release_$sequence.json"
+  for file in "$updates"/product/a-nas-release_*.json; do
+    kept=${file##*/a-nas-release_}
+    [[ -f "$updates/product/a-nas-product_${kept%.json}.raw" ]] || rm -f -- "$file"
+  done
+
   # Every directory systemd-sysupdate reads gets a signed SHA256SUMS, in one
   # container, so that the passphrase is given once.
   dirs=()
@@ -185,6 +220,7 @@ host_id=$(
     cd "$config" && find . -type f | LC_ALL=C sort | xargs sha256sum
   } | sha256sum | cut -c 1-32
 )
+echo "$host_id" >"$U/index/host"
 
 # The content: a role whose packages are those of the last image keeps its
 # file and number; a role with new content gets this release's. Each version
@@ -207,7 +243,7 @@ for role_dir in /inputs/content/*/; do
   rm -rf -- "$tree"
   mkdir -p "$tree" "$dir"
   for package in $packages; do dpkg-deb -x "/inputs/content/$role/$package" "$tree"; done
-  extension "${name}_$sequence" "$tree" "$dir/${name}_$sequence.raw" ID=_any
+  extension "${name}_$sequence" "$tree" "$dir/${name}_$sequence.raw" ID=_any "ARCHITECTURE=$arch"
   rm -rf -- "$tree"
   content_version[$role]=$sequence
   summary+=("content $role $sequence")
@@ -219,45 +255,27 @@ for role in "${!content_version[@]}"; do
 done | LC_ALL=C sort >"$U/index/content.new"
 mv "$U/index/content.new" "$U/index/content"
 
-# The product: the a-nas package as an extension, with the update definitions
-# of its content, so that a release that pins a new kind of content brings
-# its definition along.
+# The product: the a-nas package as an extension. Its release file names its
+# Debian version and sequence, and what it needs from the base.
 tree=$W/product
 rm -rf -- "$tree"
 mkdir -p "$tree"
 dpkg-deb -x /inputs/product/a-nas.deb "$tree"
-for role in "${!content_version[@]}"; do
-  defs=$tree/usr/lib/sysupdate.content-$role.d
-  mkdir -p "$defs"
-  cat >"$defs/50-content.transfer" <<EOF
-# $role, a system extension of its own (scripts/build-image.sh). Its last two
-# versions are merged side by side, as apt keeps the content of an older
-# release installed: a product from before a change still finds its own.
-[Source]
-Type=url-file
-Path=file:///var/lib/a-nas-updates/content-$role/
-MatchPattern=a-nas-content-${role}_@v.raw
-
-[Target]
-Type=regular-file
-Path=/var/lib/extensions
-MatchPattern=a-nas-content-${role}_@v.raw
-InstancesMax=2
-EOF
-done
 extension a-nas-product "$tree" "$U/product/a-nas-product_$sequence.raw" ID=debian VERSION_ID=13 \
-  "A_NAS_VERSION=$version" "A_NAS_HOST_ID=$host_id"
+  "ARCHITECTURE=$arch" "A_NAS_VERSION=$version" "A_NAS_SEQUENCE=$sequence" "A_NAS_HOST_ID=$host_id"
 rm -rf -- "$tree"
 summary+=("product $sequence")
 find "$U/product" -maxdepth 1 -name 'a-nas-product_*.raw' | sort -V | head -n -5 | xargs -r rm -f --
 
 # What a new device starts with: this release's product and content, where
-# systemd-sysext and the update definitions expect them.
+# systemd-sysext and the update service expect them, and the product linked
+# to this base (a-nas-product-select.service).
 first=$W/first
 rm -rf -- "$first"
-mkdir -p "$first/var/lib/a-nas-sysext" "$first/var/lib/extensions"
+mkdir -p "$first/var/lib/a-nas-sysext" "$first/var/lib/extensions" "$first/var/lib/a-nas-image/product"
 cp "$U/product/a-nas-product_$sequence.raw" "$first/var/lib/a-nas-sysext/"
 ln -s "/var/lib/a-nas-sysext/a-nas-product_$sequence.raw" "$first/var/lib/extensions/a-nas-product.raw"
+ln -s "/var/lib/a-nas-sysext/a-nas-product_$sequence.raw" "$first/var/lib/a-nas-image/product/$sequence"
 for role in "${!content_version[@]}"; do
   cp "$U/content-$role/a-nas-content-${role}_${content_version[$role]}.raw" "$first/var/lib/extensions/"
 done

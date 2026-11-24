@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import type { FileEntry, Space } from "../api.generated";
+import { BackupCenterIcon } from "../desktop/AppIconArtwork";
 import { listSpaces } from "../files/api";
 import type { TransferLocation } from "../transfers/api";
 import { Dialog, Spinner, type Toast, useToasts } from "../ui/workspace";
@@ -25,7 +26,6 @@ import {
   type Snapshot,
   type SnapshotSchedule,
 } from "./api";
-import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import styles from "./backup.module.css";
 import { ExternalPage } from "./ExternalPage";
 import { FindPage } from "./FindPage";
@@ -264,7 +264,7 @@ export function BackupCenter({
           <nav className={styles.bkSidebar} aria-label="备份中心导航">
             <div className={styles.bkBrand}>
               <span className={styles.bkBrandMark}>
-                <BackupCenterGlyph aria-hidden="true" />
+                <BackupCenterIcon />
               </span>
               <div>
                 <strong>备份中心</strong>
@@ -323,7 +323,7 @@ export function BackupCenter({
                 <PanelLeft />
               </button>
               <span className={`${styles.bkBrandMark} ${styles.small} ${workspaceStyles.small}`}>
-                <BackupCenterGlyph aria-hidden="true" />
+                <BackupCenterIcon />
               </span>
               <strong>备份中心</strong>
             </div>

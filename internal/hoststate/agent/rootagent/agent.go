@@ -5,6 +5,7 @@
 package rootagent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,25 +20,30 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/systemupdate"
 	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
 type handler struct {
-	observer    hoststate.Observer
-	volume      datavolume.VolumeExecutor
-	credentials accountid.CredentialProvisioner
-	identities  accountid.IdentitySynchronizer
-	viewing     accountid.ViewingProvisioner
-	apps        appid.Host
-	snapshots   filesystem.SnapshotBackend
-	systemLogs  systemlog.Reader
-	webSearch   websearchswitch.Switch
+	observer     hoststate.Observer
+	volume       datavolume.VolumeExecutor
+	credentials  accountid.CredentialProvisioner
+	identities   accountid.IdentitySynchronizer
+	viewing      accountid.ViewingProvisioner
+	apps         appid.Host
+	snapshots    filesystem.SnapshotBackend
+	systemLogs   systemlog.Reader
+	webSearch    websearchswitch.Switch
+	phoneHotspot phonehotspot.Switch
+	// assistantKey keeps the AI assistant's model key (ADR 0024).
+	assistantKey assistantkey.Keeper
 	// systemUpdate is the system update service (docs/specs/system-update.md).
 	systemUpdate systemupdate.Updater
 	// reconcileFailed reports the last reconciliation of the data volume.
@@ -46,7 +52,17 @@ type handler struct {
 	// had its redundancy restored.
 	restoring     func() bool
 	spreadStopped func() bool
-	logger        *slog.Logger
+	// deletions reads deleted accounts from the control plane.
+	deletions AccountDeletions
+	logger    *slog.Logger
+}
+
+// AccountDeletions reads, from the control plane, what to remove of an
+// account whose deletion has started, or accountid.ErrNotDeleting: the Host
+// Agent removes accounts on its own reading, not on the Product Service's
+// word (sessiondir.Directory).
+type AccountDeletions interface {
+	AccountRemoval(context.Context, string) (accountid.AccountRemoval, error)
 }
 
 type Services struct {
@@ -60,7 +76,10 @@ type Services struct {
 	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
 	// WebSearch is the administrator's switch of web search (ADR 0030).
-	WebSearch websearchswitch.Switch
+	WebSearch    websearchswitch.Switch
+	PhoneHotspot phonehotspot.Switch
+	// AssistantKey keeps the administrator's model key of the AI assistant (ADR 0024).
+	AssistantKey assistantkey.Keeper
 	// SystemUpdate starts the system update service and reads its state.
 	SystemUpdate systemupdate.Updater
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
@@ -72,6 +91,9 @@ type Services struct {
 	// SpreadStopped reports whether spreading the mirror over its disks left
 	// space unusable and waits for the disks to change or the administrator.
 	SpreadStopped func() bool
+	// Deletions reads deleted accounts for their removal; without it no
+	// account is removed.
+	Deletions AccountDeletions
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -85,9 +107,11 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, webSearch: services.WebSearch, systemUpdate: services.SystemUpdate,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, systemUpdate: services.SystemUpdate, phoneHotspot: services.PhoneHotspot,
+		assistantKey:    services.AssistantKey,
 		reconcileFailed: services.ReconcileFailed,
-		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
+		restoring:       services.RestoringRedundancy, spreadStopped: services.SpreadStopped, deletions: services.Deletions,
+		logger: logger,
 	}
 }
 
@@ -132,12 +156,28 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSyncIdentities(w, r)
 		return
 	}
+	if r.URL.Path == wire.EnableCredentialPath {
+		h.handleEnableCredential(w, r)
+		return
+	}
+	if r.URL.Path == wire.RemoveAccountPath {
+		h.handleRemoveAccount(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
 		h.handleDisableCredential(w, r)
 		return
 	}
 	if r.URL.Path == wire.WebSearchPath {
 		h.handleWebSearch(w, r)
+		return
+	}
+	if r.URL.Path == wire.PhoneHotspotPath {
+		h.handlePhoneHotspot(w, r)
+		return
+	}
+	if r.URL.Path == wire.AssistantKeyPath {
+		h.handleAssistantKey(w, r)
 		return
 	}
 	if r.URL.Path == wire.SystemUpdatePath || r.URL.Path == wire.SystemUpdateSettingsPath {
@@ -565,6 +605,74 @@ func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) handleEnableCredential(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	enabler, ok := h.credentials.(accountid.CredentialEnabler)
+	if !ok {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "credential operation is unavailable")
+		return
+	}
+	var request wire.EnableDocument
+	if err := decodeRequest(r, &request); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	if err := enabler.EnableCredential(r.Context(), accountid.EnableRequest{Username: request.Username, SMB: request.SMB}); err != nil {
+		h.logger.ErrorContext(r.Context(), "enable credential failed", "username", request.Username, "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "credential operation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) handleRemoveAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	remover, ok := h.credentials.(accountid.AccountRemover)
+	if !ok || h.deletions == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "account operation is unavailable")
+		return
+	}
+	var request wire.AccountRemovalDocument
+	if err := decodeRequest(r, &request); err != nil || strings.TrimSpace(request.UserID) == "" {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	// What to remove and whom to hand it to come from the control plane: the
+	// request only names the account.
+	removal, err := h.deletions.AccountRemoval(r.Context(), request.UserID)
+	if errors.Is(err, accountid.ErrNotDeleting) {
+		httpjson.WriteError(w, http.StatusConflict, wire.NotDeletingCode, "the account is not being deleted")
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "account removal could not be read", "user_id", request.UserID, "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "account operation failed")
+		return
+	}
+	// The removal outlives a client that stops waiting: copying a large
+	// personal space can take longer than the Product Service waits, and its
+	// next attempt then waits for this one and finds it done.
+	folder, err := remover.RemoveAccount(context.WithoutCancel(r.Context()), removal)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "remove account failed", "username", removal.Username, "error", err)
+		if errors.Is(err, accountid.ErrVolumeUnavailable) {
+			httpjson.WriteError(w, http.StatusLocked, wire.VolumeUnavailableCode, "the data volume is offline")
+			return
+		}
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "account operation failed")
+		return
+	}
+	httpjson.Write(w, http.StatusOK, wire.AccountRemovalResult{Folder: folder})
 }
 
 func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {

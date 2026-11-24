@@ -41,6 +41,8 @@ var (
 	ErrNotReady = errors.New("batch is still importing")
 	// ErrInUse reports deleting a batch that already has ratings.
 	ErrInUse = errors.New("batch already has ratings")
+	// ErrNameTaken refuses a custom 打分项 named like another.
+	ErrNameTaken = errors.New("a scoring dimension has this name")
 )
 
 func invalid(format string, args ...any) error {
@@ -161,7 +163,7 @@ func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
 
 // migrations take the database from each version to the next; its version
 // is how many have run.
-var migrations = []string{schemaV1, schemaV2}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
 
 const schemaV1 = `
 CREATE TABLE raters (
@@ -262,6 +264,41 @@ CREATE TABLE rating_scores (
 	score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 500),
 	PRIMARY KEY (rating_id, dimension)
 ) WITHOUT ROWID;
+`
+
+// schemaV3 lets a batch score any 打分项 in the order the administrator
+// chose them, custom ones among them: ratings.score keeps a rating's first
+// 打分项, which was overall in every batch before, and rating_scores the
+// others, overall among them when it is not first.
+const schemaV3 = `
+CREATE TABLE custom_dimensions (
+	id TEXT PRIMARY KEY,
+	number INTEGER NOT NULL UNIQUE CHECK (number > 0),
+	name TEXT NOT NULL UNIQUE,
+	description TEXT NOT NULL,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	CHECK (id = 'custom_' || number)
+);
+CREATE TABLE rating_scores_v3 (
+	rating_id INTEGER NOT NULL REFERENCES ratings(id),
+	dimension TEXT NOT NULL,
+	score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 500),
+	PRIMARY KEY (rating_id, dimension)
+) WITHOUT ROWID;
+INSERT INTO rating_scores_v3 (rating_id, dimension, score) SELECT rating_id, dimension, score FROM rating_scores;
+DROP TABLE rating_scores;
+ALTER TABLE rating_scores_v3 RENAME TO rating_scores;
+`
+
+// schemaV4 gives every batch a scale, which every batch before had on the
+// number line with two decimals, and lets a scale with decimals keep them
+// from raters.
+const schemaV4 = `
+ALTER TABLE batches ADD COLUMN scale TEXT NOT NULL DEFAULT 'hundredths'
+	CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three'));
+ALTER TABLE batches ADD COLUMN hide_decimals INTEGER NOT NULL DEFAULT 0
+	CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'));
 `
 
 func (s *Store) migrate(ctx context.Context) error {
