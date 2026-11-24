@@ -65,6 +65,12 @@ if [[ "${1:-}" != --inside ]]; then
   rm -rf -- "$work"
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  # Exercise internal model packaging outside the signed repository.
+  scorer=$(bash "$repo/scripts/build-content-packages.sh" --stand-in --aesthetic-scorer-only "$work/scorer" "$repo/build")
+  dpkg-deb -x "$work/scorer/${scorer}_1_all.deb" "$work/scorer/files"
+  scorer_sha=$(jq -er .sha256 "$repo/deploy/models/qwen35-4b-aesthetic-scorer.json")
+  scorer_dir=$work/scorer/files/opt/a-nas/models/$scorer_sha
+  [[ -s "$scorer_dir/model/head.pt" && -s "$scorer_dir/licenses/Qwen3.5-4B-LICENSE.txt" ]]
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
   # The old package boundary predates a-nas-docker-policy. A previous package
   # made entirely by today's builder would otherwise mask its removal on a
@@ -82,6 +88,9 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # This target predates the hotspot and has no matching radio package.
+  sed -i '/^Suggests: a-nas-hotspot-radio/d' "$legacy_product/DEBIAN/control"
+  rm "$legacy_product/usr/lib/systemd/system/anas-phone-hotspot.service" "$legacy_product/usr/lib/a-nas/phone-hotspot"
   # Nor has it the photo service's grant socket for the montage center, the
   # montage center's socket for planning, or its planner.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
@@ -117,10 +126,12 @@ if [[ "${1:-}" != --inside ]]; then
   done
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
+  radio=$(bash "$repo/scripts/fetch-upstream-packages.sh" "$repo/build/upstream" "$repo/deploy/upstream/hotspot-radio-amd64.json")
+  mapfile -t radio <<<"$radio"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
-    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" "${radio[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -193,7 +204,7 @@ next=$version+next
 # Each model role's manifest, as $ai/ROLE.json, for the checks below.
 ai=/tmp/ai-manifests
 install -d "$ai"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   cp "/src/deploy/models/${role##*:}.json" "$ai/${role%%:*}.json"
 done
 models_kept=$(for role in "${ai_roles[@]}"; do jq -r .sha256 "/src/deploy/models/${role##*:}.json"; done | sort -u | wc -l)
@@ -735,12 +746,46 @@ check "member sharing works through production service sandboxes" sharing_smoke
 # pins. Docker waits for the address pool the App Center's runbook gives it
 # (ADR 0013), then the container agent reaches it.
 upstream_pinned() {
-  local name pinned
+  local name pinned lock=${1:-/src/deploy/upstream/packages.json}
   while read -r name pinned; do
     [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
-  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' "$lock")
 }
 check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "a standard install leaves the hotspot radio package optional" \
+  test "$(dpkg-query -W -f='${db:Status-Status}' a-nas-hotspot-radio 2>/dev/null || true)" != installed
+check "apt installs the hotspot radio package using only the signed A-NAS repository" \
+  quiet apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/a-nas.sources -o Dir::Etc::sourceparts=- \
+  install -y --no-install-recommends --no-remove "a-nas-hotspot-radio=$version"
+check "the hotspot radio package installs the pinned Debian dependencies" \
+  upstream_pinned /src/deploy/upstream/hotspot-radio-amd64.json
+check "the hotspot radio package supplies the MT7612U firmware and iw" \
+  bash -c 'test -r /usr/lib/firmware/mt7662.bin && test -r /usr/lib/firmware/mt7662_rom_patch.bin && iw --version'
+hotspot="$api/api/v1/network/phone-hotspot"
+check "the packaged phone hotspot starts off" \
+  test "$(curl -fsS -b /tmp/owner.jar "$hotspot" | jq -r .state)" = off
+check "a household member cannot read the phone hotspot" \
+  test "$(status_of -b /tmp/alice.jar "$hotspot")" = 403
+hotspot_routes=$(ip -4 route show default)
+check "the administrator can request the packaged hotspot" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":true}' "$hotspot"
+for _ in $(seq 1 50); do
+  [[ "$(systemctl show -p ActiveState --value anas-phone-hotspot.service)" != failed ]] || break
+  sleep 0.2
+done
+check "the packaged hotspot reports missing hardware without connection details" \
+  jq -e '.state == "failed" and (.reason == "no_wired_uplink" or .reason == "no_idle_radio") and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "a failed hotspot start preserves the host default route" test "$(ip -4 route show default)" = "$hotspot_routes"
+check "a failed hotspot start leaves no hotspot filter table" \
+  bash -c '! nft list tables | grep -Fxq "table inet anas_phone_hotspot"'
+check "the hotspot HTTPS proxy isolates wired routes and survives a host ruleset reload" \
+  quiet env ANAS_PHONE_HOTSPOT_NETWORK_TEST=1 PYTHONDONTWRITEBYTECODE=1 unshare --net \
+  python3 -m unittest discover -s /src/deploy/network
+check "the administrator can stop the packaged hotspot after a failed start" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":false}' "$hotspot"
 check "Docker waits for its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
@@ -1554,6 +1599,8 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/aesthetic-scorer.bundle)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")" \
+  -a ! -e /usr/lib/a-nas/ai/aesthetic-scorer.bundle \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 # The OCR model comes in parts (scripts/split-model.sh), each from its own
 # content package, beside the first one the link names.
@@ -3036,6 +3083,8 @@ check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
 check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
+check "the updated release includes the matching installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$next"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
@@ -3068,6 +3117,8 @@ state=$(update_settled || true)
 check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
+check "automatic rollback restores the installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$version"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
 check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check

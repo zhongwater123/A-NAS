@@ -43,7 +43,7 @@ GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt skills fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -126,8 +126,17 @@ web-build: web-install
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
 
+# The changed Go and Web files, the way fmt-check and web-lint expect them;
+# the coding agents' hooks run the same script after each edit (AGENTS.md).
 fmt:
-	gofmt -w $$($(GO_FILES))
+	scripts/format-changed.sh
+
+# Claude Code reads skills only from .claude/skills, other agents from
+# .agents/skills (AGENTS.md): edit the second and copy it with this target;
+# docs-check fails while the two differ.
+skills:
+	rm -rf .claude/skills
+	cp -R .agents/skills .claude/skills
 
 fmt-check:
 	@files="$$(gofmt -l $$($(GO_FILES)))"; \
@@ -169,6 +178,7 @@ vendor-check:
 # regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/network
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
@@ -301,8 +311,12 @@ ops-check:
 	grep -Fq -- '--face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--aesthetic-scorer /usr/lib/a-nas/ai/aesthetic-scorer.bundle --aesthetic-scorer-manifest /usr/lib/a-nas/ai/aesthetic-scorer.json' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HUB_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=TRANSFORMERS_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HOME=/var/cache/a-nas-ai/huggingface' deploy/systemd/system/anas-ai.service
 	@# Every model role the AI Worker's unit names is one the package links (scripts/lib/content.sh).
-	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do \
+	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf aesthetic-scorer:bundle; do \
 		grep -Eq "^  $${role}:" scripts/lib/content.sh && grep -Fq "/usr/lib/a-nas/ai/$${role%%:*}.$${role#*:} " deploy/systemd/system/anas-ai.service || { echo "model role $$role" >&2; exit 1; }; done
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'echo "CPUQuota=' deploy/site/a-nas-generator.sh
@@ -377,7 +391,9 @@ go-lint:
 vuln-check:
 	$(GO) tool govulncheck ./...
 	for tool in actionlint gitleaks golangci-lint; do $(GO) tool govulncheck -C tools/$$tool tool || exit 1; done
-	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	@mkdir -p $(BUILD_DIR)
+	python3 scripts/audit-wheel-lock.py ai/requirements.txt > $(BUILD_DIR)/ai-audit-requirements.txt
+	$(PIP_AUDIT) --strict --disable-pip --require-hashes --progress-spinner off -r $(BUILD_DIR)/ai-audit-requirements.txt
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
@@ -408,7 +424,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
-	$(RUFF) check --config ai/ruff.toml deploy/docker
+	$(RUFF) check --config ai/ruff.toml deploy/docker deploy/network
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
@@ -430,7 +446,7 @@ $(AI_SDK_STAMP): ai/assistant/companion-mcp-sdk.txt
 	@touch $(AI_SDK_STAMP)
 
 ai-sdk-test: $(AI_SDK_STAMP)
-	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp
+	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp tests.test_worker.ScorerBundleTest
 
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:

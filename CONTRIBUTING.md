@@ -24,7 +24,7 @@ ANAS_HOSTSTATE_MODE=fake go run ./cmd/anas-api
 - 终端默认关闭，要测试时加 `ANAS_TERMINAL=enabled`。本地模拟模式下 Shell 以开发进程用户运行，边界见[终端规格](docs/specs/web-terminal.md)。
 - 桌面上的“Docker”应用在模拟模式下使用确定性的 Fake 容器；连接真实 Docker 需要容器代理，见 [ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md) 与[安装手册](docs/runbooks/install-container-agent.md)。
 - 只改前端时运行 `cd web && npm run dev`，Vite 把 `/api` 和 `/healthz` 代理到本地的 Go 服务。
-- 同时开几套预览栈、互不登出：Windows 上用 [fake-preview](.claude/skills/fake-preview/SKILL.md)，macOS 见 [Colima 预览](docs/development/environments/macos.md#fake-预览)。
+- 同时开几套预览栈、互不登出：Windows 上用 [fake-preview](.agents/skills/fake-preview/SKILL.md)，macOS 见 [Colima 预览](docs/development/environments/macos.md#fake-预览)。
 
 ## 检查
 
@@ -42,8 +42,18 @@ make check
 - 只能用合并提交合并，不能 squash 或 rebase，PR 里的各个提交原样进入 `main`。合并后 GitHub 自动删除 PR 的分支。
 - 一个功能或里程碑默认一个 PR，各步骤写成单独的提交。不依赖其他 PR 的工作单开 PR，以 `main` 为基。
 - 提交信息用英文，格式为 `type(scope): summary`，常用的 type 有 `feat`、`fix`、`docs`、`test`、`build`、`refactor` 与 `ci`；正文写清为什么这样改。
-- PR 解决某个 issue 时，在描述里写 `Closes #编号`。
+- PR 解决某个 issue 时，在描述里写 `Closes #编号`。只解决了一部分时，把剩下的写成新的 issue，PR 仍然关闭原来的 issue，不留下没关联的 PR。
+- 动手处理已有的 issue 之前，先看有没有开放的 PR 或新推送的分支在做同一件事（`gh pr list`、`git fetch`）；开 PR 之前再看一次。几个会话常常同时处理同一批 issue。
+- PR 描述列出作者自行决定、没问过维护者的默认值与取舍（上限、阈值、措辞、行为），维护者可以只改其中一条。
+- 推送前先 `git fetch`：维护者可能已经在 GitHub 上点过“Update branch”，或已经合并了 PR。先把远端合并进来再推，不强制推送（叠放 PR 的变基除外，见下）；PR 合并后才写的提交另开 PR。
 - 改动影响到的文档随同一个 PR 更新：状态、规格、ADR、决定记录、调查或运行手册，规则见 [AGENTS.md 的“完工”](AGENTS.md#完工)与[文档系统](docs/README.md)。
+
+### 评审
+
+- 按字节数与近期修改次数（`git log --since`）衡量文件，不只看行数：超长的行让行数失真，改得最频繁的文件也是并行分支最常冲突的地方。
+- 提新 issue 前先查开放的评审索引 issue（[#159](https://github.com/zhongwater123/A-NAS/issues/159)、[#267](https://github.com/zhongwater123/A-NAS/issues/267)、[#319](https://github.com/zhongwater123/A-NAS/issues/319)、[#357](https://github.com/zhongwater123/A-NAS/issues/357)）及其子 issue。范围内已有的 issue 用新证据重新定级，不因为已有 issue 就略过；结构上的热点即使已有 issue，也在评审总结里点出。
+- 子代理或工具报出的高严重度问题，先自己复现核实再行动。CI 的“偶发失败”可能是两个 PR 合在一起的真冲突，先看随后的提交。
+- 安全问题不写成公开 issue：交给维护者以私有的安全公告草稿记录，写缺陷与修复方向，不写利用步骤。
 
 ### 叠放 PR
 

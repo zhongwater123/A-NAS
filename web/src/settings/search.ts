@@ -24,6 +24,13 @@ export const searchEntries: SearchEntry[] = [
   { section: "storage", title: "数据卷", anchor: "volume", keywords: "容量 空间 冗余 镜像 初始化 raid" },
   { section: "storage", title: "磁盘", anchor: "disks", keywords: "硬盘 ssd hdd 健康 smart" },
   {
+    section: "network",
+    title: "手机直连热点",
+    anchor: "phone-hotspot",
+    keywords: "网络 wifi 上传 无线",
+    adminOnly: true,
+  },
+  {
     section: "system-update",
     title: "检查更新",
     anchor: "update-status",

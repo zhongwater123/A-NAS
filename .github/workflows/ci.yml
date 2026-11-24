@@ -42,6 +42,26 @@ jobs:
         shell: bash
         run: scripts/ci-scope.sh "$GITHUB_EVENT_NAME" | tee -a "$GITHUB_OUTPUT"
 
+  hotspot-radio:
+    name: Signed hotspot package (${{ matrix.arch }})
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.docs-only != 'true' }}
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install the radio from both signed repository layouts
+        run: bash scripts/test-hotspot-radio-repository.sh
+
   check:
     name: Project checks
     needs: scope

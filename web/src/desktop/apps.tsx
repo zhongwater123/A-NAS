@@ -59,6 +59,9 @@ export interface WindowIntentPayloads {
   // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
   // cards that wait for the member.
   assistant: { sessionId?: string; title?: string; conversationId?: string };
+  // A row of a section to bring into view, as the search finds one: the companion's dot, the system health
+  // in 概览. The section itself is SettingsState's.
+  settings: { anchor: string };
 }
 // The intents waiting for their windows. Every request is a new object, so a
 // window sees a request for the place it already shows. The window hands back
@@ -109,7 +112,13 @@ export interface SettingsState {
 }
 export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
 
-function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "session" | "changeUser" | "logout">) {
+function SettingsWindow({
+  session,
+  changeUser,
+  logout,
+  intents,
+  intentHandled,
+}: Pick<WindowContext, "session" | "changeUser" | "logout" | "intents" | "intentHandled">) {
   const state = use(SettingsStateContext);
   if (!state) throw new Error("SettingsWindow outside the desktop");
   return (
@@ -118,6 +127,8 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
       host={state.host}
       section={state.section}
       onSectionChange={state.setSection}
+      intent={intents.settings}
+      onIntentHandled={(handled) => intentHandled("settings", handled)}
       storagePlan={state.storagePlan}
       onUserChange={changeUser}
       onLogout={logout}
@@ -203,8 +214,14 @@ const definitions = {
       keywords: ({ isAdmin }) =>
         `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash 网页搜索开关" : ""}`,
     },
-    render: ({ session, changeUser, logout }) => (
-      <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
+    render: ({ session, changeUser, logout, intents, intentHandled }) => (
+      <SettingsWindow
+        session={session}
+        changeUser={changeUser}
+        logout={logout}
+        intents={intents}
+        intentHandled={intentHandled}
+      />
     ),
   },
   store: {

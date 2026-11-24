@@ -22,6 +22,8 @@
 #   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
 #   stay installed when the product rolls back, as Docker itself does.
+# - a-nas-hotspot-radio: optional MediaTek radio dependencies, built for
+#   the same target architecture as the rest of the deployment.
 #
 # OUT then holds this version's packages alone: those of an earlier build go,
 # so that the system test and make release find the ones just built.
@@ -47,6 +49,10 @@ out=$(cd "$1" && pwd)
 version=$2
 repo=$(cd "$(dirname "$0")/.." && pwd)
 build=${3:-$repo/build}
+target=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+product_arch=$(sed -n 's/^Architecture: //p' "$repo/deploy/debian/a-nas/DEBIAN/control")
+[[ "$target" == "$product_arch" ]] ||
+  { echo "the product build supports $product_arch here; build the optional radio package separately for $target" >&2; exit 2; }
 # A Debian upstream version without a revision (scripts/release-version.sh).
 if [[ ! "$version" =~ ^[0-9][A-Za-z0-9.+~]*$ ]]; then
   echo "not a Debian version: $version (see scripts/release-version.sh)" >&2
@@ -55,7 +61,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy a-nas-hotspot-radio; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -66,6 +72,7 @@ done
 # The same commit builds the same packages.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
+bash "$repo/scripts/build-hotspot-radio-package.sh" "$out" "$version"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
@@ -109,7 +116,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -125,18 +132,21 @@ install -m 0755 "$repo"/deploy/debian/a-nas/DEBIAN/{preinst,postinst} "$lib/rele
 install -m 0755 "$build/anas-api" "$build/anas-host-agent" "$build/anas-container-agent" \
   "$repo/scripts/install-media-pool.sh" "$repo/scripts/install-screensavers.sh" "$lib/"
 install -m 0755 "$repo/scripts/run-kiosk.sh" "$lib/kiosk-launcher"
+install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 
-# The AI Worker (ADR 0016): its code, each model role's manifest and a link
-# to the role's file in its content package, the runtime and llama.cpp.
+# The AI Worker (ADR 0016): its code and the aesthetic scorer's, each model
+# role's manifest and a link to the role's file in its content package, the
+# runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
+install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
 # The montage center's compute Worker runs in the same runtime (ADR 0038).
 install -m 0644 "$repo"/ai/anas_montage/*.py "$lib/ai/anas_montage/"
 install -m 0644 "$repo"/ai/anas_montage/domain/*.py "$lib/ai/anas_montage/domain/"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
   install -m 0644 "$manifest" "$lib/ai/$name.json"
-  ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)/$(model_link_file "$manifest")" "$lib/ai/$name.${rest%%:*}"
+  ln -s "$(model_link "$manifest")" "$lib/ai/$name.${rest%%:*}"
 done
 ln -s "/opt/a-nas/ai-runtimes/$(ai_runtime_id "$repo")" "$lib/ai/runtime"
 install -m 0644 "$repo/deploy/llama/llama.json" "$lib/ai/"

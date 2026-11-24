@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-16
+更新时间：2026-11-23
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -8,10 +8,10 @@
 
 | 任务 | 执行步骤 |
 |---|---|
-| Windows/WSL 完整门禁 | [check-in-wsl](../../.claude/skills/check-in-wsl/SKILL.md) |
+| Windows/WSL 完整门禁 | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
 | macOS/Colima 检查与当前限制 | [macOS 环境](environments/macos.md#运行检查) |
-| Fake 模式界面预览 | Windows 用 [fake-preview](../../.claude/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
-| systemd 系统测试 | [system-test](../../.claude/skills/system-test/SKILL.md) |
+| Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
+| systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
 `make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
 
@@ -105,7 +105,7 @@ python3 -m venv ~/.local/opt/ai-tools
 
 `make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。测试启动的后台操作也要在测试返回前等它结束：之后才写进 `t.TempDir()` 的 goroutine 会让清理报 `directory not empty`（[调查](../investigations/2026-11-04-volume-test-writes-after-cleanup.md)）。
 
-Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
+Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `make fmt`，它只格式化改动的 Go 与 Web 文件，Claude Code 与 Codex 的钩子在每次编辑后也运行它（[编码工具](../../AGENTS.md#编码工具)）；整个 `web/` 仍可用 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
 各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本与 `a-nas-host` 包定义的哈希及所在的周缓存，二者改了或过了一周才重新组装。
 
@@ -189,7 +189,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 升级到多了一步数据库迁移的“下一 release”、回滚到本 release 与上一 release、再升级：回滚后数据库按新版本存下的反向步骤退回，文件与账号保留，`a-nas-check` 每次通过（含数据卷上的数据库重新打开）；数据库副本两处同名、各保留最近两份，数据卷上的留在数据卷，副本不含 `-shm`；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
-镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
+镜像准备、运行命令和结果读取统一见 [system-test](../../.agents/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）与 Docker、Caddy 的软件包依赖的 Debian 包，另加助手沙箱的工具与只供测试用的工具；Docker 与 Caddy 本身不在镜像中，由测试从软件源安装。
 - 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包与 `scripts/fetch-upstream-packages.sh` 取得的 Docker、Caddy 软件包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
@@ -205,14 +205,14 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
   - `fails` 只用于任何失败都算数的检查；
   - 沙箱探针在沙箱外运行时，要报出具体的发现；
   - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标用 `expect_hidden`，由系统测试在沙箱外确认存在。
-- 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
-- CI 没有 Hermes 的运行环境，AI 助手与剪辑规划在 CI 里只查沙箱与布局。这两项的改动合入后、交部署之前，设 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑一次（[变体](../../.claude/skills/system-test/SKILL.md#变体)）：它让真实的 Hermes 走一遍对话，并让脚本化模型在规划进程里走一遍剪辑规划。
+- 部署前按 [system-test 的真实模型变体](../../.agents/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
+- CI 没有 Hermes 的运行环境，AI 助手与剪辑规划在 CI 里只查沙箱与布局。这两项的改动合入后、交部署之前，设 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑一次（[变体](../../.agents/skills/system-test/SKILL.md#变体)）：它让真实的 Hermes 走一遍对话，并让脚本化模型在规划进程里走一遍剪辑规划。
 
 ## CI
 
 `.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
 
-PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
+PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.agents/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 
 ## 安全扫描
 
