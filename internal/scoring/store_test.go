@@ -493,6 +493,42 @@ func TestRepeatsComeFromTheRatersOwnEarlierScoresAndDoNotCount(t *testing.T) {
 	}
 }
 
+// The rater's list calls a batch finished when nothing is left to score in
+// it: the photos the rater holds are still left.
+func TestABatchIsNotFinishedWhileItsRaterHoldsPhotos(t *testing.T) {
+	h := newHarness(t)
+	batch := h.batchOf(t, 2, 1)
+	h.raters(t, "a")
+	ctx := context.Background()
+	finished := func() bool {
+		t.Helper()
+		open, err := h.store.OpenBatches(ctx, "a")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("open batches %+v, %v", open, err)
+		}
+		return open[0].Finished
+	}
+	claims, done, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(claims) != 2 || done {
+		t.Fatalf("claims %+v, finished %v, %v", claims, done, err)
+	}
+	if finished() {
+		t.Fatal("finished with both photos held and none scored")
+	}
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", score(6)); err != nil {
+		t.Fatal(err)
+	}
+	if finished() {
+		t.Fatal("finished with a photo still held")
+	}
+	if _, err := h.store.Submit(ctx, claims[1].Token, "a", score(7)); err != nil {
+		t.Fatal(err)
+	}
+	if !finished() {
+		t.Fatal("not finished after the last photo")
+	}
+}
+
 func TestOnlyChosenRatersRateAndClosedBatchesHandOutNothing(t *testing.T) {
 	h := newHarness(t)
 	batch := h.batchOf(t, 4, 1)

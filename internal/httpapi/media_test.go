@@ -188,7 +188,7 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	if home := send(http.MethodGet, "/api/v1/media/home", "", ""); home.Code != http.StatusOK || !strings.Contains(home.Body.String(), fixture.film) {
 		t.Fatalf("home = %d %s", home.Code, home.Body.String())
 	}
-	if forged := send(http.MethodPut, "/api/v1/media/favorites/"+fixture.film, "", ""); forged.Code != http.StatusForbidden {
+	if forged := send(http.MethodPut, "/api/v1/media/favorites/"+fixture.film, "", ""); !refusedForCSRF(forged) {
 		t.Fatalf("favorite without CSRF = %d", forged.Code)
 	}
 	if saved := send(http.MethodPut, "/api/v1/media/favorites/"+fixture.film, "", session.CSRFToken); saved.Code != http.StatusNoContent {

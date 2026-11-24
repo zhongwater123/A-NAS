@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-16
+更新时间：2026-11-24
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -8,10 +8,10 @@
 
 | 任务 | 执行步骤 |
 |---|---|
-| Windows/WSL 完整门禁 | [check-in-wsl](../../.claude/skills/check-in-wsl/SKILL.md) |
+| Windows/WSL 完整门禁 | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
 | macOS/Colima 检查与当前限制 | [macOS 环境](environments/macos.md#运行检查) |
-| Fake 模式界面预览 | Windows 用 [fake-preview](../../.claude/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
-| systemd 系统测试 | [system-test](../../.claude/skills/system-test/SKILL.md) |
+| Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
+| systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
 `make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
 
@@ -81,7 +81,7 @@ npm run dev
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；zizmor 检查工作流与 Dependabot 配置的安全问题（见[安全扫描](#安全扫描)）；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 | `make vendor-check` | [`scripts/check-dsh-pet-vendor.sh`](../../scripts/check-dsh-pet-vendor.sh) 离线核对复制进来的 dsh-pet：清单的池等于 `install-media-pool.sh` 固定的池与 README 记录的池，README 列出的补丁与补丁目录一致，每个复制文件的文件头写着固定的提交，目录里的文件正是 `dsh-pet/files.sha256` 列出的、内容与复制脚本写下的一致（手工改过任何一个文件都通不过）。给 `DSH_PET=<检出>`（可再给 `DSH_PET_MOV_ZIP=<zip>`）时在临时目录重新引入、要求没有差异，并确认改过的检出被拒绝；重新引入要装有 json5 的 Python，开发机 B 上给 `VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python`。CI 没有检出与 zip，只运行离线部分并打印 SKIP，完整检查是提里程碑或升级前的本地步骤，见[虚拟伙伴](../specs/virtual-companion.md#验收证据) |
 
-`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant-spike/companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。
+`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant/companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。它用 `python3 -m venv` 建环境并在其中运行 pip，需要 Python 带 `ensurepip`：Debian 与 Ubuntu 上是 `python3-venv` 软件包，[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 会检查。
 
 lychee 从发布页下载，核对 SHA-256（与 CI 中的一致）后放进 `PATH`：
 
@@ -101,11 +101,11 @@ python3 -m venv ~/.local/opt/ai-tools
 ~/.local/opt/ai-tools/bin/pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
 ```
 
-开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
+开发机 B 在 2026-11-18 装上 `python3-venv` 之前没有 `ensurepip`，它的 `~/.local/opt/ai-tools` 是用 uv 建的；装不了系统包的机器照此办理：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
 `make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。测试启动的后台操作也要在测试返回前等它结束：之后才写进 `t.TempDir()` 的 goroutine 会让清理报 `directory not empty`（[调查](../investigations/2026-11-04-volume-test-writes-after-cleanup.md)）。
 
-Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
+Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `make fmt`，它只格式化改动的 Go 与 Web 文件，Claude Code 与 Codex 的钩子在每次编辑后也运行它（[编码工具](../../AGENTS.md#编码工具)）；整个 `web/` 仍可用 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
 各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本与 `a-nas-host` 包定义的哈希及所在的周缓存，二者改了或过了一周才重新组装。
 
@@ -149,6 +149,14 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
   -v "$PWD:/src" <同上镜像> bash /src/scripts/smoke-photo-service.sh
 ```
 
+## 跨进程契约
+
+`make api` 生成的类型与响应校验只覆盖浏览器与产品服务之间（[接口契约](api-contract.md#接口契约)）。服务之间、Go 与 Python 之间、服务与 Hermes 之间没有生成的类型，两边各写各的测试，就会各自通过而接不上：2026-11-19 剪辑中心生成 26 个字母的轮次编号，回合脚本只认 24 个，两边的测试各用各的编号，都通过了（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
+
+- 这类接缝的样例（请求、回答、编号与 token 的格式）只放一处，两边的测试都读它；或者一边的测试从另一边的实现读出格式，例如 [`planner_ids_test.go`](../../internal/montage/planner_ids_test.go) 从规划发起方读出它认的编号，用剪辑中心真实生成的编号核对。
+- 能生成就生成：接缝两边有一边能导出 JSON Schema 时，另一边按它校验，不再手写一份。
+- 剪辑中心的领取、简报、答案、填槽请求与选段还没有共用的样例（[规划会话的“测试”](../architecture/montage-planning-session.md#测试)）。
+
 ## 系统测试
 
 root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，从签名软件源用 apt 安装 A-NAS 的软件包（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)），再按用户检查：
@@ -181,7 +189,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 升级到多了一步数据库迁移的“下一 release”、回滚到本 release 与上一 release、再升级：回滚后数据库按新版本存下的反向步骤退回，文件与账号保留，`a-nas-check` 每次通过（含数据卷上的数据库重新打开）；数据库副本两处同名、各保留最近两份，数据卷上的留在数据卷，副本不含 `-shm`；
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
-镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
+镜像准备、运行命令和结果读取统一见 [system-test](../../.agents/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）与 Docker、Caddy 的软件包依赖的 Debian 包，另加助手沙箱的工具与只供测试用的工具；Docker 与 Caddy 本身不在镜像中，由测试从软件源安装。
 - 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包与 `scripts/fetch-upstream-packages.sh` 取得的 Docker、Caddy 软件包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
@@ -197,17 +205,24 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
   - `fails` 只用于任何失败都算数的检查；
   - 沙箱探针在沙箱外运行时，要报出具体的发现；
   - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标用 `expect_hidden`，由系统测试在沙箱外确认存在。
-- 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
+- 部署前按 [system-test 的真实模型变体](../../.agents/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
+- CI 没有 Hermes 的运行环境，AI 助手与剪辑规划在 CI 里只查沙箱与布局。这两项的改动合入后、交部署之前，设 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑一次（[变体](../../.agents/skills/system-test/SKILL.md#变体)）：它让真实的 Hermes 走一遍对话，并让脚本化模型在规划进程里走一遍剪辑规划。
 
 ## CI
 
-`.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
+每个 PR 和每次推送到 `main` 都会触发 [CI 工作流](../../.github/workflows/ci.yml)。`main` 规则集按名称要求 `Project checks`、`Go tests with the race detector` 和 `System test (Debian 13, systemd)` 三项检查，改名时需同步规则集。工作流先运行 `Change scope`，再按事件与文件选择作业。
 
-PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
+| 变更 | 实际运行 |
+|---|---|
+| 纯文档 PR | `Project checks` 运行 `make docs-check`。竞态测试、系统测试及两个架构的热点签名包测试按作业条件跳过，GitHub 接受跳过的必需作业。 |
+| 其他 PR，或无法判断范围 | 完整 `make check`、Go 竞态测试、Debian 系统测试，以及 amd64 和 arm64 的热点签名包安装测试。 |
+| 推送到 `main` | 每个合并提交均运行全量，便于定位哪个合并破坏了主线。 |
+
+[范围判定脚本](../../scripts/ci-scope.sh)只把 `docs/` 下的文件、根目录 Markdown 和 `.agents/skills/`、`.claude/skills/` 下的 Markdown 归为文档。即使主题是文档，只要还改了 `tools/doccheck/`、工作流或其他路径，就走全量。保留工作流触发、在作业内判定范围，可让分支保护收到检查结果。另有独立的[密钥扫描](#安全扫描)，纯文档 PR 也会运行。
 
 ## 安全扫描
 
-依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查：govulncheck 查产品与 `tools/` 下各 Go 工具的模块，只报代码可达的漏洞；pip-audit 查 AI 与网页搜索运行环境的 Python 锁；`npm audit --omit=dev` 查 Web 的运行依赖。Web 的开发依赖、`tools/` 下 npm 工具（`openapi`、`changelog`）的包和 `ai/requirements-dev.txt` 不在门禁中，有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。助手运行环境按 Hermes 的锁安装（[`build-runtime.sh`](../../ai/assistant-spike/build-runtime.sh)），它和 [`companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 既不在门禁中，GitHub 的依赖图也看不到。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：交给 imaging 的图片都经 `imagerender.Decode` 解码，它拒绝像素超出调色板的图片，见[调查](../investigations/2026-11-17-imaging-panics-end-the-process.md)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
+依赖与公告：Dependabot 按[配置文件](../../.github/dependabot.yml)每月更新 Go 模块（含 `tools/` 下各工具的模块）、`web/` 与接口工具的 npm 包、`ai/` 的 uv 锁和工作流引用的 Action，只取发布满 7 天的版本，安全更新不等。已知漏洞由上文的 `make vuln-check` 检查：govulncheck 查产品与 `tools/` 下各 Go 工具的模块，只报代码可达的漏洞；pip-audit 查 AI 与网页搜索运行环境的 Python 锁；`npm audit --omit=dev` 查 Web 的运行依赖。Web 的开发依赖、`tools/` 下 npm 工具（`openapi`、`changelog`）的包和 `ai/requirements-dev.txt` 不在门禁中，有公告时只出现在 GitHub 的 Dependabot 告警中，同样先升级。助手运行环境按 Hermes 的锁安装（[`build-runtime.sh`](../../ai/assistant-spike/build-runtime.sh)），它和 [`companion-mcp-sdk.txt`](../../ai/assistant/companion-mcp-sdk.txt) 既不在门禁中，GitHub 的依赖图也看不到。`github.com/disintegration/imaging` 的告警 CVE-2023-36308 没有修复版本：交给 imaging 的图片都经 `imagerender.Decode` 解码，它拒绝像素超出调色板的图片，见[调查](../investigations/2026-11-17-imaging-panics-end-the-process.md)。仓库设置中另开着 GitHub 自带的密钥扫描与推送保护（2026-11-16 核对），它们只认服务商格式的密钥。
 
 工作流：`make ops-check` 先用 actionlint 检查语法与表达式，再用 zizmor 检查工作流与 Dependabot 配置的安全问题，如模板注入、检出后保留凭据、更新没有冷却期。zizmor 的版本由 `ai/requirements-dev.txt` 按哈希固定，`PATH` 上的版本不同即失败，安装见[静态检查](#静态检查)。设了 `GH_TOKEN` 时它还做在线审计，如固定的 Action 提交是否属于该仓库、Action 是否有已知公告；CI 的 `Project checks` 传入作业的只读令牌，本地没有令牌时只做离线审计。检出都写 `persist-credentials: false`，否则 zizmor 报 `artipacked`。
 

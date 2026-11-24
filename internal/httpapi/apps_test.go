@@ -48,7 +48,7 @@ func TestDockerAndAppCenterAreForAdministratorsWithCSRF(t *testing.T) {
 	}
 	member := signIn(t, handler, "alice", "alice password for testing")
 	for _, path := range []string{"/api/v1/containers", "/api/v1/apps", "/api/v1/apps/memos/plan"} {
-		if got := member.call(t, http.MethodGet, path, ""); got.Code != http.StatusForbidden {
+		if got := member.call(t, http.MethodGet, path, ""); got.Code != http.StatusForbidden || answerCode(got) != "forbidden" {
 			t.Errorf("member GET %s = %d %s, want 403", path, got.Code, got.Body)
 		}
 	}
@@ -76,7 +76,7 @@ func TestDockerAndAppCenterAreForAdministratorsWithCSRF(t *testing.T) {
 	forged := administrator
 	forged.csrf = "not-the-token"
 	action := "/api/v1/containers/" + fakecontainers.ID("jellyfin") + "/actions"
-	if got := forged.call(t, http.MethodPost, action, `{"action":"restart"}`); got.Code != http.StatusForbidden {
+	if got := forged.call(t, http.MethodPost, action, `{"action":"restart"}`); !refusedForCSRF(got) {
 		t.Fatalf("container action without the CSRF token = %d %s", got.Code, got.Body)
 	}
 }

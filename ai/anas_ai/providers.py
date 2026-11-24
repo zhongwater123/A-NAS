@@ -1,7 +1,8 @@
 """AI providers: image vectors through MediaPipe, object detection through
 ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
 recognition model), animal identity vectors through ONNX Runtime, the text in
-photos through a llama-server child process, and deterministic fakes of each.
+photos through a llama-server child process, aesthetic scores through
+PyTorch, and deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
@@ -16,15 +17,24 @@ import http.client
 import importlib.metadata
 import io
 import json
+import logging
 import math
+import multiprocessing
 import os
+import pathlib
 import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
+
+from anas_ai import describe as montage_card
+
+# The Worker's logger (anas_ai.worker).
+log = logging.getLogger("anas-ai")
 
 
 class InvalidInput(Exception):
@@ -41,6 +51,10 @@ class Cancelled(Exception):
 
 class Failed(Exception):
     """The provider failed on an input it accepted, for a reason that may pass; the work is tried again later."""
+
+
+class InvalidResult(Exception):
+    """The model's answer did not fit what was asked for, however often it was asked again."""
 
 
 # AI works in idle time with what the device has, but leaves these cores to
@@ -67,6 +81,8 @@ def read_manifest(manifest_path):
             manifest = json.load(file)
     except (OSError, ValueError) as error:
         raise Unavailable(f"the manifest {manifest_path}: {error}") from error
+    if not isinstance(manifest, dict):
+        raise Unavailable(f"the manifest {manifest_path} must be an object")
     memory = manifest.get("memoryBytes")
     if type(memory) is not int or memory < 0:
         raise Unavailable(f"the manifest {manifest_path} gives no memoryBytes")
@@ -773,6 +789,44 @@ def ocr_prompt(kind, schema):
     return OCR_FIELDS_PROMPT + json.dumps(schema, ensure_ascii=False)
 
 
+# What a card's description takes of the context, as llama-server counted it
+# for this model on the development machine (PR #571: 5,955 prompt tokens for
+# 11 key frames of 512 × 910 and 6,440 for 12): about 620 for the prompts and
+# 485 for each frame, which is its label and a visual token for every 32 × 32
+# pixels. Frames of other shapes are estimated from that and still to be
+# counted on the NAS; describe() logs the estimate beside the server's count.
+DESCRIBE_PROMPT_TOKENS = 620
+DESCRIBE_LABEL_TOKENS = 21
+OCR_TOKEN_PIXELS = 32
+
+
+def frame_size(data):
+    """A key frame's width and height in pixels, or None when they cannot be told.
+
+    Pillow reads them from the JPEG's header. The stand-in server's tests run
+    without Pillow and with frames that are no pictures: they get None.
+    """
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return image.size
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+
+
+def describe_frame_tokens(frames):
+    """The prompt tokens each of a card's key frames takes, estimated from the largest; None when a size is unknown."""
+    sizes = [frame_size(data) for data in frames]
+    if None in sizes:
+        return None
+    return DESCRIBE_LABEL_TOKENS + max(
+        min(OCR_IMAGE_TOKENS, math.ceil(width / OCR_TOKEN_PIXELS) * math.ceil(height / OCR_TOKEN_PIXELS))
+        for width, height in sizes)
+
+
 # A loop repeats its unit over at least this many characters. Documents
 # repeat one character for a line or two: a receipt's separator line, a
 # contents page's leader dots, a form's fill-in line; a table repeats a row a
@@ -907,7 +961,6 @@ class LlamaReader:
         """
         if not data:
             raise InvalidInput("empty image")
-        path = self._start(run)
         body = {
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(data).decode()}},
@@ -916,7 +969,78 @@ class LlamaReader:
             "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
             "stream": True, "chat_template_kwargs": {"enable_thinking": False},
         }
+        text, tokens, finish, _ = self._complete(body, run)
+        return {"text": text, "logprobs": tokens, "finish": finish}
+
+    def describe(self, frames, offsets, groups, duration, run):
+        """Describes a montage card from its key frames (anas_ai.describe), with the prototype's settings.
+
+        The answer is asked for with the schema as llama-server's grammar and
+        checked again here; one that does not fit, or repeats itself, is asked
+        again with a stronger repeat penalty, three times in all, and then
+        raises InvalidResult.
+
+        The answer may take MAX_TOKENS, which the context must still hold
+        after the prompt. A card whose key frames leave less, such as 12 or
+        more of a video filmed upright, is described from as many of them as
+        fit, spread evenly (montage_card.fitting), and each beat's "frames"
+        still count among all of the card's. A card that fits is asked about
+        exactly as the prototype asks. Should the estimate be too low, the
+        server refuses the prompt or the context cuts the answer short
+        (InvalidInput): the card goes undescribed.
+        """
+        if any(not data for data in frames):
+            raise InvalidInput("empty image")
+        count, each = len(frames), describe_frame_tokens(frames)
+        most, estimate = count, "no"
+        if each is not None:
+            room = OCR_CONTEXT - montage_card.MAX_TOKENS - DESCRIBE_PROMPT_TOKENS
+            most = max(montage_card.FEWEST_FRAMES, room // each)
+        kept, offsets, groups = montage_card.fitting(offsets, groups, most)
+        if each is not None:
+            estimate = DESCRIBE_PROMPT_TOKENS + each * len(kept)
+        frames = [frames[index] for index in kept]
+        content, answer_schema, spans = montage_card.request(offsets, groups, duration)
+        parts = [{"type": "text", "text": value} if kind == "text" else
+                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(frames[value]).decode()}}
+                 for kind, value in content]
+        errors = []
+        for penalty in montage_card.REPEAT_PENALTIES:
+            body = {
+                "messages": [{"role": "system", "content": montage_card.SYSTEM_PROMPT}, {"role": "user", "content": parts}],
+                "temperature": montage_card.TEMPERATURE, "repeat_penalty": penalty, "max_tokens": montage_card.MAX_TOKENS,
+                "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": answer_schema}},
+                "cache_prompt": True, "stream": True, "stream_options": {"include_usage": True},
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            text, _, finish, prompt_tokens = self._complete(body, run)
+            if not errors:
+                # Evidence for the estimate, which the NAS has yet to confirm.
+                log.info("card description from %d of %d key frames: %s prompt tokens estimated, %d counted",
+                         len(kept), count, estimate, prompt_tokens)
+            # Frame dimensions determine the image token count. When the
+            # context cut this answer short, retrying the same frames cannot
+            # make room for the requested answer budget.
+            if finish == "length" and prompt_tokens + montage_card.MAX_TOKENS > OCR_CONTEXT:
+                raise InvalidInput(f"{prompt_tokens} prompt tokens leave insufficient room for the card description")
+            try:
+                if finish != "stop":
+                    raise montage_card.InvalidAnswer(f"the answer ended with {finish}")
+                return montage_card.numbered(montage_card.parse(text, answer_schema, spans), kept)
+            except montage_card.InvalidAnswer as error:
+                errors.append(f"repeat_penalty={penalty}: {error}")
+        raise InvalidResult("; ".join(errors))
+
+    def _complete(self, body, run):
+        """Streams the text, [token, log probability] pairs, finish reason and reported prompt token count.
+
+        Raises Cancelled once run is told to stop, InvalidInput for a request
+        the server refuses (4xx), and Failed for a server that fails
+        otherwise; the server is then stopped, so the next call starts anew.
+        """
+        path = self._start(run)
         text, tokens, finish, refused, failed = [], [], None, None, None
+        prompt_tokens = 0
         connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
         try:
             connection.connect()
@@ -934,6 +1058,8 @@ class LlamaReader:
                     if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
                         continue
                     event = json.loads(line[6:])
+                    if event.get("usage"):
+                        prompt_tokens = event["usage"].get("prompt_tokens", 0)
                     if "error" in event:
                         # How llama-server reports a failure mid-answer, before it ends the stream.
                         failed = f"llama-server failed mid-answer: {json.dumps(event['error'], ensure_ascii=False)[:500]}"
@@ -974,7 +1100,7 @@ class LlamaReader:
             # the next reading starts a new one rather than fail at once.
             self.release()
             raise Failed(failed)
-        return {"text": "".join(text), "logprobs": tokens, "finish": finish}
+        return "".join(text), tokens, finish, prompt_tokens
 
     def release(self, kill=False):
         """Stops the server, which frees the model's memory; kill does not wait for it to finish its work."""
@@ -1100,18 +1226,27 @@ def fake_fields(schema, digest):
     return schema
 
 
-class FakeReader:
-    """A deterministic stand-in: equal images get equal readings.
+# What a fake key frame holds to be refused, to get answers that never fit the
+# schema, or to have a number written into its description.
+FAKE_REFUSE = b"fake:too-long"
+FAKE_INVALID = b"fake:invalid"
+FAKE_NUMBER = b"fake:number="
 
-    delay keeps a reading running for that long, checking whether it was told
-    to stop, so that tests can cancel one.
+
+class FakeReader:
+    """A deterministic stand-in: equal images get equal readings and descriptions.
+
+    delay keeps a reading or description running for that long, checking
+    whether it was told to stop, so that tests can cancel one. answers, when
+    given, are the texts the model answers a description with, one per try.
     """
 
     model = "fake-reader-sha256"
     memory = 0
 
-    def __init__(self, delay=0.0):
+    def __init__(self, delay=0.0, answers=None):
         self.delay = delay
+        self.answers = answers
         self.loaded = False
         self.cancelled = 0
 
@@ -1122,18 +1257,167 @@ class FakeReader:
         if not data:
             raise InvalidInput("empty image")
         self.loaded = True
-        deadline = time.monotonic() + self.delay
-        while time.monotonic() < deadline:
-            if run.terminate:
-                self.cancelled += 1
-                raise Cancelled()
-            time.sleep(0.01)
+        self._wait(run)
         digest = hashlib.sha256(data).hexdigest()
         if kind == "text":
             text = f"fake text {digest[:8]}"
         else:
             text = json.dumps(fake_fields(schema, digest), ensure_ascii=False)
         return {"text": text, "logprobs": [[text, 0.0]], "finish": "stop"}
+
+    def describe(self, frames, offsets, groups, duration, run):
+        """A description that fits the schema, from the frames' digest; with answers, those texts in turn.
+
+        A frame whose bytes hold FAKE_REFUSE is refused as a prompt past the
+        context would be, one holding FAKE_INVALID gets answers that never fit
+        the schema, and one holding FAKE_NUMBER gets that number written into
+        the summary, so that the Go side's tests can see each through the
+        Worker.
+        """
+        if any(not data for data in frames):
+            raise InvalidInput("empty image")
+        self.loaded = True
+        self._wait(run)
+        if any(FAKE_REFUSE in data for data in frames):
+            raise InvalidInput("llama-server answered 400: the request exceeds the available context size")
+        _, answer_schema, spans = montage_card.request(offsets, groups, duration)
+        answers = self.answers or (["{}"] * 3 if any(FAKE_INVALID in data for data in frames) else None)
+        if answers:
+            errors = []
+            for text in answers[:len(montage_card.REPEAT_PENALTIES)]:
+                try:
+                    return montage_card.parse(text, answer_schema, spans)
+                except montage_card.InvalidAnswer as error:
+                    errors.append(str(error))
+            raise InvalidResult("; ".join(errors))
+        digest = hashlib.sha256(b"".join(frames)).hexdigest()
+        number = next((data.split(FAKE_NUMBER, 1)[1][:20].decode(errors="ignore") for data in frames
+                       if FAKE_NUMBER in data), "")
+        answer = {"camera": montage_card.CAMERAS[0],
+                  "beats": [{"shot_size": montage_card.SHOT_SIZES[n % 5], "what": f"画面 {n + 1} {digest[:6]}"}
+                            for n in range(max(groups))],
+                  "process": ["走过"], "summary": f"一段 {duration:.0f} 秒的画面 {digest[:8]}{number}", "scene": "街道"}
+        return montage_card.parse(json.dumps(answer, ensure_ascii=False), answer_schema, spans)
+
+    def _wait(self, run):
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
+
+    def release(self):
+        self.loaded = False
+
+
+class AestheticScorer:
+    """Validate the bundle at startup and load its CPU runtime on first use."""
+
+    def __init__(self, bundle, manifest_path, threads=None):
+        deploy = read_manifest(manifest_path)
+        if deploy.get("kind") != "qv-head":
+            raise Unavailable(f"unsupported scorer kind in {manifest_path}")
+        self._bundle = pathlib.Path(bundle)
+        self._process = None
+        self._connection = None
+        try:
+            pin = deploy["bundleManifest"]
+            verify_file(self._bundle / "MANIFEST.json", pin)
+            versions = {name: importlib.metadata.version(name) for name in ("torch", "transformers")}
+            from qv_head.release import load_manifest
+
+            self._manifest = load_manifest(self._bundle)
+        except importlib.metadata.PackageNotFoundError as error:
+            raise Unavailable(f"the AI runtime has no {error.name}") from error
+        except (ImportError, OSError, ValueError, TypeError, KeyError) as error:
+            raise Unavailable(f"invalid or unavailable scorer bundle: {error}") from error
+        self.memory = deploy["memoryBytes"]
+        self.threads = threads or inference_threads()
+        self.model = (f"{self._manifest.tag}+manifest-{pin['sha256']}"
+                      f"+torch-{versions['torch']}+transformers-{versions['transformers']}")
+
+    def run_options(self):
+        return RunHandle()
+
+    def _reply(self, run):
+        while not run.terminate:
+            if self._connection.poll(0.05):
+                return json.loads(self._connection.recv_bytes())
+        raise Cancelled()
+
+    def score(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        try:
+            if run.terminate:
+                raise Cancelled()
+            if self._process is None:
+                self._connection, child = multiprocessing.Pipe()
+                with child:
+                    self._process = subprocess.Popen(
+                        [sys.executable, "-m", "anas_ai.scoring", str(child.fileno()), str(self._bundle),
+                         str(self.threads)], pass_fds=(child.fileno(),))
+                self._connection.send_bytes(self._manifest.model_dump_json().encode())
+                status, detail = self._reply(run)
+                if status != "ready":
+                    raise Unavailable(detail)
+            self._connection.send_bytes(data)
+            status, result = self._reply(run)
+            if status == "invalid":
+                raise InvalidInput(result)
+            return result
+        except (Cancelled, Unavailable):
+            self.release()
+            raise
+        except (EOFError, OSError) as error:
+            self.release()
+            raise Unavailable("scorer process stopped") from error
+
+    def release(self):
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        if self._process is not None:
+            # Closing the pipe lets an idle scorer release native resources normally.
+            try:
+                self._process.wait(timeout=0.3)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
+            self._process = None
+
+
+class FakeScorer:
+    """A deterministic stand-in: equal images get equal scores.
+
+    delay keeps a scoring running for that long, checking whether it was told
+    to stop, so that tests can cancel one.
+    """
+
+    model = "fake-scorer-sha256"
+    memory = 0
+
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.loaded = False
+        self.cancelled = 0
+
+    def run_options(self):
+        return RunHandle()
+
+    def score(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
+        digest = hashlib.sha256(data).digest()
+        return {"aesthetic": round(1 + 4 * digest[0] / 255, 4), "technical": round(1 + 4 * digest[1] / 255, 4)}
 
     def release(self):
         self.loaded = False

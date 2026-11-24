@@ -20,7 +20,7 @@ import { setWriteGate } from "../api/client";
 import { drawDesktop, onScreen } from "../desktop/desktopPicture";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import controlStyles from "./webosControl.module.css";
-import { writeRisk } from "./webosWrites";
+import { writeRefusal, writeRisk } from "./webosWrites";
 
 /** What the member is asked to allow. */
 export interface Danger {
@@ -131,6 +131,8 @@ interface Step {
   answer?: Promise<boolean>;
   why?: string;
   allowed?: boolean;
+  /** Why a write the step caused was refused outright, without asking. */
+  refused?: string;
 }
 
 export class WebosController {
@@ -165,10 +167,16 @@ export class WebosController {
 
   /** Whether a write the page is about to send may go. */
   write(method: string, path: string): Promise<boolean> {
-    const why = writeRisk(method, path);
     const step = this.step;
-    if (!why || !step || this.memberSeq > step.seq || Date.now() - step.at > STEP_WRITES_MS)
-      return Promise.resolve(true);
+    if (!step || this.memberSeq > step.seq || Date.now() - step.at > STEP_WRITES_MS) return Promise.resolve(true);
+    // Some writes are never VNAS's, not even in a window the member allowed.
+    const refused = writeRefusal(method, path);
+    if (refused) {
+      step.refused ??= refused;
+      return Promise.resolve(false);
+    }
+    const why = writeRisk(method, path);
+    if (!why) return Promise.resolve(true);
     if (step.allowed !== undefined) return Promise.resolve(step.allowed);
     step.why ??= why;
     step.answer ??= this.options.confirm({ ...step.danger, why: step.why }).then((allowed) => {
@@ -335,6 +343,7 @@ export class WebosController {
   /** After a step's events: the writes it caused have gone, or the member did not allow them. */
   private async settle(step: Step): Promise<void> {
     await new Promise((resolve) => window.setTimeout(resolve, SETTLE_MS));
+    if (step.refused) throw new ControlError(`${step.refused}，什么都没有发出`);
     if (step.answer && !(await step.answer)) {
       throw new ControlError(`成员没有允许这一步（${step.danger.what}：${step.why}），NAS 上什么都没有改`);
     }

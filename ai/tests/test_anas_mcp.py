@@ -13,7 +13,7 @@ import types
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "anas_mcp.py"
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "anas_mcp.py"
 
 
 class _Result:

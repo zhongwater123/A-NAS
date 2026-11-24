@@ -456,7 +456,15 @@ func (s *Store) OpenBatches(ctx context.Context, rater string) ([]RaterBatch, er
 		if err != nil {
 			return nil, err
 		}
-		batch.Finished = item == 0
+		if item == 0 {
+			// The photos the rater still holds are left to score, as Claim
+			// says of the same batch.
+			held, err := heldClaims(ctx, s.db, batch.ID, rater, now)
+			if err != nil {
+				return nil, err
+			}
+			batch.Finished = len(held) == 0
+		}
 		result = append(result, batch.RaterBatch)
 	}
 	return result, nil

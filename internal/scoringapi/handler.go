@@ -907,5 +907,5 @@ func (h *handler) removeRater(w http.ResponseWriter, r *http.Request, user accou
 func Start(ctx context.Context, store *scoring.Store, sessions modules.SessionResolver, version string, logger *slog.Logger) http.Handler {
 	go store.RunImports(ctx)
 	go store.RunBackups(ctx)
-	return modules.Authenticate(sessions, Unavailable, logger, New(store, sessions, version, logger))
+	return modules.Authenticate(sessions, "scoring", Unavailable, logger, New(store, sessions, version, logger))
 }

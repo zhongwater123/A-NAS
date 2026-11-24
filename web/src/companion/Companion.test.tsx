@@ -54,6 +54,9 @@ const askedMember = (sessionId: string) =>
     reportCards([]);
   });
 
+/** A critical trouble of the device, as Desktop hands it to the companion (health.ts). */
+const READ_ONLY = { key: "volume_read_only:", text: "数据卷变成了只读" };
+
 /** The animations the card fetched, by name, in order: what it played or is about to. */
 let fetched: string[] = [];
 /** Animations whose next fetches fail, by name: how many more, and whether the network or the NAS fails them. */
@@ -868,6 +871,10 @@ describe("what VNAS asks of the companion", () => {
       });
       await plays("写代码");
       fetched = [];
+      // The step has run 5 s. One done sooner shows only 5 s after it started, as dsh-pet merges a quick working
+      // to result flip (work-status-bridge.ts, workStatus.test.ts): as long as findBy waits, which it lost under load.
+      const now = Date.now;
+      vi.spyOn(Date, "now").mockImplementation(() => now() + 5000);
       act(() => reportEvent("live0001", "tool.complete", { name: "terminal", tool_id: "c1" }));
       expect(await screen.findByText(/搞定一步，继续看看哦~|这步好啦！/)).toBeInTheDocument();
       await settle();
@@ -1676,7 +1683,7 @@ describe("walking, throwing and resting", () => {
       task: run,
       createdAt: "2026-11-06T08:00:00Z",
     });
-    const opened = { vnas: 0, runs: [] as unknown[] };
+    const opened = { vnas: 0, runs: [] as unknown[], health: 0 };
     const openers = {
       onOpenVnas: () => {
         opened.vnas += 1;
@@ -1684,10 +1691,121 @@ describe("walking, throwing and resting", () => {
       onOpenTaskRun: (task: unknown) => {
         opened.runs.push(task);
       },
+      onOpenHealth: () => {
+        opened.health += 1;
+      },
     };
     beforeEach(() => {
       opened.vnas = 0;
       opened.runs = [];
+      opened.health = 0;
+    });
+
+    it("opens Settings' overview while the device is in critical trouble, before a card that waits", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-原地踱步张望"]);
+      const { pet } = await mount(<Companion trouble={READ_ONLY} {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportCards([{ requestId: "r1", sessionId: "live0001", status: "awaiting" }]);
+      });
+      fetched = [];
+      fireEvent.click(pet);
+      expect((await screen.findAllByText(/数据卷变成了只读\s*打开设置看看/))[0]).toBeInTheDocument();
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 1 });
+      await settle();
+      expect(fetched).not.toContain("点击回应-元气挥手");
+    });
+
+    it("tells a trouble first once, then lets a card that waits come first, and tells it again when nothing else is", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-原地踱步张望"]);
+      const { view, pet } = await mount(<Companion trouble={READ_ONLY} {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportCards([{ requestId: "r1", sessionId: "live0001", status: "awaiting" }]);
+      });
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 1 });
+      // Told: the card that waits comes first now, though the dot is still up.
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 1, runs: [], health: 1 });
+      // Nothing else to tell: the trouble again, not a click response.
+      act(() => reportCards([]));
+      fetched = [];
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 1, runs: [], health: 2 });
+      await settle();
+      expect(fetched).not.toContain("点击回应-元气挥手");
+      // Another trouble is told first again; the same trouble in new words is not another.
+      act(() => reportCards([{ requestId: "r2", sessionId: "live0001", status: "awaiting" }]));
+      view.rerender(<Companion trouble={{ ...READ_ONLY, text: "数据卷仍是只读" }} {...openers} />);
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 2, runs: [], health: 2 });
+      view.rerender(<Companion trouble={{ key: "disk_failing:disk-1", text: "硬盘自检未通过" }} {...openers} />);
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 2, runs: [], health: 3 });
+      // A trouble that goes and comes back is told first again.
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 3, runs: [], health: 3 });
+      view.rerender(<Companion {...openers} />);
+      view.rerender(<Companion trouble={{ key: "disk_failing:disk-1", text: "硬盘自检未通过" }} {...openers} />);
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 3, runs: [], health: 4 });
+    });
+
+    it("tells a trouble before an unread result and a turn under way, then lets them come first", async () => {
+      server.use(http.get("/api/v1/notifications", ({ response }) => response(200).json({ items: [notice("n-1")] })));
+      server.use(
+        http.untyped.post(
+          `${origin}/api/v1/notifications/:id/acknowledge`,
+          () => new HttpResponse(null, { status: 204 }),
+        ),
+      );
+      serve([IDLE, "点击回应-元气挥手", "东张西望"]);
+      const { pet } = await mount(<Companion trouble={READ_ONLY} {...openers} />);
+      await act(() => loadTaskNotices());
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "tool.start", { name: "mcp__desktop__snapshot" });
+      });
+      await plays("东张西望");
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 1 });
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("整理照片 有新结果"))[0]).toBeInTheDocument();
+      expect(opened).toEqual({ vnas: 0, runs: [run], health: 1 });
+      fireEvent.click(pet);
+      expect((await screen.findAllByText(/第 1 步 · 已用 \d+ 秒/))[0]).toBeInTheDocument();
+      expect(opened).toEqual({ vnas: 0, runs: [run], health: 1 });
+    });
+
+    it("lets a turn's cross come first once the trouble is told", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-思考冒泡", "工作状态-垂头叹气冒汗"]);
+      const { pet } = await mount(<Companion trouble={READ_ONLY} {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportEvent("live0001", "message.start");
+        reportEvent("live0001", "message.complete", { status: "error" });
+      });
+      await plays("工作状态-垂头叹气冒汗");
+      fireEvent.click(pet);
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 1 });
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("这一轮出错了，打开 VNAS 看看"))[0]).toBeInTheDocument();
+      expect(opened).toEqual({ vnas: 1, runs: [], health: 1 });
+    });
+
+    it("hands the screen reader the same words again when it says them again", async () => {
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet, root } = await mount(<Companion trouble={READ_ONLY} {...openers} />);
+      const spoken = () => root.closest("[data-vnas-overlay]")?.querySelector("[aria-live] > *");
+      fireEvent.click(pet);
+      const first = spoken();
+      expect(first?.textContent).toBe("数据卷变成了只读\n打开设置看看");
+      fireEvent.click(pet);
+      // A node of its own, which a screen reader reads; the same text set again it would not.
+      expect(spoken()).not.toBe(first);
+      expect(spoken()?.textContent).toBe("数据卷变成了只读\n打开设置看看");
+      expect(opened.health).toBe(2);
     });
 
     it("brings up VNAS's window at the card that waits for the member", async () => {
@@ -1793,7 +1911,58 @@ describe("walking, throwing and resting", () => {
       const { pet } = await mount(<Companion {...openers} />);
       fireEvent.click(pet);
       await plays("点击回应-元气挥手");
-      expect(opened).toEqual({ vnas: 0, runs: [] });
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 0 });
+    });
+  });
+
+  describe("the dot at its feet", () => {
+    it("shows while the device is in critical trouble, asleep too, and is gone once it is not", async () => {
+      serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+      const { view, root, pet } = await mount(<Companion trouble={READ_ONLY} />);
+      const layer = () => root.closest("[data-vnas-overlay]");
+      expect(layer()).toHaveAttribute("data-companion-trouble");
+      // Its words go to the screen reader, which the dot does not reach: they describe the companion's button.
+      expect(screen.getByText("设备需要处理：数据卷变成了只读")).toBeInTheDocument();
+      expect(pet).toHaveAccessibleDescription("设备需要处理：数据卷变成了只读");
+      act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+      await plays("睡觉-开始");
+      expect(layer()).toHaveAttribute("data-companion-trouble");
+      view.rerender(<Companion />);
+      expect(layer()).not.toHaveAttribute("data-companion-trouble");
+      expect(screen.queryByText(/设备需要处理/)).toBeNull();
+      expect(pet).toHaveAccessibleDescription("");
+    });
+
+    it("reads a trouble out as it comes", async () => {
+      serve([IDLE]);
+      const { view, root } = await mount(<Companion />);
+      const line = [...(root.closest("[data-vnas-overlay]")?.querySelectorAll(":scope > [aria-live]") ?? [])].at(-1);
+      // On the page before the trouble, which a screen reader needs to read what comes into it.
+      expect(line).toHaveTextContent("");
+      view.rerender(<Companion trouble={READ_ONLY} />);
+      expect(line).toHaveTextContent("设备需要处理：数据卷变成了只读");
+    });
+
+    it("lets a click wake it while it sleeps, as ever, and opens nothing", async () => {
+      serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+      let health = 0;
+      const { pet, videos } = await mount(
+        <Companion
+          trouble={READ_ONLY}
+          onOpenHealth={() => {
+            health += 1;
+          }}
+        />,
+      );
+      act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+      await plays("睡觉-开始");
+      await ready(videos);
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await plays("睡觉-循环");
+      await ready(videos);
+      fireEvent.click(pet);
+      await plays("睡觉-起来");
+      expect(health).toBe(0);
     });
   });
 

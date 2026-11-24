@@ -15,7 +15,7 @@ logging.disable(logging.WARNING)
 
 from utils import fast_safe_load  # Hermes's own YAML loader
 
-with open("/etc/hermes/config.yaml", encoding="utf-8") as f:
+with open("/usr/lib/a-nas/assistant/managed/config.yaml", encoding="utf-8") as f:
     policy = fast_safe_load(f)
 
 import toolsets

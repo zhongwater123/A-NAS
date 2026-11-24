@@ -25,9 +25,10 @@ import (
 func (p Principal) valid() bool { return p.UserID != "" }
 
 // viewing returns the caller's unexpired grant on a member's private library
-// that lasts longest. An assistant never views through a grant.
+// that lasts longest. An assistant or a project grant never views through a
+// viewing grant.
 func (p Principal) viewing(ownerUserID string, now time.Time) (ViewingGrant, bool) {
-	if p.Assistant {
+	if p.Assistant || p.Grant {
 		return ViewingGrant{}, false
 	}
 	var found ViewingGrant
@@ -56,9 +57,10 @@ func viewingOnly(p Principal, lib library) bool {
 	return lib.kind == LibraryKindPrivate && lib.ownerUserID != p.UserID
 }
 
-// canAdd covers importing into, copying into and creating directories in lib.
+// canAdd covers copying into lib, creating albums and directories there and
+// completing its Live Photos; canImport covers importing originals.
 func canAdd(p Principal, lib library) bool {
-	if p.Assistant {
+	if p.Assistant || p.Grant {
 		return false
 	}
 	if lib.kind == LibraryKindShared {
@@ -67,10 +69,20 @@ func canAdd(p Principal, lib library) bool {
 	return lib.ownerUserID == p.UserID
 }
 
+// canImport covers importing an original into lib. A project grant imports
+// only into its owner's private library, where the montage center saves its
+// films, and adds nothing else anywhere.
+func canImport(p Principal, lib library) bool {
+	if p.Grant {
+		return lib.kind == LibraryKindPrivate && lib.ownerUserID == p.UserID
+	}
+	return canAdd(p, lib)
+}
+
 // canChange covers renaming, moving, trashing, restoring and purging an item
 // that createdBy uploaded or created in lib.
 func canChange(p Principal, lib library, createdBy string) bool {
-	if p.Assistant {
+	if p.Assistant || p.Grant {
 		return false
 	}
 	if lib.kind == LibraryKindShared {

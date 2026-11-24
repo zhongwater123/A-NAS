@@ -32,8 +32,15 @@ const (
 	OpSubtitle = "subtitle"
 	// OpStream converts a video to fragmented MP4.
 	OpStream = "stream"
-	// OpAudio decodes the first audio stream to FLAC.
+	// OpAudio decodes the first audio stream to FLAC, or to raw mono
+	// samples.
 	OpAudio = "audio"
+	// OpFrames takes several frames of a video for analysis (edit.go).
+	OpFrames = "frames"
+	// OpSegment renders part of a video as one piece of a film.
+	OpSegment = "segment"
+	// OpAssemble joins the pieces with a song into the film.
+	OpAssemble = "assemble"
 )
 
 var (
@@ -56,6 +63,9 @@ var (
 	ErrUnreadable = errors.New("FFmpeg worker cannot read the file")
 	// ErrInvalid reports a request the worker refused.
 	ErrInvalid = errors.New("FFmpeg worker request is invalid")
+	// ErrTooLarge reports output past the request's limit. The worker
+	// stopped rather than cut it short.
+	ErrTooLarge = errors.New("FFmpeg worker output is over its limit")
 )
 
 // Error codes in a response.
@@ -65,9 +75,16 @@ const (
 	CodeInvalid     = "invalid_request"
 	CodeFailed      = "failed"
 	CodeUnavailable = "unavailable"
+	// CodeTooLarge: the output grew past the request's limit while FFmpeg
+	// ran, which the checks on the request could not foresee.
+	CodeTooLarge = "too_large"
 )
 
 const maxFrame = 1 << 16
+
+// maxFiles is the most descriptors a request carries: assemble's segments
+// and song.
+const maxFiles = 2
 
 type Request struct {
 	Op string `json:"op"`
@@ -87,9 +104,13 @@ type Request struct {
 	AudioTrack int     `json:"audioTrack"`
 	CopyAudio  bool    `json:"copyAudio,omitempty"`
 	// Audio: the output sample rate (0 keeps the source's) and bits per
-	// sample, 16 or 24. Start is shared with Stream.
-	SampleRate int `json:"sampleRate,omitempty"`
-	Bits       int `json:"bits,omitempty"`
+	// sample, 16 or 24. Start is shared with Stream. PCM asks for raw 32-bit
+	// float samples at SampleRate instead of FLAC, with Bits 32 and Channels
+	// 1 or 2.
+	SampleRate int  `json:"sampleRate,omitempty"`
+	Bits       int  `json:"bits,omitempty"`
+	PCM        bool `json:"pcm,omitempty"`
+	Channels   int  `json:"channels,omitempty"`
 	// Ack asks the worker to say it has the request before it starts, so
 	// that a caller can tell a connection systemd dropped from a worker that
 	// stopped while working.
@@ -103,6 +124,10 @@ type Response struct {
 	// Accepted marks the acknowledgement that precedes the response when
 	// the request asked for one.
 	Accepted bool `json:"accepted,omitempty"`
+	// Size is the length of the body that follows, for the operations that
+	// finish their output before they answer (segment and assemble), so that
+	// a body cut short by a lost worker reads as an error.
+	Size int64 `json:"size,omitempty"`
 }
 
 var subtitleFormats = map[string]bool{"srt": true, "ass": true, "webvtt": true}
@@ -129,6 +154,15 @@ func (r Request) Validate() error {
 			return errors.New("invalid subtitle request")
 		}
 	case OpAudio:
+		if r.PCM {
+			if !finiteIn(r.Start, 0, 1e6) || r.SampleRate < 8000 || r.SampleRate > 48000 || r.Bits != 32 || r.Channels != 1 && r.Channels != 2 {
+				return errors.New("invalid audio request")
+			}
+			break
+		}
+		if r.Channels != 0 {
+			return errors.New("invalid audio request")
+		}
 		if !finiteIn(r.Start, 0, 1e6) || r.SampleRate != 0 && (r.SampleRate < 8000 || r.SampleRate > 384000) || r.Bits != 16 && r.Bits != 24 {
 			return errors.New("invalid audio request")
 		}

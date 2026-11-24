@@ -1,8 +1,8 @@
 # Windows 与 WSL 开发环境
 
-更新时间：2026-11-11
+更新时间：2026-11-18
 
-记录开发机 A、B 的配置与差异。检查目标见[测试与验证](../testing.md)；完整门禁命令统一维护在 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md)，Fake 预览按 [fake-preview](../../../.claude/skills/fake-preview/SKILL.md)。
+记录开发机 A、B 的配置与差异。检查目标见[测试与验证](../testing.md)；完整门禁命令统一维护在 [check-in-wsl](../../../.agents/skills/check-in-wsl/SKILL.md)，Fake 预览按 [fake-preview](../../../.agents/skills/fake-preview/SKILL.md)。
 
 ## Windows 检出换行
 
@@ -66,11 +66,11 @@ wsl -d Ubuntu-24.04 -u root
 |---|---|
 | Windows | Windows 11 专业版（build 26200）；源码 `D:\A-NAS`，Claude Code 的工作树位于 `D:\A-NAS\.claude\worktrees\` |
 | 硬件 | Intel Core Ultra 5 125U：低功耗笔记本处理器，12 核 14 线程，其中 2 个性能核；内存 15.5 GB |
-| WSL | WSL2，发行版名 `Ubuntu`（Ubuntu 26.04 LTS），systemd 已启用；没有 `.wslconfig`，按默认用全部 14 个线程、最多约 7.7 GB 内存（主机的一半），所以几个会话的门禁要排队，见 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md#一次只跑一个门禁) |
+| WSL | WSL2，发行版名 `Ubuntu`（Ubuntu 26.04 LTS），systemd 已启用；没有 `.wslconfig`，按默认用全部 14 个线程、最多约 7.7 GB 内存（主机的一半），所以几个会话的门禁要排队，见 [check-in-wsl](../../../.agents/skills/check-in-wsl/SKILL.md#一次只跑一个门禁) |
 | WSL 用户 | 日常用户，属于 `docker` 组，没有免密 `sudo`；没有 `anas-dev` |
 | WSL 工作区入口 | 直接使用 `/mnt/d/A-NAS` 或对应工作树 |
 | Git | Git for Windows；仓库内已设置 `core.autocrlf=false`、`core.eol=lf` |
-| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、lychee 0.24.2、jq 与 Ruff（见[静态检查](../testing.md#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译 |
+| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、lychee 0.24.2、jq 与 Ruff（见[静态检查](../testing.md#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译；Python 3.14 与 `python3-venv` 也来自 Ubuntu 软件包，后者 2026-11-18 以 root 安装（`wsl -u root -e apt-get install -y python3-venv`），`make ai-sdk-test` 靠它建虚拟环境 |
 | Docker | WSL 内 Docker Engine 29.1.3，cgroup v2；Docker Hub 不可达，`deb.debian.org` 与 `proxy.golang.org` 可达 |
 | 本地镜像 | `anas-acl-matrix:bookworm`：Debian 12，加装 gcc、acl、btrfs-progs、samba、samba-vfs-modules 与 smbclient，用于 root 集成测试，也可在 Debian 12 中复现 cgo 测试；`anas-systemd:trixie`：由 `scripts/build-system-test-image.sh` 以前者为构建器生成，用于系统测试 |
 
@@ -84,7 +84,7 @@ cd /mnt/d/A-NAS
 make docs-check ops-check
 ```
 
-完整门禁按 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md) 在 WSL 的 ext4 副本中运行，依赖 cgo（SQLite）的 Go 测试与构建直接用 WSL 的 gcc。要在 Debian 12 中复现 cgo 测试时，在 `anas-acl-matrix:bookworm` 中以当前用户运行；以 root 运行会改变依赖权限检查的文件代理与文件测试。模块缓存先在 WSL 中用 `go mod download` 填好：
+完整门禁按 [check-in-wsl](../../../.agents/skills/check-in-wsl/SKILL.md) 在 WSL 的 ext4 副本中运行，依赖 cgo（SQLite）的 Go 测试与构建直接用 WSL 的 gcc。要在 Debian 12 中复现 cgo 测试时，在 `anas-acl-matrix:bookworm` 中以当前用户运行；以 root 运行会改变依赖权限检查的文件代理与文件测试。模块缓存先在 WSL 中用 `go mod download` 填好：
 
 ```bash
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
@@ -98,7 +98,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
 
 把最后的 `go test ./...` 换成 `go vet ./...` 或 `go build -o build/ ./cmd/anas-api ./cmd/anas-host-agent` 即得到对应检查。root 集成测试使用同一镜像，去掉 `-u`，加上 `--privileged -e ANAS_ROOT_INTEGRATION=1`，运行 `go test -tags rootintegration -count=1 ./internal/hostops/linux`。
 
-系统测试按 [system-test](../../../.claude/skills/system-test/SKILL.md) 在同一个 ext4 副本中运行；构建系统测试镜像时以 `anas-acl-matrix:bookworm` 为构建器：
+系统测试按 [system-test](../../../.agents/skills/system-test/SKILL.md) 在同一个 ext4 副本中运行；构建系统测试镜像时以 `anas-acl-matrix:bookworm` 为构建器：
 
 ```bash
 scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm

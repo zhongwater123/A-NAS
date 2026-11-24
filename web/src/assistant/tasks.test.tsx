@@ -4,9 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { assistantTask, noticesHandlers, taskNotice, tasksHandlers } from "../test/handlers/assistant";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import { scheduledPrompt } from "./AssistantPanel";
 import { TasksView } from "./TasksView";
 import { plainText, TaskToasts } from "./TaskToasts";
+
+fixToday();
 
 const seconds = (date: Date) => date.getTime() / 1000;
 const today = (hour: number, minute = 0) => {

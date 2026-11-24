@@ -1,0 +1,159 @@
+parameters:
+  MontageProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  MontageJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  MontageCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
+schemas:
+  MontageRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
+  MontageAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
+  MontageProjectSummary:
+    type: object
+    additionalProperties: false
+    required: [id, name, assetCount, createdAt]
+    properties:
+      id: { type: string, minLength: 1 }
+      name: { type: string }
+      assetCount: { type: integer, minimum: 0 }
+      createdAt: { type: string, format: date-time }
+      previewAssetIds: { type: array, maxItems: 6, description: "Up to six of its videos, spread over the order they were added, for thumbnails.", items: { type: string } }
+  MontageProjectPage:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/MontageProjectSummary" } }
+      next: { type: string }
+  MontageProjectAsset:
+    type: object
+    additionalProperties: false
+    required: [assetId, status, addedAt]
+    properties:
+      assetId: { type: string }
+      status: { type: string, enum: [available, trashed, missing, unknown], description: "unknown: the photo library did not answer this time." }
+      duration: { type: number, minimum: 0 }
+      takenAt: { type: string, format: date-time }
+      addedAt: { type: string, format: date-time }
+  MontageProject:
+    type: object
+    additionalProperties: false
+    required: [id, name, assetCount, createdAt, ask, chronological, assets, versions]
+    properties:
+      id: { type: string, minLength: 1 }
+      name: { type: string }
+      assetCount: { type: integer, minimum: 0 }
+      createdAt: { type: string, format: date-time }
+      ask: { type: string }
+      chronological: { type: boolean }
+      assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
+      versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/MontageVersion" } }
+      job: { $ref: "#/schemas/MontageJob", description: "The project's latest job, for the page to pick up where it was after a reload." }
+  MontageSongSection:
+    type: object
+    additionalProperties: false
+    required: [start, end, label]
+    properties:
+      start: { type: number, minimum: 0 }
+      end: { type: number, minimum: 0 }
+      label: { type: string, enum: [start, end, intro, outro, break, bridge, inst, solo, verse, chorus], description: "allin1's label." }
+  MontageSongPart:
+    type: object
+    additionalProperties: false
+    required: [start, end, level, label, slots]
+    properties:
+      start: { type: number, minimum: 0, description: Seconds from the excerpt's start. }
+      end: { type: number, minimum: 0 }
+      level: { type: string, enum: [安静, 中等, 高潮], description: "The part's level in the film: quiet, middle or climax." }
+      label: { type: string }
+      allin1: { type: string, description: "allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it." }
+      slots: { type: array, items: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 } }, description: "The shots' slots, cut on the bar lines, in seconds from the excerpt's start." }
+  MontageSongSelection:
+    type: object
+    additionalProperties: false
+    required: [tempo, bar, excerpt, seconds, parts, chorus]
+    properties:
+      tempo: { type: number }
+      bar: { type: number, minimum: 0 }
+      excerpt: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 }, description: "Its start and end in the song, in seconds. The film starts there and lasts as long." }
+      seconds: { type: number, minimum: 0 }
+      parts: { type: array, items: { $ref: "#/schemas/MontageSongPart" } }
+      chorus: { type: boolean, description: "false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen." }
+  MontageSong:
+    type: object
+    additionalProperties: false
+    required: [id, title, duration, transcode, state]
+    properties:
+      id: { type: string, minLength: 1 }
+      trackId: { type: string, description: "The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title." }
+      title: { type: string }
+      duration: { type: number, minimum: 0 }
+      transcode: { type: boolean, description: "Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range." }
+      state: { type: string, enum: [analyzing, ready, unusable] }
+      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot, analysis_failed], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from." }
+      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times." }
+      tempo: { type: number }
+      beats: { type: array, items: { type: number, minimum: 0 } }
+      downbeats: { type: array, items: { type: number, minimum: 0 } }
+      sections: { type: array, items: { $ref: "#/schemas/MontageSongSection" } }
+      defaultStart: { type: number, minimum: 0, description: "Where the eighth version's rule starts the excerpt: around the first chorus." }
+      selection: { $ref: "#/schemas/MontageSongSelection" }
+  MontageVersion:
+    type: object
+    additionalProperties: false
+    required: [number, jobId, plan, filmAssetId, createdAt]
+    properties:
+      number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
+      jobId: { type: string, description: "The job that made it." }
+      plan: { type: integer, minimum: 1, description: "Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二." }
+      filmAssetId: { type: string, description: "The film in the caller's photo library; play and download it there." }
+      createdAt: { type: string, format: date-time }
+      gone: { type: boolean, description: "The member deleted the film from the photo library." }
+  MontageJobStep:
+    type: object
+    additionalProperties: false
+    required: [name, state]
+    properties:
+      name:
+        type: string
+        description: "The shared steps, then each 方案's: the first 方案's plain, the second's with -2."
+        enum: [analysis, catalog, song, pick, shots, fill, render, save, pick-2, shots-2, fill-2, render-2, save-2]
+      state: { type: string, enum: [pending, running, done, queued, waiting, needs_input, failed, cancelled], description: "A step that stopped with the job shows the job's state." }
+      startedAt: { type: string, format: date-time }
+      finishedAt: { type: string, format: date-time }
+  MontageJob:
+    type: object
+    additionalProperties: false
+    required: [id, projectId, state, steps, createdAt]
+    properties:
+      id: { type: string, minLength: 1 }
+      projectId: { type: string, minLength: 1 }
+      state: { type: string, enum: [queued, running, waiting, needs_input, done, failed, cancelled] }
+      step: { type: string, description: The step the job is at or stopped at. }
+      waitReason:
+        type: string
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, plan_error, storage_full, photos_unavailable, video_too_long, model_unavailable]
+        description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for."
+      error: { type: string }
+      steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
+      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed.", items: { type: string } }
+      version: { $ref: "#/schemas/MontageVersion", description: "The first 方案's film." }
+      versions: { type: array, description: "Every 方案's film the job saved, in order.", items: { $ref: "#/schemas/MontageVersion" } }
+      createdAt: { type: string, format: date-time }
+      finishedAt: { type: string, format: date-time }
+  MontageNotice:
+    type: object
+    additionalProperties: false
+    required: [kind, jobId, projectId, project, at]
+    properties:
+      kind: { type: string, enum: [waiting_for_planning, planning, needs_input, saved] }
+      jobId: { type: string }
+      projectId: { type: string }
+      project: { type: string, description: The project's name. }
+      reason: { type: string }
+      detail: { type: string, description: "Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet." }
+      filmAssetId: { type: string, description: "The film saved, for saved." }
+      at: { type: string, format: date-time }
+  MontageNotices:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/MontageNotice" } }

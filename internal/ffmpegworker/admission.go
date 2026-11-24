@@ -30,9 +30,10 @@ const (
 	// Streaming is playback, which keeps its worker while it plays. It is the
 	// default for stream and audio requests.
 	Streaming
-	// Background is work nobody watches: thumbnails, library scans and the
-	// inputs of local AI. It waits for a slot for as long as its context
-	// lives, so a busy worker never fails it.
+	// Background is work nobody watches: thumbnails, library scans, the
+	// inputs of local AI and editing, whose operations take it by default.
+	// It waits for a slot for as long as its context lives, so a busy worker
+	// never fails it.
 	Background
 
 	priorities = Background + 1
@@ -95,6 +96,9 @@ func priorityOf(ctx context.Context, op string) Priority {
 	}
 	if op == OpStream || op == OpAudio {
 		return Streaming
+	}
+	if isEditing(op) {
+		return Background
 	}
 	return Interactive
 }
