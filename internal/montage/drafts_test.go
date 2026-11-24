@@ -51,6 +51,8 @@ type editGrants struct {
 	// version key.
 	trashed map[string]bool
 	films   map[string]string
+	// gone are the videos the photo library no longer has.
+	gone map[string]bool
 }
 
 func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
@@ -58,6 +60,9 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 		return photos.GrantAnalysis{}, nil, errors.New("another grant")
 	}
 	g.analysed = append(g.analysed, assetID)
+	if g.gone[assetID] {
+		return photos.GrantAnalysis{}, nil, &photosapi.GrantError{Code: photosapi.GrantAssetNotFound, Message: "the asset is not available"}
+	}
 	var list []photos.Window
 	var raw []byte
 	for i, axis := range g.windows[assetID] {
@@ -849,5 +854,24 @@ func TestDeletingAShotReadsEachVideosAnalysisOnce(t *testing.T) {
 	}
 	if !slices.Equal(env.grants.analysed, []string{videoA}) {
 		t.Fatalf("the analyses read to delete a shot = %v", env.grants.analysed)
+	}
+}
+
+// A shot whose video, or a neighbour's, the photo library no longer has is
+// not deleted, and the member is told why: not that a video cannot be added
+// to a project.
+func TestDeletingAShotBesideAVideoGoneIsRefusedWithWhy(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shot 2 (c2/1) lies between c1/1 and c2/2, all three of video A.
+	env.grants.gone = map[string]bool{videoA: true}
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	refusedWith(t, err, "已从相册删除或放进回收站")
+	if errors.Is(err, ErrAssetsRefused) {
+		t.Fatalf("deleting beside a video gone = %v, a video that cannot be added", err)
 	}
 }

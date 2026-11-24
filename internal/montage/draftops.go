@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 // The rules of each step (ADR 0039, decision 2;
@@ -236,6 +237,13 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 		of, ok := read[video]
 		if !ok {
 			analysis, raw, err := s.grants.Analysis(ctx, src.grantID, video)
+			switch photosapi.GrantErrorCode(err) {
+			case photosapi.GrantAssetNotFound, photosapi.GrantAssetsRefused:
+				// Gone from the library or in its trash since the version
+				// was made: a refusal of this step, not a video that cannot
+				// be added to a project (grantError).
+				return nil, 0, refuse("这一镜或前后镜头的视频已从相册删除或放进回收站，不能删这一镜")
+			}
 			if err != nil {
 				return nil, 0, grantError(err)
 			}
