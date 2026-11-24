@@ -13,14 +13,14 @@ const (
 	Whole Scale = "whole"
 	// Three is three levels: 差 1, 中 3 and 好 5.
 	Three Scale = "three"
+	// Five is five levels, the whole points without 0: 很差 1, 较差 2,
+	// 一般 3, 好 4 and 很好 5.
+	Five Scale = "five"
 )
-
-// Scales lists every scale in the order the window offers them.
-var Scales = []Scale{Hundredths, Tenths, Whole, Three}
 
 func (scale Scale) valid() bool {
 	switch scale {
-	case Hundredths, Tenths, Whole, Three:
+	case Hundredths, Tenths, Whole, Three, Five:
 		return true
 	}
 	return false
@@ -50,19 +50,36 @@ func (scale Scale) fits(score int) bool {
 		return score%100 == 0
 	case Three:
 		return score == 100 || score == 300 || score == 500
+	case Five:
+		return score >= 100 && score%100 == 0
 	}
 	return true
 }
 
-// describe says in the export what a score of the scale is.
-func (scale Scale) describe() string {
-	switch scale {
-	case Tenths:
+// describe says in the export what a score of the scale is on a 打分项:
+// levels name 情绪 from calm to intense, every other one from poor to good,
+// as the window does (web/src/scoring/model.ts, levelsFor); a number line
+// has 情绪 from 1 to 5.
+func (scale Scale) describe(dimension string) string {
+	switch {
+	case scale == Tenths && dimension == Emotion:
+		return "1 到 5，一位小数：1 平静，5 激烈"
+	case scale == Tenths:
 		return "0 到 5，一位小数"
-	case Whole:
+	case scale == Whole && dimension == Emotion:
+		return "1 到 5 的整数：1 平静，5 激烈"
+	case scale == Whole:
 		return "0 到 5 的整数"
-	case Three:
+	case scale == Three && dimension == Emotion:
+		return "三档：1 平静，3 中间，5 激烈"
+	case scale == Three:
 		return "三档：1 差，3 中，5 好"
+	case scale == Five && dimension == Emotion:
+		return "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈"
+	case scale == Five:
+		return "五档：1 很差，2 较差，3 一般，4 好，5 很好"
+	case dimension == Emotion:
+		return "1 到 5，两位小数：1 平静，5 激烈"
 	}
 	return "0 到 5，两位小数"
 }
@@ -76,6 +93,8 @@ func (scale Scale) says() string {
 		return "a whole number from 0 to 5"
 	case Three:
 		return "1, 3 or 5"
+	case Five:
+		return "a whole number from 1 to 5"
 	}
 	return "0 to 5"
 }

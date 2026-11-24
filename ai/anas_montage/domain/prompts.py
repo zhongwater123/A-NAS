@@ -104,7 +104,7 @@ SUMMARY_CHARS = 80   # a vlog card holds more than a film's: 40 characters left 
 # from a boat at the water's level, for a drone; the plan then put it among the flight's shots. Asked from what
 # is seen (three wordings tried on 12 cards, three runs each): every boat card 船上, the helicopter's 飞机或直升机里
 # (they had been drones), no drone written anywhere; but a lake seen from the shore is still taken for a boat
-# (5 of 6), its summary then a boat trip. Data: 剪辑对比/描述随机性（2026-11-16）/. 室内 (2026-11-16, Insta360):
+# (5 of 6), its summary then a boat trip. Data: #626. 室内 (2026-11-16, Insta360):
 # a breakfast shot through a restaurant's window had been 地面.
 CAMERAS = ["地面", "室内", "车里", "船上", "飞机或直升机里", "无人机航拍", "水里", "看不出"]
 PROMPT = (
