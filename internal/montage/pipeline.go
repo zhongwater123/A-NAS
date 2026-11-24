@@ -183,6 +183,9 @@ var (
 	ErrPlanUnknown = errors.New("the planning round ended without a plan")
 	// ErrPlanInvalid: the plan failed its checks too many times.
 	ErrPlanInvalid = errors.New("the plan failed its checks")
+	// ErrPlanFailed: the planning itself failed twice before the model
+	// planned (docs/architecture/montage-planning-session.md, 重试).
+	ErrPlanFailed = errors.New("the planning failed")
 )
 
 // Music is what jobs ask of the project's song (M8b).

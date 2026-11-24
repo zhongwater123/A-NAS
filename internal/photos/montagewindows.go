@@ -559,6 +559,37 @@ type RunningGate interface {
 	Continue(ctx context.Context, need uint64) (open bool, reason string)
 }
 
+// MemberGate is a Gate that also answers for work a member waits for, such
+// as the montage center's analysis of a job's videos (ADR 0038): someone
+// using the photo library does not hold such work back, for that someone
+// may be the member waiting, or anyone else on the device for as long as
+// they like. Short memory and the device's other work still do.
+type MemberGate interface {
+	Gate
+	OpenForMember(ctx context.Context, need uint64) (open bool, reason string)
+	ContinueForMember(ctx context.Context, need uint64) (open bool, reason string)
+}
+
+// memberGate is a MemberGate as the work a member waits for asks it.
+type memberGate struct{ gate MemberGate }
+
+func (g memberGate) Open(ctx context.Context, need uint64) (bool, string) {
+	return g.gate.OpenForMember(ctx, need)
+}
+
+func (g memberGate) Continue(ctx context.Context, need uint64) (bool, string) {
+	return g.gate.ContinueForMember(ctx, need)
+}
+
+// forMember is gate as the work a member waits for asks it, and whether it
+// answers for such work apart; a gate that does not is used as it is.
+func forMember(gate Gate) (Gate, bool) {
+	if member, ok := gate.(MemberGate); ok {
+		return memberGate{member}, true
+	}
+	return gate, false
+}
+
 // continuing is how a running montage chunk asks gate whether to go on.
 func continuing(gate Gate) func(context.Context, uint64) (bool, string) {
 	if running, ok := gate.(RunningGate); ok {

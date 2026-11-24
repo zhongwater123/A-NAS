@@ -223,6 +223,26 @@ func maskTexts(value any) any {
 
 const describeReady = qualityReady + " AND NOT EXISTS (SELECT 1 FROM jobs p WHERE p.object_id = j.object_id AND p.derivation = '" + qualityDerivation + "')"
 
+// describeDue reports whether a description job is due whose video has its
+// cards and their quality.
+func (s *Service) describeDue(ctx context.Context) (bool, error) {
+	now := formatTime(s.now())
+	var due bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs j WHERE j.derivation = ?
+		AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
+		AND `+describeReady+`)`, describeDerivation, now, now).Scan(&due)
+	return due, err
+}
+
+// montageAnalysisDue reports whether the montage center's windows or
+// descriptions are due: the AI Worker's work that a member waits for.
+func (s *Service) montageAnalysisDue(ctx context.Context) (bool, error) {
+	if due, err := s.montageWorkWaiting(ctx); due || err != nil {
+		return due, err
+	}
+	return s.describeDue(ctx)
+}
+
 // montageDescribe describes one card of a due description job. It reports
 // whether it claimed one, which ends the round, and whether it did any
 // work; a job that only waits for memory to load the reader goes back
@@ -237,12 +257,7 @@ func (r *aiRunner) montageDescribe(ctx context.Context, embedder Embedder, gate 
 	if !ok || !taking || info.OCR == "" {
 		return false, false, nil
 	}
-	now := formatTime(lib.now())
-	var due bool
-	err = lib.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs j WHERE j.derivation = ?
-		AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
-		AND `+describeReady+`)`, describeDerivation, now, now).Scan(&due)
-	if err != nil || !due {
+	if due, err := lib.describeDue(ctx); err != nil || !due {
 		return false, false, err
 	}
 	job, err := lib.claimJobWhere(ctx, describeDerivation, "", "j.not_before, j.object_id", describeReady)

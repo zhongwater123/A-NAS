@@ -28,6 +28,8 @@ type Commands interface {
 // next release no longer satisfies it.
 var releasePackages = []string{"a-nas", "a-nas-host", "a-nas-console"}
 
+const hotspotRadio = "a-nas-hotspot-radio"
+
 // contentPatterns are the content packages a release depends on
 // (scripts/lib/content.sh): installed at version 1, named by their content.
 var contentPatterns = []string{"a-nas-model-*", "a-nas-ai-runtime-*", "a-nas-search-runtime-*", "a-nas-qdrant-*",
@@ -362,6 +364,9 @@ func (s *Service) landed(ctx context.Context, version string) bool {
 			return false
 		}
 	}
+	if s.updatesHotspotRadio(ctx, version) && s.installedVersion(ctx, hotspotRadio) != version {
+		return false
+	}
 	return true
 }
 
@@ -403,7 +408,11 @@ func (s *Service) candidate(ctx context.Context) (string, error) {
 
 // available reports whether the source still has a version of a-nas.
 func (s *Service) available(ctx context.Context, version string) bool {
-	output, err := s.Commands.Run(ctx, "apt-cache", "madison", "a-nas")
+	return s.packageAvailable(ctx, "a-nas", version)
+}
+
+func (s *Service) packageAvailable(ctx context.Context, name, version string) bool {
+	output, err := s.Commands.Run(ctx, "apt-cache", "madison", name)
 	if err != nil {
 		return false
 	}
@@ -414,6 +423,26 @@ func (s *Service) available(ctx context.Context, version string) bool {
 		}
 	}
 	return false
+}
+
+// A release that suggests its radio package must publish the matching build.
+// Targets that never offered it leave the installed dependency package alone.
+// The older product has no hotspot unit, and a later upgrade keeps the choice
+// to install radio support. Metadata failure must not silently skip a package.
+func (s *Service) updatesHotspotRadio(ctx context.Context, version string) bool {
+	if status, _ := s.packageState(ctx, hotspotRadio); !present(status) {
+		return false
+	}
+	metadata, err := s.Commands.Run(ctx, "apt-cache", "show", "a-nas="+version)
+	if err != nil || len(bytes.TrimSpace(metadata)) == 0 {
+		return true
+	}
+	for line := range strings.Lines(string(metadata)) {
+		if strings.HasPrefix(line, "Suggests:") && strings.Contains(line, hotspotRadio) {
+			return true
+		}
+	}
+	return s.packageAvailable(ctx, hotspotRadio, version)
 }
 
 // newer reports whether a is a later Debian version than b.
@@ -435,6 +464,9 @@ func (s *Service) releaseArguments(ctx context.Context, version string) []string
 			}
 		}
 		arguments = append(arguments, name+"="+version)
+	}
+	if s.updatesHotspotRadio(ctx, version) {
+		arguments = append(arguments, hotspotRadio+"="+version)
 	}
 	return arguments
 }

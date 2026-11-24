@@ -4,6 +4,9 @@ import { HostState, readHostState } from "./api";
 
 export interface HostStateView {
   snapshot?: HostState;
+  // When this page got the snapshot (Date.now()), for what goes by the time
+  // between reads: the companion's dot (companion/health.ts).
+  readAt?: number;
   loading: boolean;
   refreshing: boolean;
   disconnected: boolean;
@@ -12,6 +15,7 @@ export interface HostStateView {
 
 export function useHostState(enabled = true): HostStateView {
   const [snapshot, setSnapshot] = useState<HostState>();
+  const [readAt, setReadAt] = useState<number>();
   const snapshotRef = useRef<HostState | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,6 +33,7 @@ export function useHostState(enabled = true): HostStateView {
       .then((state) => {
         snapshotRef.current = state;
         setSnapshot(state);
+        setReadAt(Date.now());
         setDisconnected(false);
       })
       .catch((error: unknown) => {
@@ -63,7 +68,7 @@ export function useHostState(enabled = true): HostStateView {
 
   // The desktop hands this to every window; a new object only when something changed.
   return useMemo(
-    () => ({ snapshot, loading, refreshing, disconnected, refresh }),
-    [snapshot, loading, refreshing, disconnected, refresh],
+    () => ({ snapshot, readAt, loading, refreshing, disconnected, refresh }),
+    [snapshot, readAt, loading, refreshing, disconnected, refresh],
   );
 }

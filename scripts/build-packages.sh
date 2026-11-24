@@ -22,6 +22,8 @@
 #   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
 #   stay installed when the product rolls back, as Docker itself does.
+# - a-nas-hotspot-radio: optional MediaTek radio dependencies, built for
+#   the same target architecture as the rest of the deployment.
 #
 # OUT then holds this version's packages alone: those of an earlier build go,
 # so that the system test and make release find the ones just built.
@@ -47,6 +49,10 @@ out=$(cd "$1" && pwd)
 version=$2
 repo=$(cd "$(dirname "$0")/.." && pwd)
 build=${3:-$repo/build}
+target=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+product_arch=$(sed -n 's/^Architecture: //p' "$repo/deploy/debian/a-nas/DEBIAN/control")
+[[ "$target" == "$product_arch" ]] ||
+  { echo "the product build supports $product_arch here; build the optional radio package separately for $target" >&2; exit 2; }
 # A Debian upstream version without a revision (scripts/release-version.sh).
 if [[ ! "$version" =~ ^[0-9][A-Za-z0-9.+~]*$ ]]; then
   echo "not a Debian version: $version (see scripts/release-version.sh)" >&2
@@ -55,7 +61,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy a-nas-hotspot-radio; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -66,6 +72,7 @@ done
 # The same commit builds the same packages.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
+bash "$repo/scripts/build-hotspot-radio-package.sh" "$out" "$version"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
@@ -125,6 +132,7 @@ install -m 0755 "$repo"/deploy/debian/a-nas/DEBIAN/{preinst,postinst} "$lib/rele
 install -m 0755 "$build/anas-api" "$build/anas-host-agent" "$build/anas-container-agent" \
   "$repo/scripts/install-media-pool.sh" "$repo/scripts/install-screensavers.sh" "$lib/"
 install -m 0755 "$repo/scripts/run-kiosk.sh" "$lib/kiosk-launcher"
+install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 
 # The AI Worker (ADR 0016): its code, each model role's manifest and a link
 # to the role's file in its content package, the runtime and llama.cpp.
@@ -153,11 +161,12 @@ for file in "$assistant"/*.sh "$assistant"/*.py; do
 done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
-# The cron unit's policy adds the montage center's planning server, which a
-# conversation's instance never starts (docs/architecture/montage-center.md);
-# the fixed prompt templates a planning round fills go beside it.
-install -d "$lib/assistant/managed-cron" "$lib/assistant/montage-prompts"
-derive_cron_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-cron/config.yaml"
+# The planning instance's policy adds the montage center's planning server,
+# which no other unit starts, and reviews every planning
+# (docs/architecture/montage-planning-session.md); the fixed prompt templates
+# the planner fills go beside it.
+install -d "$lib/assistant/managed-plan" "$lib/assistant/montage-prompts"
+derive_plan_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
 install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
@@ -178,14 +187,15 @@ ln -s "/opt/a-nas/qdrant/$(pin_field "$repo/deploy/qdrant/qdrant.json" sha256)/q
 # console, the container agent and the internet entry are turned on by their
 # runbooks or by a-nas-generator.
 install -m 0644 "$repo"/deploy/systemd/system/* "$units/"
-# The assistant's scheduled tasks and its curator, made from its sandbox.
+# The assistant's scheduled tasks, its curator and its planning instance, made
+# from its sandbox.
 derive_assistant_units "$units"
 wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
 for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-search anas-site \
-  anas-assistant-gateway anas-assistant-cron-waker; do
+  anas-assistant-gateway anas-assistant-cron-waker anas-montage-planner; do
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Fetches the Docker and Caddy packages that deploy/upstream/packages.json
-# pins (ADR 0015) into DIR/<sha256>/, and prints their paths. A-NAS's signed
+# Fetches the packages pinned in LOCK into DIR/<sha256>/ and prints their
+# paths. The default lock pins Docker and Caddy (ADR 0015). A-NAS's signed
 # repository carries these files (scripts/release.sh), and the system test
 # installs them (scripts/system-test.sh). Each is checked against its pinned
 # size and SHA-256; one already in DIR, as a CI cache or the release content
 # store keeps it, is reused once it passes the same check.
 #
-# Usage: scripts/fetch-upstream-packages.sh [DIR]
+# Usage: scripts/fetch-upstream-packages.sh [DIR [LOCK]]
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-lock=$repo/deploy/upstream/packages.json
+lock=${2:-$repo/deploy/upstream/packages.json}
+architecture=$(jq -r '.architecture // empty' "$lock")
 mkdir -p "${1:-$repo/build/upstream}"
 out=$(cd "${1:-$repo/build/upstream}" && pwd)
 # pinned FILE SIZE SHA256: FILE has this size and SHA-256.
@@ -38,6 +39,13 @@ jq -r '.packages[] | [.source, .file, .sizeBytes, .sha256] | @tsv' "$lock" |
         exit 4
       fi
       mv -f -- "$target.partial" "$target"
+    fi
+    if [[ -n "$architecture" ]]; then
+      package_arch=$(dpkg-deb --field "$target" Architecture)
+      if [[ "$package_arch" != "$architecture" && "$package_arch" != all ]]; then
+        echo "wrong architecture in $lock: $file ($package_arch)" >&2
+        exit 4
+      fi
     fi
     echo "$target"
   done

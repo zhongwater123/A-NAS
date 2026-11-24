@@ -82,9 +82,14 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
-  # Nor has it the photo service's grant socket for the montage center, or
-  # the montage center's socket for members' scheduled tasks.
+  # This target predates the hotspot and has no matching radio package.
+  sed -i '/^Suggests: a-nas-hotspot-radio/d' "$legacy_product/DEBIAN/control"
+  rm "$legacy_product/usr/lib/systemd/system/anas-phone-hotspot.service" "$legacy_product/usr/lib/a-nas/phone-hotspot"
+  # Nor has it the photo service's grant socket for the montage center, the
+  # montage center's socket for planning, or its planner.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-montage-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage-planner.service" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-assistant.socket" \
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-assistant.socket" \
     "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
@@ -94,6 +99,7 @@ if [[ "${1:-}" != --inside ]]; then
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
     "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
   sed -i -e '/systemctl stop anas-montage-assistant\.socket/d' -e 's/ anas-montage-assistant\.socket//g' \
+    -e 's/ anas-montage-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
     -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
     -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
@@ -114,10 +120,12 @@ if [[ "${1:-}" != --inside ]]; then
   done
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
+  radio=$(bash "$repo/scripts/fetch-upstream-packages.sh" "$repo/build/upstream" "$repo/deploy/upstream/hotspot-radio-amd64.json")
+  mapfile -t radio <<<"$radio"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
-    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" "${radio[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -732,12 +740,46 @@ check "member sharing works through production service sandboxes" sharing_smoke
 # pins. Docker waits for the address pool the App Center's runbook gives it
 # (ADR 0013), then the container agent reaches it.
 upstream_pinned() {
-  local name pinned
+  local name pinned lock=${1:-/src/deploy/upstream/packages.json}
   while read -r name pinned; do
     [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
-  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' "$lock")
 }
 check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "a standard install leaves the hotspot radio package optional" \
+  test "$(dpkg-query -W -f='${db:Status-Status}' a-nas-hotspot-radio 2>/dev/null || true)" != installed
+check "apt installs the hotspot radio package using only the signed A-NAS repository" \
+  quiet apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/a-nas.sources -o Dir::Etc::sourceparts=- \
+  install -y --no-install-recommends --no-remove "a-nas-hotspot-radio=$version"
+check "the hotspot radio package installs the pinned Debian dependencies" \
+  upstream_pinned /src/deploy/upstream/hotspot-radio-amd64.json
+check "the hotspot radio package supplies the MT7612U firmware and iw" \
+  bash -c 'test -r /usr/lib/firmware/mt7662.bin && test -r /usr/lib/firmware/mt7662_rom_patch.bin && iw --version'
+hotspot="$api/api/v1/network/phone-hotspot"
+check "the packaged phone hotspot starts off" \
+  test "$(curl -fsS -b /tmp/owner.jar "$hotspot" | jq -r .state)" = off
+check "a household member cannot read the phone hotspot" \
+  test "$(status_of -b /tmp/alice.jar "$hotspot")" = 403
+hotspot_routes=$(ip -4 route show default)
+check "the administrator can request the packaged hotspot" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":true}' "$hotspot"
+for _ in $(seq 1 50); do
+  [[ "$(systemctl show -p ActiveState --value anas-phone-hotspot.service)" != failed ]] || break
+  sleep 0.2
+done
+check "the packaged hotspot reports missing hardware without connection details" \
+  jq -e '.state == "failed" and (.reason == "no_wired_uplink" or .reason == "no_idle_radio") and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "a failed hotspot start preserves the host default route" test "$(ip -4 route show default)" = "$hotspot_routes"
+check "a failed hotspot start leaves no hotspot filter table" \
+  bash -c '! nft list tables | grep -Fxq "table inet anas_phone_hotspot"'
+check "the hotspot HTTPS proxy isolates wired routes and survives a host ruleset reload" \
+  quiet env ANAS_PHONE_HOTSPOT_NETWORK_TEST=1 PYTHONDONTWRITEBYTECODE=1 unshare --net \
+  python3 -m unittest discover -s /src/deploy/network
+check "the administrator can stop the packaged hotspot after a failed start" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":false}' "$hotspot"
 check "Docker waits for its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
@@ -1251,6 +1293,11 @@ check "the montage account cannot list the photo store" denied a-nas-montage ls 
 # The small test runtime has only system Python, so its fixture answers a
 # fixed quality request and reports whether it can see the data volume or
 # create an IP socket. Real-content runs exercise the production entrypoint.
+# For the montage center's planning (ai/assistant-spike/system-test.sh) it
+# also writes the two steps' briefs, as plan_brief does, with the data and
+# schema of the eighth version's requests cut down to what the scripted VNAS
+# reads, and turns the second step's answer back; any other request is
+# refused, as the real Worker refuses what it cannot do.
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
   install -d /run/systemd/system/anas-montage-compute.service.d
   cat > /run/systemd/system/anas-montage-compute.service.d/system-test.conf <<'EOF'
@@ -1259,9 +1306,68 @@ ExecStart=
 ExecStart=/usr/bin/python3 /usr/local/lib/montage-compute-fixture.py
 EOF
   cat > /usr/local/lib/montage-compute-fixture.py <<'PY'
+import glob
+import json
 import os
 import socket
 from anas_ai import protocol
+
+# The template the montage center fills: the newest installed.
+TEMPLATE = max((os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")), default="")
+
+
+def with_body(request, fds):
+    """The request with the fields of its "body" array, a sealed file of JSON (internal/montagecompute)."""
+    fields = {}
+    for spec, fd in zip(request.get("arrays", []), fds):
+        if spec.get("name") == "body":
+            fields = json.loads(os.pread(fd, os.fstat(fd).st_size, 0) or b"{}")
+        os.close(fd)
+    return {**fields, **request}
+
+
+def pick_brief(request):
+    ids = [card["id"] for card in request["cards"]]
+    parts = request["music"]["parts"]
+
+    def part(slots):
+        scene = {"type": "object", "required": ["query", "cards"], "properties": {
+            "query": {"type": "string"},
+            "cards": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "enum": ids}}}}
+        return {"type": "object", "required": ["name", "summary", "link", "scenes"], "properties": {
+            "name": {"type": "string"}, "summary": {"type": "string"}, "link": {"type": "string"},
+            "scenes": {"type": "array", "minItems": 1, "maxItems": slots, "items": scene}}}
+
+    schema = {"type": "object", "required": ["design", "opening", "ending", "unmet", "parts"], "properties": {
+        "design": {"type": "string"}, "opening": {"type": "string"}, "ending": {"type": "string"},
+        "unmet": {"type": "array", "items": {"type": "string"}},
+        "parts": {"type": "array", "minItems": len(parts), "maxItems": len(parts),
+                  "prefixItems": [part(len(p["slots"])) for p in parts], "items": False}}}
+    data = {"catalog": [f"{card['id']} | {card['answer']['summary']}" for card in request["cards"]],
+            "partCount": len(parts), "targetSeconds": round(request["music"]["seconds"])}
+    return {"data": data, "schema": schema, "template": TEMPLATE}
+
+
+def shots_brief(request):
+    cards = {card["id"]: card for card in request["cards"]}
+    parts, slots, pictures = {}, [], []
+    for n, part in enumerate(request["picked"]["parts"], 1):
+        items = {}
+        for k, scene in enumerate(part["scenes"], 1):
+            beats = [f"{c}/{j}" for c in dict.fromkeys(scene["cards"]) if c in cards
+                     for j in range(1, len(cards[c]["answer"]["beats"]) + 1)]
+            items[f"画面{k}"] = {"type": "object", "required": ["beats", "shows", "link"], "properties": {
+                "beats": {"type": "array", "minItems": 1, "maxItems": len(beats), "items": {"type": "string", "enum": beats}},
+                "shows": {"type": "string"}, "link": {"type": "string"}}}
+        parts[f"段落{n}"] = {"type": "object", "required": list(items), "properties": items}
+        slots.append([[[2.0 * k, 2.0 * k + 2.0]] for k in range(len(items))])
+        pictures.append(len(items))
+    schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
+        "unmet": {"type": "array", "items": {"type": "string"}},
+        "parts": {"type": "object", "required": list(parts), "properties": parts}}}
+    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": TEMPLATE,
+            "slots": slots, "pictures": pictures}
+
 
 assert os.environ["LISTEN_PID"] == str(os.getpid())
 assert os.environ["LISTEN_FDS"] == "1"
@@ -1269,8 +1375,9 @@ listener = socket.socket(fileno=3)
 while True:
     conn, _ = listener.accept()
     with conn:
-        request, fds = protocol.read_request(conn)
-        assert not fds
+        # The photo library's analysis sends several arrays; their requests are refused below.
+        request, fds = protocol.read_request(conn, 16)
+        request = with_body(request, fds)
         if request["op"] == "probe":
             try:
                 with socket.socket(socket.AF_INET):
@@ -1278,9 +1385,14 @@ while True:
             except OSError:
                 network = False
             reply = protocol.ok(data=os.path.isdir("/srv/a-nas/data/photos"), network=network)
-        else:
-            assert request["op"] == "quality"
+        elif request["op"] == "quality":
             reply = protocol.ok(blur=2.0, shake=0.0, blocked=0.0, points=[None], reasons=[])
+        elif request["op"] == "plan_brief":
+            reply = protocol.ok(**(pick_brief(request) if request["step"] == "pick" else shots_brief(request)))
+        elif request["op"] == "shots_answer":
+            reply = protocol.ok(answer=request["answer"])
+        else:
+            reply = protocol.failure(protocol.CODE_INVALID_INPUT, f"the fixture does not {request['op']}")
         protocol.write_response(conn, reply)
 PY
   systemctl daemon-reload
@@ -2963,6 +3075,8 @@ check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
 check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
+check "the updated release includes the matching installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$next"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
@@ -2995,6 +3109,8 @@ state=$(update_settled || true)
 check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
+check "automatic rollback restores the installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$version"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
 check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check

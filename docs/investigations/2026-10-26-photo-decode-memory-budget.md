@@ -27,7 +27,7 @@ make check
 make race-test
 ```
 
-Windows 开发机按 [WSL 流程](../../.claude/skills/check-in-wsl/SKILL.md)在 ext4 副本运行 `make check-steps`，与 `make check` 相同的门禁，不写部署清单。
+Windows 开发机按 [WSL 流程](../../.agents/skills/check-in-wsl/SKILL.md)在 ext4 副本运行 `make check-steps`，与 `make check` 相同的门禁，不写部署清单。
 
 回归覆盖颜色模型的预算边界、无效及溢出尺寸、极端长边、导入无残留、历史图片与图片搜索、等待中的取消、解码器 panic 后释放，以及像素处理未结束时四类入口共用槽位。`make ops-check` 同时检查单元的 Go 内存软限制与 systemd 硬限制。
 
