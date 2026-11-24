@@ -78,7 +78,7 @@ Hermes 用 SQLite 的 WAL，WAL 的索引文件 `-shm` 经共享映射写入。B
 
 ## 后续工作
 
-- 整个数据卷写满时，卷上所有用 WAL 的 SQLite 进程都可能这样结束：各成员的 Hermes，以及经 [`internal/sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开数据库的服务，它对每个库都用 WAL。要单独查哪些写入不受数据卷余量的保护。
+- 整个数据卷写满时，卷上所有用 WAL 的 SQLite 进程都可能这样结束：各成员的 Hermes，以及经 [`internal/sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开数据库的服务，它对每个库都用 WAL。数据卷的保留容量只在文件服务中执行，其他写入绕过它（[#181](https://github.com/zhongwater123/A-NAS/issues/181)）。
 
 ## 关联
 
