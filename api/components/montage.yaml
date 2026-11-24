@@ -212,7 +212,7 @@ schemas:
   MontageDraft:
     type: object
     additionalProperties: false
-    required: [id, versionId, projectId, versionNumber, revision, canUndo, songStart, seconds, plan, parts, shots, counts, updatedAt]
+    required: [id, versionId, projectId, versionNumber, revision, canUndo, songStart, songTranscode, seconds, plan, parts, shots, counts, updatedAt]
     properties:
       id: { type: string, minLength: 1 }
       versionId: { type: string }
@@ -221,34 +221,54 @@ schemas:
       revision: { type: integer, minimum: 0, description: "A step is made on this revision (baseRevision)." }
       canUndo: { type: boolean }
       songStart: { type: number, minimum: 0, description: "Where the version's excerpt starts in its song, in seconds." }
+      songTranscode: { type: boolean, description: "The draft's song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does." }
       seconds: { type: number, minimum: 0, description: "How long the film is." }
-      plan:
-        type: object
-        additionalProperties: false
-        required: [design, opening, ending]
-        description: The first step of the plan the version was cut by.
-        properties: { design: { type: string }, opening: { type: string }, ending: { type: string } }
-      parts:
-        type: array
-        items:
-          type: object
-          additionalProperties: false
-          required: [number, name, summary, level, start, end]
-          properties:
-            number: { type: integer, minimum: 1 }
-            name: { type: string }
-            summary: { type: string }
-            level: { type: string, description: "The music part's strength, from the song's analysis." }
-            start: { type: number, minimum: 0 }
-            end: { type: number, minimum: 0 }
+      plan: { $ref: "#/schemas/MontageFilmPlan" }
+      parts: { type: array, items: { $ref: "#/schemas/MontageFilmPart" } }
       shots: { type: array, items: { $ref: "#/schemas/MontageDraftShot" } }
-      counts:
-        type: object
-        additionalProperties: false
-        required: [shots, videos, portrait]
-        properties: { shots: { type: integer, minimum: 0 }, videos: { type: integer, minimum: 0 }, portrait: { type: integer, minimum: 0 } }
+      counts: { $ref: "#/schemas/MontageFilmCounts" }
       message: { type: string, description: "What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上." }
       updatedAt: { type: string, format: date-time }
+  MontageFilmPlan:
+    type: object
+    additionalProperties: false
+    required: [design, opening, ending]
+    description: The first step of the plan a version was cut by.
+    properties: { design: { type: string }, opening: { type: string }, ending: { type: string } }
+  MontageFilmPart:
+    type: object
+    additionalProperties: false
+    required: [number, name, summary, level, label, start, end]
+    description: A part of the music and of the plan.
+    properties:
+      number: { type: integer, minimum: 1 }
+      name: { type: string }
+      summary: { type: string }
+      level: { type: string, description: "The music part's strength, from the song's analysis: 安静, 中等 or 高潮." }
+      label: { type: string, description: "The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫." }
+      start: { type: number, minimum: 0 }
+      end: { type: number, minimum: 0 }
+  MontageFilmCounts:
+    type: object
+    additionalProperties: false
+    required: [shots, videos, portrait]
+    description: "A film's shots, the videos they come from, and how many of those are 竖."
+    properties: { shots: { type: integer, minimum: 0 }, videos: { type: integer, minimum: 0 }, portrait: { type: integer, minimum: 0 } }
+  MontageVersionOutline:
+    type: object
+    additionalProperties: false
+    required: [versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet]
+    description: "A version as its film is: the plan it was cut by and its shots, for the version's card. Unlike the draft, an edit not saved yet does not show here."
+    properties:
+      versionId: { type: string }
+      projectId: { type: string }
+      versionNumber: { type: integer, minimum: 1 }
+      seconds: { type: number, minimum: 0, description: "How long the film is." }
+      plan: { $ref: "#/schemas/MontageFilmPlan" }
+      parts: { type: array, items: { $ref: "#/schemas/MontageFilmPart" } }
+      shots: { type: array, description: "The film's shots, none of them changed, extended or locked.", items: { $ref: "#/schemas/MontageDraftShot" } }
+      counts: { $ref: "#/schemas/MontageFilmCounts" }
+      unmet: { type: array, description: "What the plan found the videos do not have, as the planner wrote it: shown on the version's card.", items: { type: string } }
   MontageCandidate:
     type: object
     additionalProperties: false

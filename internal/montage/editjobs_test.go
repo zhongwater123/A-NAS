@@ -239,6 +239,16 @@ func TestAVersionKeepsTheSongItWasMadeWith(t *testing.T) {
 	if _, err := env.store.OpenDraftSongAudio(ctx, editOther, draft.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another member's draft song = %v", err)
 	}
+	// A song browsers play is sought in; one decoded on the way is asked
+	// for from where it plays, and the draft says which.
+	if draft.SongTranscode {
+		t.Fatal("a draft whose song browsers play says it is decoded")
+	}
+	env.store.Exec(t, "UPDATE songs SET content_type = '' WHERE id = 'song:old'")
+	if decoded, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil || !decoded.SongTranscode {
+		t.Fatalf("a draft whose song is decoded = %+v, %v", decoded.SongTranscode, err)
+	}
+	env.store.Exec(t, "UPDATE songs SET content_type = 'audio/mpeg' WHERE id = 'song:old'")
 	// The edit job takes the version's song, not the project's.
 	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); err != nil {
 		t.Fatal(err)
