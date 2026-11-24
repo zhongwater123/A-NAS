@@ -2461,6 +2461,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/versions/{versionId}/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The version as its film is, for its card on the choose page: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409) */
+        get: operations["getMontageVersionOutline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/versions/{versionId}/draft": {
         parameters: {
             query?: never;
@@ -8460,6 +8477,24 @@ export interface components {
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
         };
+        /** @description The first step of the plan a version was cut by. */
+        MontageFilmPlan: {
+            design: string;
+            opening: string;
+            ending: string;
+        };
+        /** @description A part of the music and of the plan. */
+        MontageFilmPart: {
+            number: number;
+            name: string;
+            summary: string;
+            /** @description The music part's strength, from the song's analysis: 安静, 中等 or 高潮. */
+            level: string;
+            /** @description The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫. */
+            label: string;
+            start: number;
+            end: number;
+        };
         MontageDraftShot: {
             number: number;
             /** @description card/n: the beat that leads the shot. */
@@ -8488,6 +8523,27 @@ export interface components {
             /** @description 竖: its video is narrower than 16:9 and is shown on a blurred background. */
             portrait: boolean;
         };
+        /** @description A film's shots, the videos they come from, and how many of those are 竖. */
+        MontageFilmCounts: {
+            shots: number;
+            videos: number;
+            portrait: number;
+        };
+        /** @description A version as its film is: the plan it was cut by and its shots, for the version's card. Unlike the draft, an edit not saved yet does not show here. */
+        MontageVersionOutline: {
+            versionId: string;
+            projectId: string;
+            versionNumber: number;
+            /** @description How long the film is. */
+            seconds: number;
+            plan: components["schemas"]["MontageFilmPlan"];
+            parts: components["schemas"]["MontageFilmPart"][];
+            /** @description The film's shots, none of them changed, extended or locked. */
+            shots: components["schemas"]["MontageDraftShot"][];
+            counts: components["schemas"]["MontageFilmCounts"];
+            /** @description What the plan found the videos do not have, as the planner wrote it: shown on the version's card. */
+            unmet: string[];
+        };
         MontageDraft: {
             id: string;
             versionId: string;
@@ -8498,29 +8554,14 @@ export interface components {
             canUndo: boolean;
             /** @description Where the version's excerpt starts in its song, in seconds. */
             songStart: number;
+            /** @description The draft's song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does. */
+            songTranscode: boolean;
             /** @description How long the film is. */
             seconds: number;
-            /** @description The first step of the plan the version was cut by. */
-            plan: {
-                design: string;
-                opening: string;
-                ending: string;
-            };
-            parts: {
-                number: number;
-                name: string;
-                summary: string;
-                /** @description The music part's strength, from the song's analysis. */
-                level: string;
-                start: number;
-                end: number;
-            }[];
+            plan: components["schemas"]["MontageFilmPlan"];
+            parts: components["schemas"]["MontageFilmPart"][];
             shots: components["schemas"]["MontageDraftShot"][];
-            counts: {
-                shots: number;
-                videos: number;
-                portrait: number;
-            };
+            counts: components["schemas"]["MontageFilmCounts"];
             /** @description What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上. */
             message?: string;
             /** Format: date-time */
@@ -9065,7 +9106,11 @@ export type MontageSongSection = components['schemas']['MontageSongSection'];
 export type MontageSongPart = components['schemas']['MontageSongPart'];
 export type MontageSongSelection = components['schemas']['MontageSongSelection'];
 export type MontageSong = components['schemas']['MontageSong'];
+export type MontageFilmPlan = components['schemas']['MontageFilmPlan'];
+export type MontageFilmPart = components['schemas']['MontageFilmPart'];
 export type MontageDraftShot = components['schemas']['MontageDraftShot'];
+export type MontageFilmCounts = components['schemas']['MontageFilmCounts'];
+export type MontageVersionOutline = components['schemas']['MontageVersionOutline'];
 export type MontageDraft = components['schemas']['MontageDraft'];
 export type MontageDraftOp = components['schemas']['MontageDraftOp'];
 export type MontageCandidate = components['schemas']['MontageCandidate'];
@@ -14044,6 +14089,30 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionOutline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version's outline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageVersionOutline"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     getMontageVersionDraft: {

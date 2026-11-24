@@ -23,6 +23,15 @@ func (h *handler) confirmVersion(w http.ResponseWriter, r *http.Request, user ac
 	httpjson.Write(w, http.StatusOK, detail)
 }
 
+func (h *handler) versionOutline(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	outline, err := h.store.VersionOutline(r.Context(), user.ID, r.PathValue("versionID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, outline)
+}
+
 func (h *handler) versionDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	draft, err := h.store.VersionDraft(r.Context(), user.ID, r.PathValue("versionID"))
 	if err != nil {

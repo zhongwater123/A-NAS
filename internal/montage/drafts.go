@@ -103,6 +103,7 @@ type plannedPicture struct {
 
 type plannedDoc struct {
 	Answer struct {
+		Unmet json.RawMessage `json:"unmet"`
 		Parts []struct {
 			Name     string           `json:"name"`
 			Pictures []plannedPicture `json:"pictures"`
@@ -111,9 +112,10 @@ type plannedDoc struct {
 }
 
 type pickedDoc struct {
-	Design  string `json:"design"`
-	Opening string `json:"opening"`
-	Ending  string `json:"ending"`
+	Design  string          `json:"design"`
+	Opening string          `json:"opening"`
+	Ending  string          `json:"ending"`
+	Unmet   json.RawMessage `json:"unmet"`
 	Parts   []struct {
 		Name    string `json:"name"`
 		Summary string `json:"summary"`
@@ -130,6 +132,7 @@ type musicDoc struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
 		Level string  `json:"level"`
+		Label string  `json:"label"`
 	} `json:"parts"`
 }
 
@@ -153,6 +156,8 @@ type editSource struct {
 	// its own, or for an edited version the one it came from.
 	planJob string
 	planNo  int
+	// songTranscode: browsers do not play the version's song as it is kept.
+	songTranscode bool
 	// pickedRaw and plannedRaw are the plan's two steps as they were
 	// answered, whole: picked and planned read only what editing shows.
 	pickedRaw, plannedRaw json.RawMessage
@@ -191,6 +196,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	var settings JobSettings
 	if err := json.Unmarshal([]byte(settingsJSON), &settings); err == nil && settings.Edit != nil {
 		src.planJob, src.planNo = settings.Edit.Job, settings.Edit.Plan
+	}
+	if settings.SongID != "" {
+		// A song gone since is not heard at all (OpenDraftSongAudio).
+		if song, err := s.song(ctx, s.db, settings.SongID); err == nil {
+			src.songTranscode = song.contentType == ""
+		}
 	}
 	results := map[string][]byte{}
 	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", src.planNo), planStep("shots", src.planNo), planStep("fill", src.plan)} {
@@ -449,17 +460,20 @@ type Draft struct {
 	Revision int  `json:"revision"`
 	CanUndo  bool `json:"canUndo"`
 	// SongStart is where the version's excerpt starts in its song, and
-	// Seconds how long the film is.
-	SongStart float64     `json:"songStart"`
-	Seconds   float64     `json:"seconds"`
-	Plan      DraftPlan   `json:"plan"`
-	Parts     []DraftPart `json:"parts"`
-	Shots     []DraftShot `json:"shots"`
-	Message   string      `json:"message,omitempty"`
-	Counts    DraftCounts `json:"counts"`
-	UpdatedAt time.Time   `json:"updatedAt"`
-	source    *editSource
-	state     draftState
+	// Seconds how long the film is. SongTranscode: the song is decoded on
+	// the way and cannot seek, so the rough preview asks for it from
+	// where it plays.
+	SongStart     float64     `json:"songStart"`
+	SongTranscode bool        `json:"songTranscode"`
+	Seconds       float64     `json:"seconds"`
+	Plan          DraftPlan   `json:"plan"`
+	Parts         []DraftPart `json:"parts"`
+	Shots         []DraftShot `json:"shots"`
+	Message       string      `json:"message,omitempty"`
+	Counts        DraftCounts `json:"counts"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
+	source        *editSource
+	state         draftState
 }
 
 // DraftPlan is the plan the version was cut by: the first step's design,
@@ -472,12 +486,15 @@ type DraftPlan struct {
 
 // DraftPart is a part of the music and of the plan.
 type DraftPart struct {
-	Number  int     `json:"number"`
-	Name    string  `json:"name"`
-	Summary string  `json:"summary"`
-	Level   string  `json:"level"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
+	Number  int    `json:"number"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	Level   string `json:"level"`
+	// Label is the music's section (allin1's: intro, verse, chorus, build…);
+	// a build leads into a chorus (铺垫).
+	Label string  `json:"label"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
 }
 
 // DraftCounts are the draft's shots, the videos they come from, and how
@@ -513,11 +530,11 @@ type DraftShot struct {
 // view turns a draft's state into what the page shows.
 func (src *editSource) view(id string, revision int, canUndo bool, state draftState, updated time.Time) Draft {
 	draft := Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
-		CanUndo: canUndo, SongStart: src.excerpt.Start, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,
+		CanUndo: canUndo, SongStart: src.excerpt.Start, SongTranscode: src.songTranscode, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,
 		Plan:  DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
 		Parts: []DraftPart{}, Shots: []DraftShot{}, source: src, state: state}
 	for n, part := range src.music.Parts {
-		about := DraftPart{Number: n + 1, Level: part.Level, Start: part.Start, End: part.End}
+		about := DraftPart{Number: n + 1, Level: part.Level, Label: part.Label, Start: part.Start, End: part.End}
 		if n < len(src.picked.Parts) {
 			about.Name, about.Summary = src.picked.Parts[n].Name, src.picked.Parts[n].Summary
 		}
@@ -544,6 +561,53 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 	}
 	draft.Counts = DraftCounts{Shots: len(state.Shots), Videos: len(videos), Portrait: portrait}
 	return draft
+}
+
+// VersionOutline is a version as its film is: the plan it was cut by and
+// its shots, as its card on the choose page shows them.
+type VersionOutline struct {
+	VersionID     string      `json:"versionId"`
+	ProjectID     string      `json:"projectId"`
+	VersionNumber int         `json:"versionNumber"`
+	Seconds       float64     `json:"seconds"`
+	Plan          DraftPlan   `json:"plan"`
+	Parts         []DraftPart `json:"parts"`
+	Shots         []DraftShot `json:"shots"`
+	Counts        DraftCounts `json:"counts"`
+	// Unmet is what the plan found the videos do not have.
+	Unmet []string `json:"unmet"`
+}
+
+// VersionOutline reads owner's version as its film is. It makes no draft,
+// and an edit of the version not saved yet does not show in it.
+func (s *Store) VersionOutline(ctx context.Context, owner, versionID string) (VersionOutline, error) {
+	src, err := s.versionSource(ctx, owner, versionID)
+	if err != nil {
+		return VersionOutline{}, err
+	}
+	film := src.view("", 0, false, src.newDraftState(), time.Time{})
+	return VersionOutline{VersionID: film.VersionID, ProjectID: film.ProjectID, VersionNumber: film.VersionNumber, Seconds: film.Seconds,
+		Plan: film.Plan, Parts: film.Parts, Shots: film.Shots, Counts: film.Counts, Unmet: src.unmet()}, nil
+}
+
+// unmet is what the version's plan said the videos do not have
+// (docs/specs/montage-center.md, 成片存进相册): the outline's and the
+// shots', each once, in order. An answer that is not a list of texts
+// says nothing.
+func (src *editSource) unmet() []string {
+	unmet := []string{}
+	for _, raw := range []json.RawMessage{src.picked.Unmet, src.planned.Answer.Unmet} {
+		var texts []string
+		if len(raw) == 0 || json.Unmarshal(raw, &texts) != nil {
+			continue
+		}
+		for _, text := range texts {
+			if text = strings.TrimSpace(text); text != "" && !slices.Contains(unmet, text) {
+				unmet = append(unmet, text)
+			}
+		}
+	}
+	return unmet
 }
 
 // previewPiece is the part of a shot's video the rough preview plays: where

@@ -202,9 +202,9 @@ func newEditEnv(t *testing.T) *editEnv {
 	catalog, _ := json.Marshal(catalogResult{Cards: cards, Catalog: []string{"c1", "c2", "c3", "c4"}})
 	music := `{"seconds":14,"parts":[{"start":0,"end":8,"level":"主歌","slots":[[0,4],[4,8]]},{"start":8,"end":14,"level":"高潮","slots":[[8,11],[11,14]]}]}`
 	song, _ := json.Marshal(Excerpt{Key: "song", Music: json.RawMessage(music), Start: 31.5, Frames: 420})
-	pick := `{"design":"从海边走到山里","opening":"海","ending":"山","parts":[{"name":"海边","summary":"走","scenes":[{"query":"海边散步","cards":["c1","c2"]}]},
+	pick := `{"design":"从海边走到山里","opening":"海","ending":"山","unmet":["直升机"," 雪地 "],"parts":[{"name":"海边","summary":"走","scenes":[{"query":"海边散步","cards":["c1","c2"]}]},
 		{"name":"山里","summary":"爬","scenes":[{"query":"海浪","cards":["c2"]},{"query":"山路","cards":["c3","c4"]}]}]}`
-	shots := `{"answer":{"parts":[{"name":"海边","pictures":[{"beats":["c1/1","c2/1","c1/3"],"shows":"","link":""}]},
+	shots := `{"answer":{"unmet":["雪地","日落"],"parts":[{"name":"海边","pictures":[{"beats":["c1/1","c2/1","c1/3"],"shows":"","link":""}]},
 		{"name":"山里","pictures":[{"beats":["c2/2"],"shows":"","link":""},{"beats":["c3/2","c3/1"],"shows":"","link":""}]}]}}`
 	fill, _ := json.Marshal(timelineResult{Clips: []json.RawMessage{
 		clipJSON("c1/1", videoA, 0.7, 4.7, [2]float64{0, 4}, 1, 1),
