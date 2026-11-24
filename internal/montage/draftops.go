@@ -9,7 +9,6 @@ import (
 	mathrand "math/rand/v2"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
@@ -288,7 +287,7 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 	for _, id := range src.catalog {
 		card := src.cards[id]
 		for n := range card.Times {
-			beats[card.Video] = append(beats[card.Video], fmt.Sprintf("%s/%d", id, n+1))
+			beats[card.Video] = append(beats[card.Video], beatID(id, n+1))
 		}
 	}
 	answer := make([][]scoredBeat, len(texts))
@@ -400,8 +399,9 @@ func reservedLater(state draftState, i int, beat string) bool {
 	return slices.ContainsFunc(state.Shots[i+1:], func(shot draftShot) bool { return shot.Beat == beat })
 }
 
+// cardOf is the card of a beat.
 func cardOf(beat string) string {
-	if card, _, found := strings.CutLast(beat, "/"); found {
+	if card, _, ok := splitBeat(beat); ok {
 		return card
 	}
 	return beat

@@ -694,7 +694,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			id := fmt.Sprintf("v%d-%d", n+1, card.Index)
 			frames := make([]string, len(seen))
 			for i := range seen {
-				frames[i] = fmt.Sprintf("%s/%d", id, i+1)
+				frames[i] = beatID(id, i+1)
 			}
 			video.Cards = append(video.Cards, Card{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
 				End: float64(card.EndMs) / 1000, Times: seen, Frames: frames, Answer: answer})

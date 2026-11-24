@@ -115,7 +115,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	}
 	card, _, _ := src.beat(shot.Beat)
 	for n := range card.Times {
-		add(&answer.SameCard, fmt.Sprintf("%s/%d", card.ID, n+1), nil)
+		add(&answer.SameCard, beatID(card.ID, n+1), nil)
 	}
 	for _, beat := range src.planned.Answer.Parts[slot.Part-1].Pictures[slot.Picture-1].Beats {
 		add(&answer.Planned, beat, nil)
@@ -140,7 +140,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	if !searching {
 		for _, id := range src.catalog {
 			for n := range src.cards[id].Times {
-				add(&results, fmt.Sprintf("%s/%d", id, n+1), nil)
+				add(&results, beatID(id, n+1), nil)
 			}
 		}
 	} else {

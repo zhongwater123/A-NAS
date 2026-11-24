@@ -286,17 +286,28 @@ func (src *editSource) query(part, picture int) string {
 	return src.picked.Parts[part-1].Scenes[picture-1].Query
 }
 
-// beat splits "card/n" into the card and the beat's number from 1, and
-// reports whether it is a beat of a described card. Only the catalog's
-// cards may be cut from (cuttable): the fill is given no other.
-func (src *editSource) beat(beat string) (Card, int, bool) {
-	id, number, found := strings.Cut(beat, "/")
-	if !found {
-		return Card{}, 0, false
-	}
+// beatID names beat n, from 1, of a card: "card/n", as the fill and the
+// plan write a beat (CONTEXT.md, 节拍).
+func beatID(card string, n int) string { return card + "/" + strconv.Itoa(n) }
+
+// splitBeat is the card and the number from 1 that beatID wrote as beat;
+// ok is false for a text it did not write.
+func splitBeat(beat string) (card string, n int, ok bool) {
+	card, number, found := strings.CutLast(beat, "/")
 	n, err := strconv.Atoi(number)
-	card, ok := src.cards[id]
-	if err != nil || !ok || n < 1 || n > len(card.Times) || strconv.Itoa(n) != number {
+	if !found || err != nil || n < 1 || strconv.Itoa(n) != number {
+		return "", 0, false
+	}
+	return card, n, true
+}
+
+// beat is a beat's card and its number from 1, and reports whether it is a
+// beat of a described card. Only the catalog's cards may be cut from
+// (cuttable): the fill is given no other.
+func (src *editSource) beat(beat string) (Card, int, bool) {
+	id, n, ok := splitBeat(beat)
+	card, described := src.cards[id]
+	if !ok || !described || n > len(card.Times) {
 		return Card{}, 0, false
 	}
 	return card, n, true
