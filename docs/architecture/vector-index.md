@@ -135,9 +135,10 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - **对账**：每天一次，与图片集合分开记时间。集合不在就新建并把全部有窗口的视频排队；集合在就逐点比对：点数、窗口序号与 `libraries` 与 Catalog 不符的视频重新排队，分析还在进行的视频跳过。Catalog 里没有窗口时删除集合。
 - **别名**：同步写的和搜索读的都是 Catalog 的 `vector_index_state` 记的那个集合，按集合名访问。别名 `video_windows_v1` 不用来寻址，只标记“这个集合已经写满”（[#599](https://github.com/zhongwater123/A-NAS/issues/599)）：
   - 换了身份时，新集合在旁边建好并写入，`vector_index_state` 随即改记新集合，别名仍指向旧集合；window outbox 清空、全部视频都写进新集合后，别名一次切过去（日志 `photo vector index switched`）。
-  - 搜索只在别名指向 `vector_index_state` 记的集合时读索引。所以换模型期间旧集合没有读者：被搜的视频还有旧身份的窗口时回答 `model_mismatch`，都重新分析过、新集合还没写满时读 Catalog（见下文“读者”）。
+  - 搜索只在别名指向 `vector_index_state` 记的集合时读索引。它不是每次都去读别名：同步循环记着自己最后一次看到或切过去的别名指向哪个集合，搜索直接信这个记忆，记忆里不是当前集合时（服务刚启动、新集合还在写）才问一次索引。所以换模型期间旧集合没有读者：被搜的视频还有旧身份的窗口时回答 `model_mismatch`，都重新分析过、新集合还没写满时读 Catalog（见下文“读者”）。
   - 旧集合留到下一次换身份，不再同步。换回之前的模型时，同身份的旧集合被重新启用（`reused`）而不是新建：它停更期间的变化未知，所以照新集合的做法把全部视频排队重写，写完后别名切回。所以窗口集合至多两个：正在写的，与别名还指着或上一次指过的那个。
   - 别名只在同步或对账做完一批、outbox 为空时检查；记得它已指向当前集合时不联系实例。对账先忘掉这个记忆，实例丢了别名（例如清空了存储）时下一次就补上。
+  - 索引丢了集合时（例如实例清空了存储，别名随集合一起没了），结果始终由 Catalog 给出，原因分两步记。服务运行期间丢的：第一次搜索还照记忆去问，索引回答没有这个集合，记一次 `the vector index failed` 并进入出错后的等待，同时忘掉记忆；等待过后的搜索读别名、再看索引里还有没有这个集合，没有就记 `the vector index has lost the windows collection`。服务启动前就丢了的，第一次搜索直接记后者。集合在下一次有视频排队同步或每天对账时重建；搜索发现它丢了不会立即重建（图片集合会）。
 - **读者**：剪辑中心二次编辑的文字搜镜头，经相册授权套接字的 `searchWindows`（[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项，[`windowsearch.go`](../../internal/photos/windowsearch.go)）。它是这个集合唯一的读者，剪辑中心的其他读取仍从 Catalog 读窗口向量。
   - **范围**：授权里主人现在看得到、窗口分析已完成的视频。按 `object` 过滤，命中的点还要是这些视频、窗口序号在窗口数以内，否则忽略：索引命中不构成授权。
   - **模型不一致**：这些视频（含分析未完成的）在 Catalog 里有任何一个窗口的身份不是文字模型的身份，就回答 `model_mismatch`，不回答空结果或只搜其余视频。
@@ -148,11 +149,12 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
     |---|---|
     | `the vector index has no windows collection for the model` | info |
     | `the vector index is still filling the windows collection` | info |
+    | `the vector index has lost the windows collection` | info |
     | `too many videos wait for the vector index` | info |
     | `the vector index failed` | warn，带 `error` |
     | `the vector index failed recently` | info |
 
-  - 测试：[`TestWindowSearchReadsTheIndexAsTheCatalogDoes`](../../internal/photos/windowsearch_test.go)、`TestWindowSearchWorksWithTheIndexStopped`、`TestTheWindowsAliasMovesOnceTheNewCollectionIsFull`、[`TestAWindowSearchFindsOnlyTheGrantsVideos`](../../internal/photos/leak_test.go)。
+  - 测试：[`TestWindowSearchReadsTheIndexAsTheCatalogDoes`](../../internal/photos/windowsearch_test.go)、`TestWindowSearchWorksWithTheIndexStopped`、`TestWindowSearchSaysWhyItReadsTheCatalog`、`TestWindowSearchSaysTheIndexLostItsCollection`、`TestTheWindowsAliasMovesOnceTheNewCollectionIsFull`、[`TestAWindowSearchFindsOnlyTheGrantsVideos`](../../internal/photos/leak_test.go)。
 
 ### 同步循环
 
