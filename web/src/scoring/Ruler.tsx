@@ -1,7 +1,17 @@
 import { Fragment, type PointerEvent, type RefObject, useRef, useState } from "react";
 
 import { claimThumbnailURL } from "./api";
-import { formatScore, isLevels, lanes, levelsFor, levelsOf, maxScore, type Scale, snapScore } from "./model";
+import {
+  formatScore,
+  isLevels,
+  lanes,
+  levelsFor,
+  levelsOf,
+  lowestScore,
+  maxScore,
+  type Scale,
+  snapScore,
+} from "./model";
 import styles from "./scoring.module.css";
 import { useSize } from "./useSize";
 
@@ -136,7 +146,7 @@ export function Ruler({
     if (!box || box.width === 0) return value ?? hover ?? (ladder ? 300 : 0);
     const across = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
     if (ladder) return ladder[Math.min(ladder.length - 1, Math.floor(across * ladder.length))].score;
-    return snapScore(across * maxScore, scale);
+    return snapScore(across * maxScore, scale, dimension);
   };
   const places = spread(marks, scale, width);
   const placed = lanes(
@@ -196,7 +206,7 @@ export function Ruler({
       role="slider"
       tabIndex={0}
       aria-label={label}
-      aria-valuemin={line ? 0 : 1}
+      aria-valuemin={line ? lowestScore(dimension) / 100 : 1}
       aria-valuemax={5}
       aria-valuenow={set ? value / 100 : undefined}
       aria-valuetext={set ? said(value) : "未打分"}

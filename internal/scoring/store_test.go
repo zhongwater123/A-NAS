@@ -768,6 +768,37 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 	if got := Three.describe(Overall); got != "三档：1 差，3 中，5 好" {
 		t.Errorf("总体 on three levels: %s", got)
 	}
+	// A number line has 情绪 from 1.
+	if got := Hundredths.describe(Emotion); got != "1 到 5，两位小数：1 平静，5 激烈" {
+		t.Errorf("情绪 on the number line: %s", got)
+	}
+	if got := Whole.describe(Overall); got != "0 到 5 的整数" {
+		t.Errorf("总体 on whole points: %s", got)
+	}
+}
+
+func TestEmotionStartsAtOneOnTheNumberLineToo(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	first := h.batchOf(t, 1, 1, Emotion)
+	later := h.batchOf(t, 2, 1, Overall, Emotion)
+	h.raters(t, "a")
+	firstClaims, _, _ := h.store.Claim(ctx, first.ID, "a")
+	laterClaims, _, _ := h.store.Claim(ctx, later.ID, "a")
+	// score(1) is 0.50 and score(2) 1.00; Scores are in hundredths.
+	if _, err := h.store.Submit(ctx, firstClaims[0].Token, "a", score(1)); !errors.Is(err, ErrInvalid) {
+		t.Errorf("情绪 0.50 first: %v", err)
+	}
+	if _, err := h.store.Submit(ctx, laterClaims[0].Token, "a", withScores(6, map[string]int{Emotion: 99})); !errors.Is(err, ErrInvalid) {
+		t.Errorf("情绪 0.99 after 总体: %v", err)
+	}
+	if _, err := h.store.Submit(ctx, firstClaims[0].Token, "a", score(2)); err != nil {
+		t.Fatalf("情绪 1.00 first: %v", err)
+	}
+	// 总体 still starts at 0.
+	if _, err := h.store.Submit(ctx, laterClaims[0].Token, "a", withScores(0, map[string]int{Emotion: 100})); err != nil {
+		t.Fatalf("总体 0 with 情绪 1.00: %v", err)
+	}
 }
 
 func TestTheHandbooksDimensionsComeFirst(t *testing.T) {

@@ -143,11 +143,15 @@ const levelOf = (hundredths: number, scale: LevelScale, dimension?: string) =>
 
 // snapScore puts hundredths on the scale: the nearest step of the number
 // line, or the nearest level.
-export function snapScore(hundredths: number, scale: Scale): number {
+export function snapScore(hundredths: number, scale: Scale, dimension?: string): number {
   if (isLevels(scale)) return levelOf(hundredths, scale).score;
   const step = steps[scale];
-  return clampScore(Math.round(hundredths / step) * step);
+  return Math.max(lowestScore(dimension), clampScore(Math.round(hundredths / step) * step));
 }
+
+// lowestScore is the lowest score of a 打分项 on a number line: 情绪 goes
+// from 1, calm, to 5, intense, as on its levels; every other one from 0.
+export const lowestScore = (dimension?: string) => (dimension === "emotion" ? 100 : 0);
 
 // formatScore shows hundredths as the scale writes them: 3.47, 3.5, 3, or
 // the level's word for the 打分项, 中, 一般 or for 情绪 中间.
@@ -167,6 +171,10 @@ export const typingRule: Record<Scale, string> = {
   five: "1 到 5 之间的整数",
 };
 
+// typingRuleFor says it for a 打分项: 情绪 starts at 1 on a number line.
+export const typingRuleFor = (scale: Scale, dimension?: string) =>
+  lowestScore(dimension) > 0 && !isLevels(scale) ? typingRule[scale].replace("0 到 5", "1 到 5") : typingRule[scale];
+
 const typingPatterns: Record<Scale, RegExp> = {
   hundredths: /^\d(\.\d{1,2})?$/,
   tenths: /^\d(\.\d)?$/,
@@ -175,20 +183,20 @@ const typingPatterns: Record<Scale, RegExp> = {
   five: /^[1-5]$/,
 };
 
-// parseScore reads what the rater typed: 0 to 5 with as many decimals as
-// the scale has, in hundredths, or undefined.
-export function parseScore(text: string, scale: Scale = "hundredths"): number | undefined {
+// parseScore reads what the rater typed: 0 to 5, 1 to 5 for 情绪, with as
+// many decimals as the scale has, in hundredths, or undefined.
+export function parseScore(text: string, scale: Scale = "hundredths", dimension?: string): number | undefined {
   const trimmed = text.trim();
   if (!typingPatterns[scale].test(trimmed)) return undefined;
   const hundredths = Math.round(Number(trimmed) * 100);
-  return hundredths <= maxScore ? hundredths : undefined;
+  return hundredths >= lowestScore(dimension) && hundredths <= maxScore ? hundredths : undefined;
 }
 
 // pickScore is the score a key 0 to 5 picks on the scale, or undefined:
-// three levels take 1, 3 and 5 only, five levels 1 to 5.
-export function pickScore(hundredths: number, scale: Scale): number | undefined {
+// three levels take 1, 3 and 5 only, five levels and 情绪 1 to 5.
+export function pickScore(hundredths: number, scale: Scale, dimension?: string): number | undefined {
   if (isLevels(scale)) return levelsOf[scale].some((level) => level.score === hundredths) ? hundredths : undefined;
-  return hundredths;
+  return hundredths >= lowestScore(dimension) ? hundredths : undefined;
 }
 
 // nudgeScore moves a score by an arrow key: by is in hundredths for the

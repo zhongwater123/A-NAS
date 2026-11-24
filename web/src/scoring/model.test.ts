@@ -17,6 +17,7 @@ import {
   snapScore,
   stageAction,
   typeable,
+  typingRuleFor,
   uprightSize,
 } from "./model";
 
@@ -124,6 +125,18 @@ describe("scores", () => {
     // Three levels of 情绪 do not judge either.
     expect([100, 300, 500].map((score) => formatScore(score, "three", "emotion"))).toEqual(["平静", "中间", "激烈"]);
     expect(formatScore(300, "three", "overall")).toBe("中");
+  });
+
+  it("starts 情绪 at 1 on a number line, typed, picked or placed", () => {
+    expect(parseScore("0.99", "hundredths", "emotion")).toBeUndefined();
+    expect(parseScore("1", "whole", "emotion")).toBe(100);
+    expect(parseScore("0", "whole", "overall")).toBe(0);
+    expect(pickScore(0, "tenths", "emotion")).toBeUndefined();
+    expect(pickScore(0, "tenths", "overall")).toBe(0);
+    expect(snapScore(20, "hundredths", "emotion")).toBe(100);
+    expect(snapScore(20, "hundredths", "overall")).toBe(20);
+    expect(typingRuleFor("tenths", "emotion")).toBe("1 到 5 之间，最多一位小数");
+    expect(typingRuleFor("five", "emotion")).toBe("1 到 5 之间的整数");
   });
 
   it("moves a score by one step of its scale with the arrows, from the middle when there is none", () => {

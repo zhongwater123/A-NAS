@@ -33,6 +33,7 @@ import {
   formatCount,
   formatScore,
   hiddenKeys,
+  lowestScore,
   nudgeScore,
   Outbox,
   type OutboxState,
@@ -44,7 +45,7 @@ import {
   snapScore,
   stageAction,
   typeable,
-  typingRule,
+  typingRuleFor,
 } from "./model";
 import { type Mark, Ruler } from "./Ruler";
 import styles from "./scoring.module.css";
@@ -482,7 +483,7 @@ export function Stage({
   }, [delivery.waiting]);
 
   const ready = Boolean(shown) && visible === shown?.token && !guide && !rest;
-  const typedValue = typed === undefined ? value : parseScore(typed, scale);
+  const typedValue = typed === undefined ? value : parseScore(typed, scale, dimension.id);
   const typedValid = typed === undefined || typedValue !== undefined;
   // What the photo has with what is typed now.
   const withTyped: Values = typedValue === undefined ? values : { ...values, [dimension.id]: typedValue };
@@ -494,7 +495,7 @@ export function Stage({
   // a sheet covers it.
   const setValue = (hundredths: number) => {
     if (!ready) return;
-    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale) }));
+    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale, dimension.id) }));
     setTyped(undefined);
   };
 
@@ -700,7 +701,7 @@ export function Stage({
     if (action.kind !== "zoom") setArmed(false);
     switch (action.kind) {
       case "set": {
-        const picked = pickScore(action.score, scale);
+        const picked = pickScore(action.score, scale, dimension.id);
         if (picked !== undefined) setValue(picked);
         break;
       }
@@ -1018,12 +1019,12 @@ export function Stage({
                 placeholder="—"
                 inputMode="decimal"
                 readOnly={!ready}
-                aria-label={`${label}，${typingRule[scale]}`}
+                aria-label={`${label}，${typingRuleFor(scale, dimension.id)}`}
                 aria-invalid={!typedValid}
                 onChange={(event) => {
                   setArmed(false);
                   setTyped(event.target.value);
-                  const parsed = parseScore(event.target.value, scale);
+                  const parsed = parseScore(event.target.value, scale, dimension.id);
                   if (parsed !== undefined) setValues((current) => ({ ...current, [dimension.id]: parsed }));
                 }}
                 onBlur={() => typedValid && setTyped(undefined)}
@@ -1048,13 +1049,13 @@ export function Stage({
                 ) : scale === "five" ? (
                   "点选一档，或按 1–5"
                 ) : (
-                  "在数轴上点选，或按 0–5"
+                  `在数轴上点选，或按 ${lowestScore(dimension.id) / 100}–5`
                 )
               ) : (
                 keysHint
               )
             ) : (
-              <span role="alert">{typingRule[scale]}</span>
+              <span role="alert">{typingRuleFor(scale, dimension.id)}</span>
             )}
           </p>
           <button

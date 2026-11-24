@@ -58,11 +58,16 @@ func (scale Scale) fits(score int) bool {
 
 // describe says in the export what a score of the scale is on a 打分项:
 // levels name 情绪 from calm to intense, every other one from poor to good,
-// as the window does (web/src/scoring/model.ts, levelsFor).
+// as the window does (web/src/scoring/model.ts, levelsFor); a number line
+// has 情绪 from 1 to 5.
 func (scale Scale) describe(dimension string) string {
 	switch {
+	case scale == Tenths && dimension == Emotion:
+		return "1 到 5，一位小数：1 平静，5 激烈"
 	case scale == Tenths:
 		return "0 到 5，一位小数"
+	case scale == Whole && dimension == Emotion:
+		return "1 到 5 的整数：1 平静，5 激烈"
 	case scale == Whole:
 		return "0 到 5 的整数"
 	case scale == Three && dimension == Emotion:
@@ -73,6 +78,8 @@ func (scale Scale) describe(dimension string) string {
 		return "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈"
 	case scale == Five:
 		return "五档：1 很差，2 较差，3 一般，4 好，5 很好"
+	case dimension == Emotion:
+		return "1 到 5，两位小数：1 平静，5 激烈"
 	}
 	return "0 到 5，两位小数"
 }

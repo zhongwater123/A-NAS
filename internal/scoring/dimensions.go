@@ -31,6 +31,9 @@ const Sharpness = "sharpness"
 // five levels name it from calm to intense (scales.go).
 const Emotion = "emotion"
 
+// lowestEmotion is 1.00, the calmest 情绪 on every scale.
+const lowestEmotion = 100
+
 // BuiltIn lists the 打分项 every module has, in the order a new batch offers
 // them: the scoring handbook's five, then the older three. Their IDs are
 // stored and exported, so an ID never changes meaning; a new one is added,
