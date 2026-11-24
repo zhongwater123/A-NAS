@@ -357,7 +357,7 @@
 /api/v1/montage/projects/{projectId}/frames/{assetId}:
   get:
     operationId: getMontageFrame
-    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the edit page's thumbnails. It is not kept: the video's content does not change, so the browser keeps it"
+    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it"
     parameters:
       - { $ref: "../components/montage.yaml#/parameters/MontageProjectID" }
       - { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -422,7 +422,7 @@
             required: [requestKey, change]
             properties:
               requestKey: { $ref: "../components/montage.yaml#/schemas/MontageRequestKey" }
-              change: { type: string, minLength: 1, maxLength: 200, description: "What to change, as a member's ask: 结尾留长一点. The page says what the first version cannot do, as for the ask." }
+              change: { type: string, minLength: 1, maxLength: 200, description: "What to change, as a member's ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask's page does for the ask." }
     responses:
       "202": { description: The recut job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }

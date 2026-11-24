@@ -2604,7 +2604,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the edit page's thumbnails. It is not kept: the video's content does not change, so the browser keeps it */
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it */
         get: operations["getMontageFrame"];
         put?: never;
         post?: never;
@@ -14070,7 +14070,7 @@ export interface operations {
             content: {
                 "application/json": {
                     requestKey: components["schemas"]["MontageRequestKey"];
-                    /** @description What to change, as a member's ask: 结尾留长一点. The page says what the first version cannot do, as for the ask. */
+                    /** @description What to change, as a member's ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask's page does for the ask. */
                     change: string;
                 };
             };

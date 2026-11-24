@@ -15,7 +15,7 @@ export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   "fill-2": "填入方案二的镜头",
   "render-2": "渲染方案二",
   "save-2": "保存方案二",
-  // An edit's first step (#596); the page that shows an edit's progress is R6's.
+  // An edit job's first step (#596). No page starts an edit yet: its interface is being redone (#632).
   source: "读取修改稿",
 };
 
