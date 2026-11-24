@@ -65,3 +65,23 @@ func TestAnUnmetThatIsNotAListSaysNothing(t *testing.T) {
 		t.Fatalf("unmet = %#v", got)
 	}
 }
+
+// A timeline naming a beat its card does not have cannot be shown shot by
+// shot: the version is one that can only be played, not a fault of the
+// montage center's.
+func TestATimelineOfAnUnknownBeatIsNotEditable(t *testing.T) {
+	for _, beat := range []string{"c1/9", "c1/0", "c1", "", "c9/1"} {
+		env := newEditEnv(t)
+		ctx := t.Context()
+		env.store.Exec(t, `UPDATE versions SET timeline_json = replace(timeline_json, '"beat":"c1/1"', ?) WHERE id = 'version:1'`, `"beat":"`+beat+`"`)
+		if _, err := env.store.VersionOutline(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+			t.Errorf("the outline of a timeline with beat %q = %v", beat, err)
+		}
+		if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+			t.Errorf("the draft of a timeline with beat %q = %v", beat, err)
+		}
+		if _, err := env.store.VersionShots(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+			t.Errorf("the shot list of a timeline with beat %q = %v", beat, err)
+		}
+	}
+}

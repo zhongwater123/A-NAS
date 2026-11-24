@@ -254,7 +254,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		src.videos[video.AssetID] = video
 	}
 	for _, clip := range src.clips {
-		if _, ok := src.cards[clip.Card]; !ok || !src.pictureKnown(clip.Part, clip.Picture) {
+		// Each shot is shown by its beat's description (view): a beat its
+		// card does not have cannot be.
+		if _, _, known := src.beat(clip.Beat); !known || !src.pictureKnown(clip.Part, clip.Picture) {
+			return nil, ErrNotEditable
+		}
+		if _, ok := src.cards[clip.Card]; !ok {
 			return nil, ErrNotEditable
 		}
 	}
