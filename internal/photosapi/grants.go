@@ -36,7 +36,7 @@ const (
 	// into the owner's private library, once per version key.
 	GrantSaveFilm = "saveFilm"
 	// GrantSearchWindows finds the windows of the grant's videos most like
-	// each of some texts, for the edit page's search (ADR 0039 decision 8).
+	// each of some texts, for the search of a film's edit (ADR 0039 decision 8).
 	// A member waits for it: it holds background AI work back, as a photo
 	// search does.
 	GrantSearchWindows = "searchWindows"

@@ -508,7 +508,7 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 			t.Fatalf("SearchWindows() = %+v", list)
 		}
 	}
-	// The montage center's edit page reads the same windows through it.
+	// The montage center's edit of a film reads the same windows through it.
 	hits, err := montage.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
 	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (montage.WindowHit{AssetID: videoID, Window: 5, Score: 10}) {
 		t.Fatalf("montage search = %+v, %v", hits, err)

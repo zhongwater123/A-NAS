@@ -21,7 +21,7 @@ import (
 // (anas-photos-grants.socket, mode 0600); the photo service checks the
 // peer's UID as well. A request there is not someone using the photo
 // library: it does not hold background AI work back, except a search of
-// windows, which a member on the edit page waits for.
+// windows, which a member editing a film waits for.
 
 // ActiveAccounts lists the accounts in use, as the Host Agent's session
 // lookup does.

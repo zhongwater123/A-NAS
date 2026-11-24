@@ -16,7 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 )
 
-// The montage center's edit page finds shots by text (ADR 0039 decision 8):
+// Editing a montage film finds shots by text (ADR 0039 decision 8):
 // the photo library encodes each text with its own query encoder and ranks
 // the window vectors of a grant's videos by similarity to it. A member waits
 // for the answer, so it is an interactive request, as a photo search is.
