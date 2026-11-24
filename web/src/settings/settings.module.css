@@ -1,6 +1,11 @@
 /* The settings window: its sections, their shared parts and the storage
    wizard. The sections come first, in the order they had in the window's
    stylesheet, so that the shared rules below still win their ties. */
+.networkValue {
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
 /* ── 日志 (logs.css) ── */
 /* Settings → 日志: an activity timeline and a service log console in the
    grouped-card style of the other settings sections. */

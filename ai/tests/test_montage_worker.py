@@ -167,6 +167,13 @@ class BriefTest(unittest.TestCase):
         case, opts = brief.case_of(request)
         _system, _user, schema = planrules.pick_request(case, opts, brief.numbered(cards), brief_music())
         self.assertEqual(pick["schema"], schema)
+        # Each part takes no more pictures than its own music part has slots: a picture past them is never filled.
+        uneven = {**brief_music(), "parts": [{**brief_music()["parts"][0], "slots": [[0.0, 4.0]]},
+                                             {**brief_music()["parts"][1], "slots": [[4.0, 5.0], [5.0, 6.0], [6.0, 8.0]]}]}
+        _system, _user, uneven_schema = planrules.pick_request(case, opts, brief.numbered(cards), uneven)
+        parts = uneven_schema["properties"]["parts"]
+        self.assertEqual([p["properties"]["scenes"]["maxItems"] for p in parts["prefixItems"]], [1, 3])
+        self.assertIs(parts["items"], False)
 
         picked = {"design": "从海边开始", "opening": "v1-0", "ending": "v2-0", "unmet": [],
                   "parts": [{"name": "海", "summary": "海边", "link": "开场", "scenes": [{"query": "海边远景", "cards": ["v1-0"]}]},

@@ -1034,3 +1034,58 @@ func TestWindowSyncWithNoWindowsLeftEmptiesItsQueue(t *testing.T) {
 		t.Fatalf("SyncWindows() again = %v, %v", worked, err)
 	}
 }
+
+// libraryInUseGate is a gate on which someone uses the photo library, while
+// member says whether the work a member waits for may go on.
+type libraryInUseGate struct {
+	lockedGate
+	member lockedGate
+}
+
+func (g *libraryInUseGate) OpenForMember(ctx context.Context, need uint64) (bool, string) {
+	return g.member.Open(ctx, need)
+}
+
+func (g *libraryInUseGate) ContinueForMember(ctx context.Context, need uint64) (bool, string) {
+	return g.member.Open(ctx, need)
+}
+
+// While someone uses the photo library, the analysis a member's job waits
+// for goes on, and only it: the photos' own work waits for the library to be
+// quiet. Short memory still holds the analysis back. Before, a member who
+// kept the montage center's window open, which plays videos of the library,
+// kept their own job waiting for as long as the window was open.
+func TestTheMontageAnalysisGoesOnWhileTheLibraryIsInUse(t *testing.T) {
+	ctx := context.Background()
+	f := newMontageFixture(t)
+	private, _ := libraries(t, f.service, namedAlice)
+	video := importPhoto(t, f.service, namedAlice, private.ID, "", "trip.mp4", mp4Bytes(1))
+	importPhoto(t, f.service, namedAlice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, f.service)
+	grant, object := f.grant(t, namedAlice, "project:in-use", video)
+	gate := &libraryInUseGate{}
+	gate.set(false, "foreground")
+	gate.member.set(false, "memory_low")
+	if worked, err := f.service.ProcessAIJob(ctx, f.embedder, gate); worked || err != nil || f.embedder.embedded != 0 {
+		t.Fatalf("a round with memory short = %v, %v; %d images embedded", worked, err, f.embedder.embedded)
+	}
+	if status := aiStatus(t, f.service, namedAlice); status.State != photos.AIPaused || status.Reason != "memory_low" {
+		t.Fatalf("status with memory short = %+v", status)
+	}
+	gate.member.set(true, "")
+	processAI(t, f.service, f.embedder, gate)
+	if count, _ := f.windows(t, object); count != 35 || f.embedder.embedded != 35 {
+		t.Fatalf("while the library is in use: %d windows, %d images embedded; the photo must wait", count, f.embedder.embedded)
+	}
+	if analysis, _ := f.analysis(t, namedAlice, grant.ID, video.ID); analysis.Windows != photos.AnalysisDone {
+		t.Fatalf("windows while the library is in use = %s", analysis.Windows)
+	}
+	if status := aiStatus(t, f.service, namedAlice); status.State != photos.AIPaused || status.Reason != "foreground" {
+		t.Fatalf("status once the analysis is done = %+v", status)
+	}
+	gate.set(true, "")
+	processAI(t, f.service, f.embedder, gate)
+	if f.embedder.embedded != 36 {
+		t.Fatalf("once the library is quiet, %d images embedded; want the photo too", f.embedder.embedded)
+	}
+}

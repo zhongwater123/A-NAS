@@ -54,7 +54,7 @@ func TestEnablingAnAccountUnlocksItAndGivesBackSMBAndTheAssistant(t *testing.T) 
 		"pdbedit --user alice",
 		"smbpasswd -e alice",
 		"systemctl unmask " + strings.Join(assistantUnits, " "),
-		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer",
+		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 	}
 	if strings.Join(host.commands, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("commands:\n%s\nwant:\n%s", strings.Join(host.commands, "\n"), strings.Join(want, "\n"))
@@ -98,7 +98,7 @@ func TestEnablingAnAccountWithoutASambaEntryStillEnablesTheRest(t *testing.T) {
 	if host.ran("smbpasswd -e alice") {
 		t.Fatalf("enabled a Samba entry that does not exist: %v", host.commands)
 	}
-	if !host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer") {
+	if !host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer") {
 		t.Fatalf("the assistant stays off: %v", host.commands)
 	}
 }
@@ -116,7 +116,7 @@ func TestEnablingAnAccountWhoseAssistantCannotBePreparedSucceeds(t *testing.T) {
 	if !host.ran("smbpasswd -e alice") || !host.ran("systemctl unmask "+strings.Join(assistantUnits, " ")) {
 		t.Fatalf("commands: %v", host.commands)
 	}
-	if host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-curator@alice.timer") {
+	if host.ran("systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer") {
 		t.Fatalf("an assistant without its settings was turned on: %v", host.commands)
 	}
 }
@@ -132,7 +132,7 @@ func TestSynchronizingAnAccountTheRegistryDoesNotHoldYetRecordsIt(t *testing.T) 
 	if err := executor.SyncIdentities(context.Background(), identities); err != nil {
 		t.Fatalf("SyncIdentities() = %v", err)
 	}
-	if !host.ran("systemctl enable --now --quiet anas-assistant-api@dave.socket anas-assistant-curator@dave.timer") {
+	if !host.ran("systemctl enable --now --quiet anas-assistant-api@dave.socket anas-assistant-planapi@dave.socket anas-assistant-curator@dave.timer") {
 		t.Fatalf("dave's assistant was not prepared: %v", host.commands)
 	}
 	host.commands = nil

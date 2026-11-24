@@ -1802,6 +1802,51 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/network/phone-hotspot:
+    get:
+      operationId: getPhoneHotspot
+      x-anas-posture: admin
+      summary: Read the phone hotspot state and its active connection details
+      responses:
+        '200':
+          description: Hotspot status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotStatus'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: updatePhoneHotspot
+      x-anas-posture: admin
+      summary: Start or stop the phone hotspot on the dedicated Wi-Fi radio
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneHotspotRequest'
+      responses:
+        '200':
+          description: Hotspot operation accepted or the service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
@@ -11545,6 +11590,55 @@ components:
           description: The websites searches leave out after a block, the first to return first; sibling engines share a pause.
           items:
             $ref: '#/components/schemas/WebSearchPausedEngine'
+    PhoneHotspotStatus:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum:
+            - unavailable
+            - 'off'
+            - starting
+            - 'on'
+            - stopping
+            - failed
+        reason:
+          type: string
+          enum:
+            - dependencies_missing
+            - no_wired_uplink
+            - no_idle_radio
+            - ap_failed
+            - dhcp_failed
+            - web_unavailable
+            - tls_unavailable
+            - isolation_failed
+            - cleanup_failed
+            - service_failed
+        connection:
+          description: Present when the hotspot is on. The response is not cacheable.
+          type: object
+          required:
+            - ssid
+            - password
+            - url
+          properties:
+            ssid:
+              type: string
+            password:
+              type: string
+            url:
+              type: string
+    PhoneHotspotRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
     WebSearchPausedEngine:
       type: object
       additionalProperties: false
@@ -16913,11 +17007,12 @@ components:
             - music_invalid
             - vnas_unknown
             - plan_invalid
+            - plan_error
             - storage_full
             - photos_unavailable
             - video_too_long
             - model_unavailable
-          description: 'Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.'
+          description: 'Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.'
         error:
           type: string
         steps:

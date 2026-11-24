@@ -75,7 +75,7 @@ func (e *jobEnv) round(t *testing.T) montage.Claim {
 	if err != nil {
 		t.Fatalf("ClaimRound() = %v", err)
 	}
-	if err := e.store.StartRound(context.Background(), "user:alice", claim.RoundID, "job-in-hermes"); err != nil {
+	if err := e.store.StartRound(context.Background(), "user:alice", claim.RoundID, "conversation-in-hermes"); err != nil {
 		t.Fatalf("StartRound() = %v", err)
 	}
 	return claim
@@ -120,14 +120,15 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	env.grant(t)
 	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
 	if !env.marked(t) {
-		t.Fatal("no marker for the waker")
+		t.Fatal("no marker for the planner")
 	}
 	// Bob has no job wanting a round.
 	if _, err := env.store.ClaimRound(ctx, "user:bob"); !errors.Is(err, montage.ErrNoPlanWanted) {
 		t.Fatalf("Bob's claim = %v", err)
 	}
 	claim, err := env.store.ClaimRound(ctx, "user:alice")
-	if err != nil || claim.JobID != job.ID || claim.Template != montage.PlanTemplate || claim.TargetSeconds != 4 || len(claim.AttemptToken) != 32 {
+	if err != nil || claim.JobID != job.ID || claim.Template != montage.PlanTemplate || claim.TargetSeconds != 4 || len(claim.AttemptToken) != 32 ||
+		claim.Project != "海边" {
 		t.Fatalf("claim = %+v, %v", claim, err)
 	}
 	if env.marked(t) {
@@ -136,11 +137,11 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, montage.ErrNoPlanWanted) {
 		t.Fatalf("a second claim = %v", err)
 	}
-	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "job-in-hermes"); err != nil {
+	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "conversation-in-hermes"); err != nil {
 		t.Fatal(err)
 	}
 	// Once started, the round is not abandoned.
-	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, montage.ErrRoundOver) {
+	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "late", "error"); !errors.Is(err, montage.ErrRoundOver) {
 		t.Fatalf("abandoning a started round = %v", err)
 	}
 
@@ -183,7 +184,7 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	if shots := env.submit(t, claim, montage.StepShots, outline("v1-0")); shots.Status != montage.ToolAccepted {
 		t.Fatalf("shots = %+v", shots)
 	}
-	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	if done := env.settle(t, job.ID); done.State != montage.JobDone || done.Version == nil {
@@ -209,12 +210,48 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	if late := env.submit(t, claim, montage.StepOutline, outline("v1-0")); late.Status != montage.ToolRoundOver {
 		t.Fatalf("a late answer = %+v", late)
 	}
-	if stale, err := env.store.StaleRounds(ctx, "user:alice"); err != nil || len(stale) != 0 {
-		t.Fatalf("stale = %+v, %v", stale, err)
+}
+
+// A round VNAS could not be reached for (its planning instance did not
+// start, the model's gateway did not answer) is tried again after 2, 4 and
+// 8 minutes, then every 15, and the page says when
+// (docs/architecture/montage-planning-session.md, 重试).
+func TestARoundVNASCouldNotBeReachedForIsTriedAgainLaterEachTime(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	env.grant(t)
+	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
+	for _, minutes := range []int{2, 4, 8, 15, 15} {
+		claim, err := env.store.ClaimRound(ctx, "user:alice")
+		if err != nil {
+			t.Fatalf("the claim before a wait of %d minutes = %v", minutes, err)
+		}
+		if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "VNAS 的规划进程连不上", "unreachable"); err != nil {
+			t.Fatal(err)
+		}
+		// Abandoned, it is no longer started.
+		if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, montage.ErrRoundOver) {
+			t.Fatalf("starting an abandoned round = %v", err)
+		}
+		if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != montage.DetailUnreachable(minutes) {
+			t.Fatalf("job = %+v, marked %v, want %q", job, env.marked(t), montage.DetailUnreachable(minutes))
+		}
+		env.clock.advance(time.Duration(minutes)*time.Minute - time.Second)
+		if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != montage.DetailUnreachable(1) {
+			t.Fatalf("a second before the wait is over: job = %+v, marked %v", job, env.marked(t))
+		}
+		// The job looks again a minute later (waitPoll), and asks for a round.
+		env.clock.advance(time.Minute)
+		if env.waitForPlan(t, job.ID); !env.marked(t) {
+			t.Fatalf("no marker after a wait of %d minutes", minutes)
+		}
 	}
 }
 
-func TestAnAbandonedRoundWaitsAndTriesAgain(t *testing.T) {
+// The planning failed before the model planned: it is tried once more a
+// minute later, and a second failure is the member's, with what the planner
+// reported.
+func TestAFailedPlanningIsTriedOnceMoreThenTheMemberIsAsked(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	env.grant(t)
@@ -223,27 +260,100 @@ func TestAnAbandonedRoundWaitsAndTriesAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "no model key on the device"); err != nil {
+	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "session.create: unknown method", "error"); err != nil {
 		t.Fatal(err)
 	}
-	// Abandoned, it is no longer started.
-	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, montage.ErrRoundOver) {
-		t.Fatalf("starting an abandoned round = %v", err)
-	}
-	// Within the backoff no marker comes back.
-	if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != montage.DetailRetrying {
+	if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != montage.DetailFailed(1) {
 		t.Fatalf("job = %+v, marked %v", job, env.marked(t))
 	}
 	env.clock.advance(time.Minute + time.Second)
 	if env.waitForPlan(t, job.ID); !env.marked(t) {
-		t.Fatal("no marker after the backoff")
+		t.Fatal("not tried once more")
+	}
+	// This time the conversation started and stopped before the model called
+	// a montage tool: it planned nothing.
+	second := env.round(t)
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "Hermes: the model's gateway answered 502", "error"); err != nil {
+		t.Fatal(err)
+	}
+	needs := env.settle(t, job.ID)
+	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedPlanError ||
+		needs.Error != "Hermes: the model's gateway answered 502" || env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if env.waitForPlan(t, job.ID); !env.marked(t) {
+		t.Fatal("no marker after replanning")
+	}
+}
+
+// A conversation that stopped after its model called a montage tool may have
+// planned: whatever stopped it, the member decides (#514).
+func TestAnErrorAfterTheModelCalledAToolNeedsTheMember(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	job, claim := env.planning(t)
+	if _, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepOutline); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "the connection to the planning instance closed", "interrupted"); err != nil {
+		t.Fatal(err)
+	}
+	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
+	}
+}
+
+// Doing something that may need planning registers a grant, and a new version
+// restarts the montage service: either way the waits so far are over and
+// VNAS is asked at once.
+func TestARegistrationOrARestartTriesAgainAtOnce(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	env.grant(t)
+	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
+	unreached := func() {
+		t.Helper()
+		claim, err := env.store.ClaimRound(ctx, "user:alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "VNAS 的规划进程连不上", "unreachable"); err != nil {
+			t.Fatal(err)
+		}
+		if job = env.waitForPlan(t, job.ID); env.marked(t) {
+			t.Fatalf("job = %+v, marked right after the round", job)
+		}
+	}
+	unreached()
+	env.clock.advance(time.Second)
+	env.grant(t)
+	env.clock.advance(time.Minute)
+	if env.waitForPlan(t, job.ID); !env.marked(t) {
+		t.Fatal("still waiting after a registration")
+	}
+	// The rounds before the registration no longer count: the next wait is the first's.
+	unreached()
+	if job.Error != montage.DetailUnreachable(2) {
+		t.Fatalf("job = %+v", job)
+	}
+	if err := env.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env.clock.advance(time.Second)
+	env.open(t)
+	env.clock.advance(time.Minute)
+	if env.waitForPlan(t, job.ID); !env.marked(t) {
+		t.Fatal("still waiting after a restart")
 	}
 }
 
 // A round that was claimed and never started is abandoned five minutes
-// later; the backoff counts from then, not from its claim, which is already
-// longer ago than the first backoffs.
-func TestARoundNotStartedInFiveMinutesIsAbandonedAndBacksOffFromThen(t *testing.T) {
+// later, as one VNAS was not reached for; the wait counts from then, not
+// from its claim.
+func TestARoundNotStartedInFiveMinutesIsAbandonedAndWaitsFromThen(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	env.grant(t)
@@ -256,13 +366,23 @@ func TestARoundNotStartedInFiveMinutesIsAbandonedAndBacksOffFromThen(t *testing.
 	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, montage.ErrRoundOver) {
 		t.Fatalf("starting it late = %v", err)
 	}
-	// No model was called: the job waits for another round, after the backoff.
-	if job = env.waitForPlan(t, job.ID); job.Error != montage.DetailRetrying || env.marked(t) {
+	// No model was called: the job waits for another round.
+	if job = env.waitForPlan(t, job.ID); job.Error != montage.DetailUnreachable(2) || env.marked(t) {
 		t.Fatalf("right after the round was abandoned: job = %+v, marked %v", job, env.marked(t))
 	}
-	env.clock.advance(time.Minute + time.Second)
+	env.clock.advance(2*time.Minute + time.Second)
 	if env.waitForPlan(t, job.ID); !env.marked(t) {
-		t.Fatal("no marker after the backoff")
+		t.Fatal("no marker after the wait")
+	}
+}
+
+// While a round runs, the page says VNAS is planning.
+func TestAJobWhoseRoundRunsSaysVNASIsPlanning(t *testing.T) {
+	env := newPlanEnv(t)
+	job, _ := env.planning(t)
+	env.clock.advance(time.Minute)
+	if job = env.waitForPlan(t, job.ID); job.Error != montage.DetailPlanning || env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", job, env.marked(t))
 	}
 }
 
@@ -270,15 +390,19 @@ func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
-	// The model began to plan and the unit was killed: thirty minutes after
-	// its first call the round is over.
-	if _, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepOutline); err != nil {
-		t.Fatal(err)
+	// The model plans, call after call, for longer than twenty minutes in
+	// all: each call keeps the round going.
+	for range 2 {
+		if _, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, montage.StepOutline); err != nil {
+			t.Fatal(err)
+		}
+		env.clock.advance(19 * time.Minute)
+		if still := env.settle(t, job.ID); still.State != montage.JobWaiting {
+			t.Fatalf("19 minutes after a call: job = %+v", still)
+		}
 	}
-	env.clock.advance(29 * time.Minute)
-	if still := env.settle(t, job.ID); still.State != montage.JobWaiting {
-		t.Fatalf("before the round's time is up: job = %+v", still)
-	}
+	// Then the conversation was cut off: twenty minutes after the last call the
+	// round is over.
 	env.clock.advance(2 * time.Minute)
 	needs := env.settle(t, job.ID)
 	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown {
@@ -291,15 +415,6 @@ func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
 	if late := env.submit(t, claim, montage.StepOutline, outline("v1-0")); late.Status != montage.ToolRoundOver {
 		t.Fatalf("an answer after the round's time = %+v", late)
 	}
-	if stale, err := env.store.StaleRounds(ctx, "user:alice"); err != nil || len(stale) != 1 || stale[0].RunRef != "job-in-hermes" {
-		t.Fatalf("stale = %+v, %v", stale, err)
-	}
-	if err := env.store.CleanedRounds(ctx, "user:alice", []string{claim.RoundID}); err != nil {
-		t.Fatal(err)
-	}
-	if stale, _ := env.store.StaleRounds(ctx, "user:alice"); len(stale) != 0 {
-		t.Fatalf("stale after cleaning = %+v", stale)
-	}
 	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -308,9 +423,9 @@ func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
 	}
 }
 
-// Hermes may run the member's own due jobs before the planning job, in the
-// same round of the unit: a round handed over whose model has not called yet
-// is not over after thirty minutes, only once the unit's hour has passed.
+// A model may take long before its first call: a round handed over whose
+// model has not called yet is not over after thirty minutes, only once the
+// planner's hour has passed.
 func TestARoundWhoseModelHasNotStartedYetIsGivenTheUnitsHour(t *testing.T) {
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
@@ -322,7 +437,7 @@ func TestARoundWhoseModelHasNotStartedYetIsGivenTheUnitsHour(t *testing.T) {
 	if taken := env.submit(t, claim, montage.StepOutline, outline("v1-0")); taken.Status != montage.ToolAccepted {
 		t.Fatalf("an outline 40 minutes after the hand-over = %+v", taken)
 	}
-	// Another job's round, never called: over after the unit's hour.
+	// Another job's round, never called: over after the planner's hour.
 	if _, err := env.store.Cancel(context.Background(), "user:alice", job.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +445,7 @@ func TestARoundWhoseModelHasNotStartedYetIsGivenTheUnitsHour(t *testing.T) {
 	env.round(t)
 	env.clock.advance(66 * time.Minute)
 	if needs := env.settle(t, second.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown {
-		t.Fatalf("after the unit's hour without a call: job = %+v", needs)
+		t.Fatalf("after the planner's hour without a call: job = %+v", needs)
 	}
 }
 
@@ -362,10 +477,6 @@ func TestAnswersAfterCancellingAreToldSo(t *testing.T) {
 	}
 	if kept := env.store.Count(t, "SELECT COUNT(*) FROM plan_answers WHERE job_id = ?", job.ID); kept != 0 {
 		t.Fatalf("%d answers kept for a cancelled job", kept)
-	}
-	// The round's Hermes job is the next round's to remove.
-	if stale, _ := env.store.StaleRounds(ctx, "user:alice"); len(stale) != 1 {
-		t.Fatalf("stale = %+v", stale)
 	}
 }
 
@@ -423,8 +534,8 @@ func TestARestartWhileARoundPlansStartsNoOther(t *testing.T) {
 	}
 }
 
-// A marker with no job behind it would have the waker start the member's
-// unit again and again: a claim that finds nothing to plan takes it, and so
+// A marker with no job behind it would have the planner claim for the member
+// again and again: a claim that finds nothing to plan takes it, and so
 // does deleting the project or the account of a job that wanted a round.
 func TestAMarkerGoesWithTheJobItWasFor(t *testing.T) {
 	ctx := context.Background()
@@ -432,7 +543,7 @@ func TestAMarkerGoesWithTheJobItWasFor(t *testing.T) {
 	env.grant(t)
 	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
 	if !env.marked(t) {
-		t.Fatal("no marker for the waker")
+		t.Fatal("no marker for the planner")
 	}
 	if err := env.store.DeleteProject(ctx, "user:alice", env.project.ID); err != nil {
 		t.Fatal(err)
@@ -487,7 +598,7 @@ func TestAJobBackInTheQueueIsNotClaimedUntilItWaitsAgain(t *testing.T) {
 	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, montage.ErrNoPlanWanted) {
 		t.Fatalf("claiming a queued job = %v", err)
 	}
-	// Even with a marker the waker still saw.
+	// Even with a marker the planner still saw.
 	if err := os.WriteFile(filepath.Join(env.markers, "alice"), nil, 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -536,10 +647,6 @@ func TestPlanningAgainEndsTheRoundInProgress(t *testing.T) {
 	}
 	if taken := env.submit(t, next, montage.StepOutline, outline("v2-0")); taken.Status != montage.ToolAccepted {
 		t.Fatalf("the new round's outline = %+v", taken)
-	}
-	// The old round's Hermes job is still the next round's to remove.
-	if stale, _ := env.store.StaleRounds(ctx, "user:alice"); len(stale) != 2 {
-		t.Fatalf("stale = %+v", stale)
 	}
 }
 
@@ -686,7 +793,7 @@ func TestNoticesTellWaitingFromPlanning(t *testing.T) {
 	}
 	env.waitForPlan(t, job.ID)
 	only(montage.NoticePlanning, "")
-	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	env.settle(t, job.ID)
@@ -812,7 +919,7 @@ func TestARoundPlansBothPlansTheSecondAfterTheFirst(t *testing.T) {
 	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolAccepted {
 		t.Fatalf("second shots again = %+v", got)
 	}
-	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	done := env.settle(t, job.ID)
@@ -844,7 +951,7 @@ func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) 
 	if got := env.submit(t, claim, montage.StepShots, outline("v1-0")); got.Status != montage.ToolNextPlan {
 		t.Fatalf("first shots = %+v", got)
 	}
-	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	needs := env.settle(t, job.ID)
@@ -880,7 +987,7 @@ func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) 
 	if got := env.submit(t, second, montage.StepShots, outline("v2-0")); got.Status != montage.ToolAccepted {
 		t.Fatalf("second shots = %+v", got)
 	}
-	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	done := env.settle(t, job.ID)
@@ -895,7 +1002,7 @@ func TestARoundThatEndsWithOnlyAnOutlineNeedsTheMember(t *testing.T) {
 	env := newTwoPlanEnv(t)
 	job, claim := env.planning(t)
 	env.submit(t, claim, montage.StepOutline, outline("v1-0"))
-	if err := env.store.EndRound(context.Background(), "user:alice", claim.RoundID, "the unit was stopped"); err != nil {
+	if err := env.store.EndRound(context.Background(), "user:alice", claim.RoundID, "the conversation was cut off", "interrupted"); err != nil {
 		t.Fatal(err)
 	}
 	needs := env.settle(t, job.ID)
@@ -964,7 +1071,7 @@ func TestDroppingAVideoAfterTheFirstPlanWasSavedKeepsItAndMakesTheRest(t *testin
 	if got := env.submit(t, second, montage.StepShots, outline("v1-1")); got.Status != montage.ToolAccepted {
 		t.Fatalf("second shots = %+v", got)
 	}
-	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok"); err != nil {
+	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
 	done := env.settle(t, job.ID)

@@ -3,7 +3,6 @@ import { Check, ChevronRight, Clapperboard, Music2, Play, Plus, Scissors } from 
 
 import { thumbnailURL } from "../photos/api";
 import { Spinner } from "../ui/workspace";
-import type { MontageProject } from "./api";
 import { Failed } from "./Failed";
 import { HeroReel } from "./HeroReel";
 import styles from "./montage.module.css";
@@ -14,26 +13,14 @@ import { useShown } from "./shown";
 
 const day = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
 
-// The hero's videos: three, from the newest projects first.
-function reelOf(projects: MontageProject[]): string[] {
-  const reel: string[] = [];
-  for (let round = 0; reel.length < 3 && round < 6; round++) {
-    for (const project of projects) {
-      const id = project.previewAssetIds?.[round];
-      if (id && reel.length < 3) reel.push(id);
-    }
-  }
-  return reel;
-}
-
-// Home is the prototype's first page, where editing starts: the hero over
-// the member's own videos; the projects as the footage step's folders,
-// one selected with a click, unselected with another, and opened with its
-// arrow; and, for the one selected, the bar that starts the film, the job
-// and its 方案. Until the member clicks, the newest is selected. A member
-// without projects sees the steps the first one goes through instead: the
-// footage to make it from, then the song, the request and the bar, which
-// wait for the project.
+// Home is the prototype's first page, where editing starts: the hero, over
+// the device's own film when it keeps one; the projects as the footage
+// step's folders, one selected with a click, unselected with another, and
+// opened with its arrow; and, for the one selected, the bar that starts the
+// film, the job and its 方案. Until the member clicks, the newest is selected.
+// A member without projects sees the steps the first one goes through
+// instead: the footage to make it from, then the song, the request and the
+// bar, which wait for the project.
 export function Home({
   userId,
   selected,
@@ -56,7 +43,7 @@ export function Home({
   return (
     <main className={styles.mtMain}>
       <section className={styles.mtHero}>
-        <HeroReel assetIds={reelOf(list)} />
+        <HeroReel />
         <div className={styles.mtHeroCopy}>
           <h1>剪辑中心</h1>
         </div>

@@ -20,8 +20,8 @@ import (
 // the member is signed in and does something the montage center may plan
 // for, the Product Service asks the broker, behind the member's session,
 // to let their VNAS plan in their absence. The broker records when, and how
-// many rounds; only root's waker reads it (ai/assistant/cron-waker.py) and
-// starts the member's cron unit for a round. Registering again replaces it.
+// many rounds; only root's planner reads it (ai/assistant/montage-planner.py) and
+// hands a round to the member's planning instance. Registering again replaces it.
 // ADR 0024 decision 10 keeps background services from driving a member's
 // assistant on their own: the grant is the member's, left while present.
 //
@@ -30,12 +30,12 @@ import (
 // service that owns a directory above them could put grants of its own
 // making there, or a link that takes root's write elsewhere. The broker
 // writes only into a directory that is its own user's and nobody else's to
-// change, and the waker reads only such grants.
+// change, and the planner reads only such grants.
 
 // planGrantRounds is how many rounds of planning one grant allows.
 const planGrantRounds = 5
 
-// planGrant is what the waker reads.
+// planGrant is what the planner reads.
 type planGrant struct {
 	IssuedAt string `json:"issuedAt"`
 	Rounds   int    `json:"rounds"`
@@ -51,11 +51,11 @@ func (s *Server) serveAssistantPlan(req wire.Request) wire.Response {
 	if s.config.AssistantPlans == "" || s.config.AssistantTokens == "" {
 		return wire.Response{Plan: wire.PlanDeviceOff}
 	}
-	// As the waker and "run now" tell: no key, no model for any member.
+	// As the planner and "run now" tell: no key, no model for any member.
 	if s.config.AssistantOn != nil && !s.config.AssistantOn() {
 		return wire.Response{Plan: wire.PlanDeviceOff}
 	}
-	// As the waker tells an account with an assistant: its token file.
+	// As the planner tells an account with an assistant: its token file.
 	if !accountid.ValidAssistantAccount(identity.Username) {
 		return wire.Response{Plan: wire.PlanNoAssistant}
 	}

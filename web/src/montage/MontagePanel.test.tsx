@@ -346,6 +346,24 @@ describe("剪辑中心", () => {
     await waitFor(() => expect(seen.did).toEqual(["replan"]));
   });
 
+  it("says what failed when the planning failed twice, and plans again", async () => {
+    const seen = fresh();
+    const stopped = job("needs_input", {
+      waitReason: "plan_error",
+      step: "pick",
+      error: "session.create: unknown method",
+    });
+    serve(
+      () => project({ job: stopped }),
+      () => stopped,
+      seen,
+    );
+    const page = await openProject();
+    expect(await within(page).findByText("规划出错：session.create: unknown method")).toBeInTheDocument();
+    await userEvent.click(within(page).getByRole("button", { name: "重新规划" }));
+    await waitFor(() => expect(seen.did).toEqual(["replan"]));
+  });
+
   it("says why a job waits: for VNAS with the reason, and for the photo library", async () => {
     let waiting = job("waiting", { waitReason: "vnas", step: "pick", error: "VNAS 没有开启" });
     serve(
@@ -658,7 +676,7 @@ describe("剪辑中心", () => {
     expect(await screen.findByRole("main", { name: "2026-08-02 至 08-04" })).toBeInTheDocument();
   });
 
-  it("plays the device's own film behind the hero when it keeps one, else the member's videos", async () => {
+  it("plays the device's own film behind the hero when it keeps one, and never the member's videos", async () => {
     serve(
       () => project(),
       () => job("queued"),
@@ -677,14 +695,21 @@ describe("剪辑中心", () => {
         ],
       }),
     );
-    server.use(listed);
+    // Playing the member's videos kept the photo library in use for as long as
+    // the window was open, which held back the analysis the job waits for.
+    let played = 0;
+    server.use(
+      listed,
+      http.get("/api/v1/photos/assets/{assetId}/video/playback", ({ response }) => {
+        played++;
+        return response(200).json({ mode: "direct", duration: 30 });
+      }),
+    );
     const first = render(<MontagePanel userId="user:alice" />);
     await screen.findByRole("button", { name: "选中 2026-08-02 至 08-04" });
-    // No film of the device's: the first of the member's videos, and no player for a film that is not there.
-    await waitFor(() =>
-      expect(first.container.querySelector('img[src="/api/v1/photos/assets/photo%3Aa/thumbnail"]')).not.toBeNull(),
-    );
-    expect(first.container.querySelector('video[src^="/api/v1/montage/hero"]')).toBeNull();
+    // No film of the device's: no player at all.
+    await waitFor(() => expect(first.container.querySelector("video")).toBeNull());
+    expect(played).toBe(0);
     first.unmount();
 
     let asked = "";
@@ -701,6 +726,8 @@ describe("剪辑中心", () => {
     const second = render(<MontagePanel userId="user:alice" />);
     await waitFor(() => expect(second.container.querySelector('video[src^="/api/v1/montage/hero"]')).not.toBeNull());
     expect(asked).toBe("bytes=0-0");
+    expect(second.container.querySelectorAll("video")).toHaveLength(1);
+    expect(played).toBe(0);
   });
 
   it("shows a member without projects the steps of the first one, and a drawn hero", async () => {
