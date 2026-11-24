@@ -48,5 +48,5 @@
 6. 家庭局域网版的 NAS 侧（发现、配对、HTTPS）：等“开始做”（[决定](../decisions/2026-11-09-home-network-first.md)）。
 7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
-9. 剪辑中心：allin1 版权待议；二次编辑的界面按新交互重做，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的服务端先合入（#631），新界面的 ADR 与分票另定（#596）。
+9. 剪辑中心：allin1 版权待议；二次编辑的界面按新交互重做，先写新的 ADR 与规格（[#632](https://github.com/zhongwater123/A-NAS/issues/632)），再分票（#596）；已有的服务端见[实施方案](../architecture/montage-center.md#出片后的二次编辑)。
 10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
