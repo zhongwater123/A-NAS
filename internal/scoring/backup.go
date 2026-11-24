@@ -21,9 +21,22 @@ func (s *Store) StagingDir() string { return filepath.Join(s.dir, "staging") }
 func (s *Store) RunBackups(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+	// Below the reserve the backup waits, said once, as imports do.
+	waiting := false
 	for {
-		if err := s.BackupIfDue(ctx); err != nil && ctx.Err() == nil {
+		err := s.BackupIfDue(ctx)
+		switch {
+		case ctx.Err() != nil:
+		case errors.Is(err, ErrInsufficientSpace):
+			if !waiting {
+				s.logger.WarnContext(ctx, "photo scoring backup waits: the data volume is at its reserve")
+			}
+			waiting = true
+		case err != nil:
 			s.logger.ErrorContext(ctx, "photo scoring backup failed", "error", err)
+		case waiting:
+			s.logger.InfoContext(ctx, "photo scoring backup no longer waits for space")
+			waiting = false
 		}
 		select {
 		case <-ctx.Done():
