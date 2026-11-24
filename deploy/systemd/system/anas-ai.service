@@ -17,7 +17,13 @@ DynamicUser=true
 # packages under /opt/a-nas (ADR 0034).
 Environment=PYTHONPATH=/usr/lib/a-nas/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_ai.worker --model /usr/lib/a-nas/ai/model.litertlm --manifest /usr/lib/a-nas/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /usr/lib/a-nas/ai/detector.onnx --detector-manifest /usr/lib/a-nas/ai/detector.json --face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json --animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json --ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json
+ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_ai.worker --model /usr/lib/a-nas/ai/model.litertlm --manifest /usr/lib/a-nas/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /usr/lib/a-nas/ai/detector.onnx --detector-manifest /usr/lib/a-nas/ai/detector.json --face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json --animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json --ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json --aesthetic-scorer /usr/lib/a-nas/ai/aesthetic-scorer.bundle --aesthetic-scorer-manifest /usr/lib/a-nas/ai/aesthetic-scorer.json
+# The aesthetic scorer loads its tower with transformers from local files
+# only: it must not try Hugging Face, and the home directory it would cache
+# in is not there (ProtectHome), so its cache goes under the cache directory.
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=HF_HOME=/var/cache/a-nas-ai/huggingface
 # XNNPack keeps repacked weights here so later starts load faster.
 CacheDirectory=a-nas-ai
 CacheDirectoryMode=0700
