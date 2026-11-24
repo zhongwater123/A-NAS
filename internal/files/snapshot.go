@@ -162,10 +162,12 @@ SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM snapshot_schedules WHERE space_id = ? A
 		args = append(args, spaceID)
 	}
 	result, err := s.store.db.ExecContext(ctx, note, args...)
+	var noted int64
 	if err == nil {
-		if noted, _ := result.RowsAffected(); noted == 0 {
-			err = errScheduleGone
-		}
+		noted, err = result.RowsAffected()
+	}
+	if err == nil && noted == 0 {
+		err = errScheduleGone
 	}
 	if err != nil {
 		s.holdSnapshot(snapshot.ID, false)

@@ -209,7 +209,12 @@ func (s *Service) startDeletion(ctx context.Context, userID string) error {
 	if startedAt.Valid {
 		return nil
 	}
-	if at, _ := time.Parse(time.RFC3339Nano, dueAt); at.After(now) {
+	// A time that cannot be read is not taken as due: nothing starts.
+	at, err := time.Parse(time.RFC3339Nano, dueAt)
+	if err != nil {
+		return fmt.Errorf("read the deletion's due time: %w", err)
+	}
+	if at.After(now) {
 		return errDeletionNotDue
 	}
 	// due_at names the request that was read: one made in between is not it.
