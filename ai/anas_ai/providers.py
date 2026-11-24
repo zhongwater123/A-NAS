@@ -26,6 +26,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1310,37 +1311,6 @@ class FakeReader:
         self.loaded = False
 
 
-# Aesthetic scores (docs/architecture/photo-ai.md#美学打分): the scorer bundle
-# of #480, Qwen3.5-4B's frozen vision tower with two small heads, through
-# PyTorch and the inference modules in ai/qv_head. Scores are not clipped.
-def _serve_scorer(connection, bundle, manifest, threads):
-    """Own the native runtime in a killable process, including its first load."""
-    with connection:
-        try:
-            import torch
-
-            torch.set_num_threads(threads)
-            from qv_head.scorer import Scorer, ScorerError
-
-            scorer = Scorer(bundle, manifest, device="cpu")
-        except Exception as error:  # noqa: BLE001  an optional runtime must not take down the Worker
-            connection.send(("unavailable", str(error)))
-            return
-        connection.send(("ready", None))
-        while True:
-            try:
-                image = connection.recv_bytes()
-            except EOFError:
-                return
-            try:
-                result = scorer.score_bytes(image)
-            except ScorerError as error:
-                connection.send(("invalid", str(error)))
-            else:
-                connection.send(("scores", {"aesthetic": round(result.aesthetic, 4),
-                                            "technical": round(result.technical, 4)}))
-
-
 class AestheticScorer:
     """Validate the bundle at startup and load its CPU runtime on first use."""
 
@@ -1373,7 +1343,7 @@ class AestheticScorer:
     def _reply(self, run):
         while not run.terminate:
             if self._connection.poll(0.05):
-                return self._connection.recv()
+                return json.loads(self._connection.recv_bytes())
         raise Cancelled()
 
     def score(self, data, run):
@@ -1383,13 +1353,12 @@ class AestheticScorer:
             if run.terminate:
                 raise Cancelled()
             if self._process is None:
-                context = multiprocessing.get_context("spawn")
-                self._connection, child = context.Pipe()
+                self._connection, child = multiprocessing.Pipe()
                 with child:
-                    process = context.Process(target=_serve_scorer, daemon=True,
-                                              args=(child, self._bundle, self._manifest, self.threads))
-                    process.start()
-                    self._process = process
+                    self._process = subprocess.Popen(
+                        [sys.executable, "-m", "anas_ai.scoring", str(child.fileno()), str(self._bundle),
+                         str(self.threads)], pass_fds=(child.fileno(),))
+                self._connection.send_bytes(self._manifest.model_dump_json().encode())
                 status, detail = self._reply(run)
                 if status != "ready":
                     raise Unavailable(detail)
@@ -1410,9 +1379,12 @@ class AestheticScorer:
             self._connection.close()
             self._connection = None
         if self._process is not None:
-            self._process.kill()
-            self._process.join()
-            self._process.close()
+            # Closing the pipe lets an idle scorer release native resources normally.
+            try:
+                self._process.wait(timeout=0.3)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
             self._process = None
 
 

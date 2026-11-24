@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import struct
+import subprocess
 import tempfile
 import threading
 import time
@@ -528,17 +529,6 @@ SCORER_RELEASE = {"name": "test-scorer", "version": "1.0.0", "dimensions": ["aes
                   "tower": {"taps": [5], "min_pixels": 65536, "max_pixels": 1048576, "precision": "bf16"}}
 
 
-def slow_first_load(connection, bundle, _manifest, _threads):
-    marker = bundle / "first-load"
-    with connection:
-        if not marker.exists():
-            marker.touch()
-            time.sleep(30)
-        connection.send(("ready", None))
-        while connection.recv_bytes():
-            connection.send(("scores", {"aesthetic": 2.5, "technical": 3.5}))
-
-
 class ScorerBundleTest(unittest.TestCase):
     """What the aesthetic scorer checks when the Worker starts, before it loads anything."""
 
@@ -594,7 +584,6 @@ class ScorerBundleTest(unittest.TestCase):
 
 
     @unittest.skipUnless(importlib.util.find_spec("pydantic"), "requires the scorer schema dependency")
-    @patch("anas_ai.providers._serve_scorer", slow_first_load)
     @patch("importlib.metadata.version", return_value="test")
     def test_cancel_during_cold_load_reaps_child_and_allows_retry(self, _version):
         scorer = providers.AestheticScorer(*self.bundle(self.valid_release()), threads=1)
@@ -607,16 +596,37 @@ class ScorerBundleTest(unittest.TestCase):
                 time.sleep(0.01)
             run.terminate = True
 
-        cancellation = threading.Thread(target=cancel_when_loading)
-        cancellation.start()
-        try:
-            with self.assertRaises(providers.Cancelled):
-                scorer.score(b"photo", run)
-        finally:
-            cancellation.join()
-        self.assertTrue((scorer._bundle / "first-load").exists())
-        self.assertIsNone(scorer._process)
-        self.assertEqual(scorer.score(b"photo", scorer.run_options()), {"aesthetic": 2.5, "technical": 3.5})
+        # Stand in for native loading without requiring torch or 680 MB of weights.
+        child = """
+import sys, time
+from pathlib import Path
+from multiprocessing.connection import Connection
+with Connection(int(sys.argv[1])) as channel:
+    channel.recv_bytes()
+    marker = Path(sys.argv[2]) / "first-load"
+    if not marker.exists():
+        marker.touch()
+        time.sleep(30)
+    channel.send_bytes(b'["ready",null]')
+    channel.recv_bytes()
+    channel.send_bytes(b'["scores",{"aesthetic":2.5,"technical":3.5}]')
+"""
+        popen = subprocess.Popen
+
+        def start_child(args, **kwargs):
+            return popen([args[0], "-c", child, *args[3:]], **kwargs)
+
+        with patch("anas_ai.providers.subprocess.Popen", side_effect=start_child):
+            cancellation = threading.Thread(target=cancel_when_loading)
+            cancellation.start()
+            try:
+                with self.assertRaises(providers.Cancelled):
+                    scorer.score(b"photo", run)
+            finally:
+                cancellation.join()
+            self.assertTrue((scorer._bundle / "first-load").exists())
+            self.assertIsNone(scorer._process)
+            self.assertEqual(scorer.score(b"photo", scorer.run_options()), {"aesthetic": 2.5, "technical": 3.5})
 
 
 if __name__ == "__main__":
