@@ -9,6 +9,8 @@ import (
 	mathrand "math/rand/v2"
 	"slices"
 	"sort"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -334,22 +336,33 @@ const shuffleFrom = 4
 
 // shuffle picks each unlocked shot again from the four beats most like its
 // picture's description, by seed: not one used in the film, not of the
-// card before it, long enough, and not 竖 where the shot was not.
+// card before it, long enough, and not 竖 where the shot was not. A shot
+// whose description the plan left empty or too long to search for stays as
+// it is: the plan wrote it, not the member, so it is not their request that
+// is wrong.
 func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, seed int64) (draftState, string, error) {
 	var texts []string
-	locked := 0
+	locked, unsearched := 0, 0
 	for _, shot := range state.Shots {
 		if shot.Locked {
 			locked++
 			continue
 		}
 		slot := state.Slots[shot.First]
-		if query := src.query(slot.Part, slot.Picture); !slices.Contains(texts, query) {
+		query := src.query(slot.Part, slot.Picture)
+		if !searchable(query) {
+			unsearched++
+			continue
+		}
+		if !slices.Contains(texts, query) {
 			texts = append(texts, query)
 		}
 	}
 	if locked == len(state.Shots) {
 		return draftState{}, "", refuse("镜头都锁定了，没有可以重洗的")
+	}
+	if len(texts) == 0 {
+		return draftState{}, "", refuse("没锁的镜头在规划里都没有可以搜索的画面描述，重洗换不了")
 	}
 	found, err := s.searchBeats(ctx, src, texts)
 	if err != nil {
@@ -370,7 +383,12 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 			continue
 		}
 		slot := state.Slots[shot.First]
-		ranked := found[slices.Index(texts, src.query(slot.Part, slot.Picture))]
+		query := src.query(slot.Part, slot.Picture)
+		if !searchable(query) {
+			used[shot.Beat] = true
+			continue
+		}
+		ranked := found[slices.Index(texts, query)]
 		var before string
 		if i > 0 {
 			before = cardOf(next.Shots[i-1].Beat)
@@ -400,7 +418,18 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 			changed++
 		}
 	}
-	return next, fmt.Sprintf("换了 %d 个镜头，锁住的 %d 个没动", changed, locked), nil
+	message := fmt.Sprintf("换了 %d 个镜头，锁住的 %d 个没动", changed, locked)
+	if unsearched > 0 {
+		message += fmt.Sprintf("，%d 个在规划里没有可以搜索的画面描述，保持原样", unsearched)
+	}
+	return next, message, nil
+}
+
+// searchable reports whether the photo library searches for query: not
+// empty and not longer than a search (photos.SearchWindows).
+func searchable(query string) bool {
+	query = strings.TrimSpace(query)
+	return query != "" && utf8.RuneCountInString(query) <= photos.MaxQueryRunes
 }
 
 // reservedLater reports whether beat leads a shot after i: that shot may

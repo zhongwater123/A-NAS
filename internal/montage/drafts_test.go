@@ -875,3 +875,42 @@ func TestDeletingAShotBesideAVideoGoneIsRefusedWithWhy(t *testing.T) {
 		t.Fatalf("deleting beside a video gone = %v, a video that cannot be added", err)
 	}
 }
+
+// A shot whose picture the plan described with nothing to search for stays
+// as it is in a shuffle, and the others are shuffled: the plan wrote it,
+// not the member. With nothing left to search for, the shuffle is refused.
+func TestAShuffleLeavesAShotItCannotSearchFor(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	for i := range 20 {
+		env.search.hits = append(env.search.hits, photos.WindowMatch{AssetID: videoA, Window: i, Score: float64(i)})
+	}
+	env.store.Exec(t, `UPDATE steps SET result_json = replace(result_json, '"query":"海浪"', '"query":"  "') WHERE job_id = 'job:1' AND name = 'pick'`)
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := beats(draft)
+	seed := int64(7)
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	if err != nil {
+		t.Fatalf("a shuffle with a picture of no description = %v", err)
+	}
+	// Shot 3 (c2/2) is the picture described with nothing.
+	if got := beats(next); got[2] != before[2] {
+		t.Fatalf("the shot with nothing to search for moved: %v, was %v", got, before)
+	}
+	if !strings.Contains(next.Message, "1 个在规划里没有可以搜索的画面描述，保持原样") {
+		t.Fatalf("message %q", next.Message)
+	}
+	for _, texts := range env.search.texts {
+		if slices.ContainsFunc(texts, func(text string) bool { return strings.TrimSpace(text) == "" }) {
+			t.Fatalf("searched for %q", texts)
+		}
+	}
+
+	// Every unlocked shot without a description to search for: refused.
+	env.store.Exec(t, `UPDATE steps SET result_json = replace(replace(result_json, '"query":"海边散步"', '"query":""'), '"query":"山路"', '"query":""') WHERE job_id = 'job:1' AND name = 'pick'`)
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	refusedWith(t, err, "都没有可以搜索的画面描述")
+}
