@@ -43,6 +43,15 @@ set -euo pipefail
 if [[ "${1:-}" != --inside ]]; then
   image=${1:-anas-systemd:trixie}
   repo=$(cd "$(dirname "$0")/.." && pwd)
+  # The image and the assistant runtime must match this checkout; a mismatch
+  # means the test would run in an environment nobody built for it.
+  # ANAS_SYSTEM_TEST_SKIP_ENV_CHECK=1 skips the check (rolling out images that
+  # predate the labels); ANAS_SYSTEM_TEST_ALLOW_ENV_MISMATCH=1 only warns.
+  if [[ -z "${ANAS_SYSTEM_TEST_SKIP_ENV_CHECK:-}" ]]; then
+    env_args=(--image "$image")
+    [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]] && env_args+=(--runtime "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME")
+    bash "$repo/scripts/check-system-test-env.sh" "${env_args[@]}" || exit 2
+  fi
   shopt -s nullglob
   products=("$repo"/build/packages/a-nas_*.deb)
   ((${#products[@]} == 1)) || { echo "build/packages needs exactly one a-nas package: run make packages" >&2; exit 2; }

@@ -191,6 +191,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.agents/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
+- 系统测试启动前 `scripts/system-test.sh` 用 `scripts/check-system-test-env.sh` 核对镜像与本检出的构建输入：镜像 label `anas.image.inputs` 必须等于当前检出算出的值，否则失败；ISO 周（`anas.image.week`）不同只警告。`ANAS_SYSTEM_TEST_SKIP_ENV_CHECK=1` 跳过检查（镜像尚未带 label 的过渡期），`ANAS_SYSTEM_TEST_ALLOW_ENV_MISMATCH=1` 把不一致降级为警告（不推荐）。共用服务器上的镜像由管理员构建，用 `anas-images` 查看；
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）与 Docker、Caddy 的软件包依赖的 Debian 包，另加助手沙箱的工具与只供测试用的工具；Docker 与 Caddy 本身不在镜像中，由测试从软件源安装。
 - 系统测试按部署的顺序安装：外层脚本用 `make release` 的同一套脚本（aptly）做一个以临时测试密钥签名的软件源，含本 release、同样程序的“上一 release”与多一步迁移的“下一 release”（`go build -tags rollbacktest`），以及替身内容包与 `scripts/fetch-upstream-packages.sh` 取得的 Docker、Caddy 软件包；容器只读这个软件源，不联网。包列出了镜像中没有的依赖时，apt 安装失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。

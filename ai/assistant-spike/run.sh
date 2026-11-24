@@ -43,6 +43,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
 commit=8fd9f70600f143b2d8e294f3848e0874377c206d
 name=${HERMES_SPIKE_NAME:-hermes-spike-sbx}
+system_image=${SYSTEM_TEST_IMAGE:-anas-systemd:trixie}
+ai_dev_image=${ANAS_AI_DEV_IMAGE:-anas-ai-dev:trixie}
 run=${HERMES_SPIKE_RUN:-$work/run}
 
 case "${1:-}" in
@@ -66,7 +68,7 @@ case "${1:-}" in
     done
     docker run --rm -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
       -v "$patched:/src:ro" -v "$work/out:/out" -v "$here:/spike:ro" \
-      anas-ai-dev:trixie bash /spike/build-runtime.sh 2>&1 | tee "$work/out/build.log"
+      "$ai_dev_image" bash /spike/build-runtime.sh 2>&1 | tee "$work/out/build.log"
     rm -rf -- "$patched"
     ;;
   sandbox)
@@ -96,7 +98,7 @@ case "${1:-}" in
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
       --tmpfs /run --tmpfs /run/lock -v "$work/out:/spike-out:ro" -v "$here:/spike:ro" -v "$here/../..:/src:ro" "${key_mount[@]}" \
-      anas-systemd:trixie >/dev/null
+      "$system_image" >/dev/null
     for _ in $(seq 1 50); do
       docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break
       sleep 0.5

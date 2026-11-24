@@ -48,5 +48,11 @@ docker run --rm --privileged -v "$work:/out" -e PACKAGES="$packages" "$builder" 
   rm -rf /rootfs/var/cache/apt/archives/*.deb
   tar -C /rootfs -czf /out/rootfs.tar.gz .
   chmod 0644 /out/rootfs.tar.gz'
-docker import --change 'CMD ["/sbin/init"]' --change 'STOPSIGNAL SIGRTMIN+3' "$work/rootfs.tar.gz" "$image" >/dev/null
+inputs=$(bash "$repo/scripts/system-test-image-key.sh" --inputs)
+week=$(bash "$repo/scripts/system-test-image-key.sh" --week)
+source_commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo unknown)
+docker import --change 'CMD ["/sbin/init"]' --change 'STOPSIGNAL SIGRTMIN+3' \
+  --change "LABEL anas.image.inputs=$inputs" --change "LABEL anas.image.week=$week" \
+  --change "LABEL anas.image.commit=$source_commit" \
+  "$work/rootfs.tar.gz" "$image" >/dev/null
 docker run --rm "$image" systemctl --version | head -1
