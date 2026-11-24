@@ -283,7 +283,8 @@ assistant_probe owner 1
 
 # --- What the member approves is applied as the member, with the broker's own checks.
 fold "assistant broker" < <(bash /spike/approvals-broker.sh 2>&1 || true)
-check "the broker's execution tests ran" test "$folded" -ge 15
+# Every check in the script passed: one that stopped part-way, on an exception, fails here.
+check "the broker's execution tests ran" test "$folded" -ge "$(grep -c '^check(' /spike/approvals-broker.sh)"
 # shellcheck disable=SC2329 # invoked through check
 in_web_trash() { # JQ_CONDITION: alice's Web recycle bin holds an item matching it
   curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -e "any(.items[]; $1)" >/dev/null
