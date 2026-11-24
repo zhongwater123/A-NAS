@@ -73,16 +73,19 @@ func compareWindowHits(a, b windowHit) int {
 	return cmp.Compare(a.idx, b.idx)
 }
 
-// searchedVideo is a granted video whose windows a search ranks: the first
-// granted asset of its object, as the owner sees it, and how many windows
-// it has.
+// searchedVideo is a granted video whose windows a search ranks: the
+// granted assets of its object the owner sees now, in the order of their
+// IDs, and how many windows it has.
 type searchedVideo struct {
-	asset string
-	count int
+	assets []string
+	count  int
 }
 
 // SearchWindows returns, for each of texts, the k windows of the grant's
-// videos most like it, most alike first.
+// videos most like it, most alike first. A video the grant holds as several
+// assets answers as each of them, in the order of their IDs, and each
+// counts towards k: the montage center knows a video by its asset, and
+// which of them a film was made with is not the photo library's to say.
 func (s *Service) SearchWindows(ctx context.Context, owner Principal, grantID string, texts []string, k int) ([][]WindowMatch, error) {
 	if len(texts) == 0 || len(texts) > MaxWindowSearchTexts || k < 1 || k > MaxWindowMatches || len(texts)*k > MaxWindowSearchHits {
 		return nil, ErrInvalidQuery
@@ -133,10 +136,13 @@ func (s *Service) SearchWindows(ctx context.Context, owner Principal, grantID st
 		return nil, err
 	}
 	for i, hits := range ranked {
-		matches[i] = make([]WindowMatch, len(hits))
-		for n, hit := range hits {
-			matches[i][n] = WindowMatch{AssetID: videos[hit.object].asset, Window: hit.idx, Score: hit.score}
+		matches[i] = make([]WindowMatch, 0, len(hits))
+		for _, hit := range hits {
+			for _, asset := range videos[hit.object].assets {
+				matches[i] = append(matches[i], WindowMatch{AssetID: asset, Window: hit.idx, Score: hit.score})
+			}
 		}
+		matches[i] = matches[i][:min(len(matches[i]), k)]
 	}
 	return matches, nil
 }
@@ -167,12 +173,11 @@ func (s *Service) searchedVideos(ctx context.Context, owner Principal, grantID s
 			for _, identity := range p.windowIdentities {
 				identities[identity] = true
 			}
-			if _, seen := videos[asset.ObjectID]; seen {
-				// The asset IDs come in order: the first one stands for its object.
-				continue
-			}
 			if p.windows == AnalysisDone {
-				videos[asset.ObjectID] = searchedVideo{asset: asset.AssetID, count: p.windowCount}
+				// The asset IDs come in order, and so each video's do.
+				video := videos[asset.ObjectID]
+				video.assets, video.count = append(video.assets, asset.AssetID), p.windowCount
+				videos[asset.ObjectID] = video
 			}
 		}
 	}

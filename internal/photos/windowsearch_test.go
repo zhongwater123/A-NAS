@@ -187,6 +187,76 @@ func TestWindowSearchRanksTheGrantsWindows(t *testing.T) {
 	}
 }
 
+// A video the grant holds as two assets, as when a member keeps the same
+// file in two libraries, is found as each of them: the montage center knows
+// its videos by asset, and a version may have been made with either. Each
+// counts towards k, in the order of their IDs, with or without the index.
+func TestWindowSearchAnswersEveryGrantedAssetOfAVideo(t *testing.T) {
+	ctx := context.Background()
+	f := newSearchFixture(t)
+	_, shared := libraries(t, f.service, namedAlice)
+	twin := importPhoto(t, f.service, namedAlice, shared.ID, "", "trip-again.mp4", mp4Bytes(1))
+	if _, err := f.service.RegisterGrant(ctx, granting(namedAlice), "project:trip", []string{twin.ID}); err != nil {
+		t.Fatal(err)
+	}
+	looked, err := f.service.LookupGrant(ctx, granting(namedAlice), f.tripGrant.ID, []string{twin.ID})
+	if err != nil || len(looked) != 1 || looked[0].ObjectID != f.tripObject || twin.ID == f.trip.ID {
+		t.Fatalf("the twin of the trip = %+v, %v", looked, err)
+	}
+	assets := []string{f.trip.ID, twin.ID}
+	slices.Sort(assets)
+	check := func(stage string, k int) [][]photos.WindowMatch {
+		t.Helper()
+		matches := f.searchWindows(t, namedAlice, f.tripGrant, k)
+		for i, list := range matches {
+			// The trip's 35 windows twice, and the beach's 35.
+			if len(list) != min(k, 105) {
+				t.Fatalf("%s, k=%d: %q found %d windows", stage, k, searchTexts[i], len(list))
+			}
+			for n := 0; n < len(list); n++ {
+				if list[n].AssetID == f.beach.ID {
+					continue
+				}
+				// The lower ID first, then the same window as the other,
+				// unless k cut the list between them.
+				if list[n].AssetID != assets[0] {
+					t.Fatalf("%s, k=%d: %q found %+v before its twin of the lower ID", stage, k, searchTexts[i], list[n])
+				}
+				if n+1 == len(list) {
+					break
+				}
+				if want := (photos.WindowMatch{AssetID: assets[1], Window: list[n].Window, Score: list[n].Score}); list[n+1] != want {
+					t.Fatalf("%s, k=%d: %q found %+v after %+v, want %+v", stage, k, searchTexts[i], list[n+1], list[n], want)
+				}
+				n++
+			}
+		}
+		return matches
+	}
+	for _, k := range []int{1, 2, 7, 50, photos.MaxWindowMatches} {
+		check("from the Catalog", k)
+	}
+	w := newWindowIndex(t, &f.montageFixture)
+	w.sync(t)
+	for _, k := range []int{1, 7, photos.MaxWindowMatches} {
+		photos.UseVectorIndex(f.service, nil)
+		scanned := check("from the Catalog", k)
+		photos.UseVectorIndex(f.service, w.index)
+		if indexed := check("from the index", k); !reflect.DeepEqual(indexed, scanned) || w.index.searched() == 0 {
+			t.Fatalf("k=%d: the index found\n%+v\nthe Catalog\n%+v", k, indexed, scanned)
+		}
+	}
+	// One of the two in the trash: the video is found as the other alone.
+	if _, err := f.service.Trash(ctx, namedAlice, assets[0]); err != nil {
+		t.Fatal(err)
+	}
+	for _, list := range f.searchWindows(t, namedAlice, f.tripGrant, photos.MaxWindowMatches) {
+		if len(list) != 70 || slices.ContainsFunc(list, func(match photos.WindowMatch) bool { return match.AssetID == assets[0] }) {
+			t.Fatalf("with one of the two in the trash, found %d windows: %+v", len(list), list)
+		}
+	}
+}
+
 // A grant whose videos have no windows yet finds nothing, without asking
 // the Worker; requests out of bounds are refused.
 func TestWindowSearchBeforeAnyWindowsAndOutOfBounds(t *testing.T) {
