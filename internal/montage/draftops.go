@@ -229,24 +229,14 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource, beat string) (
 	if err != nil {
 		return nil, 0, grantError(err)
 	}
-	dimensions := analysis.Dimensions
-	if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
-		return nil, 0, fmt.Errorf("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
-	}
-	var vectors []float32
-	for i, window := range analysis.List {
-		if float64(window.StartMs)/1000 >= end || float64(window.EndMs)/1000 <= start {
-			continue
-		}
-		for d := range dimensions {
-			at := (i*dimensions + d) * 4
-			vectors = append(vectors, math.Float32frombits(binary.LittleEndian.Uint32(raw[at:])))
-		}
+	_, vectors, err := windowVectors(analysis, raw, func(from, to float64) bool { return from < end && to > start })
+	if err != nil {
+		return nil, 0, err
 	}
 	if len(vectors) == 0 {
 		return nil, 0, fmt.Errorf("no windows beneath beat %s", beat)
 	}
-	return vectors, dimensions, nil
+	return vectors, analysis.Dimensions, nil
 }
 
 // --- searching ---

@@ -762,3 +762,31 @@ func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
 		t.Fatalf("the draft with the windows it was cut with = %v", err)
 	}
 }
+
+// The fill's rows and a beat's likeness read the same vectors: for each
+// window the analysis lists, its dimensions as little-endian float32.
+func TestWindowVectorsAreReadAsTheLibraryKeepsThem(t *testing.T) {
+	analysis := photos.GrantAnalysis{Dimensions: 2, List: windowsOf(3)}
+	var raw []byte
+	for _, value := range []float32{1, -2, 0.5, 4, 3e-9, float32(math.Inf(1))} {
+		raw = binary.LittleEndian.AppendUint32(raw, math.Float32bits(value))
+	}
+	windows, vectors, err := windowVectors(analysis, raw, func(start, end float64) bool { return start < 6 && end > 2 })
+	if err != nil || len(windows) != 2 || windows[0].Index != 1 || windows[1].Index != 2 ||
+		!slices.Equal(vectors, []float32{0.5, 4, 3e-9, float32(math.Inf(1))}) {
+		t.Fatalf("windowVectors() = %v, %v, %v", windows, vectors, err)
+	}
+	if _, vectors, err := windowVectors(analysis, raw, func(float64, float64) bool { return false }); err != nil || len(vectors) != 0 {
+		t.Fatalf("no window kept = %v, %v", vectors, err)
+	}
+	for name, wrong := range map[string]photos.GrantAnalysis{
+		"a vector short":         {Dimensions: 2, List: windowsOf(4)},
+		"another dimension":      {Dimensions: 3, List: windowsOf(3)},
+		"no dimension":           {Dimensions: 0, List: windowsOf(3)},
+		"more than a vector has": {Dimensions: photos.MaxWindowDimensions + 1, List: windowsOf(3)},
+	} {
+		if _, _, err := windowVectors(wrong, raw, func(float64, float64) bool { return true }); err == nil {
+			t.Errorf("%s: read as vectors", name)
+		}
+	}
+}

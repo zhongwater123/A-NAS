@@ -128,25 +128,44 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 			return nil, nil, 0, failed("window vectors have incompatible dimensions")
 		}
 		dimensions = analysis.Dimensions
-		if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
-			return nil, nil, 0, failed("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
+		windows, beneath, err := windowVectors(analysis, raw, func(start, end float64) bool { return overlaps(within, start, end) })
+		if err != nil {
+			return nil, nil, 0, failed("%v", err)
 		}
-		for i, window := range analysis.List {
-			start, end := float64(window.StartMs)/1000, float64(window.EndMs)/1000
-			if !overlaps(within, start, end) {
-				continue
-			}
-			if len(vectors)+dimensions > MaxComputeArrayBytes/4 {
-				return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
-			}
-			rows = append(rows, FillRow{Video: video.AssetID, Start: start, End: end})
-			for d := range dimensions {
-				at := (i*dimensions + d) * 4
-				vectors = append(vectors, math.Float32frombits(binary.LittleEndian.Uint32(raw[at:])))
-			}
+		if len(vectors)+len(beneath) > MaxComputeArrayBytes/4 {
+			return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
 		}
+		for _, window := range windows {
+			rows = append(rows, FillRow{Video: video.AssetID, Start: float64(window.StartMs) / 1000, End: float64(window.EndMs) / 1000})
+		}
+		vectors = append(vectors, beneath...)
 	}
 	return rows, vectors, dimensions, nil
+}
+
+// windowVectors are those of an analysis's windows that keep wants, given
+// each window's start and end in seconds, with their vectors one after
+// another. raw is the analysis's vectors as the photo library keeps them:
+// for each window in order, its dimensions as little-endian float32.
+func windowVectors(analysis photos.GrantAnalysis, raw []byte, keep func(start, end float64) bool) ([]photos.Window, []float32, error) {
+	dimensions := analysis.Dimensions
+	if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
+		return nil, nil, fmt.Errorf("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
+	}
+	var windows []photos.Window
+	var vectors []float32
+	for i, window := range analysis.List {
+		if !keep(float64(window.StartMs)/1000, float64(window.EndMs)/1000) {
+			continue
+		}
+		windows = append(windows, window)
+		at := len(vectors)
+		vectors = append(vectors, make([]float32, dimensions)...)
+		if _, err := binary.Decode(raw[i*4*dimensions:(i+1)*4*dimensions], binary.LittleEndian, vectors[at:]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return windows, vectors, nil
 }
 
 func catalogSpans(catalog catalogResult) map[string][][2]float64 {
