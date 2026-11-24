@@ -334,8 +334,6 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 	}
 }
 
-// A video's window points go together when the video does: deleting by the
-// object field removes every one of them, and only them.
 // An alias moves from one collection to another in one change, and back;
 // deleting the collection it names takes it along.
 func TestAnAliasSwitchesBetweenCollections(t *testing.T) {
@@ -390,6 +388,8 @@ func TestAnAliasSwitchesBetweenCollections(t *testing.T) {
 	}
 }
 
+// A video's window points go together when the video does: deleting by the
+// object field removes every one of them, and only them.
 func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
