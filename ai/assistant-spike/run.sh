@@ -39,6 +39,8 @@
 # Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
 # read-only) but each needs its own container: HERMES_SPIKE_NAME=<name>, and with
 # SPIKE_PRODUCT_UID also HERMES_SPIKE_RUN=<dir> for the sockets.
+# SPIKE_BROKER_NO_RESERVE=1 given to sandbox lets broker-spike write into a disk with less free
+# space than A-NAS keeps (5% of the volume, at least 10 GiB); otherwise it refuses the writes.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
@@ -111,6 +113,7 @@ case "${1:-}" in
     # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
     docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      -e SPIKE_BROKER_NO_RESERVE="${SPIKE_BROKER_NO_RESERVE:-}" \
       "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
@@ -126,7 +129,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,40p' "$0"
+    sed -n '2,42p' "$0"
     exit 2
     ;;
 esac
