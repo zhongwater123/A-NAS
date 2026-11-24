@@ -201,15 +201,8 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	var jobID string
 	created := false
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		var priorKind, priorProject string
-		err := tx.QueryRowContext(ctx, "SELECT id, kind, project_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
-			Scan(&jobID, &priorKind, &priorProject)
-		if err == nil && (priorKind != KindGenerate || priorProject != projectID) {
-			// The key of a save or a recut is another request's, also on
-			// this project.
-			return ErrConflict
-		}
-		if err == nil || !errors.Is(err, sql.ErrNoRows) {
+		var err error
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindGenerate, "project_id", projectID); err != nil || jobID != "" {
 			return err
 		}
 		row, err := s.project(ctx, tx, owner, projectID)
@@ -219,12 +212,8 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if row.state != "ready" {
 			return ErrNotFound
 		}
-		var active bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active); err != nil {
+		if err := projectIdle(ctx, tx, projectID); err != nil {
 			return err
-		}
-		if active {
-			return ErrJobActive
 		}
 		var count int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM project_assets WHERE project_id = ?", projectID).Scan(&count); err != nil {
@@ -240,16 +229,10 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if settings.SongID == "" {
 			return ErrNoSong
 		}
-		encoded, err := json.Marshal(settings)
-		if err != nil {
+		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: projectID, requestKey: requestKey, kind: KindGenerate, settings: settings, plans: s.plans}); err != nil {
 			return err
 		}
-		jobID, created = newID("job"), true
-		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before, created_at, updated_at)
-			VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`, jobID, owner, projectID, requestKey, string(encoded), s.plans, now, now, now); err != nil {
-			return err
-		}
+		created = true
 		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
 			jobID, projectID)
 		return err
@@ -260,6 +243,63 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	s.wakeJobs()
 	job, err := s.Job(ctx, owner, jobID)
 	return job, created, err
+}
+
+// keyedJob is the job owner started with requestKey, "" when there is none
+// yet. The key names one request: a job of another kind, or of another
+// subject (the project generated, the draft saved, the version recut, which
+// column holds), is another request's, ErrConflict.
+func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, subject string) (string, error) {
+	var id, priorKind string
+	var prior sql.NullString
+	err := q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+		Scan(&id, &priorKind, &prior)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", err
+	case priorKind != kind || prior.String != subject:
+		return "", ErrConflict
+	}
+	return id, nil
+}
+
+// projectIdle answers ErrJobActive while a job of the project has not
+// ended: a project has one job in progress at a time, of any kind.
+func projectIdle(ctx context.Context, tx *sql.Tx, projectID string) error {
+	var active bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active); err != nil {
+		return err
+	}
+	if active {
+		return ErrJobActive
+	}
+	return nil
+}
+
+// newJob is a job to queue: an edit names the version it came from, its
+// draft and the draft's revision; a recut the version.
+type newJob struct {
+	owner, projectID, requestKey, kind string
+	settings                           JobSettings
+	plans                              int
+	sourceVersion, draft               sql.NullString
+	draftRevision                      sql.NullInt64
+}
+
+// queueJob writes a job, due now, and returns its ID.
+func (s *Store) queueJob(ctx context.Context, tx *sql.Tx, job newJob) (string, error) {
+	encoded, err := json.Marshal(job.settings)
+	if err != nil {
+		return "", err
+	}
+	id, now := newID("job"), sqlitedb.FormatTime(s.now())
+	_, err = tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
+			created_at, updated_at, kind, source_version_id, draft_id, draft_revision)
+		VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+		id, job.owner, job.projectID, job.requestKey, string(encoded), job.plans, now, now, now, job.kind, job.sourceVersion, job.draft, job.draftRevision)
+	return id, err
 }
 
 // settingsOf is a project's settings as a job keeps them.

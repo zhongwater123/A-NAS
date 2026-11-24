@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Saving a draft as a new version (#596, ADR 0039 decisions 4–6): an edit
@@ -28,20 +27,16 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	if !s.runsEdits() {
 		return Job{}, false, ErrJobsUnavailable
 	}
-	var jobID string
-	created := false
 	// A request key used before answers its job, whatever became of the draft.
-	var prior, priorDraft sql.NullString
-	err := s.db.QueryRowContext(ctx, "SELECT id, draft_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&prior, &priorDraft)
-	switch {
-	case err == nil && priorDraft.String != draftID:
-		return Job{}, false, ErrConflict
-	case err == nil:
-		job, err := s.Job(ctx, owner, prior.String)
-		return job, false, err
-	case !errors.Is(err, sql.ErrNoRows):
+	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindEdit, "draft_id", draftID)
+	if err != nil {
 		return Job{}, false, err
 	}
+	if jobID != "" {
+		job, err := s.Job(ctx, owner, jobID)
+		return job, false, err
+	}
+	created := false
 	draft, err := s.readDraft(ctx, owner, draftID, nil)
 	if err != nil {
 		return Job{}, false, err
@@ -63,26 +58,16 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		// A retry with the same key may have made the job since the look above.
-		var again, againDraft sql.NullString
-		switch err := tx.QueryRowContext(ctx, "SELECT id, draft_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&again, &againDraft); {
-		case err == nil && againDraft.String != draftID:
-			return ErrConflict
-		case err == nil:
-			jobID = again.String
-			return nil
-		case !errors.Is(err, sql.ErrNoRows):
+		var err error
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindEdit, "draft_id", draftID); err != nil || jobID != "" {
 			return err
 		}
 		row, err := s.project(ctx, tx, owner, src.projectID)
 		if err != nil {
 			return err
 		}
-		var active bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", src.projectID).Scan(&active); err != nil {
+		if err := projectIdle(ctx, tx, src.projectID); err != nil {
 			return err
-		}
-		if active {
-			return ErrJobActive
 		}
 		var revision int
 		if err := tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision); err != nil {
@@ -104,18 +89,12 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		// An edit of a recut version is not a recut: its sentence and base
 		// stay with the version they planned.
 		settings.ProjectName, settings.Edit, settings.Recut = row.name, &edit, nil
-		encoded, err := json.Marshal(settings)
-		if err != nil {
+		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindEdit, settings: settings, plans: 1,
+			sourceVersion: sql.NullString{String: src.versionID, Valid: true}, draft: sql.NullString{String: draftID, Valid: true},
+			draftRevision: sql.NullInt64{Int64: int64(draft.Revision), Valid: true}}); err != nil {
 			return err
 		}
-		jobID, created = newID("job"), true
-		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
-				created_at, updated_at, kind, source_version_id, draft_id, draft_revision)
-			VALUES(?, ?, ?, ?, ?, 1, 'queued', ?, ?, ?, 'edit', ?, ?, ?)`,
-			jobID, owner, src.projectID, requestKey, string(encoded), now, now, now, src.versionID, draftID, draft.Revision); err != nil {
-			return err
-		}
+		created = true
 		// The job looks after the videos its shots lead with; a piece the
 		// fill takes from another is passed over when that video is gone.
 		for asset, object := range used {
