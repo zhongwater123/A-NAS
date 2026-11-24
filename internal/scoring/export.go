@@ -132,7 +132,7 @@ func (options *ExportOptions) columns(batch Batch, catalogue Catalogue) ([]Colum
 		if !slices.Contains(options.Fields, dimension.ID) {
 			continue
 		}
-		description := batch.Scale.describe() + "；跳过和标记没有分数"
+		description := batch.Scale.describe(dimension.ID) + "；跳过和标记没有分数"
 		if dimension.Description != "" {
 			description = dimension.Description + "。" + description
 		}
