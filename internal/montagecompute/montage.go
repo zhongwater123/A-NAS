@@ -105,10 +105,12 @@ func (c Client) ShotsAnswer(ctx context.Context, answer, picked json.RawMessage,
 	return turned.Answer, err
 }
 
-// Likeness is the cosine of two beats' mean window vectors.
+// Likeness is the cosine of two beats' mean window vectors. A member waits
+// for it (deleting a shot of a draft), so its errors are those a request's
+// handler answers: a Worker that cannot be reached is one to wait for.
 func (c Client) Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error) {
 	if dimensions <= 0 || len(a) == 0 || len(b) == 0 || len(a)%dimensions != 0 || len(b)%dimensions != 0 {
-		return 0, fmt.Errorf("%w: %d and %d values of dimension %d", ErrRefused, len(a), len(b), dimensions)
+		return 0, fmt.Errorf("%w: %d and %d values of dimension %d", montage.ErrWorkerRefused, len(a), len(b), dimensions)
 	}
 	var answer struct {
 		Likeness float64 `json:"likeness"`
@@ -117,5 +119,5 @@ func (c Client) Likeness(ctx context.Context, a, b []float32, dimensions int) (f
 		{Name: "a", Shape: []int{len(a) / dimensions, dimensions}, Float32: a},
 		{Name: "b", Shape: []int{len(b) / dimensions, dimensions}, Float32: b},
 	}, &answer)
-	return answer.Likeness, jobComputeError(err)
+	return answer.Likeness, waitedError(err)
 }
