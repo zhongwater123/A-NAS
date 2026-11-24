@@ -156,7 +156,7 @@
 /api/v1/montage/projects/{projectId}/generate:
   post:
     operationId: generateMontageFilm
-    summary: "Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing"
+    summary: "Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true

@@ -2231,7 +2231,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
         post: operations["generateMontageFilm"];
         delete?: never;
         options?: never;
