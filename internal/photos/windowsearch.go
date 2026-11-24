@@ -265,44 +265,16 @@ func (s *Service) scoreVideoWindows(ctx context.Context, identity string, videos
 // index cannot answer for identity, and the caller reads the Catalog.
 func (s *Service) indexWindows(ctx context.Context, identity string, videos map[string]searchedVideo, vectors [][]float32,
 	k int) (ranked [][]windowHit, ok bool, err error) {
-	if s.indexResting() {
-		s.reportVectorFallback("the vector index failed recently", nil)
-		return nil, false, nil
-	}
-	// Sync keeps the collection it writes in line with the Catalog, and
-	// puts the alias on it once every video is written: only then is it
-	// read, by its own name.
-	target, err := s.currentWindowsCollection(ctx)
-	if err != nil {
+	collection, waiting, readable, err := s.readableCollection(ctx, s.windowVectorsIndexed(), identity)
+	if err != nil || !readable {
 		return nil, false, err
-	}
-	if target.name == "" || target.identity != identity {
-		s.reportVectorFallback("the vector index has no windows collection for the model", nil)
-		return nil, false, nil
-	}
-	full, why, err := s.windowsFull(ctx, target)
-	if err != nil {
-		s.indexFailed(ctx, err)
-		return nil, false, err
-	}
-	if !full {
-		s.reportVectorFallback(why, nil)
-		return nil, false, nil
-	}
-	waiting, err := s.textColumn(ctx, "SELECT object_id FROM window_outbox LIMIT ?", maxOutboxDelta+1)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(waiting) > maxOutboxDelta {
-		s.reportVectorFallback("too many videos wait for the vector index", nil)
-		return nil, false, nil
 	}
 
 	// What the outbox queues is scored from the Catalog: the index may hold
 	// an older version of it, or nothing.
 	queued := map[string]bool{}
-	for _, object := range waiting {
-		if _, searched := videos[object]; searched {
+	for object := range videos {
+		if waiting[object] {
 			queued[object] = true
 		}
 	}
@@ -332,14 +304,21 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 		}
 		return windowHit{object: object, idx: idx, score: float64(hit.Score)}, true
 	}
-	ask := func(queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
-		found, err := s.vectors.SearchBatch(ctx, target.name, queries)
-		if err != nil {
-			if errors.Is(err, vectorindex.ErrNoCollection) {
-				// What the sync loop saw no longer holds: ask next time.
-				s.windowsAliased.Store(nil)
+	place := func(hits []vectorindex.Hit) []windowHit {
+		var placed []windowHit
+		for _, hit := range hits {
+			if h, ok := usable(hit); ok {
+				placed = append(placed, h)
 			}
-			s.indexFailed(ctx, err)
+		}
+		return placed
+	}
+	asking := s.askIndex(ctx, collection)
+	ask := func(queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
+		found, err := asking(queries)
+		if errors.Is(err, vectorindex.ErrNoCollection) {
+			// What the sync loop saw no longer holds: ask next time.
+			s.windowsAliased.Store(nil)
 		}
 		return found, err
 	}
@@ -361,23 +340,13 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 	}
 	placed := make([][]windowHit, len(vectors))
 	for i := range vectors {
-		for {
-			placed[i] = placed[i][:0]
-			for _, hit := range answers[i] {
-				if h, ok := usable(hit); ok {
-					placed[i] = append(placed[i], h)
-				}
-			}
-			if len(answers[i]) < limits[i] || len(placed[i])+len(exact[i].hits) >= k {
-				break
-			}
-			limits[i] *= 4
-			more, err := ask([]vectorindex.Query{query(i, limits[i], nil)})
-			if err != nil {
-				return nil, false, err
-			}
-			answers[i] = more[0]
+		answers[i], limits[i], err = askDeeper(ask, requests[i], answers[i], func(hits []vectorindex.Hit) bool {
+			return len(place(hits))+len(exact[i].hits) >= k
+		})
+		if err != nil {
+			return nil, false, err
 		}
+		placed[i] = place(answers[i])
 	}
 
 	// The index sums in float32: whatever lies within similarityMargin of
@@ -397,21 +366,11 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 			continue
 		}
 		floor := float32(cuts[i])
-		for limit := limits[i] * 4; ; limit *= 4 {
-			more, err := ask([]vectorindex.Query{query(i, limit, &floor)})
-			if err != nil {
-				return nil, false, err
-			}
-			if hits = more[0]; len(hits) < limit {
-				break
-			}
+		above, err := askAllAbove(ask, []vectorindex.Query{query(i, limits[i]*4, &floor)})
+		if err != nil {
+			return nil, false, err
 		}
-		placed[i] = placed[i][:0]
-		for _, hit := range hits {
-			if h, ok := usable(hit); ok {
-				placed[i] = append(placed[i], h)
-			}
-		}
+		placed[i] = place(above[0])
 	}
 	s.indexAnswered()
 
@@ -444,26 +403,41 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 	return ranked, true, nil
 }
 
-// windowsFull reports whether the alias names target, which says that
+// windowVectorsIndexed is the windows collection as ranking reads it: the
+// one sync writes, by its own name, once its alias says it is full.
+func (s *Service) windowVectorsIndexed() indexedVectors {
+	return indexedVectors{
+		current: func(ctx context.Context) (string, string, error) {
+			current, err := s.currentWindowsCollection(ctx)
+			return current.name, current.identity, err
+		},
+		full:    s.windowsFull,
+		outbox:  "SELECT object_id FROM window_outbox LIMIT ?",
+		missing: "the vector index has no windows collection for the model",
+		behind:  "too many videos wait for the vector index",
+	}
+}
+
+// windowsFull reports whether the alias names collection, which says that
 // every video is written into it. The sync loop remembers the collection
 // it last found or put the alias on (aliasWindows); the index is asked only
-// when that is not target. When the alias does not name it, why says why
-// the Catalog answers: the collection is still being filled, or the
+// when that is not collection. When the alias does not name it, why says
+// why the Catalog answers: the collection is still being filled, or the
 // index no longer has it, as after it lost its storage, and nothing fills
 // it until sync or the next reconciliation makes it again.
-func (s *Service) windowsFull(ctx context.Context, target windowsCollection) (full bool, why string, err error) {
-	if aliased := s.windowsAliased.Load(); aliased != nil && *aliased == target.name {
+func (s *Service) windowsFull(ctx context.Context, collection string) (full bool, why string, err error) {
+	if aliased := s.windowsAliased.Load(); aliased != nil && *aliased == collection {
 		return true, "", nil
 	}
 	aliased, err := s.vectors.Alias(ctx, windowsAlias)
-	if err != nil || aliased == target.name {
+	if err != nil || aliased == collection {
 		return err == nil, "", err
 	}
 	names, err := s.vectors.Collections(ctx)
 	if err != nil {
 		return false, "", err
 	}
-	if !slices.Contains(names, target.name) {
+	if !slices.Contains(names, collection) {
 		return false, "the vector index has lost the windows collection", nil
 	}
 	return false, "the vector index is still filling the windows collection", nil
