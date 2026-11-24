@@ -2485,7 +2485,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Another member's version is not_found */
+        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found */
         get: operations["getMontageVersionDraft"];
         put?: never;
         post?: never;
@@ -2504,7 +2504,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Nothing here calls a model or renders */
+        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Deleting a shot between two that could each take its slots asks the compute Worker which is more alike: compute_unavailable (503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders */
         post: operations["editMontageDraft"];
         delete?: never;
         options?: never;
@@ -2521,7 +2521,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), and a draft changed since it was read draft_conflict (409). A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model */
+        /** Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model */
         post: operations["saveMontageDraft"];
         delete?: never;
         options?: never;
@@ -2604,7 +2604,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it */
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found; one the photo library no longer has, or holds in its trash, answers assets_unavailable (422), and a project that can no longer reach its videos grant_revoked (409) */
         get: operations["getMontageFrame"];
         put?: never;
         post?: never;
@@ -14137,6 +14137,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     editMontageDraft: {
@@ -14367,6 +14368,8 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

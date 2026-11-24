@@ -290,16 +290,17 @@
 /api/v1/montage/versions/{versionId}/draft:
   get:
     operationId: getMontageVersionDraft
-    summary: "The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Another member's version is not_found"
+    summary: "The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }]
     responses:
       "200": { description: The draft, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageDraft" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/drafts/{draftId}/ops:
   post:
     operationId: editMontageDraft
-    summary: "One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Nothing here calls a model or renders"
+    summary: "One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Deleting a shot between two that could each take its slots asks the compute Worker which is more alike: compute_unavailable (503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageDraftID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -357,7 +358,7 @@
 /api/v1/montage/projects/{projectId}/frames/{assetId}:
   get:
     operationId: getMontageFrame
-    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it"
+    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found; one the photo library no longer has, or holds in its trash, answers assets_unavailable (422), and a project that can no longer reach its videos grant_revoked (409)"
     parameters:
       - { $ref: "../components/montage.yaml#/parameters/MontageProjectID" }
       - { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -366,11 +367,13 @@
       "200": { description: The frame, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/drafts/{draftId}/save:
   post:
     operationId: saveMontageDraft
-    summary: "Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), and a draft changed since it was read draft_conflict (409). A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model"
+    summary: "Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageDraftID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
