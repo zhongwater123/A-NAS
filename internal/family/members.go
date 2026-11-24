@@ -105,6 +105,17 @@ func (m membership) activeGuardians() int {
 	return count
 }
 
+// hasGuardian reports whether any member is a guardian, with an account
+// enabled or not.
+func (m membership) hasGuardian() bool {
+	for _, member := range m.members {
+		if member.Guardian {
+			return true
+		}
+	}
+	return false
+}
+
 func (m membership) activeMembers() int {
 	count := 0
 	for _, member := range m.members {
@@ -115,9 +126,12 @@ func (m membership) activeMembers() int {
 	return count
 }
 
-// loadMembership reads the family and, when every guardian's account is
-// gone or disabled, makes the earliest-joined active member a guardian so
-// the family can still approve people and look after its babies.
+// loadMembership reads the family and, when no guardian is left because
+// their accounts were deleted (RemoveAccount takes a deleted account out),
+// makes the earliest-joined active member a guardian so the family can still
+// approve people and look after its babies. A guardian whose account is only
+// disabled keeps the role and has it again once the account is enabled; the
+// family waits for that rather than gaining a guardian for good.
 func (s *Store) loadMembership(ctx context.Context, q queryer) (membership, error) {
 	var created string
 	err := q.QueryRowContext(ctx, "SELECT created_at FROM family WHERE id = 1").Scan(&created)
@@ -154,7 +168,7 @@ func (s *Store) loadMembership(ctx context.Context, q queryer) (membership, erro
 	if err := rows.Err(); err != nil {
 		return membership{}, err
 	}
-	if result.activeGuardians() == 0 {
+	if !result.hasGuardian() {
 		for i := range result.members {
 			if result.members[i].Active {
 				if _, err := q.ExecContext(ctx, "UPDATE members SET guardian = 1 WHERE account_id = ?",
@@ -162,6 +176,9 @@ func (s *Store) loadMembership(ctx context.Context, q queryer) (membership, erro
 					return membership{}, err
 				}
 				result.members[i].Guardian = true
+				if err := s.audit(ctx, q, Actor{}, "family.guardian_promoted", result.members[i].AccountID, ""); err != nil {
+					return membership{}, err
+				}
 				break
 			}
 		}
@@ -262,8 +279,12 @@ func (s *Store) joinRequests(ctx context.Context, q queryer) ([]JoinRequest, err
 }
 
 // Join asks to join the family with a role. The first account to join, or
-// the first after every member has gone, founds the family as its guardian;
-// everyone else waits for a guardian's approval.
+// the first after every member left or had their account deleted, founds the
+// family as its guardian; everyone else waits for a guardian's approval. That
+// includes a family whose members' accounts are all disabled: an
+// administrator who disables them does not hand the family to the next
+// account, and enabling a guardian's account again is how it takes people in.
+// Asking again with another role replaces the request and asks anew.
 func (s *Store) Join(ctx context.Context, actor Actor, role string) (Me, error) {
 	role, ok := cleanRole(role)
 	if !ok {
@@ -279,7 +300,7 @@ func (s *Store) Join(ctx context.Context, actor Actor, role string) (Me, error) 
 			return ErrConflict
 		}
 		now := formatTime(s.now())
-		if family.activeMembers() == 0 {
+		if len(family.members) == 0 {
 			if !family.exists {
 				if _, err := tx.ExecContext(ctx, "INSERT INTO family(id, created_at, created_by) VALUES(1, ?, ?)", now, actor.AccountID); err != nil {
 					return err
@@ -292,7 +313,8 @@ func (s *Store) Join(ctx context.Context, actor Actor, role string) (Me, error) 
 			return s.audit(ctx, tx, actor, "family.joined", actor.AccountID, role)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO join_requests(account_id, username, role, requested_at) VALUES(?, ?, ?, ?)
-ON CONFLICT(account_id) DO UPDATE SET role = excluded.role, username = excluded.username`,
+ON CONFLICT(account_id) DO UPDATE SET username = excluded.username, role = excluded.role,
+    requested_at = CASE WHEN join_requests.role = excluded.role THEN join_requests.requested_at ELSE excluded.requested_at END`,
 			actor.AccountID, actor.Username, role, now); err != nil {
 			return err
 		}
@@ -327,8 +349,10 @@ func (s *Store) CancelJoin(ctx context.Context, actor Actor) error {
 	})
 }
 
-// Approve admits a requester. Fathers and mothers become guardians.
-func (s *Store) Approve(ctx context.Context, actor Actor, accountID string) (Member, error) {
+// Approve admits a requester with role, the role the guardian was shown.
+// Fathers and mothers become guardians. A request whose role changed since
+// is refused with ErrRequestChanged, so the guardian looks at it again.
+func (s *Store) Approve(ctx context.Context, actor Actor, accountID, role string) (Member, error) {
 	var member Member
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, _, err := s.requireGuardian(ctx, tx, actor); err != nil {
@@ -342,6 +366,9 @@ func (s *Store) Approve(ctx context.Context, actor Actor, accountID string) (Mem
 		}
 		if err != nil {
 			return err
+		}
+		if request.Role != role {
+			return ErrRequestChanged
 		}
 		accounts, err := s.accounts(ctx)
 		if err != nil {

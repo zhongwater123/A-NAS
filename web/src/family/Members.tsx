@@ -117,7 +117,9 @@ export function Members({ baby }: { baby: FamilyBaby }) {
                 <button
                   type="button"
                   className={styles.fcPrimary}
-                  onClick={() => void run(() => approveJoin(request.accountId), `${request.role}已加入家庭`)}
+                  onClick={() =>
+                    void run(() => approveJoin(request.accountId, request.role), `${request.role}已加入家庭`)
+                  }
                 >
                   同意
                 </button>
