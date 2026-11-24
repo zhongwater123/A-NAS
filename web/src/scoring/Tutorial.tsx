@@ -6,17 +6,20 @@ import {
   type DimensionGuide,
   dimensionGuides,
   type Example,
-  order,
   preparation,
   rules,
   skipping,
   specialCases,
+  steps,
 } from "./handbook";
 import styles from "./scoring.module.css";
 
 // Try asks the rater's level for an example photo before showing the
-// handbook's, like a first round that counts for nothing.
-function Try({ example, dimension }: { example: Example; dimension: string }) {
+// handbook's, like a first round that counts for nothing. The levels are the
+// batch's: 1, 3 and 5 on three levels, else 1 to 5. The answer takes the
+// place of the button that reveals it, inside a live region that is there
+// from the start, so that a screen reader reads it out.
+function Try({ example, dimension, levels }: { example: Example; dimension: string; levels: readonly number[] }) {
   const [picked, setPicked] = useState<number>();
   const [shown, setShown] = useState(false);
   const answered = picked !== undefined || shown;
@@ -26,7 +29,7 @@ function Try({ example, dimension }: { example: Example; dimension: string }) {
       <img src={example.image} alt={example.alt} loading="lazy" />
       <figcaption>
         <div className={styles.scTryLevels} role="group" aria-label={`这张照片的${dimension}你打几分`}>
-          {[1, 2, 3, 4, 5].map((level) => (
+          {levels.map((level) => (
             <button
               key={level}
               type="button"
@@ -40,17 +43,19 @@ function Try({ example, dimension }: { example: Example; dimension: string }) {
             </button>
           ))}
         </div>
-        {answered ? (
-          <p className={styles.scTryAnswer} aria-live="polite">
-            <b>手册 {example.level} 分</b>
-            {example.why}
-            {off !== undefined && <span>{off === 0 ? "和你一样" : off === 1 ? "差 1 分" : `差 ${off} 分`}</span>}
-          </p>
-        ) : (
-          <button type="button" className={styles.scTryReveal} onClick={() => setShown(true)}>
-            先试着打一个分，或直接看答案
-          </button>
-        )}
+        <div aria-live="polite">
+          {answered ? (
+            <p className={styles.scTryAnswer}>
+              <b>手册 {example.level} 分</b>
+              {example.why}
+              {off !== undefined && <span>{off === 0 ? "和你一样" : `差 ${off} 分`}</span>}
+            </p>
+          ) : (
+            <button type="button" className={styles.scTryReveal} onClick={() => setShown(true)}>
+              先试着打一个分，或直接看答案
+            </button>
+          )}
+        </div>
       </figcaption>
     </figure>
   );
@@ -58,7 +63,7 @@ function Try({ example, dimension }: { example: Example; dimension: string }) {
 
 // Dimension is one 打分项 as the handbook explains it, under the batch's name
 // for it.
-function Dimension({ guide, name }: { guide: DimensionGuide; name: string }) {
+function Dimension({ guide, name, levels }: { guide: DimensionGuide; name: string; levels: readonly number[] }) {
   return (
     <section className={styles.scTutorialItem}>
       <h3>
@@ -86,7 +91,7 @@ function Dimension({ guide, name }: { guide: DimensionGuide; name: string }) {
       </ol>
       <div className={styles.scTries}>
         {guide.examples.map((example) => (
-          <Try key={example.image} example={example} dimension={name} />
+          <Try key={example.image} example={example} dimension={name} levels={levels} />
         ))}
       </div>
       <div className={styles.scPitfalls}>
@@ -114,9 +119,11 @@ export function Tutorial({
   onBack: () => void;
   onDone: () => void;
 }) {
-  const ids = new Set(batch.dimensions.map((dimension) => dimension.id));
+  const ids = batch.dimensions.map((dimension) => dimension.id);
+  const three = batch.scale === "three";
+  const levels = three ? [1, 3, 5] : [1, 2, 3, 4, 5];
   const shown = rules.filter(
-    (rule) => (!rule.wholeOnly || batch.scale === "five") && (!rule.dimension || ids.has(rule.dimension)),
+    (rule) => (!rule.fiveOnly || batch.scale === "five") && (!rule.dimension || ids.includes(rule.dimension)),
   );
   const explained = batch.dimensions.flatMap((dimension) => {
     const guide = dimensionGuides.find((candidate) => candidate.id === dimension.id);
@@ -134,9 +141,6 @@ export function Tutorial({
         <span className={styles.scMuted}>{batch.name}</span>
       </header>
       <div className={`${styles.scGuide} ${styles.scTutorial}`}>
-        <p className={styles.scTutorialLead}>
-          这是风景打分手册的要点。往下翻着看一遍，示例照片可以先试着打分，再看手册给的分；试打不计分。随时点“完成”开始打分。
-        </p>
         <section>
           <h3>准备工作</h3>
           <ul className={styles.scKeys}>
@@ -148,7 +152,7 @@ export function Tutorial({
         <section>
           <h3>每张照片</h3>
           <ol className={styles.scTutorialSteps}>
-            {order.map((text) => (
+            {steps(ids).map((text) => (
               <li key={text}>{text}</li>
             ))}
           </ol>
@@ -159,13 +163,13 @@ export function Tutorial({
             {shown.map((rule) => (
               <div key={rule.title}>
                 <dt>{rule.title}</dt>
-                <dd>{rule.text}</dd>
+                <dd>{(three && rule.three) || rule.text}</dd>
               </div>
             ))}
           </dl>
         </section>
         {explained.map(({ guide, name }) => (
-          <Dimension key={guide.id} guide={guide} name={name} />
+          <Dimension key={guide.id} guide={guide} name={name} levels={levels} />
         ))}
         {others.length > 0 && (
           <section>
@@ -193,7 +197,6 @@ export function Tutorial({
           </dl>
           <p className={styles.scMuted}>{skipping}</p>
         </section>
-        <p className={styles.scMuted}>示例照片取自 EVA 公开数据集，只用来示意 1、3、5 分大概的样子。</p>
       </div>
       <footer className={styles.scCalibrationFoot}>
         <button type="button" className={styles.scPrimary} onClick={onDone}>

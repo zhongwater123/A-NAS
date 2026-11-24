@@ -508,9 +508,6 @@
   max-width: 880px;
   line-height: 1.7;
 }
-.sc-tutorial-lead {
-  color: var(--sc-ink-2);
-}
 .sc-tutorial-steps {
   display: flex;
   flex-direction: column;
@@ -635,9 +632,11 @@
   flex-direction: column;
   gap: 8px;
 }
+/* As many equal places as the batch has levels: five, or three. */
 .sc-try-levels {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   gap: 6px;
 }
 .sc-try-levels button {
@@ -2394,7 +2393,7 @@
 .sc-hint.warn {
   color: var(--sc-accent);
 }
-/* 打分方式: four cards, each with what a score looks like on it. */
+/* 打分方式: five cards, each with what a score looks like on it. */
 .sc-scales {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

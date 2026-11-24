@@ -695,7 +695,8 @@ func TestCustomDimensionsAreNamedOnceAndExportedWithTheirDescription(t *testing.
 	if err != nil || harmony != (Dimension{ID: "custom_1", Name: "色彩和谐", Description: "颜色是否协调", Custom: true}) {
 		t.Fatalf("made %+v, %v", harmony, err)
 	}
-	for _, taken := range []string{"色彩和谐", "构图"} {
+	// 总分 is what overall was called before.
+	for _, taken := range []string{"色彩和谐", "构图", "总分"} {
 		if _, err := h.store.CreateDimension(ctx, "user:admin", taken, ""); !errors.Is(err, ErrNameTaken) {
 			t.Errorf("%s again: %v", taken, err)
 		}
@@ -754,12 +755,18 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 			}
 		}
 	}
-	// Five levels name 情绪 from calm to intense, the rest from poor to good.
+	// Levels name 情绪 from calm to intense, the rest from poor to good.
 	if got := Five.describe(Emotion); got != "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈" {
 		t.Errorf("情绪 on five levels: %s", got)
 	}
 	if got := Five.describe("custom_1"); got != "五档：1 很差，2 较差，3 一般，4 好，5 很好" {
 		t.Errorf("a custom 打分项 on five levels: %s", got)
+	}
+	if got := Three.describe(Emotion); got != "三档：1 平静，3 中间，5 激烈" {
+		t.Errorf("情绪 on three levels: %s", got)
+	}
+	if got := Three.describe(Overall); got != "三档：1 差，3 中，5 好" {
+		t.Errorf("总体 on three levels: %s", got)
 	}
 }
 
@@ -885,6 +892,61 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	var version int
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(schema.Steps) {
 		t.Fatalf("version %d, %v", version, err)
+	}
+}
+
+func TestAVersionFourDatabaseIsCopiedAndKeepsItsCustomNamesUnique(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const at = "2026-11-17T09:00:00.000000000Z"
+	statements := []string{schemaV1, schemaV2, schemaV3, schemaV4, "PRAGMA user_version = 4"}
+	for number, name := range []string{"画质", "情绪", "情绪（自定义）", "色彩"} {
+		statements = append(statements, fmt.Sprintf(`INSERT INTO custom_dimensions (id, number, name, description, created_by, created_at)
+			VALUES ('custom_%d', %d, '%s', '', 'user:admin', '%s')`, number+1, number+1, name, at))
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_ = db.Close()
+	photos := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC) }
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	// The custom ones named like a new built-in one keep their IDs under new
+	// names, by their ID when the first choice is taken.
+	catalogue, err := store.Catalogue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, dimension := range catalogue[len(BuiltIn):] {
+		names = append(names, dimension.ID+" "+dimension.Name)
+	}
+	if want := []string{"custom_1 画质（自定义）", "custom_2 情绪（custom_2）", "custom_3 情绪（自定义）", "custom_4 色彩"}; !slices.Equal(names, want) {
+		t.Fatalf("custom 打分项 %q", names)
+	}
+	// The database as it was is copied first, for going back to a build of
+	// version 4, which refuses a newer one.
+	copied, err := sqlitedb.Open(filepath.Join(dir, "backups", "scoring-2026-11-24-v4.db"), sqlitedb.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = copied.Close() }()
+	var version int
+	var name string
+	if err := copied.QueryRow("SELECT name FROM custom_dimensions WHERE id = 'custom_1'").Scan(&name); err != nil || name != "画质" {
+		t.Fatalf("the copy's custom_1 %q, %v", name, err)
+	}
+	if err := copied.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("the copy's version %d, %v", version, err)
 	}
 }
 

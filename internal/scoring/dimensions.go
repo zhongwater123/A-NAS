@@ -27,8 +27,8 @@ const Overall = "overall"
 // Sharpness is 清晰度.
 const Sharpness = "sharpness"
 
-// Emotion is 情绪, which describes a photo rather than judges it: five
-// levels name it from calm to intense (scales.go).
+// Emotion is 情绪, which describes a photo rather than judges it: three and
+// five levels name it from calm to intense (scales.go).
 const Emotion = "emotion"
 
 // BuiltIn lists the 打分项 every module has, in the order a new batch offers
@@ -45,6 +45,10 @@ var BuiltIn = []Dimension{
 	{ID: "narrative", Name: "叙事意境"},
 	{ID: "preference", Name: "喜好程度"},
 }
+
+// formerNames are names built-in 打分项 had before. Older batches, exports
+// and raters still know overall as 总分, so no custom 打分项 takes it.
+var formerNames = []string{"总分"}
 
 const (
 	// MaxBatchDimensions is how many 打分项 a batch scores at most.
@@ -127,7 +131,8 @@ func (c Catalogue) check(ids []string) error {
 }
 
 // CreateDimension makes a custom 打分项 that every batch from now on can
-// choose. Its name is unique among them all.
+// choose. Its name is unique among them all, and none a built-in one had
+// before (formerNames).
 func (s *Store) CreateDimension(ctx context.Context, by, name, description string) (Dimension, error) {
 	name = strings.TrimSpace(name)
 	description = strings.TrimSpace(description)
@@ -143,7 +148,7 @@ func (s *Store) CreateDimension(ctx context.Context, by, name, description strin
 		if err != nil {
 			return err
 		}
-		if slices.ContainsFunc(catalogue, func(other Dimension) bool { return other.Name == name }) {
+		if slices.Contains(formerNames, name) || slices.ContainsFunc(catalogue, func(other Dimension) bool { return other.Name == name }) {
 			return ErrNameTaken
 		}
 		if len(catalogue)-len(BuiltIn) >= maxCustomDimensions {

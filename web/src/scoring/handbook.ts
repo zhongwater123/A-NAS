@@ -5,7 +5,10 @@
 // does not ask for (keep, problem tags, comments, burst groups) are left
 // out. The example images come from the public EVA dataset and only
 // illustrate levels 1, 3 and 5 until calibration replaces them with the
-// project's own.
+// project's own. EVA's repository is CC0-1.0, but its photos are AVA's
+// resized DPChallenge photos, whose rights stay with their photographers;
+// the user accepted shipping them (decision 28 of
+// docs/decisions/2026-11-12-photo-scoring.md).
 
 import compositionLow from "./tutorial/composition-1.jpg";
 import compositionMid from "./tutorial/composition-3.jpg";
@@ -57,17 +60,34 @@ export const preparation = [
   "打分是一个人独立完成的，打完之前不要和别人讨论具体照片。",
 ];
 
-export const order = [
-  "看整张 3–5 秒，凭第一感觉打“总体”：拍得好不好、有没有让人想多看的感觉。先打总体，是为了不被后面的细节分析带偏。",
-  "再按顺序打其余各项：每项只看它自己的那一方面，下面写了每项看什么、不看什么。",
-  "一张照片大约 1 分钟。不要过度纠结，在两个分之间犹豫时，选更接近第一感觉的那个。",
-];
+// steps is what to do with each photo of a batch that scores these 打分项 in
+// this order. The handbook scores 总体 first, on the first impression; a
+// batch that asks for another 打分项 first is scored in its own order, as
+// the stage asks for them.
+export function steps(dimensions: readonly string[]): string[] {
+  const several = dimensions.length > 1;
+  const first =
+    dimensions[0] === "overall"
+      ? [
+          "看整张 3–5 秒，凭第一感觉打“总体”：拍得好不好、有没有让人想多看的感觉。先打总体，是为了不被后面的细节分析带偏。",
+          ...(several ? ["再按顺序打其余各项：每项只看它自己的那一方面，下面写了每项看什么、不看什么。"] : []),
+        ]
+      : [
+          several
+            ? "按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。"
+            : "只看这一项自己的那一方面，下面写了它看什么、不看什么。",
+        ];
+  return [...first, "一张照片大约 1 分钟。不要过度纠结，在两个分之间犹豫时，选更接近第一感觉的那个。"];
+}
 
-// A rule of the handbook; only for some scales or 打分项 when it says so.
+// A rule of the handbook. fiveOnly ones are shown only on five levels,
+// dimension ones only to a batch that scores it; three replaces the text on
+// three levels, which have no 2 or 4.
 export interface Rule {
   title: string;
   text: string;
-  wholeOnly?: boolean;
+  three?: string;
+  fiveOnly?: boolean;
   dimension?: string;
 }
 
@@ -75,7 +95,7 @@ export const rules: Rule[] = [
   {
     title: "只打整数",
     text: "每项只打 1、2、3、4、5 五档，没有小数。拿不准时选更接近第一感觉的那一档；更细的差别由几个人的分数合起来得出，不用自己细分。",
-    wholeOnly: true,
+    fiveOnly: true,
   },
   {
     title: "3 分是普通手机照",
@@ -84,8 +104,13 @@ export const rules: Rule[] = [
   {
     title: "加分扣分要有依据",
     text: "打 4、5 分，要说得出好在哪；打 1、2 分，要有看得见的毛病。说不出依据的，就打 3 分。",
+    three: "打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。",
   },
-  { title: "用满 1–5 分", text: "好照片就给 5，废片就给 1，不要只在 3、4 之间打。" },
+  {
+    title: "用满 1–5 分",
+    text: "好照片就给 5，废片就给 1，不要只在 3、4 之间打。",
+    three: "好照片就给 5，废片就给 1，不要总打 3。",
+  },
   {
     title: "每项单独看",
     text: "喜欢一张照片，不代表它每项都高；一项很差，也不代表其他项都差。同一个毛病只在它所属的那一项扣分。",

@@ -106,19 +106,27 @@ export const levelsOf: Record<LevelScale, readonly Level[]> = {
   ],
 };
 
-// 情绪 describes rather than judges, so its five levels have words of their
-// own; every other 打分项, custom ones too, has the scale's.
-const emotionLevels: readonly Level[] = [
-  { score: 100, word: "很平静" },
-  { score: 200, word: "安静" },
-  { score: 300, word: "中间" },
-  { score: 400, word: "有张力" },
-  { score: 500, word: "激烈" },
-];
+// 情绪 describes rather than judges, so its levels have words of their own,
+// from calm to intense; every other 打分项, custom ones too, has the
+// scale's. Go's describe (scales.go) writes the same words in the export.
+const emotionLevels: Record<LevelScale, readonly Level[]> = {
+  three: [
+    { score: 100, word: "平静" },
+    { score: 300, word: "中间" },
+    { score: 500, word: "激烈" },
+  ],
+  five: [
+    { score: 100, word: "很平静" },
+    { score: 200, word: "安静" },
+    { score: 300, word: "中间" },
+    { score: 400, word: "有张力" },
+    { score: 500, word: "激烈" },
+  ],
+};
 
 // levelsFor is the levels of a scale with the words of a 打分项.
 export const levelsFor = (scale: LevelScale, dimension?: string): readonly Level[] =>
-  scale === "five" && dimension === "emotion" ? emotionLevels : levelsOf[scale];
+  (dimension === "emotion" ? emotionLevels : levelsOf)[scale];
 
 export const isLevels = (scale: Scale): scale is LevelScale => scale === "three" || scale === "five";
 

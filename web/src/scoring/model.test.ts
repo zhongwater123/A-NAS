@@ -112,7 +112,7 @@ describe("scores", () => {
     expect(nudgeScore(100, -1, "five")).toBe(100);
   });
 
-  it("names five levels of 情绪 from calm to intense, and every other 打分项 from poor to good", () => {
+  it("names the levels of 情绪 from calm to intense, and every other 打分项 from poor to good", () => {
     expect([100, 200, 300, 400, 500].map((score) => formatScore(score, "five", "emotion"))).toEqual([
       "很平静",
       "安静",
@@ -121,8 +121,9 @@ describe("scores", () => {
       "激烈",
     ]);
     expect(formatScore(300, "five", "custom_1")).toBe("一般");
-    // Three levels keep their own words.
-    expect(formatScore(300, "three", "emotion")).toBe("中");
+    // Three levels of 情绪 do not judge either.
+    expect([100, 300, 500].map((score) => formatScore(score, "three", "emotion"))).toEqual(["平静", "中间", "激烈"]);
+    expect(formatScore(300, "three", "overall")).toBe("中");
   });
 
   it("moves a score by one step of its scale with the arrows, from the middle when there is none", () => {

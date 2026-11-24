@@ -25,6 +25,9 @@ function Picking({ scale, hidden, dimensions }: Pick<ScoringRaterBatch, "scale" 
     return (
       <>
         <li>在下方点选一档：差、中、好</li>
+        {dimensions.some((dimension) => dimension.id === "emotion") && (
+          <li>情绪的三档不是好坏：1 平静、3 中间、5 激烈</li>
+        )}
         <li>
           <kbd>1</kbd> 差，<kbd>3</kbd> 中，<kbd>5</kbd> 好，<kbd>←</kbd> <kbd>→</kbd> 换一档
         </li>

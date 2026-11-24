@@ -37,10 +37,12 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 数据
 
-`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `schema` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总体；第 3 版加入自定义打分项，并让总体可以排在第一项以外（见下面的 `rating_scores`）；第 4 版给批次加上打分方式，之前的批次都是两位小数的数轴；第 5 版重建 `batches` 让它收五档。
+`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `schema` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总体；第 3 版加入自定义打分项，并让总体可以排在第一项以外（见下面的 `rating_scores`）；第 4 版给批次加上打分方式，之前的批次都是两位小数的数轴；第 5 版重建 `batches` 让它收五档，并给与新内置项同名的自定义项改名（见下面的 `batches`）。
 
-- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按打分顺序以逗号连接的 ID，即管理员点选的先后；第 1 版留下的空值是 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。内置打分项在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改，名称与说明可以改（`overall` 由总体改名为总体，打分手册的五项有说明）。目录的顺序就是新建批次时的顺序。五档的档名跟着打分项走：`emotion` 用 1 很平静到 5 激烈，其余用 1 很差到 5 很好，导出的列说明（`scales.go` 的 `describe`）与网页（`model.ts` 的 `levelsFor`）一致。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
-- `batches.scale` 与 `batches.hide_decimals`：打分方式（`five`、`hundredths`、`tenths`、`whole`、`three`，见 [`scales.go`](../../internal/scoring/scales.go)）与是否不给打分人看分数；表上的约束保证只有两种带小数的方式能不给看。提交时每个分数都要是批次打分方式中的一个（一位小数是 10 的倍数、整数是 100 的倍数、三档是 100、300、500，五档是 100 到 500 中 100 的倍数）。第 5 版加五档：SQLite 改不了列上的约束，迁移在关闭外键的连接上重建 `batches` 表（`sqlitedb.Schema`），回退时五档的批次改为整数，整数包含五档的全部分数。它们与打分项一起在第一条回答时固定，改动用同一条带“没有回答”核对的 `UPDATE`。
+第 5 版起迁移用项目共用的 `sqlitedb.Schema`：每一步带反向步骤，以后的版本留下的数据库，本版本按存下的反向步骤退回。第 4 版及以前的版本是手写的迁移，遇到更新的数据库拒绝启动，不会执行反向步骤；所以模块升级已有的数据库之前，先把它复制成 `backups/scoring-<日期>-v<原版本>.db`（`store.go` 的 `migrate`），复制不成功就不升级。回到这些版本时恢复这份副本（[运行手册](../runbooks/install-and-remove-photo-scoring.md#回滚或恢复)）。副本与每天的备份一起计数，保留最近 14 份。
+
+- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按打分顺序以逗号连接的 ID，即管理员点选的先后；第 1 版留下的空值是 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。内置打分项在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改，名称与说明可以改（`overall` 由总分改名为总体，打分手册的五项有说明）。打分项的名称在内置与自定义之间不重复：第 5 版把名为总体、画质或情绪的自定义项改名为“原名（自定义）”，这个名称也被占用时改为“原名（ID）”，ID 不变；新建自定义项也不能用内置项以前的名称“总分”。目录的顺序就是新建批次时的顺序。三档与五档的档名跟着打分项走：`emotion` 的三档是 1 平静、3 中间、5 激烈，五档是 1 很平静到 5 激烈，其余用 1 差到 5 好与 1 很差到 5 很好，导出的列说明（`scales.go` 的 `describe`）与网页（`model.ts` 的 `levelsFor`）一致。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
+- `batches.scale` 与 `batches.hide_decimals`：打分方式（`five`、`hundredths`、`tenths`、`whole`、`three`，见 [`scales.go`](../../internal/scoring/scales.go)）与是否不给打分人看分数；表上的约束保证只有两种带小数的方式能不给看。提交时每个分数都要是批次打分方式中的一个（一位小数是 10 的倍数、整数是 100 的倍数、三档是 100、300、500，五档是 100 到 500 中 100 的倍数）。第 5 版加五档：SQLite 改不了列上的约束，迁移在关闭外键的连接上重建 `batches` 表（`sqlitedb.Schema`）。它的反向步骤把五档的批次改为整数（整数包含五档的全部分数），但只有用 `sqlitedb.Schema` 且步数更少的版本才会执行，现在没有这样的版本，见上一段。它们与打分项一起在第一条回答时固定，改动用同一条带“没有回答”核对的 `UPDATE`。
 - `custom_dimensions`：管理员自定义的打分项（`custom_<n>`、名称、说明）。编号只增不复用，名称在全部打分项中唯一；没有改名与删除，所以一个 ID 在每个批次、每次导出里都是同一个意思。
 - `import_files`：来源文件夹中的每个文件与处理结果（`pending`、`done`、`skipped` 及原因）。导入一次处理一个文件，重启后从 `pending` 继续。
 - `contents`：按原图 SHA-256 的预览尺寸；预览文件在 `previews/<前两位>/<sha256>.jpg`，数轴、批次卡片与管理员批次列表用的缩略图（长边 320 px）在第一次请求时从预览生成，放在 `thumbnails/`。不同批次的同一张图共用一份预览与缩略图。管理员批次列表的缩略图是批次随机顺序中的第一张；导入期间它可能换成后来导入的图，所以这个接口不让浏览器长期缓存。
@@ -79,7 +81,8 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 验证
 
-- [`internal/scoring/store_test.go`](../../internal/scoring/store_test.go)：导入与去重、按原因计数的跳过、2400 像素限制与锚点例外、先凑满再开新图、8 位打分人并发时没有一张图超过人数、租期与迟到提交、重试与改分、重复检查、统计、打分项按选择的顺序与锁定、自定义打分项、打分方式收的分数与锁定、第 1 版与第 2 版数据库的升级、导出的列与记录及改过分照片的耗时、100% 查看、备份保留。
+- [`internal/scoring/store_test.go`](../../internal/scoring/store_test.go)：导入与去重、按原因计数的跳过、2400 像素限制与锚点例外、先凑满再开新图、8 位打分人并发时没有一张图超过人数、租期与迟到提交、重试与改分、重复检查、统计、打分项按选择的顺序与锁定、自定义打分项、打分方式收的分数与锁定、第 1、2、4 版数据库的升级（第 4 版升级前的副本与同名自定义项的改名）、导出的列与记录及改过分照片的耗时、100% 查看、备份保留。
+- [`internal/scoring/schema_test.go`](../../internal/scoring/schema_test.go)：带反向步骤的迁移退回后与旧版本新建的数据库结构相同，再升级后与原来相同（`sqlitedbtest.CheckReversible`）。
 - [`internal/scoringapi/handler_test.go`](../../internal/scoringapi/handler_test.go)：打分人看不到别人的图与分数，成员进不了管理接口，批次缩略图只给管理员且不长期缓存；打分项（按选择的顺序，第一项在 `score`）、自定义打分项与同名拒绝、打分方式（打分人的批次带上它，拒绝不符合的分数与第一条打分后的改动）、100% 查看与导出选项经过接口。
 - [`internal/modules/modules_test.go`](../../internal/modules/modules_test.go)：清单校验、未安装 404、未运行 503、转发只带会话令牌。
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：每个接口都在契约中并按姿态守卫。

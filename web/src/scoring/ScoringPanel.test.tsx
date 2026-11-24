@@ -303,6 +303,28 @@ describe("ScoringPanel for a rater", () => {
     await shownPhoto();
   });
 
+  it("fits the tutorial to a batch of three levels that scores 构图 before 总体", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      scale: "three",
+      dimensions: dimensionsOf("composition", "overall"),
+    });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers } = raterHandlers(batch, ["t1"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    // The batch's own order, not the handbook's 总体 first.
+    expect(screen.getByText("按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。")).toBeTruthy();
+    expect(screen.queryByText(/凭第一感觉打“总体”/)).toBeNull();
+    // Three levels have no 2 or 4, in the rules or the tries.
+    expect(screen.queryByText("只打整数")).toBeNull();
+    expect(screen.getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。")).toBeTruthy();
+    const first = screen.getAllByRole("group", { name: "这张照片的构图你打几分" })[0];
+    expect(within(first).getAllByRole("button").map((button) => button.textContent)).toEqual(["1", "3", "5"]);
+  });
+
   it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "three" });
     window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");

@@ -18,10 +18,6 @@ const (
 	Five Scale = "five"
 )
 
-// Scales lists every scale in the order the window offers them, the default
-// for a new batch first.
-var Scales = []Scale{Five, Hundredths, Tenths, Whole, Three}
-
 func (scale Scale) valid() bool {
 	switch scale {
 	case Hundredths, Tenths, Whole, Three, Five:
@@ -61,14 +57,16 @@ func (scale Scale) fits(score int) bool {
 }
 
 // describe says in the export what a score of the scale is on a 打分项:
-// five levels name 情绪 from calm to intense, every other one from poor to
-// good.
+// levels name 情绪 from calm to intense, every other one from poor to good,
+// as the window does (web/src/scoring/model.ts, levelsFor).
 func (scale Scale) describe(dimension string) string {
 	switch {
 	case scale == Tenths:
 		return "0 到 5，一位小数"
 	case scale == Whole:
 		return "0 到 5 的整数"
+	case scale == Three && dimension == Emotion:
+		return "三档：1 平静，3 中间，5 激烈"
 	case scale == Three:
 		return "三档：1 差，3 中，5 好"
 	case scale == Five && dimension == Emotion:
