@@ -44,7 +44,9 @@
 
 ## 快速开始
 
-在 Linux 或 WSL2 中用模拟的宿主机运行整套网页桌面，不碰真实磁盘。需要 Go（版本见 `.go-version`）、Node（见 `.nvmrc`）与 gcc：
+第一次体验网页桌面，只需自己的开发机。下面两条命令在 Linux 终端或 Windows 的 WSL2 终端运行，使用模拟数据，不碰真实磁盘。macOS 请用 [Colima 预览步骤](docs/development/environments/macos.md#fake-预览)。如果要跑检查、复测模型或验收设备，先[按任务选运行环境](CONTRIBUTING.md#按任务选运行环境)。
+
+在检出根目录执行，需要 Go（版本见 `.go-version`）、Node（见 `.nvmrc`）与 gcc：
 
 ```bash
 make web-build
@@ -81,7 +83,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](docs/adr/0034
 
 ## 参与开发
 
-- 开发者：读 [CONTRIBUTING.md](CONTRIBUTING.md)，内容包括开发环境、本地运行、检查、提交与 PR。
+- 开发者：从[按任务选运行环境](CONTRIBUTING.md#按任务选运行环境)开始；提交改动见[提交与 PR](CONTRIBUTING.md#提交与-pr)。
 - AI Agent：从 [AGENTS.md](AGENTS.md) 开始，它是唯一的项目指令文件，Claude Code 直接读取。
 
 ## 文档导航

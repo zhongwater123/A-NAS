@@ -119,7 +119,7 @@ func (input *BatchInput) normalize() error {
 	}
 	switch {
 	case !input.Scale.valid():
-		return invalid("scale must be hundredths, tenths, whole or three")
+		return invalid("scale must be five, hundredths, tenths, whole or three")
 	case input.HideDecimals && !input.Scale.HasDecimals():
 		return invalid("only a scale with decimals can hide them")
 	}
@@ -446,7 +446,15 @@ func (s *Store) OpenBatches(ctx context.Context, rater string) ([]RaterBatch, er
 		if err != nil {
 			return nil, err
 		}
-		batch.Finished = item == 0
+		if item == 0 {
+			// The photos the rater still holds are left to score, as Claim
+			// says of the same batch.
+			held, err := heldClaims(ctx, s.db, batch.ID, rater, now)
+			if err != nil {
+				return nil, err
+			}
+			batch.Finished = len(held) == 0
+		}
 		result = append(result, batch.RaterBatch)
 	}
 	return result, nil
