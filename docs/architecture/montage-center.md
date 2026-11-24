@@ -725,13 +725,13 @@ montage/
 **版本的时间线**：二次编辑都从一个版本出发，所以存回时把这一版的时间线（`fill` 的 `clips`，连同段落、画面与小节槽的划分）写进 `versions.timeline_json`，与写版本行在同一个事务里。之前的版本没有这一列，第一次打开修改稿时从它的任务的填槽步骤结果补上；步骤结果也没有时，这一版只能播放，不能修改或重剪。
 
 **修改稿**
-- `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍，修订号 0。槽的键是段落、画面与小节槽的序号，和 `fill` 的嵌套相同。
-- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`；写一行 `draft_revisions`、更新 `drafts`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
+- `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍（结尾画面的最后一个槽记末段的：结尾选的节拍收尾），修订号 0。槽按成片顺序排列，各记段落号、画面号与起止秒数；`fill` 的 `pins` 也这样指一个槽。
+- `POST /drafts/{id}/ops` 分两段。先在事务外读修改稿、比对 `baseRevision`（对不上回答 409 `draft_conflict`），按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验并算出新的状态（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`；重洗的搜索与删除的 `likeness` 也在这一段，不占着事务等相册或计算 Worker。再在一个事务里写入：只在修订号仍是 `baseRevision` 时更新 `drafts`，这期间被别的请求改过就回答 409 `draft_conflict`、什么都不写；写一行 `draft_revisions`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
 - 这一版的时间线读不出来时（见上），修改稿、候选与镜头清单都回答 409 `not_editable`。
 - 打开修改稿时，逐个读卡片所在视频的分析：相册现在的窗口身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。相册里已经没有、或内容对象换了的视频留给用到它的步骤。`POST /drafts/{id}/save` 建任务前再查一次，打开之后才重新分析的，直接回答 409 `analysis_changed`，不建任务。版本概要、每一步操作与候选不做这一步：读分析要连同全部窗口向量，每次点击都读太重。
 - 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。换镜头、拖动时节拍够不够长按 `fill` 的放慢上限（2.5 倍）算；删除一镜时“卡片盖得住两段之和”按不放慢算。
 - 这里的校验不知道 `fill` 实际会从卡片的哪一段取画面，所以存为新版本时还要核对一次，见“重新填槽”。
-- 删除时两边都够长，调一次计算 Worker 的 `likeness` 选更像的一边。
+- 删除时两边都够长，调两次计算 Worker 的 `likeness`（被删的一镜分别对前一镜、后一镜），选更像的一边，一样像时选前一镜；只有一边够长时不调。
 - `shuffle` 先用一次 `searchWindows` 查全部没锁画面的 `query`，再按种子挑；种子写进修订，同一种子结果相同。
 - 粗预览的片段随修改稿一起回答：没改过的槽取版本时间线里的镜头，改过的槽取所选节拍的起点与一个槽长。
 
@@ -753,7 +753,7 @@ montage/
 | 种类 | 来源 | 步骤 | 版本键 |
 |---|---|---|---|
 | `generate` | 项目当前的设置 | 现在的步骤 | 任务 ID 加渲染键 |
-| `edit` | 修改稿的一个修订：素材、歌、起点与顺序取来源版本的任务快照 | 查素材 → 带 `pins` 填槽 → 校验 → 渲染 → 存回 | 修改稿 ID、修订号加渲染键 |
+| `edit` | 修改稿的一个修订：素材、歌、起点与顺序取来源版本的任务快照 | `source`（读来源版本的规划、分析与目录和修改稿的 `pins`，已不在的视频的卡片退出目录）→ `fill`（带 `pins` 填槽，并在这一步里逐槽核对，见“重新填槽”）→ `render` → `save` | 修改稿 ID、修订号加渲染键 |
 | `recut` | 来源版本的任务快照，加这句话 | 分析 → 目录 → 歌曲 → 规划两步（一个方案）→ 填槽 → 渲染 → 存回 | 任务 ID 加渲染键 |
 
 - 一个项目同一时刻只有一个没结束的任务：建任务时在同一个事务里查，已有就回答 409 `job_in_progress`。原来只有 `generate` 这样做，现在三种都是。
@@ -765,7 +765,7 @@ montage/
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
 - brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。
-- 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
+- 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_montage_worker.py`](../../ai/tests/test_montage_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
 - 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
@@ -823,7 +823,7 @@ montage/
 
 - **先后**：P1、P2 已做完。M1–M8b 不碰助手，M0 之后照常推进；allin1 的商业版权待议不挡开发，挡 M10 打开开关；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
 - 第八版代码在 PR #454 的分支上（2026-11-17）。M6 从提交 `19f2d6db` 复制 `domain/`，并在 PR 描述里写明来源。
-- **出片后的二次编辑**：R1–R6 是 [#596](https://github.com/zhongwater123/A-NAS/issues/596) 的子 issue，内容与依赖见 [ADR 0039 的交付](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付)，都在 M10 之后。2026-11-24 界面改版后，服务端（R2–R5、R7，以及从 R6 拆出的版本概要、段落标签与配乐能否跳转）先合入；R1 只合入本页与术语表中描述服务端的部分，规格与 R6 的网页随新界面重做。
+- **出片后的二次编辑**：R1–R6 是 [#596](https://github.com/zhongwater123/A-NAS/issues/596) 的子 issue，内容与依赖见 [ADR 0039 的交付](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付)，都在 M10 之后。2026-11-24 界面改版后，服务端先合入：R2–R5，把 R2 的 `searchWindows` 接到 R3 的候选与重洗的那一步（交付表里没有这一行，实施时在 [#617](https://github.com/zhongwater123/A-NAS/pull/617) 里叫 R7），以及从 R6 拆出的版本概要、段落标签与配乐能否跳转；R1 只合入本页与术语表中描述服务端的部分，规格与 R6 的网页随新界面重做。
 - **整体验收**归 M10：在实验 NAS 上走完规格里的“首版闭环”。各票只对自己那部分的验收负责。
 
 ## 考虑过的替代方案
