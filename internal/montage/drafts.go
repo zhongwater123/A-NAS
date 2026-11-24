@@ -814,9 +814,11 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		}
 		back, message = further, "已撤销"
 	case "shuffle":
-		value := randomSeed()
+		var value int64
 		if op.Seed != nil {
 			value = *op.Seed
+		} else {
+			value = randomSeed()
 		}
 		seed = sql.NullInt64{Int64: value, Valid: true}
 		if next, message, err = s.shuffle(ctx, src, state, value); err != nil {

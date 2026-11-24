@@ -2,8 +2,6 @@ package montage
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -20,10 +18,10 @@ import (
 // unit is the music's slot, whose length and cuts stay; a beat is used once
 // in a film; the cards must be long enough.
 
+// randomSeed is the seed of a shuffle the member gave none for.
 func randomSeed() int64 {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return int64(binary.LittleEndian.Uint64(b[:]) >> 1)
+	//nolint:gosec // G404: the seed only picks among a shuffle's candidates and is kept with its revision; nothing rests on guessing it.
+	return mathrand.Int64()
 }
 
 // shotAt is shot number n of state, from 1.
