@@ -19,7 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// What the edit page reads besides the draft (#596): candidates for a
+// What editing a film reads besides the draft (#596): candidates for a
 // shot, confirming a version, the shot list, and thumbnails.
 
 // --- candidates ---
@@ -72,8 +72,7 @@ type Candidates struct {
 }
 
 const (
-	// maxResults is how many of a search's beats are listed: the page shows
-	// three and more as the member scrolls.
+	// maxResults is how many of a search's beats are listed, best first.
 	maxResults = 60
 	// shownScenes is how many scenes the filter lists; the rest are 其他.
 	shownScenes = 8

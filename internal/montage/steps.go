@@ -576,7 +576,8 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	if len(trashed) > 0 {
 		wait := &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
 		if job.kind == KindEdit {
-			// The edit page marks the shots of the videos in the trash.
+			// Named, so that the shots of the videos in the trash can be
+			// marked for the member.
 			wait.missing = trashed
 		}
 		return wait

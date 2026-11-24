@@ -41,7 +41,7 @@ var (
 )
 
 // AnalysisChangedReason tells the member why a version analysed again can
-// no longer be edited, on the edit page and on a save that found it.
+// no longer be edited, when its draft is opened and on a save that found it.
 const AnalysisChangedReason = "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"
 
 // EditRefusal is a step the rules do not allow; Reason says why, for the
@@ -483,7 +483,7 @@ func (state draftState) changed(shot draftShot) bool {
 	return state.original(shot) != shot.Beat
 }
 
-// Draft is a member's edit of a version, as the page shows it.
+// Draft is a member's edit of a version, as it is answered.
 type Draft struct {
 	ID            string `json:"id"`
 	VersionID     string `json:"versionId"`
@@ -561,7 +561,7 @@ type DraftShot struct {
 	Portrait bool    `json:"portrait"`
 }
 
-// view turns a draft's state into what the page shows.
+// view turns a draft's state into what is answered.
 func (src *editSource) view(id string, revision int, canUndo bool, state draftState, updated time.Time) Draft {
 	draft := Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
 		CanUndo: canUndo, SongStart: src.excerpt.Start, SongTranscode: src.songTranscode, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,

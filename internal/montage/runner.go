@@ -41,8 +41,8 @@ type stepWait struct {
 	// detail says more for the project page, such as why VNAS has not
 	// taken the plan.
 	detail string
-	// missing are the videos waited for, where the page shows them: an
-	// edit's videos in the trash.
+	// missing are the videos waited for, where the member is told which:
+	// an edit's videos in the trash.
 	missing []string
 }
 
