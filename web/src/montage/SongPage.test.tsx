@@ -193,6 +193,15 @@ describe("配乐页上传配乐", () => {
     expect(tus.uploads).toHaveLength(0);
   });
 
+  it("marks a song of the library longer than the rules allow", async () => {
+    // Symphony plays 3:20; a device that takes 2 minutes at most.
+    const rules = { ...songRules, maxSeconds: 120 };
+    serve({ rules });
+    const page = await open(rules);
+    const library = within(page).getByRole("list", { name: "音乐库" });
+    expect(await within(library).findByText("超过 2 分钟")).toBeInTheDocument();
+  });
+
   it("sends the song unchecked when the rules cannot be read, and tells what the montage center says", async () => {
     const seen = serve({ rules: null, refuse: { status: 413, code: "song_too_large" } });
     const page = await open(null);

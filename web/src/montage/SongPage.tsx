@@ -9,7 +9,7 @@ import { Spinner } from "../ui/workspace";
 import { chooseSong, type MontageSong, songAudioURL, updateProject } from "./api";
 import { Failed } from "./Failed";
 import styles from "./montage.module.css";
-import { songKey, songQuery } from "./queries";
+import { songKey, songQuery, songRulesQuery } from "./queries";
 import { useShown } from "./shown";
 import { type SongUploadStep, useSongUpload } from "./songUpload";
 
@@ -41,6 +41,9 @@ const uploadSteps: Record<Exclude<SongUploadStep, "upload">, string> = {
   scan: "扫描音乐库",
   choose: "选用中",
 };
+// spanText says a length of time as the page says the longest song: in
+// minutes when it is whole minutes.
+const spanText = (seconds: number) => (seconds % 60 === 0 ? `${seconds / 60} 分钟` : clock(seconds));
 const coverOf = (title: string) => covers[[...title].reduce((sum, c) => sum + c.charCodeAt(0), 0) % covers.length];
 
 // SongPage is the prototype's 配乐 page: the chosen song with the excerpt
@@ -50,6 +53,9 @@ export function SongPage({ id, userId, onBack }: { id: string; userId: string; o
   const client = useQueryClient();
   const song = useQuery(songQuery(id, useShown()));
   const tracks = useQuery({ queryKey: ["music", "tracks"], queryFn: listTracks });
+  // The longest a song may play, as the montage center takes it; no mark
+  // until the rules are read.
+  const longest = useQuery(songRulesQuery).data?.maxSeconds;
   const [filter, setFilter] = useState("");
   const [playing, setPlaying] = useState<string>();
   const audio = useRef<HTMLAudioElement>(null);
@@ -178,8 +184,8 @@ export function SongPage({ id, userId, onBack }: { id: string; userId: string; o
                   {track.durationMs !== undefined && (
                     <span className={styles.mtMeta}>
                       <span className={styles.mtTag}>{clock(track.durationMs / 1000)}</span>
-                      {track.durationMs > 8 * 60_000 && (
-                        <span className={`${styles.mtTag} ${styles.warn}`}>超过 8 分钟</span>
+                      {longest !== undefined && track.durationMs > longest * 1000 && (
+                        <span className={`${styles.mtTag} ${styles.warn}`}>超过 {spanText(longest)}</span>
                       )}
                     </span>
                   )}
