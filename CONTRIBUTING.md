@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-产品的 Go 服务面向 Linux。开发机用 Windows 加 WSL2，或 macOS 加 Colima，依赖都装在虚拟机自己的目录里；按机器选择[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)，Windows 上的专用 WSL 用户与环境检查脚本也在那里。
+产品的 Go 服务面向 Linux。开发机用 Windows 加 WSL2，或 macOS 加 Colima，依赖都装在虚拟机自己的目录里；按机器选择[开发环境](docs/development/LOCAL_ENVIRONMENT.md)。团队另有[共享开发服务器](docs/development/LOCAL_ENVIRONMENT.md#共享开发服务器)，可就近验证大模型，或运行本机资源不足的任务。
 
 - Go 版本见 `.go-version`，模块路径是 `github.com/zhongwater123/A-NAS`（[ADR 0001](docs/adr/0001-use-go-for-product-services.md)）。
 - Node 版本见 `.nvmrc`，网页桌面用 React、TypeScript、Vite 与 npm lockfile（[ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)）。
@@ -46,7 +46,7 @@ make check
 - 动手处理已有的 issue 之前，先看有没有开放的 PR 或新推送的分支在做同一件事（`gh pr list`、`git fetch`）；开 PR 之前再看一次。几个会话常常同时处理同一批 issue。
 - PR 描述列出作者自行决定、没问过维护者的默认值与取舍（上限、阈值、措辞、行为），维护者可以只改其中一条。
 - 推送前先 `git fetch`：维护者可能已经在 GitHub 上点过“Update branch”，或已经合并了 PR。先把远端合并进来再推，不强制推送（叠放 PR 的变基除外，见下）；PR 合并后才写的提交另开 PR。
-- 改动影响到的文档随同一个 PR 更新：状态、规格、ADR、决定记录、调查或运行手册，规则见 [AGENTS.md 的“完工”](AGENTS.md#完工)与[文档系统](docs/README.md)。
+- 提交前对照[文档路由的“何时更新”](docs/README.md#路由)核对本次差异。行为、操作步骤、开发环境或验证范围有变化时，同一 PR 更新对应文档，在 PR 描述链接到改动处并附验证结果。只有实现细节或依赖版本变化且现有说明仍准确时，简述依据即可。评审者按链接核对下一位开发者能否复现。
 
 ### 评审
 
