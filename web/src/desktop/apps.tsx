@@ -344,8 +344,12 @@ const definitions = {
     // A narrow list; on a phone the window fills the page as every window does.
     bounds: { x: 320, y: 64, width: 720, height: 640 },
     launcher: { id: "todos", keywords: "待办 提醒 截止 到期 账单 缴费 续保 复查 证件 todo" },
-    render: ({ intents, intentHandled }) => (
-      <TodosPanel intent={intents.todos} onIntentHandled={(handled) => intentHandled("todos", handled)} />
+    render: ({ session, intents, intentHandled }) => (
+      <TodosPanel
+        userId={session.user.id}
+        intent={intents.todos}
+        onIntentHandled={(handled) => intentHandled("todos", handled)}
+      />
     ),
   },
   montage: {

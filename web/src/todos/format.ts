@@ -1,18 +1,10 @@
-// How 待办 says when something is due, short enough to sit beside a title of
-// ten characters.
-import { daysUntil, type TimeValue } from "../lib/time";
+// Which to-dos are urgent or waiting, in what order they list, and the lines
+// of the desktop's notice. How a due date is worded is lib/time's dueText.
+import { daysUntil, dueText, type TimeValue } from "../lib/time";
 import { CATEGORY_LABEL, type Todo, type TodoReminder } from "./api";
 
 // Reminders start this many days before the due date.
 export const SOON_DAYS = 3;
-
-// dueText is “还有 3 天”, “今天截止” or “已过期 2 天”.
-export function dueText(due: string, now: TimeValue = Date.now()): string {
-  const days = daysUntil(due, now);
-  if (days > 0) return `还有 ${days} 天`;
-  if (days === 0) return "今天截止";
-  return `已过期 ${-days} 天`;
-}
 
 // urgent says a to-do is due within the reminder days or overdue.
 export function urgent(todo: Pick<Todo, "due">, now: TimeValue = Date.now()): boolean {

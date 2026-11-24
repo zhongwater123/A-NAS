@@ -62,6 +62,14 @@ schemas:
       ownerId: { type: string, minLength: 1, description: "An account's ID; absent means the whole family. A new owner must be an active account." }
       amountCents: { type: integer, minimum: 0, description: "Amount in fen (分) of renminbi." }
       version: { type: integer, minimum: 1, description: The version the edit was made from. }
+  TodoOwner:
+    type: object
+    additionalProperties: false
+    required: [id, username]
+    description: "An active account a to-do can be given to."
+    properties:
+      id: { type: string }
+      username: { type: string }
   TodoReminder:
     type: object
     additionalProperties: false

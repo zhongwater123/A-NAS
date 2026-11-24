@@ -54,6 +54,13 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/todos/owners:
+  get:
+    operationId: listTodoOwners
+    summary: "The active accounts a to-do can be given to, by username. Disabled accounts and those waiting to be deleted are left out; a to-do already theirs keeps them"
+    responses:
+      "200": { description: Accounts, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/todos.yaml#/schemas/TodoOwner" } } } } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/todos/reminders:
   get:
     operationId: listTodoReminders

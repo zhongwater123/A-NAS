@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -128,21 +129,41 @@ func checkTodo(title, category, due, ownerID string, amount *int64) (todoValues,
 	return values, true
 }
 
-// ownerName is the username of an active account, the owner a to-do is
-// given.
-func (s *Store) ownerName(ctx context.Context, ownerID string) (string, error) {
+// TodoOwner is an active account a to-do can be given to.
+type TodoOwner struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}
+
+// TodoOwners lists the active accounts a to-do can be given to, by
+// username. Disabled accounts and those waiting to be deleted are left out:
+// a to-do cannot be given to them.
+func (s *Store) TodoOwners(ctx context.Context) ([]TodoOwner, error) {
+	accounts, err := s.accounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owners := make([]TodoOwner, 0, len(accounts))
+	for _, account := range accounts {
+		owners = append(owners, TodoOwner(account))
+	}
+	slices.SortFunc(owners, func(a, b TodoOwner) int { return strings.Compare(a.Username, b.Username) })
+	return owners, nil
+}
+
+// activeOwner is the username of the active account ownerID, and whether it
+// is one. It asks the accounts service, so it runs before a transaction:
+// family.db has one connection, and the question would hold it.
+func (s *Store) activeOwner(ctx context.Context, ownerID string) (string, bool, error) {
 	if ownerID == "" {
-		return "", nil
+		return "", true, nil
 	}
 	accounts, err := s.accounts(ctx)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	account, ok := accounts[ownerID]
-	if !ok {
-		return "", ErrInvalid
-	}
-	return account.Username, nil
+	return account.Username, ok, nil
 }
 
 const todoColumns = `id, title, category, due_on, owner_id, owner_name, amount_cents, viewer_id, status, snoozed_until,
@@ -229,8 +250,15 @@ func (s *Store) addTodo(ctx context.Context, actor Actor, fields TodoFields, vie
 	if !ok || len(fields.RequestKey) > maxRequestKey || !utf8.ValidString(fields.RequestKey) {
 		return Todo{}, ErrInvalid
 	}
+	ownerName, active, err := s.activeOwner(ctx, values.ownerID)
+	if err != nil {
+		return Todo{}, err
+	}
+	if !active {
+		return Todo{}, ErrInvalid
+	}
 	var todo Todo
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		if fields.RequestKey != "" {
 			existing, err := s.todoByRequest(ctx, tx, actor, fields.RequestKey)
 			if err == nil {
@@ -240,10 +268,6 @@ func (s *Store) addTodo(ctx context.Context, actor Actor, fields TodoFields, vie
 			if !errors.Is(err, ErrNotFound) {
 				return err
 			}
-		}
-		ownerName, err := s.ownerName(ctx, values.ownerID)
-		if err != nil {
-			return err
 		}
 		id := newID("todo")
 		if _, err := tx.ExecContext(ctx, `INSERT INTO todos(id, title, category, due_on, owner_id, owner_name, amount_cents,
@@ -278,16 +302,21 @@ func (s *Store) todoByRequest(ctx context.Context, q queryer, actor Actor, key s
 }
 
 // UpdateTodo replaces a to-do's fields. Someone editing from a stale copy
-// gets ErrChanged. A new due date starts the reminders over. Only a new
-// owner must be an active account, so a to-do whose owner left can still be
-// edited. A done or ignored to-do can be edited too.
+// gets ErrChanged. A new due date starts the reminders over and ends a
+// snooze, as opening it again does. Only a new owner must be an active
+// account, so a to-do whose owner left can still be edited. A done or
+// ignored to-do can be edited too.
 func (s *Store) UpdateTodo(ctx context.Context, actor Actor, id string, edit TodoEdit) (Todo, error) {
 	values, ok := checkTodo(edit.Title, edit.Category, edit.Due, edit.OwnerID, edit.AmountCents)
 	if !ok || edit.Version < 1 {
 		return Todo{}, ErrInvalid
 	}
+	newOwnerName, active, err := s.activeOwner(ctx, values.ownerID)
+	if err != nil {
+		return Todo{}, err
+	}
 	var todo Todo
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		current, err := visibleTodo(ctx, tx, actor, id)
 		if err != nil {
 			return err
@@ -297,18 +326,19 @@ func (s *Store) UpdateTodo(ctx context.Context, actor Actor, id string, edit Tod
 		}
 		ownerName := current.OwnerName
 		if values.ownerID != current.OwnerID {
-			if ownerName, err = s.ownerName(ctx, values.ownerID); err != nil {
-				return err
+			if !active {
+				return ErrInvalid
 			}
+			ownerName = newOwnerName
 		}
-		round := current.RemindRound
+		round, snoozed := current.RemindRound, current.SnoozedUntil
 		if values.due != current.Due {
-			round++
+			round, snoozed = round+1, ""
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE todos SET title = ?, category = ?, due_on = ?, owner_id = ?, owner_name = ?,
-amount_cents = ?, remind_round = ?, version = version + 1, updated_at = ? WHERE id = ?`,
-			values.title, values.category, nullString(values.due), values.ownerID, ownerName, values.amount, round,
-			formatTime(s.now()), id); err != nil {
+amount_cents = ?, snoozed_until = ?, remind_round = ?, version = version + 1, updated_at = ? WHERE id = ?`,
+			values.title, values.category, nullString(values.due), values.ownerID, ownerName, values.amount,
+			nullString(snoozed), round, formatTime(s.now()), id); err != nil {
 			return err
 		}
 		if todo, err = visibleTodo(ctx, tx, actor, id); err != nil {

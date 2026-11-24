@@ -1,6 +1,7 @@
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
+import { errorText } from "../api/errorMessages";
 import { parseYuan, yuanText } from "../lib/money";
 import { displayName, usePeople } from "../people/people";
 import { Modal } from "../ui/modal";
@@ -13,21 +14,23 @@ import {
   TITLE_MAX,
   type Todo,
   type TodoCategory,
-  todoError,
   updateTodo,
 } from "./api";
+import { useTodoOwners } from "./queries";
 import styles from "./todos.module.css";
 
 // TodoDialog adds a to-do, or edits one from the version it was read at.
 // Only what it is about is required; a to-do added by hand is the whole
-// family's.
+// family's. The rules for each field are in docs/specs/family-todos.md.
 export function TodoDialog({
+  userId,
   todo,
   container,
   onClose,
   onSaved,
   onChanged,
 }: {
+  userId: string;
   todo?: Todo;
   container: RefObject<HTMLElement | null>;
   onClose: () => void;
@@ -36,6 +39,7 @@ export function TodoDialog({
   onChanged: () => void;
 }) {
   const people = usePeople();
+  const active = useTodoOwners(userId);
   const [title, setTitle] = useState(todo?.title ?? "");
   const [category, setCategory] = useState<TodoCategory>(todo?.category ?? "other");
   const [due, setDue] = useState(todo?.due ?? "");
@@ -50,10 +54,14 @@ export function TodoDialog({
   const cents = amount.trim() ? parseYuan(amount) : undefined;
   const amountWrong = amount.trim() !== "" && cents === undefined;
   const ready = length > 0 && length <= TITLE_MAX && !amountWrong;
-  // An owner whose account is gone stays chosen, under the name it had.
-  const owners = people.profiles.map((profile) => ({ id: profile.id, name: displayName(profile) }));
+  // Only active accounts are offered; a to-do's owner whose account was
+  // disabled or is gone stays chosen, under the name it had.
+  const owners = active.map((owner) => ({ id: owner.id, name: displayName(people.byId(owner.id) ?? owner) }));
   if (todo?.ownerId && !owners.some((owner) => owner.id === todo.ownerId))
-    owners.push({ id: todo.ownerId, name: todo.ownerName ?? "已删除的账号" });
+    owners.push({
+      id: todo.ownerId,
+      name: displayName(people.byId(todo.ownerId) ?? { username: todo.ownerName ?? "已删除的账号" }),
+    });
 
   const save = async () => {
     if (!ready || busy) return;
@@ -75,7 +83,7 @@ export function TodoDialog({
     } catch (caught) {
       setBusy(false);
       if (todo && caught instanceof APIError && caught.code === "changed") onChanged();
-      else setProblem(todoError(caught));
+      else setProblem(errorText(caught, "todos"));
     }
   };
 
@@ -109,7 +117,7 @@ export function TodoDialog({
           label="什么事"
           hint={
             <span className={length > TITLE_MAX ? styles.urgent : ""}>
-              {length}/{TITLE_MAX} 个字，写短一点，例如“交物业费”
+              {length}/{TITLE_MAX} 个字
             </span>
           }
         >
@@ -129,7 +137,7 @@ export function TodoDialog({
               ))}
             </select>
           </Field>
-          <Field label="截止日" hint="不填就不提醒">
+          <Field label="截止日">
             <input type="date" value={due} onChange={(event) => setDue(event.target.value)} disabled={busy} />
           </Field>
         </div>
@@ -146,7 +154,7 @@ export function TodoDialog({
           </Field>
           <Field
             label="金额（元）"
-            hint={amountWrong ? <span className={styles.urgent}>请填写数字，最多两位小数</span> : "可不填，例如 128.50"}
+            hint={amountWrong ? <span className={styles.urgent}>请填写数字，最多两位小数</span> : undefined}
           >
             <input
               value={amount}

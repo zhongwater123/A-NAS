@@ -61,6 +61,21 @@ export function daysUntil(value: string, now: TimeValue = Date.now()): number {
   return calendarDays(dateOnly(value), now);
 }
 
+// dueText says how far off a date-only due date is: “还有 3 天”, “今天截止” or
+// “已过期 2 天”, short enough to sit beside a title of ten characters.
+export function dueText(due: string, now: TimeValue = Date.now()): string {
+  const days = daysUntil(due, now);
+  if (days > 0) return `还有 ${days} 天`;
+  if (days === 0) return "今天截止";
+  return `已过期 ${-days} 天`;
+}
+
+// dayLabel is a date-only value as “11月20日”, with the year when it is not
+// this year's.
+export function dayLabel(value: string, now: TimeValue = Date.now()): string {
+  return calendarDate(dateOnly(value), now);
+}
+
 // untilNextDay is how long it is from now until a little after the next local
 // midnight, when date-only values move a day closer.
 export function untilNextDay(now: TimeValue = Date.now(), after = minute): number {

@@ -1,19 +1,30 @@
-import { Check, Ellipsis, Plus, RotateCcw } from "lucide-react";
-import { DropdownMenu } from "radix-ui";
-import { type ReactNode, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { Check, Plus, RotateCcw } from "lucide-react";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
+import { errorCodeText, errorText } from "../api/errorMessages";
 import { formatYuan } from "../lib/money";
-import { calendarDate, dateOnly, relativeTime, untilNextDay } from "../lib/time";
+import { dayLabel, dueText, relativeTime } from "../lib/time";
 import { nameOfAccount, type People, usePeople } from "../people/people";
 import { useToasts } from "../ui/feedback";
-import { CATEGORY_ACTION, listTodos, setTodoStatus, snoozeTodo, type Todo, type TodoReminder, todoError } from "./api";
-import { byUrgency, dueText, snoozed, urgent } from "./format";
-import { acknowledgeTodoReminder, loadTodoReminders, useTodoReminders } from "./reminders";
+import { RowMenu } from "../ui/RowMenu";
+import { CATEGORY_ACTION, setTodoStatus, snoozeTodo, type Todo, type TodoReminder } from "./api";
+import { byUrgency, snoozed, urgent } from "./format";
+import {
+  changedTodo,
+  readListAgain,
+  readTodos,
+  useAcknowledgeReminders,
+  useFreshTodos,
+  useTodoReminders,
+  useTodos,
+} from "./queries";
 import { TodoDialog } from "./TodoDialog";
 import styles from "./todos.module.css";
 
 interface Props {
+  /** The signed-in account. */
+  userId: string;
   /** A to-do another window asks to show, such as the desktop's reminder; onIntentHandled hands it back. */
   intent?: { todoId: string };
   onIntentHandled?(handled: { todoId: string }): void;
@@ -25,62 +36,22 @@ const SNOOZE_DAYS = [1, 3, 7];
 
 // TodosPanel is the 待办 window: what to be reminded of, what is open, what
 // waits until a later day, and what was closed in the last 30 days.
-export function TodosPanel({ intent, onIntentHandled }: Props) {
-  const [todos, setTodos] = useState<Todo[]>();
-  const reminders = useTodoReminders();
-  const [failure, setFailure] = useState("");
+export function TodosPanel({ userId, intent, onIntentHandled }: Props) {
+  const list = useTodos(userId);
+  const reminders = useTodoReminders(userId);
+  const acknowledgement = useAcknowledgeReminders(userId);
+  // A window left open, as on the local console, reads again just after
+  // midnight, when what is due moves a day closer.
+  useFreshTodos(userId);
   const [editing, setEditing] = useState<Todo | "new">();
   const [marked, setMarked] = useState<string>();
-  // When the list was last read or changed: what is due counts from that day.
-  const [now, setNow] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const { toast, element: toasts } = useToasts();
   const people = usePeople();
-
-  const show = useCallback((items: Todo[]) => {
-    setTodos(items.toSorted(byUrgency));
-    setNow(Date.now());
-  }, []);
-  const reload = useCallback(async () => {
-    try {
-      show(await listTodos());
-      setFailure("");
-    } catch (caught) {
-      setFailure(todoError(caught));
-    }
-  }, [show]);
-
-  useEffect(() => {
-    let live = true;
-    listTodos().then(
-      (items) => {
-        if (live) show(items);
-      },
-      (caught: unknown) => {
-        if (live) setFailure(todoError(caught));
-      },
-    );
-    void loadTodoReminders();
-    return () => {
-      live = false;
-    };
-  }, [show]);
-
-  // A window left open, as on the local console, reads again just after
-  // midnight, when what is due moves a day closer.
-  useEffect(() => {
-    let timer = 0;
-    const nextDay = () => {
-      timer = window.setTimeout(() => {
-        void reload();
-        void loadTodoReminders();
-        nextDay();
-      }, untilNextDay());
-    };
-    nextDay();
-    return () => window.clearTimeout(timer);
-  }, [reload]);
+  const todos = list.data?.toSorted(byUrgency);
+  // What is due counts from when the list was last read or changed.
+  const now = list.dataUpdatedAt;
 
   // A to-do asked for from another window shows once the list is read
   // again, as it may be new. An intent replaced before then is left to its
@@ -89,13 +60,10 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
   useEffect(() => {
     if (!intent) return;
     let current = true;
-    listTodos()
+    readTodos(userId)
       .then(
         (items) => {
-          if (!current) return;
-          show(items);
-          setFailure("");
-          if (items.some((item) => item.id === intent.todoId)) setMarked(intent.todoId);
+          if (current && items.some((item) => item.id === intent.todoId)) setMarked(intent.todoId);
         },
         () => undefined,
       )
@@ -105,7 +73,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
     return () => {
       current = false;
     };
-  }, [intent, show]);
+  }, [intent, userId]);
 
   // The marked to-do scrolls into view inside the window, not the desktop.
   useEffect(() => {
@@ -122,36 +90,28 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
     return () => window.clearTimeout(timer);
   }, [marked]);
 
-  const replace = useCallback((next: Todo) => {
-    setTodos((current) => current?.map((item) => (item.id === next.id ? next : item)).toSorted(byUrgency));
-    setNow(Date.now());
-  }, []);
   const act = async (run: () => Promise<Todo>, said: (todo: Todo) => string) => {
     try {
       const next = await run();
-      replace(next);
+      changedTodo(userId, next);
       toast({ text: said(next), tone: "done" });
-      // A change to a to-do can start its reminders over or end them.
-      void loadTodoReminders();
     } catch (caught) {
-      toast({ text: todoError(caught), tone: "error" });
-      if (caught instanceof APIError && (caught.code === "not_found" || caught.code === "conflict")) void reload();
+      toast({ text: errorText(caught, "todos"), tone: "error" });
+      if (caught instanceof APIError && (caught.code === "not_found" || caught.code === "conflict"))
+        void readListAgain(userId);
     }
   };
-  const acknowledge = async (reminder: TodoReminder) => {
-    try {
-      await acknowledgeTodoReminder([reminder.key]);
-    } catch (caught) {
-      toast({ text: todoError(caught), tone: "error" });
-    }
-  };
+  const acknowledge = (reminder: TodoReminder) =>
+    acknowledgement.mutate([reminder.key], {
+      onError: (caught) => toast({ text: errorText(caught, "todos"), tone: "error" }),
+    });
 
   const body = () => {
     if (!todos) {
-      return failure ? (
+      return list.error ? (
         <div className={styles.tdCentered}>
-          <p>{failure}</p>
-          <button type="button" className={styles.tdSecondary} onClick={() => void reload()}>
+          <p>{errorText(list.error, "todos")}</p>
+          <button type="button" className={styles.tdSecondary} onClick={() => void list.refetch()}>
             重试
           </button>
         </div>
@@ -198,7 +158,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
       snooze: (days: number) =>
         act(
           () => snoozeTodo(item.id, days),
-          (next) => `“${next.title}”推迟到${next.snoozedUntil ? dayText(next.snoozedUntil) : ` ${days} 天后`}`,
+          (next) => `“${next.title}”推迟到${next.snoozedUntil ? dayLabel(next.snoozedUntil) : ` ${days} 天后`}`,
         ),
     });
     const openActions = (item: Todo) => {
@@ -216,6 +176,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
           </button>
           <RowMenu
             label={`更多操作：${item.title}`}
+            triggerClassName={styles.tdIconButton}
             items={[
               { label: "已处理", run: () => void run.done() },
               { label: "忽略", run: () => void run.ignore() },
@@ -240,7 +201,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
                     type="button"
                     className={styles.tdSecondary}
                     aria-label={`知道了：${reminder.title}`}
-                    onClick={() => void acknowledge(reminder)}
+                    onClick={() => acknowledge(reminder)}
                   >
                     知道了
                   </button>
@@ -274,7 +235,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
               {waiting.map((item) =>
                 rowOf(
                   item,
-                  <span className={styles.tdDue}>推迟到{dayText(item.snoozedUntil ?? "")}</span>,
+                  <span className={styles.tdDue}>推迟到{dayLabel(item.snoozedUntil ?? "", now)}</span>,
                   openActions(item),
                 ),
               )}
@@ -303,6 +264,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
                     </button>
                     <RowMenu
                       label={`更多操作：${item.title}`}
+                      triggerClassName={styles.tdIconButton}
                       items={[{ label: "编辑", run: () => setEditing(item) }]}
                     />
                   </>,
@@ -318,10 +280,7 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
   return (
     <div className={styles.tdApp} ref={root}>
       <header className={styles.tdHead}>
-        <div>
-          <h2>待办</h2>
-          <p>全家都能看到、都能处理。快到期时会提醒每个人。</p>
-        </div>
+        <h2>待办</h2>
         <button type="button" className={styles.tdPrimary} onClick={() => setEditing("new")} disabled={!todos}>
           <Plus size={15} /> 新建
         </button>
@@ -329,31 +288,25 @@ export function TodosPanel({ intent, onIntentHandled }: Props) {
       {body()}
       {editing && (
         <TodoDialog
+          userId={userId}
           todo={editing === "new" ? undefined : editing}
           container={root}
           onClose={() => setEditing(undefined)}
           onSaved={(saved, created) => {
             setEditing(undefined);
-            if (created) show([...(todos ?? []).filter((item) => item.id !== saved.id), saved]);
-            else replace(saved);
+            changedTodo(userId, saved);
             toast({ text: created ? `已新建“${saved.title}”` : "已保存", tone: "done" });
-            void loadTodoReminders();
           }}
           onChanged={() => {
             setEditing(undefined);
-            toast({ text: "别人刚改过这件事，已刷新，请再改一次", tone: "error" });
-            void reload();
+            toast({ text: errorCodeText("changed", "todos") ?? "", tone: "error" });
+            void readListAgain(userId);
           }}
         />
       )}
       {toasts}
     </div>
   );
-}
-
-// dayText is a date-only value as “11月20日”, with the year when it is not this year's.
-function dayText(value: string): string {
-  return calendarDate(dateOnly(value));
 }
 
 // details says what kind of matter a to-do is, whose and how much.
@@ -366,29 +319,4 @@ function details(item: Todo, people: People): string[] {
       `${nameOfAccount(people, item.closedById, item.closedByName ?? "已删除的账号")}${item.status === "done" ? "处理" : "忽略"}`,
     );
   return parts;
-}
-
-interface MenuItem {
-  label: string;
-  run: () => void;
-}
-
-// RowMenu is the … menu of a to-do.
-function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
-  return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger className={styles.tdIconButton} aria-label={label}>
-        <Ellipsis size={16} />
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className={styles.tdMenu} align="end" sideOffset={4}>
-          {items.map((item) => (
-            <DropdownMenu.Item key={item.label} className={styles.tdMenuItem} onSelect={item.run}>
-              {item.label}
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  );
 }

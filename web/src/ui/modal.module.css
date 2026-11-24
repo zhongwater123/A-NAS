@@ -62,17 +62,11 @@
     padding: 0;
     border: 0;
     border-radius: 8px;
-    color: var(--ph-muted);
-    background: none;
     cursor: pointer;
     transition:
       background 0.15s,
       color 0.15s,
       opacity 0.15s;
-  }
-  .fc-modal-close:not(:disabled):hover {
-    color: var(--ph-ink);
-    background: var(--ph-hover, rgba(0, 0, 0, 0.05));
   }
   .fc-modal-close:disabled {
     cursor: default;
@@ -103,4 +97,16 @@
       transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
     }
   }
+}
+
+/* Outside the layer: a window's own base rules, such as
+   :where(.fc-app) :where(button) { color: inherit }, are not in a layer and
+   would win over anything inside one, whatever its specificity. */
+.fc-modal-close {
+  color: var(--ph-muted);
+  background: none;
+}
+.fc-modal-close:not(:disabled):hover {
+  color: var(--ph-ink);
+  background: var(--ph-hover, rgba(0, 0, 0, 0.05));
 }

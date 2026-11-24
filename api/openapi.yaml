@@ -139,6 +139,7 @@ paths:
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
   /api/v1/todos: { $ref: "paths/todos.yaml#/~1api~1v1~1todos" }
+  /api/v1/todos/owners: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1owners" }
   /api/v1/todos/reminders: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders" }
   /api/v1/todos/reminders/seen: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders~1seen" }
   /api/v1/todos/{todoId}: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}" }
@@ -526,6 +527,7 @@ components:
     Todo: { $ref: "components/todos.yaml#/schemas/Todo" }
     TodoFields: { $ref: "components/todos.yaml#/schemas/TodoFields" }
     TodoEdit: { $ref: "components/todos.yaml#/schemas/TodoEdit" }
+    TodoOwner: { $ref: "components/todos.yaml#/schemas/TodoOwner" }
     TodoReminder: { $ref: "components/todos.yaml#/schemas/TodoReminder" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
     ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }

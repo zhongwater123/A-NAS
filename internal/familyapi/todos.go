@@ -16,9 +16,17 @@ func (h *handler) todoRoutes() map[string]route {
 		"PATCH /{todoID}":      h.updateTodo,
 		"PUT /{todoID}/status": h.setTodoStatus,
 		"PUT /{todoID}/snooze": h.snoozeTodo,
+		"GET /owners":          h.todoOwners,
 		"GET /reminders":       h.todoReminders,
 		"POST /reminders/seen": h.acknowledgeTodoReminders,
 	}
+}
+
+// todoOwners lists the accounts a to-do can be given to; every account may
+// read it, like the to-dos.
+func (h *handler) todoOwners(w http.ResponseWriter, r *http.Request, _ family.Actor) {
+	owners, err := h.store.TodoOwners(r.Context())
+	h.reply(w, r, http.StatusOK, items[family.TodoOwner]{Items: owners}, err)
 }
 
 func (h *handler) listTodos(w http.ResponseWriter, r *http.Request, actor family.Actor) {

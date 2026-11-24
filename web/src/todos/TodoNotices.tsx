@@ -8,61 +8,45 @@
 import { ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { untilNextDay } from "../lib/time";
 import { DeskNotice } from "../ui/DeskNotice";
 import { reminderLines } from "./format";
 import styles from "./notices.module.css";
-import { acknowledgeTodoReminder, loadTodoReminders, useTodoReminders } from "./reminders";
+import { readAgain, useAcknowledgeReminders, useFreshTodos, useTodoReminders } from "./queries";
 
 const SHOWN = 3;
 
 export function TodoNotices({
+  userId,
   shared,
   onWake,
   onOpen,
 }: {
+  /** The signed-in account, whose reminders these are. */
+  userId: string;
   /** The screen is the family's (the local console). */
   shared: boolean;
   /** On the local console, subscribes to someone waking the screen; the desktop passes it in, so this feature does not reach into desktop/. */
   onWake?: (listener: () => void) => () => void;
   onOpen(todoId: string): void;
 }) {
-  const reminders = useTodoReminders();
+  // Read after signing in, whenever the page comes back into view and just
+  // after midnight, when to-dos move into their next stage.
+  const reminders = useTodoReminders(userId);
+  useFreshTodos(userId);
+  const acknowledge = useAcknowledgeReminders(userId);
   // Reminders hidden on this page; the server still has them unacknowledged.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
 
-  // Read after signing in and whenever the page comes back into view. A page
-  // that stays open, such as the local console, reads again just after
-  // midnight, when to-dos move into their next stage, and the local console
-  // also when someone wakes its screen.
-  useEffect(() => {
-    let timer = 0;
-    const read = () => void loadTodoReminders();
-    const nextDay = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        read();
-        nextDay();
-      }, untilNextDay());
-    };
-    const back = () => {
-      if (document.visibilityState !== "visible") return;
-      read();
-      nextDay();
-    };
-    read();
-    nextDay();
-    document.addEventListener("visibilitychange", back);
-    const woken = onWake?.(() => {
-      setHidden(new Set());
-      read();
-    });
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", back);
-      woken?.();
-    };
-  }, [onWake]);
+  // On the local console, someone waking the screen shows again what hid
+  // itself, and reads what is due now.
+  useEffect(
+    () =>
+      onWake?.(() => {
+        setHidden(new Set());
+        void readAgain(userId);
+      }),
+    [onWake, userId],
+  );
 
   const showing = reminders.filter((reminder) => !hidden.has(reminder.key));
   // Nothing to show takes the notice away, so a pointer that was over it,
@@ -85,10 +69,8 @@ export function TodoNotices({
       more={more > 0 ? `另有 ${more} 件` : undefined}
       action={
         shown.length > 0
-          ? {
-              label: "知道了",
-              onClick: () => void acknowledgeTodoReminder(shown.map((line) => line.key)).catch(() => undefined),
-            }
+          ? // A refusal puts the reminders back when they are read again; the notice says nothing more.
+            { label: "知道了", onClick: () => acknowledge.mutate(shown.map((line) => line.key)) }
           : undefined
       }
       onOpen={() => onOpen(showing[0].todoId)}

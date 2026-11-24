@@ -6,13 +6,33 @@ import {
   calendarLabel,
   calendarMoment,
   dateOnly,
+  dayLabel,
   daysUntil,
+  dueText,
   formatClock,
   formatDate,
   isoDate,
   relativeTime,
   untilNextDay,
 } from "./time";
+
+describe("due dates", () => {
+  const now = new Date(2026, 10, 17, 9, 30);
+  it("say how far off they are", () => {
+    expect(dueText("2026-11-20", now)).toBe("还有 3 天");
+    expect(dueText("2026-11-18", now)).toBe("还有 1 天");
+    expect(dueText("2026-11-17", now)).toBe("今天截止");
+    expect(dueText("2026-11-16", now)).toBe("已过期 1 天");
+  });
+  it("count calendar days across the year's end", () => {
+    expect(dueText("2027-01-02", new Date(2026, 11, 31, 23, 50))).toBe("还有 2 天");
+    expect(dueText("2026-12-29", new Date(2027, 0, 1, 0, 5))).toBe("已过期 3 天");
+  });
+  it("label a day, with the year only when it is not this year's", () => {
+    expect(dayLabel("2026-11-20", now)).toBe("11月20日");
+    expect(dayLabel("2027-01-02", now)).toBe("2027年1月2日");
+  });
+});
 
 describe("date-only values", () => {
   it("read as the local calendar day, not midnight UTC", () => {

@@ -22,6 +22,7 @@ func TestTodoEndpointsAreServedBeneathTheirPrefix(t *testing.T) {
 		{Method: http.MethodPatch, Pattern: TodosPrefix + "/{todoID}"},
 		{Method: http.MethodPut, Pattern: TodosPrefix + "/{todoID}/status"},
 		{Method: http.MethodPut, Pattern: TodosPrefix + "/{todoID}/snooze"},
+		{Method: http.MethodGet, Pattern: TodosPrefix + "/owners"},
 		{Method: http.MethodGet, Pattern: TodosPrefix + "/reminders"},
 		{Method: http.MethodPost, Pattern: TodosPrefix + "/reminders/seen"},
 	} {
@@ -83,6 +84,7 @@ func TestTodosAnswerEveryAccount(t *testing.T) {
 		{http.MethodPut, TodosPrefix + "/" + todo.ID + "/snooze", `{"days":3}`, http.StatusOK},
 		{http.MethodPut, TodosPrefix + "/" + todo.ID + "/status", `{"status":"done"}`, http.StatusOK},
 		{http.MethodPut, TodosPrefix + "/" + todo.ID + "/snooze", `{"days":3}`, http.StatusConflict},
+		{http.MethodGet, TodosPrefix + "/owners", "", http.StatusOK},
 		{http.MethodGet, TodosPrefix + "/reminders", "", http.StatusOK},
 		{http.MethodPost, TodosPrefix + "/reminders/seen", `{"keys":["todo:x"]}`, http.StatusNoContent},
 		{http.MethodPost, TodosPrefix + "/reminders/seen", `{"keys":["join:x"]}`, http.StatusUnprocessableEntity},

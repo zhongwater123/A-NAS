@@ -101,11 +101,11 @@ func (s *Store) dueReminders(ctx context.Context, q queryer, actor Actor) ([]Tod
 // joining the family is not needed. Nothing runs in the background: the
 // stages follow from today's date whenever someone asks.
 func (s *Store) TodoReminders(ctx context.Context, actor Actor) ([]TodoReminder, error) {
-	seen, err := s.seenHints(ctx, actor)
+	due, err := s.dueReminders(ctx, s.db, actor)
 	if err != nil {
 		return nil, err
 	}
-	due, err := s.dueReminders(ctx, s.db, actor)
+	seen, err := s.seenTodoKeys(ctx, actor, due)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +116,43 @@ func (s *Store) TodoReminders(ctx context.Context, actor Actor) ([]TodoReminder,
 		}
 	}
 	return reminders, nil
+}
+
+// seenTodoKeys says which of these reminders the caller acknowledged. Only
+// their keys are read, not every key the caller ever acknowledged.
+func (s *Store) seenTodoKeys(ctx context.Context, actor Actor, due []TodoReminder) (map[string]bool, error) {
+	seen := map[string]bool{}
+	if len(due) == 0 {
+		return seen, nil
+	}
+	args := []any{actor.AccountID}
+	for _, reminder := range due {
+		args = append(args, reminder.Key)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT hint_key FROM hints_seen WHERE account_id = ? AND hint_key IN (?"+
+		strings.Repeat(", ?", len(due)-1)+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		seen[key] = true
+	}
+	return seen, rows.Err()
+}
+
+// purgeTodoKeys forgets the acknowledgements of to-dos closed more than
+// ClosedTodoDays ago, which no longer list or remind. Opening one again
+// starts a new round, whose keys are new.
+func purgeTodoKeys(ctx context.Context, tx *sql.Tx, cutoff string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM hints_seen WHERE hint_key LIKE 'todo:%'
+AND substr(hint_key, 6, instr(substr(hint_key, 6), ':') - 1) IN (SELECT id FROM todos WHERE status <> 'open' AND closed_at <= ?)`,
+		cutoff)
+	return err
 }
 
 // AcknowledgeTodoReminders records that the caller acknowledged these

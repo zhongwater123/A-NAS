@@ -2169,6 +2169,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/todos/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active accounts a to-do can be given to, by username. Disabled accounts and those waiting to be deleted are left out; a to-do already theirs keeps them */
+        get: operations["listTodoOwners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/todos/reminders": {
         parameters: {
             query?: never;
@@ -6919,6 +6936,11 @@ export interface components {
             /** @description The version the edit was made from. */
             version: number;
         };
+        /** @description An active account a to-do can be given to. */
+        TodoOwner: {
+            id: string;
+            username: string;
+        };
         TodoReminder: {
             /** @description Names this reminder to the caller; acknowledging it stops this stage until the reminders start over. */
             key: string;
@@ -8851,6 +8873,7 @@ export type TodoStage = components['schemas']['TodoStage'];
 export type Todo = components['schemas']['Todo'];
 export type TodoFields = components['schemas']['TodoFields'];
 export type TodoEdit = components['schemas']['TodoEdit'];
+export type TodoOwner = components['schemas']['TodoOwner'];
 export type TodoReminder = components['schemas']['TodoReminder'];
 export type ScoringMe = components['schemas']['ScoringMe'];
 export type ScoringScale = components['schemas']['ScoringScale'];
@@ -13329,6 +13352,29 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoOwners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoOwner"][];
+                    };
+                };
+            };
             503: components["responses"]["ProductError"];
         };
     };

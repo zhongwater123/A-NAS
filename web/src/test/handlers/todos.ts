@@ -1,6 +1,6 @@
 // 待办: the to-dos and reminders one account sees, and what the window and
 // the desktop's reminder send back.
-import type { Todo, TodoReminder } from "../../api.generated";
+import type { Todo, TodoOwner, TodoReminder } from "../../api.generated";
 import { isoDate } from "../../lib/time";
 import { http } from "../server";
 
@@ -39,10 +39,13 @@ export function reminder(overrides: Partial<TodoReminder> = {}): TodoReminder {
 export interface TodosOptions {
   todos?: Todo[];
   reminders?: TodoReminder[];
+  /** The active accounts; mom and dad unless given. */
+  owners?: TodoOwner[];
 }
 
 // todosHandlers answers the reads and records the writes: the bodies sent,
-// by operation, in order.
+// by operation, in order. Like the server, it stops listing a reminder once
+// it is acknowledged.
 export function todosHandlers(options: TodosOptions = {}) {
   const sent = {
     added: [] as unknown[],
@@ -55,7 +58,19 @@ export function todosHandlers(options: TodosOptions = {}) {
   const find = (todoId: string) => items().find((item) => item.id === todoId) ?? todo({ id: todoId });
   const handlers = [
     http.get("/api/v1/todos", ({ response }) => response(200).json({ items: items() })),
-    http.get("/api/v1/todos/reminders", ({ response }) => response(200).json({ items: options.reminders ?? [] })),
+    http.get("/api/v1/todos/owners", ({ response }) =>
+      response(200).json({
+        items: options.owners ?? [
+          { id: "user:dad", username: "dad" },
+          { id: "user:mom", username: "mom" },
+        ],
+      }),
+    ),
+    http.get("/api/v1/todos/reminders", ({ response }) =>
+      response(200).json({
+        items: (options.reminders ?? []).filter((item) => !sent.acknowledged.flat().includes(item.key)),
+      }),
+    ),
     http.post("/api/v1/todos/reminders/seen", async ({ request, response }) => {
       sent.acknowledged.push((await request.json()).keys);
       return response(204).empty();

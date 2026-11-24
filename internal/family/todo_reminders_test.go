@@ -159,3 +159,73 @@ func TestTodoReminderKeysAreChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNewDueDateEndsSnooze(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// Today is 2026-10-29. A bill due 11-01 is snoozed for 7 days, to 11-05.
+	bill := must(f.store.AddTodo(ctx, mom, TodoFields{Title: "交电费", Category: "bill", Due: "2026-11-01"}))
+	must(f.store.SnoozeTodo(ctx, mom, bill.ID, 7))
+	if got := must(f.store.TodoReminders(ctx, dad)); len(got) != 0 {
+		t.Fatalf("told while snoozed: %+v", got)
+	}
+	// Someone moves the due date to today: the snooze ends, and today's stage is told at once.
+	moved := must(f.store.UpdateTodo(ctx, dad, bill.ID, TodoEdit{Title: "交电费", Category: "bill", Due: "2026-10-29", Version: 1}))
+	if moved.SnoozedUntil != "" || moved.RemindRound != 2 {
+		t.Fatalf("moved = %+v", moved)
+	}
+	if got := reminderKeys(must(f.store.TodoReminders(ctx, mom))); !slices.Equal(got, []string{"todo:" + bill.ID + ":2:today"}) {
+		t.Fatalf("after the new due date = %v", got)
+	}
+	// An edit that keeps the due date keeps the snooze.
+	snoozed := must(f.store.SnoozeTodo(ctx, mom, bill.ID, 3))
+	kept := must(f.store.UpdateTodo(ctx, mom, bill.ID, TodoEdit{Title: "交水费", Category: "bill", Due: "2026-10-29", Version: 2}))
+	if kept.SnoozedUntil != snoozed.SnoozedUntil || kept.RemindRound != snoozed.RemindRound {
+		t.Fatalf("an edit of the title = %+v", kept)
+	}
+}
+
+func TestPurgeForgetsKeysOfLongClosedTodos(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	closed := must(f.store.AddTodo(ctx, mom, TodoFields{Title: "交电费", Due: "2026-10-29"}))
+	open := must(f.store.AddTodo(ctx, mom, TodoFields{Title: "交水费", Due: "2026-10-29"}))
+	wantErr(t, f.store.AcknowledgeTodoReminders(ctx, mom, []string{
+		"todo:" + closed.ID + ":0:today", "todo:" + open.ID + ":0:today"}), nil)
+	// A key of the family center's own hints is left alone.
+	if _, err := f.store.db.Exec("INSERT INTO hints_seen(account_id, hint_key, seen_at) VALUES(?, ?, ?)",
+		mom.AccountID, "vaccine:baby:hepb:1", formatTime(f.now)); err != nil {
+		t.Fatal(err)
+	}
+	must(f.store.SetTodoStatus(ctx, mom, closed.ID, TodoDone))
+	keys := func() []string {
+		rows, err := f.store.db.Query("SELECT hint_key FROM hints_seen ORDER BY hint_key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var got []string
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, key)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	// Within ClosedTodoDays the closed to-do still lists, and its keys stay.
+	f.now = f.now.AddDate(0, 0, ClosedTodoDays-1)
+	wantErr(t, f.store.Purge(ctx), nil)
+	if got := keys(); len(got) != 3 {
+		t.Fatalf("purged too early: %v", got)
+	}
+	f.now = f.now.AddDate(0, 0, 2)
+	wantErr(t, f.store.Purge(ctx), nil)
+	if got := keys(); !slices.Equal(got, []string{"todo:" + open.ID + ":0:today", "vaccine:baby:hepb:1"}) {
+		t.Fatalf("after the purge = %v", got)
+	}
+}

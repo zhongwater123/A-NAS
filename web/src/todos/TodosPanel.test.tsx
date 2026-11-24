@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,7 +8,7 @@ import { forgetPeople, rememberPerson } from "../people/people";
 import { session } from "../test/fixtures";
 import { reminder, todo, todosHandlers } from "../test/handlers/todos";
 import { apiError, http, server } from "../test/server";
-import { resetTodoReminders } from "./reminders";
+import { forgetTodos } from "./queries";
 import { TodosPanel } from "./TodosPanel";
 
 // daysFromToday is a date relative to the day the test runs.
@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   forgetPeople();
-  act(() => resetTodoReminders());
+  forgetTodos();
 });
 
 const rent = todo({ id: "todo_rent", title: "交物业费", due: daysFromToday(2), amountCents: 12850 });
@@ -72,7 +72,7 @@ describe("TodosPanel", () => {
   it("shows what is open, what waits and what was closed, the urgent marked", async () => {
     const served = todosHandlers({ todos: [insurance, passport, checkup, rent] });
     server.use(...served.handlers);
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
 
     const open = await screen.findByRole("region", { name: "待处理" });
     const rows = within(open).getAllByRole("listitem");
@@ -94,7 +94,7 @@ describe("TodosPanel", () => {
 
   it("says all is done when nothing is open", async () => {
     server.use(...todosHandlers({ todos: [] }).handlers);
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
     expect(await screen.findByText("都处理完了")).toBeTruthy();
   });
 
@@ -102,7 +102,7 @@ describe("TodosPanel", () => {
     const served = todosHandlers({ todos: [] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
     await user.click(await screen.findByRole("button", { name: "新建" }));
     const dialog = await screen.findByRole("dialog", { name: "新建待办" });
     const save = within(dialog).getByRole("button", { name: "保存" }) as HTMLButtonElement;
@@ -115,6 +115,7 @@ describe("TodosPanel", () => {
     await user.clear(within(dialog).getByRole("textbox", { name: "什么事" }));
     await user.type(within(dialog).getByRole("textbox", { name: "什么事" }), "交物业费");
     await user.selectOptions(within(dialog).getByRole("combobox", { name: "类别" }), "bill");
+    await within(dialog).findByRole("option", { name: "爸爸" });
     await user.selectOptions(within(dialog).getByRole("combobox", { name: "谁的" }), "user:dad");
     await user.type(within(dialog).getByRole("textbox", { name: "金额（元）" }), "128.5");
     fireEvent.change(within(dialog).getByLabelText("截止日"), { target: { value: daysFromToday(5) } });
@@ -140,7 +141,7 @@ describe("TodosPanel", () => {
     const served = todosHandlers({ todos: [rent, passport, insurance] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
 
     await user.click(await screen.findByRole("button", { name: "已处理：交物业费" }));
     await waitFor(() => expect(served.sent.status).toEqual([{ todoId: "todo_rent", status: "done" }]));
@@ -164,7 +165,7 @@ describe("TodosPanel", () => {
     const served = todosHandlers({ todos: [{ ...rent, version: 3 }] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
 
     await user.click(await screen.findByRole("button", { name: "更多操作：交物业费" }));
     await user.click(await screen.findByRole("menuitem", { name: "编辑" }));
@@ -202,7 +203,7 @@ describe("TodosPanel", () => {
     const served = todosHandlers({ todos: [insurance] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
     const closed = await screen.findByRole("region", { name: "最近处理" });
     await user.click(within(closed).getByRole("button", { name: "更多操作：续车险" }));
     await user.click(await screen.findByRole("menuitem", { name: "编辑" }));
@@ -215,12 +216,39 @@ describe("TodosPanel", () => {
     expect(await within(after).findByText("续保 · 全家 · ¥3,200.00 · grandpa处理")).toBeTruthy();
   });
 
+  it("offers only active accounts, and keeps the owner a to-do already has", async () => {
+    // grandpa's account is disabled: still a profile, no longer an owner.
+    rememberPerson({ id: "user:grandpa", username: "grandpa" });
+    const theirs = todo({ id: "todo_theirs", title: "换老花镜", ownerId: "user:grandpa", ownerName: "grandpa" });
+    const served = todosHandlers({ todos: [rent, theirs] });
+    server.use(...served.handlers);
+    const user = userEvent.setup();
+    render(<TodosPanel userId="user:mom" />);
+
+    await user.click(await screen.findByRole("button", { name: "新建" }));
+    let dialog = await screen.findByRole("dialog", { name: "新建待办" });
+    await within(dialog).findByRole("option", { name: "爸爸" });
+    const offered = (box: HTMLElement) =>
+      within(within(box).getByRole("combobox", { name: "谁的" }))
+        .getAllByRole("option")
+        .map((option) => option.textContent);
+    expect(offered(dialog)).toEqual(["全家", "爸爸", "mom"]);
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    await user.click(screen.getByRole("button", { name: "更多操作：换老花镜" }));
+    await user.click(await screen.findByRole("menuitem", { name: "编辑" }));
+    dialog = await screen.findByRole("dialog", { name: "编辑待办" });
+    await within(dialog).findByRole("option", { name: "爸爸" });
+    expect(offered(dialog)).toEqual(["全家", "爸爸", "mom", "grandpa"]);
+    expect((within(dialog).getByRole("combobox", { name: "谁的" }) as HTMLSelectElement).value).toBe("user:grandpa");
+  });
+
   it("acknowledges a reminder from the window", async () => {
     const due = reminder({ todoId: "todo_rent", due: rent.due });
     const served = todosHandlers({ todos: [rent], reminders: [due] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
     const reminders = await screen.findByRole("region", { name: "要提醒的" });
     expect(within(reminders).getByText("还有 2 天")).toBeTruthy();
     await user.click(within(reminders).getByRole("button", { name: "知道了：交物业费" }));
@@ -232,7 +260,7 @@ describe("TodosPanel", () => {
     server.use(...todosHandlers({ todos: [rent, passport] }).handlers);
     const intent = { todoId: "todo_passport" };
     const onIntentHandled = vi.fn();
-    render(<TodosPanel intent={intent} onIntentHandled={onIntentHandled} />);
+    render(<TodosPanel userId="user:mom" intent={intent} onIntentHandled={onIntentHandled} />);
     await waitFor(() => expect(onIntentHandled).toHaveBeenCalledWith(intent));
     const row = (await screen.findByText("换护照")).closest("li");
     await waitFor(() => expect(row?.getAttribute("aria-current")).toBe("true"));
@@ -243,8 +271,10 @@ describe("TodosPanel", () => {
       http.get("/api/v1/todos", ({ response }) => response(503).json(apiError("family_unavailable"))),
       http.get("/api/v1/todos/reminders", ({ response }) => response(503).json(apiError("family_unavailable"))),
     );
-    render(<TodosPanel />);
+    render(<TodosPanel userId="user:mom" />);
     expect(await screen.findByText("待办暂时不可用（数据盘未就绪），请稍后再试")).toBeTruthy();
+    // Only the window's own heading; how the to-dos work is in the spec, not under the title.
+    expect(screen.getByRole("heading", { name: "待办" }).nextElementSibling?.tagName).toBe("BUTTON");
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 });

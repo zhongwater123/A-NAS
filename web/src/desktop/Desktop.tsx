@@ -434,6 +434,7 @@ export function Desktop({
           <ShellPart name="todo reminders">
             <Suspense fallback={null}>
               <TodoNotices
+                userId={session.user.id}
                 shared={isLocalConsole()}
                 onWake={isLocalConsole() ? onLocalConsoleDismissed : undefined}
                 onOpen={(todoId) => open("todos", { todoId })}

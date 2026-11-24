@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isoDate } from "../lib/time";
 import { reminder, todosHandlers } from "../test/handlers/todos";
-import { http, server } from "../test/server";
-import { resetTodoReminders } from "./reminders";
+import { apiError, http, server } from "../test/server";
+import { forgetTodos } from "./queries";
 import { TodoNotices } from "./TodoNotices";
 
 // A test that wakes the local console tells who listens, as the screen saver does.
@@ -15,7 +16,7 @@ const onWake = (listener: () => void) => {
   return () => woken.delete(listener);
 };
 
-afterEach(() => act(() => resetTodoReminders()));
+afterEach(() => forgetTodos());
 
 const daysFromToday = (days: number) => {
   const date = new Date();
@@ -39,7 +40,7 @@ describe("TodoNotices", () => {
     const served = todosHandlers({ reminders: [car, water, rent, passport] });
     server.use(...served.handlers);
     const user = userEvent.setup();
-    render(<TodoNotices shared={false} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
     const notice = await screen.findByRole("status", { name: "待办提醒" });
     expect(notice.closest("[data-vnas-overlay]")).toBeTruthy();
     expect(within(notice).getByText("续车险").nextSibling?.textContent).toBe("已过期 1 天");
@@ -60,7 +61,7 @@ describe("TodoNotices", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const served = todosHandlers({ reminders: [rent] });
     server.use(...served.handlers);
-    render(<TodoNotices shared={false} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
     const notice = await screen.findByRole("status", { name: "待办提醒" });
     const holder = notice.parentElement as HTMLElement;
     fireEvent.pointerEnter(holder);
@@ -80,7 +81,7 @@ describe("TodoNotices", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const served = todosHandlers({ reminders: [rent] });
     server.use(...served.handlers);
-    render(<TodoNotices shared={false} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
     const notice = await screen.findByRole("status", { name: "待办提醒" });
     fireEvent.pointerEnter(notice.parentElement as HTMLElement);
     fireEvent.click(within(notice).getByRole("button", { name: "关闭" }));
@@ -101,7 +102,7 @@ describe("TodoNotices", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const served = todosHandlers({ reminders: [rent] });
     server.use(...served.handlers);
-    render(<TodoNotices shared onWake={onWake} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared onWake={onWake} onOpen={vi.fn()} />);
     await screen.findByRole("status", { name: "待办提醒" });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(16_000);
@@ -118,14 +119,14 @@ describe("TodoNotices", () => {
     server.use(...served.handlers);
     const onOpen = vi.fn();
     const user = userEvent.setup();
-    const { unmount } = render(<TodoNotices shared={false} onOpen={onOpen} />);
+    const { unmount } = render(<TodoNotices userId="user:mom" shared={false} onOpen={onOpen} />);
     await user.click(await screen.findByRole("button", { name: /去看看/ }));
     expect(onOpen).toHaveBeenCalledWith("rent");
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
     unmount();
 
     // The next visit tells them again.
-    render(<TodoNotices shared={false} onOpen={onOpen} />);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={onOpen} />);
     const notice = await screen.findByRole("status", { name: "待办提醒" });
     await user.click(within(notice).getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
@@ -136,12 +137,77 @@ describe("TodoNotices", () => {
     const checkup = reminder({ todoId: "checkup", title: "儿童医院复查", category: "medical", due: daysFromToday(1) });
     const own = reminder({ todoId: "own", title: "还信用卡", scope: "private", due: daysFromToday(2) });
     server.use(...todosHandlers({ reminders: [checkup, own] }).handlers);
-    render(<TodoNotices shared onWake={onWake} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared onWake={onWake} onOpen={vi.fn()} />);
     const notice = await screen.findByRole("status", { name: "待办提醒" });
     expect(within(notice).getByText("一件医疗的事")).toBeTruthy();
     expect(within(notice).getByText("你有 1 件自己的待办要看")).toBeTruthy();
     expect(screen.queryByText(/儿童医院/)).toBeNull();
     expect(screen.queryByText(/信用卡/)).toBeNull();
+  });
+
+  it("shows nothing of the account signed in before, even when the next one's read fails", async () => {
+    server.use(...todosHandlers({ reminders: [rent] }).handlers);
+    const { rerender } = render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
+    await screen.findByRole("status", { name: "待办提醒" });
+    // dad signs in on the same page while the disk is not ready.
+    server.use(
+      http.get("/api/v1/todos/reminders", ({ response }) => response(503).json(apiError("family_unavailable"))),
+    );
+    rerender(<TodoNotices userId="user:dad" shared={false} onOpen={vi.fn()} />);
+    expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
+  });
+
+  it("shows nothing once the session is gone", async () => {
+    server.use(...todosHandlers({ reminders: [rent] }).handlers);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
+    await screen.findByRole("status", { name: "待办提醒" });
+    server.use(
+      http.get("/api/v1/todos/reminders", () =>
+        HttpResponse.json(apiError("authentication_required"), { status: 401 }),
+      ),
+    );
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull());
+  });
+
+  it("does not bring back what was acknowledged with a read that left before", async () => {
+    const acknowledged = new Set<string>();
+    let gate: Promise<void> | undefined;
+    let open = () => {};
+    server.use(
+      http.get("/api/v1/todos/reminders", async ({ response }) => {
+        // What the server lists when the read arrives, answered when the gate opens.
+        const items = [rent, water].filter((item) => !acknowledged.has(item.key));
+        await gate;
+        return response(200).json({ items });
+      }),
+      http.post("/api/v1/todos/reminders/seen", async ({ request, response }) => {
+        for (const key of (await request.json()).keys) acknowledged.add(key);
+        return response(204).empty();
+      }),
+    );
+    const user = userEvent.setup();
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
+    const notice = await screen.findByRole("status", { name: "待办提醒" });
+    gate = new Promise((resolve) => (open = resolve));
+    // The page comes back into view: a read leaves, and waits.
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await user.click(within(notice).getByRole("button", { name: "知道了" }));
+    await waitFor(() => expect(acknowledged.size).toBe(2));
+    expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
+    await act(async () => {
+      open();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
   });
 
   it("reads again when the page comes back and just after midnight, without polling", async () => {
@@ -154,7 +220,7 @@ describe("TodoNotices", () => {
         return response(200).json({ items: [] });
       }),
     );
-    render(<TodoNotices shared={false} onOpen={vi.fn()} />);
+    render(<TodoNotices userId="user:mom" shared={false} onOpen={vi.fn()} />);
     await waitFor(() => expect(reads).toBe(1));
     // The rest of the day reads nothing more.
     await act(async () => {

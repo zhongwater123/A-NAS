@@ -99,6 +99,27 @@ func TestTodoFieldsAreChecked(t *testing.T) {
 	if cleared.OwnerID != "" || cleared.OwnerName != "" {
 		t.Fatalf("cleared = %+v", cleared)
 	}
+	// Once dad's account is gone, he is no longer offered, and a new to-do cannot be his.
+	for _, owner := range must(f.store.TodoOwners(ctx)) {
+		if owner.ID == dad.AccountID {
+			t.Fatalf("a gone account is offered: %+v", owner)
+		}
+	}
+	_, err = f.store.AddTodo(ctx, mom, TodoFields{Title: "交费", OwnerID: dad.AccountID})
+	wantErr(t, err, ErrInvalid)
+}
+
+func TestTodoOwnersAreTheActiveAccounts(t *testing.T) {
+	f := newFixture(t)
+	owners := must(f.store.TodoOwners(context.Background()))
+	if len(owners) != len(f.accounts) {
+		t.Fatalf("owners = %+v", owners)
+	}
+	for i, owner := range owners {
+		if f.accounts[owner.ID].Username != owner.Username || i > 0 && owners[i-1].Username > owner.Username {
+			t.Fatalf("owners = %+v", owners)
+		}
+	}
 }
 
 func TestTodoStatusChanges(t *testing.T) {

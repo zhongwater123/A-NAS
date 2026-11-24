@@ -36,7 +36,7 @@
 6. **家庭服务另外持有家庭待办**（2026-11-17 修订；行为见[家庭待办规格](../specs/family-todos.md)）：
    - 用户定了待办是 A-NAS 本体的能力、范围按来源分（[决定](../decisions/2026-11-16-family-todos-first-step.md)）。待办存在家庭服务的 `family.db` 中（第 4 步迁移），不新开服务、身份、systemd 单元或存储：家庭服务已有数据卷上的专属存储、按账号记“看过了”的表、账号删除的通道与审计，而新开一个内置服务要接的线很多（[ADR 0037](0037-plug-removable-modules-in-as-separate-services.md)）。
    - 待办不按家庭 Policy 授权，也不要求加入家庭中心，按“共享 / 本人”授权：每件待办记一个“给谁看”的账号 ID，为空的是共享待办，所有有效账号都能读写（决定 3：NAS 的账号就是家人）；不为空的只有那个账号能读写，别人一律得到“不存在”。手工新建的都是共享待办，只给本人看的留给以后邮件、个人空间来的待办。设备管理员同样没有额外权限。
-   - 前缀是 `/api/v1/todos`：`anas-api` 把它和 `/api/v1/family` 一样以 `session` 姿态挂在家庭服务上，连同会话令牌转发（[`routes.go`](../../internal/httpapi/routes.go) 第 111–117 行的家庭挂载多挂一个前缀，先例是第 130–134 行传输中心的两个前缀）；家庭服务对 `/` 统一确认会话（[`service.go`](../../internal/familyservice/service.go) 第 174–176 行），所以安装与单元都不用改。
+   - 前缀是 `/api/v1/todos`：`anas-api` 把它和 `/api/v1/family` 一样以 `session` 姿态挂在家庭服务上，连同会话令牌转发（[`routes.go`](../../internal/httpapi/routes.go) 的 `mounts()` 中 `h.Family` 那一段多挂一个前缀，先例是同一函数里 `h.Transfers` 那一段挂的传输中心两个前缀）；家庭服务对 `/` 统一确认会话（[`service.go`](../../internal/familyservice/service.go) 的 `familyservice.Run` 里 `/` 的处理），所以安装与单元都不用改。
 
 ## 后果
 
