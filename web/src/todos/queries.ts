@@ -22,11 +22,21 @@ import {
 // answer is, once.
 const retry = (failures: number, error: unknown) => failures < 1 && !(error instanceof APIError && error.status < 500);
 
-// Reads happen when a window opens, when the page comes back into view, just
-// after midnight and after a change (useFreshTodos, changedTodo); nothing polls.
+// Reads happen when a window opens, when the page comes back into view
+// (refetchOnWindowFocus), just after local midnight, when what is due moves a
+// day closer (dueRefetch), and after a change (changedTodo); nothing polls.
 export const todoClient = new QueryClient({
-  defaultOptions: { queries: { retry, refetchOnWindowFocus: false, refetchOnReconnect: false } },
+  defaultOptions: { queries: { retry, refetchOnReconnect: false } },
 });
+// Without a QueryClientProvider nothing mounts the client, and an unmounted
+// client does not hear the page come back into view. It lives as long as
+// the page.
+todoClient.mount();
+
+// What is due changes at local midnight: a page that stays open, such as the
+// local console, reads again just after it. A hidden page waits until it is
+// seen again, which reads anyway.
+const dueRefetch = { refetchInterval: () => untilNextDay(), refetchIntervalInBackground: false } as const;
 
 const keys = {
   account: (account: string) => ["todos", account] as const,
@@ -46,10 +56,13 @@ function useOnlyAccount(account: string) {
   }, [account]);
 }
 
-/** The to-dos the account sees, unsorted. */
+/** The to-dos the account sees, in the server's order: the most urgent first. */
 export function useTodos(account: string) {
   useOnlyAccount(account);
-  return useQuery({ queryKey: keys.list(account), queryFn: ({ signal }) => listTodos(signal) }, todoClient);
+  return useQuery(
+    { queryKey: keys.list(account), queryFn: ({ signal }) => listTodos(signal), ...dueRefetch },
+    todoClient,
+  );
 }
 
 /** Reads the to-dos now, as when another window asks for one that may be new. */
@@ -70,7 +83,7 @@ export function useTodoOwners(account: string): TodoOwner[] {
 export function useTodoReminders(account: string): TodoReminder[] {
   useOnlyAccount(account);
   const query = useQuery(
-    { queryKey: keys.reminders(account), queryFn: ({ signal }) => listTodoReminders(signal) },
+    { queryKey: keys.reminders(account), queryFn: ({ signal }) => listTodoReminders(signal), ...dueRefetch },
     todoClient,
   );
   if (query.error instanceof APIError && query.error.status === 401) return noReminders;
@@ -97,12 +110,22 @@ export function useAcknowledgeReminders(account: string) {
   );
 }
 
-/** Puts a to-do the server just returned into the list, and reads the reminders again: a change can start them over or end them. */
+/**
+ * Shows a to-do the server just returned at once, then reads the list and
+ * the reminders again: the server orders the list, and a change can start
+ * the reminders over or end them. A read already on its way left before the
+ * change, so it is replaced.
+ */
 export function changedTodo(account: string, todo: Todo): void {
   todoClient.setQueryData<Todo[]>(
     keys.list(account),
-    (current) => current && [...current.filter((item) => item.id !== todo.id), todo],
+    (current) =>
+      current &&
+      (current.some((item) => item.id === todo.id)
+        ? current.map((item) => (item.id === todo.id ? todo : item))
+        : [...current, todo]),
   );
+  void todoClient.invalidateQueries({ queryKey: keys.list(account) });
   void todoClient.invalidateQueries({ queryKey: keys.reminders(account) });
 }
 
@@ -114,35 +137,6 @@ export function readListAgain(account: string): Promise<void> {
 /** Reads the account's to-dos and reminders again now, as when someone wakes the local console. */
 export function readAgain(account: string): Promise<void> {
   return todoClient.invalidateQueries({ queryKey: keys.account(account) }, { cancelRefetch: false });
-}
-
-/**
- * Reads what is shown again when the page comes back into view and just
- * after midnight, when what is due moves a day closer; a page that stays
- * open, such as the local console, would otherwise keep yesterday's stages.
- */
-export function useFreshTodos(account: string) {
-  useEffect(() => {
-    let timer = 0;
-    const nextDay = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        void readAgain(account);
-        nextDay();
-      }, untilNextDay());
-    };
-    const back = () => {
-      if (document.visibilityState !== "visible") return;
-      void readAgain(account);
-      nextDay();
-    };
-    nextDay();
-    document.addEventListener("visibilitychange", back);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", back);
-    };
-  }, [account]);
 }
 
 /** For tests: forget everything read. */

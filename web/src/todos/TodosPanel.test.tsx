@@ -8,7 +8,7 @@ import { forgetPeople, rememberPerson } from "../people/people";
 import { session } from "../test/fixtures";
 import { reminder, todo, todosHandlers } from "../test/handlers/todos";
 import { apiError, http, server } from "../test/server";
-import { forgetTodos } from "./queries";
+import { forgetTodos, todoClient } from "./queries";
 import { TodosPanel } from "./TodosPanel";
 
 // daysFromToday is a date relative to the day the test runs.
@@ -70,7 +70,8 @@ const insurance = todo({
 
 describe("TodosPanel", () => {
   it("shows what is open, what waits and what was closed, the urgent marked", async () => {
-    const served = todosHandlers({ todos: [insurance, passport, checkup, rent] });
+    // In the server's order: open by due date, undated last, then closed.
+    const served = todosHandlers({ todos: [checkup, rent, passport, insurance] });
     server.use(...served.handlers);
     render(<TodosPanel userId="user:mom" />);
 
@@ -179,6 +180,8 @@ describe("TodosPanel", () => {
       body: { title: "交物业费", category: "bill", due: rent.due, version: 3 },
     });
     expect(await screen.findByText("已保存")).toBeTruthy();
+    // The list is read again after the save; let that read finish first.
+    await waitFor(() => expect(todoClient.isFetching()).toBe(0));
 
     let reads = 0;
     server.use(

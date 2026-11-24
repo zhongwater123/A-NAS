@@ -5,4 +5,6 @@
 .tn-notice {
   --desk-notice-mark: linear-gradient(155deg, #4fd19c, #14875f);
   --desk-notice-link: var(--color-success);
+  /* Every reminder is due within three days or overdue. */
+  --desk-notice-note: var(--color-danger);
 }

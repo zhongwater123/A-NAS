@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { DeskNotice } from "../ui/DeskNotice";
 import { reminderLines } from "./format";
 import styles from "./notices.module.css";
-import { readAgain, useAcknowledgeReminders, useFreshTodos, useTodoReminders } from "./queries";
+import { readAgain, useAcknowledgeReminders, useTodoReminders } from "./queries";
 
 const SHOWN = 3;
 
@@ -30,9 +30,8 @@ export function TodoNotices({
   onOpen(todoId: string): void;
 }) {
   // Read after signing in, whenever the page comes back into view and just
-  // after midnight, when to-dos move into their next stage.
+  // after midnight, when to-dos move into their next stage (queries.ts).
   const reminders = useTodoReminders(userId);
-  useFreshTodos(userId);
   const acknowledge = useAcknowledgeReminders(userId);
   // Reminders hidden on this page; the server still has them unacknowledged.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
@@ -62,10 +61,7 @@ export function TodoNotices({
       label="待办提醒"
       source="待办"
       icon={<ListTodo />}
-      lines={[
-        ...shown.map((line) => ({ key: line.key, text: line.title, note: line.when })),
-        ...(privateCount > 0 ? [`你有 ${privateCount} 件自己的待办要看`] : []),
-      ]}
+      lines={[...shown, ...(privateCount > 0 ? [`你有 ${privateCount} 件自己的待办要看`] : [])]}
       more={more > 0 ? `另有 ${more} 件` : undefined}
       action={
         shown.length > 0

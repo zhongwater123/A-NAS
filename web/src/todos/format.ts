@@ -1,10 +1,12 @@
-// Which to-dos are urgent or waiting, in what order they list, and the lines
-// of the desktop's notice. How a due date is worded is lib/time's dueText.
+// Which to-dos are urgent or waiting, whose they are, and the lines of the
+// desktop's notice. How a due date is worded is lib/time's dueText; the
+// order they list in is the server's.
 import { daysUntil, dueText, type TimeValue } from "../lib/time";
+import { nameOfAccount, type People } from "../people/people";
 import { CATEGORY_LABEL, type Todo, type TodoReminder } from "./api";
 
 // Reminders start this many days before the due date.
-export const SOON_DAYS = 3;
+const SOON_DAYS = 3;
 
 // urgent says a to-do is due within the reminder days or overdue.
 export function urgent(todo: Pick<Todo, "due">, now: TimeValue = Date.now()): boolean {
@@ -16,30 +18,17 @@ export function snoozed(todo: Pick<Todo, "status" | "snoozedUntil">, now: TimeVa
   return todo.status === "open" && Boolean(todo.snoozedUntil) && daysUntil(todo.snoozedUntil ?? "", now) > 0;
 }
 
-// byUrgency orders open to-dos the most urgent first, those without a due
-// date last; closed ones the latest closed first.
-export function byUrgency(a: Todo, b: Todo): number {
-  if ((a.status === "open") !== (b.status === "open")) return a.status === "open" ? -1 : 1;
-  if (a.status !== "open") return (b.closedAt ?? "").localeCompare(a.closedAt ?? "");
-  if (a.due !== b.due) {
-    if (!a.due) return 1;
-    if (!b.due) return -1;
-    return a.due.localeCompare(b.due);
-  }
-  return a.createdAt.localeCompare(b.createdAt);
-}
-
-export interface ReminderLine {
-  key: string;
-  title: string;
-  when: string;
+// accountName names an account a to-do records, by its profile, or by the
+// name the to-do kept once the account is gone.
+export function accountName(people: People, id: string, kept: string | undefined): string {
+  return nameOfAccount(people, id, kept ?? "已删除的账号");
 }
 
 // reminderLines turns reminders into the lines of the desktop's notice. On
 // the family's shared screen (shared), a medical matter shows only its
 // category and someone's private to-dos only how many there are.
 export function reminderLines(reminders: TodoReminder[], shared: boolean, now: TimeValue = Date.now()) {
-  const lines: ReminderLine[] = [];
+  const lines: Array<{ key: string; text: string; note: string }> = [];
   let hidden = 0;
   for (const reminder of reminders) {
     if (shared && reminder.scope === "private") {
@@ -48,8 +37,8 @@ export function reminderLines(reminders: TodoReminder[], shared: boolean, now: T
     }
     lines.push({
       key: reminder.key,
-      title: shared && reminder.category === "medical" ? `一件${CATEGORY_LABEL.medical}的事` : reminder.title,
-      when: dueText(reminder.due, now),
+      text: shared && reminder.category === "medical" ? `一件${CATEGORY_LABEL.medical}的事` : reminder.title,
+      note: dueText(reminder.due, now),
     });
   }
   return { lines, privateCount: hidden };

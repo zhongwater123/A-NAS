@@ -3,7 +3,7 @@ import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import { parseYuan, yuanText } from "../lib/money";
-import { displayName, usePeople } from "../people/people";
+import { nameOfAccount, usePeople } from "../people/people";
 import { Modal } from "../ui/modal";
 import {
   addTodo,
@@ -16,6 +16,7 @@ import {
   type TodoCategory,
   updateTodo,
 } from "./api";
+import { accountName } from "./format";
 import { useTodoOwners } from "./queries";
 import styles from "./todos.module.css";
 
@@ -56,12 +57,9 @@ export function TodoDialog({
   const ready = length > 0 && length <= TITLE_MAX && !amountWrong;
   // Only active accounts are offered; a to-do's owner whose account was
   // disabled or is gone stays chosen, under the name it had.
-  const owners = active.map((owner) => ({ id: owner.id, name: displayName(people.byId(owner.id) ?? owner) }));
+  const owners = active.map((owner) => ({ id: owner.id, name: nameOfAccount(people, owner.id, owner.username) }));
   if (todo?.ownerId && !owners.some((owner) => owner.id === todo.ownerId))
-    owners.push({
-      id: todo.ownerId,
-      name: displayName(people.byId(todo.ownerId) ?? { username: todo.ownerName ?? "已删除的账号" }),
-    });
+    owners.push({ id: todo.ownerId, name: accountName(people, todo.ownerId, todo.ownerName) });
 
   const save = async () => {
     if (!ready || busy) return;

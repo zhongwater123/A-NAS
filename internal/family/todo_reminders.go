@@ -3,10 +3,12 @@ package family
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // RemindDays is how many days before its due date a to-do is coming up.
@@ -71,15 +73,18 @@ func reminderKey(id string, round int64, stage string) string {
 }
 
 // dueReminders lists every reminder the caller's to-dos give today,
-// acknowledged or not, by due date.
+// acknowledged or not, by due date. Only open to-dos due by RemindDays from
+// today and not snoozed past today are read; most open ones are weeks away.
 func (s *Store) dueReminders(ctx context.Context, q queryer, actor Actor) ([]TodoReminder, error) {
-	rows, err := q.QueryContext(ctx, "SELECT "+todoColumns+" FROM todos WHERE "+visibleTodos+
-		" AND status = 'open' AND due_on IS NOT NULL ORDER BY due_on, created_at, id", actor.AccountID)
+	today := s.today()
+	rows, err := q.QueryContext(ctx, "SELECT "+todoColumns+" FROM todos WHERE "+visibleTodos+`
+AND status = 'open' AND due_on <= ? AND (snoozed_until IS NULL OR snoozed_until <= ?)
+ORDER BY due_on, created_at, id`,
+		actor.AccountID, today.AddDate(0, 0, RemindDays).Format(dateLayout), today.Format(dateLayout))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	today := s.today()
 	reminders := []TodoReminder{}
 	for rows.Next() {
 		todo, err := scanTodo(rows)
@@ -129,20 +134,12 @@ func (s *Store) seenTodoKeys(ctx context.Context, actor Actor, due []TodoReminde
 	for _, reminder := range due {
 		args = append(args, reminder.Key)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT hint_key FROM hints_seen WHERE account_id = ? AND hint_key IN (?"+
-		strings.Repeat(", ?", len(due)-1)+")", args...)
+	rows, err := s.db.QueryContext(ctx, "SELECT hint_key FROM hints_seen WHERE account_id = ? AND hint_key IN ("+
+		sqlitedb.Placeholders(len(due))+")", args...)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		seen[key] = true
-	}
-	return seen, rows.Err()
+	return hintKeySet(rows)
 }
 
 // purgeTodoKeys forgets the acknowledgements of to-dos closed more than
@@ -161,11 +158,11 @@ AND substr(hint_key, 6, instr(substr(hint_key, 6), ':') - 1) IN (SELECT id FROM 
 // does not fail the request, and nobody can fill hints_seen with keys of
 // their own making. Keys that are not to-do keys are ErrInvalid.
 func (s *Store) AcknowledgeTodoReminders(ctx context.Context, actor Actor, keys []string) error {
-	if len(keys) > maxHintKeys {
-		return ErrInvalid
+	if err := checkHintKeys(keys); err != nil {
+		return err
 	}
 	for _, key := range keys {
-		if len(key) > maxHintKeyBytes || !utf8.ValidString(key) || !strings.HasPrefix(key, todoKeyPrefix) {
+		if !strings.HasPrefix(key, todoKeyPrefix) {
 			return ErrInvalid
 		}
 	}
@@ -178,16 +175,6 @@ func (s *Store) AcknowledgeTodoReminders(ctx context.Context, actor Actor, keys 
 		for _, reminder := range due {
 			current[reminder.Key] = true
 		}
-		now := formatTime(s.now())
-		for _, key := range keys {
-			if !current[key] {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO hints_seen(account_id, hint_key, seen_at) VALUES(?, ?, ?)",
-				actor.AccountID, key, now); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.markHintsSeen(ctx, tx, actor, slices.DeleteFunc(slices.Clone(keys), func(key string) bool { return !current[key] }))
 	})
 }

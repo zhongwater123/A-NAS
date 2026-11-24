@@ -18,6 +18,10 @@ const onWake = (listener: () => void) => {
 
 afterEach(() => forgetTodos());
 
+// The page comes back into view. A browser's visibilitychange bubbles up to
+// window, where TanStack Query listens.
+const pageShown = () => document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+
 const daysFromToday = (days: number) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -89,7 +93,7 @@ describe("TodoNotices", () => {
 
     server.use(...todosHandlers({ reminders: [rent, water] }).handlers);
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      pageShown();
     });
     expect(await screen.findByText("交水费")).toBeTruthy();
     await act(async () => {
@@ -156,7 +160,7 @@ describe("TodoNotices", () => {
     rerender(<TodoNotices userId="user:dad" shared={false} onOpen={vi.fn()} />);
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      pageShown();
     });
     expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull();
   });
@@ -171,7 +175,7 @@ describe("TodoNotices", () => {
       ),
     );
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      pageShown();
     });
     await waitFor(() => expect(screen.queryByRole("status", { name: "待办提醒" })).toBeNull());
   });
@@ -198,7 +202,7 @@ describe("TodoNotices", () => {
     gate = new Promise((resolve) => (open = resolve));
     // The page comes back into view: a read leaves, and waits.
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      pageShown();
     });
     await user.click(within(notice).getByRole("button", { name: "知道了" }));
     await waitFor(() => expect(acknowledged.size).toBe(2));
@@ -233,7 +237,7 @@ describe("TodoNotices", () => {
     });
     await waitFor(() => expect(reads).toBe(2));
     await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      pageShown();
     });
     await waitFor(() => expect(reads).toBe(3));
     await act(async () => {

@@ -280,10 +280,9 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			}
 			return err
 		}
-		if todo, err = visibleTodo(ctx, tx, actor, id); err != nil {
-			return err
-		}
-		return s.auditAs(ctx, tx, actor, "todo", "family.todo_added", id, todo.Title)
+		added, err := s.readBackTodo(ctx, tx, actor, id, "family.todo_added")
+		todo = added
+		return err
 	})
 	if errors.Is(err, ErrConflict) && fields.RequestKey != "" {
 		// Another request with the key won the race; answer with its to-do.
@@ -315,19 +314,14 @@ func (s *Store) UpdateTodo(ctx context.Context, actor Actor, id string, edit Tod
 	if err != nil {
 		return Todo{}, err
 	}
-	var todo Todo
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		current, err := visibleTodo(ctx, tx, actor, id)
-		if err != nil {
-			return err
-		}
+	return s.changeTodo(ctx, actor, id, func(tx *sql.Tx, current Todo) (string, error) {
 		if current.Version != edit.Version {
-			return ErrChanged
+			return "", ErrChanged
 		}
 		ownerName := current.OwnerName
 		if values.ownerID != current.OwnerID {
 			if !active {
-				return ErrInvalid
+				return "", ErrInvalid
 			}
 			ownerName = newOwnerName
 		}
@@ -335,18 +329,12 @@ func (s *Store) UpdateTodo(ctx context.Context, actor Actor, id string, edit Tod
 		if values.due != current.Due {
 			round, snoozed = round+1, ""
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE todos SET title = ?, category = ?, due_on = ?, owner_id = ?, owner_name = ?,
+		_, err := tx.ExecContext(ctx, `UPDATE todos SET title = ?, category = ?, due_on = ?, owner_id = ?, owner_name = ?,
 amount_cents = ?, snoozed_until = ?, remind_round = ?, version = version + 1, updated_at = ? WHERE id = ?`,
 			values.title, values.category, nullString(values.due), values.ownerID, ownerName, values.amount,
-			nullString(snoozed), round, formatTime(s.now()), id); err != nil {
-			return err
-		}
-		if todo, err = visibleTodo(ctx, tx, actor, id); err != nil {
-			return err
-		}
-		return s.auditAs(ctx, tx, actor, "todo", "family.todo_updated", id, todo.Title)
+			nullString(snoozed), round, formatTime(s.now()), current.ID)
+		return "family.todo_updated", err
 	})
-	return todo, err
 }
 
 // SetTodoStatus marks a to-do done or ignored, recording who and when, or
@@ -358,34 +346,19 @@ func (s *Store) SetTodoStatus(ctx context.Context, actor Actor, id, status strin
 	if status != TodoOpen && status != TodoDone && status != TodoIgnored {
 		return Todo{}, ErrInvalid
 	}
-	var todo Todo
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		current, err := visibleTodo(ctx, tx, actor, id)
-		if err != nil {
-			return err
-		}
+	return s.changeTodo(ctx, actor, id, func(tx *sql.Tx, current Todo) (string, error) {
 		if current.Status == status {
-			todo = current
-			return nil
+			return "", nil
 		}
-		action := "family.todo_reopened"
 		if status == TodoOpen {
-			_, err = tx.ExecContext(ctx, `UPDATE todos SET status = ?, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
-closed_by_name = NULL, remind_round = remind_round + 1 WHERE id = ?`, status, id)
-		} else {
-			action = "family.todo_" + status
-			_, err = tx.ExecContext(ctx, `UPDATE todos SET status = ?, snoozed_until = NULL, closed_at = ?, closed_by = ?,
-closed_by_name = ? WHERE id = ?`, status, formatTime(s.now()), actor.AccountID, actor.Username, id)
+			_, err := tx.ExecContext(ctx, `UPDATE todos SET status = ?, snoozed_until = NULL, closed_at = NULL, closed_by = NULL,
+closed_by_name = NULL, remind_round = remind_round + 1 WHERE id = ?`, status, current.ID)
+			return "family.todo_reopened", err
 		}
-		if err != nil {
-			return err
-		}
-		if todo, err = visibleTodo(ctx, tx, actor, id); err != nil {
-			return err
-		}
-		return s.auditAs(ctx, tx, actor, "todo", action, id, todo.Title)
+		_, err := tx.ExecContext(ctx, `UPDATE todos SET status = ?, snoozed_until = NULL, closed_at = ?, closed_by = ?,
+closed_by_name = ? WHERE id = ?`, status, formatTime(s.now()), actor.AccountID, actor.Username, current.ID)
+		return "family.todo_" + status, err
 	})
-	return todo, err
 }
 
 // SnoozeTodo quiets an open to-do's reminders until today plus days, by the
@@ -396,23 +369,47 @@ func (s *Store) SnoozeTodo(ctx context.Context, actor Actor, id string, days int
 		return Todo{}, ErrInvalid
 	}
 	until := s.today().AddDate(0, 0, days).Format(dateLayout)
+	return s.changeTodo(ctx, actor, id, func(tx *sql.Tx, current Todo) (string, error) {
+		if current.Status != TodoOpen {
+			return "", ErrConflict
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE todos SET snoozed_until = ?, remind_round = remind_round + 1 WHERE id = ?",
+			until, current.ID)
+		return "family.todo_snoozed", err
+	})
+}
+
+// changeTodo applies change to a to-do the caller can see, in one
+// transaction, then reads it back and records in the audit trail the action
+// change names. An empty action means nothing changed: the to-do is
+// answered as it was and nothing is recorded.
+func (s *Store) changeTodo(ctx context.Context, actor Actor, id string, change func(*sql.Tx, Todo) (string, error)) (Todo, error) {
 	var todo Todo
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		current, err := visibleTodo(ctx, tx, actor, id)
 		if err != nil {
 			return err
 		}
-		if current.Status != TodoOpen {
-			return ErrConflict
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE todos SET snoozed_until = ?, remind_round = remind_round + 1 WHERE id = ?",
-			until, id); err != nil {
+		action, err := change(tx, current)
+		if err != nil || action == "" {
+			todo = current
 			return err
 		}
-		if todo, err = visibleTodo(ctx, tx, actor, id); err != nil {
-			return err
-		}
-		return s.auditAs(ctx, tx, actor, "todo", "family.todo_snoozed", id, todo.Title)
+		todo, err = s.readBackTodo(ctx, tx, actor, id, action)
+		return err
 	})
-	return todo, err
+	if err != nil {
+		return Todo{}, err
+	}
+	return todo, nil
+}
+
+// readBackTodo reads a to-do just written and records action on it in the
+// audit trail, with its title as the detail.
+func (s *Store) readBackTodo(ctx context.Context, tx *sql.Tx, actor Actor, id, action string) (Todo, error) {
+	todo, err := visibleTodo(ctx, tx, actor, id)
+	if err != nil {
+		return Todo{}, err
+	}
+	return todo, s.auditAs(ctx, tx, actor, "todo", action, id, todo.Title)
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { reminder, todo } from "../test/handlers/todos";
-import { byUrgency, reminderLines, snoozed, urgent } from "./format";
+import { reminderLines, snoozed, urgent } from "./format";
 
 const now = new Date(2026, 10, 17, 9, 30);
 
@@ -17,22 +17,6 @@ describe("to-do states", () => {
     expect(snoozed(todo({ snoozedUntil: "2026-11-17" }), now)).toBe(false);
     expect(snoozed(todo({ snoozedUntil: "2026-11-18", status: "done" }), now)).toBe(false);
   });
-  it("orders the most urgent first, undated last and closed ones the latest first", () => {
-    const items = [
-      todo({ id: "closed-early", status: "done", closedAt: "2026-11-10T08:00:00Z" }),
-      todo({ id: "undated" }),
-      todo({ id: "later", due: "2026-12-01" }),
-      todo({ id: "closed-late", status: "ignored", closedAt: "2026-11-15T08:00:00Z" }),
-      todo({ id: "sooner", due: "2026-11-18" }),
-    ];
-    expect(items.toSorted(byUrgency).map((item) => item.id)).toEqual([
-      "sooner",
-      "later",
-      "undated",
-      "closed-late",
-      "closed-early",
-    ]);
-  });
 });
 
 describe("reminderLines", () => {
@@ -43,7 +27,7 @@ describe("reminderLines", () => {
   ];
   it("names every reminder on the account's own screen", () => {
     const { lines, privateCount } = reminderLines(reminders, false, now);
-    expect(lines.map((line) => `${line.title} ${line.when}`)).toEqual([
+    expect(lines.map((line) => `${line.text} ${line.note}`)).toEqual([
       "交物业费 还有 2 天",
       "儿童医院复查 今天截止",
       "换护照 已过期 2 天",
@@ -52,7 +36,7 @@ describe("reminderLines", () => {
   });
   it("on the family's shared screen keeps a medical matter to its category and private ones to a count", () => {
     const { lines, privateCount } = reminderLines(reminders, true, now);
-    expect(lines.map((line) => `${line.title} ${line.when}`)).toEqual(["交物业费 还有 2 天", "一件医疗的事 今天截止"]);
+    expect(lines.map((line) => `${line.text} ${line.note}`)).toEqual(["交物业费 还有 2 天", "一件医疗的事 今天截止"]);
     expect(privateCount).toBe(1);
   });
 });

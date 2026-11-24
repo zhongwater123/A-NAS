@@ -1,8 +1,9 @@
 /* A feature's notice on the desktop (DeskNotice). The desktop places it, in
    its stack of notices under the status bar (desktop.module.css
    .notice-stack); the feature's own class sets its colours:
-   --desk-notice-mark and --desk-notice-link (also the action button's). The
-   paper and ink are the ones 家庭中心's hint has had since it was drawn. */
+   --desk-notice-mark, --desk-notice-link (also the action button's) and
+   --desk-notice-note (a line's short note, muted unless set). The paper and
+   ink are the ones 家庭中心's hint has had since it was drawn. */
 @layer ui {
   .desk-notice {
     pointer-events: auto;
@@ -67,7 +68,7 @@
   }
   .desk-notice-row span {
     flex: none;
-    color: var(--color-danger);
+    color: var(--desk-notice-note, var(--color-muted));
     font-size: 12px;
     font-weight: 600;
   }

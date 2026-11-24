@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
 import { type ReactNode, useState } from "react";
 
+import { scrollInside } from "../lib/scroll";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { person, usePeople } from "../people/people";
 import { thumbnailURL } from "../photos/api";
@@ -30,16 +31,10 @@ export function scrollerOf(element: Element | null): HTMLElement | null {
 }
 
 // scrollWithin scrolls the board so an element sits near the top of the
-// view, or at a share `at` of its height, without scrolling the window or
-// the desktop around it as scrollIntoView would.
+// view, or at a share `at` of its height (lib/scroll).
 export function scrollWithin(element: HTMLElement, smooth: boolean, at = 0) {
   const container = scrollerOf(element);
-  if (!container?.scrollTo) return;
-  const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
-  container.scrollTo({
-    top: container.scrollTop + offset - 16 - at * container.clientHeight,
-    behavior: smooth ? "smooth" : "auto",
-  });
+  if (container) scrollInside(container, element, smooth, at);
 }
 
 // Mosaic lays a record's photos out as one picture: a single photo large,
