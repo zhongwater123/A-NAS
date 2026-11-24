@@ -83,7 +83,7 @@ func TestAGivenSearchIsKept(t *testing.T) {
 	}
 }
 
-func TestTheLibrarysRefusalsAreTheEditPagesErrors(t *testing.T) {
+func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 	for _, c := range []struct {
 		code string
 		want error
@@ -100,13 +100,16 @@ func TestTheLibrarysRefusalsAreTheEditPagesErrors(t *testing.T) {
 			t.Errorf("%s: %v, want %v", c.code, err, c.want)
 		}
 	}
-	// Other refusals stay the library's: the grant is gone, or the request
-	// was wrong.
-	for _, code := range []string{photosapi.GrantNotFound, photosapi.GrantInvalid} {
+	// The rest are what a request's handler answers, not errors of the
+	// montage center's own (500): a text the library does not search for is
+	// the request's fault, a revoked grant the project's, an ended session
+	// the member's.
+	for code, want := range map[string]error{photosapi.GrantInvalid: ErrInvalid, photosapi.GrantNotFound: ErrGrantRevoked,
+		photosapi.GrantUnauthorized: ErrSessionEnded, "something_new": ErrPhotosUnavailable} {
 		var asked photosapi.GrantRequest
 		_, err := GrantSearch{Grants: grantCall(t, code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
-		if photosapi.GrantErrorCode(err) != code || errors.Is(err, ErrSearchUnavailable) || errors.Is(err, ErrSearchModel) {
-			t.Errorf("%s: %v", code, err)
+		if !errors.Is(err, want) || errors.Is(err, ErrSearchUnavailable) || errors.Is(err, ErrSearchModel) {
+			t.Errorf("%s: %v, want %v", code, err, want)
 		}
 	}
 }
