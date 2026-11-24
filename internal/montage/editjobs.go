@@ -18,8 +18,9 @@ import (
 // film stay as they were.
 
 // SaveDraft starts an edit job that renders owner's draft as it stands. The
-// same requestKey again returns the same job; a project with a job in
-// progress answers ErrJobActive.
+// same requestKey again returns the same job, and so does a revision that
+// was saved already, whatever the key; a project with a job in progress
+// answers ErrJobActive.
 func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string) (Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) {
 		return Job{}, false, ErrInvalid
@@ -42,6 +43,18 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		return Job{}, false, err
 	}
 	src, state := draft.source, draft.state
+	// A revision saved before is that version: its job answers, rather than
+	// a new one that fills and renders again to find the same film.
+	var saved string
+	err = s.db.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
+		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, draft.Revision).Scan(&saved)
+	switch {
+	case err == nil:
+		job, err := s.Job(ctx, owner, saved)
+		return job, false, err
+	case !errors.Is(err, sql.ErrNoRows):
+		return Job{}, false, err
+	}
 	// A version whose videos were analysed again with another model since the
 	// draft was opened cannot be saved: say so now rather than fail in the fill.
 	if err := s.checkAnalysis(ctx, src); err != nil {

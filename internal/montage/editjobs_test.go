@@ -152,17 +152,27 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 	if list, err := env.store.VersionShots(ctx, editOwner, edited.ID); err != nil || len(readList(t, list)) != 4 {
 		t.Fatalf("the new version's shot list = %v", err)
 	}
-	// Saved again at the same revision, the film is the same one.
-	second, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:4")
-	if err != nil {
-		t.Fatal(err)
+	// Saved again at the same revision, the film is the same one: the job
+	// that saved it answers, and nothing is filled, rendered or saved again.
+	rendered, opened := env.frames.rendered, len(env.grants.opened)
+	second, created, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:4")
+	if err != nil || created || second.ID != job.ID || second.Version == nil || second.Version.ID != edited.ID {
+		t.Fatalf("saving the same revision again = %+v, %v, %v", second, created, err)
 	}
 	env.runJobs(t)
-	if done, err := env.store.Job(ctx, editOwner, second.ID); err != nil || done.State != JobDone || done.Version == nil || done.Version.ID != edited.ID {
-		t.Fatalf("saving the same revision again = %+v, %v", done.Version, err)
+	if env.frames.rendered != rendered || len(env.grants.opened) != opened || env.store.Count(t, "SELECT COUNT(*) FROM jobs WHERE kind = 'edit'") != 1 {
+		t.Fatal("saving the same revision again made another job")
 	}
 	if len(env.grants.films) != 1 || env.store.Count(t, "SELECT COUNT(*) FROM versions") != 3 {
 		t.Fatalf("%d films, %d versions", len(env.grants.films), env.store.Count(t, "SELECT COUNT(*) FROM versions"))
+	}
+	// Another step is another revision, and another version.
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "lock", Shot: 2}); err != nil {
+		t.Fatal(err)
+	}
+	third, created, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:5")
+	if err != nil || !created || third.ID == job.ID {
+		t.Fatalf("saving the next revision = %+v, %v, %v", third, created, err)
 	}
 }
 
