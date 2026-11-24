@@ -12,11 +12,11 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 - WSL 中的 Docker；测试只启动并删除自己命名为 `anas-system-test-<PID>` 的容器。本机还运行着与 A-NAS 无关的容器，不要清理它们。
 - 镜像 `anas-systemd:trixie`，其中的 aptly 与 GnuPG 为测试做签名软件源。镜像带 label 记录构建输入（`anas.image.inputs`）、ISO 周与来源提交；`scripts/system-test.sh` 启动前用 `scripts/check-system-test-env.sh` 自动核对：镜像的 inputs 必须与本检出的输入一致，否则失败并提示重建；ISO 周不同只警告（提醒重建以带上 Debian 的安全更新）。共享开发服务器上有管理员构建的镜像，先看 `anas-images`；过渡期可用 `ANAS_SYSTEM_TEST_SKIP_ENV_CHECK=1` 跳过检查。
 
-  缺少镜像或自己改了镜像输入文件时，自行构建（自己的分支用私有标签，测试时把标签传给脚本，用完删除；共享标签不要改、不要删）：
+  缺少镜像或自己改了镜像输入文件时，自行构建，镜像名用自己的仓库名，测试时把它传给脚本，用完删除。`anas-systemd:trixie` 与 `anas-systemd:trixie-<周>-<inputs>` 是共享镜像的标签，不要改、不要删，也不要借用这个前缀：服务器按它清理旧版本。
 
   ```bash
-  scripts/build-system-test-image.sh anas-systemd:trixie-<你>-<主题> <本地任一 Debian 镜像>
-  scripts/system-test.sh anas-systemd:trixie-<你>-<主题>
+  scripts/build-system-test-image.sh anas-systemd-<你>:<主题> <本地任一 Debian 镜像>
+  scripts/system-test.sh anas-systemd-<你>:<主题>
   ```
 
   镜像用 debootstrap 从 `deb.debian.org` 组装，不需要 Docker Hub。`ANAS_SYSTEM_TEST_ALLOW_ENV_MISMATCH=1` 可把不一致降级为警告（不推荐）。
