@@ -812,3 +812,18 @@ func TestABeatIsReadAsItIsWritten(t *testing.T) {
 		}
 	}
 }
+
+// A step of a 方案 has one name, whether Go or SQL writes it: the versions'
+// query finds a version's fill step by the name planStep gave it.
+func TestPlanStepsAreNamedAlikeInSQL(t *testing.T) {
+	env := newEditEnv(t)
+	for plan := range 4 {
+		var name string
+		if err := env.store.db.QueryRowContext(t.Context(), "SELECT "+planStepSQL("fill", "p")+" FROM (SELECT ? AS p)", plan).Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		if name != planStep("fill", plan) {
+			t.Errorf("方案 %d: SQL names its fill %q, Go %q", plan, name, planStep("fill", plan))
+		}
+	}
+}

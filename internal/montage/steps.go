@@ -97,6 +97,12 @@ func planStep(name string, plan int) string {
 	return fmt.Sprintf("%s-%d", name, plan)
 }
 
+// planStepSQL is planStep as SQL, for a step's plain name and the column
+// that holds the 方案 (TestPlanStepsAreNamedAlikeInSQL).
+func planStepSQL(name, column string) string {
+	return "CASE WHEN " + column + " <= 1 THEN '" + name + "' ELSE '" + name + "-' || " + column + " END"
+}
+
 // planOf is a step's plain name and the 方案 it belongs to.
 func planOf(name string) (string, int) {
 	base, number, found := strings.Cut(name, "-")

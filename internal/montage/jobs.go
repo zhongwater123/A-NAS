@@ -140,7 +140,9 @@ type Version struct {
 	Gone bool `json:"gone,omitempty"`
 	// Editable: its timeline is known, so that it can be edited (#596). A
 	// version saved before timelines were kept has its job's fill, unless
-	// that is gone too; then it can only be played.
+	// that is gone too; then it can only be played. It is a look at the
+	// version's row alone: whether the plan it was cut by can still be read
+	// is found when its draft or outline is opened (ErrNotEditable).
 	Editable bool `json:"editable"`
 	// Kind is plan, edit or recut; an edit or recut names the version it
 	// came from (改自第 N 版), and an edit the draft's revision.
@@ -153,9 +155,9 @@ type Version struct {
 }
 
 // versionColumns are what versionsOf scans, of versions v.
-const versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
+var versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
 	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
-		AND f.name = CASE WHEN v.plan <= 1 THEN 'fill' ELSE 'fill-' || v.plan END AND f.result_json IS NOT NULL),
+		AND f.name = ` + planStepSQL("fill", "v.plan") + ` AND f.result_json IS NOT NULL),
 	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision,
 	IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change') FROM jobs WHERE id = v.job_id), '')`
 
