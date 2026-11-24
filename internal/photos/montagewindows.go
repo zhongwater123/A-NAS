@@ -120,9 +120,12 @@ func windowCount(duration float64) int {
 // analysisProgress is where the montage analysis of a video stands; for
 // done windows, also their identity and how many there are.
 type analysisProgress struct {
-	windows                        AnalysisState
-	windowsIdentity                string
-	windowCount                    int
+	windows         AnalysisState
+	windowsIdentity string
+	windowCount     int
+	// windowIdentities is every identity the Catalog has a window of the
+	// video with, done or not, in order.
+	windowIdentities               []string
 	cards, quality                 AnalysisState
 	cardsIdentity, qualityIdentity string
 	described                      AnalysisState
@@ -195,6 +198,7 @@ func (s *Service) progressOf(ctx context.Context, videos map[string]float64) (ma
 		default:
 			p.windows = AnalysisQueued
 		}
+		p.windowIdentities = slices.Sorted(maps.Keys(counts[object]))
 		progress[object] = p
 	}
 	cardArgs := append([]any{cardsDerivation, qualityDerivation}, args[1:]...)

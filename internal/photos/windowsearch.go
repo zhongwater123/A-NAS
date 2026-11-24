@@ -151,7 +151,7 @@ func (s *Service) searchedVideos(ctx context.Context, owner Principal, grantID s
 		return nil, nil, err
 	}
 	videos := map[string]searchedVideo{}
-	available := map[string]bool{}
+	identities := map[string]bool{}
 	for start := 0; start < len(assetIDs); start += MaxGrantAssets {
 		looked, progress, err := s.lookupGrant(ctx, owner, grantID, assetIDs[start:min(len(assetIDs), start+MaxGrantAssets)])
 		if err != nil {
@@ -161,38 +161,20 @@ func (s *Service) searchedVideos(ctx context.Context, owner Principal, grantID s
 			if asset.Status != GrantAvailable {
 				continue
 			}
-			available[asset.ObjectID] = true
+			p := progress[asset.ObjectID]
+			for _, identity := range p.windowIdentities {
+				identities[identity] = true
+			}
 			if _, seen := videos[asset.ObjectID]; seen {
 				// The asset IDs come in order: the first one stands for its object.
 				continue
 			}
-			if p := progress[asset.ObjectID]; p.windows == AnalysisDone {
+			if p.windows == AnalysisDone {
 				videos[asset.ObjectID] = searchedVideo{asset: asset.AssetID, count: p.windowCount}
 			}
 		}
 	}
-	objects := slices.Sorted(maps.Keys(available))
-	identities := map[string]bool{}
-	for start := 0; start < len(objects); start += vectorReadBatch {
-		batch := objects[start:min(len(objects), start+vectorReadBatch)]
-		found, err := s.textColumn(ctx, "SELECT DISTINCT identity FROM video_windows WHERE object_id IN ("+sqlitedb.Placeholders(len(batch))+")",
-			anySlice(batch)...)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, identity := range found {
-			identities[identity] = true
-		}
-	}
 	return videos, identities, nil
-}
-
-func anySlice(values []string) []any {
-	out := make([]any, len(values))
-	for i, value := range values {
-		out[i] = value
-	}
-	return out
 }
 
 // rankWindows returns, for each vector, the k windows of identity of videos
