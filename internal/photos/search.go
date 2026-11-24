@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -564,19 +565,44 @@ func (s *Service) searchScope(ctx context.Context, p Principal, viewing string) 
 // embedQuery asks the Worker for the query's vector and the model it belongs
 // to; any failure leaves search to names alone.
 func (s *Service) embedQuery(ctx context.Context, query string) ([]float32, string) {
-	if s.embedder == nil {
-		return nil, ""
-	}
-	info, err := s.embedder.Info(ctx)
+	info, err := s.queryEncoder(ctx)
 	if err != nil {
 		return nil, ""
 	}
-	s.ai.noticeModel(info.Model)
-	vector, err := s.embedder.EmbedQuery(ctx, query)
-	if err != nil || !validVector(vector, info.Dimensions) {
+	vector, err := s.encodeQuery(ctx, info, query)
+	if err != nil {
 		return nil, ""
 	}
 	return vector, info.Model
+}
+
+// queryEncoder asks the Worker which model encodes queries now, and of how
+// many dimensions, and lets the runner know of it. Without a Worker that
+// answers, it is ErrAIUnavailable.
+func (s *Service) queryEncoder(ctx context.Context) (EmbedderInfo, error) {
+	if s.embedder == nil {
+		return EmbedderInfo{}, ErrAIUnavailable
+	}
+	info, err := s.embedder.Info(ctx)
+	if err != nil {
+		return EmbedderInfo{}, fmt.Errorf("%w: %w", ErrAIUnavailable, err)
+	}
+	s.ai.noticeModel(info.Model)
+	return info, nil
+}
+
+// encodeQuery asks the Worker queryEncoder found for query's vector. A
+// Worker that fails, or answers with anything but a vector of info's
+// dimensions, is ErrAIUnavailable.
+func (s *Service) encodeQuery(ctx context.Context, info EmbedderInfo, query string) ([]float32, error) {
+	vector, err := s.embedder.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrAIUnavailable, err)
+	}
+	if !validVector(vector, info.Dimensions) {
+		return nil, fmt.Errorf("%w: the query vector is not one of %d dimensions", ErrAIUnavailable, info.Dimensions)
+	}
+	return vector, nil
 }
 
 // Hits are ordered by score, then by ID, both descending; the order is total,

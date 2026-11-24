@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -105,14 +104,10 @@ func (s *Service) SearchWindows(ctx context.Context, owner Principal, grantID st
 		}
 		return matches, nil
 	}
-	if s.embedder == nil {
-		return nil, ErrAIUnavailable
-	}
-	info, err := s.embedder.Info(ctx)
+	info, err := s.queryEncoder(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrAIUnavailable, err)
+		return nil, err
 	}
-	s.ai.noticeModel(info.Model)
 	identity := windowsIdentity(info.Model, info.Dimensions)
 	for other := range identities {
 		if other != identity {
@@ -125,12 +120,9 @@ func (s *Service) SearchWindows(ctx context.Context, owner Principal, grantID st
 		if vectors[i] = encoded[query]; vectors[i] != nil {
 			continue
 		}
-		vector, err := s.embedder.EmbedQuery(ctx, query)
+		vector, err := s.encodeQuery(ctx, info, query)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrAIUnavailable, err)
-		}
-		if !validVector(vector, info.Dimensions) {
-			return nil, fmt.Errorf("%w: the query vector has %d dimensions, want %d", ErrAIUnavailable, len(vector), info.Dimensions)
+			return nil, err
 		}
 		vectors[i], encoded[query] = vector, vector
 	}
