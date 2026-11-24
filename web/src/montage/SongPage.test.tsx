@@ -12,50 +12,20 @@ import { songRules, songRulesHandler } from "../test/handlers/montage";
 import { musicStatus } from "../test/handlers/music";
 import { transfer, transfersHandlers } from "../test/handlers/transfers";
 import { apiError, http, server } from "../test/server";
+import * as tus from "../test/tus";
 import { transferStore } from "../transfers/store";
 import type { MontageSong } from "./api";
 import { SongPage } from "./SongPage";
 
 // Uploads go through the transfer center's tus client; tests answer it, as
-// the media center's tests do.
-const tus = vi.hoisted(() => {
-  class FakeUpload {
-    url: string | null = null;
-    constructor(
-      readonly file: File,
-      readonly options: Record<string, any>,
-    ) {
-      uploads.push(this);
-    }
-    start() {}
-    abort() {
-      return Promise.resolve();
-    }
-    get metadata() {
-      return this.options.metadata as Record<string, string>;
-    }
-    // finish lands the file on the NAS as the transfer id.
-    finish(id: string) {
-      this.url = `/api/v1/uploads/${id}`;
-      this.options.onUploadUrlAvailable();
-      this.options.onSuccess();
-    }
-    fail(status: number, code: string) {
-      this.options.onError(
-        Object.assign(new Error(code), {
-          originalRequest: { getMethod: () => "POST" },
-          originalResponse: {
-            getStatus: () => status,
-            getBody: () => JSON.stringify({ error: { code, message: code } }),
-          },
-        }),
-      );
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// the media center's tests do (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("../test/tus")).FakeUpload }));
+
+// finish lands the upload on the NAS as the transfer id.
+function finish(upload: tus.FakeUpload, id: string) {
+  upload.created(id);
+  upload.options.onSuccess();
+}
 
 const symphony: MontageSong = {
   id: "song:1",
@@ -229,7 +199,7 @@ describe("配乐页上传配乐", () => {
     expect(within(page).getByLabelText("选择歌曲")).not.toHaveAttribute("accept");
     await upload(page, song("Long Mix.mp3", 101 << 20, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     expect(await within(page).findByText("歌曲超过 100 MiB", {}, { timeout: 4000 })).toBeInTheDocument();
     expect(seen.chosen).toEqual(["file:new"]);
   });
@@ -247,7 +217,7 @@ describe("配乐页上传配乐", () => {
     });
     expect(transferStore.getSnapshot().uploads[0].target.label).toBe("剪辑中心 · 音乐");
     expect(within(page).getByRole("button", { name: /上传配乐/ })).toBeDisabled();
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     await waitFor(() => expect(seen.chosen).toEqual(["file:new"]), { timeout: 4000 });
     expect(seen.scans).toBe(1);
     expect(await within(page).findByText("正在分析节拍与段落")).toBeInTheDocument();
@@ -261,7 +231,7 @@ describe("配乐页上传配乐", () => {
     // The browser cannot read this file's length: the montage center decides.
     await upload(page, song("Live.ape", 1024));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     expect(await within(page).findByText("歌曲时长要在 30 秒到 8 分钟之间", {}, { timeout: 4000 })).toBeInTheDocument();
   });
 
@@ -270,7 +240,7 @@ describe("配乐页上传配乐", () => {
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     expect(await within(page).findByText(/音乐库读不出它的格式/, {}, { timeout: 4000 })).toBeInTheDocument();
     expect(seen.chosen).toEqual([]);
   });
@@ -283,7 +253,7 @@ describe("配乐页上传配乐", () => {
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     expect(await within(page).findByText(/不在音乐库的来源里/, {}, { timeout: 4000 })).toBeInTheDocument();
   });
 
@@ -292,7 +262,7 @@ describe("配乐页上传配乐", () => {
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     expect(await within(page).findByText(/音乐库扫描失败/, {}, { timeout: 4000 })).toBeInTheDocument();
     expect(seen.chosen).toEqual([]);
   });
@@ -302,7 +272,7 @@ describe("配乐页上传配乐", () => {
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].finish("upload-1"));
+    act(() => finish(tus.uploads[0], "upload-1"));
     await waitFor(() => expect(seen.scans).toBe(1));
     cleanup();
     // Longer than the scan is asked about again.
@@ -315,7 +285,7 @@ describe("配乐页上传配乐", () => {
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
-    act(() => tus.uploads[0].fail(403, "forbidden"));
+    act(() => tus.uploads[0].fail("POST", 403, "forbidden"));
     // The transfer center's own words for it, as its window shows them.
     expect(await within(page).findByText("没有写入这个位置的权限")).toBeInTheDocument();
     await userEvent.click(within(page).getByRole("button", { name: "重试" }));

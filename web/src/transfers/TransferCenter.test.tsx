@@ -2,44 +2,14 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const tus = vi.hoisted(() => {
-  class FakeUpload {
-    url: string | null;
-    constructor(
-      readonly file: File,
-      readonly options: Record<string, any>,
-    ) {
-      this.url = options.uploadUrl ?? null;
-      uploads.push(this);
-    }
-    start() {}
-    abort() {
-      return Promise.resolve();
-    }
-    created(id: string) {
-      this.url = `http://nas/api/v1/uploads/${id}`;
-      this.options.onUploadUrlAvailable();
-    }
-    fail(method: string, status: number, code: string) {
-      this.options.onError(
-        Object.assign(new Error(code), {
-          originalRequest: { getMethod: () => method },
-          originalResponse: {
-            getStatus: () => status,
-            getBody: () => JSON.stringify({ error: { code, message: code } }),
-          },
-        }),
-      );
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// Uploads go through tus-js-client; tests answer its requests themselves
+// (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("../test/tus")).FakeUpload }));
 
 import { transfer, transfersHandlers } from "../test/handlers/transfers";
 import { server } from "../test/server";
 import { fixToday } from "../test/today";
+import * as tus from "../test/tus";
 import type { Transfer } from "./api";
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";

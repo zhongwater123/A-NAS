@@ -24,6 +24,7 @@ import { trashHandlers } from "./test/handlers/trash";
 import { accountHandlers, alice } from "./test/handlers/users";
 import { webSearchStatus } from "./test/handlers/websearch";
 import { apiError, http, server } from "./test/server";
+import * as tus from "./test/tus";
 import { transferStore } from "./transfers/store";
 import { resetWebSearch } from "./websearch/status";
 
@@ -61,25 +62,8 @@ vi.mock("./transfers/TransferCenter", async (importOriginal) => {
 });
 
 // Uploads go through tus-js-client, whose Node build cannot read a jsdom
-// File; the tests report the uploads' progress themselves.
-const tus = vi.hoisted(() => {
-  class FakeUpload {
-    constructor(
-      readonly file: File,
-      readonly options: { onProgress: (sent: number, total: number) => void },
-    ) {
-      uploads.push(this);
-    }
-    url = null;
-    start() {}
-    abort() {
-      return Promise.resolve();
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// File; the tests report the uploads' progress themselves (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("./test/tus")).FakeUpload }));
 
 // Settings → 终端 runs a shell through xterm.js, which needs layout jsdom lacks.
 const xterm = vi.hoisted(() => ({ mounts: 0 }));

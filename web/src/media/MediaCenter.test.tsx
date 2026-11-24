@@ -9,6 +9,7 @@ import { entry, filesHandlers, folder, sharedSpace, space } from "../test/handle
 import { type MediaOptions, mediaHandlers, mediaHome, mediaLibrary, playback } from "../test/handlers/media";
 import { transfersHandlers } from "../test/handlers/transfers";
 import { apiError, http, server } from "../test/server";
+import * as tus from "../test/tus";
 import { transferStore } from "../transfers/store";
 import type { Episode, MediaLibrary, ShowDetail, Title, TitleResults, VideoDetail } from "./api";
 import { MediaCenter } from "./MediaCenter";
@@ -129,39 +130,9 @@ function renamesFilm(conflicts = 0) {
   return { sent, handler };
 }
 
-// Uploads go through the transfer center's tus client; tests answer it.
-const tus = vi.hoisted(() => {
-  class FakeUpload {
-    url: string | null = null;
-    constructor(
-      readonly file: File,
-      readonly options: Record<string, any>,
-    ) {
-      uploads.push(this);
-    }
-    start() {}
-    abort() {
-      return Promise.resolve();
-    }
-    get metadata() {
-      return this.options.metadata as Record<string, string>;
-    }
-    fail(status: number, code: string) {
-      this.options.onError(
-        Object.assign(new Error(code), {
-          originalRequest: { getMethod: () => "POST" },
-          originalResponse: {
-            getStatus: () => status,
-            getBody: () => JSON.stringify({ error: { code, message: code } }),
-          },
-        }),
-      );
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// Uploads go through the transfer center's tus client; tests answer it
+// (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("../test/tus")).FakeUpload }));
 
 function withPath(file: File, path: string): File {
   Object.defineProperty(file, "webkitRelativePath", { value: path });
@@ -567,7 +538,7 @@ describe("MediaCenter", () => {
     ]);
     // A file already there is left alone, without asking.
     act(() => {
-      tus.uploads[1].fail(409, "name_conflict");
+      tus.uploads[1].fail("POST", 409, "name_conflict");
       tus.uploads[0].options.onSuccess();
     });
     expect(await within(dialog).findByText("同名文件已存在，未覆盖")).toBeTruthy();

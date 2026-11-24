@@ -1,43 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const tus = vi.hoisted(() => {
-  // FakeUpload stands in for tus-js-client: tests answer its requests.
-  class FakeUpload {
-    url: string | null;
-    started = 0;
-    aborted = 0;
-    constructor(
-      readonly file: File,
-      readonly options: Record<string, any>,
-    ) {
-      this.url = options.uploadUrl ?? null;
-      uploads.push(this);
-    }
-    start() {
-      this.started += 1;
-    }
-    abort() {
-      this.aborted += 1;
-      return Promise.resolve();
-    }
-    created(id: string) {
-      this.url = `http://nas/api/v1/uploads/${id}`;
-      this.options.onUploadUrlAvailable();
-    }
-    fail(method: string, status: number, code = "") {
-      const error = Object.assign(new Error(`${method} ${status}`), {
-        originalRequest: { getMethod: () => method },
-        originalResponse: status
-          ? { getStatus: () => status, getBody: () => (code ? JSON.stringify({ error: { code, message: code } }) : "") }
-          : null,
-      });
-      this.options.onError(error);
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// FakeUpload stands in for tus-js-client: tests answer its requests
+// (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("../test/tus")).FakeUpload }));
 
 const api = vi.hoisted(() => ({ sessionEnded: vi.fn() }));
 vi.mock("../api/client", async (original) => ({
@@ -48,6 +13,7 @@ vi.mock("../api/client", async (original) => ({
 import { APIError } from "../api/client";
 import { transfersHandlers } from "../test/handlers/transfers";
 import { server } from "../test/server";
+import * as tus from "../test/tus";
 import type { Transfer } from "./api";
 import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
 

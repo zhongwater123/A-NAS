@@ -16,29 +16,13 @@ import {
   volume,
 } from "../test/handlers/files";
 import { http, server } from "../test/server";
+import * as tus from "../test/tus";
 import { transferStore } from "../transfers/store";
 import { FilePanel } from "./FilePanel";
 
-// Uploads go through tus-js-client; tests answer its requests themselves.
-const tus = vi.hoisted(() => {
-  class FakeUpload {
-    url: string | null;
-    constructor(
-      readonly file: File,
-      readonly options: Record<string, any>,
-    ) {
-      this.url = options.uploadUrl ?? null;
-      uploads.push(this);
-    }
-    start() {}
-    abort() {
-      return Promise.resolve();
-    }
-  }
-  const uploads: FakeUpload[] = [];
-  return { FakeUpload, uploads };
-});
-vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+// Uploads go through tus-js-client; tests answer its requests themselves
+// (test/tus.ts).
+vi.mock("tus-js-client", async () => ({ Upload: (await import("../test/tus")).FakeUpload }));
 
 // serve answers the file manager's reads, and the share provider's, which
 // polls for notices and counts unread shares around every window: nothing is
