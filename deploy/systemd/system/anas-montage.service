@@ -17,9 +17,10 @@ Environment=ANAS_MONTAGE_ROOT=/srv/a-nas/data/montage
 Environment=ANAS_MONTAGE_SOCKET=/run/a-nas-montage/montage.sock
 Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
 Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
-# Members' cron units plan with VNAS through a socket systemd holds
-# (anas-montage-assistant.socket); the waker reads who has a job to plan from
-# the markers in /run/a-nas-montage/plans (docs/architecture/montage-center.md).
+# Members' planning instances plan with VNAS through a socket systemd holds
+# (anas-montage-assistant.socket), which root's planner also claims rounds on;
+# the planner reads who has a job to plan from the markers in
+# /run/a-nas-montage/plans (docs/architecture/montage-planning-session.md).
 Sockets=anas-montage-assistant.socket
 RuntimeDirectory=a-nas-montage
 RuntimeDirectoryMode=0750

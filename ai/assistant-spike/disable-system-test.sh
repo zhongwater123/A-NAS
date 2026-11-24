@@ -72,6 +72,7 @@ check "disabling stops the running task" \
 
 for unit in anas-assistant@bob.service anas-assistant-api@bob.service anas-assistant-api@bob.socket \
   anas-assistant-cron@bob.service anas-assistant-curator@bob.service anas-assistant-curator@bob.timer \
+  anas-assistant-plan@bob.service anas-assistant-planapi@bob.service anas-assistant-planapi@bob.socket \
   anas-assistant-net@bob.service; do
   check "a disabled account cannot restart $unit" fails systemctl start "$unit"
   check "$unit remains masked" test "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = masked
@@ -81,6 +82,8 @@ check "saving the key again keeps a disabled account's assistant off" \
   test "$(save_key /tmp/owner.jar "$owner_csrf" true)" = 200
 check "it does not reactivate the member socket" \
   test "$(systemctl is-enabled anas-assistant-api@bob.socket 2>/dev/null || true)" = masked
+check "nor the socket of his planning instance" \
+  test "$(systemctl is-enabled anas-assistant-planapi@bob.socket 2>/dev/null || true)" = masked
 check "nor the curator timer" \
   test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" = masked
 
@@ -95,7 +98,7 @@ for _ in $(seq 1 120); do getent passwd bob >/dev/null || break; sleep 0.5; done
 check "bob is removed once his time is up" bash -c '! getent passwd bob'
 check "his assistant leaves no secret, settings, socket or folder" \
   test ! -e /var/lib/a-nas-host/assistant/tokens/bob.env -a ! -e /var/lib/a-nas-host/assistant/members/bob \
-  -a ! -e /run/a-nas-assistant/bob.sock -a ! -e "$data/assistant/bob"
+  -a ! -e /run/a-nas-assistant/bob.sock -a ! -e /run/a-nas-assistant-plan/bob.sock -a ! -e "$data/assistant/bob"
 check "and his units are no longer masked" \
   test "$(systemctl is-enabled anas-assistant-curator@bob.timer 2>/dev/null || true)" != masked
 
@@ -103,8 +106,9 @@ check "and his units are no longer masked" \
 # saving it again brings each back.
 check "the administrator deletes the key" \
   test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/assistant-key")" = 200
-check "without the key the model gateway and the waker stop" \
-  test "$(systemctl is-active anas-assistant-gateway.service anas-assistant-cron-waker.service | sort -u | paste -sd ' ' || true)" = inactive
+check "without the key the model gateway, the waker and the montage center's planner stop" \
+  test "$(systemctl is-active anas-assistant-gateway.service anas-assistant-cron-waker.service anas-montage-planner.service |
+    sort -u | paste -sd ' ' || true)" = inactive
 check "alice's assistant is off" test ! -S /run/a-nas-assistant/alice.sock
 check "and alice is told why" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .reason || true)" = no_key

@@ -496,9 +496,10 @@ type montageServiceConfig struct {
 	// yet (M9): the development machine and the system test only. Without
 	// it the montage center makes no film.
 	PlanAnswers string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
-	// AssistantSocket is where members' cron units reach the montage
-	// center when systemd does not hold the socket (development);
-	// PlanMarkers is where the waker finds who has a job to plan.
+	// AssistantSocket is where members' planning instances and root's
+	// planner reach the montage center when systemd does not hold the
+	// socket (development); PlanMarkers is where the planner finds who has
+	// a job to plan (docs/architecture/montage-planning-session.md).
 	AssistantSocket string `env:"ANAS_MONTAGE_ASSISTANT_SOCKET"`
 	PlanMarkers     string `env:"ANAS_MONTAGE_PLAN_MARKERS" envDefault:"/run/a-nas-montage/plans"`
 }
