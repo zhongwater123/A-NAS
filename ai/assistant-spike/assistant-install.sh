@@ -89,11 +89,13 @@ if [[ -n "${SPIKE_MODEL:-}" ]]; then
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
-# The spike's change broker executes the assistants' changes, with a product socket for the
-# product service and the agent socket for the assistants' MCP tool.
+# The File Broker's executor of the assistants' changes (broker-spike, which run.sh builds), with
+# the spike's product socket for the product service and the agent socket for the assistants'
+# MCP tool. Its state stays in /var/lib/anas-spike/changes, root's alone.
 install -d -m 0755 /run/anas-spike-broker
 transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
-  python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
+  /spike-broker/broker-spike /srv/a-nas/data /var/lib/anas-spike/changes \
+  /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 systemctl daemon-reload
 systemctl enable --now --quiet anas-assistant-cron-waker.service
 PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"

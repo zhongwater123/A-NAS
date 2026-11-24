@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hermes Agent spike for the AI assistant (docs/research/hermes-agent-runtime.md).
-# Runs on a Linux development machine with Docker and the local images
+# Runs on a Linux development machine with Docker, Go (sandbox builds broker-spike, the File
+# Broker's executor of the assistants' changes) and the local images
 # anas-ai-dev:trixie (ai/dev.Dockerfile) and anas-systemd:trixie
 # (scripts/build-system-test-image.sh). Nothing here touches a NAS.
 #
@@ -84,6 +85,12 @@ case "${1:-}" in
       chmod 0700 "$run/tokens"
       key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker" -v "$run/tokens:/run/anas-spike-tokens")
     fi
+    # The File Broker's executor of the assistants' changes, from broker-spike/ in this
+    # checkout: the product's own code, built statically for the container.
+    broker_bin="$work/broker-spike/$name"
+    mkdir -p "$broker_bin"
+    (cd "$here/../.." && CGO_ENABLED=0 go build -trimpath -o "$broker_bin/broker-spike" ./ai/assistant-spike/broker-spike)
+    key_mount+=(-v "$broker_bin:/spike-broker:ro")
     # SPIKE_PHOTOS=1 also runs the photo service with its assistant socket and a seeded
     # library (#113), from photos-spike/ in this checkout; it needs Go with cgo.
     if [[ -n "${SPIKE_PHOTOS:-}" ]]; then
