@@ -223,6 +223,14 @@ export const scaleKeys: Record<Scale, string> = {
   three: "1 差　3 中　5 好",
   five: "1–5 选档　← → 换一档",
 };
+// keysFor is scaleKeys for a 打分项: three levels name its own levels, so
+// that 情绪 reads 1 平静 rather than 1 差.
+export const keysFor = (scale: Scale, dimension?: string) =>
+  scale === "three"
+    ? levelsFor(scale, dimension)
+        .map((level) => `${level.score / 100} ${level.word}`)
+        .join("　")
+    : scaleKeys[scale];
 // The same with the decimals hidden from the rater.
 export const hiddenKeys: Record<"hundredths" | "tenths", string> = {
   hundredths: "← → 移动　⇧ 细调",

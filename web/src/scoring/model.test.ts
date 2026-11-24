@@ -7,6 +7,7 @@ import {
   formatCorrelation,
   formatScore,
   formatSeconds,
+  keysFor,
   lanes,
   nudgeScore,
   orientationMatrix,
@@ -125,6 +126,10 @@ describe("scores", () => {
     // Three levels of 情绪 do not judge either.
     expect([100, 300, 500].map((score) => formatScore(score, "three", "emotion"))).toEqual(["平静", "中间", "激烈"]);
     expect(formatScore(300, "three", "overall")).toBe("中");
+    // The keys under the reading name the same levels.
+    expect(keysFor("three", "emotion")).toBe("1 平静　3 中间　5 激烈");
+    expect(keysFor("three", "overall")).toBe("1 差　3 中　5 好");
+    expect(keysFor("five", "emotion")).toBe("1–5 选档　← → 换一档");
   });
 
   it("starts 情绪 at 1 on a number line, typed, picked or placed", () => {

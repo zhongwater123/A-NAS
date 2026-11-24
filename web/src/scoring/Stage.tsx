@@ -33,6 +33,7 @@ import {
   formatCount,
   formatScore,
   hiddenKeys,
+  keysFor,
   lowestScore,
   nudgeScore,
   Outbox,
@@ -41,7 +42,6 @@ import {
   parseScore,
   pickScore,
   Stopwatch,
-  scaleKeys,
   snapScore,
   stageAction,
   typeable,
@@ -761,9 +761,16 @@ export function Stage({
   const label = named ? dimension.name : "分数";
   // The keys that move a set score, under the reading.
   const fine = scale === "hundredths" || scale === "tenths";
+  const lowest = lowestScore(dimension.id) / 100;
   const keysHint =
-    (scoresHidden && fine ? hiddenKeys[scale] : scaleKeys[scale]) +
-    (several ? "　↑ ↓ 换项" : fine && !scoresHidden ? "　0–5 整数分" : scale === "whole" ? "　0–5" : "");
+    (scoresHidden && fine ? hiddenKeys[scale] : keysFor(scale, dimension.id)) +
+    (several
+      ? "　↑ ↓ 换项"
+      : fine && !scoresHidden
+        ? `　${lowest}–5 整数分`
+        : scale === "whole"
+          ? `　${lowest}–5`
+          : "");
   let body;
   if (loading) {
     body = (
