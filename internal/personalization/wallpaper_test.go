@@ -101,13 +101,14 @@ func TestOnlyReasonableWallpapersAreAccepted(t *testing.T) {
 		"dimensions": {huge, personalization.ErrImageTooLarge},
 		"bytes":      {make([]byte, personalization.MaxWallpaperUploadBytes+1), personalization.ErrImageTooLarge},
 		"decoder":    {imagetest.PanickingPicture(), personalization.ErrUnsupportedImage},
+		"palette":    {imagetest.OutsidePalettePicture(), personalization.ErrUnsupportedImage},
 	} {
 		if _, _, _, err := personalization.NormalizeWallpaper(test.picture); !errors.Is(err, test.want) {
 			t.Errorf("%s: NormalizeWallpaper() error = %v, want %v", name, err, test.want)
 		}
 	}
-	// The decoder's panic is logged; pictures refused before or by the
-	// decoder are not.
+	// The decoder's panic is logged; pictures refused before, by or after
+	// the decoder are not.
 	imagetest.RequirePanicLogged(t, panics(), "wallpaper")
 }
 

@@ -1,0 +1,13 @@
+#!/bin/bash
+# postinst of a-nas-montage-music: the socket starts the music analysis
+# Worker on the montage service's first song. On an upgrade the socket is
+# listening already and start leaves it alone: restarting it would stop the
+# Worker with it (the service Requires= the socket) in the middle of a song.
+# A Worker of the earlier version exits once idle, and the next song starts
+# this one.
+set -euo pipefail
+
+[[ "${1:-}" == configure && -d /run/systemd/system ]] || exit 0
+systemctl daemon-reload
+systemctl start anas-montage-music.socket
+exit 0

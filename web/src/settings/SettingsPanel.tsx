@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bot,
   ChevronRight,
   CircleFadingArrowUp,
   Globe,
@@ -11,6 +12,7 @@ import {
   Search,
   SquareTerminal,
   UsersRound,
+  Wifi,
   X,
 } from "lucide-react";
 import {
@@ -30,11 +32,13 @@ import type { HostStateView } from "../desktop/useHostState";
 import type { PinyinMatch } from "../music/library";
 import { loadPinyin } from "../music/pinyin";
 import { displayName } from "../people/people";
-import { hasNewVersion, useSystemUpdate } from "../systemupdate/status";
+import { hasNewVersion, useSystemUpdate, waitsForRestart } from "../systemupdate/status";
 import { useToasts } from "../ui/feedback";
 import { AccountSection } from "./AccountSection";
+import { AssistantSection } from "./AssistantSection";
 import { roleLabel } from "./labels";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
+import { NetworkSection } from "./NetworkSection";
 import { OverviewSection } from "./OverviewSection";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { Avatar, type SettingsKit, SettingsKitContext } from "./parts";
@@ -56,13 +60,15 @@ export type SettingsSection =
   | "account"
   | "overview"
   | "storage"
+  | "network"
   | "system-update"
   | "personalization"
   | "users"
   | "logs"
   | "terminal"
   | "task-manager"
-  | "web-search";
+  | "web-search"
+  | "assistant";
 
 interface SectionLink {
   id: SettingsSection;
@@ -76,6 +82,7 @@ const sectionGroups: SectionLink[][] = [
   [
     { id: "overview", label: "概览", icon: LayoutDashboard },
     { id: "storage", label: "存储", icon: HardDrive },
+    { id: "network", label: "网络", icon: Wifi, adminOnly: true },
     { id: "system-update", label: "系统更新", icon: CircleFadingArrowUp, adminOnly: true },
     { id: "task-manager", label: "任务管理器", icon: Activity },
   ],
@@ -83,6 +90,7 @@ const sectionGroups: SectionLink[][] = [
     { id: "users", label: "用户与权限", icon: UsersRound, adminOnly: true },
     { id: "personalization", label: "个性化", icon: Palette, adminOnly: true },
     { id: "web-search", label: "网页搜索", icon: Globe, adminOnly: true },
+    { id: "assistant", label: "VNAS", icon: Bot, adminOnly: true },
   ],
   [
     { id: "logs", label: "日志", icon: ScrollText },
@@ -110,6 +118,7 @@ export function SettingsPanel({
   storagePlan,
   onUserChange,
   onLogout,
+  onAssistantKeyChange,
 }: {
   session: Session;
   host: HostStateView;
@@ -122,6 +131,8 @@ export function SettingsPanel({
   // onUserChange receives the account after its owner changed the nickname or avatar.
   onUserChange: (user: User) => void;
   onLogout: () => void;
+  // onAssistantKeyChange tells the desktop that VNAS was turned on or off for everyone.
+  onAssistantKeyChange?: () => void;
 }) {
   const { user } = session;
   const isAdmin = user.role === "admin";
@@ -236,7 +247,7 @@ export function SettingsPanel({
               groups={links}
               current={current}
               terminalRunning={current !== "terminal" && terminalStatus?.state === "connected"}
-              newVersion={hasNewVersion(update)}
+              updateMark={hasNewVersion(update) ? "有新版本" : waitsForRestart(update) ? "等待重启" : undefined}
               onGo={go}
             />
           </SettingsSearch>
@@ -278,6 +289,8 @@ export function SettingsPanel({
               {current === "system-update" && <SystemUpdateSection onOpenLogs={() => openLogs("system")} />}
               {current === "personalization" && <PersonalizationSection />}
               {current === "web-search" && <WebSearchSection />}
+              {current === "network" && <NetworkSection />}
+              {current === "assistant" && <AssistantSection onKeyChange={onAssistantKeyChange} />}
               {current === "users" && (
                 <UsersSection
                   currentUser={user}
@@ -315,14 +328,15 @@ function SectionNav({
   groups,
   current,
   terminalRunning,
-  newVersion,
+  updateMark,
   onGo,
 }: {
   user: User;
   groups: SectionLink[][];
   current: SettingsSection;
   terminalRunning: boolean;
-  newVersion: boolean;
+  // updateMark says why 系统更新 wants a look: a new version, or one that waits for a restart.
+  updateMark?: string;
   onGo: (section: SettingsSection) => void;
 }) {
   const nav = useRef<HTMLElement>(null);
@@ -368,9 +382,9 @@ function SectionNav({
               {id === "terminal" && terminalRunning && (
                 <span className={styles.setNavLive} title="Shell 正在运行" aria-hidden="true" />
               )}
-              {id === "system-update" && newVersion && (
-                <span className={styles.setNavMark} title="有新版本">
-                  <span className="sr-only">有新版本</span>
+              {id === "system-update" && updateMark && (
+                <span className={styles.setNavMark} title={updateMark}>
+                  <span className="sr-only">{updateMark}</span>
                 </span>
               )}
               <ChevronRight className={styles.setNavGo} aria-hidden="true" />

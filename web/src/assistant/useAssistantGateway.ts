@@ -43,7 +43,14 @@ export function useAssistantGateway(): AssistantGateway {
       // session that ended is handled there like everywhere else on the desktop.
       assistantStatus()
         .then((status) => {
-          if (!stopped) setProblem(status.available ? "" : "你的账号还没有 VNAS");
+          if (!stopped)
+            setProblem(
+              status.available
+                ? ""
+                : status.reason === "no_key"
+                  ? "管理员还没有在“设置 → VNAS”中填写 DeepSeek 密钥"
+                  : "你的账号还没有 VNAS",
+            );
         })
         .catch((reason) => {
           if (!stopped) setProblem(failureText(reason));

@@ -110,6 +110,31 @@ describe("问题反馈", () => {
     expect(avatar(within(other).getByText("owner"))?.textContent).toBe("O");
   });
 
+  it("keeps a deleted account's name on what it wrote and handled when a newer account takes it", async () => {
+    // The lin who wrote and handled these was deleted; a newer account took
+    // the name and chose a nickname.
+    rememberPerson({ id: "user:lin-2", username: "lin", nickname: "新林" });
+    const old = feedbackItem("feedback:old", {
+      text: "旧账号写的反馈",
+      createdBy: "lin",
+      createdById: "user:lin",
+      createdAt: "2026-10-12T08:00:00Z",
+      resolved: true,
+      resolvedBy: "lin",
+      resolvedById: "user:lin",
+      resolvedAt: "2026-10-12T09:00:00Z",
+    });
+    server.use(...feedbackHandlers(() => [old]));
+    const user = userEvent.setup();
+    render(<FeedbackChannel />);
+    const panel = await openPanel(user);
+    await user.click(within(panel).getByRole("tab", { name: "已处理1" }));
+    const card = (await within(panel).findByText(old.text)).closest("li") as HTMLElement;
+    expect(within(card).getByText("lin")).toBeTruthy();
+    expect(within(card).getByText(/lin 已处理/)).toBeTruthy();
+    expect(within(card).queryByText(/新林/)).toBeNull();
+  });
+
   it("shows the open count on the edge button and lists open items first", async () => {
     server.use(...feedbackHandlers(() => [upload, heic, subtitles]));
     const focus = vi.spyOn(HTMLElement.prototype, "focus");

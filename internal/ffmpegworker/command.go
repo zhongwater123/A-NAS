@@ -91,6 +91,11 @@ func (t Tools) command(request Request) (string, []string) {
 			args = append(args, "-ss", seconds(request.Start))
 		}
 		args = append(args, "-i", "fd:", "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "-1")
+		if request.PCM {
+			// The samples music analysis reads, in little-endian float: one
+			// channel FFmpeg mixes down, or two interleaved.
+			return t.FFmpeg, append(args, "-ac", strconv.Itoa(request.Channels), "-ar", strconv.Itoa(request.SampleRate), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1")
+		}
 		if request.SampleRate > 0 {
 			args = append(args, "-ar", strconv.Itoa(request.SampleRate))
 		}

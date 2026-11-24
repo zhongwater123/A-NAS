@@ -1,6 +1,11 @@
 /* The settings window: its sections, their shared parts and the storage
    wizard. The sections come first, in the order they had in the window's
    stylesheet, so that the shared rules below still win their ties. */
+.networkValue {
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
 /* ── 日志 (logs.css) ── */
 /* Settings → 日志: an activity timeline and a service log console in the
    grouped-card style of the other settings sections. */
@@ -3027,11 +3032,16 @@ button.set-row-command.danger {
   height: 16px;
 }
 .set-field,
-.set-field > label {
+.set-field > label,
+.set-field > [role="group"] {
   display: grid;
   gap: 6px;
 }
-.set-field > label > span:first-child {
+.set-field > [role="group"] > .set-segmented {
+  justify-self: start;
+}
+.set-field > label > span:first-child,
+.set-field > [role="group"] > span:first-child {
   color: var(--set-text);
   font-size: 13px;
   font-weight: 600;
@@ -4490,7 +4500,8 @@ button.ov-fact:hover .ov-fact-head svg {
 .acct-state.status-disabled {
   color: var(--set-faint);
 }
-.acct-state.status-error {
+.acct-state.status-error,
+.acct-state.status-deleting {
   color: var(--set-danger);
 }
 .acct-avatar {
@@ -5094,4 +5105,30 @@ button.set-row-command:disabled {
 }
 button.set-row-command:disabled:hover {
   background: transparent;
+}
+
+/* 设置 → VNAS: what goes to DeepSeek, and the administrator's consent before saving the key. */
+.set-disclosure {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--set-warning-soft);
+  color: var(--set-text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.set-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.set-consent input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--set-accent);
 }

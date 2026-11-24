@@ -1308,7 +1308,86 @@ describe("Settings", () => {
       within(screen.getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }),
     );
     expect(await screen.findByText("已禁用 alice。")).toBeTruthy();
-    expect(members.sent.disabled).toEqual(["/api/v1/users/user%3Aalice"]);
+    expect(members.sent.disabled).toEqual(["/api/v1/users/user%3Aalice/disable"]);
+  });
+
+  it("enables a disabled member again with the password it had", async () => {
+    serve();
+    const members = membersHandlers([owner.user, { ...alice, status: "disabled" }]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    expect(await screen.findByText("已禁用")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "alice 的更多操作" }));
+    expect(screen.queryByRole("menuitem", { name: "禁用账号…" })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "重新启用…" }));
+    const confirm = screen.getByRole("form", { name: "重新启用 alice" });
+    expect(within(screen.getByRole("dialog")).getByText(/原来的密码/)).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "重新启用" }));
+    expect(await screen.findByText("已重新启用 alice。")).toBeTruthy();
+    expect(members.sent.enabled).toEqual(["/api/v1/users/user%3Aalice/enable"]);
+  });
+
+  it("deletes a disabled member after the choices and the administrator's password", async () => {
+    // Radix's radio group sizes the input it keeps in a form with
+    // ResizeObserver, which jsdom lacks.
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    serve();
+    const members = membersHandlers([owner.user, { ...alice, status: "disabled" }]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除账号…" }));
+    const form = screen.getByRole("form", { name: "删除 alice" });
+    expect(within(form).getByText("放进你个人空间的“alice 的文件”文件夹")).toBeTruthy();
+    const library = within(form).getByRole("group", { name: "私有图库" });
+    await user.click(within(library).getByRole("radio", { name: "一并删除" }));
+    expect(within(form).getByText("连同图库回收站一起删除")).toBeTruthy();
+    await user.type(within(form).getByLabelText("你的密码"), "owner password 1");
+    await user.click(within(form).getByRole("button", { name: "删除账号" }));
+    expect(await screen.findByText(/alice 将于.*删除，在此之前可以撤销。/)).toBeTruthy();
+    expect(members.sent.deletions).toEqual([
+      {
+        path: "/api/v1/users/user%3Aalice/deletion",
+        body: { password: "owner password 1", personalSpace: "transfer", library: "delete" },
+      },
+    ]);
+  });
+
+  it("keeps a member waiting to be deleted, which stays disabled", async () => {
+    serve();
+    const waiting = {
+      ...alice,
+      status: "disabled" as const,
+      deletion: {
+        dueAt: "2026-12-16T10:00:00Z",
+        personalSpace: "transfer" as const,
+        library: "delete" as const,
+        started: false,
+      },
+    };
+    const members = membersHandlers([owner.user, waiting]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    expect(await screen.findByText(/待删除 · .*删除/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "alice 的更多操作" }));
+    expect(screen.queryByRole("menuitem", { name: "重新启用…" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "重置密码…" })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "撤销删除…" }));
+    await user.click(
+      within(screen.getByRole("form", { name: "撤销删除 alice" })).getByRole("button", { name: "撤销删除" }),
+    );
+    expect(await screen.findByText("已撤销删除 alice，账号仍为禁用。")).toBeTruthy();
+    expect(members.sent.cancelled).toEqual(["/api/v1/users/user%3Aalice/deletion"]);
   });
 });
 

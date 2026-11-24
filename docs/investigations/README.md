@@ -4,6 +4,13 @@
 
 ## 索引
 
+- [2026-11-19：伙伴的“这一步完成”测试与阶段合并的 5 秒赛跑](2026-11-19-companion-step-done-test-races-the-stage-merge.md)
+- [2026-11-19：剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](2026-11-19-montage-job-stalls-on-the-experimental-nas.md)
+- [2026-11-18：向量索引测试在 gRPC 发布 Ready 状态前断言预热完成](2026-11-18-vectorindex-ready-observation.md)
+- [2026-11-18：助手确认卡片把非法 UTF-8 后缀与旧二进制内容当成完整预览](2026-11-18-assistant-change-preview.md)
+- [2026-11-18：助手更改的复制大小与确认副本漏计保留容量](2026-11-18-assistant-change-capacity.md)
+- [2026-11-17：imaging 在自己的 goroutine 里 panic，服务进程随之退出](2026-11-17-imaging-panics-end-the-process.md)
+- [2026-11-16：更新单元退出时遗漏已受理的请求](2026-11-16-system-update-request-handoff.md)
 - [2026-11-12：Docker 的地址池保护必须跨产品回滚保留](2026-11-12-docker-policy-survives-product-rollback.md)
 - [2026-11-09：hwmon 属性截断与异常 SMART 温度](2026-11-09-hwmon-truncation-and-smart-temperature.md)
 - [2026-11-09：音乐扫描刚结束时，状态报告“空闲”却带着扫描前的歌曲数与版本号](2026-11-09-music-status-idle-with-stale-count.md)

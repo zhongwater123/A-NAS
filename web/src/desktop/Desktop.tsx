@@ -22,6 +22,7 @@ import { Companion } from "../companion/Companion";
 import { useDeviceTrouble } from "../companion/health";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
+import { montageEnabled } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -60,6 +61,7 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint loads after the desktop, so its code and styles stay out of
 // the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
+const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -149,22 +151,32 @@ export function Desktop({
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   // anchor brings a row of the section into view, as the search does: one there already shows again.
-  const openSettings = (section?: SettingsSection, anchor?: string) => {
-    if (section) setSettingsSection(section);
-    if (anchor) open("settings", { anchor });
-    else open("settings");
-  };
+  const openSettings = useCallback(
+    (section?: SettingsSection, anchor?: string) => {
+      if (section) setSettingsSection(section);
+      if (anchor) open("settings", { anchor });
+      else open("settings");
+    },
+    [open],
+  );
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
   useEffect(() => {
     transferStore.attach(session.user.id);
   }, [session.user.id]);
-  const [assistantReady, setAssistantReady] = useState(false);
-  useEffect(() => {
+  // VNAS opens when this device runs one for this account; without the administrator's key
+  // nobody has one, and the desktop says so (ADR 0024).
+  const [assistant, setAssistant] = useState({ ready: false, needsKey: false });
+  const readAssistant = useCallback(() => {
     void assistantStatus()
-      .then((status) => setAssistantReady(status.available))
-      .catch(() => setAssistantReady(false));
-  }, [session.user.id]);
+      .then((status) =>
+        setAssistant({ ready: status.available, needsKey: !status.available && status.reason === "no_key" }),
+      )
+      .catch(() => setAssistant({ ready: false, needsKey: false }));
+  }, []);
+  useEffect(() => readAssistant(), [session.user.id, readAssistant]);
+  const assistantReady = assistant.ready;
+  const assistantNeedsKey = assistant.needsKey;
   // Only the switch reaches the windows' context, not every minute's read.
   const webSearchEnabled = useWebSearch()?.enabled ?? false;
   // 照片打分 is read when the account signs in and when the page comes back
@@ -191,6 +203,28 @@ export function Desktop({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
+  // 剪辑中心 is read when the account signs in and when the page comes back
+  // into view, so a read that failed is tried again.
+  const [montage, setMontage] = useState(false);
+  useEffect(() => {
+    let controller = new AbortController();
+    const read = () => {
+      controller.abort();
+      controller = new AbortController();
+      montageEnabled(controller.signal)
+        .then(setMontage)
+        .catch(() => undefined);
+    };
+    read();
+    const visible = () => {
+      if (!document.hidden) read();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      controller.abort();
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -204,19 +238,42 @@ export function Desktop({
       session,
       isAdmin,
       assistantReady,
+      assistantNeedsKey,
+      openSettings,
       webSearchEnabled,
       scoring,
+      montage,
       open,
       intents,
       intentHandled,
       changeUser,
       logout: onLogout,
     }),
-    [session, isAdmin, assistantReady, webSearchEnabled, scoring, open, intents, intentHandled, changeUser, onLogout],
+    [
+      session,
+      isAdmin,
+      assistantReady,
+      assistantNeedsKey,
+      openSettings,
+      webSearchEnabled,
+      scoring,
+      montage,
+      open,
+      intents,
+      intentHandled,
+      changeUser,
+      onLogout,
+    ],
   );
   const settingsState = useMemo<SettingsState>(
-    () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),
-    [host, settingsSection, storagePlan],
+    () => ({
+      host,
+      section: settingsSection,
+      setSection: setSettingsSection,
+      storagePlan,
+      assistantKeyChanged: readAssistant,
+    }),
+    [host, settingsSection, storagePlan, readAssistant],
   );
   const shortcuts = useAppShortcuts();
   const launcherApps = [
@@ -374,6 +431,13 @@ export function Desktop({
             <FamilyNotices onOpen={() => open("family")} />
           </Suspense>
         </ShellPart>
+        {montage && (
+          <ShellPart name="montage hints">
+            <Suspense fallback={null}>
+              <MontageNotices onOpen={() => open("montage")} />
+            </Suspense>
+          </ShellPart>
+        )}
         <ShellPart name="feedback">
           <FeedbackChannel />
         </ShellPart>

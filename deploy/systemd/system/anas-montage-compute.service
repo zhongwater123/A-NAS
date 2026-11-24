@@ -1,0 +1,44 @@
+[Unit]
+Description=A-NAS montage compute Worker
+Documentation=https://github.com/zhongwater123/A-NAS
+Requires=anas-montage-compute.socket
+After=anas-montage-compute.socket
+
+[Service]
+Type=simple
+# Cuts cards, measures their quality and fills the music's slots with the
+# prototype's pure computation (ai/anas_montage). Everything it reads comes
+# in the request, so it has no network and no data volume.
+User=a-nas-montage-compute
+DynamicUser=true
+Environment=PYTHONPATH=/usr/lib/a-nas/ai
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_montage.worker
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# Background work: under anas.slice it gives way to everything else on the
+# device. Quality frames come in 30-second chunks, so memory does not grow
+# with a card's length.
+Slice=anas.slice
+MemoryMax=1G
+MemorySwapMax=0

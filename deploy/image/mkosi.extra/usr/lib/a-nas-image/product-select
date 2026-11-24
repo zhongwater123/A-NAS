@@ -1,0 +1,23 @@
+#!/bin/bash
+# a-nas-product-select.service: links the product that runs on the booted
+# base before systemd-sysext merges the extensions. The update service links
+# each base to its product in /var/lib/a-nas-image/product
+# (internal/systemupdate/updater/image.go): a new base starts the product
+# installed with it, and the base before, which systemd-boot goes back to
+# when the new one fails its boot check, starts its own. A base without a
+# link keeps the product linked now.
+set -euo pipefail
+# shellcheck disable=SC1091 # the image's own release file
+base=$(. /usr/lib/os-release && echo "${IMAGE_VERSION:-}")
+chosen=/var/lib/a-nas-image/product/$base
+[[ -n "$base" && -L "$chosen" ]] || exit 0
+target=$(readlink -- "$chosen")
+if [[ ! -f "$target" ]]; then
+  echo "a-nas-product-select: the product of the base $base, $target, is gone; the one linked stays" >&2
+  exit 0
+fi
+current=/var/lib/extensions/a-nas-product.raw
+[[ "$(readlink -- "$current" 2>/dev/null)" == "$target" ]] && exit 0
+ln -sfn -- "$target" "$current.new"
+mv -Tf -- "$current.new" "$current"
+echo "a-nas-product-select: the base $base starts ${target##*/}"

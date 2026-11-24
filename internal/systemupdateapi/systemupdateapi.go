@@ -24,7 +24,7 @@ import (
 
 // Recorder writes to the activity record (accounts.Service.RecordSystemUpdate).
 type Recorder interface {
-	RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string) error
+	RecordSystemUpdate(ctx context.Context, actorID, action, resourceID, detail string, at time.Time) (bool, error)
 }
 
 // Work names what an install waits for: "storage" while the data volume
@@ -90,7 +90,7 @@ func (a *API) act(w http.ResponseWriter, r *http.Request, session accounts.Sessi
 		return
 	}
 	if !systemupdate.Requestable(request.Action) {
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the action is check, download, install or revert")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the action is check, download, install, revert or restart")
 		return
 	}
 	status, err := a.updater.SystemUpdate(r.Context())
@@ -106,7 +106,8 @@ func (a *API) act(w http.ResponseWriter, r *http.Request, session accounts.Sessi
 		httpjson.WriteError(w, http.StatusConflict, "update_not_ready", "there is nothing to "+request.Action)
 		return
 	}
-	if request.Action == systemupdate.RequestInstall || request.Action == systemupdate.RequestRevert {
+	if request.Action == systemupdate.RequestInstall || request.Action == systemupdate.RequestRevert ||
+		request.Action == systemupdate.RequestRestart {
 		if waiting := a.work(r.Context()); len(waiting) > 0 {
 			httpjson.WriteError(w, http.StatusConflict, "update_waiting", "an install waits for "+waiting[0])
 			return
@@ -123,13 +124,16 @@ func (a *API) act(w http.ResponseWriter, r *http.Request, session accounts.Sessi
 		return
 	}
 	version := status.Candidate
-	if request.Action == systemupdate.RequestRevert {
+	switch request.Action {
+	case systemupdate.RequestRevert:
 		version = status.Previous
+	case systemupdate.RequestRestart:
+		version = status.Target
 	}
 	// A check is not recorded: the page asks for one whenever the last is an
 	// hour old, and what a check finds is recorded when it fails.
 	if request.Action != systemupdate.RequestCheck {
-		a.record(r.Context(), session.User.ID, "system.update."+request.Action, "", map[string]string{"version": version})
+		a.record(r.Context(), session.User.ID, "system.update."+request.Action, "", map[string]string{"version": version}, time.Time{})
 	}
 	a.logger.InfoContext(r.Context(), "system update requested", "by", session.User.Username, "action", request.Action)
 	httpjson.Write(w, http.StatusAccepted, a.document(r.Context(), status))
@@ -143,7 +147,9 @@ func actionReady(action string, status systemupdate.Status) bool {
 	case systemupdate.RequestInstall:
 		return status.Phase == systemupdate.PhaseReady
 	case systemupdate.RequestRevert:
-		return status.Previous != ""
+		return status.Previous != "" && status.Phase != systemupdate.PhaseRestartPending
+	case systemupdate.RequestRestart:
+		return status.Phase == systemupdate.PhaseRestartPending
 	}
 	return true
 }
@@ -166,7 +172,7 @@ func (a *API) setSettings(w http.ResponseWriter, r *http.Request, session accoun
 		a.unavailable(w, r, err)
 		return
 	}
-	a.record(r.Context(), session.User.ID, "system.update.settings", "", settings)
+	a.record(r.Context(), session.User.ID, "system.update.settings", "", settings, time.Time{})
 	httpjson.Write(w, http.StatusOK, a.document(r.Context(), status))
 }
 
@@ -175,27 +181,30 @@ func (a *API) unavailable(w http.ResponseWriter, r *http.Request, err error) {
 	httpjson.WriteError(w, http.StatusServiceUnavailable, "update_unavailable", "system update is unavailable")
 }
 
-// record writes one event to the activity record; a failure is logged, the
-// request itself has happened.
-func (a *API) record(ctx context.Context, actorID, action, resourceID string, detail any) {
+// record reports whether it wrote a new activity event. A zero time is now.
+func (a *API) record(ctx context.Context, actorID, action, resourceID string, detail any, at time.Time) bool {
 	if a.recorder == nil {
-		return
+		return false
 	}
 	data, err := json.Marshal(detail)
 	if err == nil {
-		err = a.recorder.RecordSystemUpdate(ctx, actorID, action, resourceID, string(data))
+		var written bool
+		written, err = a.recorder.RecordSystemUpdate(ctx, actorID, action, resourceID, string(data), at)
+		if err == nil {
+			return written
+		}
 	}
-	if err != nil {
-		a.logger.ErrorContext(ctx, "system update not written to the activity record", "action", action, "error", err)
-	}
+	a.logger.ErrorContext(ctx, "system update not written to the activity record", "action", action, "error", err)
+	return false
 }
 
 // systemActor is the actor the activity log shows as 系统 and filters as 系统任务
 // (internal/activityapi); who started an operation is in the detail.
 const systemActor = "system"
 
-// mirror writes the outcomes the service recorded to the activity record;
-// each record's time names it, so writing it again changes nothing.
+// mirror writes the outcomes the service recorded to the activity record, at
+// the time each happened; that time names it, so writing it again changes
+// nothing.
 func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
 	for _, record := range slices.Backward(status.Records) {
 		detail := map[string]string{"version": record.Version, "from": record.From, "by": record.By}
@@ -203,14 +212,14 @@ func (a *API) mirror(ctx context.Context, status systemupdate.Status) {
 			detail["problem"] = record.Problem.Code
 		}
 		a.record(ctx, systemActor, "system.update.result."+record.Kind,
-			record.At.UTC().Format(time.RFC3339Nano)+" "+record.Kind, detail)
+			record.At.UTC().Format(time.RFC3339Nano)+" "+record.Kind, detail, record.At)
 	}
 }
 
 // Run installs by itself while the settings allow it: every few minutes,
 // within the window, a downloaded version is installed once nothing waits
-// on the services. It also writes the outcomes to the activity record. It
-// returns when ctx ends.
+// on the services, asked for once a window. It also writes the outcomes to
+// the activity record. It returns when ctx ends.
 func (a *API) Run(ctx context.Context, every time.Duration) {
 	if a.updater == nil {
 		return
@@ -233,17 +242,35 @@ func (a *API) automatic(ctx context.Context) {
 		return
 	}
 	a.mirror(ctx, status)
-	if status.Running || status.Phase != systemupdate.PhaseReady || !status.Settings.AutoInstall ||
-		!status.Settings.InWindow(a.now()) || len(a.work(ctx)) > 0 {
+	now := a.now()
+	// A version that is ready is installed; on a device that runs the A-NAS
+	// image, one an administrator installed and that waits for a restart is
+	// restarted into, as an automatic install of it would be.
+	kind, version := systemupdate.RequestInstall, status.Candidate
+	if status.Phase == systemupdate.PhaseRestartPending {
+		kind, version = systemupdate.RequestRestart, status.Target
+	}
+	if status.Running || (status.Phase != systemupdate.PhaseReady && status.Phase != systemupdate.PhaseRestartPending) ||
+		!status.Settings.AutoInstall || !status.Settings.InWindow(now) || len(a.work(ctx)) > 0 {
 		return
 	}
-	request := systemupdate.Request{Kind: systemupdate.RequestInstall, By: systemupdate.ByAutomatic}
+	// Record the attempt and claim this window before dispatch. A service
+	// restart or a rejected request must not permit a second dispatch.
+	window := status.Settings.WindowOpened(now).UTC().Format(time.RFC3339)
+	claim := "automatic " + window
+	if kind == systemupdate.RequestRestart {
+		claim = "automatic restart " + window
+	}
+	if !a.record(ctx, systemActor, "system.update."+kind, claim,
+		map[string]string{"version": version, "by": systemupdate.ByAutomatic}, now) {
+		return
+	}
+	request := systemupdate.Request{Kind: kind, By: systemupdate.ByAutomatic}
 	if _, err := a.updater.RequestSystemUpdate(ctx, request); err != nil {
-		a.logger.ErrorContext(ctx, "automatic install not started", "error", err)
+		a.logger.ErrorContext(ctx, "automatic "+kind+" not started", "error", err)
 		return
 	}
-	a.record(ctx, "", "system.update.install", "", map[string]string{"version": status.Candidate, "by": systemupdate.ByAutomatic})
-	a.logger.InfoContext(ctx, "automatic install started", "version", status.Candidate)
+	a.logger.InfoContext(ctx, "automatic "+kind+" started", "version", version)
 }
 
 // Document is the page's view of the service.
@@ -265,6 +292,18 @@ type Document struct {
 	Settings        systemupdate.Settings `json:"settings"`
 	// Waiting names what an install waits for now.
 	Waiting []string `json:"waiting"`
+	// Image is set on a device that runs the A-NAS image.
+	Image *ImageDocument `json:"image,omitempty"`
+}
+
+// ImageDocument is what the page shows of a device that runs the A-NAS
+// image.
+type ImageDocument struct {
+	// Base is the base image the device runs, by its release's sequence.
+	Base string `json:"base"`
+	// Restart says that installing the candidate writes a new base, which
+	// takes effect after a restart.
+	Restart bool `json:"restart"`
 }
 
 func (a *API) document(ctx context.Context, status systemupdate.Status) Document {
@@ -275,8 +314,11 @@ func (a *API) document(ctx context.Context, status systemupdate.Status) Document
 		Target: status.Target, Problem: status.Problem, Records: status.Records,
 		Settings: status.Settings, Waiting: a.work(ctx),
 	}
-	if status.Running || status.Phase.Busy() {
+	if status.Running || status.Phase.Busy() || status.Phase == systemupdate.PhaseRestartPending {
 		document.StartedAt = timePointer(status.StartedAt)
+	}
+	if status.Image != nil {
+		document.Image = &ImageDocument{Base: status.Image.Base, Restart: status.Image.Restart}
 	}
 	if document.Suites == nil {
 		document.Suites = []string{}

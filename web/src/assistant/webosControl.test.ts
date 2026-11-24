@@ -180,6 +180,16 @@ describe("WebosController", () => {
     expect([...sent].sort()).toEqual(["POST /api/v1/shares", "POST /api/v1/shares/x/messages"]);
   });
 
+  it("refuses a web search a step causes without asking, whatever the button is called (#359)", async () => {
+    const { control, asked } = controller(true);
+    writes("new-folder", "POST", "/api/v1/web-search/query");
+    await expect(control.run("click", { ref: refOf(await look(control), "新建文件夹") })).rejects.toThrow(
+      "网页搜索不给 VNAS 使用",
+    );
+    expect(asked).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   it("asks about a write of a route it does not know", async () => {
     const { control, asked } = controller(false);
     writes("open", "POST", "/api/v1/something-new");

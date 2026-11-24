@@ -83,10 +83,19 @@ type Config struct {
 	// AssistantChanges holds what the executor of the assistants' changes
 	// keeps, readable by root alone; empty turns the executor off.
 	AssistantChanges string
+	// AssistantChangesAdmit checks the data volume's reserve before an
+	// assistant's change writes to it; nil uses capacity.Admits.
+	AssistantChangesAdmit func(path string, incoming int64) (bool, error)
 	// AssistantRuns holds, for each member, the scheduled tasks they asked to
 	// run now and no round has taken yet, a file each in <username>; root's
 	// alone. Empty turns running a task now off.
 	AssistantRuns string
+	// AssistantPlans holds each member's planning grant, <username>, for the
+	// montage center (assistant_plan); root's alone. Empty turns it off.
+	AssistantPlans string
+	// AssistantOn reports whether the administrator's model key is saved;
+	// without it no member's task runs now, and nil counts as saved.
+	AssistantOn func() bool
 	// StartAssistantRound starts a round of the member's scheduled tasks.
 	// The default starts the member's cron unit without waiting for it.
 	StartAssistantRound func(ctx context.Context, username string) error
@@ -211,7 +220,7 @@ func NewServer(config Config) (*Server, error) {
 	}
 	server := &Server{config: config, executable: executable, pools: make(map[workerKey]*pool), assistants: make(map[*net.UnixConn]struct{})}
 	if config.AssistantChanges != "" {
-		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot}
+		server.changes = &assistantchanges.Executor{Root: config.AssistantChanges, Volume: config.VolumeRoot, Admits: config.AssistantChangesAdmit}
 	}
 	return server, nil
 }
@@ -281,6 +290,11 @@ func (s *Server) handle(conn *net.UnixConn) {
 		return
 	case wire.OpAssistantRun:
 		if err := wire.WriteMessage(conn, s.serveAssistantRun(req), nil); err != nil {
+			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
+		}
+		return
+	case wire.OpAssistantPlan:
+		if err := wire.WriteMessage(conn, s.serveAssistantPlan(req), nil); err != nil {
 			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
 		}
 		return

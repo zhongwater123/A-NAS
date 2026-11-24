@@ -3,14 +3,17 @@
 import type { FeedbackComment, FeedbackItem } from "../../api.generated";
 import { http } from "../server";
 
-// feedbackItem is an open item without images or comments.
+// feedbackItem is an open item without images or comments. Its author's ID
+// follows the fixtures' accounts, user:<name>.
 export function feedbackItem(id: string, overrides: Partial<FeedbackItem> = {}): FeedbackItem {
+  const createdBy = overrides.createdBy ?? "owner";
   return {
     id,
     text: "",
     images: [],
     version: 1,
-    createdBy: "owner",
+    createdBy,
+    createdById: `user:${createdBy}`,
     createdAt: "2026-10-12T07:00:00Z",
     resolved: false,
     comments: [],
@@ -20,7 +23,17 @@ export function feedbackItem(id: string, overrides: Partial<FeedbackItem> = {}):
 
 // feedbackComment is a comment without images.
 export function feedbackComment(id: string, overrides: Partial<FeedbackComment> = {}): FeedbackComment {
-  return { id, text: "", images: [], version: 1, createdBy: "owner", createdAt: "2026-10-12T07:00:00Z", ...overrides };
+  const createdBy = overrides.createdBy ?? "owner";
+  return {
+    id,
+    text: "",
+    images: [],
+    version: 1,
+    createdBy,
+    createdById: `user:${createdBy}`,
+    createdAt: "2026-10-12T07:00:00Z",
+    ...overrides,
+  };
 }
 
 // feedbackHandlers answers the list from items, read on every request so a

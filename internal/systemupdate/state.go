@@ -37,11 +37,21 @@ const (
 	// the version before; apt is installing that one.
 	PhaseRollingBack Phase = "rolling-back"
 	// PhaseRolledBack: the check of the new version failed and the device
-	// is back on the version before it.
+	// is back on the version before it. It stays, with its problem, until a
+	// newer version is offered or an administrator goes back. With
+	// ProblemRollback, going back went wrong, after a failed install or a
+	// failed "back to the version before", and it also goes once a-nas-check
+	// passes again.
 	PhaseRolledBack Phase = "rolled-back"
 	// PhaseCheckFailed: the source could not be read, or its signature was
 	// wrong.
 	PhaseCheckFailed Phase = "check-failed"
+	// PhaseRestartPending: on a device that runs the A-NAS image, Target's
+	// base image is written beside the one that runs, and a restart starts
+	// it. It is not busy: the page offers to restart now. The run after the
+	// restart settles it: updated once the new base passed its boot check,
+	// rolled back when systemd-boot went back to the base before.
+	PhaseRestartPending Phase = "restart-pending"
 )
 
 // Busy reports whether an operation is running in this phase.
@@ -67,6 +77,9 @@ const (
 	ProblemRollback     = "rollback"
 	ProblemStaging      = "staging"
 	ProblemNotInstalled = "not_installed"
+	// ProblemBoot: a new base image did not pass its boot check, and
+	// systemd-boot went back to the base before.
+	ProblemBoot = "boot"
 )
 
 // Settings are the administrator's choices (docs/decisions/2026-11-12-system-update-defaults.md).
@@ -111,6 +124,20 @@ func (s Settings) InWindow(now time.Time) bool {
 		return minute >= from && minute < to
 	}
 	return minute >= from || minute < to
+}
+
+// WindowOpened is when the window that now falls in opened: today's start,
+// or yesterday's for a window that runs past midnight.
+func (s Settings) WindowOpened(now time.Time) time.Time {
+	start, err := time.Parse("15:04", s.WindowStart)
+	if err != nil {
+		return now
+	}
+	opened := time.Date(now.Year(), now.Month(), now.Day(), start.Hour(), start.Minute(), 0, 0, now.Location())
+	if opened.After(now) {
+		opened = opened.AddDate(0, 0, -1)
+	}
+	return opened
 }
 
 // Record is one line of the page's history.
@@ -167,15 +194,70 @@ type State struct {
 	From      string    `json:"from,omitempty"`
 	By        string    `json:"by,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
+	// Reverting marks a rolling-back phase that an administrator's "back to
+	// the version before" started, not the rollback of a failed install: a
+	// run that a power cut stops in it finishes going to Target. If Problem
+	// is set, that attempt failed and the run restores From instead.
+	Reverting bool `json:"reverting,omitempty"`
+	// DpkgBefore sums what dpkg recorded of every package before the install
+	// or revert in progress: one that fails or is cut with dpkg recording
+	// the same changed nothing, and is not undone.
+	DpkgBefore string `json:"dpkgBefore,omitempty"`
 	// BackupName is the database copy the a-nas package's preinst made
 	// before the install in progress, <time>-<From>.
 	BackupName string   `json:"backupName,omitempty"`
 	Problem    *Problem `json:"problem,omitempty"`
-	// Rejected are versions that failed their check or that an
-	// administrator went back from: never installed automatically again.
+	// LastCheckProblem identifies a consecutive series of identical failures.
+	LastCheckProblem *Problem `json:"lastCheckProblem,omitempty"`
+	// Rejected are versions that failed their check, or an install that
+	// changed the device, and versions an administrator went back from: not
+	// offered again.
 	Rejected []string `json:"rejected,omitempty"`
 	Records  []Record `json:"records,omitempty"`
 	Settings Settings `json:"settings"`
+	// Image is set on a device that runs the A-NAS image.
+	Image *Image `json:"image,omitempty"`
+}
+
+// Image is what the state of a device that runs the A-NAS image (ADR 0034
+// decision 2) adds. Its update files are numbered by the release's sequence
+// on main (scripts/build-image.sh), and a release is a base image, a product
+// and the content the product uses; the page still shows the product's
+// Debian versions.
+type Image struct {
+	// Base is the sequence of the base image the device runs, Product the
+	// sequence of the product merged over it, Content the content
+	// extensions that product uses.
+	Base    string   `json:"base,omitempty"`
+	Product string   `json:"product,omitempty"`
+	Content []string `json:"content,omitempty"`
+	// PreviousProduct, PreviousBase and PreviousContent are what "back to the
+	// version before" goes back to: State.Previous's product, the base it
+	// runs on, and its content.
+	PreviousProduct string   `json:"previousProduct,omitempty"`
+	PreviousBase    string   `json:"previousBase,omitempty"`
+	PreviousContent []string `json:"previousContent,omitempty"`
+	// Candidate is the release sequence of State.Candidate; Restart says
+	// that installing it writes a new base, which a restart starts.
+	Candidate string `json:"candidate,omitempty"`
+	Restart   bool   `json:"restart,omitempty"`
+	// The operation in progress: the product, base and content it goes to,
+	// the base it started from, and the boot in which it wrote a base.
+	TargetProduct string   `json:"targetProduct,omitempty"`
+	TargetBase    string   `json:"targetBase,omitempty"`
+	TargetContent []string `json:"targetContent,omitempty"`
+	FromBase      string   `json:"fromBase,omitempty"`
+	BootID        string   `json:"bootId,omitempty"`
+}
+
+// Unsettled reports whether the state waits for a run of the service: an
+// operation that a power cut, reboot or kill stopped, or a restart since a
+// new base was written (bootID is the running boot's).
+func (s State) Unsettled(bootID string) bool {
+	if s.Phase.Busy() {
+		return true
+	}
+	return s.Phase == PhaseRestartPending && s.Image != nil && bootID != "" && s.Image.BootID != bootID
 }
 
 // Record adds a line to the history, newest first, keeping the last ten.
@@ -216,11 +298,15 @@ const (
 	RequestRevert = "revert"
 	// RequestBoot finishes an install that a power cut or reboot stopped.
 	RequestBoot = "boot"
+	// RequestRestart restarts a device that runs the A-NAS image into the
+	// base image an install wrote.
+	RequestRestart = "restart"
 )
 
 // Requestable reports whether the Product Service may ask for kind.
 func Requestable(kind string) bool {
-	return kind == RequestCheck || kind == RequestDownload || kind == RequestInstall || kind == RequestRevert
+	return kind == RequestCheck || kind == RequestDownload || kind == RequestInstall || kind == RequestRevert ||
+		kind == RequestRestart
 }
 
 // Status is the state the service left and whether it runs now.

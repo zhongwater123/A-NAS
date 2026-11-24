@@ -14,9 +14,25 @@ mkfs.btrfs --quiet "$image"
 mount -o loop "$image" "$volume"
 trap 'umount "$volume"' EXIT HUP INT TERM
 chmod 1777 "$volume"
+log="$base/tests.log"
+
+# -test.run selects by name and exits 0 when it selects nothing, so a renamed
+# test would stop running without anyone noticing. Each test named here must
+# be seen to pass in the output.
+passed() {
+ for name in "$@"; do
+  if ! grep -q "^--- PASS: $name " "$log"; then
+   echo "btrfs.sh: $name did not run and pass; was it renamed or skipped?" >&2
+   exit 1
+  fi
+ done
+}
+
 ANAS_SHARE_BTRFS_ROOT="$volume" ANAS_SHARE_TEST_GID=1001 \
  setpriv --reuid=1000 --regid=1000 --groups=1001 \
- /tests/sharefiles.test -test.v -test.run 'Test(BtrfsCapture|RemoteCapture)'
+ /tests/sharefiles.test -test.v -test.run 'Test(BtrfsCapture|RemoteCapture)' > "$log" 2>&1 || { cat "$log"; exit 1; }
+cat "$log"
+passed TestBtrfsCaptureAtomicAndPublishedCopyIndependent TestRemoteCaptureSaveKeepsEmptyDirectoriesAndRenames
 
 # Real Linux identities, only inside this disposable container.
 for record in a-nas-users:20000 a-nas-admins:20001 alice:20100 bob:20101 a-nas-shares:31001; do
@@ -27,4 +43,6 @@ done
 useradd -M -u 20100 -g 20100 -G 20000,20001 -s /usr/sbin/nologin alice
 useradd -M -u 20101 -g 20101 -G 20000 -s /usr/sbin/nologin bob
 useradd -M -u 31001 -g 31001 -s /usr/sbin/nologin a-nas-shares
-ANAS_SHARE_BTRFS_ROOT="$volume" ANAS_SHARE_ACL=1 /tests/sharefiles.test -test.v -test.run TestShareACLMatrix
+ANAS_SHARE_BTRFS_ROOT="$volume" ANAS_SHARE_ACL=1 /tests/sharefiles.test -test.v -test.run TestShareACLMatrix > "$log" 2>&1 || { cat "$log"; exit 1; }
+cat "$log"
+passed TestShareACLMatrix

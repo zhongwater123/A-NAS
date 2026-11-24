@@ -23,6 +23,8 @@ import (
 	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -45,7 +47,13 @@ type Config struct {
 	// service; systemd binds the socket into each assistant's sandbox.
 	AssistantSocketPath string
 	Accounts            AccountResolver
-	Logger              *slog.Logger
+	// GrantSocketPath is where the montage center's project grants are
+	// served in development and tests; on a NAS systemd hands the socket
+	// over by the name "grants" (anas-photos-grants.socket). GrantPeerUID is
+	// the only UID it answers, the montage service's (ADR 0038).
+	GrantSocketPath string
+	GrantPeerUID    int
+	Logger          *slog.Logger
 	// CheckStore proves Root is the photo store on the mounted, writable data
 	// volume; it defaults to RequireOwnedStore. While it fails, requests
 	// answer photos_unavailable and nothing is created.
@@ -139,8 +147,22 @@ func Run(parent context.Context, config Config) error {
 			return err
 		}
 	}
+	grantListener, grantInherited, err := grantSocket(config.GrantSocketPath)
+	active, _ := config.Sessions.(ActiveAccounts)
+	if err == nil && grantListener != nil && active == nil {
+		_ = grantListener.Close()
+		err = errors.New("the grant socket needs a lookup of the accounts in use")
+	}
+	if err != nil {
+		_ = listener.Close()
+		if assistantListener != nil {
+			_ = assistantListener.Close()
+		}
+		return err
+	}
 	var api atomic.Pointer[http.Handler]
 	serve := func(handler http.Handler) { api.Store(&handler) }
+	var opened atomic.Pointer[photos.Service]
 	unavailable := photosapi.New(nil, config.Logger)
 	serve(unavailable)
 	if config.AIQuietPeriod <= 0 {
@@ -157,11 +179,19 @@ func Run(parent context.Context, config Config) error {
 	current := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		(*api.Load()).ServeHTTP(w, r)
 	})
+	// A deleted account's library is removed on the Product Service's
+	// request, which carries no session: the request is only a prompt, and
+	// what to do comes from the Host Agent (accountremoval).
+	routes := http.NewServeMux()
+	routes.Handle(accountremoval.Path, current)
+	routes.Handle("/", Authenticate(config.Sessions, config.Logger, gate, current))
 	server := &http.Server{
-		Handler:           Authenticate(config.Sessions, config.Logger, gate, current),
+		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
-	serveError := make(chan error, 2)
+	// One place for each server's result, so that none blocks once Run has
+	// returned.
+	serveError := make(chan error, 3)
 	go func() { serveError <- server.Serve(listener) }()
 	var assistantServer *http.Server
 	if assistantListener != nil {
@@ -172,6 +202,12 @@ func Run(parent context.Context, config Config) error {
 		}
 		go func() { serveError <- assistantServer.Serve(assistantListener) }()
 	}
+	var grants *grantServer
+	if grantListener != nil {
+		grants = newGrantServer(grantListener, &opened, config.Sessions, active,
+			cmp.Or(config.GrantPeerUID, accountid.MontageServiceUID), config.Logger)
+		go func() { serveError <- grants.serve() }()
+	}
 
 	// As in the Product Service, background work stops as soon as the
 	// process is told to stop, while open requests drain; the Catalog closes
@@ -180,12 +216,25 @@ func Run(parent context.Context, config Config) error {
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
-		supervise(serving, parent, config, gate, serve, unavailable)
+		supervise(serving, parent, config, gate, serve, unavailable, &opened)
 	}()
 	defer func() {
 		stop()
 		<-supervised
 	}()
+	if grants != nil {
+		// Deferred after the store, so it runs first: the grant requests
+		// being answered finish before the Catalog closes, also when a
+		// server failed. On a normal stop they have drained already.
+		defer func() {
+			drained, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			defer cancel()
+			grants.drain(drained)
+			if !grantInherited && config.GrantSocketPath != "" {
+				_ = os.Remove(config.GrantSocketPath)
+			}
+		}()
+	}
 
 	select {
 	case err := <-serveError:
@@ -194,6 +243,15 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
+	// The grant socket stops accepting with the others and drains beside
+	// them, within the same grace.
+	grantsDrained := make(chan struct{})
+	go func() {
+		defer close(grantsDrained)
+		if grants != nil {
+			grants.drain(shutdown)
+		}
+	}()
 	var shutdownErr error
 	if assistantServer != nil {
 		shutdownErr = assistantServer.Shutdown(shutdown)
@@ -203,6 +261,7 @@ func Run(parent context.Context, config Config) error {
 	}
 	shutdownErr = errors.Join(shutdownErr, server.Shutdown(shutdown))
 	_ = os.Remove(config.SocketPath)
+	<-grantsDrained
 	return shutdownErr
 }
 
@@ -231,7 +290,7 @@ const shutdownGrace = 15 * time.Second
 // goes offline, turns read-only or is remounted. The open Catalog never
 // follows the path onto the system disk, and reopening reconciles whatever an
 // abrupt loss left behind. Requests in between answer photos_unavailable.
-func supervise(ctx, background context.Context, config Config, gate *Gate, serve func(http.Handler), unavailable http.Handler) {
+func supervise(ctx, background context.Context, config Config, gate *Gate, serve func(http.Handler), unavailable http.Handler, opened *atomic.Pointer[photos.Service]) {
 	for {
 		service, err := openWhenReady(ctx, config)
 		if err != nil {
@@ -243,11 +302,14 @@ func supervise(ctx, background context.Context, config Config, gate *Gate, serve
 			defer close(background)
 			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors, cmp.Or(config.VectorCheckEvery, VectorCheckInterval))
 		}()
-		serve(preparingVectors(service, photosapi.New(service, config.Logger)))
+		serve(accountremoval.Route(deletionLookup(config.Sessions), RemoveAccount(service), config.Logger,
+			preparingVectors(service, photosapi.New(service, config.Logger))))
+		opened.Store(service)
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
 
 		lost := watchStore(ctx, config, service)
 		serve(unavailable)
+		opened.Store(nil)
 		stopWorkers()
 		<-background
 		_ = service.Close()
@@ -255,6 +317,38 @@ func supervise(ctx, background context.Context, config Config, gate *Gate, serve
 			return
 		}
 		config.Logger.Error("photo store lost; photos are unavailable until it returns", "error", lost)
+	}
+}
+
+// deletionLookup asks the Host Agent about account deletions through the
+// session lookup, which can.
+func deletionLookup(sessions SessionResolver) accountremoval.Lookup {
+	lookup, ok := sessions.(interface {
+		AccountDeletion(context.Context, string) (accounts.AccountDeletion, error)
+	})
+	if !ok {
+		return func(context.Context, string) (accounts.AccountDeletion, error) {
+			return accounts.AccountDeletion{}, errors.New("account deletions cannot be looked up")
+		}
+	}
+	return lookup.AccountDeletion
+}
+
+// RemoveAccount removes a deleted account's private library, handing its
+// photos to the administrator first when that was chosen, and names the
+// album they went to.
+func RemoveAccount(service *photos.Service) accountremoval.Remove {
+	return func(ctx context.Context, deletion accounts.AccountDeletion) (accountremoval.Result, error) {
+		removal := photos.AccountRemoval{UserID: deletion.UserID}
+		if deletion.Library == "transfer" {
+			if deletion.AdminID == "" {
+				return accountremoval.Result{}, errors.New("the administrator who deleted the account no longer administers the device")
+			}
+			removal.Transfer, removal.AdminID, removal.AdminUsername = true, deletion.AdminID, deletion.AdminUsername
+			removal.Album = accounts.HandoverAlbum(deletion.Username)
+		}
+		album, err := service.RemoveAccount(ctx, removal)
+		return accountremoval.Result{Album: album}, err
 	}
 }
 
@@ -423,6 +517,12 @@ func maintain(ctx context.Context, service *photos.Service, logger *slog.Logger)
 		if _, err := service.ExpireTrash(ctx); err != nil && ctx.Err() == nil {
 			logger.ErrorContext(ctx, "photo trash expiry failed", "error", err)
 		}
+		// The montage center's analyses no grant has referred to for a week.
+		if removed, err := service.PruneMontageAnalysis(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "montage analysis pruning failed", "error", err)
+		} else if removed > 0 {
+			logger.InfoContext(ctx, "montage analyses pruned", "videos", removed)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -477,9 +577,11 @@ func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 	})
 }
 
-// listen opens an API socket. The Product Service's socket is 0660, for its
-// user is a member of this service's group; the runtime directory keeps
-// everyone else out.
+// systemdListeners are the sockets systemd handed over, by name. Reading
+// them clears LISTEN_FDS, so they are read once for the assistant's and
+// the grants' sockets both.
+var systemdListeners = sync.OnceValues(activation.ListenersWithNames)
+
 // assistantSocket is where members' assistants connect; the peer's UID says
 // which member. When systemd holds the socket (a socket unit naming it
 // "assistant"), it outlives restarts of this service, so the socket bound into
@@ -487,7 +589,7 @@ func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, nex
 // Otherwise the service makes it, open to every UID, in a directory that must
 // keep out all but the sandboxes systemd binds the socket into.
 func assistantSocket(socketPath string) (net.Listener, bool, error) {
-	if listeners, err := activation.ListenersWithNames(); err == nil && len(listeners["assistant"]) > 0 {
+	if listeners, err := systemdListeners(); err == nil && len(listeners["assistant"]) > 0 {
 		return listeners["assistant"][0], true, nil
 	}
 	if err := requirePrivateDirectory(filepath.Dir(socketPath)); err != nil {
@@ -497,6 +599,9 @@ func assistantSocket(socketPath string) (net.Listener, bool, error) {
 	return listener, false, err
 }
 
+// listen opens an API socket. The Product Service's socket is 0660, for its
+// user is a member of this service's group; the runtime directory keeps
+// everyone else out.
 func listen(socketPath string, mode os.FileMode) (net.Listener, error) {
 	if info, err := os.Lstat(socketPath); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {

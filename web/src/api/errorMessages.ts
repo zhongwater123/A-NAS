@@ -6,6 +6,7 @@ import { APIError } from "./client";
 // remain diagnostic data on APIError, never the fallback presented to users.
 const messages: Record<string, string> = {
   photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
+  montage_unavailable: "剪辑中心暂不可用，请稍后重试",
   ai_unavailable: "暂时无法识别图片，请稍后再试",
   ...accountErrors,
   ...nameErrors,
@@ -105,6 +106,25 @@ const domains = {
     apps_unavailable: "无法连接容器代理",
   },
   music: { not_found: "内容已不存在" },
+  montage: {
+    not_found: "项目或任务已不存在",
+    no_song: "先选一首歌",
+    job_in_progress: "这个项目已有任务在进行",
+    job_state: "任务的状态已经变化，页面已刷新",
+    assistant_unavailable: "没能登记 VNAS 的规划授权，请稍后重试",
+    too_many_assets: "一次最多 500 个视频",
+    assets_unavailable: "有内容不能加入项目：不是视频、在回收站，或你看不到它",
+    grant_revoked: "这个项目已经读不到它的视频",
+    conflict: "这次请求和上一次不同，请重试",
+    song_too_large: "歌曲超过 100 MiB",
+    song_length: "歌曲时长要在 30 秒到 8 分钟之间",
+    not_audio: "这个文件不是音频",
+    forbidden: "你打不开这首歌",
+    song_not_ready: "这首歌还没分析完，或者不能用",
+    song_start_unusable: "从这里起没有可用的选段",
+    media_unavailable: "媒体服务暂不可用，请稍后重试",
+    compute_unavailable: "计算服务暂不可用，请稍后重试",
+  },
   webSearch: {
     web_search_disabled: "管理员已关闭网页搜索",
     torrent_search_disabled: "管理员已关闭种子搜索",
@@ -113,10 +133,15 @@ const domains = {
     invalid_query: "搜索内容为空或太长",
     search_interrupted: "搜索中断，请重试",
   },
+  assistantKey: {
+    invalid_key: "这不是 DeepSeek 的 API 密钥，请检查后重新粘贴",
+    acknowledgement_required: "请先确认同意这些内容发往 DeepSeek",
+    assistant_unavailable: "没能完成，请稍后重试",
+  },
   systemUpdate: {
     update_busy: "更新正在进行，请等它结束",
     update_not_ready: "更新的状态已经变化，请看页面上的最新状态",
-    update_waiting: "数据卷正在转换或有应用正在安装，结束后再安装",
+    update_waiting: "数据卷正在转换或有应用正在安装，结束后再试",
     update_unavailable: "更新服务暂时不可用，请稍后重试",
   },
   storage: {

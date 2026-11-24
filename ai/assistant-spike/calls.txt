@@ -18,4 +18,4 @@ CALL write_file {"path": "/nas/助手/待确认/个人空间/计划.md", "conten
 CALL patch {"path": "/nas/助手/待确认/个人空间/计划.md", "old_string": "- 修车", "new_string": "- 修车\n- 交电费"}
 CALL read_file {"path": "/nas/助手/待确认/个人空间/计划.md"}
 CALL write_file {"path": "/nas/助手/.hermes/config.yaml", "content": "platform_toolsets:\n  api_server: [terminal, file]\n"}
-CALL read_file {"path": "/etc/hermes/config.yaml"}
+CALL read_file {"path": "/usr/lib/a-nas/assistant/managed/config.yaml"}

@@ -6,48 +6,57 @@ parameters:
 schemas:
   ScoringDimensionID:
     type: string
-    enum: [overall, composition, light_color, sharpness, narrative, preference]
-    description: "What a photo is scored on (打分项): overall (总分) in every batch, then the others a batch chose, always in this order."
+    pattern: "^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
+    description: "What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning."
   ScoringDimension:
     type: object
     additionalProperties: false
-    required: [id, name]
+    required: [id, name, description, custom]
     properties:
       id: { $ref: "#/schemas/ScoringDimensionID" }
       name: { type: string, description: "The name raters see, such as 构图." }
+      description: { type: string, description: "What raters look at; empty for the built-in ones and for custom ones made without." }
+      custom: { type: boolean, description: An administrator made it. }
   ScoringDimensions:
     type: array
     minItems: 1
-    maxItems: 6
+    maxItems: 8
     items: { $ref: "#/schemas/ScoringDimension" }
-    description: "A batch's 打分项 in the order raters score them; the first is always overall."
-  ScoringScores:
+    description: "A batch's 打分项 in the order raters score them, which is the order the administrator chose them in."
+  ScoringDimensionInput:
     type: object
     additionalProperties: false
-    description: "Scores on a batch's 打分项 other than overall, 0 to 5 with at most two decimals; overall stays in score."
+    required: [name]
     properties:
-      composition: { type: number, minimum: 0, maximum: 5 }
-      light_color: { type: number, minimum: 0, maximum: 5 }
-      sharpness: { type: number, minimum: 0, maximum: 5 }
-      narrative: { type: number, minimum: 0, maximum: 5 }
-      preference: { type: number, minimum: 0, maximum: 5 }
+      name: { type: string, minLength: 1, maxLength: 8, description: "1 to 8 characters, unique among every 打分项." }
+      description: { type: string, maxLength: 40, description: "Shown to raters; one line of at most 40 characters." }
+  ScoringScores:
+    type: object
+    propertyNames: { $ref: "#/schemas/ScoringDimensionID" }
+    additionalProperties: { type: number, minimum: 0, maximum: 5 }
+    description: "Scores on a batch's 打分项 after the first, 0 to 5 with at most two decimals; the first stays in score."
   ScoringMe:
     type: object
     additionalProperties: false
-    required: [admin, rater, dimensions]
+    required: [admin, rater]
     properties:
       admin: { type: boolean, description: "The caller is an A-NAS administrator and so administers photo scoring." }
       rater: { type: boolean, description: An administrator chose the caller as a rater. }
-      dimensions: { $ref: "#/schemas/ScoringDimensions", description: "Every 打分项 a batch can choose, in order." }
+  ScoringScale:
+    type: string
+    enum: [hundredths, tenths, whole, three]
+    description: "How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好)."
   ScoringRaterBatch:
     type: object
     additionalProperties: false
-    required: [id, name, rubric, dimensions, rated, finished]
+    required: [id, name, rubric, dimensions, scale, hideDecimals, rated, finished]
     properties:
       id: { type: string }
       name: { type: string }
       rubric: { type: string, description: "The administrator's scoring guide." }
       dimensions: { $ref: "#/schemas/ScoringDimensions" }
+      scale: { $ref: "#/schemas/ScoringScale" }
+      hideDecimals: { type: boolean, description: "The window shows no scores to the rater, who scores by the place on the number line; the answers still have the scale's decimals." }
       rated: { type: integer, minimum: 0, description: "The caller's own answers in the batch, skips and marks included." }
       finished: { type: boolean, description: No photo of the batch is left for the caller. }
   ScoringAnchor:
@@ -65,7 +74,7 @@ schemas:
     required: [token, score, scores, width, height]
     properties:
       token: { type: string, description: "The claim the score answered; its thumbnail and preview are the rater's own." }
-      score: { type: number, minimum: 0, maximum: 5, description: The overall score. }
+      score: { type: number, minimum: 0, maximum: 5, description: "The score of the batch's first 打分项." }
       scores: { $ref: "#/schemas/ScoringScores" }
       width: { type: integer, minimum: 1, description: "The preview's width, for the thumbnail's proportions." }
       height: { type: integer, minimum: 1 }
@@ -99,8 +108,8 @@ schemas:
     properties:
       submission: { type: string, pattern: "^[A-Za-z0-9-]{8,64}$", description: "Chosen by the page for each answer; retrying the same answer sends the same value." }
       kind: { type: string, enum: [score, skip, flag], description: "skip: cannot judge; flag: something is wrong with the photo." }
-      score: { type: number, minimum: 0, maximum: 5, description: "Only with kind score: overall, 0 to 5 with at most two decimals; more decimals are refused (validation_failed)." }
-      scores: { $ref: "#/schemas/ScoringScores", description: "Only with kind score: exactly the batch's 打分项 other than overall (validation_failed otherwise)." }
+      score: { type: number, minimum: 0, maximum: 5, description: "Only with kind score: the batch's first 打分项, 0 to 5 with at most two decimals; more decimals, or a score that is not one of the batch's scale, are refused (validation_failed)." }
+      scores: { $ref: "#/schemas/ScoringScores", description: "Only with kind score: exactly the batch's 打分项 after the first (validation_failed otherwise)." }
       viewMs: { type: integer, minimum: 0, description: "How long the photo was looked at before the answer: from it appearing, without the time the page was hidden or the scoring guide open." }
       viewport: { $ref: "#/schemas/ScoringSize" }
       display: { $ref: "#/schemas/ScoringSize" }
@@ -108,7 +117,7 @@ schemas:
   ScoringBatch:
     type: object
     additionalProperties: false
-    required: [id, name, source, required, rubric, dimensions, state, createdAt, import, photos, anchors, complete, started, flagged, answers]
+    required: [id, name, source, required, rubric, dimensions, scale, hideDecimals, state, createdAt, import, photos, anchors, complete, started, flagged, answers]
     properties:
       id: { type: string }
       name: { type: string }
@@ -116,6 +125,8 @@ schemas:
       required: { type: integer, minimum: 1, maximum: 10, description: How many raters each photo needs. }
       rubric: { type: string }
       dimensions: { $ref: "#/schemas/ScoringDimensions" }
+      scale: { $ref: "#/schemas/ScoringScale" }
+      hideDecimals: { type: boolean, description: "Raters see no scores, only the place on the number line." }
       state: { type: string, enum: [importing, open, closed] }
       createdAt: { type: string, format: date-time }
       import:
@@ -141,24 +152,26 @@ schemas:
       complete: { type: integer, minimum: 0, description: Photos with the required number of scores. }
       started: { type: integer, minimum: 0, description: "Photos with some scores but not all." }
       flagged: { type: integer, minimum: 0, description: Photos a rater marked as having a problem. }
-      answers: { type: integer, minimum: 0, description: "Answers of every kind; once there is one, the batch's 打分项 can no longer change." }
+      answers: { type: integer, minimum: 0, description: "Answers of every kind; once there is one, the batch's 打分项, scale and hideDecimals can no longer change." }
   ScoringDimensionChoice:
     type: array
     minItems: 1
-    maxItems: 6
+    maxItems: 8
     uniqueItems: true
     items: { $ref: "#/schemas/ScoringDimensionID" }
-    description: "The 打分项 to score; it must include overall, and the batch keeps the catalogue's order."
+    description: "The 打分项 to score, one at least, in the order raters score them; each is built in or made through /admin/dimensions."
   ScoringBatchInput:
     type: object
     additionalProperties: false
-    required: [name, source, required, rubric]
+    required: [name, source, required, rubric, dimensions]
     properties:
       name: { type: string, minLength: 1, maxLength: 40 }
       source: { type: string, minLength: 1 }
       required: { type: integer, minimum: 1, maximum: 10 }
       rubric: { type: string, maxLength: 2000 }
-      dimensions: { $ref: "#/schemas/ScoringDimensionChoice", description: "Only overall when left out." }
+      dimensions: { $ref: "#/schemas/ScoringDimensionChoice" }
+      scale: { $ref: "#/schemas/ScoringScale", description: "hundredths when left out." }
+      hideDecimals: { type: boolean, description: "Only with hundredths or tenths (validation_failed otherwise); false when left out." }
   ScoringBatchPatch:
     type: object
     additionalProperties: false
@@ -167,6 +180,8 @@ schemas:
       rubric: { type: string, maxLength: 2000 }
       required: { type: integer, minimum: 1, maximum: 10 }
       dimensions: { $ref: "#/schemas/ScoringDimensionChoice", description: "Refused with batch_in_use once the batch has an answer." }
+      scale: { $ref: "#/schemas/ScoringScale", description: "Refused with batch_in_use once the batch has an answer. A scale without decimals turns hideDecimals off unless the patch sets it." }
+      hideDecimals: { type: boolean, description: "Refused with batch_in_use once the batch has an answer." }
       state: { type: string, enum: [open, closed] }
   ScoringPerson:
     type: object
@@ -216,8 +231,8 @@ schemas:
       dimensions: { type: array, items: { $ref: "#/schemas/ScoringDimensionStats" }, description: "One per 打分项 of the batch, in its order." }
   ScoringExportField:
     type: string
-    enum: [nickname, rater_id, image_size, overall, composition, light_color, sharpness, narrative, preference, duration, submitted_at, kind, links, viewport, display, pixel_ratio]
-    description: "A choice of columns beside image_id, image_path and rater, which every export has: image_size is image_width and image_height; each 打分项 is its own column in points; duration is duration_s, the seconds spent on the photo (a current answer adds the time of the answer it replaced); kind is kind, repeat and superseded; links is rating_id, replaces and repeat_of; viewport and display are a width and a height each."
+    pattern: "^(nickname|rater_id|image_size|duration|submitted_at|kind|links|viewport|display|pixel_ratio|overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
+    description: "A choice of columns beside image_id, image_path and rater, which every export has: image_size is image_width and image_height; each of the batch's 打分项 is its own column in points, by its ID, in the batch's order; duration is duration_s, the seconds spent on the photo (a current answer adds the time of the answer it replaced); kind is kind, repeat and superseded; links is rating_id, replaces and repeat_of; viewport and display are a width and a height each."
   ScoringExportSummary:
     type: object
     additionalProperties: false

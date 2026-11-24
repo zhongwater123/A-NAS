@@ -24,6 +24,13 @@ export const searchEntries: SearchEntry[] = [
   { section: "storage", title: "数据卷", anchor: "volume", keywords: "容量 空间 冗余 镜像 初始化 raid" },
   { section: "storage", title: "磁盘", anchor: "disks", keywords: "硬盘 ssd hdd 健康 smart" },
   {
+    section: "network",
+    title: "手机直连热点",
+    anchor: "phone-hotspot",
+    keywords: "网络 wifi 上传 无线",
+    adminOnly: true,
+  },
+  {
     section: "system-update",
     title: "检查更新",
     anchor: "update-status",
@@ -67,6 +74,13 @@ export const searchEntries: SearchEntry[] = [
   { section: "web-search", title: "种子搜索", anchor: "torrents", keywords: "bt 磁力 下载", adminOnly: true },
   { section: "web-search", title: "搜索引擎", anchor: "engines", adminOnly: true },
   { section: "web-search", title: "开源许可", anchor: "license", keywords: "searxng 源码 许可证", adminOnly: true },
+  {
+    section: "assistant",
+    title: "DeepSeek 密钥",
+    anchor: "assistant-key",
+    keywords: "vnas 助手 ai 模型 api key 密钥",
+    adminOnly: true,
+  },
   { section: "logs", title: "活动记录", keywords: "审计 操作 谁 登录" },
   { section: "logs", title: "系统日志", keywords: "服务 报错 错误 error", adminOnly: true },
   { section: "terminal", title: "终端", keywords: "shell 命令行 bash", adminOnly: true },
