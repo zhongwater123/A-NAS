@@ -41,9 +41,10 @@ type Config struct {
 	Editing    montage.Editing
 	Planner    montage.Planner
 	// Accounts names the account behind a member's UID; AssistantSocket is
-	// where members' cron units reach the montage center when systemd does
-	// not hold it; PlanMarkers is the directory of planning markers the
-	// waker reads (docs/architecture/montage-center.md, 规划).
+	// where members' planning instances and root's planner reach the montage
+	// center when systemd does not hold it; PlanMarkers is the directory of
+	// planning markers the planner reads
+	// (docs/architecture/montage-planning-session.md).
 	Accounts        AccountResolver
 	AssistantSocket string
 	PlanMarkers     string
@@ -96,15 +97,16 @@ func Run(ctx context.Context, config Config) error {
 		config.Logger = slog.Default()
 	}
 	// The planning markers live in the service's runtime directory, where
-	// root's waker reads them; they come back from the jobs at start.
+	// root's planner reads them; they come back from the jobs at start.
 	if config.PlanMarkers != "" {
 		if err := os.MkdirAll(config.PlanMarkers, 0o750); err != nil {
 			return err
 		}
 	}
-	// Members' cron units reach the montage center on its assistant socket,
-	// where their UID says who they are. It answers with the store that is
-	// open, and unavailable while none is.
+	// Members' planning instances reach the montage center on its assistant
+	// socket, where their UID says who they are, and so does root's planner,
+	// naming the member. It answers with the store that is open, and
+	// unavailable while none is.
 	assistant := &assistantGate{}
 	stopAssistant, err := listenAssistant(ctx, config, assistant)
 	if err != nil {

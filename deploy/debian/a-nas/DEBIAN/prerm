@@ -8,16 +8,27 @@
 # a photo service that no longer reads it, after dpkg removed the units. The
 # next release's postinst starts the service again, and its photo service the
 # socket; the photo service keeps its copy of the socket until it restarts.
-# The montage center's socket for members' scheduled tasks stops before the
-# montage service, each time: a round of a member's tasks that connects to it
+# The montage center's socket for planning stops before the montage service,
+# each time: root's planner or a member's planning instance that connects to it
 # starts the service again (its Service=), which would then run on after the
 # rollback, or write montage.db while the next release's preinst copies it.
-# It starts again with the montage service (its Wants=).
+# It starts again with the montage service (its Wants=). Removing the product
+# also stops the planner and the members' planning instances.
 set -euo pipefail
 
 if [[ -d /run/systemd/system ]]; then
+  # Stop while the unit and its cleanup program are still installed, including
+  # when downgrading to a release that does not have the hotspot.
+  case "${1:-}" in
+    remove | upgrade)
+      if [[ "$(systemctl show -p LoadState --value anas-phone-hotspot.service)" == loaded ]]; then
+        systemctl stop anas-phone-hotspot.service
+      fi
+      ;;
+  esac
   case "${1:-}" in
     remove)
+      systemctl stop anas-montage-planner.service 'anas-assistant-planapi@*.service' 'anas-assistant-plan@*.service' || true
       systemctl stop anas-montage-assistant.socket || true
       systemctl stop 'anas-kiosk@*.service' anas-search.service anas-search-dns.path anas-search-dns.service \
         anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service anas-host-agent.service \

@@ -1,6 +1,7 @@
 package montage
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -50,6 +51,9 @@ type stepNeeds struct {
 	reason  string
 	missing []string
 	err     error
+	// said, when set, is what the job's page shows of why, in place of
+	// the error.
+	said string
 }
 
 func (n *stepNeeds) Error() string {
@@ -338,7 +342,7 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 			// not taken the plan.
 			state, reason, message, next = JobWaiting, wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay))
 		case errors.As(err, &needs):
-			state, reason, class, message = JobNeedsInput, needs.reason, "input", needs.Error()
+			state, reason, class, message = JobNeedsInput, needs.reason, "input", cmp.Or(needs.said, needs.Error())
 			if len(needs.missing) != 0 {
 				encoded, _ := json.Marshal(needs.missing)
 				missing = string(encoded)

@@ -1042,6 +1042,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network/phone-hotspot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the phone hotspot state and its active connection details */
+        get: operations["getPhoneHotspot"];
+        /** Start or stop the phone hotspot on the dedicated Wi-Fi radio */
+        put: operations["updatePhoneHotspot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web-search/query": {
         parameters: {
             query?: never;
@@ -6109,6 +6127,21 @@ export interface components {
             /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
         };
+        PhoneHotspotStatus: {
+            /** @enum {string} */
+            state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
+            /** @enum {string} */
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed";
+            /** @description Present when the hotspot is on. The response is not cacheable. */
+            connection?: {
+                ssid: string;
+                password: string;
+                url: string;
+            };
+        };
+        PhoneHotspotRequest: {
+            enabled: boolean;
+        };
         /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
         WebSearchPausedEngine: {
             /** @description The website name the window shows; the legacy field name is retained. */
@@ -8323,10 +8356,10 @@ export interface components {
             /** @description The step the job is at or stopped at. */
             step?: string;
             /**
-             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed.
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.
              * @enum {string}
              */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
             /** @description The videos missing, too long, or whose analysis failed. */
@@ -8750,6 +8783,8 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type PhoneHotspotStatus = components['schemas']['PhoneHotspotStatus'];
+export type PhoneHotspotRequest = components['schemas']['PhoneHotspotRequest'];
 export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
@@ -11067,6 +11102,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebSearchStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getPhoneHotspot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hotspot status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updatePhoneHotspot: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotRequest"];
+            };
+        };
+        responses: {
+            /** @description Hotspot operation accepted or the service is unavailable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
                 };
             };
             400: components["responses"]["ProductError"];

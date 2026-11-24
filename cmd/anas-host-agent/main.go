@@ -116,7 +116,7 @@ type config struct {
 	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
 	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
 	// MontageAssistantLookup=1 looks accounts up by UID for the montage
-	// center's socket for members' cron units, as the unit sets it.
+	// center's socket for planning, as the unit sets it.
 	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
@@ -195,7 +195,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
+		SystemLogs: journal.New(), WebSearch: executor, PhoneHotspot: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
 		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped, Deletions: sessions,
 	}, logger)
 	mux := http.NewServeMux()

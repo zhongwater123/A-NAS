@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspotapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storageapi"
@@ -74,6 +75,7 @@ func (h *productHandler) table() []apiroute.Route {
 		filepreviewapi.New(h.FilePreviews, logger),
 		personalizationapi.New(h.Personalization, h.pictures, logger),
 		musicapi.New(h.Music, logger),
+		phonehotspotapi.New(h.PhoneHotspot, logger),
 		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(), Logger: logger}),
 		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),
 		taskmanagerapi.New(tasks, string(h.DataSource), logger),
