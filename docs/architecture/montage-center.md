@@ -216,7 +216,7 @@ montage/
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。窗口向量放在 memfd 里，是 `n × 768` 个小端 float32，只按长度校验 |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
-| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。Qdrant 不可用或集合不在时退回 Catalog 精确计算，结果相同；文字与窗口的模型不一致时回答 `model_mismatch`，AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)）。剪辑中心经 [`grantsearch.go`](../../internal/montage/grantsearch.go) 调用：`model_mismatch` 对成员是 409 `search_model_changed`，`ai_unavailable` 与相册答不了是 503 `search_unavailable` |
+| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。搜哪些视频、何时回答 `model_mismatch`、何时改读 Catalog（结果相同）只写在[向量索引](vector-index.md#剪辑中心的窗口集合)的“读者”一条；AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)）。剪辑中心把相册的回答换成给成员的错误码，候选与重洗共用（[`draftops.go`](../../internal/montage/draftops.go) 的 `searchBeats` 经 `WindowSearch` 调用）：`model_mismatch` 是 409 `search_model_changed`，`ai_unavailable` 与相册答不了是 503 `search_unavailable`，授权已撤销照其他授权调用是 409 `grant_revoked` |
 | `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 
@@ -688,8 +688,8 @@ montage/
 | POST | `/versions/{id}/recut` | `{requestKey, change}`：回答 202 与 `recut` 任务；项目已有进行中的任务时回答 409 |
 | GET | `/versions/{id}/outline` | 这一版成片本身的规划与镜头，用于版本的概要：只读，不建修改稿，没存的修改不在里面。`unmet` 是规划时没找到的内容 |
 | GET | `/versions/{id}/draft` | 这一版的修改稿，没有就建：音乐段落与槽、每镜的节拍、锁定、粗预览用的片段、选段起点、配乐要不要转码（`songTranscode`）、修订号、能否撤销 |
-| POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo`。修订号对不上回答 409 `draft_conflict`；违反规则回答 422 `edit_refused`，`message` 是给成员看的原因；重洗要搜索，搜不了回答 503 `search_unavailable`，分析模型换了回答 409 `search_model_changed` |
-| GET | `/drafts/{id}/candidates` | `?shot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表，`shot` 是镜号（页面手上有的是镜号）；搜索的错误码同上 |
+| POST | `/drafts/{id}/ops` | `{baseRevision, op}`：`replace`、`move`、`delete`、`lock`、`unlock`、`shuffle`、`revert`、`reset`、`undo` 中的一步，回答改后的修改稿；校验与错误码见“出片后的二次编辑”的“修改稿” |
+| GET | `/drafts/{id}/candidates` | `?shot=&q=&size=&scene=&landscape=`：候选节拍与场景的列表，`shot` 是镜号（页面手上有的是镜号）；见“出片后的二次编辑”的“候选” |
 | GET | `/drafts/{id}/song` | 粗预览用的配乐副本：浏览器能播的支持 Range；不能播的即时解码成 FLAC，不能跳转，用 `?start=` 指定从哪一秒起 |
 | POST | `/drafts/{id}/save` | `{requestKey}`：回答 202 与 `edit` 任务，按当前修订存为新版本；项目已有进行中的任务时回答 409 |
 | GET | `/versions/{id}/shots`、`/drafts/{id}/shots` | 镜头清单（CSV） |
@@ -726,17 +726,17 @@ montage/
 
 **修改稿**
 - `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍（结尾画面的最后一个槽记末段的：结尾选的节拍收尾），修订号 0。槽按成片顺序排列，各记段落号、画面号与起止秒数；`fill` 的 `pins` 也这样指一个槽。
-- `POST /drafts/{id}/ops` 分两段。先在事务外读修改稿、比对 `baseRevision`（对不上回答 409 `draft_conflict`），按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验并算出新的状态（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`；重洗的搜索与删除的 `likeness` 也在这一段，不占着事务等相册或计算 Worker。再在一个事务里写入：只在修订号仍是 `baseRevision` 时更新 `drafts`，这期间被别的请求改过就回答 409 `draft_conflict`、什么都不写；写一行 `draft_revisions`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
+- `POST /drafts/{id}/ops` 分两段。先在事务外读修改稿、比对 `baseRevision`（对不上回答 409 `draft_conflict`），按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验并算出新的状态（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`，`message` 是给成员看的原因；重洗的搜索与删除的 `likeness` 也在这一段，不占着事务等相册或计算 Worker。再在一个事务里写入：只在修订号仍是 `baseRevision` 时更新 `drafts`，这期间被别的请求改过就回答 409 `draft_conflict`、什么都不写；写一行 `draft_revisions`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
 - 这一版的时间线读不出来时（见上），修改稿、候选与镜头清单都回答 409 `not_editable`。
 - 打开修改稿时，逐个读卡片所在视频的分析：相册现在的窗口身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。相册里已经没有、或内容对象换了的视频留给用到它的步骤。`POST /drafts/{id}/save` 建任务前再查一次，打开之后才重新分析的，直接回答 409 `analysis_changed`，不建任务。版本概要、每一步操作与候选不做这一步：读分析要连同全部窗口向量，每次点击都读太重。
 - 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。换镜头、拖动时节拍够不够长按 `fill` 的放慢上限（2.5 倍）算；删除一镜时“卡片盖得住两段之和”按不放慢算。
 - 这里的校验不知道 `fill` 实际会从卡片的哪一段取画面，所以存为新版本时还要核对一次，见“重新填槽”。
-- 删除时两边都够长，调两次计算 Worker 的 `likeness`（被删的一镜分别对前一镜、后一镜），选更像的一边，一样像时选前一镜；只有一边够长时不调。
-- `shuffle` 先用一次 `searchWindows` 查全部没锁画面的 `query`，再按种子挑；种子写进修订，同一种子结果相同。
+- 删除时两边都够长，调两次计算 Worker 的 `likeness`（被删的一镜分别对前一镜、后一镜），选更像的一边，一样像时选前一镜；只有一边够长时不调。计算 Worker 连不上时回答 503 `compute_unavailable`，修改稿不变。
+- `shuffle` 先用一次 `searchWindows` 查全部没锁画面的 `query`，再按种子挑；种子写进修订，同一种子结果相同。搜不了时修改稿不变，错误码见“项目授权”里 `searchWindows` 一行。
 - 粗预览的片段随修改稿一起回答：没改过的槽取版本时间线里的镜头，改过的槽取所选节拍的起点与一个槽长。
 
 **候选**：`GET /drafts/{id}/candidates?shot=&q=&size=&scene=&landscape=`
-- 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。写了 `q` 时最多列 60 个；没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。
+- 依次是同一张卡片里没用到的节拍、`shots` 步骤结果里这个画面的备用节拍、`searchWindows` 的结果。写了 `q` 时最多列 60 个；没写 `q` 时不调搜索，按拍摄先后列出筛选下的全部节拍。搜不了时的错误码与重洗相同。
 - 窗口换算成节拍：节拍的分数取它覆盖的窗口里最高的一个（同原型），只用来排序，不设门槛。
 - 景别取节拍描述的 `shot_size`，场景取卡片描述的 `scene`；筛选都在剪辑中心做，不进相册的检索。回答附场景的列表与个数。
 - 每个候选标明够不够长、已用在第几镜、横竖。
