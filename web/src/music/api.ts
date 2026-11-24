@@ -18,6 +18,9 @@ const id = encodeURIComponent;
 const track = (trackId: string) => ({ params: { path: { trackId } } });
 const playlist = (playlistId: string) => ({ params: { path: { playlistId } } });
 
+// How often a running scan is asked about.
+export const statusPoll = 1500;
+
 export const getMusicStatus = () => call(client.GET("/api/v1/music/library"));
 export const scanMusic = () => call(client.POST("/api/v1/music/library/scan"));
 export const listTracks = () => call(client.GET("/api/v1/music/tracks"));

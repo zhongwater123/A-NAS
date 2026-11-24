@@ -1,9 +1,9 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useEffectEvent, useState } from "react";
 
-import { errorCodeText, errorText } from "../api/errorMessages";
+import { type ErrorDomain, errorCodeText, errorText } from "../api/errorMessages";
 import { listSpaces } from "../files/api";
-import { getMusicStatus, listSources, listTracks, type MusicStatus, scanMusic } from "../music/api";
+import { getMusicStatus, listSources, listTracks, scanMusic, statusPoll } from "../music/api";
 import { getTransfer } from "../transfers/api";
 import { failureText } from "../transfers/model";
 import { transferStore, useTransfers } from "../transfers/store";
@@ -36,8 +36,6 @@ export const acceptedSongTypes = songTypes.join(",");
 // Where an uploaded song goes: this folder of the member's private space,
 // which the NAS creates when it is not there yet.
 const songFolder = "音乐";
-// How often the music library's scan is asked about, as the music window does.
-const statusPoll = 1500;
 
 const isSong = (name: string) => {
   const dot = name.lastIndexOf(".");
@@ -65,143 +63,166 @@ function audioSeconds(file: File): Promise<number | undefined> {
   });
 }
 
-// What the montage center would refuse, told before the file is sent.
+// What the montage center would refuse, told before the file is sent: the
+// code of its answer.
 async function refusal(file: File): Promise<string | undefined> {
-  if (!isSong(file.name)) return errorCodeText("not_audio", "montage");
-  if (file.size > maxSongBytes) return errorCodeText("song_too_large", "montage");
+  if (!isSong(file.name)) return "not_audio";
+  if (file.size > maxSongBytes) return "song_too_large";
   const seconds = await audioSeconds(file);
-  if (seconds !== undefined && (seconds < minSongSeconds || seconds > maxSongSeconds))
-    return errorCodeText("song_length", "montage");
+  if (seconds !== undefined && (seconds < minSongSeconds || seconds > maxSongSeconds)) return "song_length";
   return undefined;
 }
 
-const scanProblems: Record<NonNullable<MusicStatus["scan"]["error"]>, string> = {
-  volume_unavailable: "数据卷不可用，音乐库没有扫描。数据卷恢复后再选",
-  failed: "音乐库扫描失败。在音乐里重新扫描后再选",
-};
-
+// Refused is what the page tells of an upload itself, by a code whose words
+// are with the montage center's other messages (api/errorMessages.ts).
 class Refused extends Error {}
+const told = (code: string) => errorCodeText(code, "montage") ?? errorText(undefined);
+const refused = (code: string) => new Refused(told(code));
+const problemOf = (error: unknown, domain?: ErrorDomain) =>
+  error instanceof Refused ? error.message : errorText(error, domain);
+
+// The scan an uploaded file waits for, by the transfer the upload became.
+const scanKey = (transferId?: string) => ["montage", "song-upload", transferId] as const;
 
 export type SongUploadStep = "checking" | "upload" | "scan" | "choose";
 export interface SongUpload {
   name: string;
   step: SongUploadStep;
-  // The upload in the transfer center's queue.
-  key?: string;
   problem?: string;
 }
 
 // useSongUpload sends a song the member picks into the 音乐 folder of their
 // private space through the transfer center's queue, scans the music library
 // until the song is in it, and chooses it for the project. Leaving the page
-// leaves the upload to the transfer center; the song is then chosen by hand.
+// leaves the upload to the transfer center; the song is then chosen by hand:
+// each step starts the next from the page, which is no longer there.
 export function useSongUpload(projectId: string, userId: string) {
   const client = useQueryClient();
-  const [job, setJob] = useState<SongUpload>();
+  // The song picked, and its upload in the transfer center's queue once it
+  // is there.
+  const [sent, setSent] = useState<{ name: string; key?: string }>();
   const snapshot = useTransfers();
-  const upload = job?.key ? snapshot.uploads.find((item) => item.key === job.key) : undefined;
-  const stopped = useRef(new AbortController());
-  useEffect(() => {
-    const controller = new AbortController();
-    stopped.current = controller;
-    return () => controller.abort();
-  }, []);
-  const settling = useRef<string>(undefined);
+  const upload = sent?.key ? snapshot.uploads.find((item) => item.key === sent.key) : undefined;
+  const landed = upload?.phase === "completed" ? upload.transferId : undefined;
 
-  const pick = async (file: File) => {
-    const signal = stopped.current.signal;
-    setJob({ name: file.name, step: "checking" });
-    const fail = (problem: string) => !signal.aborted && setJob({ name: file.name, step: "checking", problem });
-    const refused = await refusal(file);
-    if (refused) return fail(refused);
-    let spaceId: string | undefined;
-    try {
+  // Before the file is sent: what would be refused, and where it goes.
+  const check = useMutation({
+    mutationFn: async (file: File) => {
+      const code = await refusal(file);
+      if (code) throw refused(code);
       // The member's own space, never one an administrator only views.
       const spaces = await listSpaces();
-      spaceId = spaces.find((space) => space.kind === "private" && !space.viewing && space.ownerUserId === userId)?.id;
-    } catch (caught) {
-      return fail(errorText(caught));
-    }
-    if (!spaceId) return fail("找不到你的个人空间，歌没有上传");
-    if (signal.aborted) return;
-    const batch = transferStore.enqueue(
-      [{ file, directories: [songFolder] }],
-      { spaceId, spaceKind: "private", parentId: "", folders: [], label: `剪辑中心 · ${songFolder}` },
-      // A song of the same name stays; this one is saved beside it.
-      { choice: "rename" },
-    );
-    const key = transferStore.getSnapshot().uploads.find((item) => item.batch === batch)?.key;
-    setJob({ name: file.name, step: "upload", key });
+      const own = spaces.find((space) => space.kind === "private" && !space.viewing && space.ownerUserId === userId);
+      if (!own) throw refused("song_space_missing");
+      return own.id;
+    },
+  });
+  // Once uploaded: the file's entry, and a scan of the library's folders (a
+  // scan asked for while one runs runs once more after it).
+  const scan = useMutation({
+    mutationFn: async (transferId: string) => {
+      const { entryId } = await getTransfer(transferId);
+      client.setQueryData(scanKey(transferId), await scanMusic());
+      return entryId;
+    },
+  });
+  // The scan is asked about, as often as the music window asks, until it ends.
+  const scanned = useQuery({
+    queryKey: scanKey(scan.variables),
+    queryFn: getMusicStatus,
+    enabled: scan.isSuccess,
+    staleTime: statusPoll,
+    refetchInterval: (query) => (query.state.data?.scan.state === "scanning" ? statusPoll : false),
+  });
+  const ended = scan.isSuccess && scanned.data?.scan.state === "idle" ? scanned.data.scan : undefined;
+  // The song is a track named by its file, when the library has read it.
+  const find = useMutation({
+    mutationFn: async (entryId: string | undefined) => {
+      const tracks = await client.fetchQuery({ queryKey: ["music", "tracks"], queryFn: listTracks, staleTime: 0 });
+      if (!entryId || !tracks.items.some((track) => track.id === entryId))
+        throw refused((await listSources()).custom ? "song_not_in_sources" : "song_not_indexed");
+      return entryId;
+    },
+  });
+  const choose = useMutation({ mutationFn: (trackId: string) => chooseSong(projectId, trackId) });
+
+  const clear = () => {
+    setSent(undefined);
+    check.reset();
+    scan.reset();
+    find.reset();
+    choose.reset();
+  };
+  const pick = (file: File) => {
+    clear();
+    setSent({ name: file.name });
+    check.mutate(file, {
+      onSuccess: (spaceId) => {
+        const batch = transferStore.enqueue(
+          [{ file, directories: [songFolder] }],
+          { spaceId, spaceKind: "private", parentId: "", folders: [], label: `剪辑中心 · ${songFolder}` },
+          // A song of the same name stays; this one is saved beside it.
+          { choice: "rename" },
+        );
+        setSent({
+          name: file.name,
+          key: transferStore.getSnapshot().uploads.find((item) => item.batch === batch)?.key,
+        });
+      },
+    });
   };
 
-  // Once uploaded: the library scans its folders again (a scan asked for
-  // while one runs runs once more after it), and the song, a track named by
-  // its file, is chosen when it is there.
-  const settle = useEffectEvent(async (name: string, key: string, transferId: string) => {
-    const signal = stopped.current.signal;
-    const step = (next: SongUploadStep, problem?: string) => {
-      if (!signal.aborted) setJob({ name, key, step: next, problem });
-    };
-    step("scan");
-    try {
-      const { entryId } = await getTransfer(transferId);
-      let status = await scanMusic();
-      while (status.scan.state === "scanning") {
-        await new Promise((resolve) => window.setTimeout(resolve, statusPoll));
-        if (signal.aborted) return;
-        status = await getMusicStatus();
-      }
-      if (status.scan.error) throw new Refused(scanProblems[status.scan.error]);
-      const tracks = await client.fetchQuery({ queryKey: ["music", "tracks"], queryFn: listTracks, staleTime: 0 });
-      if (!entryId || !tracks.items.some((track) => track.id === entryId)) {
-        const sources = await listSources();
-        throw new Refused(
-          sources.custom
-            ? `歌已存进“${songFolder}”文件夹，但它不在音乐库的来源里。在音乐里添加这个文件夹后再选`
-            : `歌已存进“${songFolder}”文件夹，但音乐库读不出它的格式。换一种格式再传`,
-        );
-      }
-      if (signal.aborted) return;
-      step("choose");
-      const chosen = await chooseSong(projectId, entryId);
-      client.setQueryData(songKey(projectId), chosen);
-      if (!signal.aborted) setJob(undefined);
-    } catch (caught) {
-      step("scan", caught instanceof Refused ? caught.message : errorText(caught, "montage"));
-    }
-  });
-  const finished = job?.step === "upload" && upload?.phase === "completed" ? upload.transferId : undefined;
+  // The upload has landed: scan. The scan has ended: find the song and
+  // choose it.
+  const scanFor = useEffectEvent((transferId: string) => scan.mutate(transferId));
+  const unscanned = scan.isIdle;
   useEffect(() => {
-    if (!job?.key || !finished || settling.current === job.key) return;
-    settling.current = job.key;
-    void settle(job.name, job.key, finished);
-  }, [job, finished]);
+    if (landed && unscanned) scanFor(landed);
+  }, [landed, unscanned]);
+  const settle = useEffectEvent(() =>
+    find.mutate(scan.data, {
+      onSuccess: (trackId) =>
+        choose.mutate(trackId, {
+          onSuccess: (chosen) => {
+            client.setQueryData(songKey(projectId), chosen);
+            clear();
+          },
+        }),
+    }),
+  );
+  const found = Boolean(ended && !ended.error && find.isIdle);
+  useEffect(() => {
+    if (found) settle();
+  }, [found]);
 
-  // How the upload stands while it is in the queue.
-  let problem = job?.problem;
+  let step: SongUploadStep = "checking";
+  if (!choose.isIdle) step = "choose";
+  else if (!scan.isIdle) step = "scan";
+  else if (sent?.key) step = "upload";
+
+  // What stopped it, if anything; a failed upload can be sent again.
+  let problem: string | undefined;
   let retry: (() => void) | undefined;
-  if (job?.step === "upload" && job.key) {
-    const key = job.key;
-    if (!upload) problem = "上传已取消";
-    else if (upload.phase === "failed" || upload.phase === "canceled") {
-      problem =
-        upload.phase === "canceled"
-          ? "上传已取消"
-          : upload.error?.code === "forbidden"
-            ? "没有权限上传到“音乐”文件夹"
-            : failureText(upload.error?.code ?? "");
-      retry = () => transferStore.retry(key);
-    }
+  const failure = check.error ?? scan.error ?? scanned.error ?? find.error;
+  if (choose.error) problem = problemOf(choose.error, "montage");
+  else if (failure) problem = problemOf(failure);
+  else if (ended?.error) problem = told(ended.error === "failed" ? "song_scan_failed" : ended.error);
+  else if (step === "upload" && sent?.key) {
+    const key = sent.key;
+    if (!upload || upload.phase === "canceled") problem = told("song_upload_canceled");
+    else if (upload.phase === "failed") problem = failureText(upload.error?.code ?? "");
+    if (upload && problem) retry = () => transferStore.retry(key);
   }
   const progress = upload?.size ? Math.min(1, upload.transferred / upload.size) : 0;
+  const job: SongUpload | undefined = sent && { name: sent.name, step, problem };
   return {
-    job: job && { ...job, problem },
+    job,
     progress,
     // Whether the file waits in the queue rather than being sent.
     queued: Boolean(upload && upload.phase !== "running"),
-    busy: Boolean(job && !problem),
-    pick: (file: File) => void pick(file),
+    busy: Boolean(sent && !problem),
+    pick,
     retry,
-    dismiss: () => setJob(undefined),
+    dismiss: clear,
   };
 }

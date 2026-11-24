@@ -124,6 +124,13 @@ const domains = {
     song_start_unusable: "从这里起没有可用的选段",
     media_unavailable: "媒体服务暂不可用，请稍后重试",
     compute_unavailable: "计算服务暂不可用，请稍后重试",
+    // What the song page tells of a song it uploads (montage/songUpload.ts);
+    // the montage center answers none of these.
+    song_upload_canceled: "上传已取消",
+    song_space_missing: "找不到你的个人空间，歌没有上传",
+    song_scan_failed: "音乐库扫描失败。在音乐里重新扫描后再选",
+    song_not_in_sources: "歌已存进“音乐”文件夹，但它不在音乐库的来源里。在音乐里添加这个文件夹后再选",
+    song_not_indexed: "歌已存进“音乐”文件夹，但音乐库读不出它的格式。换一种格式再传",
   },
   webSearch: {
     web_search_disabled: "管理员已关闭网页搜索",

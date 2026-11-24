@@ -35,6 +35,7 @@ import {
   scanMusic,
   setFavorite,
   setSources,
+  statusPoll,
   type Track,
   updatePlaylist,
 } from "./api";
@@ -82,7 +83,6 @@ interface Props {
   onOpenFiles?: () => void;
 }
 
-const statusPoll = 1500;
 // While a scan runs the library reloads at most this often.
 const reloadInterval = 5000;
 

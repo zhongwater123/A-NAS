@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -258,13 +258,27 @@ describe("配乐页上传配乐", () => {
     expect(seen.chosen).toEqual([]);
   });
 
+  it("leaves the song to be chosen by hand when the page is left before the scan ends", async () => {
+    const seen = serve();
+    const page = await open();
+    await upload(page, song("New Song.mp3", 1024, 200));
+    await waitFor(() => expect(tus.uploads).toHaveLength(1));
+    act(() => tus.uploads[0].finish("upload-1"));
+    await waitFor(() => expect(seen.scans).toBe(1));
+    cleanup();
+    // Longer than the scan is asked about again.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(seen.chosen).toEqual([]);
+  });
+
   it("says why an upload failed and sends it again on 重试", async () => {
     serve();
     const page = await open();
     await upload(page, song("New Song.mp3", 1024, 200));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
     act(() => tus.uploads[0].fail(403, "forbidden"));
-    expect(await within(page).findByText("没有权限上传到“音乐”文件夹")).toBeInTheDocument();
+    // The transfer center's own words for it, as its window shows them.
+    expect(await within(page).findByText("没有写入这个位置的权限")).toBeInTheDocument();
     await userEvent.click(within(page).getByRole("button", { name: "重试" }));
     await waitFor(() => expect(tus.uploads).toHaveLength(2));
   });
