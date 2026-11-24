@@ -15,6 +15,15 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
+type testMembers struct{}
+
+func (testMembers) ResolveSessionIdentity(_ context.Context, token string) (accountid.Identity, error) {
+	if token == "alice" || token == "bob" {
+		return accountid.Identity{Username: token, Enabled: true}, nil
+	}
+	return accountid.Identity{}, accountid.ErrSessionNotFound
+}
+
 // fakeBroker answers as the File Broker would for alice's changes, and records
 // what it was asked.
 type fakeBroker struct {
@@ -33,7 +42,7 @@ func (f *fakeBroker) signedIn(ctx context.Context) error {
 	if token == "" {
 		return fmt.Errorf("%w: no session for file operation", filesystem.ErrForbidden)
 	}
-	if token != "alice" {
+	if _, err := (testMembers{}).ResolveSessionIdentity(ctx, token); err != nil {
 		return &wire.Error{Code: wire.CodeUnauthenticated}
 	}
 	return nil
@@ -85,7 +94,7 @@ func call(t *testing.T, handler http.Handler, method, target, body string) (int,
 
 func TestProductProtocolSignsInAsTheAccountAndPassesTheArguments(t *testing.T) {
 	broker := &fakeBroker{cards: map[string]string{}}
-	handler := newProduct(broker)
+	handler := newProduct(broker, testMembers{})
 	body := `{"summary":"复制","operations":[{"op":"copy","path":"/nas/个人空间/a","source":"/nas/助手/a"}],` +
 		`"sessionId":"s1","runId":"r1","requestId":"q1","extra":1}`
 	status, card := call(t, handler, http.MethodPost, "/changes/prepare?account=alice", body)
@@ -126,6 +135,12 @@ func TestProductProtocolSignsInAsTheAccountAndPassesTheArguments(t *testing.T) {
 	if status, got := ids("bob"); status != http.StatusOK || len(got) != 0 {
 		t.Fatalf("bob's list = %d %v, want none of alice's", status, got)
 	}
+	for _, target := range []string{"/changes", "/changes?account=mallory"} {
+		status, body := call(t, handler, http.MethodGet, target, "")
+		if status != http.StatusUnauthorized || !strings.Contains(body, "unauthenticated") {
+			t.Errorf("GET %s = %d %s, want 401 unauthenticated", target, status, body)
+		}
+	}
 	for _, token := range broker.sessions {
 		if token != "alice" {
 			t.Fatalf("signed in as %q", token)
@@ -148,14 +163,14 @@ func TestProductProtocolStatuses(t *testing.T) {
 		"unknown decision": {nil, "/changes/00000001/apply?account=alice", http.StatusNotFound, "not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler := newProduct(&fakeBroker{cards: map[string]string{}, refuse: c.refuse})
+			handler := newProduct(&fakeBroker{cards: map[string]string{}, refuse: c.refuse}, testMembers{})
 			status, body := call(t, handler, http.MethodPost, c.target, `{"summary":"x","operations":[]}`)
 			if status != c.status || !strings.Contains(body, c.said) {
 				t.Fatalf("= %d %s, want %d with %q", status, body, c.status, c.said)
 			}
 		})
 	}
-	handler := newProduct(&fakeBroker{cards: map[string]string{}})
+	handler := newProduct(&fakeBroker{cards: map[string]string{}}, testMembers{})
 	if status, body := call(t, handler, http.MethodGet, "/changes/00000009?account=alice", ""); status != http.StatusNotFound {
 		t.Fatalf("an unknown change = %d %s", status, body)
 	}

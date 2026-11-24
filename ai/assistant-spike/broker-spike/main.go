@@ -117,7 +117,8 @@ func run(logger *slog.Logger, data, state, productSocket, agentSocket string) er
 	go func() { failed <- server.Serve(broker) }()
 	go func() { failed <- server.ServeAssistantChanges(agent) }()
 	go func() {
-		failed <- (&http.Server{Handler: newProduct(filebroker.NewClient(brokerSocket)), ReadHeaderTimeout: 10 * time.Second}).Serve(product)
+		handler := newProduct(filebroker.NewClient(brokerSocket), config.Sessions)
+		failed <- (&http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}).Serve(product)
 	}()
 	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
@@ -214,13 +215,14 @@ type changes interface {
 // signed in as the account the request names. The File Broker lists no
 // changes, so product keeps the ones it prepared for GET /changes.
 type product struct {
-	broker changes
-	mu     sync.Mutex
-	made   map[string][]string
+	broker   changes
+	sessions rootbroker.SessionResolver
+	mu       sync.Mutex
+	made     map[string][]string
 }
 
-func newProduct(broker changes) http.Handler {
-	p := &product{broker: broker, made: map[string][]string{}}
+func newProduct(broker changes, sessions rootbroker.SessionResolver) http.Handler {
+	p := &product{broker: broker, sessions: sessions, made: map[string][]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /changes/prepare", p.prepare)
 	mux.HandleFunc("POST /changes/{id}/{decision}", p.decide)
@@ -307,6 +309,10 @@ func (p *product) get(w http.ResponseWriter, r *http.Request) {
 // are now; one the File Broker no longer keeps is left out.
 func (p *product) list(w http.ResponseWriter, r *http.Request) {
 	ctx, account := signedIn(r)
+	if _, err := p.sessions.ResolveSessionIdentity(ctx, account); err != nil {
+		p.fail(w, err)
+		return
+	}
 	p.mu.Lock()
 	ids := slices.Clone(p.made[account])
 	p.mu.Unlock()
@@ -346,7 +352,7 @@ func (p *product) fail(w http.ResponseWriter, err error) {
 		reply(w, status, map[string]string{"error": message})
 		return
 	}
-	if errors.Is(err, filesystem.ErrForbidden) {
+	if errors.Is(err, filesystem.ErrForbidden) || errors.Is(err, accountid.ErrSessionNotFound) {
 		reply(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
