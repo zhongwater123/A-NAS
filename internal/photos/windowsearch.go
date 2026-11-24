@@ -275,13 +275,13 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 		s.reportVectorFallback("the vector index has no windows collection for the model", nil)
 		return nil, false, nil
 	}
-	full, err := s.windowsFull(ctx, target)
+	full, why, err := s.windowsFull(ctx, target)
 	if err != nil {
 		s.indexFailed(ctx, err)
 		return nil, false, err
 	}
 	if !full {
-		s.reportVectorFallback("the vector index is still filling the windows collection", nil)
+		s.reportVectorFallback(why, nil)
 		return nil, false, nil
 	}
 	waiting, err := s.textColumn(ctx, "SELECT object_id FROM window_outbox LIMIT ?", maxOutboxDelta+1)
@@ -442,13 +442,26 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 // windowsFull reports whether the alias names target, which says that
 // every video is written into it. The sync loop remembers the collection
 // it last found or put the alias on (aliasWindows); the index is asked only
-// when that is not target.
-func (s *Service) windowsFull(ctx context.Context, target windowsCollection) (bool, error) {
+// when that is not target. When the alias does not name it, why says why
+// the Catalog answers: the collection is still being filled, or the
+// index no longer has it, as after it lost its storage, and nothing fills
+// it until sync or the next reconciliation makes it again.
+func (s *Service) windowsFull(ctx context.Context, target windowsCollection) (full bool, why string, err error) {
 	if aliased := s.windowsAliased.Load(); aliased != nil && *aliased == target.name {
-		return true, nil
+		return true, "", nil
 	}
 	aliased, err := s.vectors.Alias(ctx, windowsAlias)
-	return aliased == target.name, err
+	if err != nil || aliased == target.name {
+		return err == nil, "", err
+	}
+	names, err := s.vectors.Collections(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	if !slices.Contains(names, target.name) {
+		return false, "the vector index has lost the windows collection", nil
+	}
+	return false, "the vector index is still filling the windows collection", nil
 }
 
 // windowVectors reads the Catalog's vectors of identity of the windows

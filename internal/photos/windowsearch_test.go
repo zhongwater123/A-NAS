@@ -296,6 +296,64 @@ func TestWindowSearchWorksWithTheIndexStopped(t *testing.T) {
 	}
 }
 
+// A windows collection the index no longer has, as after the instance lost
+// its storage, is said to be lost: nothing fills it until sync or the next
+// reconciliation makes it again. A search reads the Catalog meanwhile and
+// finds the same, whether or not the sync loop had seen the alias name it.
+func TestWindowSearchSaysTheIndexLostItsCollection(t *testing.T) {
+	ctx := context.Background()
+	f := newSearchFixture(t)
+	w := newWindowIndex(t, &f.montageFixture)
+	f.vectors = w.index
+	w.sync(t)
+	photos.UseVectorIndex(f.service, nil)
+	want := f.searchWindows(t, namedAlice, f.tripGrant, 10)
+	lose := func() {
+		t.Helper()
+		collection, err := w.index.Alias(ctx, "video_windows_v1")
+		if err != nil || collection == "" {
+			t.Fatalf("Alias() = %q, %v", collection, err)
+		}
+		if err := w.index.DeleteCollection(ctx, collection); err != nil {
+			t.Fatal(err)
+		}
+	}
+	search := func(stage string) []string {
+		t.Helper()
+		if got := f.searchWindows(t, namedAlice, f.tripGrant, 10); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s, found\n%+v\nwant\n%+v", stage, got, want)
+		}
+		return f.fell.take()
+	}
+	const lost = "the vector index has lost the windows collection<nil>"
+
+	// A service that has not looked at the alias yet asks the index.
+	lose()
+	f.restart(t)
+	if fell := search("lost before the service started"); !slices.Equal(fell, []string{lost}) {
+		t.Fatalf("lost before the service started: fell back for %v", fell)
+	}
+
+	// Sync makes the collection again once a video is queued for it, and
+	// remembers that its alias names it; then the index loses it again.
+	if err := f.service.QueueWindows(ctx, f.tripObject); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(t)
+	if fell, searched := search("made again"), w.index.searched(); len(fell) > 0 || searched == 0 {
+		t.Fatalf("made again: %d index searches; fell back for %v", searched, fell)
+	}
+	lose()
+	if fell := search("lost while the service ran"); len(fell) != 1 || !strings.HasPrefix(fell[0], "the vector index failed") {
+		t.Fatalf("lost while the service ran: fell back for %v", fell)
+	}
+	// Once the index is asked again, it is known to be lost.
+	f.clock.Advance(time.Hour)
+	if fell := search("asked again"); !slices.Equal(fell, []string{lost}) {
+		t.Fatalf("asked again: fell back for %v", fell)
+	}
+}
+
 // After the model changes, a search refuses with its own error until every
 // video of the grant has windows of the new model: an empty or partial
 // answer would hide videos. Without the Worker it says so.
