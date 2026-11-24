@@ -16,8 +16,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// Editing a film after it was made (#596, ADR 0039; docs/specs/montage-center.md,
-// 出片后的二次编辑). A member edits a version slot by slot in a draft kept
+// Editing a film after it was made (#596, ADR 0039;
+// docs/architecture/montage-center.md, 出片后的二次编辑). A member edits a version slot by slot in a draft kept
 // here: each step is checked against the rules, written as a revision, and
 // can be undone. Nothing here calls a model.
 
@@ -31,7 +31,8 @@ var (
 	ErrNotEditable = errors.New("the version cannot be edited")
 	// ErrAnalysisChanged: the photo library analysed the version's videos
 	// again with another model since the version was cut. The version can
-	// only be played, or recut (docs/specs/montage-center.md, 修改的规则).
+	// only be played, or recut (docs/architecture/montage-center.md, 出片后的二次编辑:
+	// 修改稿).
 	ErrAnalysisChanged = errors.New("the videos were analysed again with another model")
 	// ErrSearchUnavailable: the photo library cannot search windows now.
 	ErrSearchUnavailable = errors.New("searching the videos is not available")

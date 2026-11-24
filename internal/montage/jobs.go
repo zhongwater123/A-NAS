@@ -509,7 +509,8 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		return Job{}, err
 	}
 	// An edit takes no video out: the member replaces the shots that use it
-	// and saves again (docs/specs/montage-center.md, 存为新版本). A recut
+	// and saves again (ADR 0039, decision 6; docs/architecture/montage-center.md,
+	// 出片后的二次编辑: 任务的种类). A recut
 	// plans anew as generating does, and goes on without them the same way.
 	if job.Kind == KindEdit || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
 		return Job{}, ErrJobState

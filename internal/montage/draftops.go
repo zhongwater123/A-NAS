@@ -13,7 +13,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-// The rules of each step (docs/specs/montage-center.md, 修改的规则): the
+// The rules of each step (ADR 0039, decision 2;
+// docs/architecture/montage-center.md, 出片后的二次编辑: 修改稿): the
 // unit is the music's slot, whose length and cuts stay; a beat is used once
 // in a film; the cards must be long enough.
 
@@ -101,7 +102,7 @@ func (src *editSource) fits(state draftState, i int, beat string) error {
 
 // move moves shot from among its part's shots to where shot to is. The
 // locked shots stay; the others take the unlocked places in their new
-// order (docs/specs/montage-center.md, 拖动).
+// order (ADR 0039, decision 2: 拖动).
 func (src *editSource) move(state draftState, from, to int) (draftState, string, error) {
 	i, err := shotAt(state, from)
 	if err != nil {
