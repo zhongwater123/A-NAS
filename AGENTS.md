@@ -34,7 +34,7 @@
 - 新功能或行为变化：读或创建 `docs/specs/` 中的规格。
 - 难复现、跨边界或可能复发的缺陷：先查 `docs/investigations/`，再更新或创建调查记录。
 - 安装、部署、恢复、磁盘等高风险操作：`docs/runbooks/` 中的手册。
-- 选择本机或共享开发服务器、查工具链或模型暂存位置时，见[开发环境入口](docs/development/LOCAL_ENVIRONMENT.md)。产品定位：`README.md`；早期背景：`PROJECT_CONTEXT.md`。
+- 新用或更换开发环境、排查平台问题、使用共享开发服务器时，查[开发环境入口](docs/development/LOCAL_ENVIRONMENT.md)，补记实测配置与解决方法。产品定位：`README.md`；早期背景：`PROJECT_CONTEXT.md`。
 - 文档类型或事实归属不明确时：`docs/README.md`。
 
 ## 不重复造轮子

@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-产品的 Go 服务面向 Linux。开发机用 Windows 加 WSL2，或 macOS 加 Colima，依赖都装在虚拟机自己的目录里；按机器选择[开发环境](docs/development/LOCAL_ENVIRONMENT.md)。团队另有[共享开发服务器](docs/development/LOCAL_ENVIRONMENT.md#共享开发服务器)，可就近验证大模型，或运行本机资源不足的任务。
+产品的 Go 服务面向 Linux。Windows 开发机用 WSL2，macOS 用 Colima，依赖装在虚拟机自己的目录里。首次开工先查同类环境的已知问题，再按[环境登记说明](docs/development/LOCAL_ENVIRONMENT.md#登记开发环境与已知问题)记录自己的实际配置。团队另有[共享开发服务器](docs/development/LOCAL_ENVIRONMENT.md#共享开发服务器)，可就近验证大模型，或运行本机资源不足的任务。
 
 - Go 版本见 `.go-version`，模块路径是 `github.com/zhongwater123/A-NAS`（[ADR 0001](docs/adr/0001-use-go-for-product-services.md)）。
 - Node 版本见 `.nvmrc`，网页桌面用 React、TypeScript、Vite 与 npm lockfile（[ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)）。
