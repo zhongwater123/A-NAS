@@ -13,7 +13,7 @@
 | Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
 | systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
-`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。`make check` 以 `make -k` 运行这些目标：一步失败后继续运行其余各步，最后报告全部失败，耗时短的格式、文档、运维、vendor、vet 与 golangci-lint 排在最前；直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。开发机上 `make check` 以 `make -k` 运行这些目标，一步失败后继续运行其余各步，一次报出全部失败；CI 把 Makefile 的 `CHECK_FLAGS` 设为空，在第一个失败处停止。直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
 
 ## Qdrant 测试依赖
 
