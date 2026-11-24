@@ -476,13 +476,14 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	grantSocket := filepath.Join(dir, "grants.sock")
 	options := photos.Options{DisableCapacityReserve: true, Media: probedVideo{}}
+	known := &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
 	var videoID string
 	var grants []string
 	r := start(t, func(config *photoservice.Config) {
 		videoID, grants = grantedStore(t, config.Root, options, 1)
 		// 12 seconds: 6 windows.
 		seedWindows(t, config.Root, 6, 4, "model|win=2s1f,frame=edge512,jpeg82,rot=display,dim=4,l2")
-		config.Sessions = &grantSessions{sessions: knownSessions, active: map[string]bool{"user:alice": true}}
+		config.Sessions = known
 		config.Photos, config.AI = options, textEncoder{}
 		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()
 	})
@@ -518,6 +519,16 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 	}
 	if _, err := client.SearchWindows(ctx, "grant:missing", []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
 		t.Fatalf("SearchWindows() of no grant = %v", err)
+	}
+	// While the owner's account is not in use her grant searches nothing,
+	// and says why, as its other requests do.
+	known.set("user:alice", false)
+	if found, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantOwnerInactive || found != nil {
+		t.Fatalf("SearchWindows() for a disabled owner = %+v, %v", found, err)
+	}
+	known.set("user:alice", true)
+	if found, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, 4); err != nil || len(found) != 1 || len(found[0]) != 4 {
+		t.Fatalf("SearchWindows() once the owner's account is back = %+v, %v", found, err)
 	}
 	db, err := sql.Open("sqlite3", filepath.Join(r.root, "catalog.db"))
 	if err != nil {
