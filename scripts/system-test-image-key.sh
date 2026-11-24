@@ -9,7 +9,9 @@
 #   scripts/system-test-image-key.sh --inputs   hash of the image inputs
 #
 # <inputs> is the SHA-256 of `sha256sum` over the four files: one digest line
-# per file, so moving bytes between the files changes the hash.
+# per file, so moving bytes between the files changes the hash. -t keeps the
+# lines as Linux writes them where sha256sum defaults to binary mode and marks
+# each file with `*` (Git for Windows), which would change the hash.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 files=(
@@ -21,7 +23,7 @@ files=(
 for f in "${files[@]}"; do
   [[ -f "$repo/$f" ]] || { echo "missing $f" >&2; exit 2; }
 done
-inputs=$( (cd "$repo" && sha256sum "${files[@]}") | sha256sum | awk '{print $1}')
+inputs=$( (cd "$repo" && sha256sum -t "${files[@]}") | sha256sum | awk '{print $1}')
 week=$(date -u +%G-W%V)
 case "${1:-}" in
   "") echo "$week-$inputs" ;;
