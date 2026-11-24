@@ -2393,6 +2393,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/montage/song-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What a file must be to become a project's song, for a page to check one before it uploads it: the extensions of the audio files the music library indexes, and the montage center's limits on size and length. The Product Service answers it without asking the montage center. A page that cannot read the rules sends the file all the same: choosing the song refuses it by the same limits (song_too_large, song_length, not_audio) */
+        get: operations["getMontageSongRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage/hero": {
         parameters: {
             query?: never;
@@ -8261,6 +8278,16 @@ export interface components {
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
         };
+        MontageSongRules: {
+            /** @description The audio files the music library indexes, by extension: lower case with the dot, sorted. A file of another extension never becomes a track to choose. */
+            extensions: string[];
+            /** @description The largest file; a larger one is song_too_large (413). */
+            maxBytes: number;
+            /** @description The shortest song; a shorter one is song_length (422). */
+            minSeconds: number;
+            /** @description The longest song; a longer one is song_length (422). */
+            maxSeconds: number;
+        };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
@@ -8750,6 +8777,7 @@ export type MontageSongSection = components['schemas']['MontageSongSection'];
 export type MontageSongPart = components['schemas']['MontageSongPart'];
 export type MontageSongSelection = components['schemas']['MontageSongSelection'];
 export type MontageSong = components['schemas']['MontageSong'];
+export type MontageSongRules = components['schemas']['MontageSongRules'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -13599,6 +13627,27 @@ export interface operations {
             };
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageSongRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSongRules"];
+                };
+            };
+            404: components["responses"]["ProductError"];
         };
     };
     getMontageHero: {

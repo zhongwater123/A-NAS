@@ -7,40 +7,12 @@ import { getMusicStatus, listSources, listTracks, scanMusic, statusPoll } from "
 import { getTransfer } from "../transfers/api";
 import { failureText } from "../transfers/model";
 import { transferStore, useTransfers } from "../transfers/store";
-import { chooseSong } from "./api";
-import { songKey } from "./queries";
+import { chooseSong, type MontageSongRules } from "./api";
+import { songKey, songRulesQuery } from "./queries";
 
-// Limits of a song, as the montage center holds them (internal/montage/songs.go).
-const maxSongBytes = 100 << 20;
-const minSongSeconds = 30;
-const maxSongSeconds = 8 * 60;
-// The audio files the music library indexes (internal/music/metadata.go, formats).
-const songTypes = [
-  ".mp3",
-  ".flac",
-  ".m4a",
-  ".aac",
-  ".ogg",
-  ".oga",
-  ".opus",
-  ".wav",
-  ".ape",
-  ".wma",
-  ".wv",
-  ".aif",
-  ".aiff",
-  ".dsf",
-  ".dff",
-];
-export const acceptedSongTypes = songTypes.join(",");
 // Where an uploaded song goes: this folder of the member's private space,
 // which the NAS creates when it is not there yet.
 const songFolder = "音乐";
-
-const isSong = (name: string) => {
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 && songTypes.includes(name.slice(dot).toLowerCase());
-};
 
 // audioSeconds is how long the browser says the file plays, or undefined
 // when it cannot read it: the montage center decides about those.
@@ -63,13 +35,14 @@ function audioSeconds(file: File): Promise<number | undefined> {
   });
 }
 
-// What the montage center would refuse, told before the file is sent: the
-// code of its answer.
-async function refusal(file: File): Promise<string | undefined> {
-  if (!isSong(file.name)) return "not_audio";
-  if (file.size > maxSongBytes) return "song_too_large";
+// What the rules of a song (GET /montage/song-rules) refuse, told before the
+// file is sent: the code the montage center would answer with.
+async function refusal(file: File, rules: MontageSongRules): Promise<string | undefined> {
+  const dot = file.name.lastIndexOf(".");
+  if (dot < 0 || !rules.extensions.includes(file.name.slice(dot).toLowerCase())) return "not_audio";
+  if (file.size > rules.maxBytes) return "song_too_large";
   const seconds = await audioSeconds(file);
-  if (seconds !== undefined && (seconds < minSongSeconds || seconds > maxSongSeconds)) return "song_length";
+  if (seconds !== undefined && (seconds < rules.minSeconds || seconds > rules.maxSeconds)) return "song_length";
   return undefined;
 }
 
@@ -105,10 +78,14 @@ export function useSongUpload(projectId: string, userId: string) {
   const upload = sent?.key ? snapshot.uploads.find((item) => item.key === sent.key) : undefined;
   const landed = upload?.phase === "completed" ? upload.transferId : undefined;
 
+  // The rules a song is checked by before it is sent. Until they are read,
+  // and when they cannot be, the file is sent unchecked: choosing the song
+  // refuses it by the same rules.
+  const rules = useQuery(songRulesQuery).data;
   // Before the file is sent: what would be refused, and where it goes.
   const check = useMutation({
     mutationFn: async (file: File) => {
-      const code = await refusal(file);
+      const code = rules && (await refusal(file, rules));
       if (code) throw refused(code);
       // The member's own space, never one an administrator only views.
       const spaces = await listSpaces();
@@ -217,6 +194,8 @@ export function useSongUpload(projectId: string, userId: string) {
   const job: SongUpload | undefined = sent && { name: sent.name, step, problem };
   return {
     job,
+    // The files the picker offers: every file while the rules are not read.
+    accept: rules?.extensions.join(","),
     progress,
     // Whether the file waits in the queue rather than being sent.
     queued: Boolean(upload && upload.phase !== "running"),

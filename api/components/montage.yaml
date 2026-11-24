@@ -95,6 +95,15 @@ schemas:
       sections: { type: array, items: { $ref: "#/schemas/MontageSongSection" } }
       defaultStart: { type: number, minimum: 0, description: "Where the eighth version's rule starts the excerpt: around the first chorus." }
       selection: { $ref: "#/schemas/MontageSongSelection" }
+  MontageSongRules:
+    type: object
+    additionalProperties: false
+    required: [extensions, maxBytes, minSeconds, maxSeconds]
+    properties:
+      extensions: { type: array, minItems: 1, description: "The audio files the music library indexes, by extension: lower case with the dot, sorted. A file of another extension never becomes a track to choose.", items: { type: string, pattern: "^\\.[a-z0-9]+$" } }
+      maxBytes: { type: integer, minimum: 1, description: "The largest file; a larger one is song_too_large (413)." }
+      minSeconds: { type: number, minimum: 0, description: "The shortest song; a shorter one is song_length (422)." }
+      maxSeconds: { type: number, minimum: 0, description: "The longest song; a longer one is song_length (422)." }
   MontageVersion:
     type: object
     additionalProperties: false

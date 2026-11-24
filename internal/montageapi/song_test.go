@@ -2,11 +2,13 @@ package montageapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,5 +125,26 @@ func TestCopySongCutsALongTitleToFitItsHeader(t *testing.T) {
 	var source montage.SongSource
 	if err := montageapi.DecodeHeader(header, &source); recorder.Code != http.StatusOK || err != nil || source.Title != strings.Repeat("长", 200) {
 		t.Fatalf("answer = %d; the title arrived with %d runes, %v", recorder.Code, len([]rune(source.Title)), err)
+	}
+}
+
+// The page checks a song before sending it by what this answers, so it is
+// the music library's extensions and the limits CopySong and the montage
+// center refuse by, not a copy of them.
+func TestSongRulesAreTheLibrarysExtensionsAndTheMontageCentersLimits(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	montageapi.ServeSongRules(recorder, httptest.NewRequest(http.MethodGet, montageapi.SongRulesPath, nil), accounts.Session{})
+	var rules montageapi.SongRules
+	if err := json.Unmarshal(recorder.Body.Bytes(), &rules); recorder.Code != http.StatusOK || err != nil {
+		t.Fatalf("answer = %d %s, %v", recorder.Code, recorder.Body, err)
+	}
+	want := montageapi.SongRules{
+		Extensions: music.Extensions(),
+		MaxBytes:   montage.MaxSongBytes,
+		MinSeconds: montage.MinSongSeconds,
+		MaxSeconds: montage.MaxSongSeconds,
+	}
+	if !reflect.DeepEqual(rules, want) || len(rules.Extensions) == 0 {
+		t.Fatalf("rules = %+v, want %+v", rules, want)
 	}
 }

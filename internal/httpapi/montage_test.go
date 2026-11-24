@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
@@ -107,6 +109,14 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if served != 0 {
 		t.Fatal("the montage center was asked whether it is on")
 	}
+	// What a song must be is the Product Service's answer too, to any
+	// member: the music library's extensions with the montage center's limits.
+	var rules montageapi.SongRules
+	decode(t, bob.do(http.MethodGet, montageapi.SongRulesPath, "", nil, http.StatusOK).Body, &rules)
+	if want := (montageapi.SongRules{Extensions: music.Extensions(), MaxBytes: montage.MaxSongBytes,
+		MinSeconds: montage.MinSongSeconds, MaxSeconds: montage.MaxSongSeconds}); !reflect.DeepEqual(rules, want) || served != 0 {
+		t.Fatalf("song rules = %+v, want %+v; the montage center was asked %d times", rules, want, served)
+	}
 	response := owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK)
 	if body := strings.TrimSpace(response.Body.String()); body != `{"items":[]}` {
 		t.Fatalf("projects = %s", body)
@@ -114,6 +124,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	anonymous := &contractClient{t: t, handler: handler}
 	anonymous.do(http.MethodGet, "/api/v1/montage", "", nil, http.StatusUnauthorized)
 	anonymous.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusUnauthorized)
+	anonymous.do(http.MethodGet, montageapi.SongRulesPath, "", nil, http.StatusUnauthorized)
 
 	// The owner's two videos, in the private library.
 	var me struct {
@@ -246,7 +257,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	off := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Logger: logger,
 	})
-	for _, path := range []string{"/api/v1/montage", "/api/v1/montage/projects"} {
+	for _, path := range []string{"/api/v1/montage", "/api/v1/montage/projects", montageapi.SongRulesPath} {
 		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+path, nil)
 		request.AddCookie(owner.cookie)
 		request.Header.Set("X-Forwarded-For", owner.forwardedFor)

@@ -11,7 +11,7 @@ import { Failed } from "./Failed";
 import styles from "./montage.module.css";
 import { songKey, songQuery } from "./queries";
 import { useShown } from "./shown";
-import { acceptedSongTypes, type SongUploadStep, useSongUpload } from "./songUpload";
+import { type SongUploadStep, useSongUpload } from "./songUpload";
 
 // Why a song is not ready yet, or cannot be used (MontageSong.waiting, .reason).
 const songWaits: Record<NonNullable<MontageSong["waiting"]>, string> = {
@@ -104,7 +104,7 @@ export function SongPage({ id, userId, onBack }: { id: string; userId: string; o
             ref={picker}
             hidden
             type="file"
-            accept={acceptedSongTypes}
+            accept={uploads.accept}
             aria-label="选择歌曲"
             onChange={(event) => {
               const file = event.target.files?.[0];

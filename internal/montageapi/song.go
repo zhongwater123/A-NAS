@@ -29,6 +29,32 @@ const SongHeader = "X-A-NAS-Song"
 // SongPath is where a project's song is chosen.
 const SongPath = PathPrefix + "/projects/{projectID}/song"
 
+// SongRulesPath is where a page reads what a song must be before it sends
+// one.
+const SongRulesPath = PathPrefix + "/song-rules"
+
+// SongRules is what a song must be to become a project's: a file the music
+// library indexes, within the montage center's limits.
+type SongRules struct {
+	Extensions []string `json:"extensions"`
+	MaxBytes   int64    `json:"maxBytes"`
+	MinSeconds float64  `json:"minSeconds"`
+	MaxSeconds float64  `json:"maxSeconds"`
+}
+
+// ServeSongRules serves GET /song-rules in the Product Service, which holds
+// both halves: the extensions are the music library's, the limits the ones
+// CopySong and the montage center refuse a song by. The montage service is
+// not asked.
+func ServeSongRules(w http.ResponseWriter, _ *http.Request, _ accounts.Session) {
+	httpjson.Write(w, http.StatusOK, SongRules{
+		Extensions: music.Extensions(),
+		MaxBytes:   montage.MaxSongBytes,
+		MinSeconds: montage.MinSongSeconds,
+		MaxSeconds: montage.MaxSongSeconds,
+	})
+}
+
 // Tracks opens a track of the member's music library as the member;
 // music.Service provides it.
 type Tracks interface {

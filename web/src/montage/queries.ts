@@ -1,5 +1,5 @@
 import { APIError } from "../api/client";
-import { getProject, getSong, listProjects, type MontageSong } from "./api";
+import { getProject, getSong, getSongRules, listProjects, type MontageSong } from "./api";
 
 // The queries the window's pages share: the projects, one project, and its
 // song (null before one is chosen).
@@ -34,3 +34,11 @@ export const songQuery = (projectId: string, shown: boolean) => ({
     shown && query.state.data?.state === "analyzing" ? 4_000 : false,
   refetchIntervalInBackground: false,
 });
+
+// What a song must be, for the page to check one before it uploads it. The
+// rules are the device's software's: read once, they stay as they are.
+export const songRulesQuery = {
+  queryKey: ["montage", "song-rules"] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => getSongRules(signal),
+  staleTime: Number.POSITIVE_INFINITY,
+};

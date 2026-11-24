@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,10 @@ var contentTypes = map[string]string{
 }
 
 func formatOf(name string) string { return formats[strings.ToLower(path.Ext(name))] }
+
+// Extensions are the extensions of the audio files the library indexes, in
+// lower case with their dot, sorted: what a page offers to upload into it.
+func Extensions() []string { return slices.Sorted(maps.Keys(formats)) }
 
 func playsInBrowser(format, codec string) bool { return browserFormats[format] && codec != "alac" }
 

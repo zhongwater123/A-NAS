@@ -153,6 +153,13 @@
       "416": { description: The range is outside the song. }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/montage/song-rules:
+  get:
+    operationId: getMontageSongRules
+    summary: "What a file must be to become a project's song, for a page to check one before it uploads it: the extensions of the audio files the music library indexes, and the montage center's limits on size and length. The Product Service answers it without asking the montage center. A page that cannot read the rules sends the file all the same: choosing the song refuses it by the same limits (song_too_large, song_length, not_audio)"
+    responses:
+      "200": { description: The rules, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageSongRules" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/montage/projects/{projectId}/generate:
   post:
     operationId: generateMontageFilm

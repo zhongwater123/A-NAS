@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import type { MusicSources, MusicStatus, MusicTrack } from "../api.generated";
+import type { MontageSongRules, MusicSources, MusicStatus, MusicTrack } from "../api.generated";
 import { session } from "../test/fixtures";
 import { filesHandlers, sharedSpace, space } from "../test/handlers/files";
+import { songRules, songRulesHandler } from "../test/handlers/montage";
 import { musicStatus } from "../test/handlers/music";
 import { transfer, transfersHandlers } from "../test/handlers/transfers";
 import { apiError, http, server } from "../test/server";
@@ -86,11 +88,13 @@ interface Library {
   scanError?: MusicStatus["scan"]["error"];
   // How the montage center answers the song chosen.
   refuse?: { status: 413 | 422; code: string };
+  // The device's rules of a song; null when the page cannot read them.
+  rules?: MontageSongRules | null;
 }
 
-// serve answers the song page: the project's song, the member's library,
-// whose scan runs until it is asked about once and then has the upload in
-// it, and the transfer the upload became, saved as file:new.
+// serve answers the song page: the rules of a song, the project's song, the
+// member's library, whose scan runs until it is asked about once and then has
+// the upload in it, and the transfer the upload became, saved as file:new.
 function serve(library: Library = {}) {
   const seen = { scans: 0, chosen: [] as string[] };
   let scanned = false;
@@ -125,6 +129,9 @@ function serve(library: Library = {}) {
         entryId: "file:new",
       }),
     ]).handlers,
+    library.rules === null
+      ? http.get("/api/v1/montage/song-rules", () => HttpResponse.error())
+      : songRulesHandler(library.rules),
     http.get("/api/v1/montage/projects/{projectId}/song", ({ response }) => response(200).json(symphony)),
     http.put("/api/v1/montage/projects/{projectId}/song", async ({ request, response }) => {
       const { trackId } = (await request.json()) as { trackId: string };
@@ -137,14 +144,21 @@ function serve(library: Library = {}) {
   return seen;
 }
 
-function open() {
+// open shows the page once it has read the rules it was served: the picker
+// then offers their extensions. Without rules it offers every file.
+async function open(rules: MontageSongRules | null = songRules) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <SongPage id="project:1" userId="user:alice" onBack={() => undefined} />
     </QueryClientProvider>,
   );
-  return screen.findByRole("region", { name: "配乐" });
+  const page = await screen.findByRole("region", { name: "配乐" });
+  if (rules)
+    await waitFor(() =>
+      expect(within(page).getByLabelText("选择歌曲")).toHaveAttribute("accept", rules.extensions.join(",")),
+    );
+  return page;
 }
 
 // song is an audio file of size bytes that the browser reads as seconds
@@ -159,8 +173,10 @@ function song(name: string, size: number, seconds?: number): File {
   return file;
 }
 
-async function upload(page: HTMLElement, file: File) {
-  await userEvent.upload(within(page).getByLabelText("选择歌曲"), file);
+// upload picks the file in the browser's dialog; shown every file there,
+// the member may pick one the page did not offer.
+async function upload(page: HTMLElement, file: File, shownEveryFile = false) {
+  await userEvent.upload(within(page).getByLabelText("选择歌曲"), file, { applyAccept: !shownEveryFile });
 }
 
 beforeEach(() => {
@@ -193,6 +209,29 @@ describe("配乐页上传配乐", () => {
     await upload(page, song("Jingle.mp3", 1024, 12));
     expect(await within(page).findByText("歌曲时长要在 30 秒到 8 分钟之间")).toBeInTheDocument();
     expect(tus.uploads).toHaveLength(0);
+  });
+
+  it("checks a song by the rules the NAS gives, not by its own", async () => {
+    // A device whose music library does not index MP3, and takes 1 KiB at most.
+    const rules = { ...songRules, extensions: [".flac"], maxBytes: 1024 };
+    serve({ rules });
+    const page = await open(rules);
+    await upload(page, song("New Song.mp3", 512, 200), true);
+    expect(await within(page).findByText("这个文件不是音频")).toBeInTheDocument();
+    await upload(page, song("New Song.flac", 2048, 200));
+    expect(await within(page).findByText("歌曲超过 100 MiB")).toBeInTheDocument();
+    expect(tus.uploads).toHaveLength(0);
+  });
+
+  it("sends the song unchecked when the rules cannot be read, and tells what the montage center says", async () => {
+    const seen = serve({ rules: null, refuse: { status: 413, code: "song_too_large" } });
+    const page = await open(null);
+    expect(within(page).getByLabelText("选择歌曲")).not.toHaveAttribute("accept");
+    await upload(page, song("Long Mix.mp3", 101 << 20, 200));
+    await waitFor(() => expect(tus.uploads).toHaveLength(1));
+    act(() => tus.uploads[0].finish("upload-1"));
+    expect(await within(page).findByText("歌曲超过 100 MiB", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(seen.chosen).toEqual(["file:new"]);
   });
 
   it("uploads into the 音乐 folder, scans the library and chooses the song", async () => {

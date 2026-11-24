@@ -4191,6 +4191,19 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/montage/song-rules:
+    get:
+      operationId: getMontageSongRules
+      summary: 'What a file must be to become a project''s song, for a page to check one before it uploads it: the extensions of the audio files the music library indexes, and the montage center''s limits on size and length. The Product Service answers it without asking the montage center. A page that cannot read the rules sends the file all the same: choosing the song refuses it by the same limits (song_too_large, song_length, not_audio)'
+      responses:
+        '200':
+          description: The rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageSongRules'
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/montage/hero:
     get:
       operationId: getMontageHero
@@ -17292,6 +17305,34 @@ components:
           description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
         selection:
           $ref: '#/components/schemas/MontageSongSelection'
+    MontageSongRules:
+      type: object
+      additionalProperties: false
+      required:
+        - extensions
+        - maxBytes
+        - minSeconds
+        - maxSeconds
+      properties:
+        extensions:
+          type: array
+          minItems: 1
+          description: 'The audio files the music library indexes, by extension: lower case with the dot, sorted. A file of another extension never becomes a track to choose.'
+          items:
+            type: string
+            pattern: ^\.[a-z0-9]+$
+        maxBytes:
+          type: integer
+          minimum: 1
+          description: The largest file; a larger one is song_too_large (413).
+        minSeconds:
+          type: number
+          minimum: 0
+          description: The shortest song; a shorter one is song_length (422).
+        maxSeconds:
+          type: number
+          minimum: 0
+          description: The longest song; a longer one is song_length (422).
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

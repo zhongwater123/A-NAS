@@ -2,6 +2,7 @@ package music
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,6 +28,20 @@ func asLatin1(raw []byte) string {
 		runes[i] = rune(b)
 	}
 	return string(runes)
+}
+
+// What a page offers to upload is what a scan would index: every extension
+// once, in order, and none the library does not read.
+func TestExtensionsAreTheOnesTheLibraryIndexes(t *testing.T) {
+	extensions := Extensions()
+	if len(extensions) != len(formats) || !slices.IsSorted(extensions) {
+		t.Fatalf("extensions = %q for %d formats", extensions, len(formats))
+	}
+	for _, extension := range extensions {
+		if formatOf("Song"+extension) == "" {
+			t.Errorf("%s is offered but not indexed", extension)
+		}
+	}
 }
 
 func TestRepairTextRecoversGBKButKeepsLatin1Names(t *testing.T) {

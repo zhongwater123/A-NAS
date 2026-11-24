@@ -6,6 +6,7 @@ export type MontageProject = components["schemas"]["MontageProjectSummary"];
 export type MontageProjectDetail = components["schemas"]["MontageProject"];
 export type MontageJob = components["schemas"]["MontageJob"];
 export type MontageSong = components["schemas"]["MontageSong"];
+export type MontageSongRules = components["schemas"]["MontageSongRules"];
 export type MontageNotice = components["schemas"]["MontageNotice"];
 export type MontageVersion = components["schemas"]["MontageVersion"];
 
@@ -59,6 +60,7 @@ export const retryAnalysis = (jobId: string) =>
 export const retryJob = (jobId: string) => call(client.POST("/api/v1/montage/jobs/{jobId}/retry", job(jobId)));
 export const replan = (jobId: string) => call(client.POST("/api/v1/montage/jobs/{jobId}/replan", job(jobId)));
 
+export const getSongRules = (signal?: AbortSignal) => call(client.GET("/api/v1/montage/song-rules", { signal }));
 export const getSong = (projectId: string, signal?: AbortSignal) =>
   call(client.GET("/api/v1/montage/projects/{projectId}/song", { ...project(projectId), signal }));
 export const chooseSong = (projectId: string, trackId: string) =>

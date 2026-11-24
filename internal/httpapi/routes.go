@@ -139,6 +139,10 @@ func (h *productHandler) mounts() []apiroute.Route {
 		}
 		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
 			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
+		// What a song must be is answered here: the music library's
+		// extensions with the montage center's limits.
+		routes = append(routes, apiroute.Route{Method: http.MethodGet, Pattern: montageapi.SongRulesPath, Posture: apiroute.Session,
+			Handler: montageapi.ServeSongRules})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())

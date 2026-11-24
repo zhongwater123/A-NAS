@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WINDOW_ID } from "../desktop/windowSnapshot";
+import { songRulesHandler } from "../test/handlers/montage";
 import { asset } from "../test/handlers/photos";
 import { apiError, http, server } from "../test/server";
 import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api";
@@ -120,6 +121,7 @@ function serve(
     http.get("/api/v1/montage/projects/{projectId}/song", ({ response }) =>
       song ? response(200).json(song) : response(404).json(apiError("no_song", "the project has no song yet")),
     ),
+    songRulesHandler(),
     http.patch("/api/v1/montage/projects/{projectId}", async ({ request, response }) => {
       const change = (await request.json()) as ProjectChange;
       seen.changes.push(change);
