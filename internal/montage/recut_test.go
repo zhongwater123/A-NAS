@@ -233,3 +233,37 @@ func TestARecutGoesOnWithoutAMissingVideo(t *testing.T) {
 		t.Fatalf("the recut keeps %d videos", n)
 	}
 }
+
+// A request key names one request: generating with the key of a recut or of
+// a save is another request of another kind (ErrConflict), not that job.
+func TestGeneratingWithTheKeyOfAnotherKindOfJobIsAConflict(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	recut, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "key:1", "结尾留长一点")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("generating with a recut's key = %+v, %v", job, err)
+	}
+	if _, err := env.store.Cancel(ctx, editOwner, recut.ID); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "key:2"); err != nil {
+		t.Fatal(err)
+	}
+	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:2"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("generating with a save's key = %+v, %v", job, err)
+	}
+	// The other way round was already so.
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "key:2", "结尾留长一点"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("recutting with a save's key = %v", err)
+	}
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "key:1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("saving with a recut's key = %v", err)
+	}
+}

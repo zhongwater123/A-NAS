@@ -201,9 +201,12 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	var jobID string
 	created := false
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		var priorProject string
-		err := tx.QueryRowContext(ctx, "SELECT id, project_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&jobID, &priorProject)
-		if err == nil && priorProject != projectID {
+		var priorKind, priorProject string
+		err := tx.QueryRowContext(ctx, "SELECT id, kind, project_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+			Scan(&jobID, &priorKind, &priorProject)
+		if err == nil && (priorKind != KindGenerate || priorProject != projectID) {
+			// The key of a save or a recut is another request's, also on
+			// this project.
 			return ErrConflict
 		}
 		if err == nil || !errors.Is(err, sql.ErrNoRows) {
