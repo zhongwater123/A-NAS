@@ -19,6 +19,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useMemo,
@@ -101,10 +102,10 @@ const sectionLinks = sectionGroups.flat();
 const sectionLabel = (section: SettingsSection) =>
   section === "account" ? "我的账号" : (sectionLinks.find((link) => link.id === section)?.label ?? "");
 
-// A row the search led to: found again after the section has rendered it.
+// A row the search led to: found again after the section has rendered it. A
+// new object for each request, so the same row asked for again is found again.
 interface Target {
   anchor: string;
-  id: number;
 }
 
 export function SettingsPanel({
@@ -112,6 +113,8 @@ export function SettingsPanel({
   host,
   section,
   onSectionChange,
+  intent,
+  onIntentHandled,
   storagePlan,
   onUserChange,
   onLogout,
@@ -121,6 +124,9 @@ export function SettingsPanel({
   host: HostStateView;
   section: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
+  // A row the desktop asks to bring into view, in the section it set (apps.tsx WindowIntentPayloads).
+  intent?: { anchor: string };
+  onIntentHandled?: (handled: { anchor: string }) => void;
   storagePlan: StoragePlanFlow;
   // onUserChange receives the account after its owner changed the nickname or avatar.
   onUserChange: (user: User) => void;
@@ -207,9 +213,24 @@ export function SettingsPanel({
     };
   }, [target]);
 
+  // The desktop asks for a row the same way (the companion's dot: the system health in 概览), in the section
+  // it set: found though the section shows already, and handed back once taken.
+  const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent) {
+      setPane("page");
+      setTarget({ anchor: intent.anchor });
+    }
+  }
+  const intentHandled = useEffectEvent((handled: { anchor: string }) => onIntentHandled?.(handled));
+  useEffect(() => {
+    if (intent) intentHandled(intent);
+  }, [intent]);
+
   const open = (entry: SearchEntry) => {
     go(entry.section);
-    if (entry.anchor) setTarget({ anchor: entry.anchor, id: Date.now() });
+    if (entry.anchor) setTarget({ anchor: entry.anchor });
   };
 
   const links = sectionGroups
