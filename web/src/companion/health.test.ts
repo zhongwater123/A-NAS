@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HostState } from "../desktop/api";
 import { healthyState } from "../test/fixtures";
-import { CLEAR_READS, CRITICAL_FALLBACK, DISCONNECTED_KEEP_MS, deviceTrouble, useDeviceTrouble } from "./health";
+import {
+  CLEAR_READS,
+  CLEAR_SPAN_MS,
+  CRITICAL_FALLBACK,
+  DISCONNECTED_KEEP_MS,
+  deviceTrouble,
+  useDeviceTrouble,
+} from "./health";
 
 const state = (system: Partial<HostState["system"]>): HostState => ({
   ...healthyState,
@@ -45,7 +52,7 @@ describe("the trouble the companion shows a dot for", () => {
     expect(deviceTrouble(readOnly(), false)).toEqual({ key: "volume_read_only:", text: "数据卷变成了只读" });
   });
 
-  it("still shows for a critical device whose reasons the page does not know", () => {
+  it("still shows for a critical device that names no critical reason", () => {
     const fallback = { key: "critical", text: CRITICAL_FALLBACK };
     expect(deviceTrouble(state({ health: "critical", healthFindings: [] }), false)).toEqual(fallback);
     const older = state({ health: "critical" });
@@ -62,9 +69,15 @@ describe("the trouble the companion shows a dot for", () => {
 
 describe("the dot held steady over the desktop's reads", () => {
   afterEach(() => vi.useRealTimers());
+  /** What the desktop hands the hook: the last read, whether the connection is down, and when the read came. */
+  interface Reads {
+    snapshot?: HostState;
+    disconnected: boolean;
+    readAt?: number;
+  }
   const hold = () =>
-    renderHook(({ snapshot, disconnected }) => useDeviceTrouble(snapshot, disconnected), {
-      initialProps: { snapshot: undefined as HostState | undefined, disconnected: false },
+    renderHook(({ snapshot, disconnected, readAt }: Reads) => useDeviceTrouble(snapshot, disconnected, readAt), {
+      initialProps: { disconnected: false } as Reads,
     });
 
   it("comes with the first critical read", () => {
@@ -76,15 +89,35 @@ describe("the dot held steady over the desktop's reads", () => {
 
   it(`goes only after ${CLEAR_READS} reads in a row that are not critical, so a reading near a limit does not blink`, () => {
     const { result, rerender } = hold();
-    rerender({ snapshot: full(), disconnected: false });
+    // The desktop's reads, 10 s apart.
+    let readAt = 0;
+    const read = (snapshot: HostState) => {
+      readAt += 10_000;
+      rerender({ snapshot, disconnected: false, readAt });
+    };
+    read(full());
     // A volume about to be full, read on either side of the limit: the dot stays.
     for (const snapshot of [healthy(), full(), healthy(), full()]) {
-      rerender({ snapshot, disconnected: false });
+      read(snapshot);
       expect(result.current?.key).toBe("volume_full:");
     }
-    rerender({ snapshot: healthy(), disconnected: false });
+    read(healthy());
     expect(result.current).toBeDefined();
-    rerender({ snapshot: healthy(), disconnected: false });
+    read(healthy());
+    expect(result.current).toBeUndefined();
+  });
+
+  it(`counts reads right after each other as one, until ${CLEAR_SPAN_MS / 1000} s have passed since the first`, () => {
+    const { result, rerender } = hold();
+    rerender({ snapshot: full(), disconnected: false, readAt: 0 });
+    rerender({ snapshot: healthy(), disconnected: false, readAt: 10_000 });
+    // The page comes back into view, then 刷新设备状态: two more reads within a second.
+    rerender({ snapshot: healthy(), disconnected: false, readAt: 10_400 });
+    rerender({ snapshot: healthy(), disconnected: false, readAt: 10_800 });
+    expect(result.current?.key).toBe("volume_full:");
+    rerender({ snapshot: healthy(), disconnected: false, readAt: 10_000 + CLEAR_SPAN_MS - 1 });
+    expect(result.current?.key).toBe("volume_full:");
+    rerender({ snapshot: healthy(), disconnected: false, readAt: 10_000 + CLEAR_SPAN_MS });
     expect(result.current).toBeUndefined();
   });
 

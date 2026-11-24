@@ -108,7 +108,7 @@ export function Desktop({
 }) {
   const host = useHostState(true);
   // The companion's dot while the device is in critical trouble, held steady over the reads (health.ts).
-  const trouble = useDeviceTrouble(host.snapshot, host.disconnected);
+  const trouble = useDeviceTrouble(host.snapshot, host.disconnected, host.readAt);
   const wallpaper = useWallpaper();
   // Names and avatars of every account; read again whenever the page comes
   // back into view, so someone else's new nickname shows up without a reload.
@@ -148,9 +148,11 @@ export function Desktop({
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
-  const openSettings = (section?: SettingsSection) => {
+  // anchor brings a row of the section into view, as the search does: one there already shows again.
+  const openSettings = (section?: SettingsSection, anchor?: string) => {
     if (section) setSettingsSection(section);
-    open("settings");
+    if (anchor) open("settings", { anchor });
+    else open("settings");
   };
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
@@ -364,7 +366,7 @@ export function Desktop({
               atCards ? open("assistant", { conversationId: atCards.conversation }) : open("assistant")
             }
             onOpenTaskRun={showTaskRun}
-            onOpenHealth={() => openSettings("overview")}
+            onOpenHealth={() => openSettings("overview", "health")}
           />
         </ShellPart>
         <ShellPart name="family hints">

@@ -65,7 +65,17 @@ const member = signIn(alice);
 // section, the host state and any storage plan, which outlive the window,
 // and App takes an account its owner changed into the session. open shows
 // the window or leaves it closed.
-function Settings({ signedIn, open = true }: { signedIn: Session; open?: boolean }) {
+function Settings({
+  signedIn,
+  open = true,
+  intent,
+  onIntentHandled,
+}: {
+  signedIn: Session;
+  open?: boolean;
+  intent?: { anchor: string };
+  onIntentHandled?: (handled: { anchor: string }) => void;
+}) {
   const [current, setCurrent] = useState(signedIn);
   const host = useHostState(true);
   const [section, setSection] = useState<SettingsSection>("overview");
@@ -77,6 +87,8 @@ function Settings({ signedIn, open = true }: { signedIn: Session; open?: boolean
       host={host}
       section={section}
       onSectionChange={setSection}
+      intent={intent}
+      onIntentHandled={onIntentHandled}
       storagePlan={storagePlan}
       onUserChange={(user) => setCurrent((value) => ({ ...value, user }))}
       onLogout={() => undefined}
@@ -214,6 +226,28 @@ describe("Settings host state", () => {
 
     expect(await screen.findByText("连接中断，正在显示上次成功读取的数据")).toBeTruthy();
     expect(screen.getByText("anas-fake")).toBeTruthy();
+  });
+
+  it("brings the row the desktop asks for into view, though its section shows already", async () => {
+    // jsdom does not scroll.
+    const scrollBy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: scrollBy });
+    try {
+      serve();
+      setSession(owner);
+      const handled: unknown[] = [];
+      const health = { anchor: "health" };
+      const view = render(<Settings signedIn={owner} />);
+      expect(await screen.findByText("anas-fake")).toBeTruthy();
+      const row = screen.getByRole("region", { name: "设备状态" });
+      expect(row).not.toHaveAttribute("data-found");
+      view.rerender(<Settings signedIn={owner} intent={health} onIntentHandled={(taken) => handled.push(taken)} />);
+      await waitFor(() => expect(row).toHaveAttribute("data-found"));
+      expect(scrollBy).toHaveBeenCalled();
+      expect(handled).toEqual([health]);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollBy");
+    }
   });
 
   it("retries after an initial 503 response", async () => {

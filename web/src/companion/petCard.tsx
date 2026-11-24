@@ -21,7 +21,7 @@
 // waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
 // (companion.module.css). The character's credit is in Settings → 概览 (credit.ts), not on
 // the companion.
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
 import {
@@ -1142,7 +1142,11 @@ function Card({
   // of every card. With nothing to tell it plays a click response, as the card does. What it says also goes to
   // the screen reader. A drag let go, a sleeping or locked companion are the card's own. On the screen the
   // family shares, no task's name or object.
-  const [spoken, setSpoken] = useState("");
+  /**
+   * What it said last, for the screen reader, with a count: each answer goes in as a node of its own, so
+   * the same words said again are read again, which the same text set twice would not be.
+   */
+  const [spoken, setSpoken] = useState({ text: "", count: 0 });
   /**
    * The trouble last told on a click (its key): it waits behind the rest until another trouble comes, or
    * this one goes and comes back.
@@ -1151,6 +1155,14 @@ function Card({
   useEffect(() => {
     if (!trouble) toldTrouble.current = null;
   }, [trouble]);
+  // The trouble's words describe the companion's button, dsh-pet's hit area, so a screen reader names it as
+  // it reaches the companion; the hit area is dsh-pet's to draw (view.ts), so the page sets the reference on
+  // it. Checked on every render, in case dsh-pet draws it anew.
+  const troubleLine = useId();
+  useEffect(() => {
+    const hit = clipSpeed.current?.querySelector(".dsh-pet-hit");
+    if (hit && hit.getAttribute("aria-describedby") !== troubleLine) hit.setAttribute("aria-describedby", troubleLine);
+  });
 
   const ask = useRef<() => boolean>(() => false);
   useEffect(() => {
@@ -1160,7 +1172,7 @@ function Card({
       const shared = isLocalConsole();
       const say = (text: string) => {
         companionState.writePet(COMPANION_PET, "say", { text, anim: false });
-        setSpoken(text);
+        setSpoken((last) => ({ text, count: last.count + 1 }));
       };
       const tellTrouble = (told: DeviceTrouble) => {
         toldTrouble.current = told.key;
@@ -1278,9 +1290,12 @@ function Card({
         onPlace={place}
       />
       <p className="sr-only" aria-live="polite">
-        {spoken}
+        {spoken.text && <span key={spoken.count}>{spoken.text}</span>}
       </p>
-      {trouble && <p className="sr-only">{`设备需要处理：${trouble.text}`}</p>}
+      {/* On the page from the start, so that a trouble that comes is read out as it comes. */}
+      <p id={troubleLine} className="sr-only" aria-live="polite">
+        {trouble ? `设备需要处理：${trouble.text}` : ""}
+      </p>
     </div>
   );
 }
