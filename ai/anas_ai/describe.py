@@ -201,10 +201,10 @@ def fitting(offsets, groups, most):
     left out, and the beats after it move up. A card that fits is unchanged.
 
     The NAS names this fitting in a description's identity (fit= in
-    internal/photos/montagedescribe.go, describeIdentitySuffix): a change to
-    which frames a card is described from, here or in how LlamaReader.describe
-    counts what fits, bumps fit= there, or cards that failed under the old
-    fitting are never described again.
+    internal/photos/montagedescribe.go, describeIdentitySuffix). Each release
+    tries the cards that failed once more, so a change that only lets more
+    cards through needs nothing; bump fit= there only when the cards
+    described before should be described again.
     """
     count = len(offsets)
     if count <= most:

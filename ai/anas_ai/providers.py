@@ -981,9 +981,10 @@ class LlamaReader:
         still count among all of the card's. A card that fits is asked about
         exactly as the prototype asks. Should the estimate be too low, the
         server refuses the prompt or the context cuts the answer short
-        (InvalidInput): the card goes undescribed. A change to the estimate
-        or to the fitting bumps fit= in the NAS's description identity
-        (internal/photos/montagedescribe.go), so that such cards are tried again.
+        (InvalidInput): the card goes undescribed until the next release,
+        whose first start tries the cards that failed once more. Bump fit= in
+        the NAS's description identity (internal/photos/montagedescribe.go)
+        only when the cards described before should be described again.
         """
         if any(not data for data in frames):
             raise InvalidInput("empty image")

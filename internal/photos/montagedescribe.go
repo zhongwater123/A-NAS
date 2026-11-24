@@ -34,9 +34,10 @@ const (
 	// number filter, which textread does not version itself, and the
 	// version of how the Worker fits the key frames into the reader's
 	// context (anas_ai.describe.fitting), which the reader's name does not
-	// carry either. Changing how frames are fitted bumps fit=: a card that
-	// failed under the old fitting is then stale and described again
-	// (catalog migration 22).
+	// carry either. Bump fit= only when the cards described before should
+	// be described again: the cards that failed are tried once more by every
+	// release anyway (aiRunner.requeueStale, workerRecord.DescribedRelease).
+	// Catalog migration 22 moved the cards described before fit= to fit=1.
 	describeIdentitySuffix = "|tpl=" + describeTemplate + ",genre=TRAVEL,frame=w512q3,mask=1,fit=1"
 )
 

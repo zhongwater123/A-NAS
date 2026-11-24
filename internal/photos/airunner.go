@@ -59,13 +59,18 @@ func newAIRunner(lib *Service) *aiRunner {
 //     release's need is not taken: its models may take less, and a need
 //     too high would keep the gate shut without ever asking the Worker again;
 //   - its text reader. A new one tries again the photos the last one failed
-//     to read, which are not retried on every start (RecoverJobs).
+//     to read, which are not retried on every start (RecoverJobs);
+//   - the release whose first start tried again the montage center's card
+//     descriptions that had failed (DescribedRelease): each release tries
+//     them once, for a change in how a card is fitted or asked about may
+//     let them through (#583), and no one has to remember to say so.
 const workerFile = "ai-worker.json"
 
 type workerRecord struct {
-	Release     string `json:"release"`
-	MemoryBytes uint64 `json:"memoryBytes"`
-	Reader      string `json:"reader,omitempty"`
+	Release          string `json:"release"`
+	MemoryBytes      uint64 `json:"memoryBytes"`
+	Reader           string `json:"reader,omitempty"`
+	DescribedRelease string `json:"describedRelease,omitempty"`
 }
 
 // workerRecord is what workerFile keeps, or nothing before the Worker first
@@ -763,12 +768,22 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
 		}
-		// The montage center's descriptions: only those a grant still refers to.
-		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
+		// The montage center's descriptions: only those a grant still refers
+		// to. A new reader, or the first start of another release, also tries
+		// the cards that failed again; the cards described stay as they are.
+		retryFailed := record.Reader != info.OCR || record.DescribedRelease != lib.release
+		if err := lib.withTx(ctx, func(tx *sql.Tx) error {
+			if retryFailed {
+				if _, err := tx.ExecContext(ctx, "DELETE FROM video_card_descriptions WHERE result IS NULL AND object_id IN ("+referencedObjects+")"); err != nil {
+					return err
+				}
+			}
+			return lib.queueMissingDescriptions(ctx, tx, info.OCR, retryFailed, referencedObjects)
+		}); err != nil {
 			return err
 		}
-		if record.Reader != info.OCR {
-			record.Reader = info.OCR
+		if retryFailed {
+			record.Reader, record.DescribedRelease = info.OCR, lib.release
 			if err := lib.storeWorkerRecord(record); err != nil {
 				return err
 			}

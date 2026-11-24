@@ -954,3 +954,74 @@ func TestDescriptionsFailedBeforeFrameFittingAreDescribedAgain(t *testing.T) {
 		})
 	}
 }
+
+// Each release tries once more the cards whose description failed, for how
+// it fits key frames or asks may now get them through, and no one has to
+// remember to say so (#583). The cards described stay; another start of the
+// same release, or a video no grant refers to, is not asked about again.
+func TestAnUpdateTriesTheFailedDescriptionsOnce(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "granted", true: "revoked"}[revoked], func(t *testing.T) {
+			f := newDescribeFixture(t)
+			f.release = "1.0.0"
+			f.restart(t)
+			processAI(t, f.service, f.embedder, f.gate)
+			f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+				if call == 2 {
+					return nil, fmt.Errorf("%w: llama-server answered 400: the request exceeds the available context size", photos.ErrAIRejected)
+				}
+				return json.RawMessage(`{"camera":"地面","summary":"湖边"}`), nil
+			}
+			f.cards(t, []standInCard{
+				{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
+				{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
+			})
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
+				t.Fatalf("%d rounds, %d descriptions", rounds, f.embedder.calls())
+			}
+			before := f.descriptions(t)
+			if len(before) != 2 || before[0].result == "" || before[1].result != "" || before[1].failure == "" {
+				t.Fatalf("descriptions = %+v", before)
+			}
+
+			// Another start of the same release asks about nothing.
+			f.restart(t)
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
+				t.Fatalf("the same release again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+			}
+			if revoked {
+				if err := f.service.RevokeGrant(t.Context(), f.grant.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			f.embedder.answer = func(int, photos.CardLayout) (json.RawMessage, error) {
+				return json.RawMessage(`{"camera":"地面","summary":"山顶"}`), nil
+			}
+			f.release = "1.0.1"
+			f.restart(t)
+			rounds := processAI(t, f.service, f.embedder, f.gate)
+			stored := f.descriptions(t)
+			if revoked {
+				// No grant refers to the video: its failed card waits as it was.
+				if rounds != 0 || f.embedder.calls() != 2 || len(stored) != 2 || stored[1] != before[1] {
+					t.Fatalf("revoked: %d rounds, %d descriptions in all, stored %+v", rounds, f.embedder.calls(), stored)
+				}
+				return
+			}
+			if rounds != 1 || f.embedder.calls() != 3 {
+				t.Fatalf("the update: %d rounds, %d descriptions in all, want only the failed card again", rounds, f.embedder.calls())
+			}
+			if len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") || stored[1].failure != "" {
+				t.Fatalf("stored = %+v, want card 0 as before %+v", stored, before[0])
+			}
+
+			// Its next start, and a card that fails again under it, wait for
+			// the release after.
+			f.restart(t)
+			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 3 {
+				t.Fatalf("the update again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+			}
+		})
+	}
+}
