@@ -1,6 +1,6 @@
 # 本地开发环境
 
-更新时间：2026-10-27
+更新时间：2026-11-23
 
 本页是开发环境入口。项目有两台 Windows 开发机和一台 macOS 开发机；按机器与任务选择下列文档，无需通读其他机器的配置。
 
@@ -24,6 +24,7 @@
 | Windows Fake 预览与会话隔离 | [fake-preview](../../.agents/skills/fake-preview/SKILL.md) |
 | macOS Fake 预览 | [Colima 预览](environments/macos.md#fake-预览) |
 | 实验 NAS 身份、SSH 指纹、密钥和连接配置 | [SSH 运行手册](../runbooks/bootstrap-experimental-nas-ssh.md) |
+| 用开发者账号（`dev-<缩写>`）连接实验 NAS | [接入说明](experimental-nas-access.md) |
 | 暂存、安装和回滚实验 NAS 服务 | [实验存储运行手册](../runbooks/provision-v1.0.1-experimental-storage.md) |
 
 ## 关联
