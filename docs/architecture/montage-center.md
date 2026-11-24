@@ -170,7 +170,7 @@ anas-photos
 | `plan_answers` | job_id、step、input_key、round_id、answer_json、accepted_at | 工具收下的答案，按（任务、步骤、这一步的输入键）只留第一份。任务自己的步骤按输入键取出，再写进 `plans`。`step` 只有 `pick`、`shots`，方案二也写这两个值，靠输入键区分 |
 | `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
 | `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案；答案由任务的步骤从 `plan_answers` 取来写入，`round_id` 不再填写。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
-| `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、kind、source_version_id、draft_revision、timeline_json、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 由任务 ID 与渲染步骤的 `input_key` 组成，与渲染输出的字节无关。`kind` 同任务；`timeline_json` 是这一版的时间线，存回时在同一个事务里写入，修改稿、粗预览与镜头清单都从它读 |
+| `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、kind、source_version_id、draft_revision、timeline_json、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 与渲染输出的字节无关：生成与重剪的版本由任务 ID 与渲染步骤的 `input_key` 组成，存为新版本的由修改稿 ID、修订号与渲染步骤的 `input_key` 组成，同一修订重试只存一次。`kind` 按任务种类：生成任务的版本是 `plan`，存为新版本是 `edit`，重剪是 `recut`；`timeline_json` 是这一版的时间线，存回时在同一个事务里写入，修改稿、粗预览与镜头清单都从它读 |
 | `drafts` | id、owner_user_id、project_id、base_version_id、revision、slots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`slots_json` 记这一版的音乐槽，和按成片顺序盖住它们的镜头：每镜的节拍、盖住第几到第几个槽（删掉一镜就是把它的槽并给前一镜或后一镜）、哪个槽是它自己的（`home`，“还原这一镜”与“已换”按它判断）、是否锁定 |
 | `draft_revisions` | draft_id、revision、op、seed、back、slots_json、created_at | 每一步一行。`back` 是撤销这一步回到的修订：普通的一步是它之前的修订，撤销的一步是被撤销那一步的 `back`，所以连续撤销一直往回走，不会变成重做。保留最近 100 个修订和撤销链上的修订，最多 101 行，所以不管其中几步是撤销，都能撤销最近 100 步 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
@@ -726,9 +726,9 @@ montage/
 
 **修改稿**
 - `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍，修订号 0。槽的键是段落、画面与小节槽的序号，和 `fill` 的嵌套相同。
-- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按规格“修改的规则”校验，不成立回答 422 `edit_refused`；写一行 `draft_revisions`、更新 `drafts`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
+- `POST /drafts/{id}/ops` 在一个事务里：比对 `baseRevision`，对不上回答 409 `draft_conflict`；按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`；写一行 `draft_revisions`、更新 `drafts`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
 - 这一版的时间线读不出来时（见上），修改稿、候选与镜头清单都回答 409 `not_editable`。
-- 打开修改稿时，逐个读卡片所在视频的分析：相册现在的窗口身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。相册里已经没有、或内容对象换了的视频留给用到它的步骤。版本概要不做这一步：读分析要连同全部窗口向量，只在打开修改稿时读一次。
+- 打开修改稿时，逐个读卡片所在视频的分析：相册现在的窗口身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。相册里已经没有、或内容对象换了的视频留给用到它的步骤。`POST /drafts/{id}/save` 建任务前再查一次，打开之后才重新分析的，直接回答 409 `analysis_changed`，不建任务。版本概要、每一步操作与候选不做这一步：读分析要连同全部窗口向量，每次点击都读太重。
 - 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。换镜头、拖动时节拍够不够长按 `fill` 的放慢上限（2.5 倍）算；删除一镜时“卡片盖得住两段之和”按不放慢算。
 - 这里的校验不知道 `fill` 实际会从卡片的哪一段取画面，所以存为新版本时还要核对一次，见“重新填槽”。
 - 删除时两边都够长，调一次计算 Worker 的 `likeness` 选更像的一边。

@@ -47,6 +47,11 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		return Job{}, false, err
 	}
 	src, state := draft.source, draft.state
+	// A version whose videos were analysed again with another model since the
+	// draft was opened cannot be saved: say so now rather than fail in the fill.
+	if err := s.checkAnalysis(ctx, src); err != nil {
+		return Job{}, false, err
+	}
 	edit := EditSettings{Job: src.planJob, Plan: src.planNo}
 	used := map[string]string{}
 	for _, shot := range state.Shots {
@@ -57,6 +62,17 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		used[card.Video] = src.videos[card.Video].ObjectID
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		// A retry with the same key may have made the job since the look above.
+		var again, againDraft sql.NullString
+		switch err := tx.QueryRowContext(ctx, "SELECT id, draft_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).Scan(&again, &againDraft); {
+		case err == nil && againDraft.String != draftID:
+			return ErrConflict
+		case err == nil:
+			jobID = again.String
+			return nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
 		row, err := s.project(ctx, tx, owner, src.projectID)
 		if err != nil {
 			return err

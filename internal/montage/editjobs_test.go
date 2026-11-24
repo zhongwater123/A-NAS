@@ -322,6 +322,10 @@ func TestASaveOfAVersionAnalysedAgainStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.grants.identity = "another-model|win=2s1f"
+	// Analysed again before the save is asked for: it is refused at once.
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:2"); !errors.Is(err, ErrAnalysisChanged) {
+		t.Fatalf("a save asked for after the analysis changed = %v", err)
+	}
 	env.runJobs(t)
 	stopped, err := env.store.Job(ctx, editOwner, job.ID)
 	if err != nil || stopped.State != JobFailed || stopped.Error != AnalysisChangedReason {

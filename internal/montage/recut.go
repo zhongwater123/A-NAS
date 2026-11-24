@@ -52,6 +52,19 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	var jobID string
 	created := false
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		// A retry with the same key may have made the job since the look above.
+		var again, againVersion sql.NullString
+		var againKind string
+		switch err := tx.QueryRowContext(ctx, "SELECT id, kind, source_version_id FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+			Scan(&again, &againKind, &againVersion); {
+		case err == nil && (againKind != KindRecut || againVersion.String != versionID):
+			return ErrConflict
+		case err == nil:
+			jobID = again.String
+			return nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
 		row, err := s.project(ctx, tx, owner, src.projectID)
 		if err != nil {
 			return err

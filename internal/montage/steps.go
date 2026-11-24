@@ -32,7 +32,7 @@ import (
 const (
 	catalogVersion = "catalog/v1"
 	promptVersion  = "plan/v8"
-	fillVersion    = "fill/v9"
+	fillVersion    = "fill/v10"
 	renderVersion  = "render/v1"
 )
 
