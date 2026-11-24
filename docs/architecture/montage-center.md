@@ -783,7 +783,7 @@ montage/
 
 **确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
 
-**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM，列见规格。
+**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM；有哪些列见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的“镜头清单的格式”，表头在 [`editing.go`](../../internal/montage/editing.go) 的 `shotListHeader`。
 
 ## 原型缺陷的修复
 

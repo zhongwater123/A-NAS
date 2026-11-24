@@ -8567,7 +8567,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description One step of an edit (docs/specs/montage-center.md, 修改的规则). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred. */
+        /** @description One step of an edit (ADR 0039, decision 2; docs/architecture/montage-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred. */
         MontageDraftOp: {
             /** @enum {string} */
             type: "replace" | "move" | "delete" | "lock" | "unlock" | "shuffle" | "revert" | "reset" | "undo";
