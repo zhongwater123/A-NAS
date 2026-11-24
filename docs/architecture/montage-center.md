@@ -766,7 +766,7 @@ montage/
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
 - brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。
 - 模板 `plan-v3.md` 在 `plan-v2.md` 上只加一条规则：从 `base` 出发，只改 `change` 要求的地方。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
-- 这句话照“一句话要求”限 200 字，也过“不支持的要求”的词表。
+- 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
 - 资产要在这个项目的素材里；经 `open` 与 FFmpeg `frames` 取一帧 JPEG，长边 320。
