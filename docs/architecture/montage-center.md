@@ -308,7 +308,7 @@ montage/
   - 用独立的 `window_outbox` 同步。触发器建在 `video_windows` 和资产的图库变化上。现有的 `vector_outbox` 主键只有 `object_id`，同步循环也只认 `images_*`，不能复用。
   - `internal/vectorindex` 新增按 `object` 过滤删除的类型化操作，因为一个对象有多少个窗口点，删除时 Catalog 行已经没了。
   - 对账与“集合丢失就立即重建”按集合分别做。
-- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；二次编辑的文字搜镜头（`searchWindows`，#596）是第一个检索的读者，[#599](https://github.com/zhongwater123/A-NAS/issues/599) 已改为经别名读写，见[向量索引](vector-index.md#剪辑中心的窗口集合)。
+- **读路径**：首版不读 Qdrant，`analysis` 从 Catalog 读。窗口集合不参与搜索，所以不受[换模型](vector-index.md#换模型)时“先改为集合别名”的约束；二次编辑的文字搜镜头（`searchWindows`，#596）是第一个检索的读者，[#599](https://github.com/zhongwater123/A-NAS/issues/599) 给集合加了别名，只用来标记新集合已经写满：读写仍按集合名，换模型期间搜索回答 `model_mismatch` 或读 Catalog，不读旧集合，见[向量索引](vector-index.md#剪辑中心的窗口集合)。
 - **不建 HNSW**：点数在十万级以内，精确扫描就够。内存账：一组 47 分钟的素材约 1,460 个点、4.5 MB，Catalog 与 Qdrant 各一份。
 - **与 #207 的关系**：#207 的视频分段可以从这些窗口派生，由 #207 的设计决定。
 
