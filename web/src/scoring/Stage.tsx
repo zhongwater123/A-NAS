@@ -33,6 +33,8 @@ import {
   formatCount,
   formatScore,
   hiddenKeys,
+  keysFor,
+  lowestScore,
   nudgeScore,
   Outbox,
   type OutboxState,
@@ -40,11 +42,10 @@ import {
   parseScore,
   pickScore,
   Stopwatch,
-  scaleKeys,
   snapScore,
   stageAction,
   typeable,
-  typingRule,
+  typingRuleFor,
 } from "./model";
 import { type Mark, Ruler } from "./Ruler";
 import styles from "./scoring.module.css";
@@ -226,7 +227,7 @@ export function Stage({
   const scale = batch.scale;
   const scoresHidden = batch.hideDecimals;
   const typing = typeable(scale, scoresHidden);
-  // A batch of 总分 alone shows no item names, as it always did; any other
+  // A batch of 总体 alone shows no item names, as it always did; any other
   // names what is being scored.
   const named = several || dimensions[0].id !== overall;
   // Answers keep the first item in score, and the ruler lands a scored photo
@@ -482,7 +483,7 @@ export function Stage({
   }, [delivery.waiting]);
 
   const ready = Boolean(shown) && visible === shown?.token && !guide && !rest;
-  const typedValue = typed === undefined ? value : parseScore(typed, scale);
+  const typedValue = typed === undefined ? value : parseScore(typed, scale, dimension.id);
   const typedValid = typed === undefined || typedValue !== undefined;
   // What the photo has with what is typed now.
   const withTyped: Values = typedValue === undefined ? values : { ...values, [dimension.id]: typedValue };
@@ -494,7 +495,7 @@ export function Stage({
   // a sheet covers it.
   const setValue = (hundredths: number) => {
     if (!ready) return;
-    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale) }));
+    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale, dimension.id) }));
     setTyped(undefined);
   };
 
@@ -700,7 +701,7 @@ export function Stage({
     if (action.kind !== "zoom") setArmed(false);
     switch (action.kind) {
       case "set": {
-        const picked = pickScore(action.score, scale);
+        const picked = pickScore(action.score, scale, dimension.id);
         if (picked !== undefined) setValue(picked);
         break;
       }
@@ -760,9 +761,16 @@ export function Stage({
   const label = named ? dimension.name : "分数";
   // The keys that move a set score, under the reading.
   const fine = scale === "hundredths" || scale === "tenths";
+  const lowest = lowestScore(dimension.id) / 100;
   const keysHint =
-    (scoresHidden && fine ? hiddenKeys[scale] : scaleKeys[scale]) +
-    (several ? "　↑ ↓ 换项" : fine && !scoresHidden ? "　0–5 整数分" : scale === "whole" ? "　0–5" : "");
+    (scoresHidden && fine ? hiddenKeys[scale] : keysFor(scale, dimension.id)) +
+    (several
+      ? "　↑ ↓ 换项"
+      : fine && !scoresHidden
+        ? `　${lowest}–5 整数分`
+        : scale === "whole"
+          ? `　${lowest}–5`
+          : "");
   let body;
   if (loading) {
     body = (
@@ -833,7 +841,7 @@ export function Stage({
               alt={
                 scoresHidden
                   ? `你打过${named ? dimension.name : ""}的照片`
-                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale)} 分的照片`
+                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale, dimension.id)} 分的照片`
               }
               draggable={false}
               className={styles.scPrint}
@@ -842,7 +850,7 @@ export function Stage({
             <figcaption className={styles.scCaption}>
               你打过
               {named && <em>{dimension.name}</em>}
-              {!scoresHidden && <b>{formatScore(sideScore, scale)}</b>}
+              {!scoresHidden && <b>{formatScore(sideScore, scale, dimension.id)}</b>}
             </figcaption>
           </figure>
         )}
@@ -952,7 +960,7 @@ export function Stage({
                           ●
                         </b>
                       ) : (
-                        <b>{formatScore(score, scale)}</b>
+                        <b>{formatScore(score, scale, candidate.id)}</b>
                       )}
                     </button>
                   </li>
@@ -968,6 +976,7 @@ export function Stage({
             active={side?.token}
             arriving={arriving}
             scale={scale}
+            dimension={dimension.id}
             hidden={scoresHidden}
             onChange={(next) => {
               setArmed(false);
@@ -1003,7 +1012,7 @@ export function Stage({
                 </span>
               ) : (
                 <>
-                  <span className={styles.scLevel}>{formatScore(value, scale)}</span>
+                  <span className={styles.scLevel}>{formatScore(value, scale, dimension.id)}</span>
                   <span className={styles.scOutOf}>{value / 100} 分</span>
                 </>
               )}
@@ -1017,12 +1026,12 @@ export function Stage({
                 placeholder="—"
                 inputMode="decimal"
                 readOnly={!ready}
-                aria-label={`${label}，${typingRule[scale]}`}
+                aria-label={`${label}，${typingRuleFor(scale, dimension.id)}`}
                 aria-invalid={!typedValid}
                 onChange={(event) => {
                   setArmed(false);
                   setTyped(event.target.value);
-                  const parsed = parseScore(event.target.value, scale);
+                  const parsed = parseScore(event.target.value, scale, dimension.id);
                   if (parsed !== undefined) setValues((current) => ({ ...current, [dimension.id]: parsed }));
                 }}
                 onBlur={() => typedValid && setTyped(undefined)}
@@ -1044,14 +1053,16 @@ export function Stage({
               typedValue === undefined ? (
                 scale === "three" ? (
                   "点选一档，或按 1、3、5"
+                ) : scale === "five" ? (
+                  "点选一档，或按 1–5"
                 ) : (
-                  "在数轴上点选，或按 0–5"
+                  `在数轴上点选，或按 ${lowestScore(dimension.id) / 100}–5`
                 )
               ) : (
                 keysHint
               )
             ) : (
-              <span role="alert">{typingRule[scale]}</span>
+              <span role="alert">{typingRuleFor(scale, dimension.id)}</span>
             )}
           </p>
           <button

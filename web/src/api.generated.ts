@@ -6732,10 +6732,10 @@ export interface components {
             rater: boolean;
         };
         /**
-         * @description How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
+         * @description How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
          * @enum {string}
          */
-        ScoringScale: "hundredths" | "tenths" | "whole" | "three";
+        ScoringScale: "five" | "hundredths" | "tenths" | "whole" | "three";
         ScoringRaterBatch: {
             id: string;
             name: string;
@@ -8261,13 +8261,13 @@ export interface components {
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
         };
-        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
+        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
             id: components["schemas"]["ScoringDimensionID"];
             /** @description The name raters see, such as 构图. */
             name: string;
-            /** @description What raters look at; empty for the built-in ones and for custom ones made without. */
+            /** @description What raters look at; empty for sharpness, narrative and preference and for custom ones made without. */
             description: string;
             /** @description An administrator made it. */
             custom: boolean;

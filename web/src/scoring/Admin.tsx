@@ -66,6 +66,7 @@ import {
   formatPoints,
   formatSeconds,
   formatWhen,
+  isLevels,
   repeatGood,
   repeatPoor,
   type Scale,
@@ -710,7 +711,7 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   const [required, setRequired] = useState(3);
   const [rubric, setRubric] = useState("");
   const [dimensions, setDimensions] = useState<DimensionID[]>([]);
-  const [scale, setScale] = useState<Scale>("hundredths");
+  const [scale, setScale] = useState<Scale>("five");
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -916,8 +917,10 @@ function DimensionPicker({
   );
 }
 
-// The scales a batch can be scored on, each with what a score looks like.
+// The scales a batch can be scored on, each with what a score looks like;
+// a new batch starts on the first.
 const scaleChoices: { scale: Scale; example: string; name: string; about: string }[] = [
+  { scale: "five", example: "好", name: "五档", about: "很差 1 · 较差 2 · 一般 3 · 好 4 · 很好 5" },
   { scale: "hundredths", example: "3.47", name: "数轴 · 两位小数", about: "0–5，精确到 0.01" },
   { scale: "tenths", example: "3.5", name: "数轴 · 一位小数", about: "0–5，精确到 0.1" },
   { scale: "whole", example: "3", name: "数轴 · 整数", about: "0–5，只有整数" },
@@ -973,7 +976,7 @@ function ScalePicker({
               }}
             />
             <span
-              className={`${styles.scScaleExample}${choice.scale === "three" ? ` ${styles.word}` : ""}`}
+              className={`${styles.scScaleExample}${isLevels(choice.scale) ? ` ${styles.word}` : ""}`}
               aria-hidden="true"
             >
               {choice.example}
