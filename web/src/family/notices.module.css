@@ -1,8 +1,8 @@
-/* 家庭中心's hint on the desktop (ui/DeskNotice), under the status bar, in the
+/* 家庭中心's hint on the desktop (ui/DeskNotice), in the desktop's stack of
+   notices under the status bar (desktop.module.css .notice-stack), in the
    window's warm coral. Kept apart from the window's styles, which load with
    the window. */
 .fn-notice {
-  --desk-notice-top: 78px;
   --desk-notice-mark: linear-gradient(155deg, #ffad7a, #e8573a);
   --desk-notice-link: #cf5a35;
 }

@@ -30,6 +30,12 @@
   --ph-danger: var(--color-danger);
   --ph-ease: var(--fc-ease);
   --ph-toasts-bottom: 20px;
+  --ph-line: var(--fc-line);
+  --ph-hover: var(--fc-hover);
+  --ph-heading-font: var(--fc-serif);
+  --ph-heading-size: 19px;
+  --ph-modal-backdrop: rgba(35, 25, 18, 0.3);
+  --ph-modal-shadow: 0 0 0 1px rgba(60, 40, 25, 0.06), 0 30px 80px rgba(35, 20, 10, 0.28);
   position: relative;
   height: 100%;
   min-height: 0;
@@ -2452,79 +2458,10 @@
   object-fit: cover;
 }
 
-/* The window's own dialogs. */
-.fc-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  background: rgba(35, 25, 18, 0.3);
-  animation: fc-fade 0.18s ease-out;
-}
-.fc-modal {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 31;
-  display: flex;
-  flex-direction: column;
-  width: min(480px, calc(100% - 32px));
-  max-height: calc(100% - 32px);
-  border-radius: 18px;
-  background: var(--fc-card);
-  box-shadow:
-    0 0 0 1px rgba(60, 40, 25, 0.06),
-    0 30px 80px rgba(35, 20, 10, 0.28);
-  outline: none;
-  transform: translate(-50%, -50%);
-  animation: fc-pop 0.22s var(--fc-ease);
-}
-.fc-modal.wide {
-  width: min(600px, calc(100% - 32px));
-}
-.fc-modal.large {
-  width: min(940px, calc(100% - 32px));
-  height: min(700px, calc(100% - 32px));
-}
-.fc-modal.large .fc-modal-body {
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-}
-.fc-modal-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 16px 6px 24px;
-}
-.fc-modal-head h2 {
-  flex: 1;
-  margin: 0;
-  font: 600 19px / 1.35 var(--fc-serif);
-}
-.fc-modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 12px 24px 18px;
-  overflow-y: auto;
-}
-.fc-modal-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 24px 18px;
-  border-top: 1px solid var(--fc-line);
-}
+/* The window's dialogs are ui/modal; the window sets their palette above. */
 @keyframes fc-fade {
   from {
     opacity: 0;
-  }
-}
-@keyframes fc-pop {
-  from {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
   }
 }
 

@@ -56,6 +56,7 @@ const VALIDATED = [
   "getAppInstallPlan",
   "getContainerSnapshot",
   "listFamilyHints",
+  "listTodoReminders",
   "listMontageNotices",
 ];
 

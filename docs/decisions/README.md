@@ -80,6 +80,11 @@
 - [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
 - [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 
+### 家庭待办
+
+- [2026-11-16：家庭待办是不是本体能力、按什么分范围、先做哪一步](2026-11-16-family-todos-first-step.md)
+- [2026-11-17：家庭待办规格中补充的默认规则](2026-11-17-family-todos-default-rules.md)（pending）
+
 ### 网页搜索
 
 - [2026-11-02：网页搜索像人一样询问引擎](2026-11-02-web-search-pacing.md)

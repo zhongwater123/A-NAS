@@ -81,6 +81,8 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/feedback", ({ response }) => response(200).json({ items: [] })),
     // 家庭中心's hints after signing in.
     http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
+    // 待办's reminders after signing in.
+    http.get("/api/v1/todos/reminders", ({ response }) => response(200).json({ items: [] })),
     // The companion's animations, served beside the API (internal/webui): none installed.
     http.untyped.get(`/companion/animations`, () => HttpResponse.json({ pool: "", animations: {} })),
   ];
