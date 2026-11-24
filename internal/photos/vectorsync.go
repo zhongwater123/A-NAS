@@ -37,7 +37,7 @@ type VectorIndex interface {
 	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
 	Alias(ctx context.Context, alias string) (string, error)
-	SwitchAlias(ctx context.Context, alias, collection string) error
+	SwitchAlias(ctx context.Context, alias, collection string) (bool, error)
 }
 
 const (

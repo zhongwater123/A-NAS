@@ -311,7 +311,8 @@ type Service struct {
 	vectorChecked    atomic.Pointer[imagesCollection]
 	// windowsChecked is the windows collection the sync loop last saw in
 	// the index, and windowsAliased the collection it last found or put
-	// the alias on (windowsync.go).
+	// the alias on (windowsync.go), which a search takes at its word
+	// (windowsearch.go).
 	windowsChecked atomic.Pointer[windowsCollection]
 	windowsAliased atomic.Pointer[string]
 	vectorRecheck  chan struct{}

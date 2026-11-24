@@ -293,29 +293,30 @@ func (c *Client) Alias(ctx context.Context, alias string) (string, error) {
 // SwitchAlias points alias at collection in one change, so that a reader
 // of the alias sees either the old collection or the new one, never none:
 // an owner fills a new collection, switches its alias to it, and can switch
-// back while it keeps the old one.
-func (c *Client) SwitchAlias(ctx context.Context, alias, collection string) error {
+// back while it keeps the old one. It reports whether the alias moved: not
+// when it named collection already.
+func (c *Client) SwitchAlias(ctx context.Context, alias, collection string) (bool, error) {
 	ctx, cancel := bounded(ctx)
 	defer cancel()
 	if alias == "" || collection == "" || alias == collection {
-		return ErrInvalid
+		return false, ErrInvalid
 	}
 	current, err := c.Alias(ctx, alias)
 	if err != nil || current == collection {
-		return err
+		return false, err
 	}
 	client, err := c.connection(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var actions []*qdrant.AliasOperations
 	if current != "" {
 		actions = append(actions, qdrant.NewAliasDelete(alias))
 	}
 	if err := client.UpdateAliases(ctx, append(actions, qdrant.NewAliasCreate(alias, collection))); err != nil {
-		return fmt.Errorf("point alias %s at %s: %w", alias, collection, err)
+		return false, fmt.Errorf("point alias %s at %s: %w", alias, collection, err)
 	}
-	return nil
+	return true, nil
 }
 
 // Point is what the index keeps for one key.

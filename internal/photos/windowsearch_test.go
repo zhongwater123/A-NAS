@@ -369,11 +369,17 @@ func TestTheWindowsAliasMovesOnceTheNewCollectionIsFull(t *testing.T) {
 		slices.Sort(names)
 		return names
 	}
+	// Sync has seen the alias name the collection: a search does not ask
+	// the index for it again.
 	readsIndex := func(stage string) {
 		t.Helper()
+		asked := w.index.aliasRead()
 		f.searchWindows(t, namedAlice, f.tripGrant, 5)
 		if searched, fell := w.index.searched(), f.fell.take(); searched == 0 || len(fell) > 0 {
 			t.Fatalf("%s: %d index searches; fell back for %v", stage, searched, fell)
+		}
+		if again := w.index.aliasRead() - asked; again != 0 {
+			t.Fatalf("%s: the search read the alias %d times", stage, again)
 		}
 	}
 	sync()

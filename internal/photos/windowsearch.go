@@ -275,12 +275,12 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 		s.reportVectorFallback("the vector index has no windows collection for the model", nil)
 		return nil, false, nil
 	}
-	aliased, err := s.vectors.Alias(ctx, windowsAlias)
+	full, err := s.windowsFull(ctx, target)
 	if err != nil {
 		s.indexFailed(ctx, err)
 		return nil, false, err
 	}
-	if aliased != target.name {
+	if !full {
 		s.reportVectorFallback("the vector index is still filling the windows collection", nil)
 		return nil, false, nil
 	}
@@ -330,6 +330,10 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 	ask := func(queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
 		found, err := s.vectors.SearchBatch(ctx, target.name, queries)
 		if err != nil {
+			if errors.Is(err, vectorindex.ErrNoCollection) {
+				// What the sync loop saw no longer holds: ask next time.
+				s.windowsAliased.Store(nil)
+			}
 			s.indexFailed(ctx, err)
 		}
 		return found, err
@@ -433,6 +437,18 @@ func (s *Service) indexWindows(ctx context.Context, identity string, videos map[
 		ranked[i] = top.ranked()
 	}
 	return ranked, true, nil
+}
+
+// windowsFull reports whether the alias names target, which says that
+// every video is written into it. The sync loop remembers the collection
+// it last found or put the alias on (aliasWindows); the index is asked only
+// when that is not target.
+func (s *Service) windowsFull(ctx context.Context, target windowsCollection) (bool, error) {
+	if aliased := s.windowsAliased.Load(); aliased != nil && *aliased == target.name {
+		return true, nil
+	}
+	aliased, err := s.vectors.Alias(ctx, windowsAlias)
+	return aliased == target.name, err
 }
 
 // windowVectors reads the Catalog's vectors of identity of the windows

@@ -83,8 +83,8 @@ func TestRequestsAreTyped(t *testing.T) {
 		"no dimensions": client.CreateCollection(ctx, vectorindex.Collection{Name: "c"}),
 		"no limit":      searchErrLimit(client, 0),
 		"unnamed alias": func() error { _, err := client.Alias(ctx, ""); return err }(),
-		"alias to none": client.SwitchAlias(ctx, "windows", ""),
-		"alias as self": client.SwitchAlias(ctx, "windows", "windows"),
+		"alias to none": func() error { _, err := client.SwitchAlias(ctx, "windows", ""); return err }(),
+		"alias as self": func() error { _, err := client.SwitchAlias(ctx, "windows", "windows"); return err }(),
 		"batch, no limit": func() error {
 			_, err := client.SearchBatch(ctx, "c", []vectorindex.Query{{Vector: []float32{1},
 				Scope: vectorindex.Scope{Field: "libraries", Values: []string{"a"}}}})
@@ -363,9 +363,10 @@ func TestAnAliasSwitchesBetweenCollections(t *testing.T) {
 	if named := read(); named != "" {
 		t.Fatalf("Alias() before any = %q", named)
 	}
-	for _, name := range []string{"old", "old", "new", "old"} {
-		if err := client.SwitchAlias(ctx, "windows", name); err != nil {
-			t.Fatalf("SwitchAlias(%s) = %v", name, err)
+	// Switching to the collection it names already moves nothing.
+	for i, name := range []string{"old", "old", "new", "old"} {
+		if moved, err := client.SwitchAlias(ctx, "windows", name); err != nil || moved != (i != 1) {
+			t.Fatalf("SwitchAlias(%s) = %v, %v", name, moved, err)
 		}
 		if named := read(); named != name {
 			t.Fatalf("Alias() after switching to %s = %q", name, named)

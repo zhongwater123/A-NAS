@@ -197,17 +197,12 @@ func (s *Service) aliasWindows(ctx context.Context, index VectorIndex, target wi
 	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM window_outbox)").Scan(&waiting); err != nil || waiting {
 		return err
 	}
-	aliased, err := index.Alias(ctx, windowsAlias)
+	switched, err := index.SwitchAlias(ctx, windowsAlias, target.name)
 	if err != nil {
 		return err
 	}
-	if aliased != target.name {
-		if err := index.SwitchAlias(ctx, windowsAlias, target.name); err != nil {
-			return err
-		}
-		if report != nil {
-			report(VectorSyncEvent{Kind: "switched", Collection: target.name})
-		}
+	if switched && report != nil {
+		report(VectorSyncEvent{Kind: "switched", Collection: target.name})
 	}
 	s.windowsAliased.Store(&target.name)
 	return nil

@@ -558,8 +558,24 @@ type indexRecorder struct {
 	mu       sync.Mutex
 	upserts  []int
 	refusing string
-	// searches counts the searches of a windows collection.
-	searches int
+	// searches counts the searches of a windows collection, and aliasReads
+	// the times the alias was read.
+	searches   int
+	aliasReads int
+}
+
+func (x *indexRecorder) Alias(ctx context.Context, alias string) (string, error) {
+	x.mu.Lock()
+	x.aliasReads++
+	x.mu.Unlock()
+	return x.Client.Alias(ctx, alias)
+}
+
+// aliasRead returns how many times the alias was read so far.
+func (x *indexRecorder) aliasRead() int {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.aliasReads
 }
 
 func (x *indexRecorder) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
