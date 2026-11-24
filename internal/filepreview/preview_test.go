@@ -82,6 +82,48 @@ func fixture(t *testing.T, name string) (*Service, *sourceStub, *workerStub) {
 	worker := &workerStub{data: data.Bytes()}
 	return New(source, worker), source, worker
 }
+
+// smbEdit rewrites path with same-size content and restores its mtime, as an
+// SMB client may, so that only ctime tells the revisions apart. Before Linux
+// 6.13 ctime moves once per clock tick (docs/investigations/
+// 2026-10-14-file-preview-cache.md), so it restores mtime until the preview's
+// revision key moves.
+func smbEdit(t *testing.T, path string) {
+	t.Helper()
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := []byte("SMB edit")
+	if int64(len(edit)) != before.Size() {
+		t.Fatalf("edit is %d bytes; the source has %d", len(edit), before.Size())
+	}
+	if err := os.WriteFile(path, edit, 0600); err != nil {
+		t.Fatal(err)
+	}
+	key := func(info os.FileInfo) string { return revisionKey("", "", "", 0, info) }
+	deadline := time.Now().Add(time.Second)
+	for {
+		if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !after.ModTime().Equal(before.ModTime()) {
+			t.Fatalf("mtime = %v; want %v", after.ModTime(), before.ModTime())
+		}
+		if key(after) != key(before) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revision key did not move within a second")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit(t *testing.T) {
 	service, source, worker := fixture(t, "photo.HEIC")
 	ctx := context.Background()
@@ -122,16 +164,7 @@ func TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit(t *testing.T) {
 	if worker.calls != 4 || worker.size != 1600 {
 		t.Fatal("user or size cache keys were conflated")
 	}
-	info, err := os.Stat(source.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(source.path, []byte("SMB edit"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(source.path, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
-	}
+	smbEdit(t, source.path)
 	if _, err := service.Render(ctx, actor, "photo", 320); err != nil {
 		t.Fatal(err)
 	}
@@ -271,13 +304,7 @@ func TestPersistentPreviewSurvivesRestartAndRevalidatesSource(t *testing.T) {
 	if worker.calls != 2 {
 		t.Fatal("disk cache shared across users")
 	}
-	info, _ := os.Stat(source.path)
-	if err := os.WriteFile(source.path, []byte("SMB edit"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(source.path, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
-	}
+	smbEdit(t, source.path)
 	result, err = open().Render(context.Background(), actor, "movie", 320)
 	if err != nil || worker.calls != 3 || result.ETag == original.ETag {
 		t.Fatalf("SMB revision: calls=%d err=%v", worker.calls, err)
