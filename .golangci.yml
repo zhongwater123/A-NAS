@@ -172,6 +172,9 @@ linters:
             - "!**/internal/assistantchanges/*.go"
             - "!**/internal/systemlog/journal/*.go"
             - "!**/internal/systemupdate/updater/*.go"
+            # The assistant spike runs the root broker itself, as the Host
+            # Agent does; it is a development tool and never packaged.
+            - "!**/ai/assistant-spike/broker-spike/*.go"
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
               desc: the root file broker; use internal/filebroker
