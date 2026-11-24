@@ -173,11 +173,12 @@ func (s *Store) deleteShot(ctx context.Context, src *editSource, state draftStat
 	}
 	keep := sides[0]
 	if len(sides) == 2 {
-		before, err := s.likeness(ctx, src, gone.Beat, state.Shots[sides[0]].Beat)
+		vectors := s.beatVectors(ctx, src)
+		before, err := s.likeness(ctx, vectors, gone.Beat, state.Shots[sides[0]].Beat)
 		if err != nil {
 			return draftState{}, "", err
 		}
-		after, err := s.likeness(ctx, src, gone.Beat, state.Shots[sides[1]].Beat)
+		after, err := s.likeness(ctx, vectors, gone.Beat, state.Shots[sides[1]].Beat)
 		if err != nil {
 			return draftState{}, "", err
 		}
@@ -196,16 +197,16 @@ func (s *Store) deleteShot(ctx context.Context, src *editSource, state draftStat
 }
 
 // likeness is how alike two beats look: the compute Worker's cosine of the
-// mean window vectors each covers.
-func (s *Store) likeness(ctx context.Context, src *editSource, a, b string) (float64, error) {
+// mean window vectors each covers, which vectors reads.
+func (s *Store) likeness(ctx context.Context, vectors func(beat string) ([]float32, int, error), a, b string) (float64, error) {
 	if s.jobCompute == nil {
 		return 0, ErrJobsUnavailable
 	}
-	va, dimensions, err := s.beatVectors(ctx, src, a)
+	va, dimensions, err := vectors(a)
 	if err != nil {
 		return 0, err
 	}
-	vb, other, err := s.beatVectors(ctx, src, b)
+	vb, other, err := vectors(b)
 	if err != nil {
 		return 0, err
 	}
@@ -219,21 +220,36 @@ func (s *Store) likeness(ctx context.Context, src *editSource, a, b string) (flo
 	return alike, err
 }
 
-// beatVectors are the vectors of the windows a beat covers.
-func (s *Store) beatVectors(ctx context.Context, src *editSource, beat string) ([]float32, int, error) {
-	video, start, end := src.span(beat)
-	analysis, raw, err := s.grants.Analysis(ctx, src.grantID, video)
-	if err != nil {
-		return nil, 0, grantError(err)
+// beatVectors reads the vectors of the windows a beat covers, and their
+// dimensions. A video's analysis comes with all its windows' vectors, so
+// it is read once for all the beats asked of it: the shots beside a
+// deleted one are mostly of its video.
+func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat string) ([]float32, int, error) {
+	type analysed struct {
+		analysis photos.GrantAnalysis
+		raw      []byte
 	}
-	_, vectors, err := windowVectors(analysis, raw, func(from, to float64) bool { return from < end && to > start })
-	if err != nil {
-		return nil, 0, err
+	read := map[string]analysed{}
+	return func(beat string) ([]float32, int, error) {
+		video, start, end := src.span(beat)
+		of, ok := read[video]
+		if !ok {
+			analysis, raw, err := s.grants.Analysis(ctx, src.grantID, video)
+			if err != nil {
+				return nil, 0, grantError(err)
+			}
+			of = analysed{analysis: analysis, raw: raw}
+			read[video] = of
+		}
+		_, vectors, err := windowVectors(of.analysis, of.raw, func(from, to float64) bool { return from < end && to > start })
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(vectors) == 0 {
+			return nil, 0, fmt.Errorf("no windows beneath beat %s", beat)
+		}
+		return vectors, of.analysis.Dimensions, nil
 	}
-	if len(vectors) == 0 {
-		return nil, 0, fmt.Errorf("no windows beneath beat %s", beat)
-	}
-	return vectors, analysis.Dimensions, nil
 }
 
 // --- searching ---

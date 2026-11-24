@@ -43,6 +43,8 @@ type editGrants struct {
 	// dimensions on the given axis.
 	windows map[string][]int
 	opened  []string
+	// analysed are the videos whose analysis was read, in order.
+	analysed []string
 	// identity is the windows' model now: the versions were cut with "".
 	identity string
 	// trashed are the videos in the trash; films the films saved, by
@@ -55,6 +57,7 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 	if grantID != "grant:1" {
 		return photos.GrantAnalysis{}, nil, errors.New("another grant")
 	}
+	g.analysed = append(g.analysed, assetID)
 	var list []photos.Window
 	var raw []byte
 	for i, axis := range g.windows[assetID] {
@@ -825,5 +828,26 @@ func TestPlanStepsAreNamedAlikeInSQL(t *testing.T) {
 		if name != planStep("fill", plan) {
 			t.Errorf("方案 %d: SQL names its fill %q, Go %q", plan, name, planStep("fill", plan))
 		}
+	}
+}
+
+// Deleting a shot whose neighbours both cover its slots asks which looks
+// more like it. An analysis comes with every window's vectors of its video,
+// so each video is read once for the step, not once a beat compared.
+func TestDeletingAShotReadsEachVideosAnalysisOnce(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shot 2 (c2/1) lies between c1/1 and c2/2, all three of video A.
+	env.grants.analysed = nil
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	if err != nil || len(next.Shots) != 3 {
+		t.Fatalf("deleting shot 2 = %v, %v", beats(next), err)
+	}
+	if !slices.Equal(env.grants.analysed, []string{videoA}) {
+		t.Fatalf("the analyses read to delete a shot = %v", env.grants.analysed)
 	}
 }
