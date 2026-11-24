@@ -175,15 +175,14 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 	}
 	results := map[string][]byte{}
 	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", edit.Plan), planStep("shots", edit.Plan)} {
-		var result sql.NullString
-		err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", edit.Job, name).Scan(&result)
-		if errors.Is(err, sql.ErrNoRows) || err == nil && !result.Valid {
-			return "", failed("the version's plan is gone: no %s", name)
-		}
+		result, kept, err := s.doneResult(ctx, edit.Job, name)
 		if err != nil {
 			return "", err
 		}
-		results[name] = []byte(result.String)
+		if !kept {
+			return "", failed("the version's plan is gone: no %s", name)
+		}
+		results[name] = result
 	}
 	if err := errors.Join(json.Unmarshal(results["analysis"], &run.analysis), json.Unmarshal(results["catalog"], &run.catalog),
 		json.Unmarshal(results["song"], &run.excerpt)); err != nil {

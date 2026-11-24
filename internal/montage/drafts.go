@@ -209,13 +209,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		if name == planStep("fill", src.plan) {
 			job = src.jobID
 		}
-		var result sql.NullString
-		err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", job, name).Scan(&result)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		result, kept, err := s.doneResult(ctx, job, name)
+		if err != nil {
 			return nil, err
 		}
-		if result.Valid {
-			results[name] = []byte(result.String)
+		if kept {
+			results[name] = result
 		}
 	}
 	stored := timeline.Valid
@@ -273,6 +272,17 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		}
 	}
 	return src, nil
+}
+
+// doneResult is what a job's step kept when it was done; kept is false for
+// a step that is not done, or that kept nothing.
+func (s *Store) doneResult(ctx context.Context, jobID, name string) (result []byte, kept bool, err error) {
+	var stored sql.NullString
+	err = s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", jobID, name).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	return []byte(stored.String), stored.Valid, err
 }
 
 func (src *editSource) pictureKnown(part, picture int) bool {
