@@ -769,7 +769,7 @@ montage/
 - 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
-- 资产要在这个项目的素材里；经 `open` 与 FFmpeg `frames` 取一帧 JPEG，长边 320。
+- 资产要在这个项目的素材里；经 `open` 与 FFmpeg `frames` 取一帧 JPEG，长边 320。不是这个项目的资产、相册里已经没有或进了回收站的视频、内容对象换了的视频，都回答 404 `not_found`：没有这一帧，和“不能加进项目的视频”不是一回事。授权已撤销回答 409 `grant_revoked`。
 - 用 `Interactive` 优先级：成员在页面上等着看。它不计入剪辑中心同一时刻最多 1 个的后台请求，另设并发上限，初值 4，R3 实测后定。
 - 回答 `Cache-Control: private, max-age=31536000, immutable`：内容对象不可变，同一时刻的帧不会变。
 - 不存盘，也不经过计算 Worker，所以不会一边占着 FFmpeg 槽位一边等计算 Worker。

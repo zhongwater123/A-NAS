@@ -2604,7 +2604,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found; one the photo library no longer has, or holds in its trash, answers assets_unavailable (422), and a project that can no longer reach its videos grant_revoked (409) */
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, montage_unavailable where the montage center has no media worker */
         get: operations["getMontageFrame"];
         put?: never;
         post?: never;
@@ -14369,7 +14369,6 @@ export interface operations {
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
-            422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
