@@ -24,6 +24,9 @@
 # No release depends on them while allin1's licence is pending; the
 # Experimental NAS installs them by hand (docs/runbooks/enable-montage-music.md).
 #
+# With --aesthetic-scorer-only, build just the scoring model for internal evaluation.
+# Default releases omit its weights while redistribution is pending.
+#
 # With --stand-in, the models and the three runtimes are stand-ins under the
 # same names, for the system test: small random files, and virtual
 # environments around Debian's Python, where web search's holds the system
@@ -31,20 +34,21 @@
 # CONTENT. Stand-ins go to a
 # directory of their own, never to a repository.
 #
-# Usage: scripts/build-content-packages.sh [--stand-in] [--montage-music] OUT CONTENT
+# Usage: scripts/build-content-packages.sh [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT
 set -euo pipefail
 
-stand_in=false montage_music=false
+stand_in=false montage_music=false aesthetic_only=false
 while [[ "${1:-}" == --* ]]; do
   case $1 in
     --stand-in) stand_in=true ;;
+    --aesthetic-scorer-only) aesthetic_only=true ;;
     --montage-music) montage_music=true ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
 done
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 [--stand-in] [--montage-music] OUT CONTENT" >&2
+if [[ $# -ne 2 ]] || { "$aesthetic_only" && "$montage_music"; }; then
+  echo "usage: $0 [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT" >&2
   exit 2
 fi
 mkdir -p "$1"
@@ -110,8 +114,12 @@ have() {
 # Models (ADR 0016): a package for the model's file, or for each of its parts
 # (scripts/lib/content.sh model_files). A bundle's package holds the members
 # its manifest lists, unpacked from its tarball.
+model_roles=("${ai_roles[@]}")
+if "$aesthetic_only"; then
+  model_roles=("${aesthetic_role[@]}")
+fi
 model_manifests=()
-for role in "${ai_roles[@]}"; do
+for role in "${model_roles[@]}"; do
   model_manifests+=("${role##*:}")
 done
 if "$montage_music"; then
@@ -160,6 +168,8 @@ for model in "${model_manifests[@]}"; do
       "$(jq -r '"Source: \(.source // .weights // "see the manifest")\nLicense: \(.license // "see the manifest")"' "$manifest")"
   done 3< <(model_files "$manifest")
 done
+
+if "$aesthetic_only"; then exit 0; fi
 
 # runtime NAME KIND ID STAND_IN_SCRIPT: a Python runtime, unpacked where the
 # release links it from. Its scripts start with this path.

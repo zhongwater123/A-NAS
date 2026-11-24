@@ -201,12 +201,12 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 按 [#480](https://github.com/zhongwater123/A-NAS/issues/480) 的方案一，Worker 内用 PyTorch 运行打分器，给缩略图打美学、技术两个分（1–5，不截断）。目前只做到 Worker，相册服务的任务、存储与界面未接入。
 
 - **打分器**：Qwen3.5-4B 的冻结视觉塔和两个 MLP 头由 [#480 的推理代码](../../ai/qv_head/)加载；设备只安装推理所需的模块。
-- **模型文件**：[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)固定发布包 tar 的 SHA-256。内容包装入 `MANIFEST.json`、`model/` 和视觉塔原附的许可证，`ai/aesthetic-scorer.bundle` 链接到 `/opt/a-nas/models/<tar 的 SHA-256>/`。视觉塔与 OCR 的 mmproj 格式不同，系统盘多占约 667 MB。
+- **模型文件**：[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)固定发布包 tar 的 SHA-256。内容包装入 `MANIFEST.json`、`model/` 和视觉塔原附的许可证，`ai/aesthetic-scorer.bundle` 链接到 `/opt/a-nas/models/<tar 的 SHA-256>/`。视觉塔与 OCR 的 mmproj 格式不同，安装该模型时系统盘多占约 667 MB。
 - **校验与加载**：Worker 启动时验证发布清单的哈希和结构。首次打分在同一 systemd 沙箱的子进程中启动 CPU 运行时，先设置线程数，再校验权重并加载模型。后续请求复用子进程；挂断或 `release` 时回收子进程，包括首次加载期间。
 - **运行环境**：CPU 版 PyTorch 和 torchvision 从官方 CPU wheel 安装，版本与哈希见[锁文件](../../ai/requirements.txt)。依赖门禁从 wheel 文件名提取上游公开版本进行公告审计。单元启用 Hugging Face 和 transformers 离线模式，并将其缓存放在 Worker 的缓存目录。
 - **协议**：`score_aesthetic` 接收一个缩略图描述符，返回 `model` 与 `scores`（`aesthetic`、`technical`）。模型 ID 包含已验证的发布清单 SHA-256（覆盖视觉塔、打分头及预处理配置）与推理库版本。`info` 以 `aestheticModel` 和 `aestheticMemoryBytes` 单独报告打分器，供后续调度使用。
 - **资源**：清单 `memoryBytes` 先按 2 GiB（开发机实测常驻约 1.7 GB、峰值约 1.9 GB）；推理线程与其他模型相同，为可用逻辑核数减 2。开发机 CPU 上 512 px 缩略图每张约 5.5 秒，只适合空闲时后台整理。
-- **验收与分发**：作者已确认打分头可用于内部评测。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。目标 NAS（i3-12100）的打分耗时与 Worker cgroup 峰值内存待实测。
+- **验收与分发**：默认发布、设备镜像与主包依赖均不包含打分权重。内部验收可将原始 tar 放入内容库的 `models/<SHA-256>/`，用 `scripts/build-content-packages.sh --aesthetic-scorer-only OUT CONTENT` 单独构建模型包，安装后重启 AI Worker 即可打分。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。目标 NAS（i3-12100）的打分耗时与 Worker cgroup 峰值内存待实测。
 
 ## 切片与顺序
 

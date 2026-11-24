@@ -142,7 +142,7 @@ install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
 # The montage center's compute Worker runs in the same runtime (ADR 0038).
 install -m 0644 "$repo"/ai/anas_montage/*.py "$lib/ai/anas_montage/"
 install -m 0644 "$repo"/ai/anas_montage/domain/*.py "$lib/ai/anas_montage/domain/"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
   install -m 0644 "$manifest" "$lib/ai/$name.json"

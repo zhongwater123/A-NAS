@@ -65,6 +65,12 @@ if [[ "${1:-}" != --inside ]]; then
   rm -rf -- "$work"
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  # Exercise internal model packaging outside the signed repository.
+  scorer=$(bash "$repo/scripts/build-content-packages.sh" --stand-in --aesthetic-scorer-only "$work/scorer" "$repo/build")
+  dpkg-deb -x "$work/scorer/${scorer}_1_all.deb" "$work/scorer/files"
+  scorer_sha=$(jq -er .sha256 "$repo/deploy/models/qwen35-4b-aesthetic-scorer.json")
+  scorer_dir=$work/scorer/files/opt/a-nas/models/$scorer_sha
+  [[ -s "$scorer_dir/model/head.pt" && -s "$scorer_dir/licenses/Qwen3.5-4B-LICENSE.txt" ]]
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
   # The old package boundary predates a-nas-docker-policy. A previous package
   # made entirely by today's builder would otherwise mask its removal on a
@@ -198,7 +204,7 @@ next=$version+next
 # Each model role's manifest, as $ai/ROLE.json, for the checks below.
 ai=/tmp/ai-manifests
 install -d "$ai"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   cp "/src/deploy/models/${role##*:}.json" "$ai/${role%%:*}.json"
 done
 models_kept=$(for role in "${ai_roles[@]}"; do jq -r .sha256 "/src/deploy/models/${role##*:}.json"; done | sort -u | wc -l)
@@ -1594,8 +1600,7 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/aesthetic-scorer.bundle)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")" \
-  -a -s /usr/lib/a-nas/ai/aesthetic-scorer.bundle/licenses/Qwen3.5-4B-LICENSE.txt \
-  -a -f "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")/model/tower/model.safetensors" \
+  -a ! -e /usr/lib/a-nas/ai/aesthetic-scorer.bundle \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 # The OCR model comes in parts (scripts/split-model.sh), each from its own
 # content package, beside the first one the link names.

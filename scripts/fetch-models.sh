@@ -19,8 +19,8 @@
 # Usage: scripts/fetch-models.sh DIR [MANIFEST...]
 #        scripts/fetch-models.sh --publish DIR MANIFEST...
 # DIR is D:\A-NAS-models (/mnt/d/A-NAS-models in WSL) on Windows and
-# ~/A-NAS-models on macOS. Without MANIFEST every manifest in deploy/models
-# is fetched. Both forms need jq and gh signed in to an account that can read
+# ~/A-NAS-models on macOS. Without MANIFEST, fetch all except the internal evaluation scorer.
+# Pass its manifest explicitly to fetch it. Both forms need jq and gh signed in to an account that can read
 # (for --publish, write) the repository; ANAS_ASSETS_REPO names another one.
 set -euo pipefail
 
@@ -42,7 +42,9 @@ mkdir -p -- "$1"
 root=$(cd -- "$1" && pwd)
 shift
 if [[ $# -eq 0 ]]; then
-  set -- "$repo"/deploy/models/*.json
+  for manifest in "$repo"/deploy/models/*.json; do
+    [[ ${manifest##*/} == qwen35-4b-aesthetic-scorer.json ]] || set -- "$@" "$manifest"
+  done
 fi
 
 # layout NAME: the directory under DIR that holds the model NAME.

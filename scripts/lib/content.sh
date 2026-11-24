@@ -25,6 +25,11 @@ ai_roles=(
   animal-embedder:onnx:dinov2-small
   ocr-model:gguf:qwen3.5-4b-q4_k_m
   ocr-mmproj:gguf:qwen3.5-4b-mmproj-f16
+)
+
+# Linked by the Worker for internal evaluation; excluded from release dependencies and images.
+# shellcheck disable=SC2034 # Used by build-packages.sh, build-content-packages.sh and system-test.sh.
+aesthetic_role=(
   aesthetic-scorer:bundle:qwen35-4b-aesthetic-scorer
 )
 

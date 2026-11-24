@@ -503,7 +503,7 @@ def main(argv=None):
     scorer = Detector(reason="no aesthetic scorer")
     if args.fake_scorer:
         scorer = Detector(providers.FakeScorer())
-    elif args.aesthetic_scorer and args.aesthetic_scorer_manifest:
+    elif args.aesthetic_scorer and args.aesthetic_scorer_manifest and os.path.exists(args.aesthetic_scorer):
         try:
             scorer = Detector(providers.AestheticScorer(args.aesthetic_scorer, args.aesthetic_scorer_manifest,
                                                         args.threads))
