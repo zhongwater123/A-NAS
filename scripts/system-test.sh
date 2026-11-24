@@ -1594,7 +1594,7 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/aesthetic-scorer.bundle)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")" \
-  -a -s "$ai/aesthetic-scorer.bundle/licenses/Qwen3.5-4B-LICENSE.txt" \
+  -a -s /usr/lib/a-nas/ai/aesthetic-scorer.bundle/licenses/Qwen3.5-4B-LICENSE.txt \
   -a -f "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")/model/tower/model.safetensors" \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 # The OCR model comes in parts (scripts/split-model.sh), each from its own
