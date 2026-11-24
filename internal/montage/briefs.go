@@ -27,9 +27,13 @@ const (
 )
 
 // Limits of an answer's text (docs/architecture/montage-center.md, 校验).
+// The prompt (plan-v2.md) says the same: 120 characters a field, 1,500 in
+// all of an outline, card and beat names not counted. Bytes undercounted
+// Chinese threefold: 2 KiB was about 680 characters, less than an outline of
+// four parts needs.
 const (
-	maxAnswerRunes = 80
-	maxAnswerText  = 2 << 10
+	maxAnswerRunes = 120
+	maxAnswerText  = 1500
 	maxAnswerBytes = 64 << 10
 )
 
@@ -112,15 +116,15 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 	return call, nil, nil
 }
 
-// roundFor is the standing round of a tool call. The round's first call
-// shows that its model began to plan, which its time is counted from
-// (SweepRounds).
+// roundFor is the standing round of a tool call. Each call shows that its
+// model is still planning: the round's time is counted from the last one
+// (SweepRounds), as one round plans both 方案, eight calls or more.
 func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (roundCall, *ToolAnswer, error) {
 	call, over, err := s.standing(ctx, s.db, owner, jobID, token)
 	if err != nil || over != nil {
 		return call, over, err
 	}
-	_, err = s.db.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ? AND called_at IS NULL", sqlitedb.FormatTime(s.now()), call.roundID)
+	_, err = s.db.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ?", sqlitedb.FormatTime(s.now()), call.roundID)
 	return call, nil, err
 }
 
@@ -470,14 +474,17 @@ func checkAnswer(schema, answer json.RawMessage, step string) []string {
 	var reasons []string
 	total := 0
 	walkStrings(value, func(path []string, text string) {
+		if isEnumerated(path) {
+			return
+		}
 		n := utf8.RuneCountInString(text)
-		total += len(text)
-		if n > maxAnswerRunes && !isEnumerated(path) {
+		total += n
+		if n > maxAnswerRunes {
 			reasons = append(reasons, fmt.Sprintf("/%s：%d 字，超过 %d 字", strings.Join(path, "/"), n, maxAnswerRunes))
 		}
 	})
 	if step == StepOutline && total > maxAnswerText {
-		reasons = append(reasons, fmt.Sprintf("文字合计 %d 字节，超过 %d 字节", total, maxAnswerText))
+		reasons = append(reasons, fmt.Sprintf("文字合计 %d 字，超过 %d 字", total, maxAnswerText))
 	}
 	return reasons
 }

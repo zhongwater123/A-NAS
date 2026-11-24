@@ -4,6 +4,8 @@
 
 ## 索引
 
+- [2026-11-19：伙伴的“这一步完成”测试与阶段合并的 5 秒赛跑](2026-11-19-companion-step-done-test-races-the-stage-merge.md)
+- [2026-11-19：剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](2026-11-19-montage-job-stalls-on-the-experimental-nas.md)
 - [2026-11-18：向量索引测试在 gRPC 发布 Ready 状态前断言预热完成](2026-11-18-vectorindex-ready-observation.md)
 - [2026-11-18：助手确认卡片把非法 UTF-8 后缀与旧二进制内容当成完整预览](2026-11-18-assistant-change-preview.md)
 - [2026-11-18：助手更改的复制大小与确认副本漏计保留容量](2026-11-18-assistant-change-capacity.md)

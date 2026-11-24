@@ -4,10 +4,12 @@ package montageservice
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montageapi"
 )
@@ -65,10 +68,10 @@ func TestTheAssistantSocketKnowsTheMemberByUID(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	accounts := uidAccounts{os.Getuid(): {UserID: "user:alice", Username: "alice"}}
+	members := uidAccounts{os.Getuid(): {UserID: "user:alice", Username: "alice"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	go serveAssistant(ctx, listener, authenticatePeer(accounts, testLogger(), montageapi.Assistant(store, nil)), testLogger())
+	go serveAssistant(ctx, listener, authenticatePeer(members, UIDOf, testLogger(), montageapi.Assistant(store, nil)), testLogger())
 	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", path)
 	}}}
@@ -82,19 +85,69 @@ func TestTheAssistantSocketKnowsTheMemberByUID(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		return response.StatusCode, strings.TrimSpace(string(body))
 	}
-	if status, body := post("/v1/rounds/stale"); status != http.StatusOK || body != `{"rounds":[]}` {
-		t.Fatalf("stale = %d %s", status, body)
-	}
-	if status, _ := post("/v1/rounds/claim"); status != http.StatusConflict {
-		t.Fatalf("claim with nothing to plan = %d", status)
+	if status, body := post("/v1/rounds/claim"); status != http.StatusConflict || !strings.Contains(body, "no_plan_wanted") {
+		t.Fatalf("claim with nothing to plan = %d %s", status, body)
 	}
 	if status, _ := post("/v1/files"); status != http.StatusNotFound {
 		t.Fatalf("an unknown route = %d", status)
 	}
 	// A UID that is no account in use is refused.
-	delete(accounts, os.Getuid())
-	if status, _ := post("/v1/rounds/stale"); status != http.StatusUnauthorized {
+	delete(members, os.Getuid())
+	if status, _ := post("/v1/rounds/claim"); status != http.StatusUnauthorized {
 		t.Fatalf("an unknown UID = %d", status)
+	}
+}
+
+// Root's planner is heard only for an account it names, which must be in use
+// under that name; a member's UID is the member whatever it names.
+func TestRootIsHeardOnlyForTheAccountItNames(t *testing.T) {
+	resolver := uidAccounts{20101: {UserID: "user:alice", Username: "alice"}, 20102: {UserID: "user:bob", Username: "bob"}}
+	// mallory's UID is alice's: the account in use under it is not the one named.
+	uids := map[string]int{"alice": 20101, "bob": 20102, "carol": 20103, "mallory": 20101}
+	uidOf := func(name string) (int, error) {
+		if uid, ok := uids[name]; ok {
+			return uid, nil
+		}
+		return 0, errors.New("no such user")
+	}
+	seen := ""
+	handler := authenticatePeer(resolver, uidOf, testLogger(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, _ := accounts.UserFrom(r.Context())
+		seen = user.Username
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	serve := func(uid int, credentials bool, named string) int {
+		t.Helper()
+		seen = ""
+		request := httptest.NewRequest(http.MethodPost, "/v1/rounds/claim", strings.NewReader("{}"))
+		if named != "" {
+			request.Header.Set(AccountHeader, named)
+		}
+		if credentials {
+			request = request.WithContext(context.WithValue(request.Context(), peerUIDKey{}, uid))
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+	for _, c := range []struct {
+		uid         int
+		credentials bool
+		named, want string
+		status      int
+	}{
+		{0, true, "", "", http.StatusForbidden},
+		{0, true, "../alice", "", http.StatusForbidden},
+		{0, true, "alice", "alice", http.StatusNoContent},
+		{0, true, "carol", "", http.StatusUnauthorized},
+		{0, true, "mallory", "", http.StatusUnauthorized},
+		{0, true, "nobody", "", http.StatusUnauthorized},
+		{20102, true, "alice", "bob", http.StatusNoContent},
+		{0, false, "alice", "", http.StatusForbidden},
+	} {
+		if status := serve(c.uid, c.credentials, c.named); status != c.status || seen != c.want {
+			t.Errorf("UID %d (%v) naming %q = %d as %q, want %d as %q", c.uid, c.credentials, c.named, status, seen, c.status, c.want)
+		}
 	}
 }
 
@@ -146,7 +199,7 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
 		for {
-			response, err := client.Post("http://montage/v1/rounds/stale", "application/json", strings.NewReader("{}"))
+			response, err := client.Post("http://montage/v1/rounds/claim", "application/json", strings.NewReader("{}"))
 			if err == nil {
 				body, _ := io.ReadAll(response.Body)
 				_ = response.Body.Close()
@@ -160,8 +213,8 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if body := waitFor(http.StatusOK); body != `{"rounds":[]}` {
-		t.Fatalf("stale = %s", body)
+	if body := waitFor(http.StatusConflict); !strings.Contains(body, "no_plan_wanted") {
+		t.Fatalf("claim = %s", body)
 	}
 	if info, err := os.Stat(markers); err != nil || !info.IsDir() {
 		t.Fatalf("the planning markers' directory: %v", err)
@@ -171,10 +224,10 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 		t.Fatalf("without a store = %s", body)
 	}
 	usable.Store(true)
-	waitFor(http.StatusOK)
+	waitFor(http.StatusConflict)
 	// The service stops with the socket's server: nothing is left listening.
 	stop()
-	if _, err := client.Post("http://montage/v1/rounds/stale", "application/json", strings.NewReader("{}")); err == nil {
+	if _, err := client.Post("http://montage/v1/rounds/claim", "application/json", strings.NewReader("{}")); err == nil {
 		t.Fatal("the assistant socket still answers after the service stopped")
 	}
 }

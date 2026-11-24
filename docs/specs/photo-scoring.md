@@ -1,7 +1,7 @@
 # 照片打分
 
-状态：implemented（实验 NAS 待安装）
-更新时间：2026-11-16
+状态：implemented（2026-11-13 起按[手册](../runbooks/install-and-remove-photo-scoring.md)装在实验 NAS 上）
+更新时间：2026-11-23
 
 ## 目标
 

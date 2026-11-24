@@ -1,0 +1,19 @@
+{
+  "description": "After Codex edits files, format the changed Go and Web files with scripts/format-changed.sh, the formatter every tool shares (AGENTS.md). Codex loads this only for a trusted project.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/scripts/format-changed.sh\" --hook",
+            "commandWindows": "bash scripts/format-changed.sh --hook",
+            "timeout": 120,
+            "statusMessage": "Formatting changed Go and Web files"
+          }
+        ]
+      }
+    ]
+  }
+}
