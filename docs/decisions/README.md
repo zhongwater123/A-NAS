@@ -83,7 +83,7 @@
 ### 家庭待办
 
 - [2026-11-16：家庭待办是不是本体能力、按什么分范围、先做哪一步](2026-11-16-family-todos-first-step.md)
-- [2026-11-17：家庭待办规格中补充的默认规则](2026-11-17-family-todos-default-rules.md)（pending）
+- [2026-11-17：家庭待办规格中补充的默认规则](2026-11-17-family-todos-default-rules.md)
 
 ### 网页搜索
 
