@@ -364,6 +364,16 @@ func TestWindowSearchWorksWithTheIndexStopped(t *testing.T) {
 	if fell := f.fell.take(); len(fell) != 1 || fell[0] != "the vector index failed recently<nil>" {
 		t.Fatalf("fell back again for %v", fell)
 	}
+	// A service that has not seen the alias yet asks the index for it
+	// first, and fares the same.
+	f.restart(t)
+	photos.UseVectorIndex(f.service, stopped)
+	if got := f.searchWindows(t, namedAlice, f.tripGrant, 10); !reflect.DeepEqual(got, want) {
+		t.Fatalf("started with the index stopped, found\n%+v\nwant\n%+v", got, want)
+	}
+	if fell := f.fell.take(); len(fell) != 1 || !strings.HasPrefix(fell[0], "the vector index failed") || fell[0] == "the vector index failed recently<nil>" {
+		t.Fatalf("started with the index stopped, fell back for %v", fell)
+	}
 }
 
 // A windows collection the index no longer has, as after the instance lost
@@ -422,6 +432,81 @@ func TestWindowSearchSaysTheIndexLostItsCollection(t *testing.T) {
 	if fell := search("asked again"); !slices.Equal(fell, []string{lost}) {
 		t.Fatalf("asked again: fell back for %v", fell)
 	}
+}
+
+// Points that count for nothing, here of windows the video does not have,
+// may fill the index's first answer: it is asked for four times as many
+// until enough of them count, and the search finds what the Catalog does.
+func TestWindowSearchAsksDeeperPastPointsThatDoNotCount(t *testing.T) {
+	ctx := context.Background()
+	f := newSearchFixture(t)
+	w := newWindowIndex(t, &f.montageFixture)
+	w.sync(t)
+	collection, err := w.index.Alias(ctx, "video_windows_v1")
+	if err != nil || collection == "" {
+		t.Fatalf("Alias() = %q, %v", collection, err)
+	}
+	const text = "sunset over the sea"
+	forged := make([]vectorindex.Point, 80)
+	for i := range forged {
+		forged[i] = vectorindex.Point{Key: fmt.Sprintf("%s#%d", f.tripObject, 1000+i), Vector: decodeFloats(queryVector(text)),
+			Keywords: map[string][]string{"object": {f.tripObject}}}
+	}
+	if err := w.index.Upsert(ctx, collection, forged); err != nil {
+		t.Fatal(err)
+	}
+	search := func() [][]photos.WindowMatch {
+		t.Helper()
+		matches, err := f.service.SearchWindows(ctx, granting(namedAlice), f.tripGrant.ID, []string{text, "mountains"}, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return matches
+	}
+	want := search()
+	photos.UseVectorIndex(f.service, w.index)
+	w.index.asked()
+	if got := search(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the index found\n%+v\nthe Catalog\n%+v", got, want)
+	}
+	// Five and 64 more of each text at once; then each text alone, deeper.
+	if limits := w.index.asked(); fmt.Sprint(limits) != "[[69 69] [276] [276]]" {
+		t.Fatalf("the index was asked for %v", limits)
+	}
+	if fell := f.fell.take(); len(fell) != 0 {
+		t.Fatalf("fell back for %v", fell)
+	}
+}
+
+// A search says why it reads the Catalog when the index cannot answer, and
+// finds the same: before sync has made the collection, and while more
+// videos wait for the index than are scored beside its answer.
+func TestWindowSearchSaysWhyItReadsTheCatalog(t *testing.T) {
+	f := newSearchFixture(t)
+	w := newWindowIndex(t, &f.montageFixture)
+	want := f.searchWindows(t, namedAlice, f.tripGrant, 10)
+	photos.UseVectorIndex(f.service, w.index)
+	read := func(stage string, reasons ...string) {
+		t.Helper()
+		if got := f.searchWindows(t, namedAlice, f.tripGrant, 10); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: found\n%+v\nwant\n%+v", stage, got, want)
+		}
+		if fell := f.fell.take(); !slices.Equal(fell, reasons) {
+			t.Fatalf("%s: read the Catalog for %v, want %v", stage, fell, reasons)
+		}
+		if searched := w.index.searched(); (searched == 0) != (len(reasons) > 0) {
+			t.Fatalf("%s: %d index searches", stage, searched)
+		}
+	}
+	read("no collection yet", "the vector index has no windows collection for the model<nil>")
+	w.sync(t)
+	read("synced")
+	// One more waits than a search scores beside the index's answer.
+	if _, err := catalog(t, f.root).Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2001)
+INSERT INTO window_outbox(object_id) SELECT 'object:waiting-' || i FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	read("many waiting", "too many videos wait for the vector index<nil>")
 }
 
 // After the model changes, a search refuses with its own error until every

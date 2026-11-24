@@ -558,9 +558,11 @@ type indexRecorder struct {
 	mu       sync.Mutex
 	upserts  []int
 	refusing string
-	// searches counts the searches of a windows collection, and aliasReads
-	// the times the alias was read.
+	// searches counts the searches of a windows collection, limits is the
+	// limits of the queries of each, and aliasReads the times the alias was
+	// read.
 	searches   int
+	limits     [][]int
 	aliasReads int
 }
 
@@ -582,9 +584,20 @@ func (x *indexRecorder) SearchBatch(ctx context.Context, collection string, quer
 	if strings.HasPrefix(collection, "video_windows_v1_") {
 		x.mu.Lock()
 		x.searches++
+		x.limits = append(x.limits, queryLimits(queries))
 		x.mu.Unlock()
 	}
 	return x.Client.SearchBatch(ctx, collection, queries)
+}
+
+// asked returns the limits of the queries of each search of a windows
+// collection since it was last asked.
+func (x *indexRecorder) asked() [][]int {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	limits := x.limits
+	x.limits = nil
+	return limits
 }
 
 // searched returns how many searches of a windows collection there were
