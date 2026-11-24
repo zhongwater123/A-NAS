@@ -14192,6 +14192,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     exportScoringBatch: {

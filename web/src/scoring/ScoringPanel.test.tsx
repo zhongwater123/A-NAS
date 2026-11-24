@@ -309,7 +309,7 @@ describe("ScoringPanel for a rater", () => {
     // Handlers are tried in order: this one first, falling through until the original is gone.
     server.use(
       http.untyped.get("/api/v1/modules/scoring/claims/:token/full", () =>
-        gone ? new HttpResponse(null, { status: 410 }) : undefined,
+        gone ? HttpResponse.json(apiError("original_changed"), { status: 410 }) : undefined,
       ),
       ...handlers,
     );
@@ -674,5 +674,46 @@ describe("the stage's outbox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("says when it waits for space on the data volume, not for the connection", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { Outbox } = await import("./model");
+      const { retryable } = await import("./api");
+      const { APIError } = await import("../api/client");
+      let full = true;
+      const outbox = new Outbox(
+        async () => {
+          if (full) throw new APIError(507, "insufficient_storage");
+          return 1;
+        },
+        retryable,
+        () => undefined,
+      );
+      outbox.push({ token: "a", body: { submission: "aaaaaaaa", kind: "skip", viewMs: 1 } });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(outbox.current()).toMatchObject({ waiting: 1, retrying: true, noSpace: true });
+      full = false;
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(outbox.current()).toMatchObject({ waiting: 0, retrying: false, noSpace: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the 100% view", () => {
+  it("tells why the server refused it", async () => {
+    const { fetchFull } = await import("./api");
+    let refusal: [number, string] = [507, "insufficient_storage"];
+    server.use(
+      http.untyped.get("/api/v1/modules/scoring/claims/:token/full", () =>
+        HttpResponse.json(apiError(refusal[1]), { status: refusal[0] }),
+      ),
+    );
+    await expect(fetchFull("t1")).rejects.toThrow("数据卷剩余空间不足");
+    refusal = [410, "original_changed"];
+    await expect(fetchFull("t1")).rejects.toThrow("原图已不在，或已不是导入时的照片");
   });
 });

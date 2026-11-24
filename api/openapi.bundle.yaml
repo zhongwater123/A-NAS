@@ -4717,6 +4717,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/admin/batches/{batchId}/export:
     get:
       operationId: exportScoringBatch

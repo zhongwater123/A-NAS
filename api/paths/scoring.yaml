@@ -214,6 +214,7 @@
       "200": { description: The thumbnail, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/modules/scoring/admin/batches/{batchId}/export:
   get:
     operationId: exportScoringBatch
