@@ -267,7 +267,7 @@ python3 -m vnas_eval.calibrate score calibration/set.jsonl verdicts.jsonl   # �
 
 ## 隔离
 
-`reset: per-run` 时，执行器在套件开始前运行一次 `seed.sh`，以成员身份调用 Hermes 的 `sync_skills()` 把自带技能复制进成员目录，再保存数据卷上的 `spaces/` 与成员 Hermes 目录里的记忆、技能、定时任务（`cron/`）和以往的对话（`sessions/` 与 `state.db`，`session_search` 读的就是它）；每一遍之前停掉成员的实例，把它们恢复原样、清空暂存区。2026-11-18 以前只恢复记忆和技能，前几遍的对话和建的定时任务会留给后面的用例；查过此前全部真实运行，没有一次调用 `session_search` 或建定时任务，已有基线不受影响。恢复是就地进行的：两边都有的目录保留原来那一个，因为实例的单元会单独绑定其中一些（回收站），见 [`vnas_eval/sandbox.py`](../../ai/assistant-spike/vnas_eval/sandbox.py)。
+`reset: per-run` 时，执行器在套件开始前运行一次 `seed.sh`，以成员身份调用 Hermes 的 `sync_skills()` 把自带技能复制进成员目录，再保存数据卷上的 `spaces/`、助手自己的目录（`/nas/助手`）与成员 Hermes 目录里的记忆、技能、定时任务（`cron/`）和以往的对话（`sessions/` 与 `state.db`，`session_search` 读的就是它）；每一遍之前停掉成员的实例，把它们恢复原样、清空暂存区。2026-11-18 以前只恢复记忆和技能，前几遍的对话和建的定时任务会留给后面的用例；查过此前全部真实运行，没有一次调用 `session_search` 或建定时任务，已有基线不受影响。2026-11-24 以前不恢复 `/nas/助手`，一遍里助手写在那里的文件会留到同一容器后面的用例；这在 Hermes 上不只是残留：它把工作目录里的 `.hermes.md`、`AGENTS.md` 等说明文件读进每个新会话的系统提示词，留下一个就改了之后每一遍的提示词。查过两个评测容器，此前只留下一个备份文件和空的暂存目录，没有说明文件，已有基线不受影响。恢复是就地进行的：两边都有的目录保留原来那一个，因为实例的单元会单独绑定其中一些（回收站），见 [`vnas_eval/sandbox.py`](../../ai/assistant-spike/vnas_eval/sandbox.py)。
 
 技能目录要整个还原，连同 `.bundled_manifest`：Hermes 在第一次会话时复制自带技能并记进 manifest，之后某个技能目录不在、manifest 里还有，就当作成员删掉了，再也不复制。只删掉一遍里新增的技能，会让后面的用例都没有自带技能。也因此，在跑过旧版执行器的容器里结果不可信，换新容器（`run.sh sandbox`）再跑。`reset: none` 保留 `.txt` 场景的做法，用来专门测记忆会不会跨对话被污染。
 

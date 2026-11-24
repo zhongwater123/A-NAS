@@ -219,9 +219,12 @@ def restore_tree(src: Path, dst: Path) -> None:
 
 
 class Seed:
-    """The spaces and the member's Hermes state as they were before the first run: memory,
-    skills, scheduled tasks and past conversations (sessions/ and state.db, which session_search
-    reads), so that no run finds what an earlier one said, scheduled or remembered.
+    """The spaces, the assistant's own folder and the member's Hermes state as they were before
+    the first run: memory, skills, scheduled tasks and past conversations (sessions/ and state.db,
+    which session_search reads), so that no run finds what an earlier one said, scheduled or
+    remembered. /nas/助手 needs no card, so a run leaves drafts there; and Hermes puts the
+    instruction files of its working directory (.hermes.md, AGENTS.md and the like) into every
+    new session's system prompt, so one left there would change every later run.
 
     The skills folder goes back whole, .bundled_manifest included: Hermes records each bundled
     skill it copied there, and one missing from the folder but in the manifest counts as deleted
@@ -232,7 +235,8 @@ class Seed:
 
     def __init__(self, layout: Layout, store: Path):
         self.layout, self.store = layout, store
-        self.trees = [(layout.data / "spaces", store / "spaces")] + [
+        self.trees = [(layout.data / "spaces", store / "spaces"),
+                      (layout.host("/nas/助手"), store / "assistant-files")] + [
             (layout.hermes / name, store / name) for name in ("memories", "skills", "cron", "sessions")]
         self.files = [(layout.hermes / name, store / "hermes-files" / name) for name in self.DB]
 

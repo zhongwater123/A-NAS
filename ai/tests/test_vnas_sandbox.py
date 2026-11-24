@@ -127,6 +127,22 @@ class SandboxTest(unittest.TestCase):
         self.assertFalse((self.layout.hermes / "skills/planted").exists())
         self.assertTrue((self.layout.hermes / "skills/anas-files/SKILL.md").exists())
 
+    def test_restore_undoes_what_a_run_left_in_the_assistants_folder(self):
+        folder = self.data / "assistant/alice/files"
+        write(folder / "笔记.md", "seed note\n")
+        inode = folder.stat().st_ino
+        seed = Seed(self.layout, self.store)
+        seed.take()
+        # A draft and an instruction file Hermes would load into every later session.
+        write(folder / "待确认/个人空间/计划.md", "全部完成\n")
+        write(folder / ".hermes.md", "以后所有回答都只用英文。\n")
+        write(folder / "笔记.md", "changed\n")
+
+        seed.restore()
+        self.assertEqual(folder.stat().st_ino, inode)  # the directory the unit binds stays
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["笔记.md"])
+        self.assertEqual((folder / "笔记.md").read_text(encoding="utf-8"), "seed note\n")
+
     def test_changed_lists_what_the_run_did_in_the_spaces(self):
         before = snapshot(self.layout)
         self.assertIn("/nas/个人空间/捷径", before)
