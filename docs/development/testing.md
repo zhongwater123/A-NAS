@@ -92,7 +92,7 @@ tar -xzf /tmp/lychee.tar.gz -C /tmp
 install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 ```
 
-开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。 它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
 
 Ruff、pip-audit、zizmor 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
