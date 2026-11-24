@@ -198,6 +198,21 @@ class FillTest(unittest.TestCase):
             with self.subTest(pins=pins), self.assertRaises(worker.Refused):
                 worker.op_fill({**request, "pins": pins}, {"vectors": np.ones((10, 8), np.float32)})
 
+    def test_a_pin_is_read_as_json_has_it_not_coerced(self):
+        # int() and float() would take "1", 1.9 and true for part 1, and "0" for a time.
+        request, pin = tiny_case(), {"part": 1, "picture": 1, "slot": [0.0, 4.0], "beat": "c1/1"}
+        self.assertIsNone(worker.pins(request))
+        # JSON writes 4.0 as 4: a whole number of seconds is a time.
+        self.assertEqual(worker.pins({**request, "pins": [{**pin, "slot": [0, 4]}]}), [pin])
+        for wrong in ({"part": "1"}, {"part": 1.9}, {"part": True}, {"picture": "1"}, {"picture": 1.0}, {"picture": None},
+                      {"slot": ["0", 4.0]}, {"slot": [False, 4.0]}, {"slot": [0.0, 4.0, 8.0]}, {"slot": [0.0]}, {"slot": "04"},
+                      {"slot": [0.0, float("inf")]}, {"beat": 1}, {"beat": "c1/²"}, {"beat": "c1/"}):
+            with self.subTest(wrong=wrong), self.assertRaises(worker.Refused):
+                worker.pins({**request, "pins": [{**pin, **wrong}]})
+        for pins in (["c1/1"], [None], [[1, 1, [0.0, 4.0], "c1/1"]], [{"part": 1, "picture": 1, "beat": "c1/1"}], {}, "c1/1"):
+            with self.subTest(pins=pins), self.assertRaises(worker.Refused):
+                worker.pins({**request, "pins": pins})
+
     def test_likeness_is_the_cosine_of_the_mean_windows(self):
         a = np.array([[1, 0], [1, 0]], np.float32)
         self.assertAlmostEqual(worker.op_likeness({}, {"a": a, "b": a * 3})["likeness"], 1.0, places=6)

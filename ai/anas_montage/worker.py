@@ -255,16 +255,19 @@ def pins(request):
     parts = request["planned"]["answer"]["parts"]
     out, at = [], None
     for x in given:
-        try:
-            p, k, (a, b), beat = int(x["part"]), int(x["picture"]), (float(x["slot"][0]), float(x["slot"][1])), str(x["beat"])
-        except (KeyError, TypeError, ValueError, IndexError):
-            raise Refused("a pin is {part, picture, slot: [a, b], beat}") from None
+        # As JSON has them, not what int() and float() would make of them: "1", 1.9 and true are no part's number.
+        p, k, slot, beat = (x.get(name) for name in ("part", "picture", "slot", "beat")) if isinstance(x, dict) else (None,) * 4
+        if (type(p) is not int or type(k) is not int or not isinstance(beat, str) or not isinstance(slot, list) or len(slot) != 2
+                or not all(type(t) in (int, float) and math.isfinite(t) for t in slot)):
+            raise Refused("a pin is {part, picture, slot: [a, b], beat}")
+        a, b = float(slot[0]), float(slot[1])
         if not (1 <= p <= len(parts) and 1 <= k <= len(parts[p - 1]["pictures"])):
             raise Refused(f"pin {beat} names picture {k} of part {p}, which the plan has not got")
         cid, _, j = beat.rpartition("/")
-        if cid not in request["cards"] or not j.isdigit() or not 1 <= int(j) <= len(request["cards"][cid]["answer"]["beats"]):
+        if (cid not in request["cards"] or not (j.isascii() and j.isdigit())
+                or not 1 <= int(j) <= len(request["cards"][cid]["answer"]["beats"])):
             raise Refused(f"pin {beat} is not a beat of the cards given")
-        if not (math.isfinite(a) and math.isfinite(b)) or (at is not None and abs(a - at) > 1e-6) or b <= a:
+        if (at is not None and abs(a - at) > 1e-6) or b <= a:
             raise Refused("pins follow one another")
         out.append({"part": p, "picture": k, "slot": [a, b], "beat": beat})
         at = b
