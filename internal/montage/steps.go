@@ -588,6 +588,12 @@ type analysisResult struct {
 	Videos []analysedVideo `json:"videos"`
 }
 
+// allDone reports whether every stage of a video's analysis is done: the
+// one rule for the lookup's states and for the analysis read after it.
+func allDone(states ...photos.AnalysisState) bool {
+	return !slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone })
+}
+
 // analysisKey reads the photo library's analysis of every video: the key
 // is their objects and what the analysis made of them. A video not
 // analysed yet makes the job wait; one whose analysis failed needs the
@@ -625,7 +631,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			unavailable = true
 		case slices.Contains(states, photos.AnalysisFailed):
 			broken = append(broken, asset.assetID)
-		case slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }):
+		case !allDone(states...):
 			pending = append(pending, asset.assetID)
 		}
 	}
@@ -661,8 +667,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		// with its state and leaves out what is no longer current. Planning
 		// from that would leave the video's cards out, or find no footage
 		// at all; the next round's lookup decides again.
-		if states := []photos.AnalysisState{analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described}; slices.ContainsFunc(states,
-			func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }) {
+		if !allDone(analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described) {
 			s.logger.WarnContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
 				"windows", analysis.Windows, "cards", analysis.Cards, "quality", analysis.Quality, "descriptions", analysis.Described)
 			return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
