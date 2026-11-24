@@ -15,28 +15,6 @@ A round costs a gateway's start, so a round that left every job it was started f
 before holds the next one back: HOLD seconds, doubling up to HOLD_MAX, until a job is newly due
 or one of them moves. Such a job is one Hermes does not take up, or one the member's own
 processes wrote into the store, which is the member's file.
-
-The montage center's planning (docs/architecture/montage-center.md, 发起与结束) starts rounds
-too. The montage service leaves an empty file in MARKERS for each member with a job waiting for
-a plan; this loop picks the first member who may plan now (an account in use with an assistant,
-a planning grant under seven days old with rounds left, their unit not running, not backing off),
-gives the round a token in PLAN_RUN (run-requests.sh moves it into the round, where
-montage_round.py claims a round), and starts their unit. One planning round on the whole device
-at a time: the next waits until the unit that took the token stops, or runs again under another
-invocation.
-
-A planning grant is the File Broker's record that the member, signed in, asked for something
-the montage center may plan for. It is read only from GRANTS, the Host Agent's own directory,
-and only as a file that is root's and nobody else's to change: a grant anyone else could have
-written would let them start a member's assistant.
-
-Each grant's rounds are counted in PLAN_STATE, before the token is given. A round counts when
-it claimed a round of planning: montage_round.py then leaves the token's nonce in the member's
-Hermes home (RECEIPT), which the montage service cannot write. A round that claimed nothing
-(another gateway served the home, the montage center had nothing to plan or did not answer, the
-unit never started) leaves no receipt: its round is given back, and the member backs off. A
-round that did claim holds nobody back, though the member's marker may be there again for
-another of their jobs.
 """
 import hashlib
 import http.client
@@ -44,7 +22,6 @@ import json
 import os
 import pwd
 import re
-import secrets
 import socket
 import stat
 import subprocess
@@ -68,18 +45,6 @@ RUNS = os.environ.get("ANAS_ASSISTANT_RUN_DIR", "/run/a-nas/assistant-runs")
 HOLD = 120
 HOLD_MAX = 3600
 MARKS = 256
-# The montage center's planning markers, the File Broker's grants (the Host Agent's
-# AssistantPlanDir), the tokens given to rounds, and the counts.
-MARKERS = os.environ.get("ANAS_MONTAGE_PLAN_MARKERS", "/run/a-nas-montage/plans")
-GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas-host/assistant/plans")
-PLAN_RUN = os.environ.get("ANAS_MONTAGE_PLAN_RUN", "/run/anas-assistant-montage-plans")
-PLAN_STATE = os.environ.get("ANAS_MONTAGE_PLAN_STATE", "/var/lib/anas-assistant-cron-waker/plans.json")
-# The receipt of a claim, in the member's Hermes home (montage_round.py).
-RECEIPT = "anas-montage-claim"
-GRANT_LIFE = 7 * 24 * 3600
-PLAN_BACKOFF = 120
-PLAN_BACKOFF_MAX = 3600
-START_GRACE = 60
 
 
 def accounts():
@@ -245,182 +210,6 @@ def wake(account):
     print(f"started {unit}" + (f" (round {spent + 1} for the same due jobs)" if spent else ""), flush=True)
 
 
-def load_plans():
-    try:
-        with open(PLAN_STATE, encoding="utf-8") as source:
-            state = json.load(source)
-    except (OSError, ValueError):
-        state = {}
-    if not isinstance(state, dict):
-        state = {}
-    # Notes that do not read as this loop writes them are dropped: a cycle that tripped over
-    # them would trip over them every time.
-    for name in ("counts", "backoff"):
-        if not isinstance(state.get(name), dict):
-            state[name] = {}
-    state["counts"] = {key: count for key, count in state["counts"].items() if isinstance(count, int)}
-    state["backoff"] = {account: held for account, held in state["backoff"].items()
-                        if isinstance(held, dict) and isinstance(held.get("n"), int)}
-    slot = state.get("slot")
-    if not (isinstance(slot, dict) and isinstance(slot.get("account"), str) and ACCOUNT.fullmatch(slot["account"])
-            and isinstance(slot.get("grant"), str) and isinstance(slot.get("invocation"), str)
-            and isinstance(slot.get("released"), (int, float))):
-        slot = None
-    state["slot"] = slot
-    return state
-
-
-def save_plans(state):
-    os.makedirs(os.path.dirname(PLAN_STATE), mode=0o700, exist_ok=True)
-    partial = f"{PLAN_STATE}.{os.getpid()}"
-    with open(partial, "w", encoding="utf-8") as out:
-        json.dump(state, out)
-        out.flush()
-        os.fsync(out.fileno())
-    os.replace(partial, PLAN_STATE)
-
-
-def plan_grant(account, now):
-    """(issued, rounds) of the member's planning grant while it lasts, or None.
-
-    A grant counts only as the File Broker wrote it: a regular file that is this user's own
-    (root's) and nobody else's to change, in a directory of which the same holds, neither
-    reached through a link. Anything else may be somebody's own making."""
-    try:
-        directory = os.open(GRANTS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError:
-        return None
-    try:
-        info = os.fstat(directory)
-        if info.st_uid != os.geteuid() or info.st_mode & 0o022:
-            return None
-        raw = regular_file(account, 4096, dir_fd=directory, owner=os.geteuid())
-    finally:
-        os.close(directory)
-    try:
-        grant = json.loads(raw or b"null")
-        stamp, rounds = grant["issuedAt"], int(grant["rounds"])
-        issued = datetime.fromisoformat(stamp).timestamp()
-    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
-        return None
-    if not isinstance(stamp, str) or not 0 <= now - issued <= GRANT_LIFE:
-        return None
-    return stamp, rounds
-
-
-def marked():
-    """The members with a job waiting for a plan, the longest waiting first."""
-    try:
-        entries = [(e.stat(follow_symlinks=False).st_mtime, e.name) for e in os.scandir(MARKERS)
-                   if ACCOUNT.fullmatch(e.name) and e.is_file(follow_symlinks=False)]
-    except OSError:
-        return []
-    return [name for _, name in sorted(entries)]
-
-
-def claimed(account, nonce):
-    """Whether the round given the token with this nonce claimed a round of planning: its
-    receipt in the member's Hermes home (montage_round.py). The file is the member's."""
-    if not nonce:
-        return False
-    try:
-        receipt = json.loads(regular_file(f"{DATA}/{account}/hermes/{RECEIPT}", 4096) or b"null")
-    except (ValueError, RecursionError):
-        return False
-    return isinstance(receipt, dict) and receipt.get("nonce") == nonce
-
-
-def slot_over(state, now):
-    """Whether the planning round given out has stopped; settles its token, its count and
-    the member's backoff."""
-    slot = state["slot"]
-    if not slot:
-        return True
-    account, unit = slot["account"], f"anas-assistant-cron@{slot['account']}.service"
-    running, invocation = unit_state(unit)
-    if running and (not slot["invocation"] or slot["invocation"] == invocation):
-        slot["invocation"] = invocation
-        return False
-    if not running and not slot["invocation"] and now - slot["released"] < START_GRACE:
-        return False  # not started yet
-    token = f"{PLAN_RUN}/{account}"
-    took = not os.path.lexists(token)
-    if not took:
-        os.unlink(token)  # the unit did not start, or ran before the token was there
-    if took and claimed(account, slot.get("nonce")):
-        # A round of planning ran: it counts, and nothing holds the member's next one back,
-        # for another of their jobs.
-        state["backoff"].pop(account, None)
-    else:
-        # Nothing was claimed. The grant's round is given back, and the member waits
-        # before the next one: twice as long each time.
-        key = slot["grant"]
-        state["counts"][key] = max(0, state["counts"].get(key, 1) - 1)
-        n = state["backoff"].get(account, {"n": 0})["n"] + 1
-        state["backoff"][account] = {"n": n, "until": now + min(PLAN_BACKOFF * 2 ** (n - 1), PLAN_BACKOFF_MAX)}
-    state["slot"] = None
-    return True
-
-
-def prune(state, now):
-    """Forget the counts of grants that ran out and the backoffs long over."""
-    def lasts(key):
-        try:
-            return 0 <= now - datetime.fromisoformat(key.rsplit("|", 1)[1]).timestamp() <= GRANT_LIFE
-        except (ValueError, IndexError):
-            return False
-
-    state["counts"] = {key: count for key, count in state["counts"].items() if lasts(key)}
-    state["backoff"] = {account: held for account, held in state["backoff"].items()
-                        if held.get("until", 0) + PLAN_BACKOFF_MAX > now}
-
-
-def give_round(state, now):
-    """Start the unit of the first member who may plan now, with a token for the round."""
-    for account in marked():
-        unit = f"anas-assistant-cron@{account}.service"
-        grant = plan_grant(account, now)
-        if grant is None or not os.path.isfile(f"{TOKENS}/{account}.env"):
-            continue
-        key = f"{account}|{grant[0]}"
-        if state["counts"].get(key, 0) >= grant[1]:
-            continue
-        if state["backoff"].get(account, {}).get("until", 0) > now or running(unit) or not active_account(account):
-            continue
-        nonce = secrets.token_hex(16)
-        state["counts"][key] = state["counts"].get(key, 0) + 1
-        state["slot"] = {"account": account, "grant": key, "invocation": "", "released": now, "nonce": nonce}
-        # On disk before the token exists: a round is never given out uncounted.
-        save_plans(state)
-        os.makedirs(PLAN_RUN, mode=0o700, exist_ok=True)
-        with open(f"{PLAN_RUN}/{account}", "x", encoding="ascii") as token:
-            token.write(nonce)
-        try:
-            subprocess.run(["/usr/bin/systemctl", "start", "--no-block", unit], check=True, timeout=COMMAND_TIMEOUT)
-        except (OSError, subprocess.SubprocessError):
-            os.unlink(f"{PLAN_RUN}/{account}")
-            state["counts"][key] -= 1
-            state["slot"] = None
-            raise
-        print(f"started {unit} to plan (round {state['counts'][key]} of the grant)", flush=True)
-        return
-
-
-def plan_cycle():
-    """Give one member waiting for a plan a round, while no planning round runs. The state
-    is written only when it changed."""
-    now = time.time()
-    state = load_plans()
-    before = json.dumps(state, sort_keys=True)
-    try:
-        if slot_over(state, now):
-            prune(state, now)
-            give_round(state, now)
-    finally:
-        if json.dumps(state, sort_keys=True) != before:
-            save_plans(state)
-
-
 def run_cycle():
     # A member's file, filesystem or systemctl request cannot indefinitely hold
     # up the others. subprocess.run kills and reaps a timed-out worker.
@@ -437,10 +226,6 @@ def run_cycle():
 def main():
     while True:
         run_cycle()
-        try:
-            plan_cycle()
-        except Exception as error:  # noqa: BLE001 - planning never stops the members' own tasks.
-            print(f"planning skipped: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
         time.sleep(INTERVAL)
 
 

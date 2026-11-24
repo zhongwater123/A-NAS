@@ -20,7 +20,7 @@
 
 ## 为什么用虚拟机
 
-产品的 Go 代码只面向 Linux（例如 `internal/shareservice` 带 `//go:build linux`），所以在 macOS 上 `go vet` 和 `anas-api` 的构建都会失败。本机可以运行 `api-check`、`web-*`、`fmt-check`、`docs-check`、`ops-check`、`ai-lint` 与 `ai-test`；Linux 检查和 Fake 预览在 `anas` 虚拟机中运行；完整门禁还需要可运行的 Qdrant，限制见[运行检查](#运行检查)。与 [check-in-wsl](../../../.claude/skills/check-in-wsl/SKILL.md) 一样，先把检出复制到虚拟机自己的 ext4 目录再运行，因为本机的 `node_modules` 装的是 darwin 平台的二进制，不能共用。
+产品的 Go 代码只面向 Linux（例如 `internal/shareservice` 带 `//go:build linux`），所以在 macOS 上 `go vet` 和 `anas-api` 的构建都会失败。本机可以运行 `api-check`、`web-*`、`fmt-check`、`docs-check`、`ops-check`、`ai-lint` 与 `ai-test`；Linux 检查和 Fake 预览在 `anas` 虚拟机中运行；完整门禁还需要可运行的 Qdrant，限制见[运行检查](#运行检查)。与 [check-in-wsl](../../../.agents/skills/check-in-wsl/SKILL.md) 一样，先把检出复制到虚拟机自己的 ext4 目录再运行，因为本机的 `node_modules` 装的是 darwin 平台的二进制，不能共用。
 
 ## 配置
 
@@ -70,7 +70,7 @@ EOF
 
 ## Fake 预览
 
-与 [fake-preview](../../../.claude/skills/fake-preview/SKILL.md) 相同，只是构建和运行都在虚拟机中。Colima 会把虚拟机里监听 `127.0.0.1` 的端口转发到本机，所以本机浏览器可以直接打开 `http://<名称>.localhost:<端口>`：
+与 [fake-preview](../../../.agents/skills/fake-preview/SKILL.md) 相同，只是构建和运行都在虚拟机中。Colima 会把虚拟机里监听 `127.0.0.1` 的端口转发到本机，所以本机浏览器可以直接打开 `http://<名称>.localhost:<端口>`：
 
 ```bash
 colima ssh -p anas -- bash -s -- "$PWD" <名称> <端口> <<'EOF'
@@ -111,5 +111,5 @@ EOF
 
 - [开发环境入口](../LOCAL_ENVIRONMENT.md)
 - [环境检查脚本](../../../scripts/check-dev-env.sh)
-- [Fake 预览的会话隔离与功能限制](../../../.claude/skills/fake-preview/SKILL.md)
+- [Fake 预览的会话隔离与功能限制](../../../.agents/skills/fake-preview/SKILL.md)
 - [构建目标](../../../Makefile)

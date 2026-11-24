@@ -19,6 +19,7 @@ cd "$repo"
 CGO_ENABLED=1 go test -c -tags rootintegration -o "$tests/hostops-linux.test" ./internal/hostops/linux
 CGO_ENABLED=1 go test -c -o "$tests/sharefiles.test" ./internal/sharefiles
 cp internal/sharefiles/testdata/btrfs.sh "$tests/"
+cp deploy/network/phone-hotspot.py "$tests/"
 # The File Broker runs the test binary again as each member.
 chmod 0755 "$tests"
 # A container each, as both make the same accounts. Without systemd as PID 1:
@@ -26,5 +27,5 @@ chmod 0755 "$tests"
 in_container() {
   docker run --rm --privileged --entrypoint /bin/bash -v "$tests:/tests:ro" -w /tests "$image" -euc "$1"
 }
-in_container 'ANAS_ROOT_INTEGRATION=1 ./hostops-linux.test -test.count=1'
+in_container 'ANAS_ROOT_INTEGRATION=1 ANAS_PHONE_HOTSPOT_TEST_WORKER=/tests/phone-hotspot.py ./hostops-linux.test -test.count=1'
 in_container 'sh ./btrfs.sh'

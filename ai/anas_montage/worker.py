@@ -1,4 +1,4 @@
-"""The montage center's compute Worker (docs/architecture/photo-ai.md, 剪辑计算 Worker).
+"""The montage center's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
 
 It runs the prototype's pure computation (domain/) for the photo service,
 which cuts cards and measures their quality, and for the montage center,
