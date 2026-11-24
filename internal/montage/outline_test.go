@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// A version's card shows the film as it is (#616 review): its outline is
+// A version's outline is the film as it is (#616 review): it is
 // read without making a draft, and an edit not saved yet does not show.
 func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 	env := newEditEnv(t)

@@ -17,8 +17,8 @@ schemas:
       assetCount: { type: integer, minimum: 0 }
       createdAt: { type: string, format: date-time }
       previewAssetIds: { type: array, maxItems: 6, description: "Up to six of its videos, spread over the order they were added, for thumbnails.", items: { type: string } }
-      chosenVersionId: { type: string, description: "The version the member confirmed as the project's film (#596)." }
-      chosenFilmAssetId: { type: string, description: "The confirmed version's film; the list and the home page show it first." }
+      chosenVersionId: { type: string, description: "The version the member chose as the project's film (#596): the one shown when the project opens." }
+      chosenFilmAssetId: { type: string, description: "The chosen version's film; the list and the home page show it first." }
   MontageProjectPage:
     type: object
     additionalProperties: false
@@ -50,8 +50,8 @@ schemas:
       assets: { type: array, items: { $ref: "#/schemas/MontageProjectAsset" } }
       versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/MontageVersion" } }
       job: { $ref: "#/schemas/MontageJob", description: "The project's latest job, for the page to pick up where it was after a reload." }
-      chosenVersionId: { type: string, description: "The version the member confirmed as the project's film; the others stay, as \"其他版本\"." }
-      chosenFilmAssetId: { type: string, description: "The confirmed version's film." }
+      chosenVersionId: { type: string, description: "The version the member chose as the project's film; the other versions stay and can be chosen instead." }
+      chosenFilmAssetId: { type: string, description: "The chosen version's film." }
   MontageSongSection:
     type: object
     additionalProperties: false
@@ -258,7 +258,7 @@ schemas:
     type: object
     additionalProperties: false
     required: [versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet]
-    description: "A version as its film is: the plan it was cut by and its shots, for the version's card. Unlike the draft, an edit not saved yet does not show here."
+    description: "A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here."
     properties:
       versionId: { type: string }
       projectId: { type: string }
@@ -268,7 +268,7 @@ schemas:
       parts: { type: array, items: { $ref: "#/schemas/MontageFilmPart" } }
       shots: { type: array, description: "The film's shots, none of them changed, extended or locked.", items: { $ref: "#/schemas/MontageDraftShot" } }
       counts: { $ref: "#/schemas/MontageFilmCounts" }
-      unmet: { type: array, description: "What the plan found the videos do not have, as the planner wrote it: shown on the version's card.", items: { type: string } }
+      unmet: { type: array, description: "What the plan found the videos do not have, as the planner wrote it.", items: { type: string } }
   MontageCandidate:
     type: object
     additionalProperties: false

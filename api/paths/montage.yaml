@@ -273,7 +273,7 @@
 /api/v1/montage/versions/{versionId}/confirm:
   post:
     operationId: confirmMontageVersion
-    summary: "Confirm this version as the project's film (#596): the list and the home page show it, the others stay as 其他版本. No film is deleted; another version can be confirmed later"
+    summary: "Choose this version as the project's film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "200": { description: The project, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageProject" } } } }
@@ -281,7 +281,7 @@
 /api/v1/montage/versions/{versionId}/outline:
   get:
     operationId: getMontageVersionOutline
-    summary: "The version as its film is, for its card on the choose page: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409)"
+    summary: "The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409)"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageVersionID" }]
     responses:
       "200": { description: The version's outline, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageVersionOutline" } } } }

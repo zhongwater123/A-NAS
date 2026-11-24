@@ -564,7 +564,7 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 }
 
 // VersionOutline is a version as its film is: the plan it was cut by and
-// its shots, as its card on the choose page shows them.
+// its shots, read without making a draft.
 type VersionOutline struct {
 	VersionID     string      `json:"versionId"`
 	ProjectID     string      `json:"projectId"`

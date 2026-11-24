@@ -2436,7 +2436,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirm this version as the project's film (#596): the list and the home page show it, the others stay as 其他版本. No film is deleted; another version can be confirmed later */
+        /** Choose this version as the project's film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later */
         post: operations["confirmMontageVersion"];
         delete?: never;
         options?: never;
@@ -2468,7 +2468,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The version as its film is, for its card on the choose page: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409) */
+        /** The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409) */
         get: operations["getMontageVersionOutline"];
         put?: never;
         post?: never;
@@ -8278,9 +8278,9 @@ export interface components {
             createdAt: string;
             /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
             previewAssetIds?: string[];
-            /** @description The version the member confirmed as the project's film (#596). */
+            /** @description The version the member chose as the project's film (#596): the one shown when the project opens. */
             chosenVersionId?: string;
-            /** @description The confirmed version's film; the list and the home page show it first. */
+            /** @description The chosen version's film; the list and the home page show it first. */
             chosenFilmAssetId?: string;
         };
         MontageProjectPage: {
@@ -8392,9 +8392,9 @@ export interface components {
             versions: components["schemas"]["MontageVersion"][];
             /** @description The project's latest job, for the page to pick up where it was after a reload. */
             job?: components["schemas"]["MontageJob"];
-            /** @description The version the member confirmed as the project's film; the others stay, as "其他版本". */
+            /** @description The version the member chose as the project's film; the other versions stay and can be chosen instead. */
             chosenVersionId?: string;
-            /** @description The confirmed version's film. */
+            /** @description The chosen version's film. */
             chosenFilmAssetId?: string;
         };
         MontageNotice: {
@@ -8529,7 +8529,7 @@ export interface components {
             videos: number;
             portrait: number;
         };
-        /** @description A version as its film is: the plan it was cut by and its shots, for the version's card. Unlike the draft, an edit not saved yet does not show here. */
+        /** @description A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here. */
         MontageVersionOutline: {
             versionId: string;
             projectId: string;
@@ -8541,7 +8541,7 @@ export interface components {
             /** @description The film's shots, none of them changed, extended or locked. */
             shots: components["schemas"]["MontageDraftShot"][];
             counts: components["schemas"]["MontageFilmCounts"];
-            /** @description What the plan found the videos do not have, as the planner wrote it: shown on the version's card. */
+            /** @description What the plan found the videos do not have, as the planner wrote it. */
             unmet: string[];
         };
         MontageDraft: {
