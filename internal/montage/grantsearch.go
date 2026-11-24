@@ -15,11 +15,6 @@ type WindowSearch interface {
 	SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error)
 }
 
-// WindowHit is photos.WindowMatch under the name the montage center once
-// gave a copy of it. Nothing here says it; it stays until the seam's test
-// in internal/photoservice says photos.WindowMatch, and goes then.
-type WindowHit = photos.WindowMatch
-
 // GrantSearch is the search of Grants, which refuse as the photo library
 // does, with those refusals as the montage center's: windows made with
 // another model are ErrSearchModel, a library or local AI that cannot answer

@@ -511,7 +511,7 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 	}
 	// The montage center's edit of a film reads the same windows through it.
 	hits, err := montage.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
-	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (montage.WindowHit{AssetID: videoID, Window: 5, Score: 10}) {
+	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (photos.WindowMatch{AssetID: videoID, Window: 5, Score: 10}) {
 		t.Fatalf("montage search = %+v, %v", hits, err)
 	}
 	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, photos.MaxWindowMatches+1); photosapi.GrantErrorCode(err) != photosapi.GrantInvalid {
