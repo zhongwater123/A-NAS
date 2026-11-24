@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -373,6 +374,12 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 		return nil, ctx.Err()
 	}
 	file, opened, err := s.grants.Open(ctx, grantID.String, assetID)
+	switch photosapi.GrantErrorCode(err) {
+	case photosapi.GrantAssetNotFound, photosapi.GrantAssetsRefused:
+		// The video was deleted or is in the trash: there is no frame of
+		// it, which is not a video that cannot be added (grantError).
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, grantError(err)
 	}

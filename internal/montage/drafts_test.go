@@ -16,6 +16,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 // The edit of a film after it was made (#596): a project with one job whose
@@ -85,6 +86,10 @@ func (g *editGrants) Revoke(context.Context, string) error { return nil }
 
 func (g *editGrants) Open(_ context.Context, _, assetID string) (*os.File, string, error) {
 	g.opened = append(g.opened, assetID)
+	if g.trashed[assetID] {
+		// As the photo library answers for a video deleted or in the trash.
+		return nil, "", &photosapi.GrantError{Code: photosapi.GrantAssetNotFound, Message: "the asset is not available"}
+	}
 	file, err := os.CreateTemp("", "video")
 	if err != nil {
 		return nil, "", err
@@ -730,6 +735,12 @@ func TestAThumbnailIsAFrameOfTheProjectsVideo(t *testing.T) {
 	}
 	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", "asset:film1", 0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a video not in the project = %v", err)
+	}
+	// A video deleted or in the trash has no frame: not found, rather than
+	// a video that cannot be added.
+	env.grants.trashed = map[string]bool{videoA: true}
+	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", videoA, 1500); !errors.Is(err, ErrNotFound) || errors.Is(err, ErrAssetsRefused) {
+		t.Fatalf("a frame of a video in the trash = %v", err)
 	}
 }
 
