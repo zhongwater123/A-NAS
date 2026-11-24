@@ -335,3 +335,39 @@ func TestASaveOfAVersionAnalysedAgainStops(t *testing.T) {
 		t.Fatalf("it rendered %d frames and saved %d films", env.frames.rendered, len(env.grants.films))
 	}
 }
+
+// An edit of a version a recut made is an edit: it carries neither the
+// recut's sentence nor the plan the recut started from, so the version it
+// saves is not shown as recut from that sentence.
+func TestAnEditOfARecutVersionIsNotARecut(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	env.store.Exec(t, `UPDATE jobs SET kind = 'recut', settings_json = '{"recut":{"change":"结尾留长一点","base":{"outline":{"design":"旧"}}}}' WHERE id = 'job:1'`)
+	env.store.Exec(t, "UPDATE versions SET kind = 'recut' WHERE id = 'version:1'")
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM jobs WHERE id = ? AND json_extract(settings_json, '$.recut') IS NULL AND json_extract(settings_json, '$.edit') IS NOT NULL", job.ID); n != 1 {
+		t.Fatal("the edit job kept the recut's sentence and base")
+	}
+	env.runJobs(t)
+	done, err := env.store.Job(ctx, editOwner, job.ID)
+	if err != nil || done.Version == nil || done.Version.Kind != KindEdit || done.Version.Change != "" {
+		t.Fatalf("the edit of a recut version = %+v, %v", done.Version, err)
+	}
+	// The version it came from is still the recut it was.
+	detail, err := env.store.Project(ctx, editOwner, "project:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range detail.Versions {
+		if version.ID == env.version && version.Change != "结尾留长一点" {
+			t.Fatalf("the recut version = %+v", version)
+		}
+	}
+}

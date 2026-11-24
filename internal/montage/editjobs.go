@@ -101,7 +101,9 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
 			return fmt.Errorf("the version's job holds unusable settings: %w", err)
 		}
-		settings.ProjectName, settings.Edit = row.name, &edit
+		// An edit of a recut version is not a recut: its sentence and base
+		// stay with the version they planned.
+		settings.ProjectName, settings.Edit, settings.Recut = row.name, &edit, nil
 		encoded, err := json.Marshal(settings)
 		if err != nil {
 			return err
