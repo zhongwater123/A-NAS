@@ -156,6 +156,17 @@ describe("the time on a photo", () => {
     watch.start(20_000, false);
     expect(watch.elapsed(30_000)).toBe(0);
   });
+
+  it("goes on from the time a photo had when the rater comes back to it", () => {
+    const watch = new Stopwatch();
+    watch.start(1_000, true);
+    const had = watch.elapsed(21_000);
+    // The last photo is changed meanwhile, on a time of its own.
+    watch.start(21_000, true);
+    expect(watch.elapsed(25_000)).toBe(4_000);
+    watch.start(25_000, true, had);
+    expect(watch.elapsed(25_800)).toBe(20_800);
+  });
 });
 
 describe("the photo at 100%", () => {
