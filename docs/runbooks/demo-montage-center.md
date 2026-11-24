@@ -34,7 +34,6 @@
    git status --short   # 必须为空
    make check
    ```
-   - [#578](https://github.com/zhongwater123/A-NAS/pull/578) 合并之前，把 `main` 换成 `feat/montage-web`。
    - 完成标准：`make check` 通过（`src/companion/Companion.test.tsx` 的偶发超时可以单独重跑确认）。记下 `git rev-parse --short HEAD`。
 2. **开发机 B：构建配乐分析的运行环境与权重**，按[启用配乐分析](enable-montage-music.md)的第 1–3 步，得到 11 个 `.deb`。
 3. **开发机 B：发布并推送**，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的第 1、2 步：
@@ -110,6 +109,6 @@
 
 ## 关联
 
-- 剪辑中心的规格与实施方案（`docs/specs/montage-center.md`、`docs/architecture/montage-center.md`，随 #518 合入）
+- 剪辑中心的[规格](../specs/montage-center.md)、[实施方案](../architecture/montage-center.md)与[规划会话](../architecture/montage-planning-session.md)
 - [部署 A-NAS 软件包](deploy-a-nas-packages.md)、[启用配乐分析](enable-montage-music.md)、[启用 AI 助手](enable-ai-assistant.md)
 - 代码：`internal/montage`、`web/src/montage`、`ai/assistant/montage-planner.py`、`scripts/lib/assistant-units.sh`

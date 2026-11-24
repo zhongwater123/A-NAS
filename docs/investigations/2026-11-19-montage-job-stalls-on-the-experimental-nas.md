@@ -1,7 +1,7 @@
 # 剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”
 
 状态：resolved
-更新时间：2026-11-20
+更新时间：2026-11-23
 
 ## 症状与影响
 
@@ -39,13 +39,13 @@
 ## 后续工作
 
 - 规划的交接整个换掉了（用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)，[规划会话](../architecture/montage-planning-session.md)）：不再借定时任务单元跑一轮，改由 root 的规划发起方把一轮交给成员的规划进程，作为一次对话；上面第 2 条根因所在的回合脚本已删除，编号格式的核对改指向规划发起方（`internal/montage/planner_ids_test.go`）。
-- 新版本部署后在实验 NAS 上复验：开着剪辑中心窗口时分析照常进行；规划能领到一轮、交给成员的规划进程并交回两个方案。带真实模型走完一轮规划仍未跑过，后面的步骤（渲染、存回相册）仍可能暴露新的问题。
+- 新版本部署后在实验 NAS 上复验：开着剪辑中心窗口时分析照常进行；规划能领到一轮、交给成员的规划进程并交回两个方案。2026-11-20 在实验 NAS 上已带真实模型（DeepSeek）走完一轮，规划、填槽、渲染到存回相册都通过，用时见[首版闭环的基线](../architecture/montage-center.md#首版闭环的基线)；开着窗口时的分析仍待按验收手册复验。
 - 系统测试已走一次真正的规划：带真实运行环境时，脚本化模型在规划进程里调四个剪辑工具交两个方案，任务越过规划步骤（`ai/assistant-spike/system-test.sh`）。
 - 等待 VNAS 时，页面已写明在等什么、几分钟后再试；等待分析时仍只写“相册正在分析视频”，还要写明在等什么。
 
 ## 关联
 
-- 规格：剪辑中心规格（随 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 合入）
-- ADR：[0038](https://github.com/zhongwater123/A-NAS/pull/518)（随 #518 合入）
+- 规格：[剪辑中心](../specs/montage-center.md)
+- ADR：[0038](../adr/0038-keep-montage-media-in-the-photo-library.md)
 - 运行手册：[在实验 NAS 上演示剪辑中心](../runbooks/demo-montage-center.md)
 - 代码：[`internal/photos/airunner.go`](../../internal/photos/airunner.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`ai/assistant/montage-planner.py`](../../ai/assistant/montage-planner.py)（取代回合脚本）、[`web/src/montage/HeroReel.tsx`](../../web/src/montage/HeroReel.tsx)
