@@ -2504,7 +2504,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503), or search_model_changed (409) until the videos are analysed with the new model. Deleting a shot between two that could each take its slots asks the compute Worker which is more alike: compute_unavailable (503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders */
+        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, validation_failed (400) for a description it does not search for. Deleting a shot between two that could each take its slots reads their videos' analysis (photos_unavailable, 503) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders */
         post: operations["editMontageDraft"];
         delete?: never;
         options?: never;
@@ -2553,7 +2553,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it */
+        /** The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle's does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos */
         get: operations["listMontageDraftCandidates"];
         put?: never;
         post?: never;
