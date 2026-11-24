@@ -10,6 +10,8 @@ import (
 	"os/exec"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // Worker runs typed media operations on files that are already open.
@@ -45,11 +47,17 @@ type StreamRequest struct {
 }
 
 // AudioRequest decodes the first audio stream to FLAC from Start, at
-// SampleRate (0 keeps the source's) with Bits (16 or 24) per sample.
+// SampleRate (0 keeps the source's) with Bits (16 or 24) per sample. With
+// PCM it decodes to raw little-endian float samples instead, with Bits 32,
+// Channels 1 (mixed down) or 2, interleaved, at SampleRate (8 to 48 kHz):
+// what music analysis reads. That is background work: it takes a background
+// slot unless ctx says otherwise, and FFmpeg runs below playback.
 type AudioRequest struct {
 	Start      float64
 	SampleRate int
 	Bits       int
+	PCM        bool
+	Channels   int
 }
 
 // Client reaches the sandboxed worker through its socket; systemd starts a
@@ -70,8 +78,10 @@ type Local struct {
 }
 
 var (
-	_ Worker = Client{}
-	_ Worker = Local{}
+	_ Worker  = Client{}
+	_ Worker  = Local{}
+	_ Editing = Client{}
+	_ Editing = Local{}
 )
 
 // dialer takes a slot for a request of op and connects to a worker; release
@@ -165,21 +175,31 @@ func (b body) Close() error {
 // acknowledges the request a failure is ErrUnavailable, as when systemd
 // drops a connection over its limit; after that it is ErrInterrupted.
 func call(ctx context.Context, dial dialer, request Request, file *os.File) (io.ReadCloser, error) {
-	conn, release, err := dial(ctx, request.Op)
+	request.Ack = true
+	response, _, err := send(ctx, dial, request.Op, request, []*os.File{file})
 	if err != nil {
 		return nil, err
+	}
+	return response, nil
+}
+
+// send is call for any request: message must ask for an acknowledgement.
+// It returns the open body and the response that preceded it.
+func send(ctx context.Context, dial dialer, op string, message any, files []*os.File) (body, Response, error) {
+	conn, release, err := dial(ctx, op)
+	if err != nil {
+		return body{}, Response{}, err
 	}
 	ctx, cancel := working(ctx)
 	done := func() { cancel(); release() }
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	fail := func(err error) (io.ReadCloser, error) {
+	fail := func(err error) (body, Response, error) {
 		stop()
 		_ = conn.Close()
 		done()
-		return nil, err
+		return body{}, Response{}, err
 	}
-	request.Ack = true
-	if err := writeFrame(conn, request, file); err != nil {
+	if err := unixmsg.WriteFiles(conn, message, files, maxFrame); err != nil {
 		return fail(fmt.Errorf("%w: %v", ErrUnavailable, err))
 	}
 	var response Response
@@ -201,17 +221,24 @@ func call(ctx context.Context, dial dialer, request Request, file *os.File) (io.
 		accepted, response = true, Response{}
 	}
 	if !response.OK {
-		switch response.Code {
-		case CodeUnreadable:
-			return fail(fmt.Errorf("%w: %s", ErrUnreadable, response.Message))
-		case CodeUnavailable:
-			return fail(fmt.Errorf("%w: %s", ErrUnavailable, response.Message))
-		case CodeInvalid:
-			return fail(fmt.Errorf("%w: %s", ErrInvalid, response.Message))
-		}
-		return fail(fmt.Errorf("%w: %s", ErrFailed, response.Message))
+		return fail(responseError(response))
 	}
-	return body{UnixConn: conn, ctx: ctx, stop: stop, done: done}, nil
+	return body{UnixConn: conn, ctx: ctx, stop: stop, done: done}, response, nil
+}
+
+// responseError is the error a response that is not OK reports.
+func responseError(response Response) error {
+	switch response.Code {
+	case CodeUnreadable:
+		return fmt.Errorf("%w: %s", ErrUnreadable, response.Message)
+	case CodeUnavailable:
+		return fmt.Errorf("%w: %s", ErrUnavailable, response.Message)
+	case CodeInvalid:
+		return fmt.Errorf("%w: %s", ErrInvalid, response.Message)
+	case CodeTooLarge:
+		return fmt.Errorf("%w: %s", ErrTooLarge, response.Message)
+	}
+	return fmt.Errorf("%w: %s", ErrFailed, response.Message)
 }
 
 func readAll(ctx context.Context, dial dialer, request Request, file *os.File) ([]byte, error) {
@@ -259,7 +286,10 @@ func stream(ctx context.Context, dial dialer, file *os.File, options StreamReque
 }
 
 func audio(ctx context.Context, dial dialer, file *os.File, options AudioRequest) (io.ReadCloser, error) {
-	request := Request{Op: OpAudio, Start: options.Start, SampleRate: options.SampleRate, Bits: options.Bits, Stream: -1, AudioTrack: -1}
+	request := Request{Op: OpAudio, Start: options.Start, SampleRate: options.SampleRate, Bits: options.Bits, PCM: options.PCM, Channels: options.Channels, Stream: -1, AudioTrack: -1}
+	if _, marked := ctx.Value(priorityKey{}).(Priority); options.PCM && !marked {
+		ctx = WithPriority(ctx, Background)
+	}
 	return call(ctx, dial, request, file)
 }
 

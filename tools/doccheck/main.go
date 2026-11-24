@@ -35,6 +35,17 @@ const (
 	// page turns back into a journal that every session must read and every
 	// parallel branch conflicts on.
 	currentMaxBytes = 10 << 10
+
+	// The byte cap alone did not keep the page to current facts: for a week
+	// it sat within 200 bytes of the cap while each pull request cut another
+	// one's sentences to fit its own. Its 下一步 kept finished steps with
+	// "已部署" added, and the evidence of each deploy had no other place to
+	// go. So a next step says only what is left to do, in a line or two, and
+	// the page as it stood before each deploy is kept as a dated snapshot
+	// beside it.
+	statusDirectory  = "docs/status"
+	nextStepsHeading = "## 下一步"
+	nextStepMaxRunes = 120
 )
 
 var (
@@ -84,6 +95,21 @@ var (
 	deployedLine      = regexp.MustCompile("^- 已部署：`[0-9a-f]{7,40}`")
 	pullRequestNumber = regexp.MustCompile(`#\d+|/pull/\d+`)
 
+	// A snapshot is docs/status/<install date>.md, with -2 and so on for a
+	// second deploy on the same day. It keeps the page's own 已部署 line and
+	// names the commit deployed after it, so the snapshots and the current
+	// state form one chain of deploys that this tool can check without Git.
+	snapshotFileName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(-\d+)?\.md$`)
+	deployedCommit   = regexp.MustCompile("(?m)^- 已部署：`([0-9a-f]{7,40})`")
+	nextDeployPrefix = "下一次部署："
+	nextDeployCommit = regexp.MustCompile("(?m)^下一次部署：`([0-9a-f]{7,40})`")
+	currentLink      = "](CURRENT.md)"
+
+	listItem     = regexp.MustCompile(`^\s*(?:[-*]|\d+\.)\s+`)
+	markdownLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	// "已部署" and "已随 `<commit>` 部署": a next step that reports a deploy.
+	deployedPhrase = regexp.MustCompile(`已(?:随[^，。；]*)?部署`)
+
 	// The index lists each ADR as "- [NNNN：title](file)", followed by a
 	// parenthesised marker that starts with proposed or superseded when the
 	// ADR is not accepted.
@@ -109,12 +135,37 @@ var (
 	// decision record unless it is hard to reverse, which makes it an ADR.
 	// Its status lives only on its own 状态 line, as an investigation's
 	// does. A decided record names the day, so that looking back finds when
-	// it changed. The current state's 待用户决定 links every pending record
-	// and every proposed ADR, so that nothing waits for the user unseen, as
-	// proposed ADRs did for weeks.
+	// it changed. The index marks a pending record （pending）, as the ADR
+	// index marks a proposed ADR, so that nothing waits for the user unseen,
+	// as proposed ADRs did for weeks. The current state used to link each of
+	// them by hand: that list took a quarter of the page and grew with every
+	// open question, so the page now links the two indexes instead.
 	decisionStatuses    = map[string]bool{"pending": true, "decided": true, "superseded": true}
-	decisionIndexStatus = regexp.MustCompile(`^\s*[（(]\s*(?i:pending|decided|superseded)\b`)
+	decisionIndexStatus = regexp.MustCompile(`^\s*[（(]\s*((?i:pending|decided|superseded))\b`)
 	isoDate             = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+)
+
+// The skills live in .agents/skills, where Codex and other agents find them.
+// Claude Code reads only .claude/skills (checked with 2.1.330 on 2026-11-23),
+// and a symlink turns into a plain file in a Windows checkout, so that folder
+// holds a copy that `make skills` writes and this check keeps identical.
+const (
+	skillsDirectory     = ".agents/skills"
+	skillsCopyDirectory = ".claude/skills"
+)
+
+// Every coding agent reads the root AGENTS.md in full at the start of every
+// session, and a directory's AGENTS.md whenever it works there; a long file
+// costs context each time and buries the rules that matter. The Claude Code
+// team keeps its shared file near 2.5k tokens. On 2026-11-23 the root file
+// was cut from 10.7 to about 8 KB, so these caps leave room for a few rules
+// and fail before it turns back into a manual: details go into the linked
+// documents, a directory's rules into its own AGENTS.md.
+const (
+	agentsFile           = "AGENTS.md"
+	rootAgentsMaxBytes   = 10 << 10
+	localAgentsMaxBytes  = 3 << 10
+	agentsCapExplanation = "keep only the rules every session needs and link the details"
 )
 
 func main() {
@@ -174,10 +225,12 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 	if err == nil {
 		problems = append(problems, validateDeployedState(string(current))...)
+		problems = append(problems, validateNextSteps(string(current))...)
 	}
 
 	files := 0
 	adrDocuments, investigations, decisions, runbook := map[string]string{}, map[string]string{}, map[string]string{}, ""
+	snapshots := map[string]string{}
 	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -201,10 +254,23 @@ func validateDocumentation(root string) ([]string, int) {
 		if readErr != nil {
 			return readErr
 		}
-		if !statusPhraseKeepers[relativePath] {
+		if path.Base(relativePath) == agentsFile {
+			limit := localAgentsMaxBytes
+			if relativePath == agentsFile {
+				limit = rootAgentsMaxBytes
+			}
+			if len(data) > limit {
+				problems = append(problems, fmt.Sprintf("%s is %d bytes, over the %d-byte cap: %s", relativePath, len(data), limit, agentsCapExplanation))
+			}
+		}
+		// A snapshot is an old current-state page, status phrases included.
+		snapshot := path.Dir(relativePath) == statusDirectory && snapshotFileName.MatchString(path.Base(relativePath))
+		if !statusPhraseKeepers[relativePath] && !snapshot {
 			problems = append(problems, findStatusPhrases(relativePath, string(data))...)
 		}
 		switch {
+		case snapshot:
+			snapshots[relativePath] = string(data)
 		case path.Dir(relativePath) == adrDirectory:
 			adrDocuments[relativePath] = string(data)
 		case path.Dir(relativePath) == investigationDirectory:
@@ -223,20 +289,142 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateADRIndex(adrDocuments)...)
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
-	problems = append(problems, validateDecisions(decisions, adrDocuments, string(current))...)
+	problems = append(problems, validateDecisions(decisions, string(current))...)
+	problems = append(problems, validateSnapshots(snapshots, string(current))...)
+	problems = append(problems, validateSkillsCopy(root)...)
 	return problems, files
 }
 
-// validateDecisions checks that the index lists every decision record without
-// a status, that each 状态 line starts with pending, decided (with its date)
-// or superseded, and that the current state's 待用户决定 links every pending
-// decision and every proposed ADR but no settled decision. decisions and adrs
-// map the slash-separated paths of the Markdown files in docs/decisions and
-// docs/adr to their contents; current is the current state's.
-func validateDecisions(decisions, adrs map[string]string, current string) []string {
+// validateSkillsCopy checks that .claude/skills holds exactly the files of
+// .agents/skills, byte for byte.
+func validateSkillsCopy(root string) []string {
+	skills, err := readTree(filepath.Join(root, filepath.FromSlash(skillsDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	copied, err := readTree(filepath.Join(root, filepath.FromSlash(skillsCopyDirectory)))
+	if err != nil {
+		return []string{err.Error()}
+	}
+
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(skills)) {
+		if data, ok := copied[name]; !ok || data != skills[name] {
+			problems = append(problems, fmt.Sprintf("%s/%s differs from %s/%s: edit %s and run make skills", skillsCopyDirectory, name, skillsDirectory, name, skillsDirectory))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(copied)) {
+		if _, ok := skills[name]; !ok {
+			problems = append(problems, fmt.Sprintf("%s/%s has no source in %s: run make skills", skillsCopyDirectory, name, skillsDirectory))
+		}
+	}
+	return problems
+}
+
+// readTree returns the files below dir by slash-separated relative path; a
+// missing dir has none.
+func readTree(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) && filePath == dir {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(filePath) //nolint:gosec // G122: a developer tool reading the checkout's own skills.
+		if err != nil {
+			return err
+		}
+		relativePath, _ := filepath.Rel(dir, filePath)
+		files[filepath.ToSlash(relativePath)] = string(data)
+		return nil
+	})
+	return files, err
+}
+
+// validateNextSteps checks that each item under the current state's 下一步
+// says what is left to do: it reports no deploy, and without its link targets
+// it fits in nextStepMaxRunes characters.
+func validateNextSteps(current string) []string {
+	var problems []string
+	inside := false
+	for number, line := range strings.Split(current, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			inside = strings.TrimSpace(line) == nextStepsHeading
+			continue
+		}
+		marker := listItem.FindString(line)
+		if !inside || marker == "" {
+			continue
+		}
+		item := line[len(marker):]
+		// A link's text may name a document, such as 已部署功能的实机验收手册.
+		if phrase := deployedPhrase.FindString(markdownLink.ReplaceAllString(item, "")); phrase != "" && !strings.Contains(line, statusPhraseAllowed) {
+			problems = append(problems, fmt.Sprintf("%s:%d: a next step says %s: what runs goes under the Experimental NAS heading, and a finished step leaves the list", currentDocument, number+1, phrase))
+		}
+		if length := len([]rune(markdownLink.ReplaceAllString(item, "$1"))); length > nextStepMaxRunes {
+			problems = append(problems, fmt.Sprintf("%s:%d: a next step is %d characters without its link targets, over %d: say what is left to do and link the rest", currentDocument, number+1, length, nextStepMaxRunes))
+		}
+	}
+	return problems
+}
+
+// validateSnapshots checks that each snapshot is marked as one, and that the
+// snapshots in date order and then the current state form a chain: each
+// names the commit deployed after it, which the next one records as deployed.
+// A deploy that rewrites the current state's 已部署 line without saving the
+// page first breaks the chain at its end. snapshots maps the slash-separated
+// paths of the snapshots to their contents; current is the current state's.
+func validateSnapshots(snapshots map[string]string, current string) []string {
+	var problems []string
+	names := slices.SortedFunc(maps.Keys(snapshots), func(a, b string) int {
+		// Without the extension, 2026-11-10 sorts before 2026-11-10-2.
+		return strings.Compare(strings.TrimSuffix(a, ".md"), strings.TrimSuffix(b, ".md"))
+	})
+	previous, expected := "", ""
+	for _, name := range names {
+		content := snapshots[name]
+		deployed, next := deployedCommit.FindAllStringSubmatch(content, -1), nextDeployCommit.FindAllStringSubmatch(content, -1)
+		switch {
+		case len(deployed) != 1:
+			problems = append(problems, fmt.Sprintf("%s needs exactly one line starting with %s`<commit>`, found %d", name, deployedPrefix, len(deployed)))
+			continue
+		case len(next) != 1:
+			problems = append(problems, fmt.Sprintf("%s needs exactly one line starting with %s`<commit>`, the commit deployed after it, found %d", name, nextDeployPrefix, len(next)))
+			continue
+		case !strings.Contains(content, currentLink):
+			problems = append(problems, fmt.Sprintf("%s: say that it is a snapshot and link %s for the present state", name, currentDocument))
+		}
+		if previous != "" && !sameCommit(expected, deployed[0][1]) {
+			problems = append(problems, fmt.Sprintf("%s says the next deploy was %s, but %s records %s as deployed", previous, expected, name, deployed[0][1]))
+		}
+		previous, expected = name, next[0][1]
+	}
+	if match := deployedCommit.FindStringSubmatch(current); previous != "" && match != nil && !sameCommit(expected, match[1]) {
+		problems = append(problems, fmt.Sprintf("%s names %s as deployed, but the newest snapshot %s says the next deploy was %s: before rewriting the 已部署 line, save the page as %s/<install date>.md", currentDocument, match[1], previous, expected, statusDirectory))
+	}
+	return problems
+}
+
+// sameCommit reports whether two abbreviated commit names can be one commit.
+func sameCommit(a, b string) bool {
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+// validateDecisions checks that the index lists every decision record and
+// marks exactly the pending ones （pending）, that each 状态 line starts with
+// pending, decided (with its date) or superseded, and that the current
+// state's 待用户决定 links both indexes and no single decision record or ADR.
+// decisions maps the slash-separated paths of the Markdown files in
+// docs/decisions to their contents; current is the current state's.
+func validateDecisions(decisions map[string]string, current string) []string {
 	var problems []string
 	index, indexed := decisions[decisionIndex]
-	listed := map[string]bool{}
+	listed, marked := map[string]bool{}, map[string]bool{}
 	for line := range strings.SplitSeq(index, "\n") {
 		match := indexEntry.FindStringSubmatch(line)
 		if match == nil {
@@ -247,12 +435,15 @@ func validateDecisions(decisions, adrs map[string]string, current string) []stri
 			continue
 		}
 		listed[name] = true
-		if decisionIndexStatus.MatchString(match[2]) {
-			problems = append(problems, fmt.Sprintf("%s gives %s a status: keep it only on the decision's 状态 line", decisionIndex, name))
+		switch status := decisionIndexStatus.FindStringSubmatch(match[2]); {
+		case status == nil:
+		case strings.EqualFold(status[1], "pending"):
+			marked[name] = true
+		default:
+			problems = append(problems, fmt.Sprintf("%s marks %s %s: the index marks only pending, other statuses stay on the decision's 状态 line", decisionIndex, name, strings.ToLower(status[1])))
 		}
 	}
 
-	waiting := waitingLinks(current)
 	for _, name := range slices.Sorted(maps.Keys(decisions)) {
 		base := path.Base(name)
 		if !datedFileName.MatchString(base) {
@@ -271,19 +462,28 @@ func validateDecisions(decisions, adrs map[string]string, current string) []stri
 			problems = append(problems, fmt.Sprintf("%s: start the 状态 line under the title with pending, decided or superseded", name))
 		case status == "decided" && !isoDate.MatchString(match[2]):
 			problems = append(problems, fmt.Sprintf("%s: give the day it was decided on the 状态 line, as in decided（2026-11-03，用户）", name))
-		case status == "pending" && !waiting[name]:
-			problems = append(problems, fmt.Sprintf("%s is pending, but %s does not link it under %s", name, currentDocument, waitingHeading))
-		case status != "pending" && waiting[name]:
-			problems = append(problems, fmt.Sprintf("%s is %s, but %s still links it under %s", name, status, currentDocument, waitingHeading))
+		case status == "pending" && listed[base] && !marked[base]:
+			problems = append(problems, fmt.Sprintf("%s is pending, but %s does not mark it （pending）", name, decisionIndex))
+		case status != "pending" && marked[base]:
+			problems = append(problems, fmt.Sprintf("%s is %s, but %s still marks it （pending）", name, status, decisionIndex))
 		}
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(adrs)) {
-		if !adrFileName.MatchString(path.Base(name)) {
-			continue
+	if current == "" {
+		return problems
+	}
+	waiting := waitingLinks(current)
+	for _, name := range slices.Sorted(maps.Keys(waiting)) {
+		base := path.Base(name)
+		if (path.Dir(name) == decisionDirectory && datedFileName.MatchString(base)) || (path.Dir(name) == adrDirectory && adrFileName.MatchString(base)) {
+			problems = append(problems, fmt.Sprintf("%s links %s under %s: the indexes mark what waits for the user, so link %s and %s there instead", currentDocument, name, waitingHeading, decisionIndex, adrIndex))
 		}
-		if match, _ := headerStatus(adrs[name]); match != nil && strings.EqualFold(match[1], "proposed") && !waiting[name] {
-			problems = append(problems, fmt.Sprintf("%s is proposed, but %s does not link it under %s", name, currentDocument, waitingHeading))
+	}
+	// The page that every session reads first must still lead to both
+	// queues: a pull request short of room could cut the two links unnoticed.
+	for _, index := range []string{decisionIndex, adrIndex} {
+		if !waiting[index] {
+			problems = append(problems, fmt.Sprintf("%s does not link %s under %s: the page must lead to what waits for the user", currentDocument, index, waitingHeading))
 		}
 	}
 	return problems

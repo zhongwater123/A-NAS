@@ -56,6 +56,7 @@ const (
 	OpTerminal      = "terminal"
 	OpAssistant     = "assistant"
 	OpAssistantRun  = "assistant_run"
+	OpAssistantPlan = "assistant_plan"
 	OpShareReset    = "share_reset"
 	OpShareFence    = "share_fence"
 	OpShareCheck    = "share_check"
@@ -124,7 +125,18 @@ type Response struct {
 	Assistant *AssistantGrant `json:"assistant,omitempty"`
 	// Change is a change of the assistant's as its card shows it.
 	Change json.RawMessage `json:"changeCard,omitempty"`
+	// Plan answers assistant_plan: PlanRegistered, PlanDeviceOff or
+	// PlanNoAssistant.
+	Plan string `json:"plan,omitempty"`
 }
+
+// What assistant_plan answers: a planning grant was registered, or the
+// device or the account has no VNAS. A failure to register is an error.
+const (
+	PlanRegistered  = "registered"
+	PlanDeviceOff   = "device_off"
+	PlanNoAssistant = "no_assistant"
+)
 
 type AssistantGrant struct {
 	Username string `json:"username"`

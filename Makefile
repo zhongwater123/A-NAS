@@ -43,7 +43,7 @@ GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt skills fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -126,8 +126,17 @@ web-build: web-install
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
 
+# The changed Go and Web files, the way fmt-check and web-lint expect them;
+# the coding agents' hooks run the same script after each edit (AGENTS.md).
 fmt:
-	gofmt -w $$($(GO_FILES))
+	scripts/format-changed.sh
+
+# Claude Code reads skills only from .claude/skills, other agents from
+# .agents/skills (AGENTS.md): edit the second and copy it with this target;
+# docs-check fails while the two differ.
+skills:
+	rm -rf .claude/skills
+	cp -R .agents/skills .claude/skills
 
 fmt-check:
 	@files="$$(gofmt -l $$($(GO_FILES)))"; \
@@ -145,6 +154,7 @@ docs-check:
 	@have="$$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"; \
 	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
+	grep -v -E '(^|/)docs/status/[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]+)?\.md$$' | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
 # dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).
@@ -168,6 +178,7 @@ vendor-check:
 # regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/network
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
@@ -234,6 +245,14 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
+	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api montage-service' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
+	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -241,7 +260,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-montage a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
 	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
@@ -251,12 +270,36 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'Environment=ANAS_PHOTO_SESSION_GROUP=a-nas-photos' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
+	grep -Fqx 'SocketUser=a-nas-montage' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
+	@# the members' planning instances alone, and stopped before the montage service it would start again.
+	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
+	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
+	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-montage-planner.service
+	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-montage-planner.service
+	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
+	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
+	@# Planning grants are in the Host Agent's own state, never under a service's directory.
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/montage-planner.py
+	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket
@@ -321,7 +364,7 @@ ops-check:
 	test "$$(grep -c '^f /run/a-nas-ffmpeg/slots/[0-7] 0440 root a-nas-photos -$$' deploy/tmpfiles.d/a-nas.conf)" = 8
 	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
-		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant-spike/companion-mcp-sdk.txt
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant/companion-mcp-sdk.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
@@ -375,7 +418,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
-	$(RUFF) check --config ai/ruff.toml deploy/docker
+	$(RUFF) check --config ai/ruff.toml deploy/docker deploy/network
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
@@ -385,15 +428,15 @@ ai-test:
 # The companion's MCP server under the real MCP SDK (ai/tests/test_companion_mcp.py),
 # which make ai-test has not got and the assistant's runtime is not built here
 # for: a virtual environment of its own with the SDK Hermes's lock pins
-# (ai/assistant-spike/companion-mcp-sdk.txt). Without the SDK it fails.
+# (ai/assistant/companion-mcp-sdk.txt). Without the SDK it fails.
 AI_SDK_VENV ?= $(BUILD_DIR)/companion-mcp-sdk
 AI_SDK_STAMP = $(AI_SDK_VENV)/.installed
 
-$(AI_SDK_STAMP): ai/assistant-spike/companion-mcp-sdk.txt
+$(AI_SDK_STAMP): ai/assistant/companion-mcp-sdk.txt
 	rm -rf $(AI_SDK_VENV)
 	python3 -m venv $(AI_SDK_VENV)
 	$(AI_SDK_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
-		-r ai/assistant-spike/companion-mcp-sdk.txt
+		-r ai/assistant/companion-mcp-sdk.txt
 	@touch $(AI_SDK_STAMP)
 
 ai-sdk-test: $(AI_SDK_STAMP)
@@ -478,6 +521,7 @@ scoring-module:
 # build/packages; needs dpkg-deb and jq.
 packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
+	scripts/check-no-songs.sh $(BUILD_DIR)/packages
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)

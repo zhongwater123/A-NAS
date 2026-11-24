@@ -1,7 +1,7 @@
 # 相册照片中的文字（OCR）实施方案
 
 状态：proposed（2026-10-30 起草；已确认的决定见下文）
-更新时间：2026-11-10
+更新时间：2026-11-23
 
 本文把[相册规格](../specs/photo-library.md)中“做 OCR”的决定细化为可实现的方案。后台在空闲时读出照片中的文字，证件、票据、回单还要读出关键字段；文字和字段可以搜索，可见范围与照片相同。依据：
 - 候选、方法与开销：[模型评估](../research/photo-ocr-model-evaluation.md)；
@@ -308,7 +308,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 
 ### 助手的工具
 
-2026-11-10 用户在实验 NAS 上问 VNAS“我身份证号码是多少”，它翻了 11 次文件，再问才去相册，又用 5 次调用逐张取画面，最后拿不到号码：相册服务给助手的文字接口没有任何工具在用。按[工具设计的通行做法](https://www.anthropic.com/engineering/writing-tools-for-agents)（少而精、一次调用带回要用的信息、报错写明下一步），文字并进现有的两个工具，不加新工具（[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py)）：
+2026-11-10 用户在实验 NAS 上问 VNAS“我身份证号码是多少”，它翻了 11 次文件，再问才去相册，又用 5 次调用逐张取画面，最后拿不到号码：相册服务给助手的文字接口没有任何工具在用。按[工具设计的通行做法](https://www.anthropic.com/engineering/writing-tools-for-agents)（少而精、一次调用带回要用的信息、报错写明下一步），文字并进现有的两个工具，不加新工具（[`anas_mcp.py`](../../ai/assistant/anas_mcp.py)）：
 
 - **`search_photos`**：第一页里按名称或文字命中的照片（至多 10 张）带上读出的内容：
   - `document`：文档类型；
@@ -321,7 +321,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - **`look_at_photo`**：说明里写明读字不用它。被拒绝时，工具按相册的错误码告诉模型下一步：`sensitive_photo` 是“用 `photo_details` 读文字，句柄原样写进回答”，`unread_photo` 是“请成员稍后再问”。
 - **句柄怎么用**写在两个带文字的工具的说明里：成员要号码时，把句柄原样写进回答正文，不要说自己看不到。
 
-部署时相册服务、产品服务（含 Web）与助手的 MCP 工具（[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)的 `update`）一起更新：只更新一边时，助手要么拿不到文字，要么窗口换不出号码。
+部署时相册服务、产品服务（含 Web）与助手的 MCP 工具（随 `a-nas`，[手册](../runbooks/enable-ai-assistant.md)）一起更新：只更新一边时，助手要么拿不到文字，要么窗口换不出号码。
 
 评测用例在 [`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 与 [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)，结果见[研究记录](../research/hermes-agent-runtime.md#问证件上的号码2026-11-10)。
 
@@ -350,7 +350,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
   - NAS 空闲时可用 4.4–5.9 GiB，加载后剩 1.1–2.6 GiB：1 GiB 与用户要调整的 500 MB 余量下一般都能加载。
   - 映射的文件页让 Worker 的 cgroup 一度超过 5 GB，高于上限（总内存减 2.5 GiB）；到上限时内核先回收这些页，不会结束 Worker。
   - 这些都是开源 llama.cpp 默认部署下的数字，用户计划之后继续优化内存。
-- **硬件**：实验 NAS 是单条 8 GB 内存（单通道），生成速度受内存带宽限制。加一条内存组成双通道，预计生成会明显加快，未测。
+- **硬件**：上面的数字测于实验 NAS 只有单条 8 GB 内存（单通道）时，生成速度受内存带宽限制。2026-11-13 起它是两条 8 GB 组成的双通道（16 GB），生成预计明显加快，未复测。
 
 ## 界面
 

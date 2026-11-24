@@ -38,5 +38,5 @@ SMB 采用 issue 允许的 veto 方案：Shared 中名为 `Agent空间` 的条�
 - [文件服务保留名回归](../../internal/files/agent_space_test.go)
 - [Landlock 实现](../../internal/filebroker/rootbroker/confine_linux.go)与[Worker 回归](../../internal/filebroker/rootbroker/changes_test.go)
 - [目录核对](../../internal/hostops/linux/acl.go)与[真实权限矩阵](../../internal/hostops/linux/root_matrix_integration_test.go)
-- [助手规格](../specs/ai-assistant.md)、[存储架构](../architecture/storage-and-files.md)、[助手试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)
+- [助手规格](../specs/ai-assistant.md)、[存储架构](../architecture/storage-and-files.md)、[助手试用手册](../runbooks/enable-ai-assistant.md)
 - [Samba 官方配置文档](https://www.samba.org/samba/docs/current/man-html/smb.conf.5)：veto files 的访问范围。
