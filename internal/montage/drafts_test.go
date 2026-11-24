@@ -193,6 +193,8 @@ func newEditEnv(t *testing.T) *editEnv {
 		"c2": card("c2", videoA, 20, 40, []float64{22, 30}, "海边", "全景", "中景"),
 		"c3": card("c3", videoB, 0, 10, []float64{1, 5}, "山路", "近景", "特写"),
 		"c4": card("c4", videoB, 10, 11, []float64{10.5}, "山路", "全景"),
+		// Described but left out of the catalog (blurred): never cut from.
+		"c5": card("c5", videoA, 0, 20, []float64{10}, "海边", "全景"),
 	}
 	taken := time.Date(2026, 8, 23, 13, 38, 50, 0, time.UTC)
 	analysis, _ := json.Marshal(analysisResult{Videos: []analysedVideo{
@@ -378,6 +380,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	}{
 		{DraftOp{Type: "replace", Shot: 1, Beat: "c2/2"}, "已用在第 3 镜"},
 		{DraftOp{Type: "replace", Shot: 1, Beat: "c4/1"}, "不够第 1 镜"},
+		{DraftOp{Type: "replace", Shot: 1, Beat: "c5/1"}, "不在这一版能用的素材里"},
 		{DraftOp{Type: "move", Shot: 2, To: 3}, "同一个段落"},
 		{DraftOp{Type: "revert", Shot: 1}, "没有改过"},
 	}

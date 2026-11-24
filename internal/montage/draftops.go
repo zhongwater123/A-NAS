@@ -43,8 +43,12 @@ func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, 
 		if err != nil {
 			return draftState{}, "", err
 		}
-		if _, _, ok := src.beat(op.Beat); !ok {
+		card, _, ok := src.beat(op.Beat)
+		if !ok {
 			return draftState{}, "", ErrInvalid
+		}
+		if !src.cuttable(card.ID) {
+			return draftState{}, "", refuse("这个节拍不在这一版能用的素材里")
 		}
 		if err := src.fits(state, i, op.Beat); err != nil {
 			return draftState{}, "", err

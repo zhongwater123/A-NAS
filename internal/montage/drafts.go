@@ -282,7 +282,8 @@ func (src *editSource) query(part, picture int) string {
 }
 
 // beat splits "card/n" into the card and the beat's number from 1, and
-// reports whether it is a beat of the cards that may be cut from.
+// reports whether it is a beat of a described card. Only the catalog's
+// cards may be cut from (cuttable): the fill is given no other.
 func (src *editSource) beat(beat string) (Card, int, bool) {
 	id, number, found := strings.Cut(beat, "/")
 	if !found {
@@ -294,6 +295,13 @@ func (src *editSource) beat(beat string) (Card, int, bool) {
 		return Card{}, 0, false
 	}
 	return card, n, true
+}
+
+// cuttable reports whether a card is in the version's catalog, the cards
+// the fill may cut from; a card left out (blurred, upright in a landscape
+// film) is described but cannot lead a shot.
+func (src *editSource) cuttable(id string) bool {
+	return slices.Contains(src.catalog, id)
 }
 
 // covers reports whether a beat can fill length seconds slowed at most
@@ -817,6 +825,11 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		if next, message, err = src.apply(state, op); err != nil {
 			return Draft{}, err
 		}
+	}
+	// The shots must still cover every slot end to end: a step that broke
+	// that would leave a draft no read accepts.
+	if !next.valid() {
+		return Draft{}, fmt.Errorf("draft %s: a %s step left shots that do not cover the slots", draftID, op.Type)
 	}
 	encoded, err := json.Marshal(next)
 	if err != nil {
