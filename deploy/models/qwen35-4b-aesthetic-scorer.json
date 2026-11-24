@@ -23,5 +23,5 @@
   },
   "memoryBytes": 2147483648,
   "memoryNote": "Measured with the bundle's own code on a development machine, PyTorch fp32 on the CPU: about 1.7 GB once loaded and 1.9 GB at the peak of a 640 x 480 photo; a 512 px thumbnail takes no more (#480). To be measured in the Worker's cgroup on the NAS.",
-  "license": "The vision tower: Apache-2.0, cut from Qwen3.5-4B at the revision above (deploy/models/qwen3.5-4b.LICENSE). The heads: trained on EVA, whose authors publish the data and ask for their paper to be cited, without a standard licence or terms for commercial use; to be confirmed before a release ships them (#480)."
+  "license": "The Qwen3.5-4B vision tower is under Apache-2.0 (licenses/Qwen3.5-4B-LICENSE.txt). The scoring heads were trained on EVA. The EVA authors dedicate their annotations under CC0-1.0 (https://github.com/kang-gnak/eva-dataset/blob/master/LICENSE). The training photographs come from AVA and have third-party rights holders. The model author confirmed internal evaluation only; external distribution of the trained heads, including commercial distribution, awaits legal review (https://github.com/zhongwater123/A-NAS/pull/504#issuecomment-7121478394). Dataset reference: Chen Kang, Giuseppe Valenzise and Frédéric Dufaux, EVA: An Explainable Visual Aesthetics Dataset, ATQAM/MAST 2020, https://doi.org/10.1145/3423268.3423590."
 }

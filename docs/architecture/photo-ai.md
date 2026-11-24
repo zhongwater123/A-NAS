@@ -206,7 +206,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - **运行环境**：CPU 版 PyTorch 和 torchvision 从官方 CPU wheel 安装，版本与哈希见[锁文件](../../ai/requirements.txt)。依赖门禁从 wheel 文件名提取上游公开版本进行公告审计。单元启用 Hugging Face 和 transformers 离线模式，并将其缓存放在 Worker 的缓存目录。
 - **协议**：`score_aesthetic` 接收一个缩略图描述符，返回 `model` 与 `scores`（`aesthetic`、`technical`）。模型 ID 包含已验证的发布清单 SHA-256（覆盖视觉塔、打分头及预处理配置）与推理库版本。`info` 以 `aestheticModel` 和 `aestheticMemoryBytes` 单独报告打分器，供后续调度使用。
 - **资源**：清单 `memoryBytes` 先按 2 GiB（开发机实测常驻约 1.7 GB、峰值约 1.9 GB）；推理线程与其他模型相同，为可用逻辑核数减 2。开发机 CPU 上 512 px 缩略图每张约 5.5 秒，只适合空闲时后台整理。
-- **待定**：打分头用 EVA 训练，数据没有标准许可证或商用条款，随产品发行前要确认（#480）；i3-12100 上的速度与 Worker cgroup 中的内存待实测。
+- **验收与分发**：作者已确认打分头可用于内部评测。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。目标 NAS（i3-12100）的打分耗时与 Worker cgroup 峰值内存待实测。
 
 ## 切片与顺序
 
