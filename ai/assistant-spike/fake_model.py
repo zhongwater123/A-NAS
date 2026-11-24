@@ -1,7 +1,7 @@
 """Scripted OpenAI-compatible model for the Hermes spike.
 
-Listens on a Unix socket, logs every request (which tools Hermes offered), and
-answers deterministically:
+Listens on a Unix socket, or on tcp:HOST:PORT behind the real model gateway (the system
+test), logs every request (which tools Hermes offered), and answers deterministically:
   user "CALL <tool> <json>"  -> one tool call with those arguments; "{{photo}}" and
                                 "{{album}}" in them become the first such ID in an
                                 earlier tool result of the conversation
@@ -10,6 +10,12 @@ answers deterministically:
   last message is a tool result -> text echoing the start of that result
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
+
+A conversation whose prompt is the montage center's planning template (ai/anas_montage/prompts) is planned as
+VNAS would, with the least that passes: it reads each brief, writes the smallest answer its schema allows and
+hands it in, through both steps of every 方案, until the tools say all are taken. With FAKE_MODEL_PLAN_SLEEP set,
+its first call waits that many seconds, a model call longer than any short timeout on the way. Hermes's background
+review of such a conversation writes a skill (PLAN_SKILL).
 """
 import contextlib
 import json
@@ -22,6 +28,10 @@ import uuid
 from http.server import BaseHTTPRequestHandler
 
 SOCK, LOG = sys.argv[1], sys.argv[2]
+# The first line of the planning template; its ids and token are filled in after it.
+PLAN_PROMPT = "这是剪辑中心的一轮剪辑规划"
+PLAN_SLEEP = float(os.environ.get("FAKE_MODEL_PLAN_SLEEP", "0") or 0)
+PLAN_SKILL = "montage-planning-notes"
 
 
 def text_of(content):
@@ -32,12 +42,142 @@ def text_of(content):
     return ""
 
 
-def decide(messages):
+def embedded(text):
+    """The JSON objects in a text, as Hermes puts an MCP server's result in a note
+    (<untrusted_tool_result …>) or a JSON envelope."""
+    objects, start = [], text.find("{")
+    while start >= 0 and len(objects) < 20:
+        try:
+            value, length = json.JSONDecoder().raw_decode(text[start:])
+        except (ValueError, RecursionError):
+            start = text.find("{", start + 1)
+            continue
+        objects.append(value)
+        start = text.find("{", start + length)
+    return objects
+
+
+def strings_of(content):
+    """The text of a tool result, with the strings of the JSON it holds, however Hermes wrapped it."""
+    found, stack = [], [text_of(content)]
+    while stack and len(found) < 100:
+        value = stack.pop()
+        if isinstance(value, str):
+            found.append(value)
+            stack.extend(embedded(value))
+        elif isinstance(value, dict):
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return found
+
+
+def brief_in(content):
+    """The {data, schema} a montage brief answered, from its tool result."""
+    for text in strings_of(content):
+        start = text.find('{"data"')
+        while start >= 0:
+            with contextlib.suppress(ValueError):
+                value, _ = json.JSONDecoder().raw_decode(text[start:])
+                if isinstance(value, dict) and isinstance(value.get("schema"), dict):
+                    return value
+            start = text.find('{"data"', start + 1)
+    return None
+
+
+def least(schema, counter):
+    """The smallest value the schema accepts. counter spreads enumerated values (cards, beats) over the answer."""
+    if "enum" in schema:
+        counter[0] += 1
+        return schema["enum"][(counter[0] - 1) % len(schema["enum"])]
+    kind = schema.get("type")
+    if kind == "object":
+        properties = schema.get("properties") or {}
+        return {name: least(properties.get(name) or {}, counter) for name in schema.get("required") or []}
+    if kind == "array":
+        if "prefixItems" in schema:
+            return [least(item, counter) for item in schema["prefixItems"]]
+        item = schema.get("items") if isinstance(schema.get("items"), dict) else {}
+        values = []
+        for _ in range(schema.get("minItems", 0)):
+            value = least(item, counter)
+            # A list of enumerated values names each at most once, as the rules ask.
+            while "enum" in item and value in values and len(values) < len(item["enum"]):
+                value = least(item, counter)
+            values.append(value)
+        return values
+    if kind == "string":
+        return "系统测试"
+    if kind in ("integer", "number"):
+        return schema.get("minimum", 0)
+    if kind == "boolean":
+        return False
+    return None
+
+
+def planning(messages):
+    """The planning prompt of a planning conversation, or ""."""
+    return next((said for said in (text_of(m.get("content")) for m in messages if m.get("role") == "user")
+                 if PLAN_PROMPT in said), "")
+
+
+def plan(messages, tools, prompt):
+    """VNAS's next step in a planning round: a call of a montage tool, or the last answer."""
+    job = re.search(r"任务编号 (job:[A-Z2-7]+)", prompt)
+    token = re.search(r"token 是 ([0-9a-f]+)", prompt)
+    named = {short: next((t for t in tools if t.endswith(short)), short)
+             for short in ("montage_brief", "montage_submit_outline", "montage_shots_brief", "montage_submit_shots")}
+    if not job or not token:
+        return {"text": "提示词里没有任务编号或 token"}
+    ids = {"jobId": job.group(1), "attemptToken": token.group(1)}
+    called = None
+    for m in messages:
+        for call in m.get("tool_calls") or []:
+            called = call.get("function", {}).get("name") or ""
+    last = messages[-1] if messages else {}
+    if called is None:
+        return {"tool": named["montage_brief"], "args": json.dumps(ids), "sleep": PLAN_SLEEP}
+    if last.get("role") != "tool":
+        return {"text": "[SILENT]"}
+    said = "\n".join(strings_of(last.get("content")))
+    if called.endswith(("montage_brief", "montage_shots_brief")):
+        brief = brief_in(last.get("content"))
+        if brief is None:
+            return {"text": "简报读不到：" + said[:200]}
+        submit = "montage_submit_outline" if called.endswith("montage_brief") else "montage_submit_shots"
+        return {"tool": named[submit], "args": json.dumps({**ids, "answer": least(brief["schema"], [0])}, ensure_ascii=False)}
+    if called.endswith("montage_submit_outline") and "大纲已收下" in said:
+        return {"tool": named["montage_shots_brief"], "args": json.dumps(ids)}
+    if called.endswith("montage_submit_shots") and "还有下一版" in said:
+        return {"tool": named["montage_brief"], "args": json.dumps(ids)}
+    if called.endswith("montage_submit_shots") and "全部方案都已收下" in said:
+        return {"text": "[SILENT]"}
+    return {"text": "规划停下：" + said[:300]}
+
+
+def review_of_plan(messages):
+    """Hermes's background review of a planning conversation: a skill, then done."""
+    asked = max(n for n, m in enumerate(messages) if m.get("role") == "user")
+    if any(m.get("role") == "tool" for m in messages[asked:]):
+        return {"text": "已记下剪辑规划的做法"}
+    content = (f"---\nname: {PLAN_SKILL}\ndescription: 剪辑规划时摸索出的做法\n---\n"
+               "每段的画面数不超过这一段能放的镜头数；高潮段的第一个画面用全景。\n")
+    return {"tool": "skill_manage",
+            "args": json.dumps({"operations": [{"action": "create", "name": PLAN_SKILL, "content": content}]}, ensure_ascii=False)}
+
+
+def decide(messages, tools=()):
+    user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+    said = text_of(user.get("content")).strip()
+    prompt = planning(messages)
+    if prompt and said.startswith("Review the conversation above"):
+        return review_of_plan(messages)
+    if prompt and tools:
+        # A request without tools is Hermes asking for a title.
+        return plan(messages, tools, prompt)
     last = messages[-1] if messages else {}
     if last.get("role") == "tool":
         return {"text": "TOOL_RESULT: " + text_of(last.get("content"))[:600]}
-    user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
-    said = text_of(user.get("content")).strip()
     if said.startswith("Review the conversation above"):
         # Hermes's background review: replay a "REVIEW CALL <tool> <json>" the conversation planted.
         planned = next((t for t in (text_of(m.get("content")).strip() for m in messages if m.get("role") == "user")
@@ -97,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         messages = body.get("messages", [])
         tools = [t.get("function", {}).get("name") for t in body.get("tools", []) or []]
-        choice = decide(messages)
+        choice = decide(messages, tools)
         # Hermes's background review asks with this prompt as the last user message.
         user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
         review = text_of(user.get("content")).strip().startswith("Review the conversation above")
@@ -112,6 +252,11 @@ class Handler(BaseHTTPRequestHandler):
         with open(LOG, "a", encoding="utf-8") as log:
             log.write(json.dumps({"t": time.time(), "path": self.path, "stream": bool(body.get("stream")),
                                   "tools": tools, "messages": len(messages), "decision": choice, "review": review,
+                                  "plan": bool(planning(messages)),
+                                  # What a planning step answered to: the last messages, cut short.
+                                  "tail": [{"role": m.get("role"), "text": text_of(m.get("content"))[:300],
+                                            "calls": [c.get("function", {}).get("name") for c in m.get("tool_calls") or []]}
+                                           for m in messages[-2:]] if planning(messages) else None,
                                   "image_parts": sum(1 for m in messages if isinstance(m.get("content"), list)
                                                      for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"),
                                   "system_chars": sum(len(text_of(m.get("content"))) for m in messages if m.get("role") == "system")},
@@ -153,6 +298,15 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
+class TCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+if SOCK.startswith("tcp:"):
+    host, port = SOCK[4:].rsplit(":", 1)
+    with TCPServer((host, int(port)), Handler) as server:
+        server.serve_forever()
 if os.path.exists(SOCK):
     os.unlink(SOCK)
 with Server(SOCK, Handler) as server:

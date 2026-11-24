@@ -134,6 +134,27 @@ func TestATaskNoRoundCanRunIsNotLeftWaiting(t *testing.T) {
 	}
 }
 
+// A task that already waits was accepted by an earlier call. A later call
+// for the same task whose round cannot be started is refused without taking
+// that request back.
+func TestARefusedSecondRequestLeavesTheFirstWaiting(t *testing.T) {
+	asked := &rounds{}
+	h, runs := runHarness(t, asked)
+	member := accountid.WithSessionToken(context.Background(), "member-token")
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); err != nil {
+		t.Fatalf("RunAssistantTask() error = %v", err)
+	}
+	asked.mu.Lock()
+	asked.fail = errors.New("Failed to start anas-assistant-cron@alice.service: Connection timed out")
+	asked.mu.Unlock()
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); !errors.Is(err, wire.ErrUnavailable) {
+		t.Fatalf("the second RunAssistantTask() error = %v, want ErrUnavailable", err)
+	}
+	if got := waiting(t, runs, "alice"); len(got) != 1 || got[0] != "a1b2c3d4e5f6" {
+		t.Fatalf("waiting after the refused second request = %v, want the first one's", got)
+	}
+}
+
 func TestTheTasksWaitingForOneMemberAreBounded(t *testing.T) {
 	asked := &rounds{}
 	h, runs := runHarness(t, asked)
@@ -149,6 +170,27 @@ func TestTheTasksWaitingForOneMemberAreBounded(t *testing.T) {
 	}
 	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("RunAssistantTask() over the bound error = %v, want ErrUnavailable", err)
+	}
+	if got := asked.asked(); len(got) != 0 {
+		t.Fatalf("rounds started = %v", got)
+	}
+}
+
+// Without the administrator's model key no round has a model, and a request left waiting
+// would run whenever a key is saved again.
+func TestRunningATaskNowIsOffWithoutTheModelKey(t *testing.T) {
+	asked := &rounds{}
+	runs := filepath.Join(t.TempDir(), "assistant-runs")
+	h := newAssistantHarness(t, func(config *Config) {
+		config.AssistantRuns, config.StartAssistantRound = runs, asked.start
+		config.AssistantOn = func() bool { return false }
+	})
+	member := accountid.WithSessionToken(context.Background(), "member-token")
+	if err := h.client.RunAssistantTask(member, "a1b2c3d4e5f6"); !errors.Is(err, wire.ErrUnavailable) {
+		t.Fatalf("RunAssistantTask() error = %v, want ErrUnavailable", err)
+	}
+	if got := waiting(t, runs, "alice"); len(got) != 0 {
+		t.Fatalf("waiting without a key = %v", got)
 	}
 	if got := asked.asked(); len(got) != 0 {
 		t.Fatalf("rounds started = %v", got)

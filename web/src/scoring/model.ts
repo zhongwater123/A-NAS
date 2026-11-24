@@ -178,8 +178,9 @@ export class Stopwatch {
   private spent = 0;
   private since: number | undefined;
 
-  start(now: number, running: boolean) {
-    this.spent = 0;
+  // spent is the time the photo already had, when the rater comes back to it.
+  start(now: number, running: boolean, spent = 0) {
+    this.spent = spent;
     this.since = running ? now : undefined;
   }
 

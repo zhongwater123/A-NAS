@@ -14,7 +14,10 @@ import {
   systemUpdateStatus,
 } from "../test/handlers/systemupdate";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import { SystemUpdateSection } from "./SystemUpdateSection";
+
+fixToday();
 
 const current = "1.0.1-rc.6 开发版 83bb9db1";
 const next = "1.0.1-rc.6 开发版 4e842653";

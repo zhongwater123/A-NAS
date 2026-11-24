@@ -1,7 +1,7 @@
 # 相册与本地智能检索
 
-状态：M1 切片 1–6 implemented；M2 的自然语言搜索、相册与用户元数据 implemented（手工位置随地点功能实现），AI 内置安装 implemented，AI 标签改为只在 AI 聚合中展示（2026-10-10）；普通视频 implemented（2026-10-19，[相册视频](photo-video.md)）；OCR 2026-10-19 决定做，实施方案待写；M3 draft
-更新时间：2026-11-16
+状态：M1 切片 1–6 implemented；M2 的自然语言搜索、相册与用户元数据 implemented（手工位置随地点功能实现），AI 内置安装 implemented，AI 标签改为只在 AI 聚合中展示（2026-10-10）；普通视频 implemented（2026-10-19，[相册视频](photo-video.md)）；OCR 的[实施方案](../architecture/photo-ocr.md)步骤 1–5 implemented（2026-11-10 部署）；M3 draft
+更新时间：2026-11-23
 
 ## 决策状态
 
@@ -86,7 +86,7 @@
 
 ### 已冻结的实现边界
 
-- 当前 i3-12100、8 GB 内存的设备以单任务、低优先级方式执行本地推理；模型基线、进程边界与发布门槛见[相册技术设计](../architecture/photo-library.md)，具体模型摘要仍以实机基准冻结。
+- 当前 i3-12100、16 GB 内存（2026-11-13 起，此前 8 GB）的设备以单任务、低优先级方式执行本地推理；模型基线、进程边界与发布门槛见[相册技术设计](../architecture/photo-library.md)，具体模型摘要仍以实机基准冻结。
 - 第一版优先支持图片，不承诺视频理解、开放式图片问答或全库详细描述。
 - 图片目录、任务状态、标签和全文索引使用本地数据卷上的 SQLite，向量同样以 Catalog 为事实源；按相似度排序的结果与对 Catalog 向量的精确扫描相同。向量另外同步到相册服务独占、可随时从 Catalog 重建的 Qdrant 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：排序由索引选出候选、按 Catalog 的向量打分，索引不可用时读 Catalog，结果不变。模型 Runtime 和索引实现不得泄漏到相册的外部 Interface。
 - 后台处理分级执行：基础元数据与缩略图优先，Embedding 其次，人脸及详细描述按配置启用。

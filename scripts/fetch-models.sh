@@ -55,6 +55,8 @@ layout() {
     auraface-v1) echo faces/auraface ;;
     dinov2-small) echo pets/dinov2-small ;;
     qwen3.5-4b-q4_k_m | qwen3.5-4b-mmproj-f16) echo ocr/qwen3.5-4b ;;
+    allin1-harmonix-all) echo montage-music/allin1 ;;
+    htdemucs) echo montage-music/htdemucs ;;
     *) return 1 ;;
   esac
 }

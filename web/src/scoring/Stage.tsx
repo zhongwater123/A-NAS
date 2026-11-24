@@ -117,6 +117,12 @@ function sizeOf(element: Element | null) {
   return { width: Math.round(width), height: Math.round(height) };
 }
 
+// timeOn is how long the photo the stopwatch runs for has been looked at. It
+// reads the clock outside the component, which the React purity lint asks.
+function timeOn(watch: Stopwatch): number {
+  return watch.elapsed(performance.now());
+}
+
 // answerOf is what the page sends for an answer given now: the kind and, for
 // a score, the batch's first 打分项 and the others in points, how long the
 // photo was looked at, and the sizes it was seen at.
@@ -267,6 +273,8 @@ export function Stage({
   // What was set on the photo being scored while the rater went back to the
   // last one; it is there again on the way back.
   const stash = useRef<{ values: Values; item: number; reached: number }>(undefined);
+  // The photo left to change the last one, with the time it had been looked at.
+  const left = useRef<{ token: string; spent: number }>(undefined);
   const fulls = useRef(new Map<string, Promise<FullView>>());
   const pointer = useRef<{ x: number; y: number }>(undefined);
 
@@ -354,7 +362,12 @@ export function Stage({
     void prepare(prepared.current, shownToken).then(() => {
       if (!live) return;
       setVisible(shownToken);
-      watch.current.start(performance.now(), true);
+      // A photo the rater comes back to after changing the last one goes on
+      // from the time it had: its time is from when it appeared until it is
+      // answered, not from the return.
+      const back = left.current?.token === shownToken ? left.current : undefined;
+      if (back) left.current = undefined;
+      watch.current.start(performance.now(), true, back?.spent);
     });
     return () => {
       live = false;
@@ -477,14 +490,17 @@ export function Stage({
   const canPrevious = previous !== undefined && !revising && !guide && !rest;
   const canNext = ready && typedValid && complete(withTyped);
 
+  // A photo starts without a score: none is set before it is shown or while
+  // a sheet covers it.
   const setValue = (hundredths: number) => {
+    if (!ready) return;
     setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale) }));
     setTyped(undefined);
   };
 
   // go moves to another 打分项 of the photo, one already reached.
   const go = (to: number) => {
-    if (to < 0 || to > reached || to === item || !typedValid) return;
+    if (!ready || to < 0 || to > reached || to === item || !typedValid) return;
     setArmed(false);
     endCompare();
     setTyped(undefined);
@@ -571,6 +587,7 @@ export function Stage({
     endCompare();
     setZoom(undefined);
     stash.current = { values: withTyped, item, reached };
+    left.current = ready && shown ? { token: shown.token, spent: timeOn(watch.current) } : undefined;
     setRevising(previous.claim);
     setValues(previous.values ?? {});
     setItem(previous.values ? at : 0);
@@ -674,6 +691,10 @@ export function Stage({
     if (target.closest("input, textarea, select")) return;
     const action = stageAction(event.nativeEvent);
     if (!action) return;
+    // With no photo to confirm (a sheet covers it, it is not shown yet, or
+    // the batch is finished), Enter belongs to the button that has the
+    // focus: 继续打分, the guide's close, 返回批次.
+    if (action.kind === "confirm" && !ready && target.closest("button")) return;
     event.preventDefault();
     event.stopPropagation();
     if (action.kind !== "zoom") setArmed(false);
@@ -684,8 +705,7 @@ export function Stage({
         break;
       }
       case "nudge":
-        setValues((current) => ({ ...current, [dimension.id]: nudgeScore(current[dimension.id], action.by, scale) }));
-        setTyped(undefined);
+        setValue(nudgeScore(value, action.by, scale));
         break;
       case "item":
         go(item + action.by);
@@ -996,6 +1016,7 @@ export function Stage({
                 value={typed ?? (value === undefined ? "" : formatScore(value, scale))}
                 placeholder="—"
                 inputMode="decimal"
+                readOnly={!ready}
                 aria-label={`${label}，${typingRule[scale]}`}
                 aria-invalid={!typedValid}
                 onChange={(event) => {

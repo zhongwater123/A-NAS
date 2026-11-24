@@ -27,7 +27,7 @@ packages+=$(
     sed -e 's/([^)]*)//g' -e 's/|[^,]*//g' | tr ',' '\n' | tr -d ' ' | grep -v -e '^$' -e '^@' -e '^a-nas-' |
     grep -vxF -f <(jq -r '.packages[].name' "$lock") | sort -u | paste -sd, -
 ),
-# What the AI assistant's trial depends on (ai/assistant-spike): PID 1 in its
+# What the AI assistant's sandboxes need (a-nas-host's Depends): PID 1 in its
 # PID namespace, the model socket bridge and the file search Hermes runs.
 packages+=tini,socat,ripgrep,
 # Only for the tests: SMB and HTTP clients, JSON and YAML edits, HEIC encoding

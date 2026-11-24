@@ -42,7 +42,7 @@ func TestValidateDocumentationSkipsDependenciesAndOtherCheckouts(t *testing.T) {
 }
 
 func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
-	header := "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n"
+	header := "# 当前状态\n\n更新时间：2026-10-23\n" + waitingSection + "\n- 已部署：`80b602275b86`\n\n"
 	for size, wantProblem := range map[int]bool{currentMaxBytes: false, currentMaxBytes + 1: true} {
 		root := t.TempDir()
 		writeRequiredDocuments(t, root)
@@ -60,7 +60,7 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n\n## 待用户决定\n\n- [ADR 0023](../adr/0023-share-copies.md)\n",
+		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n" + waitingSection,
 		acceptanceRunbook:               "# 验收\n\n待合并的修复部署后再验收：[快照](../investigations/2026-10-21-snapshots.md)。\n",
 		investigationIndex:              "- [2026-10-21：快照](2026-10-21-snapshots.md)\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
@@ -117,7 +117,80 @@ func TestValidateDocumentationNamesOneDeployedCommit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			writeRequiredDocuments(t, root)
-			writeDocuments(t, root, map[string]string{currentDocument: header + test.body})
+			writeDocuments(t, root, map[string]string{currentDocument: header + test.body + waitingSection})
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+func TestValidateDocumentationKeepsNextStepsToWhatIsLeft(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		currentDocument: "# 当前状态\n\n更新时间：2026-11-18\n\n## 实验 NAS 上运行什么\n\n" +
+			"- 已部署：`c738affa140b`；相册排序从索引读，2026-11-10 已部署（#411）。\n\n" +
+			"## 下一步\n\n" +
+			"1. 按[已部署功能的实机验收手册](../runbooks/accept.md)逐模块核对。\n" +
+			"2. 向量索引：2026-11-10 已部署（#411）；按手册核对。\n" +
+			"3. 家庭中心 M2：认领、隐藏；数据修复已随 `61744597719c` 部署。\n" +
+			"- 核对已部署的容器有没有日志上限。<!-- doccheck: not a status -->\n" +
+			"4. " + strings.Repeat("长", nextStepMaxRunes-2) + "[链接](../specs/" + strings.Repeat("x", 200) + ".md)\n" +
+			"5. " + strings.Repeat("长", nextStepMaxRunes-1) + "[链接](../specs/long.md)\n" +
+			"\n这一段不是条目，" + strings.Repeat("长", nextStepMaxRunes) + "。\n" +
+			"\n## 备注\n\n- 这里可以写已部署。\n" + waitingSection,
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		currentDocument + ":12: a next step says 已部署",
+		currentDocument + ":13: a next step says 已随 `61744597719c` 部署",
+		fmt.Sprintf("%s:16: a next step is %d characters without its link targets, over %d", currentDocument, nextStepMaxRunes+1, nextStepMaxRunes),
+	})
+}
+
+func TestValidateDocumentationChainsStatusSnapshots(t *testing.T) {
+	current := "# 当前状态\n\n更新时间：2026-11-18\n\n- 已部署：`c738affa140b`，软件包\n" + waitingSection
+	snapshot := func(deployed, next string) string {
+		return "# 状态快照\n\n本页是历史快照，现状见[当前状态](CURRENT.md)。\n\n下一次部署：`" + next + "`\n\n" +
+			"- 已部署：`" + deployed + "`（尚未部署的 #245 随下一次部署）\n"
+	}
+	tests := map[string]struct {
+		documents map[string]string
+		want      []string
+	}{
+		"chain": {documents: map[string]string{
+			"docs/status/2026-11-04.md":   snapshot("70853075ca40", "61744597"),
+			"docs/status/2026-11-10.md":   snapshot("61744597719c", "0f04f74e"),
+			"docs/status/2026-11-10-2.md": snapshot("0f04f74e", "c738affa140b"),
+		}},
+		"deploy without a snapshot": {
+			documents: map[string]string{"docs/status/2026-11-04.md": snapshot("70853075ca40", "61744597719c")},
+			want:      []string{currentDocument + " names c738affa140b as deployed, but the newest snapshot docs/status/2026-11-04.md says the next deploy was 61744597719c"},
+		},
+		"gap": {
+			documents: map[string]string{
+				"docs/status/2026-11-04.md": snapshot("70853075ca40", "61744597719c"),
+				"docs/status/2026-11-16.md": snapshot("bfb8f04b", "c738affa140b"),
+			},
+			want: []string{"docs/status/2026-11-04.md says the next deploy was 61744597719c, but docs/status/2026-11-16.md records bfb8f04b as deployed"},
+		},
+		"unmarked": {
+			documents: map[string]string{
+				"docs/status/2026-11-04.md": "# 当前状态\n\n- 已部署：`70853075ca40`\n",
+				"docs/status/2026-11-10.md": "# 状态快照\n\n下一次部署：`c738affa140b`\n\n- 已部署：`61744597719c`\n",
+				"docs/status/notes.md":      "# 说明\n",
+			},
+			want: []string{
+				"docs/status/2026-11-04.md needs exactly one line starting with 下一次部署：`<commit>`",
+				"docs/status/2026-11-10.md: say that it is a snapshot and link " + currentDocument,
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: current})
+			writeDocuments(t, root, test.documents)
 			assertProblems(t, validateDocumentationProblems(root), test.want)
 		})
 	}
@@ -145,9 +218,6 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 		"docs/adr/0016-bold-status.md":       "# 0016\n\n**状态**：proposed\n",
 		"docs/adr/0017-body-status.md":       "# 0017\n\n背景与决定。\n\n## 后果\n\n状态：accepted 的 ADR 不再改写。\n",
 		"docs/adr/0018-late-status.md":       "# 0018\n\n背景与决定。\n\n状态：accepted\n\n## 后果\n",
-		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n" +
-			"- ADR [0002](../adr/0002-proposed.md)、[0003](../adr/0003-unmarked.md)、[0009](../adr/0009-english-status.md)、" +
-			"[0010](../adr/0010-dot.md)、[0012](../adr/0012-angle.md)、[0013](../adr/0013-prose-marker.md)、[0016](../adr/0016-bold-status.md)\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：已接受](0001-accepted.md)（修订 0007）\n" +
 			"- [0002：提议](0002-proposed.md)（proposed）\n" +
@@ -188,7 +258,6 @@ func TestValidateDocumentationKeepsADRNumbersApart(t *testing.T) {
 		"docs/adr/0002-second.md":  "# 0002\n\n状态：accepted\n",
 		"docs/adr/0002-clash.md":   "# 0002\n\n状态：accepted\n",
 		"docs/adr/0003-arrived.md": "# 0003\n\n状态：proposed\n",
-		currentDocument:            "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n- [ADR 0003](../adr/0003-arrived.md)\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：第一](0001-first.md)\n" +
 			"- [0002：第二](0002-second.md)\n" +
@@ -251,48 +320,144 @@ func TestValidateDocumentationKeepsDecisionsInOnePlace(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		"docs/decisions/2026-10-01-waiting.md":       "# 待定\n\n状态：pending\n更新时间：2026-10-01\n",
-		"docs/decisions/2026-10-02-unlinked.md":      "# 没列出的待定\n\n状态：pending\n",
-		"docs/decisions/2026-10-03-decided.md":       "# 已定\n\n状态：decided（2026-10-05，用户）\n",
-		"docs/decisions/2026-10-04-undated.md":       "# 没有日期\n\n状态：decided（用户）\n",
-		"docs/decisions/2026-10-05-still-waiting.md": "# 定了仍列着\n\n状态：decided（2026-10-06，用户）\n",
-		"docs/decisions/2026-10-06-superseded.md":    "# 被取代\n\n状态：superseded by [新的](2026-10-03-decided.md)\n",
-		"docs/decisions/2026-10-07-chinese.md":       "# 中文状态\n\n状态：已定\n",
-		"docs/decisions/2026-10-08-unlisted.md":      "# 漏列\n\n状态：decided（2026-10-08，用户）\n",
-		"docs/decisions/2026-10-09-index-status.md":  "# 索引带状态\n\n状态：decided（2026-10-09，用户）\n",
-		"docs/decisions/_TEMPLATE.md":                "# <要定的事>\n\n状态：pending\n",
-		"docs/adr/0001-proposed.md":                  "# 0001\n\n状态：proposed\n",
-		"docs/adr/0002-unlinked.md":                  "# 0002\n\n状态：proposed（2026-10-12）\n",
-		"docs/adr/0003-accepted.md":                  "# 0003\n\n状态：accepted\n",
-		"docs/adr/README.md":                         "- [0001：提议](0001-proposed.md)（proposed）\n- [0002：没列出](0002-unlinked.md)（proposed）\n- [0003：已接受](0003-accepted.md)\n",
+		"docs/decisions/2026-10-01-waiting.md":      "# 待定\n\n状态：pending\n更新时间：2026-10-01\n",
+		"docs/decisions/2026-10-02-unmarked.md":     "# 没标记的待定\n\n状态：pending\n",
+		"docs/decisions/2026-10-03-decided.md":      "# 已定\n\n状态：decided（2026-10-05，用户）\n",
+		"docs/decisions/2026-10-04-undated.md":      "# 没有日期\n\n状态：decided（用户）\n",
+		"docs/decisions/2026-10-05-still-marked.md": "# 定了仍标着\n\n状态：decided（2026-10-06，用户）\n",
+		"docs/decisions/2026-10-06-superseded.md":   "# 被取代\n\n状态：superseded by [新的](2026-10-03-decided.md)\n",
+		"docs/decisions/2026-10-07-chinese.md":      "# 中文状态\n\n状态：已定\n",
+		"docs/decisions/2026-10-08-unlisted.md":     "# 漏列\n\n状态：decided（2026-10-08，用户）\n",
+		"docs/decisions/2026-10-09-index-status.md": "# 索引带状态\n\n状态：decided（2026-10-09，用户）\n",
+		"docs/decisions/_TEMPLATE.md":               "# <要定的事>\n\n状态：pending\n",
+		"docs/adr/0001-proposed.md":                 "# 0001\n\n状态：proposed\n",
+		"docs/adr/0003-accepted.md":                 "# 0003\n\n状态：accepted\n",
+		"docs/adr/README.md":                        "- [0001：提议](0001-proposed.md)（proposed）\n- [0003：已接受](0003-accepted.md)\n",
 		decisionIndex: "# 决定记录\n\n## 索引\n\n### 相册\n\n" +
-			"- [待定](2026-10-01-waiting.md)\n" +
-			"- [没列出的待定](2026-10-02-unlinked.md)\n" +
+			"- [待定](2026-10-01-waiting.md)（pending）\n" +
+			"- [没标记的待定](2026-10-02-unmarked.md)\n" +
 			"- [已定](2026-10-03-decided.md#决定)\n" +
 			"- [没有日期](2026-10-04-undated.md)\n" +
-			"- [定了仍列着](2026-10-05-still-waiting.md)\n" +
-			"- [被取代](2026-10-06-superseded.md)\n" +
+			"- [定了仍标着](2026-10-05-still-marked.md)(Pending)\n" +
+			"- [被取代](2026-10-06-superseded.md)（见已定的那篇，当时 pending 了两周）\n" +
 			"- [中文状态](2026-10-07-chinese.md)\n" +
 			"- [索引带状态](2026-10-09-index-status.md)（decided）\n" +
 			"\n从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建。\n",
 		currentDocument: "# 当前状态\n\n更新时间：2026-10-10\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n" +
+			"- [决定索引](../decisions/README.md#索引)中标 `（pending）` 的，[ADR 索引](../adr/README.md)中标 `（proposed）` 的。\n" +
 			"- [待定](../decisions/2026-10-01-waiting.md#选项)\n" +
-			"- [定了仍列着](../decisions/2026-10-05-still-waiting.md)\n" +
-			"- [ADR 0001](../adr/0001-proposed.md)，背景见 [ADR 0003](../adr/0003-accepted.md) 与 [上游](https://example.com/docs/adr/0002-unlinked.md)\n" +
+			"- [ADR 0001](../adr/0001-proposed.md)，背景见[上游](https://example.com/docs/adr/0003-accepted.md)\n" +
 			"\n## 下一步\n\n" +
-			"- 落实[已定的决定](../decisions/2026-10-03-decided.md)，另见[待定](../decisions/2026-10-02-unlinked.md)与 [ADR 0002](../adr/0002-unlinked.md)。\n",
+			"- 落实[已定的决定](../decisions/2026-10-03-decided.md)，另见[待定](../decisions/2026-10-02-unmarked.md)与 [ADR 0003](../adr/0003-accepted.md)。\n",
 	})
 
 	assertProblems(t, validateDocumentationProblems(root), []string{
-		"docs/decisions/2026-10-02-unlinked.md is pending, but " + currentDocument + " does not link it",
+		"docs/decisions/2026-10-02-unmarked.md is pending, but " + decisionIndex + " does not mark it",
 		"docs/decisions/2026-10-04-undated.md: give the day it was decided",
-		"docs/decisions/2026-10-05-still-waiting.md is decided, but " + currentDocument + " still links it",
+		"docs/decisions/2026-10-05-still-marked.md is decided, but " + decisionIndex + " still marks it",
 		"docs/decisions/2026-10-07-chinese.md: start the 状态 line under the title with pending, decided or superseded",
 		"docs/decisions/2026-10-08-unlisted.md is not listed in " + decisionIndex,
-		decisionIndex + " gives 2026-10-09-index-status.md a status",
-		"docs/adr/0002-unlinked.md is proposed, but " + currentDocument + " does not link it",
+		decisionIndex + " marks 2026-10-09-index-status.md decided",
+		currentDocument + " links docs/decisions/2026-10-01-waiting.md under " + waitingHeading,
+		currentDocument + " links docs/adr/0001-proposed.md under " + waitingHeading,
 	})
 }
+
+func TestValidateDocumentationKeepsTheSkillsCopyIdentical(t *testing.T) {
+	skill := "---\nname: probe\ndescription: A probe.\n---\n\n# Probe\n"
+	tests := map[string]struct {
+		copied map[string]string
+		want   []string
+	}{
+		"identical": {copied: map[string]string{".claude/skills/probe/SKILL.md": skill}},
+		"edited copy": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill + "more\n"},
+			want:   []string{".claude/skills/probe/SKILL.md differs from .agents/skills/probe/SKILL.md"},
+		},
+		"missing copy": {
+			copied: map[string]string{},
+			want:   []string{".claude/skills/probe/SKILL.md differs"},
+		},
+		"copy without source": {
+			copied: map[string]string{".claude/skills/probe/SKILL.md": skill, ".claude/skills/old/SKILL.md": skill},
+			want:   []string{".claude/skills/old/SKILL.md has no source in .agents/skills"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{".agents/skills/probe/SKILL.md": skill})
+			writeDocuments(t, root, test.copied)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+func TestValidateDocumentationCapsAgentsFiles(t *testing.T) {
+	tests := map[string]struct {
+		documents map[string]string
+		want      []string
+	}{
+		"within the caps": {documents: map[string]string{
+			agentsFile:       strings.Repeat("x", rootAgentsMaxBytes),
+			"web/AGENTS.md":  strings.Repeat("x", localAgentsMaxBytes),
+			"web/NOTES.md":   strings.Repeat("x", rootAgentsMaxBytes+1),
+			"docs/AGENTS.md": "# Docs\n",
+		}},
+		"root over": {
+			documents: map[string]string{agentsFile: strings.Repeat("x", rootAgentsMaxBytes+1)},
+			want:      []string{fmt.Sprintf("AGENTS.md is %d bytes, over the %d-byte cap", rootAgentsMaxBytes+1, rootAgentsMaxBytes)},
+		},
+		"local over": {
+			documents: map[string]string{"internal/x/AGENTS.md": strings.Repeat("x", localAgentsMaxBytes+1)},
+			want:      []string{fmt.Sprintf("internal/x/AGENTS.md is %d bytes, over the %d-byte cap", localAgentsMaxBytes+1, localAgentsMaxBytes)},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, test.documents)
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+func TestValidateDocumentationKeepsTheQueuesLinked(t *testing.T) {
+	header := "# 当前状态\n\n更新时间：2026-11-23\n\n- 已部署：`a40311de890b`\n"
+	missing := func(index string) string {
+		return currentDocument + " does not link " + index + " under " + waitingHeading
+	}
+	tests := map[string]struct {
+		current string
+		want    []string
+	}{
+		"both indexes":  {current: header + waitingSection},
+		"no section":    {current: header, want: []string{missing(decisionIndex), missing(adrIndex)}},
+		"empty section": {current: header + "\n" + waitingHeading + "\n\n没有待定的事。\n", want: []string{missing(decisionIndex), missing(adrIndex)}},
+		"one mistyped": {
+			current: header + "\n" + waitingHeading + "\n\n- [决定索引](../decisions/README.md#索引)、[ADR 索引](../adr/READ.md)\n",
+			want:    []string{missing(adrIndex)},
+		},
+		"under another heading": {
+			current: header + "\n## 下一步\n\n- 见[决定索引](../decisions/README.md)与 [ADR 索引](../adr/README.md)。\n",
+			want:    []string{missing(decisionIndex), missing(adrIndex)},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: test.current})
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
+}
+
+// waitingSection is the section every current-state page needs: links to the
+// two indexes that mark what waits for the user.
+const waitingSection = "\n## 待用户决定\n\n- [决定索引](../decisions/README.md#索引)、[ADR 索引](../adr/README.md#索引)\n"
 
 func validateDocumentationProblems(root string) []string {
 	problems, _ := validateDocumentation(root)
@@ -317,7 +482,7 @@ func writeRequiredDocuments(t *testing.T, root string) {
 	for _, name := range requiredDocuments {
 		documents[name] = "# Test\n"
 	}
-	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n"
+	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n" + waitingSection
 	writeDocuments(t, root, documents)
 }
 

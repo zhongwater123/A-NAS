@@ -134,7 +134,7 @@ func TestFeedbackIsOneListEverySignedInAccountEdits(t *testing.T) {
 	member := signIn(t, handler, "member", "member horse battery staple")
 
 	body, contentType := feedbackForm{text: "无 CSRF"}.encode(t)
-	if forged := feedbackRequest(member, http.MethodPost, "/api/v1/feedback", contentType, body, false); forged.Code != http.StatusForbidden {
+	if forged := feedbackRequest(member, http.MethodPost, "/api/v1/feedback", contentType, body, false); !refusedForCSRF(forged) {
 		t.Fatalf("create without CSRF = %d", forged.Code)
 	}
 	created := sendFeedbackForm(t, member, http.MethodPost, "/api/v1/feedback", feedbackForm{text: "上传 2 GB 文件时卡住", images: [][]byte{feedbackPNG(t)}})
@@ -187,7 +187,7 @@ func TestFeedbackIsOneListEverySignedInAccountEdits(t *testing.T) {
 	// Comments: a member replies with a screenshot, the administrator rewrites
 	// that reply and then deletes it; writes need the CSRF token.
 	commentBody, commentType := feedbackForm{text: "我这边也能复现", images: [][]byte{feedbackPNG(t)}}.encode(t)
-	if forged := feedbackRequest(member, http.MethodPost, "/api/v1/feedback/"+item.ID+"/comments", commentType, commentBody, false); forged.Code != http.StatusForbidden {
+	if forged := feedbackRequest(member, http.MethodPost, "/api/v1/feedback/"+item.ID+"/comments", commentType, commentBody, false); !refusedForCSRF(forged) {
 		t.Fatalf("comment without CSRF = %d", forged.Code)
 	}
 	commented := sendFeedbackForm(t, member, http.MethodPost, "/api/v1/feedback/"+item.ID+"/comments", feedbackForm{text: "我这边也能复现", images: [][]byte{feedbackPNG(t)}})
