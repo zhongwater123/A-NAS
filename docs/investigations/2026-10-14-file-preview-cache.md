@@ -1,7 +1,7 @@
 # 视频缩略图重访重复解码与队列阻塞
 
 状态：fixed，待实机验收
-更新时间：2026-11-19
+更新时间：2026-11-24
 
 ## 症状与最小复现
 
@@ -31,9 +31,9 @@ go test ./internal/filepreview -run 'TestDirectoryRevisit|TestCachedPreview' -co
 
 ## 时间戳粒度
 
-缓存键含 inode、ctime、mtime 与大小。SMB 客户端可以写入同样大小的内容并恢复 mtime，这时只有 ctime 能发现修改，而 ctime 的精度由内核决定：Linux 6.13 之前没有细粒度时间戳，同一个时钟节拍内的所有修改得到同一个 ctime（Debian 13 的默认内核是 6.12）。在同一节拍内完成“改动、预览、再次等大改动并恢复 mtime”，`stat` 无法区分两个版本。实际的抽帧耗时远超一个节拍，解码前后也会再核对一次文件身份，这个窗口在产品里极难出现，产品暂不修改；需要时可以照 git 的 racy-clean 规则，不把 ctime 离现在不到一秒的结果写入持久缓存。
+缓存键含 inode、ctime、mtime 与大小。SMB 客户端可以写入同样大小的内容并恢复 mtime，这时只有 ctime 能发现修改，而 ctime 的精度由内核决定：Linux 6.13 之前没有细粒度时间戳，同一个时钟节拍内的所有修改得到同一个 ctime（Debian 13 的默认内核是 6.12，amd64 内核 `CONFIG_HZ=250`，一个节拍 4 ms）。生成缓存键的那次 `stat` 之后、同一节拍内的等大改写，`stat` 无法区分；解码后的再次核对也看不出它，因为前后两次 `stat` 相同。要缓存一张过期的预览，还需要 Worker 在这一节拍内已经读完它用到的数据，而真实的探测加抽帧远超一个节拍，所以这个窗口在产品里极难出现；出现时，过期的预览留在缓存里，直到文件再变或被淘汰。产品暂不修改。需要时可以照 git 的 racy-clean 规则：记下生成缓存键那次 `stat` 的时间，ctime 或 mtime 与它相差不到一秒时照常返回结果，但内存缓存与持久缓存都不写。
 
-测试原本从创建文件到模拟 SMB 修改不到 1 ms，ctime 没有变化：macOS 开发机的 Colima 虚拟机（Ubuntu 24.04 arm64，内核 6.8，`CONFIG_HZ=1000`）上，`TestPersistentPreviewSurvivesRestartAndRevalidatesSource` 连跑 200 次失败 175 次，`TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit` 100 次失败 95 次（2026-11-19，[#582](https://github.com/zhongwater123/A-NAS/issues/582)）；CI 通过，较可能是运行器的内核或速度使 ctime 前进。两个测试改为由 `smbEdit` 模拟修改，重复恢复 mtime，直到 ctime 越过旧版本，所验证的仍是“大小与 mtime 不变、ctime 改变时必须重新生成”。
+测试原本从创建文件到模拟 SMB 修改不到 1 ms，ctime 没有变化：macOS 开发机的 Colima 虚拟机（Ubuntu 24.04 arm64，内核 6.8，`CONFIG_HZ=1000`）上，`TestPersistentPreviewSurvivesRestartAndRevalidatesSource` 连跑 200 次失败 175 次，`TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit` 100 次失败 95 次（2026-11-19，[#582](https://github.com/zhongwater123/A-NAS/issues/582)）；CI 通过，较可能是运行器的内核或速度使 ctime 前进。两个测试改为由 `smbEdit` 模拟修改，重复恢复 mtime，直到预览的缓存键变化，所验证的仍是“大小与 mtime 不变、ctime 改变时必须重新生成”。
 
 ## 验证
 

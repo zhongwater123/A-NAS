@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -85,20 +84,26 @@ func fixture(t *testing.T, name string) (*Service, *sourceStub, *workerStub) {
 }
 
 // smbEdit rewrites path with same-size content and restores its mtime, as an
-// SMB client may. Kernels without fine-grained timestamps (before Linux 6.13)
-// stamp every change within one clock tick with the same ctime, which stat
-// cannot tell apart, so keep touching until ctime moves past the old revision.
+// SMB client may, so that only ctime tells the revisions apart. Before Linux
+// 6.13 ctime moves once per clock tick (docs/investigations/
+// 2026-10-14-file-preview-cache.md), so it restores mtime until the preview's
+// revision key moves.
 func smbEdit(t *testing.T, path string) {
 	t.Helper()
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("SMB edit"), 0600); err != nil {
+	edit := []byte("SMB edit")
+	if int64(len(edit)) != before.Size() {
+		t.Fatalf("edit is %d bytes; the source has %d", len(edit), before.Size())
+	}
+	if err := os.WriteFile(path, edit, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctime := func(info os.FileInfo) int64 { return info.Sys().(*syscall.Stat_t).Ctim.Nano() }
-	for deadline := time.Now().Add(time.Second); ; time.Sleep(time.Millisecond) {
+	key := func(info os.FileInfo) string { return revisionKey("", "", "", 0, info) }
+	deadline := time.Now().Add(time.Second)
+	for {
 		if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
 			t.Fatal(err)
 		}
@@ -106,17 +111,19 @@ func smbEdit(t *testing.T, path string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if after.Size() != before.Size() {
-			t.Fatalf("edit size=%d; want %d", after.Size(), before.Size())
+		if !after.ModTime().Equal(before.ModTime()) {
+			t.Fatalf("mtime = %v; want %v", after.ModTime(), before.ModTime())
 		}
-		if ctime(after) != ctime(before) {
+		if key(after) != key(before) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("ctime did not advance")
+			t.Fatal("the revision key did not move within a second")
 		}
+		time.Sleep(time.Millisecond)
 	}
 }
+
 func TestPreviewRechecksAccessAndFileIdentityBeforeCacheHit(t *testing.T) {
 	service, source, worker := fixture(t, "photo.HEIC")
 	ctx := context.Background()
