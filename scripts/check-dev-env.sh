@@ -66,29 +66,15 @@ if command -v python3 >/dev/null 2>&1; then
   fi
 fi
 
-# make check runs these tools only at the versions the repository pins, and
-# fails on any other: the Makefile pins ShellCheck and lychee,
-# ai/requirements-dev.txt zizmor (as the Makefile's ops-check reads it).
-printf '\nPinned check tools:\n'
-pinned() { # NAME WANT HAVE
-  if [[ -n "$2" && "$3" == "$2" ]]; then
-    printf '  [ok]      %s %s\n' "$1" "$2"
-  else
-    printf '  [missing] %s %s (found: %s)\n' "$1" "${2:-?}" "${3:-none}"
-    missing=1
-  fi
-}
-pinned shellcheck "$(sed -n 's/^SHELLCHECK_VERSION = //p' "$project_root/Makefile")" \
-  "$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"
-pinned lychee "$(sed -n 's/^LYCHEE_VERSION = //p' "$project_root/Makefile")" \
-  "$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"
-pinned zizmor "$(sed -n 's/^zizmor==\([0-9.]*\).*/\1/p' "$project_root/ai/requirements-dev.txt")" \
-  "$(zizmor --version 2>/dev/null | cut -d ' ' -f 2)"
-# vuln-check audits the AI and search runtimes with pip-audit.
-if command -v pip-audit >/dev/null 2>&1; then
+# The pinned versions of ShellCheck, lychee, zizmor and Ruff are checked where
+# the Makefile reads the pins, in the first steps of make check (docs-check,
+# ops-check, ai-lint). pip-audit has no such check, and vuln-check, which runs
+# it, comes late in the run; PIP_AUDIT names it as for make.
+printf '\nAudit tool:\n'
+if command -v "${PIP_AUDIT:-pip-audit}" >/dev/null 2>&1; then
   printf '  [ok]      pip-audit\n'
 else
-  printf '  [missing] pip-audit (ai/requirements-dev.txt)\n'
+  printf '  [missing] pip-audit (ai/requirements-dev.txt; make vuln-check runs it)\n'
   missing=1
 fi
 

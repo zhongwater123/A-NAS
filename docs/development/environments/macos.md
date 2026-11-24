@@ -38,8 +38,8 @@ colima start anas --cpu 6 --memory 8 --disk 60 --vm-type vz --mount-type virtiof
 - Go 与 Node.js 从官方地址下载 linux-arm64 包，按官方公布的 SHA-256 核对。
 - ShellCheck 用 GitHub 发布的 `shellcheck-v0.11.0.linux.aarch64.tar.xz`，SHA-256 为 `12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588`。
 - Ruff、pip-audit、zizmor 与 uv 按[静态检查](../testing.md#静态检查)的命令装进 `~/.local/opt` 下的 venv：`ops-check` 需要 zizmor，`vuln-check` 需要 pip-audit，版本都以 `ai/requirements-dev.txt` 为准。
-- lychee 按[静态检查](../testing.md#静态检查)下载同一发布中的 `lychee-aarch64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后放进 `~/.local/opt/lychee`。
-- 以上各目录（venv 的是其 `bin`）都写进虚拟机的 `~/.anas-env`，加入 `PATH`。在副本中运行 `bash scripts/check-dev-env.sh` 确认：它核对 ShellCheck、lychee 与 zizmor 的固定版本、pip-audit、Qdrant 与 binfmt，以及剩余磁盘空间。
+- lychee 按[静态检查](../testing.md#静态检查)中虚拟机的那一句安装，按其中的 SHA-256 核对。
+- 以上各目录（venv 的是其 `bin`）都写进虚拟机的 `~/.anas-env`，加入 `PATH`。在副本中运行 `bash scripts/check-dev-env.sh` 确认。
 
 镜像拉不下来时，可以从已有该镜像的虚拟机复制：`docker --context <来源> save <镜像> | docker --context colima-anas load`。
 
@@ -47,7 +47,7 @@ colima start anas --cpu 6 --memory 8 --disk 60 --vm-type vz --mount-type virtiof
 
 `deploy/qdrant/qdrant.json` 只固定了 Linux x86_64 的静态链接版。虚拟机装了 qemu-user-static，经 binfmt 以用户态模拟运行它，测试用的仍是清单所列的同一个二进制（2026-11-19 在虚拟机中：`qdrant --version` 输出 1.20.0，`internal/vectorindex` 的测试在 `ANAS_QDRANT_REQUIRED=1` 下通过）。下面的入口在副本中用 `scripts/fetch-qdrant.sh` 取得它，并像 CI 一样设 `ANAS_QDRANT_REQUIRED=1`，缺少时失败。Qdrant 的版本、路径和强制检查规则见[测试依赖](../testing.md#qdrant-测试依赖)；不要通过取消 `ANAS_QDRANT_REQUIRED` 来报告完整门禁通过。
 
-虚拟机的 60 GiB 数据盘只挂在 `/var/lib/docker`；`~/anas-check` 所在的根分区约 19 GiB，其他会话的副本也在那里。完整门禁需要约 20 GiB 空闲，环境检查不足时给出警告；用完的副本及时删除。
+虚拟机的 60 GiB 数据盘只挂在 `/var/lib/docker`；`~/anas-check` 所在的根分区约 19 GiB，其他会话的副本也在那里。空闲不够完整门禁时，环境检查会警告；用完的副本及时删除。
 
 在检出根目录运行；再次运行只同步改动：
 
@@ -63,11 +63,11 @@ cd "$dst"
 # The vector index tests run the pinned Qdrant, as in CI.
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
-if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+if make -k check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 
-`make check-steps` 在第一个失败处停止；要一次看到全部失败，换成 `make -k check-steps`（`make check` 本身就这样运行）。只跑部分检查时，换成 `make docs-check` 等独立目标；记录实际执行的目标，不将部分检查记为完整通过。
+`-k` 让一次运行报出全部失败的步骤。只跑部分检查时，换成 `make docs-check` 等独立目标；记录实际执行的目标，不将部分检查记为完整通过。
 
 ## Fake 预览
 
