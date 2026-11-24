@@ -1,6 +1,6 @@
 # AI 开发与评估
 
-更新时间：2026-11-11
+更新时间：2026-11-24
 
 本文记录相册 AI 的模型拉取、模型测试、运行环境打包、数据集与评估命令。以下路径示例以开发机 B 为准；macOS 的模型位置和导出限制见[开发机 C](environments/macos.md)。普通门禁与服务隔离检查见[测试与验证](testing.md)，实验 NAS 上启用 AI 使用[运行手册](../runbooks/enable-photo-ai.md)。
 
@@ -21,6 +21,31 @@ scripts/fetch-models.sh --publish /mnt/d/A-NAS-models deploy/models/<名称>.jso
 ```
 
 上传前同样核对哈希。新模型的目录先加进脚本里的 `layout`。仓库开启了不可变 Release，发布后不能改动，换文件就是新的 SHA-256 和新的 Release。上传中断会留下草稿 Release，在 GitHub 上删除后重跑。
+
+## 模型交付
+
+新增或更换模型时，提交者在 PR 中链接 `deploy/models/` 下的清单，由清单记录来源、版本、文件大小、SHA-256 和允许的分发范围。自行转换权重时固定转换代码的版本，引入新运行时时说明现有运行时缺少哪项能力。开发服务器上的工作目录可以供评审临时读取。交给发版人员时，提供能按清单重取的 `A-NAS-assets` Release。
+
+从空目录用 `scripts/fetch-models.sh DIR MANIFEST` 重新拉取，确认大小与哈希通过，再用产品实际的加载器处理一个最小输入。PR 中留下命令、结果及仍待实机验证的项目。进入常规发行版的模型还要说明内容包及安装验证入口。`A-NAS-dist` 用于分发已构建的签名软件源，常规发布渠道见[部署手册](../runbooks/deploy-a-nas-packages.md)。
+
+例如，美学打分模型只供内部验收。先激活按 [AI 依赖锁](../../ai/requirements.txt)安装的 Python 环境，再从仓库根目录运行以下命令。下载脚本按[打分器清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)校验 tar 包。解包后，测试从 `ANAS_AI_SCORER` 指向的目录读取 `MANIFEST.json` 和权重。
+
+```bash
+(
+  set -eu
+  model_root=$(mktemp -d)
+  manifest=deploy/models/qwen35-4b-aesthetic-scorer.json
+  scripts/fetch-models.sh "$model_root" "$manifest"
+  download_dir="$model_root/aesthetic/qwen35-4b-aesthetic-scorer"
+  tar -xf "$download_dir/$(jq -er '.file' "$manifest")" -C "$download_dir"
+  export ANAS_AI_SCORER="$download_dir/$(jq -er '.directory' "$manifest")"
+  test -f "$ANAS_AI_SCORER/MANIFEST.json"
+  cd ai
+  python -m unittest discover -v -s tests -p test_scorer_model.py
+)
+```
+
+测试输出应显示真实打分用例执行并通过。独立模型包的构建与分发范围见[美学打分](../architecture/photo-ai.md#美学打分)。
 
 ## 模型测试与运行环境
 

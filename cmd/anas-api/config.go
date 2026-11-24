@@ -157,9 +157,9 @@ type AssistantConfig struct {
 	// their tokens; a NAS always connects through the File Broker's session
 	// gate (decision 10).
 	TokenDir string `env:"ANAS_ASSISTANT_TOKEN_DIR"`
-	// SpikeBrokerSocket is the spike's change broker
-	// (ai/assistant-spike/change_broker.py), which executes the assistant's
-	// changes in development; a NAS uses the File Broker.
+	// SpikeBrokerSocket is the product socket of the spike's change broker
+	// (ai/assistant-spike/broker-spike), which runs the File Broker's executor
+	// of the assistant's changes in development; a NAS uses the File Broker.
 	SpikeBrokerSocket string `env:"ANAS_ASSISTANT_SPIKE_BROKER_SOCKET"`
 }
 

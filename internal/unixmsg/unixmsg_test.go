@@ -86,8 +86,15 @@ func TestAMessageCarriesSeveralDescriptorsInOrder(t *testing.T) {
 	if received, err := ReadFiles(right, &got, 1024, 2); !errors.Is(err, ErrTooManyFiles) || received != nil {
 		t.Fatalf("ReadFiles() of three descriptors = %v, %v", received, err)
 	}
-	// A refused message is not read to its end; the connection is done.
-	left, right = pair(t)
+	// A refused message is still read to its end, so a sender that writes
+	// its body after the refusal is decided is not cut off, and the next
+	// message on the connection reads as sent.
+	if err := Write(left, note{Text: "after"}, nil, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := Read(right, &got, 1024); err != nil || file != nil || got.Text != "after" {
+		t.Fatalf("Read() after a refused message = %v, %+v, %v", file, got, err)
+	}
 	// Read keeps the first of several, as before. (A passed descriptor
 	// shares its offset: the two read above are at their end.)
 	if err := WriteFiles(left, note{Text: "first"}, []*os.File{files[2], files[0]}, 1024); err != nil {

@@ -119,7 +119,7 @@ func (input *BatchInput) normalize() error {
 	}
 	switch {
 	case !input.Scale.valid():
-		return invalid("scale must be hundredths, tenths, whole or three")
+		return invalid("scale must be five, hundredths, tenths, whole or three")
 	case input.HideDecimals && !input.Scale.HasDecimals():
 		return invalid("only a scale with decimals can hide them")
 	}

@@ -1,8 +1,9 @@
-import { Ellipsis, Play, X } from "lucide-react";
+import { Ellipsis, Play } from "lucide-react";
 import { motion } from "motion/react";
-import { Dialog, DropdownMenu } from "radix-ui";
+import { DropdownMenu } from "radix-ui";
 import { type ReactNode, useState } from "react";
 
+import { scrollInside } from "../lib/scroll";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { person, usePeople } from "../people/people";
 import { thumbnailURL } from "../photos/api";
@@ -11,63 +12,6 @@ import { memberOf, useFamily } from "./context";
 import styles from "./family.module.css";
 import { monthLabel } from "./format";
 import { Lightbox, photoLayout } from "./Lightbox";
-
-// Modal is a dialog inside the family window. It stays in the window, as the
-// desktop's other in-window dialogs do, so the rest of the desktop keeps
-// working; Escape and the close button end it unless it is busy.
-export function Modal({
-  title,
-  busy,
-  wide,
-  large,
-  onClose,
-  children,
-  footer,
-}: {
-  title: string;
-  busy?: boolean;
-  wide?: boolean;
-  // large holds a grid of photos, which scrolls on its own.
-  large?: boolean;
-  onClose: () => void;
-  children: ReactNode;
-  footer?: ReactNode;
-}) {
-  const { container } = useFamily();
-  return (
-    <Dialog.Root
-      open
-      modal={false}
-      onOpenChange={(open) => {
-        if (!open && !busy) onClose();
-      }}
-    >
-      <Dialog.Portal container={container.current}>
-        <div
-          className={styles.fcBackdrop}
-          aria-hidden="true"
-          onPointerDown={() => {
-            if (!busy) onClose();
-          }}
-        />
-        <Dialog.Content
-          className={`${styles.fcModal} ${wide ? styles.wide : ""} ${large ? styles.large : ""}`}
-          aria-describedby={undefined}
-          onInteractOutside={(event) => event.preventDefault()}
-        >
-          <header className={styles.fcModalHead}>
-            <Dialog.Title>{title}</Dialog.Title>
-            <Dialog.Close className={styles.fcIconButton} aria-label="关闭" disabled={busy}>
-              <X size={17} />
-            </Dialog.Close>
-          </header>
-          <div className={styles.fcModalBody}>{children}</div>
-          {footer && <footer className={styles.fcModalFoot}>{footer}</footer>}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
 
 // MonthTitle is a month of life as a section heading: “7 个月”, and “1 岁”
 // over “2 个月” where the column is too narrow for both.
@@ -87,16 +31,10 @@ export function scrollerOf(element: Element | null): HTMLElement | null {
 }
 
 // scrollWithin scrolls the board so an element sits near the top of the
-// view, or at a share `at` of its height, without scrolling the window or
-// the desktop around it as scrollIntoView would.
+// view, or at a share `at` of its height (lib/scroll).
 export function scrollWithin(element: HTMLElement, smooth: boolean, at = 0) {
   const container = scrollerOf(element);
-  if (!container?.scrollTo) return;
-  const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
-  container.scrollTo({
-    top: container.scrollTop + offset - 16 - at * container.clientHeight,
-    behavior: smooth ? "smooth" : "auto",
-  });
+  if (container) scrollInside(container, element, smooth, at);
 }
 
 // Mosaic lays a record's photos out as one picture: a single photo large,

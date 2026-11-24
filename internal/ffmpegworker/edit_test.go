@@ -3,6 +3,7 @@ package ffmpegworker
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
+	"golang.org/x/sys/unix"
 )
 
 func TestEditingRequestsAreBoundedBeforeFFmpegRuns(t *testing.T) {
@@ -234,6 +236,45 @@ func TestEditingRequestsRefuseFieldsTheyDoNotKnow(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("FFmpeg ran for a refused request")
+	}
+}
+
+// A worker refuses a request with too many descriptors only after reading
+// it to its end. The client sends the length and descriptors first and the
+// body after; a worker that answered and closed in between failed the
+// body's write with a broken pipe, and the client reported the worker
+// unavailable instead of the refusal.
+func TestAWorkerReadsARefusedRequestBeforeAnswering(t *testing.T) {
+	local := Local{Tools: Tools{FFmpeg: script(t, "cat")}}
+	conn, err := local.connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	body, err := unixmsg.Encode(map[string]any{"op": OpAssemble, "ack": true, "frames": 30}, maxFrame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var descriptors []int
+	for _, contents := range []string{"video", "song", "extra"} {
+		descriptors = append(descriptors, int(openFile(t, contents).Fd()))
+	}
+	// The first half of what unixmsg.WriteBodyFiles sends.
+	header := binary.BigEndian.AppendUint32(nil, uint32(len(body)))
+	if _, _, err := conn.WriteMsgUnix(header, unix.UnixRights(descriptors...), nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if n, err := conn.Read(make([]byte, 1)); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("before the body arrived the worker sent %d bytes, %v", n, err)
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	if _, err := conn.Write(body); err != nil {
+		t.Fatalf("write body after the descriptors: %v", err)
+	}
+	var response Response
+	if _, err := readFrame(conn, &response); err != nil || response.Code != CodeInvalid {
+		t.Fatalf("response = %+v, %v, want %s", response, err, CodeInvalid)
 	}
 }
 
