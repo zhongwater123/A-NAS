@@ -209,11 +209,12 @@ type storedDescription struct {
 	result   string
 	failure  string
 	identity string
+	release  string
 }
 
 func (f describeFixture) descriptions(t *testing.T) []storedDescription {
 	t.Helper()
-	rows, err := catalog(t, f.root).Query("SELECT card, IFNULL(result, ''), error, identity FROM video_card_descriptions ORDER BY card")
+	rows, err := catalog(t, f.root).Query("SELECT card, IFNULL(result, ''), error, identity, IFNULL(written_release, '') FROM video_card_descriptions ORDER BY card")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,7 @@ func (f describeFixture) descriptions(t *testing.T) []storedDescription {
 	var found []storedDescription
 	for rows.Next() {
 		var d storedDescription
-		if err := rows.Scan(&d.card, &d.result, &d.failure, &d.identity); err != nil {
+		if err := rows.Scan(&d.card, &d.result, &d.failure, &d.identity, &d.release); err != nil {
 			t.Fatal(err)
 		}
 		found = append(found, d)
@@ -870,158 +871,130 @@ func TestDescriptionsAreMadeOnceWhenAGrantWentAndAnotherCame(t *testing.T) {
 	}
 }
 
-// A card that failed before the Worker fitted key frames into the reader's
-// context (#583) has an identity without fit=: after the upgrade's
-// migration it is stale, and the restart's first handshake queues it for a
-// video a grant still refers to. A card described before keeps its
-// description under the new identity and is not asked about again.
-func TestDescriptionsFailedBeforeFrameFittingAreDescribedAgain(t *testing.T) {
-	for _, revoked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "granted", true: "revoked"}[revoked], func(t *testing.T) {
-			f := newDescribeFixture(t)
-			f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
-				switch call {
-				case 1:
-					return json.RawMessage(`{"camera":"地面","summary":"湖边"}`), nil
-				case 2:
-					return nil, fmt.Errorf("%w: llama-server answered 400: the request exceeds the available context size", photos.ErrAIRejected)
-				}
-				return json.RawMessage(`{"camera":"地面","summary":"山顶"}`), nil
-			}
-			f.cards(t, []standInCard{
-				{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
-				{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
-			})
-			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
-				t.Fatalf("%d rounds, %d descriptions", rounds, f.embedder.calls())
-			}
-			before := f.descriptions(t)
-			if len(before) != 2 || before[0].result == "" || before[1].result != "" || !strings.Contains(before[1].identity, ",fit=1|") {
-				t.Fatalf("descriptions = %+v", before)
-			}
-			// The Catalog as the build before fit= left it.
-			db := catalog(t, f.root)
-			for _, statement := range []string{
-				"UPDATE video_card_descriptions SET identity = replace(identity, ',fit=1|', '|')",
-				"DELETE FROM schema_downgrades WHERE version = 22",
-				"PRAGMA user_version = 21",
-			} {
-				if _, err := db.Exec(statement); err != nil {
-					t.Fatalf("%s: %v", statement, err)
-				}
-			}
-			if revoked {
-				if err := f.service.RevokeGrant(t.Context(), f.grant.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
+// describedUnder describes two cards under release, the second failing as
+// a card with too many key frames for the reader's context did (#583).
+func describedUnder(t *testing.T, f *describeFixture, release string) []storedDescription {
+	t.Helper()
+	f.release = release
+	f.restart(t)
+	processAI(t, f.service, f.embedder, f.gate)
+	f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
+		if call == 2 {
+			return nil, fmt.Errorf("%w: llama-server answered 400: the request exceeds the available context size", photos.ErrAIRejected)
+		}
+		return json.RawMessage(`{"camera":"地面","summary":"湖边"}`), nil
+	}
+	f.cards(t, []standInCard{
+		{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
+		{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
+	})
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
+		t.Fatalf("%d rounds, %d descriptions", rounds, f.embedder.calls())
+	}
+	described := f.descriptions(t)
+	if len(described) != 2 || described[0].result == "" || described[1].result != "" || described[1].failure == "" ||
+		described[1].release != release {
+		t.Fatalf("descriptions = %+v", described)
+	}
+	f.embedder.answer = func(int, photos.CardLayout) (json.RawMessage, error) {
+		return json.RawMessage(`{"camera":"地面","summary":"山顶"}`), nil
+	}
+	return described
+}
 
-			f.restart(t)
-			migrated := f.descriptions(t)
-			if len(migrated) != 2 || migrated[0] != before[0] || strings.Contains(migrated[1].identity, "fit=") {
-				t.Fatalf("after the migration = %+v, want card 0 as before %+v and card 1 under the old identity", migrated, before[0])
-			}
-			rounds := processAI(t, f.service, f.embedder, f.gate)
-			if revoked {
-				// The video no grant refers to is not described again.
-				if rounds != 0 || f.embedder.calls() != 2 || f.montageJobs(t) != 0 {
-					t.Fatalf("revoked: %d rounds, %d descriptions in all, %d montage jobs", rounds, f.embedder.calls(), f.montageJobs(t))
-				}
-				// A new grant asks for its analysis, which describes the stale card.
-				f.grant, _ = f.montageFixture.grant(t, namedAlice, "project:again", f.video)
-				processAI(t, f.service, f.embedder, f.gate)
-			} else if rounds != 1 {
-				t.Fatalf("after the restart: %d rounds", rounds)
-			}
-			if f.embedder.calls() != 3 {
-				t.Fatalf("%d descriptions in all, want only the failed card again", f.embedder.calls())
-			}
-			stored := f.descriptions(t)
-			if len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") || stored[1].identity != before[0].identity {
-				t.Fatalf("stored = %+v", stored)
-			}
-			analysis, err := f.analysis(t)
-			if err != nil || analysis.Described != photos.AnalysisDone || analysis.DescriptionsIdentity != before[0].identity ||
-				len(analysis.Descriptions) != 2 || analysis.Descriptions[0].Description == nil || analysis.Descriptions[1].Description == nil {
-				t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
-			}
+// Each release tries once more the cards whose description failed under
+// another, for how it fits key frames or asks about them may now get them
+// through (#583). The cards described stay as they are; another start of
+// the same release asks about nothing.
+func TestAnUpdateTriesTheFailedDescriptionsOnce(t *testing.T) {
+	f := newDescribeFixture(t)
+	before := describedUnder(t, &f, "1.0.0")
 
-			// The same fitting asks about nothing again.
-			f.restart(t)
-			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 3 {
-				t.Fatalf("after another restart: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
-			}
-		})
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
+		t.Fatalf("the same release again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+	}
+
+	f.release = "1.0.1"
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 1 || f.embedder.calls() != 3 {
+		t.Fatalf("the update: %d rounds, %d descriptions in all, want only the failed card again", rounds, f.embedder.calls())
+	}
+	stored := f.descriptions(t)
+	if len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") || stored[1].failure != "" ||
+		stored[1].release != "1.0.1" {
+		t.Fatalf("stored = %+v, want card 0 as before %+v", stored, before[0])
+	}
+	analysis, err := f.analysis(t)
+	if err != nil || analysis.Described != photos.AnalysisDone || analysis.DescriptionsIdentity != before[0].identity ||
+		len(analysis.Descriptions) != 2 || analysis.Descriptions[1].Description == nil {
+		t.Fatalf("AnalysisOfGrant() = %+v, %v", analysis, err)
+	}
+
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 3 {
+		t.Fatalf("the update again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
 	}
 }
 
-// Each release tries once more the cards whose description failed, for how
-// it fits key frames or asks may now get them through, and no one has to
-// remember to say so (#583). The cards described stay; another start of the
-// same release, or a video no grant refers to, is not asked about again.
-func TestAnUpdateTriesTheFailedDescriptionsOnce(t *testing.T) {
-	for _, revoked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "granted", true: "revoked"}[revoked], func(t *testing.T) {
-			f := newDescribeFixture(t)
-			f.release = "1.0.0"
-			f.restart(t)
-			processAI(t, f.service, f.embedder, f.gate)
-			f.embedder.answer = func(call int, _ photos.CardLayout) (json.RawMessage, error) {
-				if call == 2 {
-					return nil, fmt.Errorf("%w: llama-server answered 400: the request exceeds the available context size", photos.ErrAIRejected)
-				}
-				return json.RawMessage(`{"camera":"地面","summary":"湖边"}`), nil
-			}
-			f.cards(t, []standInCard{
-				{start: 0, end: 10000, keyframes: []float64{1, 5, 9}, reasons: "[]"},
-				{start: 10000, end: 20000, keyframes: []float64{11, 15, 19}, reasons: "[]"},
-			})
-			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
-				t.Fatalf("%d rounds, %d descriptions", rounds, f.embedder.calls())
-			}
-			before := f.descriptions(t)
-			if len(before) != 2 || before[0].result == "" || before[1].result != "" || before[1].failure == "" {
-				t.Fatalf("descriptions = %+v", before)
-			}
+// A video no grant refers to when a release starts keeps its failed card;
+// a grant that asks for it again tries the card under that release, as it
+// would a stale one, and the lookup does not call the video described
+// before then.
+func TestARegrantTriesTheFailedDescriptionsOfAnotherRelease(t *testing.T) {
+	f := newDescribeFixture(t)
+	before := describedUnder(t, &f, "1.0.0")
+	if err := f.service.RevokeGrant(t.Context(), f.grant.ID); err != nil {
+		t.Fatal(err)
+	}
 
-			// Another start of the same release asks about nothing.
-			f.restart(t)
-			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
-				t.Fatalf("the same release again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
-			}
-			if revoked {
-				if err := f.service.RevokeGrant(t.Context(), f.grant.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
+	f.release = "1.0.1"
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 || f.montageJobs(t) != 0 {
+		t.Fatalf("revoked: %d rounds, %d descriptions in all, %d montage jobs", rounds, f.embedder.calls(), f.montageJobs(t))
+	}
+	if stored := f.descriptions(t); len(stored) != 2 || stored[1] != before[1] {
+		t.Fatalf("revoked: stored = %+v", stored)
+	}
 
-			f.embedder.answer = func(int, photos.CardLayout) (json.RawMessage, error) {
-				return json.RawMessage(`{"camera":"地面","summary":"山顶"}`), nil
-			}
-			f.release = "1.0.1"
-			f.restart(t)
-			rounds := processAI(t, f.service, f.embedder, f.gate)
-			stored := f.descriptions(t)
-			if revoked {
-				// No grant refers to the video: its failed card waits as it was.
-				if rounds != 0 || f.embedder.calls() != 2 || len(stored) != 2 || stored[1] != before[1] {
-					t.Fatalf("revoked: %d rounds, %d descriptions in all, stored %+v", rounds, f.embedder.calls(), stored)
-				}
-				return
-			}
-			if rounds != 1 || f.embedder.calls() != 3 {
-				t.Fatalf("the update: %d rounds, %d descriptions in all, want only the failed card again", rounds, f.embedder.calls())
-			}
-			if len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") || stored[1].failure != "" {
-				t.Fatalf("stored = %+v, want card 0 as before %+v", stored, before[0])
-			}
+	f.grant, _ = f.montageFixture.grant(t, namedAlice, "project:again", f.video)
+	if state := f.lookup(t).Descriptions; state == photos.AnalysisDone {
+		t.Fatalf("descriptions with a card failed under the last release = %q", state)
+	}
+	processAI(t, f.service, f.embedder, f.gate)
+	if f.embedder.calls() != 3 {
+		t.Fatalf("%d descriptions in all, want only the failed card again", f.embedder.calls())
+	}
+	if stored := f.descriptions(t); len(stored) != 2 || stored[0] != before[0] || !strings.Contains(stored[1].result, "山顶") {
+		t.Fatalf("stored = %+v", stored)
+	}
+	if state := f.lookup(t).Descriptions; state != photos.AnalysisDone {
+		t.Fatalf("descriptions after the retry = %q", state)
+	}
+}
 
-			// Its next start, and a card that fails again under it, wait for
-			// the release after.
-			f.restart(t)
-			if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 3 {
-				t.Fatalf("the update again: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
-			}
-		})
+// The failures written before descriptions recorded their release are
+// tried once by the first release that does; without a release, as in
+// development and Fake mode, no failure is tried again.
+func TestFailuresWithoutARecordedReleaseAreTriedOnce(t *testing.T) {
+	f := newDescribeFixture(t)
+	before := describedUnder(t, &f, "")
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 0 || f.embedder.calls() != 2 {
+		t.Fatalf("without a release: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+	}
+	if _, err := catalog(t, f.root).Exec("UPDATE video_card_descriptions SET written_release = NULL"); err != nil {
+		t.Fatal(err)
+	}
+
+	f.release = "1.0.0"
+	f.restart(t)
+	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 1 || f.embedder.calls() != 3 {
+		t.Fatalf("the first release with the column: %d rounds, %d descriptions in all", rounds, f.embedder.calls())
+	}
+	stored := f.descriptions(t)
+	if len(stored) != 2 || stored[0].result != before[0].result || stored[0].release != "" ||
+		!strings.Contains(stored[1].result, "山顶") || stored[1].release != "1.0.0" {
+		t.Fatalf("stored = %+v", stored)
 	}
 }

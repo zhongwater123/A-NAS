@@ -988,9 +988,7 @@ class LlamaReader:
         exactly as the prototype asks. Should the estimate be too low, the
         server refuses the prompt or the context cuts the answer short
         (InvalidInput): the card goes undescribed until the next release,
-        whose first start tries the cards that failed once more. Bump fit= in
-        the NAS's description identity (internal/photos/montagedescribe.go)
-        only when the cards described before should be described again.
+        which tries the cards that failed once more.
         """
         if any(not data for data in frames):
             raise InvalidInput("empty image")

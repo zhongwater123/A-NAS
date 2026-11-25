@@ -600,20 +600,14 @@ CREATE TABLE montage_films (
 `, Down: `
 DROP TABLE montage_films;
 `},
-	// 22: card descriptions name how the Worker fits key frames into the
-	// reader's context (fit=1, #583). A description that succeeded before
-	// had all its key frames fit, which the fitting asks about unchanged,
-	// so it moves to the new identity. A failed one, possibly from frames
-	// the context could not hold, keeps the old identity: it is stale, and
-	// the AI runner queues it again for a video a grant still refers to.
+	// 22: the release that wrote each card description. A description that
+	// failed under another release is tried again (staleFailure); those
+	// written before this step have none, so the first release with it
+	// tries the failures it found once.
 	{Up: `
-UPDATE video_card_descriptions
-   SET identity = replace(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|', '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|')
- WHERE result IS NOT NULL AND instr(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|') > 0;
+ALTER TABLE video_card_descriptions ADD COLUMN written_release TEXT;
 `, Down: `
-UPDATE video_card_descriptions
-   SET identity = replace(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|', '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1|')
- WHERE instr(identity, '|tpl=montage-card/v1,genre=TRAVEL,frame=w512q3,mask=1,fit=1|') > 0;
+ALTER TABLE video_card_descriptions DROP COLUMN written_release;
 `},
 }
 

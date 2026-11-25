@@ -30,15 +30,9 @@ const (
 	describeTemplate = "montage-card/v1"
 	// describeIdentitySuffix is what a description is besides the reader
 	// and the cards: the template and its genre, the key frames (512 wide,
-	// FFmpeg quality 3, the prototype's stills), the version of the
-	// number filter, which textread does not version itself, and the
-	// version of how the Worker fits the key frames into the reader's
-	// context (anas_ai.describe.fitting), which the reader's name does not
-	// carry either. Bump fit= only when the cards described before should
-	// be described again: the cards that failed are tried once more by every
-	// release anyway (aiRunner.requeueStale, workerRecord.DescribedRelease).
-	// Catalog migration 22 moved the cards described before fit= to fit=1.
-	describeIdentitySuffix = "|tpl=" + describeTemplate + ",genre=TRAVEL,frame=w512q3,mask=1,fit=1"
+	// FFmpeg quality 3, the prototype's stills) and the version of the
+	// number filter, which textread does not version itself.
+	describeIdentitySuffix = "|tpl=" + describeTemplate + ",genre=TRAVEL,frame=w512q3,mask=1"
 )
 
 // AnalysisUnavailable says the analysis waits for a local model the AI
@@ -71,6 +65,15 @@ func (s *Service) queueDescribe(ctx context.Context, tx *sql.Tx, object string) 
 // described. The same predicates are used for lookup and requeue.
 const eligibleQuality = "json_type(q.result, '$.reasons') = 'array' AND json_array_length(q.result, '$.reasons') = 0"
 
+// staleFailure is a card whose description failed under another release
+// (its two arguments are this release, twice), which is described again as
+// a stale one is: a release may change how the Worker fits a card's key
+// frames or asks about them, and so let it through (#583). Each release
+// tries such a card once, since its failure then records this release; the
+// cards described stay as they are. Without a release (development, Fake
+// mode) no failure is tried again.
+const staleFailure = "(d.result IS NULL AND ? <> '' AND d.written_release IS NOT ?)"
+
 func (r *aiRunner) descriptionReader() (reader string, unavailable bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,15 +85,16 @@ func (r *aiRunner) descriptionReader() (reader string, unavailable bool) {
 func (s *Service) fillDescriptionProgress(ctx context.Context, progress map[string]analysisProgress, in string, objects []any) error {
 	reader, unavailable := s.ai.descriptionReader()
 	return s.eachRow(ctx, `SELECT m.object_id, m.quality_identity, COALESCE(j.state, ''),
-        COUNT(q.card), COUNT(d.identity), COALESCE(MIN(d.identity), ''), COALESCE(MAX(d.identity), '')
+        COUNT(q.card), COUNT(d.identity), COALESCE(MIN(d.identity), ''), COALESCE(MAX(d.identity), ''),
+        COUNT(CASE WHEN `+staleFailure+` THEN 1 END)
         FROM montage_card_results m
         LEFT JOIN jobs j ON j.object_id = m.object_id AND j.derivation = ?
         LEFT JOIN video_card_quality q ON q.object_id = m.object_id AND q.identity = m.quality_identity AND `+eligibleQuality+`
         LEFT JOIN video_card_descriptions d ON d.object_id = q.object_id AND d.card = q.card
-        WHERE m.object_id IN (`+in+`) GROUP BY m.object_id`, append([]any{describeDerivation}, objects...), func(rows *sql.Rows) error {
+        WHERE m.object_id IN (`+in+`) GROUP BY m.object_id`, append([]any{s.release, s.release, describeDerivation}, objects...), func(rows *sql.Rows) error {
 		var object, input, job, first, last string
-		var eligible, described int
-		if err := rows.Scan(&object, &input, &job, &eligible, &described, &first, &last); err != nil {
+		var eligible, described, stale int
+		if err := rows.Scan(&object, &input, &job, &eligible, &described, &first, &last, &stale); err != nil {
 			return err
 		}
 		p := progress[object]
@@ -106,7 +110,7 @@ func (s *Service) fillDescriptionProgress(ctx context.Context, progress map[stri
 			p.described = AnalysisUnavailable
 		case job != "":
 			p.described = montageStageState(job, "")
-		case eligible == described && first == last && (first == identity || reader == "" && strings.HasSuffix(first, identity)):
+		case eligible == described && stale == 0 && first == last && (first == identity || reader == "" && strings.HasSuffix(first, identity)):
 			p.described, p.descriptionIdentity, p.describedCount = AnalysisDone, first, described
 		}
 		progress[object] = p
@@ -155,8 +159,8 @@ func (s *Service) nextDescription(ctx context.Context, object, reader string) (*
 		FROM video_cards c JOIN video_card_quality q USING (object_id, card)
 		JOIN montage_card_results m ON m.object_id = c.object_id AND m.cards_identity = c.identity AND m.quality_identity = q.identity
 		LEFT JOIN video_card_descriptions d ON d.object_id = c.object_id AND d.card = c.card
-		WHERE c.object_id = ? AND `+eligibleQuality+` AND (d.identity IS NULL OR d.identity <> ? || q.identity)
-		ORDER BY c.card LIMIT 2`, object, describeIdentity(reader, ""))
+		WHERE c.object_id = ? AND `+eligibleQuality+` AND (d.identity IS NULL OR d.identity <> ? || q.identity OR `+staleFailure+`)
+		ORDER BY c.card LIMIT 2`, object, describeIdentity(reader, ""), s.release, s.release)
 	if err != nil {
 		return nil, false, err
 	}
@@ -414,10 +418,10 @@ func (s *Service) finishDescription(ctx context.Context, job claimedJob, card de
 		if err != nil || !running {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO video_card_descriptions(object_id, card, result, error, identity, millis)
-			VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, error = excluded.error,
-			identity = excluded.identity, millis = excluded.millis`,
-			job.objectID, card.card, result, strings.TrimSpace(failure), describeIdentity(reader, card.identity), took.Milliseconds())
+		_, err = tx.ExecContext(ctx, `INSERT INTO video_card_descriptions(object_id, card, result, error, identity, millis, written_release)
+			VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(object_id, card) DO UPDATE SET result = excluded.result, error = excluded.error,
+			identity = excluded.identity, millis = excluded.millis, written_release = excluded.written_release`,
+			job.objectID, card.card, result, strings.TrimSpace(failure), describeIdentity(reader, card.identity), took.Milliseconds(), s.release)
 		if err != nil {
 			return err
 		}
@@ -440,7 +444,7 @@ func (s *Service) queueMissingDescriptions(ctx context.Context, q queryer, reade
 	now := formatTime(s.now())
 	args := []any{describeDerivation, now, now}
 	args = append(args, arg...)
-	args = append(args, windowsDerivation, cardsDerivation, qualityDerivation, describeIdentity(reader, ""), resetFailed)
+	args = append(args, windowsDerivation, cardsDerivation, qualityDerivation, describeIdentity(reader, ""), s.release, s.release, resetFailed)
 	_, err := q.ExecContext(ctx, `INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
   SELECT DISTINCT c.object_id, ?, 'pending', ?, ? FROM video_cards c
   JOIN montage_card_results m ON m.object_id=c.object_id AND m.cards_identity=c.identity
@@ -448,7 +452,7 @@ func (s *Service) queueMissingDescriptions(ctx context.Context, q queryer, reade
   LEFT JOIN video_card_descriptions d ON d.object_id=c.object_id AND d.card=c.card
   WHERE c.object_id IN (`+scope+`)
   AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.object_id=c.object_id AND j.derivation IN (?, ?, ?))
-  AND `+eligibleQuality+` AND (d.identity IS NULL OR d.identity <> ? || q.identity)
+  AND `+eligibleQuality+` AND (d.identity IS NULL OR d.identity <> ? || q.identity OR `+staleFailure+`)
   ON CONFLICT(object_id,derivation) DO UPDATE SET state='pending', attempts=0, lease_until=NULL,
    not_before=excluded.not_before, error_class='' WHERE jobs.state='failed' AND ?`, args...)
 	return err
