@@ -57,6 +57,12 @@ const askedMember = (sessionId: string) =>
 /** A critical trouble of the device, as Desktop hands it to the companion (health.ts). */
 const READ_ONLY = { key: "volume_read_only:", text: "数据卷变成了只读" };
 
+// jsdom has no requestIdleCallback, and without it the companion waits a whole second before it asks for its
+// animations (Companion.tsx), in every test. Here the page is idle at once, as a browser's mostly is.
+window.requestIdleCallback ??= (callback) =>
+  window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 50 }), 0);
+window.cancelIdleCallback ??= (handle) => window.clearTimeout(handle);
+
 /** The animations the card fetched, by name, in order: what it played or is about to. */
 let fetched: string[] = [];
 /** Animations whose next fetches fail, by name: how many more, and whether the network or the NAS fails them. */
@@ -118,7 +124,7 @@ const hide = (hidden: boolean) => {
 };
 const mount = async (ui: ReactElement = <Companion />) => {
   const view = render(ui);
-  // The companion asks for its animations a second after the desktop has drawn.
+  // The companion asks for its animations once the page is idle after the desktop has drawn.
   const pet = await screen.findByLabelText("大肥鱼", {}, { timeout: 4000 });
   const root = pet.closest(".dsh-pet-root") as HTMLElement;
   const videos = [...root.querySelectorAll("video")];
