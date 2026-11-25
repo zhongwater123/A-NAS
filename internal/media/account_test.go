@@ -1,6 +1,8 @@
 package media
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -17,10 +19,22 @@ func TestRemovingADeletedAccountForgetsItsMedia(t *testing.T) {
 	env.write(t, env.shared, "影视/家庭/VID_20080808_200000.mp4", "video")
 	env.library(t, env.alice, alicePrivate, LibraryMixed, "影视")
 	env.library(t, env.admin, env.shared, LibraryMixed, "影视")
-	var shared string
-	if err := env.media.store.db.QueryRowContext(env.ctx, `SELECT v.id FROM videos v JOIN libraries l ON l.id = v.library_id
-WHERE l.space_id = ?`, env.shared.ID).Scan(&shared); err != nil {
-		t.Fatalf("the shared video: %v", err)
+	var shared, private string
+	for space, id := range map[string]*string{env.shared.ID: &shared, alicePrivate.ID: &private} {
+		if err := env.media.store.db.QueryRowContext(env.ctx, `SELECT v.id FROM videos v JOIN libraries l ON l.id = v.library_id
+WHERE l.space_id = ?`, space).Scan(id); err != nil {
+			t.Fatalf("the video of %s: %v", space, err)
+		}
+	}
+	// What playing the two videos left in the cache: a frame and a subtitle.
+	cached := map[string][]string{}
+	for _, id := range []string{shared, private} {
+		cached[id] = []string{env.media.framePath(id), filepath.Join(env.media.cacheDir, "subtitles", cacheName(id)+"-s0-20240501123456.vtt")}
+		for _, name := range cached[id] {
+			if err := os.WriteFile(name, []byte("cached"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	for _, user := range []accounts.User{env.alice, env.admin} {
 		if _, err := env.media.SaveProgress(env.ctx, user, shared, 600, 0); err != nil {
@@ -57,6 +71,16 @@ WHERE l.space_id = ?`, env.shared.ID).Scan(&shared); err != nil {
 	}
 	if videos := count("SELECT COUNT(*) FROM videos"); videos != 1 {
 		t.Errorf("videos = %d, want the shared one", videos)
+	}
+	for _, name := range cached[private] {
+		if _, err := os.Stat(name); !os.IsNotExist(err) {
+			t.Errorf("%s of alice's video is still cached (%v)", filepath.Base(name), err)
+		}
+	}
+	for _, name := range cached[shared] {
+		if _, err := os.Stat(name); err != nil {
+			t.Errorf("the shared video lost its cached %s: %v", filepath.Base(name), err)
+		}
 	}
 	if kept := count("SELECT COUNT(*) FROM progress WHERE user_id = ?", env.admin.ID) +
 		count("SELECT COUNT(*) FROM favorites WHERE user_id = ?", env.admin.ID); kept != 2 {

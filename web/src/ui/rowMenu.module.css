@@ -1,0 +1,25 @@
+/* A row's … menu (RowMenu.tsx). It opens in a portal outside the window,
+   above every window. */
+@layer ui {
+  .row-menu {
+    z-index: 10000;
+    min-width: 130px;
+    padding: 6px;
+    border-radius: var(--radius-lg);
+    color: var(--color-text);
+    background: var(--color-surface);
+    box-shadow:
+      0 0 0 1px rgba(20, 30, 45, 0.08),
+      0 12px 32px rgba(15, 22, 44, 0.18);
+    font-size: 13px;
+  }
+  .row-menu-item {
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    outline: none;
+    cursor: pointer;
+  }
+  .row-menu-item[data-highlighted] {
+    background: rgba(20, 30, 45, 0.06);
+  }
+}

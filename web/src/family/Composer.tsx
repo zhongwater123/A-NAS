@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
 import { listPhotoLibraries, type PhotoAsset, uploadPhoto } from "../photos/api";
+import { Modal } from "../ui/modal";
 import {
   addRecord,
   addRecording,
@@ -20,7 +21,7 @@ import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { decimal, kindLabels, today } from "./format";
 import { maxPhotos, toShared } from "./fromLibrary";
-import { Field, Modal, Thumb } from "./parts";
+import { Field, Thumb } from "./parts";
 
 // The photo library's grid loads only when a member opens the picker.
 const LibraryPicker = lazy(() => import("./LibraryPicker").then((module) => ({ default: module.LibraryPicker })));
@@ -315,6 +316,7 @@ export function Composer({
   return (
     <Modal
       title={heading}
+      container={family.container}
       busy={busy}
       wide={kind === "photos" || kind === "journal"}
       onClose={onClose}

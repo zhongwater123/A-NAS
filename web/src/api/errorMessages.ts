@@ -125,6 +125,15 @@ const domains = {
     media_unavailable: "媒体服务暂不可用，请稍后重试",
     compute_unavailable: "计算服务暂不可用，请稍后重试",
   },
+  // The family service serves the to-dos, so its codes name the family; here
+  // they name the to-dos.
+  todos: {
+    family_unavailable: "待办暂时不可用（数据盘未就绪），请稍后再试",
+    validation_failed: "填写的内容不符合要求，请检查标题、日期、金额和“谁的”",
+    changed: "别人刚改过这件事，已刷新，请再改一次",
+    conflict: "这件事已经处理或忽略了，不能再推迟",
+    not_found: "这件事已不存在",
+  },
   webSearch: {
     web_search_disabled: "管理员已关闭网页搜索",
     torrent_search_disabled: "管理员已关闭种子搜索",

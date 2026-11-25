@@ -6,8 +6,8 @@
 # broker, then assistant-layout.sh prepare for each account, which writes what the Host Agent
 # would.
 #   assistant-install.sh ACCOUNT...
-# Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
-# run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
+# Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT and
+# SPIKE_BROKER_NO_RESERVE as for run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
 # broker's product socket and the instance sockets, and gets a copy of each instance secret.
 # On an A-NAS the a-nas package and the Host Agent do all of this; the system test checks
 # theirs (system-test.sh). Running it again replaces the model and the broker.
@@ -89,11 +89,15 @@ if [[ -n "${SPIKE_MODEL:-}" ]]; then
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
-# The spike's change broker executes the assistants' changes, with a product socket for the
-# product service and the agent socket for the assistants' MCP tool.
+# The File Broker's executor of the assistants' changes (broker-spike, which run.sh builds), with
+# the spike's product socket for the product service and the agent socket for the assistants'
+# MCP tool. Its state stays in /var/lib/anas-spike/changes, root's alone. A transient unit
+# gets none of this shell's environment: what the broker reads is passed with -E.
 install -d -m 0755 /run/anas-spike-broker
 transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
-  python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
+  -E SPIKE_BROKER_NO_RESERVE="${SPIKE_BROKER_NO_RESERVE:-}" \
+  /spike-broker/broker-spike /srv/a-nas/data /var/lib/anas-spike/changes \
+  /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 systemctl daemon-reload
 systemctl enable --now --quiet anas-assistant-cron-waker.service
 PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"

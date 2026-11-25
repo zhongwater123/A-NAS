@@ -35,8 +35,8 @@ from anas_montage.domain import (
 )
 
 CASES = {"pj": "pinjie", "ne": "newzealand", "ch": "chuanxi"}
-CUTS = "剪辑对比/第四版/剪法24（2026-11-08）"
-CARDS = "剪辑对比/第五版"
+CUTS = "剪辑对比/规划与成片"
+CARDS = "剪辑对比/卡片"
 FPS = 30
 
 

@@ -378,6 +378,88 @@ func TestADeletionThatHandedNothingOverSendsNoNotice(t *testing.T) {
 	}
 }
 
+// Removing the accounts listed before it can take hours. A deletion that is
+// cancelled and asked for again in that time is a new request with its own
+// wait: the sweep does not start it in the place of the one it listed.
+func TestADeletionAskedForAgainDuringASweepWaitsItsOwnTime(t *testing.T) {
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	service := accounts.NewService(store, &lifecycleHost{}, accounts.Options{
+		PasswordCost: cheapPasswords, DeletionDelay: time.Hour, Now: func() time.Time { return now },
+	})
+	const adminPassword = "correct horse battery staple"
+	admin, err := service.SetupAdministrator(ctx, "owner", adminPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := map[string]accounts.User{}
+	for _, name := range []string{"alice", "bob"} {
+		member, err := service.CreateMember(ctx, admin, name, name+" password for testing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.DisableUser(ctx, admin, member.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.ScheduleDeletion(ctx, admin, member.ID, accounts.DeletionRequest{
+			Password: adminPassword, PersonalSpace: accounts.DeletionDelete, Library: accounts.DeletionDelete,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		members[member.ID] = member
+	}
+	now = now.Add(2 * time.Hour)
+
+	var removed []string
+	var again accounts.User
+	steps := []accounts.DeletionStep{accounts.ForgetStep("photos", func(_ context.Context, removal accounts.Removal) error {
+		removed = append(removed, removal.Username)
+		if len(removed) > 1 {
+			return nil
+		}
+		// While the first account is removed, the administrator changes
+		// what happens to the other one's files.
+		for id, member := range members {
+			if id == removal.UserID {
+				continue
+			}
+			if err := service.CancelDeletion(ctx, admin, id); err != nil {
+				t.Errorf("cancel %s: %v", member.Username, err)
+			}
+			if again, err = service.ScheduleDeletion(ctx, admin, id, accounts.DeletionRequest{
+				Password: adminPassword, PersonalSpace: accounts.DeletionTransfer, Library: accounts.DeletionDelete,
+			}); err != nil {
+				t.Errorf("delete %s again: %v", member.Username, err)
+			}
+		}
+		return nil
+	})}
+	service.RunDueDeletions(ctx, steps)
+	if len(removed) != 1 || again.ID == "" || removed[0] == again.Username {
+		t.Fatalf("the sweep removed %v; want only the account that was still due, not %q", removed, again.Username)
+	}
+	users, err := service.ListUsers(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := slices.IndexFunc(users, func(user accounts.User) bool { return user.ID == again.ID })
+	if kept < 0 {
+		t.Fatalf("%s is gone 30 days early", again.Username)
+	}
+	if deletion := users[kept].Deletion; deletion == nil || deletion.Started || !deletion.DueAt.Equal(now.Add(time.Hour)) ||
+		deletion.PersonalSpace != accounts.DeletionTransfer {
+		t.Fatalf("%s's deletion = %+v; want the new request, not started, due in an hour", again.Username, deletion)
+	}
+	if err := service.CancelDeletion(ctx, admin, again.ID); err != nil {
+		t.Fatalf("the new request can no longer be cancelled: %v", err)
+	}
+}
+
 func TestADeletionThatIsNotDueYetWaits(t *testing.T) {
 	f := newLifecycleFixture(t, time.Hour)
 	f.disable(t)

@@ -1,7 +1,8 @@
 """AI providers: image vectors through MediaPipe, object detection through
 ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
 recognition model), animal identity vectors through ONNX Runtime, the text in
-photos through a llama-server child process, and deterministic fakes of each.
+photos through a llama-server child process, aesthetic scores through
+PyTorch, and deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
@@ -18,11 +19,14 @@ import io
 import json
 import logging
 import math
+import multiprocessing
 import os
+import pathlib
 import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -77,6 +81,8 @@ def read_manifest(manifest_path):
             manifest = json.load(file)
     except (OSError, ValueError) as error:
         raise Unavailable(f"the manifest {manifest_path}: {error}") from error
+    if not isinstance(manifest, dict):
+        raise Unavailable(f"the manifest {manifest_path} must be an object")
     memory = manifest.get("memoryBytes")
     if type(memory) is not int or memory < 0:
         raise Unavailable(f"the manifest {manifest_path} gives no memoryBytes")
@@ -1303,6 +1309,118 @@ class FakeReader:
                 self.cancelled += 1
                 raise Cancelled()
             time.sleep(0.01)
+
+    def release(self):
+        self.loaded = False
+
+
+class AestheticScorer:
+    """Validate the bundle at startup and load its CPU runtime on first use."""
+
+    def __init__(self, bundle, manifest_path, threads=None):
+        deploy = read_manifest(manifest_path)
+        if deploy.get("kind") != "qv-head":
+            raise Unavailable(f"unsupported scorer kind in {manifest_path}")
+        self._bundle = pathlib.Path(bundle)
+        self._process = None
+        self._connection = None
+        try:
+            pin = deploy["bundleManifest"]
+            verify_file(self._bundle / "MANIFEST.json", pin)
+            versions = {name: importlib.metadata.version(name) for name in ("torch", "transformers")}
+            from qv_head.release import load_manifest
+
+            self._manifest = load_manifest(self._bundle)
+        except importlib.metadata.PackageNotFoundError as error:
+            raise Unavailable(f"the AI runtime has no {error.name}") from error
+        except (ImportError, OSError, ValueError, TypeError, KeyError) as error:
+            raise Unavailable(f"invalid or unavailable scorer bundle: {error}") from error
+        self.memory = deploy["memoryBytes"]
+        self.threads = threads or inference_threads()
+        self.model = (f"{self._manifest.tag}+manifest-{pin['sha256']}"
+                      f"+torch-{versions['torch']}+transformers-{versions['transformers']}")
+
+    def run_options(self):
+        return RunHandle()
+
+    def _reply(self, run):
+        while not run.terminate:
+            if self._connection.poll(0.05):
+                return json.loads(self._connection.recv_bytes())
+        raise Cancelled()
+
+    def score(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        try:
+            if run.terminate:
+                raise Cancelled()
+            if self._process is None:
+                self._connection, child = multiprocessing.Pipe()
+                with child:
+                    self._process = subprocess.Popen(
+                        [sys.executable, "-m", "anas_ai.scoring", str(child.fileno()), str(self._bundle),
+                         str(self.threads)], pass_fds=(child.fileno(),))
+                self._connection.send_bytes(self._manifest.model_dump_json().encode())
+                status, detail = self._reply(run)
+                if status != "ready":
+                    raise Unavailable(detail)
+            self._connection.send_bytes(data)
+            status, result = self._reply(run)
+            if status == "invalid":
+                raise InvalidInput(result)
+            return result
+        except (Cancelled, Unavailable):
+            self.release()
+            raise
+        except (EOFError, OSError) as error:
+            self.release()
+            raise Unavailable("scorer process stopped") from error
+
+    def release(self):
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        if self._process is not None:
+            # Closing the pipe lets an idle scorer release native resources normally.
+            try:
+                self._process.wait(timeout=0.3)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
+            self._process = None
+
+
+class FakeScorer:
+    """A deterministic stand-in: equal images get equal scores.
+
+    delay keeps a scoring running for that long, checking whether it was told
+    to stop, so that tests can cancel one.
+    """
+
+    model = "fake-scorer-sha256"
+    memory = 0
+
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.loaded = False
+        self.cancelled = 0
+
+    def run_options(self):
+        return RunHandle()
+
+    def score(self, data, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
+        digest = hashlib.sha256(data).digest()
+        return {"aesthetic": round(1 + 4 * digest[0] / 255, 4), "technical": round(1 + 4 * digest[1] / 255, 4)}
 
     def release(self):
         self.loaded = False

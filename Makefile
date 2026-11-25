@@ -311,8 +311,12 @@ ops-check:
 	grep -Fq -- '--face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--aesthetic-scorer /usr/lib/a-nas/ai/aesthetic-scorer.bundle --aesthetic-scorer-manifest /usr/lib/a-nas/ai/aesthetic-scorer.json' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HUB_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=TRANSFORMERS_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HOME=/var/cache/a-nas-ai/huggingface' deploy/systemd/system/anas-ai.service
 	@# Every model role the AI Worker's unit names is one the package links (scripts/lib/content.sh).
-	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do \
+	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf aesthetic-scorer:bundle; do \
 		grep -Eq "^  $${role}:" scripts/lib/content.sh && grep -Fq "/usr/lib/a-nas/ai/$${role%%:*}.$${role#*:} " deploy/systemd/system/anas-ai.service || { echo "model role $$role" >&2; exit 1; }; done
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'echo "CPUQuota=' deploy/site/a-nas-generator.sh
@@ -387,7 +391,9 @@ go-lint:
 vuln-check:
 	$(GO) tool govulncheck ./...
 	for tool in actionlint gitleaks golangci-lint; do $(GO) tool govulncheck -C tools/$$tool tool || exit 1; done
-	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	@mkdir -p $(BUILD_DIR)
+	python3 scripts/audit-wheel-lock.py ai/requirements.txt > $(BUILD_DIR)/ai-audit-requirements.txt
+	$(PIP_AUDIT) --strict --disable-pip --require-hashes --progress-spinner off -r $(BUILD_DIR)/ai-audit-requirements.txt
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
@@ -440,7 +446,7 @@ $(AI_SDK_STAMP): ai/assistant/companion-mcp-sdk.txt
 	@touch $(AI_SDK_STAMP)
 
 ai-sdk-test: $(AI_SDK_STAMP)
-	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp
+	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp tests.test_worker.ScorerBundleTest
 
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
@@ -523,16 +529,22 @@ packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
 	scripts/check-no-songs.sh $(BUILD_DIR)/packages
 
+# check runs every step, past a failing one (CHECK_FLAGS=-k), so that one run
+# on a development machine reports every failure. CI sets CHECK_FLAGS empty and
+# stops at the first, so that a red run shows within minutes. The quick steps
+# come first. It writes the deploy manifest only once all have passed.
+CHECK_FLAGS ?= -k
+
 check:
 	@rm -f $(VALIDATION_MANIFEST)
-	@$(MAKE) --no-print-directory check-steps VERSION="$(VERSION)"
+	@$(MAKE) $(CHECK_FLAGS) --no-print-directory check-steps VERSION="$(VERSION)"
 	@commit="$$(git rev-parse --short=12 HEAD)"; \
 	api_sha="$$(sha256sum $(BUILD_DIR)/anas-api | cut -d ' ' -f 1)"; \
 	agent_sha="$$(sha256sum $(BUILD_DIR)/anas-host-agent | cut -d ' ' -f 1)"; \
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
+check-steps: fmt-check docs-check ops-check vendor-check ai-lint api-check web-typecheck web-lint vet go-lint web-test web-build vuln-check test ai-test ai-sdk-test build-binaries packages
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
