@@ -244,7 +244,7 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 			if analysis.ObjectID == was.ObjectID && analysis.Windows != photos.AnalysisDone {
 				return nil, 0, refuse("这一镜或前后镜头的视频正在重新分析，请稍后再删")
 			}
-			if analysis.ObjectID == was.ObjectID && (analysis.Identity != was.Identity || analysis.Dimensions != was.Dimensions) {
+			if was.windowsChanged(analysis) {
 				return nil, 0, ErrAnalysisChanged
 			}
 			of = analysed{analysis: analysis, raw: raw}
@@ -379,16 +379,9 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 	//nolint:gosec // G404: the seed makes a shuffle again as it was (kept with its revision); nothing rests on guessing it.
 	random := mathrand.New(mathrand.NewPCG(uint64(seed), bits.ReverseBytes64(uint64(seed))))
 	next := state.clone()
-	used := map[string]bool{}
-	for _, shot := range state.Shots {
-		if shot.Locked {
-			used[shot.Beat] = true
-		}
-	}
 	changed := 0
 	for i, shot := range state.Shots {
 		if asks[i] < 0 {
-			used[shot.Beat] = true
 			continue
 		}
 		ranked := found[asks[i]]
@@ -400,7 +393,7 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 		if i+1 < len(next.Shots) {
 			// Nor of the next shot's card: that shot may stay as it is,
 			// locked, with nothing to search for, or finding nothing to pick
-			// (as reservedLater keeps its beat).
+			// (as taken keeps its beat).
 			after = cardOf(next.Shots[i+1].Beat)
 		}
 		landscape := !src.portrait(shot.Beat)
@@ -410,8 +403,8 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 				break
 			}
 			card := cardOf(candidate.beat)
-			if used[candidate.beat] || card == before || card == after || (landscape && src.portrait(candidate.beat)) ||
-				!src.covers(candidate.beat, state.length(shot), slowMost) || reservedLater(state, i, candidate.beat) {
+			if taken(next, i, candidate.beat) || card == before || card == after || (landscape && src.portrait(candidate.beat)) ||
+				!src.covers(candidate.beat, state.length(shot), slowMost) {
 				continue
 			}
 			picks = append(picks, candidate.beat)
@@ -419,7 +412,6 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 		if len(picks) > 0 {
 			next.Shots[i].Beat = picks[random.IntN(len(picks))]
 		}
-		used[next.Shots[i].Beat] = true
 		if next.Shots[i].Beat != shot.Beat {
 			changed++
 		}
@@ -438,10 +430,12 @@ func searchable(query string) bool {
 	return ok
 }
 
-// reservedLater reports whether beat leads a shot after i: that shot may
-// find nothing to pick and keep it.
-func reservedLater(state draftState, i int, beat string) bool {
-	return slices.ContainsFunc(state.Shots[i+1:], func(shot draftShot) bool { return shot.Beat == beat })
+// taken reports whether beat leads a shot of a shuffle other than the i-th:
+// one before it as shuffled, or one after it as it is, which may stay so
+// (locked, with nothing to search for, or finding nothing to pick).
+func taken(next draftState, i int, beat string) bool {
+	leads := func(shot draftShot) bool { return shot.Beat == beat }
+	return slices.ContainsFunc(next.Shots[:i], leads) || slices.ContainsFunc(next.Shots[i+1:], leads)
 }
 
 // cardOf is the card of a beat.

@@ -69,7 +69,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 		return nil, err
 	}
 	request := FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]Card{}, Catalog: run.catalog.Catalog,
-		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins}
+		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins()}
 	for _, id := range run.catalog.Catalog {
 		request.Cards[id] = run.catalog.Cards[id]
 	}
@@ -99,26 +99,6 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	return nil, failed("the fill asked for more than %d spans", maxNeeds)
 }
 
-// windowsNotDone is what the fill does about a video whose windows the photo
-// library has not made (again): what the analysis step does (analysisKey),
-// which an edit has not. It waits while they are queued or made, asks for
-// them when no one is making them, and leaves it to the member, who can ask
-// again (RetryAnalysis), when making them failed.
-func (s *Store) windowsNotDone(ctx context.Context, grantID, assetID string, state photos.AnalysisState) error {
-	switch state {
-	case photos.AnalysisQueued, photos.AnalysisWorking:
-	case photos.AnalysisFailed:
-		return &stepNeeds{reason: NeedAnalysis, missing: []string{assetID}}
-	case photos.AnalysisUnavailable:
-		return &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
-	default:
-		if err := s.analyzeAssets(ctx, grantID, []string{assetID}, false); err != nil {
-			return jobGrantError(err, []string{assetID})
-		}
-	}
-	return &stepWait{reason: WaitAnalysis, delay: waitPoll}
-}
-
 // fillRows are the windows beneath the catalog's cards, with their vectors.
 func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32, int, error) {
 	spans := catalogSpans(run.catalog)
@@ -134,17 +114,15 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		if err != nil {
 			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
-		if analysis.ObjectID == video.ObjectID && analysis.Windows != photos.AnalysisDone {
-			return nil, nil, 0, s.windowsNotDone(ctx, run.grantID, video.AssetID, analysis.Windows)
-		}
-		changed := analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions
-		if run.kind == KindEdit && analysis.ObjectID == video.ObjectID && changed {
+		if run.kind == KindEdit && video.windowsChanged(analysis) {
 			// The version was cut with windows the library has analysed
 			// again with another model since: it is played or recut now,
 			// not edited, and trying again changes nothing.
 			return nil, nil, 0, failed("%s", AnalysisChangedReason)
 		}
-		if analysis.ObjectID != video.ObjectID || changed {
+		if !video.sameWindows(analysis) {
+			// Made again since the job's first step looked: that step
+			// decides again (analysisKey, editSourceKey).
 			return nil, nil, 0, errors.New("the photo library's analysis changed while the job ran")
 		}
 		if dimensions != 0 && dimensions != analysis.Dimensions {
@@ -294,8 +272,8 @@ func finite(values ...float64) bool {
 // job's failure, never a film.
 func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if len(answer.Short) > 0 {
-		if run.pins != nil {
-			return shortOfPins(run.pins, answer.Short)
+		if pins := run.pins(); pins != nil {
+			return shortOfPins(pins, answer.Short)
 		}
 		return failed("%d slots were left empty", len(answer.Short))
 	}
@@ -358,9 +336,9 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if total != slot[1] {
 		return failed("the last slot ends at frame %d, filled to %d", slot[1], total)
 	}
-	if run.pins != nil {
+	if pins := run.pins(); pins != nil {
 		// An edit keeps its draft's slots, in the draft's order.
-		if err := checkPinnedSlots(run.pins, slots, beats); err != nil {
+		if err := checkPinnedSlots(pins, slots, beats); err != nil {
 			return err
 		}
 	} else if err := checkPlannedSlots(run.planned, slots); err != nil {

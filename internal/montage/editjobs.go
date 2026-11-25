@@ -3,7 +3,6 @@ package montage
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -127,7 +126,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 // those a generate job runs.
 func (s *Store) editSteps() []step {
 	source := step{name: StepSource, plan: 1, key: s.editSourceKey, do: func(_ context.Context, run *jobRun) (any, error) {
-		return map[string]any{"cards": len(run.catalog.Catalog), "pins": len(run.pins)}, nil
+		return map[string]any{"cards": len(run.catalog.Catalog), "pins": len(run.pins())}, nil
 	}, load: func(*jobRun, []byte) error { return nil }}
 	return append([]step{source}, s.filmSteps(1, func(_ context.Context, run *jobRun) (string, error) {
 		return digest(run.keys[StepSource], fillVersion), nil
@@ -149,28 +148,22 @@ const StepSource = "source"
 // analysis, catalog, excerpt and plan, and the draft's pins. A card of a
 // video gone since the version was made leaves the catalog, so that the
 // fill takes no piece from it; the videos the shots lead with were checked
-// as the job's own.
+// as the job's own. The fill reads the windows of the videos left: their
+// state is the analysis step's to tell in a job that plans (analysisKey),
+// and this step's in an edit, by the same rules.
 func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) {
 	edit := run.settings.Edit
 	if edit == nil || len(edit.Pins) == 0 {
 		return "", failed("the edit job has no draft")
 	}
-	names := plannedFrom(edit.Plan)
-	results, err := s.doneResults(ctx, edit.Job, names)
+	kept, ok, err := s.loadPlan(ctx, edit.Job, edit.Plan)
 	if err != nil {
 		return "", err
 	}
-	for _, name := range names {
-		if _, kept := results[name]; !kept {
-			return "", failed("the version's plan is gone: no %s", name)
-		}
+	if !ok {
+		return "", failed("the version's plan is gone or was made again")
 	}
-	if err := errors.Join(json.Unmarshal(results["analysis"], &run.analysis), json.Unmarshal(results["catalog"], &run.catalog),
-		json.Unmarshal(results["song"], &run.excerpt)); err != nil {
-		return "", failed("the version's plan is unusable: %v", err)
-	}
-	run.picked, run.planned = results[planStep("pick", edit.Plan)], results[planStep("shots", edit.Plan)]
-	run.pins = edit.Pins
+	run.analysis, run.catalog, run.excerpt, run.picked, run.planned = kept.analysis, kept.catalog, kept.excerpt, kept.picked, kept.planned
 	ids := make([]string, len(run.analysis.Videos))
 	for i, video := range run.analysis.Videos {
 		ids[i] = video.AssetID
@@ -189,6 +182,21 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 		there[asset.assetID] = true // checkAssets passed them
 	}
 	run.catalog.Catalog = slices.DeleteFunc(slices.Clone(run.catalog.Catalog), func(id string) bool { return !there[run.catalog.Cards[id].Video] })
+	cut := map[string]bool{}
+	for _, id := range run.catalog.Catalog {
+		cut[run.catalog.Cards[id].Video] = true
+	}
+	var reading []photos.GrantedAsset
+	for _, asset := range looked {
+		if cut[asset.AssetID] && asset.Status == photos.GrantAvailable {
+			reading = append(reading, asset)
+		}
+	}
+	if err := s.analysisReady(ctx, run.grantID, reading, func(video photos.GrantedAsset) []photos.AnalysisState {
+		return []photos.AnalysisState{video.Windows}
+	}); err != nil {
+		return "", err
+	}
 	return digest(edit.Job, fmt.Sprint(edit.Plan), digestJSON(edit.Pins), digestJSON(run.catalog.Catalog), run.excerpt.Key, digestJSON(run.analysis)), nil
 }
 
@@ -197,17 +205,20 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 // OpenDraftSongAudio opens the song of the version owner's draft edits, as
 // its job had it: the project may have another song since.
 func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (SongAudio, error) {
-	var settingsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT j.settings_json FROM drafts d JOIN versions v ON v.id = d.base_version_id JOIN jobs j ON j.id = v.job_id
-		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&settingsJSON)
+	var jobID string
+	err := s.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
+		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SongAudio{}, ErrNotFound
 	}
 	if err != nil {
 		return SongAudio{}, err
 	}
-	var settings JobSettings
-	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil || settings.SongID == "" {
+	settings, err := jobSettings(ctx, s.db, jobID)
+	if err != nil {
+		return SongAudio{}, err
+	}
+	if settings.SongID == "" {
 		return SongAudio{}, ErrNoSong
 	}
 	if _, err := s.ownSong(ctx, owner, settings.SongID); err != nil {

@@ -482,9 +482,6 @@ type Options struct {
 	JobCompute Compute
 	Editing    Editing
 	Planner    Planner
-	// Search finds windows by text, for editing a film (#596). Unset, it is
-	// the grants' own search when they have one (GrantSearch).
-	Search WindowSearch
 	// PlanMarkers is the directory of planning markers the waker reads;
 	// without it no member's VNAS is asked to plan.
 	PlanMarkers string
@@ -493,6 +490,15 @@ type Options struct {
 	Plans  int
 	Now    func() time.Time
 	Logger *slog.Logger
+}
+
+// windowSearchOf is the grants' own search of windows by text, for editing
+// a film (#596), when they have one (GrantSearch).
+func windowSearchOf(grants Grants) WindowSearch {
+	if search, ok := grants.(WindowSearch); ok {
+		return GrantSearch{Grants: search}
+	}
+	return nil
 }
 
 // Open opens, creating when missing, the store's database in root. Commits
@@ -505,9 +511,6 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if options.Plans < 0 || options.Plans > MaxPlans {
 		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
 	}
-	if search, ok := options.Grants.(WindowSearch); ok && options.Search == nil {
-		options.Search = GrantSearch{Grants: search}
-	}
 	db, err := sqlitedb.Open(filepath.Join(root, DatabaseName), sqlitedb.Options{Durable: true})
 	if err != nil {
 		return nil, err
@@ -517,7 +520,7 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	}
 	store := &Store{db: db, root: root, grants: options.Grants, media: options.Media, music: options.Music, compute: options.Compute,
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
-		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner, search: options.Search, thumbnails: make(chan struct{}, MaxThumbnails),
+		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner, search: windowSearchOf(options.Grants), thumbnails: make(chan struct{}, MaxThumbnails),
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
 		planMarkers: options.PlanMarkers, plans: options.Plans}
 	if store.plans == 0 {

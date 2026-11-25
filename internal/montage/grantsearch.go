@@ -20,7 +20,7 @@ type WindowSearch interface {
 // another model are ErrSearchModel, a library or local AI that cannot answer
 // now is ErrSearchUnavailable, a text it does not search for is ErrInvalid,
 // and the rest are as for any grant call (grantError). Open uses it when
-// Options.Grants search windows and Options.Search is not set.
+// Options.Grants search windows.
 type GrantSearch struct {
 	Grants WindowSearch
 }

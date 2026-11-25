@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -174,12 +173,11 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	}
 	src.grantID = grantID.String
 	src.planJob, src.planNo = src.jobID, src.plan
-	var settingsJSON string
-	if err := s.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", src.jobID).Scan(&settingsJSON); err != nil {
+	settings, err := jobSettings(ctx, s.db, src.jobID)
+	if err != nil {
 		return nil, err
 	}
-	var settings JobSettings
-	if err := json.Unmarshal([]byte(settingsJSON), &settings); err == nil && settings.Edit != nil {
+	if settings.Edit != nil {
 		src.planJob, src.planNo = settings.Edit.Job, settings.Edit.Plan
 	}
 	if settings.SongID != "" {
@@ -188,14 +186,11 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 			src.songTranscode = song.contentType == ""
 		}
 	}
-	results, err := s.doneResults(ctx, src.planJob, plannedFrom(src.planNo))
+	kept, ok, err := s.loadPlan(ctx, src.planJob, src.planNo)
 	if err != nil {
 		return nil, err
 	}
-	switch redone, err := s.redoneSince(ctx, src.planJob, src.planNo); {
-	case err != nil:
-		return nil, err
-	case redone:
+	if !ok {
 		return nil, ErrNotEditable
 	}
 	stored := timeline.Valid
@@ -208,16 +203,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		timeline.String = string(own[fill])
 	}
 	var filled timelineResult
-	var analysis analysisResult
-	var catalog catalogResult
+	src.excerpt, src.pickedRaw, src.plannedRaw = kept.excerpt, kept.picked, kept.planned
 	if timeline.String == "" || json.Unmarshal([]byte(timeline.String), &filled) != nil || len(filled.Clips) == 0 ||
-		json.Unmarshal(results["analysis"], &analysis) != nil || json.Unmarshal(results["catalog"], &catalog) != nil ||
-		json.Unmarshal(results["song"], &src.excerpt) != nil || json.Unmarshal(src.excerpt.Music, &src.music) != nil ||
-		json.Unmarshal(results[planStep("pick", src.planNo)], &src.picked) != nil ||
-		json.Unmarshal(results[planStep("shots", src.planNo)], &src.planned) != nil {
+		json.Unmarshal(src.excerpt.Music, &src.music) != nil ||
+		json.Unmarshal(src.pickedRaw, &src.picked) != nil || json.Unmarshal(src.plannedRaw, &src.planned) != nil {
 		return nil, ErrNotEditable
 	}
-	src.pickedRaw, src.plannedRaw = results[planStep("pick", src.planNo)], results[planStep("shots", src.planNo)]
 	for _, raw := range filled.Clips {
 		var clip timelineClip
 		if err := json.Unmarshal(raw, &clip); err != nil {
@@ -225,7 +216,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		}
 		src.clips = append(src.clips, clip)
 	}
-	src.cards, src.catalog = catalog.Cards, catalog.Catalog
+	src.cards, src.catalog = kept.catalog.Cards, kept.catalog.Catalog
 	src.about, src.videos = map[string]cardAbout{}, map[string]analysedVideo{}
 	for id, card := range src.cards {
 		var about cardAbout
@@ -234,8 +225,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		}
 		src.about[id] = about
 	}
-	for _, video := range analysis.Videos {
-		video.Cards = nil
+	for _, video := range kept.analysis.Videos {
 		src.videos[video.AssetID] = video
 	}
 	for _, clip := range src.clips {
@@ -267,51 +257,64 @@ func plannedFrom(plan int) []string {
 	return []string{"analysis", "catalog", "song", planStep("pick", plan), planStep("shots", plan)}
 }
 
+// keptPlan is what the plan-th 方案 of a job was cut from, as the job's
+// steps kept it: the analysis, catalog and song its 方案 share, and its own
+// two steps of planning as answered. The analysis is read without its cards
+// and their measures, which the catalog holds as they were planned from.
+type keptPlan struct {
+	analysis        analysisResult
+	catalog         catalogResult
+	excerpt         Excerpt
+	picked, planned json.RawMessage
+}
+
+// loadPlan reads what the plan-th 方案 of a job was cut from, for a version
+// read or edited (versionSource, editSourceKey). ok is false when one of
+// its steps is not done, kept nothing readable, or was done again after the
+// 方案's version was saved (redoneSince).
+func (s *Store) loadPlan(ctx context.Context, jobID string, plan int) (keptPlan, bool, error) {
+	names := plannedFrom(plan)
+	results, err := s.doneResults(ctx, jobID, names)
+	if err != nil {
+		return keptPlan{}, false, err
+	}
+	if redone, err := s.redoneSince(ctx, jobID, plan); err != nil || redone {
+		return keptPlan{}, false, err
+	}
+	var heads struct {
+		Videos []videoHead `json:"videos"`
+	}
+	var kept keptPlan
+	if len(results) != len(names) || errors.Join(json.Unmarshal(results["analysis"], &heads),
+		json.Unmarshal(results["catalog"], &kept.catalog), json.Unmarshal(results["song"], &kept.excerpt)) != nil {
+		return keptPlan{}, false, nil
+	}
+	for _, head := range heads.Videos {
+		kept.analysis.Videos = append(kept.analysis.Videos, analysedVideo{videoHead: head})
+	}
+	kept.picked, kept.planned = results[planStep("pick", plan)], results[planStep("shots", plan)]
+	return kept, true, nil
+}
+
 // redoneSince reports whether a step the plan-th 方案 of a job was planned
 // from was done again after that 方案's version was saved. The analysis,
 // catalog and song are the job's, shared by its 方案: a later 方案 makes
 // them again when a video is taken out or analysed again, and the cards are
 // numbered anew, so the version's card and beat numbers no longer name what
 // it was cut from. A job makes one 方案 now; versions made two at a time
-// keep this.
+// keep this. Times are written fixed-width (sqlitedb.FormatTime): they
+// compare as text.
 func (s *Store) redoneSince(ctx context.Context, jobID string, plan int) (bool, error) {
-	var saved string
-	err := s.db.QueryRowContext(ctx, "SELECT created_at FROM versions WHERE job_id = ? AND plan = ?", jobID, plan).Scan(&saved)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	savedAt, err := time.Parse(time.RFC3339Nano, saved)
-	if err != nil {
-		return false, err
-	}
 	names := plannedFrom(plan)
-	args := []any{jobID}
+	args := []any{jobID, plan}
 	for _, name := range names {
 		args = append(args, name)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT finished_at FROM steps WHERE job_id = ? AND finished_at IS NOT NULL AND name IN ("+
-		sqlitedb.Placeholders(len(names))+")", args...)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var finished string
-		if err := rows.Scan(&finished); err != nil {
-			return false, err
-		}
-		at, err := time.Parse(time.RFC3339Nano, finished)
-		if err != nil {
-			return false, err
-		}
-		if at.After(savedAt) {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	var redone bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
+		WHERE v.job_id = ? AND v.plan = ? AND s.finished_at > v.created_at AND s.name IN (`+sqlitedb.Placeholders(len(names))+`))`,
+		args...).Scan(&redone)
+	return redone, err
 }
 
 // doneResults are what the named steps of a job kept when they were done,
@@ -800,8 +803,7 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 		if err != nil {
 			return grantError(err)
 		}
-		if now.ObjectID == was.ObjectID && now.Windows == photos.AnalysisDone &&
-			(now.Identity != was.Identity || now.Dimensions != was.Dimensions) {
+		if was.windowsChanged(now) {
 			return ErrAnalysisChanged
 		}
 	}
@@ -973,6 +975,8 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	if err != nil {
 		return Draft{}, err
 	}
+	// Not back.Valid: an undo's back may be a revision trimmed long since,
+	// past the last keptRevisions steps.
 	canUndo, err := s.canUndo(ctx, draftID, base+1)
 	if err != nil {
 		return Draft{}, err

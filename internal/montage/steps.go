@@ -68,8 +68,6 @@ type jobRun struct {
 	planned  json.RawMessage
 	timeline timelineResult
 	render   renderResult
-	// pins are an edit's slots with their beats (#596), nil otherwise.
-	pins []FillPin
 }
 
 type jobAsset struct{ assetID, objectID string }
@@ -604,20 +602,41 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 
 // analysedVideo is one video's analysis as the job uses it.
 type analysedVideo struct {
-	AssetID              string                     `json:"assetId"`
-	ObjectID             string                     `json:"objectId"`
-	Dimensions           int                        `json:"dimensions"`
-	CardsIdentity        string                     `json:"cardsIdentity"`
-	QualityIdentity      string                     `json:"qualityIdentity"`
-	DescriptionsIdentity string                     `json:"descriptionsIdentity"`
-	Identity             string                     `json:"identity"`
-	Duration             float64                    `json:"duration"`
-	Width                int                        `json:"width"`
-	Height               int                        `json:"height"`
-	TakenAt              *time.Time                 `json:"takenAt,omitempty"`
-	Windows              []photos.Window            `json:"windows"`
-	Cards                []Card                     `json:"cards"`
-	Measures             map[string]json.RawMessage `json:"measures"`
+	videoHead
+	Cards    []Card                     `json:"cards"`
+	Measures map[string]json.RawMessage `json:"measures"`
+}
+
+// videoHead is a video's analysis without its cards and their measures:
+// what reading a version needs, its catalog holding the cards as they were
+// planned from (loadPlan).
+type videoHead struct {
+	AssetID              string          `json:"assetId"`
+	ObjectID             string          `json:"objectId"`
+	Dimensions           int             `json:"dimensions"`
+	CardsIdentity        string          `json:"cardsIdentity"`
+	QualityIdentity      string          `json:"qualityIdentity"`
+	DescriptionsIdentity string          `json:"descriptionsIdentity"`
+	Identity             string          `json:"identity"`
+	Duration             float64         `json:"duration"`
+	Width                int             `json:"width"`
+	Height               int             `json:"height"`
+	TakenAt              *time.Time      `json:"takenAt,omitempty"`
+	Windows              []photos.Window `json:"windows"`
+}
+
+// sameWindows reports whether now holds the windows the video was analysed
+// with: of its content, done, by the same model and of the same dimensions.
+func (video analysedVideo) sameWindows(now photos.GrantAnalysis) bool {
+	return now.ObjectID == video.ObjectID && now.Windows == photos.AnalysisDone &&
+		now.Identity == video.Identity && now.Dimensions == video.Dimensions
+}
+
+// windowsChanged reports whether the photo library has made the video's
+// windows again with another model or dimensions since: windows not done
+// yet are not another model, and other content is not the video's.
+func (video analysedVideo) windowsChanged(now photos.GrantAnalysis) bool {
+	return now.ObjectID == video.ObjectID && now.Windows == photos.AnalysisDone && !video.sameWindows(now)
 }
 
 type analysisResult struct {
@@ -628,6 +647,49 @@ type analysisResult struct {
 // one rule for the lookup's states and for the analysis read after it.
 func allDone(states ...photos.AnalysisState) bool {
 	return !slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone })
+}
+
+// allStages are every stage of a video's analysis: what planning reads.
+func allStages(video photos.GrantedAsset) []photos.AnalysisState {
+	return []photos.AnalysisState{video.Windows, video.Cards, video.Quality, video.Descriptions}
+}
+
+// analysisReady answers what keeps a step from reading the analysis of
+// videos, by the stages of it the step reads: the videos too long to
+// analyse and those whose analysis failed need the member, every such video
+// at once, then a missing local model an administrator; a stage not done
+// yet is asked for, again changing nothing for one already queued, and
+// waited for. Nil when every stage is done.
+func (s *Store) analysisReady(ctx context.Context, grantID string, videos []photos.GrantedAsset, stages func(photos.GrantedAsset) []photos.AnalysisState) error {
+	var pending, broken, long []string
+	unavailable := false
+	for _, video := range videos {
+		states := stages(video)
+		switch {
+		case video.Windows == photos.AnalysisFailed && photos.VideoTooLong(video.Duration):
+			long = append(long, video.AssetID)
+		case slices.Contains(states, photos.AnalysisUnavailable):
+			unavailable = true
+		case slices.Contains(states, photos.AnalysisFailed):
+			broken = append(broken, video.AssetID)
+		case !allDone(states...):
+			pending = append(pending, video.AssetID)
+		}
+	}
+	switch {
+	case len(long) > 0:
+		return &stepNeeds{reason: NeedTooLong, missing: long, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
+	case len(broken) > 0:
+		return &stepNeeds{reason: NeedAnalysis, missing: broken}
+	case unavailable:
+		return &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
+	case len(pending) > 0:
+		if err := s.analyzeAssets(ctx, grantID, pending, false); err != nil {
+			return jobGrantError(err, pending)
+		}
+		return &stepWait{reason: WaitAnalysis, delay: waitPoll}
+	}
+	return nil
 }
 
 // analysisKey reads the photo library's analysis of every video: the key
@@ -649,8 +711,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	// The states first: reading the analysis itself carries every
 	// window's vector.
-	var pending, broken, long []string
-	unavailable := false
+	var available []photos.GrantedAsset
 	for _, asset := range run.assets {
 		looked, ok := about[asset.assetID]
 		if ok && looked.Status == photos.GrantTrashed {
@@ -659,35 +720,10 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		if !ok || looked.Status != photos.GrantAvailable || looked.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
 		}
-		states := []photos.AnalysisState{looked.Windows, looked.Cards, looked.Quality, looked.Descriptions}
-		switch {
-		case looked.Windows == photos.AnalysisFailed && photos.VideoTooLong(looked.Duration):
-			long = append(long, asset.assetID)
-		case slices.Contains(states, photos.AnalysisUnavailable):
-			unavailable = true
-		case slices.Contains(states, photos.AnalysisFailed):
-			broken = append(broken, asset.assetID)
-		case !allDone(states...):
-			pending = append(pending, asset.assetID)
-		}
+		available = append(available, looked)
 	}
-	// What the member has to take out comes first, every such video at
-	// once; then what only an administrator can change.
-	if len(long) > 0 {
-		return "", &stepNeeds{reason: NeedTooLong, missing: long, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
-	}
-	if len(broken) > 0 {
-		return "", &stepNeeds{reason: NeedAnalysis, missing: broken}
-	}
-	if unavailable {
-		return "", &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
-	}
-	if len(pending) > 0 {
-		// Asking again changes nothing for the videos already queued.
-		if err := s.analyzeAssets(ctx, run.grantID, pending, false); err != nil {
-			return "", jobGrantError(err, pending)
-		}
-		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
+	if err := s.analysisReady(ctx, run.grantID, available, allStages); err != nil {
+		return "", err
 	}
 	result := analysisResult{}
 	for n, asset := range run.assets {
@@ -942,6 +978,15 @@ func (s *Store) shots(ctx context.Context, run *jobRun) (any, error) {
 func voidPlans(ctx context.Context, tx *sql.Tx, jobID string, at time.Time) error {
 	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
 	return err
+}
+
+// pins are an edit's slots with their beats (#596), nil for a job that
+// plans.
+func (run *jobRun) pins() []FillPin {
+	if run.settings.Edit == nil {
+		return nil
+	}
+	return run.settings.Edit.Pins
 }
 
 // assetOf is the job's video named in a card.

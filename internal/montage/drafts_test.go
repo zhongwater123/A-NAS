@@ -58,6 +58,8 @@ type editGrants struct {
 	// stand; asked the videos whose analysis the job asked for.
 	windowsState map[string]photos.AnalysisState
 	asked        []string
+	// durations are the videos' lengths the library looks up, 0 unless set.
+	durations map[string]float64
 }
 
 func (g *editGrants) Analyze(_ context.Context, _ string, ids []string, _ bool) error {
@@ -101,7 +103,12 @@ func (g *editGrants) Lookup(_ context.Context, _ string, ids []string) ([]photos
 		if g.trashed[id] {
 			status = photos.GrantTrashed
 		}
-		found = append(found, photos.GrantedAsset{AssetID: id, ObjectID: "object:" + id, Status: status})
+		windows, ok := g.windowsState[id]
+		if !ok {
+			windows = photos.AnalysisDone
+		}
+		found = append(found, photos.GrantedAsset{AssetID: id, ObjectID: "object:" + id, Status: status, Windows: windows, Duration: g.durations[id],
+			Cards: photos.AnalysisDone, Quality: photos.AnalysisDone, Descriptions: photos.AnalysisDone})
 	}
 	return found, nil
 }
@@ -215,12 +222,13 @@ func newEditEnv(t *testing.T) *editEnv {
 	for i := 10; i < 15; i++ {
 		env.grants.windows[videoA][i] = 1
 	}
-	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: &editCompute{}, Search: env.search, Editing: env.frames, Planner: FixedPlanner{},
+	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: &editCompute{}, Editing: env.frames, Planner: FixedPlanner{},
 		Now: func() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	store.search = env.search
 	env.store = store
 	cards := map[string]Card{
 		"c1": card("c1", videoA, 0, 20, []float64{2, 8, 14}, "海边", "远景", "全景", "近景"),
@@ -248,7 +256,7 @@ func newEditEnv(t *testing.T) *editEnv {
 		clipJSON("c2/2", videoA, 29, 32, [2]float64{8, 11}, 2, 1),
 		clipJSON("c3/2", videoB, 4, 7, [2]float64{11, 14}, 2, 2),
 	}})
-	at := "2026-11-20T08:00:00Z"
+	at := "2026-11-20T08:00:00.000000000Z"
 	for _, statement := range []struct {
 		query string
 		args  []any

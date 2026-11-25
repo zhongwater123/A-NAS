@@ -70,19 +70,6 @@ func TestAStoreSearchesWithThePhotoLibrarysGrants(t *testing.T) {
 	}
 }
 
-func TestAGivenSearchIsKept(t *testing.T) {
-	var asked photosapi.GrantRequest
-	given := &editSearch{}
-	store, err := Open(t.Context(), t.TempDir(), Options{Grants: grantCall(t, "", &asked), Search: given})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	if store.search != given {
-		t.Fatalf("search %T, want the one given", store.search)
-	}
-}
-
 func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 	for _, c := range []struct {
 		code string

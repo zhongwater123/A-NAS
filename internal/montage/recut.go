@@ -97,15 +97,13 @@ func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
 		return nil, nil, ErrNotEditable
 	}
 	delete(outline, "unmet")
+	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}
 	places := map[string]CardPlace{}
-	note := func(id string) (string, bool) {
+	for _, id := range base.cards() {
 		if card, ok := src.cards[id]; ok {
 			places[id] = placeOf(card)
 		}
-		return id, true
 	}
-	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}
-	base.rename(note)
 	encoded, err := json.Marshal(base)
 	return encoded, places, err
 }
@@ -135,6 +133,31 @@ func (p CardPlace) key() string {
 type recutPlan struct {
 	Outline map[string]any   `json:"outline"`
 	Shots   []map[string]any `json:"shots"`
+}
+
+// cards are the cards the plan names, by its scenes' cards and its pictures'
+// beats.
+func (plan recutPlan) cards() []string {
+	var named []string
+	forEachIn(plan.Outline["parts"], "scenes", func(scene map[string]any) {
+		list, _ := scene["cards"].([]any)
+		for _, item := range list {
+			if id, ok := item.(string); ok {
+				named = append(named, id)
+			}
+		}
+	})
+	for _, part := range plan.Shots {
+		forEachIn(part["pictures"], "", func(picture map[string]any) {
+			list, _ := picture["beats"].([]any)
+			for _, item := range list {
+				if beat, ok := item.(string); ok {
+					named = append(named, cardOf(beat))
+				}
+			}
+		})
+	}
+	return named
 }
 
 // rename passes each card the plan names, by its scenes' cards and its
@@ -185,12 +208,8 @@ func renameIn(object map[string]any, field string, to func(string) (string, bool
 // was cut: the cards are numbered anew, and a number of then names other
 // footage now. A card no longer in its place (its video gone, or cut or
 // described anew) is left out, and its scenes and pictures are picked again;
-// the rest stay as they were planned. A recut queued before the base kept
-// its cards' places is passed on as it is.
+// the rest stay as they were planned.
 func alignBase(base json.RawMessage, places map[string]CardPlace, cards []Card) (json.RawMessage, error) {
-	if places == nil {
-		return base, nil
-	}
 	now := map[string]string{}
 	for _, card := range cards {
 		now[placeOf(card).key()] = card.ID

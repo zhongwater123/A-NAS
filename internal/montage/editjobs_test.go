@@ -226,8 +226,8 @@ func TestAnEditWaitsForWindowsBeingMade(t *testing.T) {
 	}
 	env.runJobs(t)
 	waiting, err := env.store.Job(ctx, editOwner, job.ID)
-	if err != nil || waiting.State != JobWaiting || waiting.WaitReason != WaitAnalysis || len(env.grants.asked) != 0 {
-		t.Fatalf("an edit while the windows are made = %+v, %v; asked %v", waiting, err, env.grants.asked)
+	if err != nil || waiting.State != JobWaiting || waiting.WaitReason != WaitAnalysis || waiting.Steps[0].State != "pending" {
+		t.Fatalf("an edit while the windows are made = %+v, %v", waiting, err)
 	}
 	env.grants.windowsState = nil
 	env.store.Exec(t, "UPDATE jobs SET not_before = '2000-01-01T00:00:00Z' WHERE id = ?", job.ID)
@@ -246,12 +246,15 @@ func TestAnEditDoesNotWaitForWindowsNoOneMakes(t *testing.T) {
 		job    string
 		reason string
 		asked  bool
+		long   bool
 	}{
-		{photos.AnalysisNone, JobWaiting, WaitAnalysis, true},
-		{photos.AnalysisFailed, JobNeedsInput, NeedAnalysis, false},
-		{photos.AnalysisUnavailable, JobNeedsInput, NeedModel, false},
+		{photos.AnalysisNone, JobWaiting, WaitAnalysis, true, false},
+		{photos.AnalysisFailed, JobNeedsInput, NeedAnalysis, false, false},
+		{photos.AnalysisUnavailable, JobNeedsInput, NeedModel, false, false},
+		// Too long to analyse, as the analysis step tells it.
+		{photos.AnalysisFailed, JobNeedsInput, NeedTooLong, false, true},
 	} {
-		t.Run(string(c.state), func(t *testing.T) {
+		t.Run(c.reason, func(t *testing.T) {
 			env := newEditEnv(t)
 			ctx := t.Context()
 			draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
@@ -259,6 +262,9 @@ func TestAnEditDoesNotWaitForWindowsNoOneMakes(t *testing.T) {
 				t.Fatal(err)
 			}
 			env.grants.windowsState = map[string]photos.AnalysisState{videoA: c.state}
+			if c.long {
+				env.grants.durations = map[string]float64{videoA: 24 * 3600}
+			}
 			job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
 			if err != nil {
 				t.Fatal(err)

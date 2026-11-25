@@ -162,7 +162,8 @@ var versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.creat
 	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
 		AND f.name = ` + planStepSQL("fill", "v.plan") + ` AND f.result_json IS NOT NULL),
 	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision,
-	IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change') FROM jobs WHERE id = v.job_id), '')`
+	CASE WHEN v.kind = 'recut' THEN IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change')
+		FROM jobs WHERE id = v.job_id), '') ELSE '' END`
 
 func scanVersion(rows interface{ Scan(...any) error }) (Version, error) {
 	var version Version
