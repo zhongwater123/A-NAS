@@ -106,7 +106,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 门控回答它时不看有没有人在用相册（`Gate.OpenForMember`、`ContinueForMember`，[`photos.MemberGate`](../../internal/photos/montagewindows.go)）。开始下一块前，CPU、I/O、内存的压力与内存余量都要允许；正在做的一块每 200 毫秒问一次门控，只在内存不足（低于余量、装不下要加载的模型或内存压力超限）时挂断，CPU、I/O 压力只挡下一块。
   - 每轮先做它（[`aiRunner.round`](../../internal/photos/airunner.go)）。有人在用相册时，一轮只做这一类，相册自己的后台工作照旧等。
   - 前台请求不挂断它。AI Worker 一次只服务一个连接（[`worker.py`](../../ai/anas_ai/worker.py)），所以成员这时搜索照片，查询的编码要排在 Worker 手上的这次调用之后：窗口每帧调用一次，和一张照片的向量相当；一张卡片的描述在实验 NAS 上平均 74 秒（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
-  - 这一类是 2026-11-19 修复[剪辑任务停在“等待分析”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)时加的，此前剪辑中心的分析和相册自己的后台工作一样等相册空闲。是否保留这种做法[待用户确认](../decisions/2026-11-25-photo-ai-gate-member-work.md)。
+  - 这一类是 2026-11-19 修复[剪辑任务停在“等待分析”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)时加的，此前剪辑中心的分析和相册自己的后台工作一样等相册空闲。2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)保留这种做法。
 - **相册自己的后台工作**：整理照片，没有人在等其中某一项。
   - 现在包括：照片的向量、物体、人脸、宠物与文字识别，标签与查询文字的编码，人物聚类，以及向量索引的同步，其中也有剪辑中心窗口向量的同步（[向量索引](vector-index.md)）。
   - 只在没有人在用相册、压力与内存余量都允许时开始（`Gate.Open`）。门控关闭时不领新任务，关闭期间至多每分钟（不长于空闲期）复查一次，因 CPU 或 I/O 压力关闭时每 5 秒复查。
