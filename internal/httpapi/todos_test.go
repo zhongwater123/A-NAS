@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,14 @@ func TestTodosKeepToTheContract(t *testing.T) {
 	decode(t, bob.do(http.MethodGet, "/api/v1/todos", "", nil, http.StatusOK).Body, &list)
 	if len(list.Items) != 1 || list.Items[0].ID != todo.ID {
 		t.Fatalf("bob's to-dos = %+v", list.Items)
+	}
+	// Any account lists whom a to-do can be given to: the active accounts.
+	var owners struct {
+		Items []family.TodoOwner `json:"items"`
+	}
+	decode(t, bob.do(http.MethodGet, "/api/v1/todos/owners", "", nil, http.StatusOK).Body, &owners)
+	if !slices.Contains(owners.Items, family.TodoOwner{ID: alice.ID, Username: "alice"}) {
+		t.Fatalf("owners = %+v", owners.Items)
 	}
 
 	todoPath := "/api/v1/todos/" + todo.ID
