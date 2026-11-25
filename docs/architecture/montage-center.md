@@ -729,7 +729,7 @@ montage/
 - `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍（结尾画面的最后一个槽记末段的：结尾选的节拍收尾），修订号 0。槽按成片顺序排列，各记段落号、画面号与起止秒数；`fill` 的 `pins` 也这样指一个槽。
 - `POST /drafts/{id}/ops` 分两段。先在事务外读修改稿、比对 `baseRevision`（对不上回答 409 `draft_conflict`），按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 2 项与本节下面几条校验并算出新的状态（规格随新界面改写前，规则以这两处为准），不成立回答 422 `edit_refused`，`message` 是给成员看的原因；重洗的搜索与删除的 `likeness` 也在这一段，不占着事务等相册或计算 Worker。再在一个事务里写入：只在修订号仍是 `baseRevision` 时更新 `drafts`，这期间被别的请求改过就回答 409 `draft_conflict`、什么都不写；写一行 `draft_revisions`；删掉最近 100 个之外、又不在撤销链上的修订。回答新的修改稿。
 - 这一版的时间线读不出来时（见上），版本概要、修改稿、每一步操作、候选、镜头清单、存为新版本与重剪都回答 409 `not_editable`。读不出来也包括时间线对不上规划与目录：镜头的卡片不在这一版任务描述过的卡片里、画面不在规划里，或镜头的节拍是它的卡片没有的。
-- 打开修改稿时，逐个读卡片所在视频的分析：相册现在的窗口身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。相册里已经没有、或内容对象换了的视频留给用到它的步骤。`POST /drafts/{id}/save` 建任务前再查一次，打开之后才重新分析的，直接回答 409 `analysis_changed`，不建任务。版本概要、每一步操作与候选不做这一步：读分析要连同全部窗口向量，每次点击都读太重。
+- 打开修改稿时，逐个读卡片所在视频的分析：相册现在已做完的窗口，身份或维度与这一版任务的分析结果不同（换了预处理模型并重新分析过），回答 409 `analysis_changed`，这一版只能播放与重剪。窗口正在重做、还没做完的不算换了模型；相册里已经没有、放进回收站、不再允许授权读取，或内容对象换了的视频，都留给用到它的步骤。`POST /drafts/{id}/save` 建任务前再查一次，打开之后才重新分析的，直接回答 409 `analysis_changed`，不建任务。版本概要、每一步操作与候选不做这一步：读分析要连同全部窗口向量，每次点击都读太重。
 - 校验只用剪辑中心手上的数据：卡片、节拍与描述来自相册的 `analysis`，横竖来自 `lookup` 的宽高（宽高比小于 16:9 算竖拍，与渲染判断是否垫模糊背景的规则相同），已用的节拍来自修改稿本身。换镜头、拖动时节拍够不够长按 `fill` 的放慢上限（2.5 倍）算；删除一镜时“卡片盖得住两段之和”按不放慢算。
 - 这里的校验不知道 `fill` 实际会从卡片的哪一段取画面，所以存为新版本时还要核对一次，见“重新填槽”。
 - 删除时两边都够长，调两次计算 Worker 的 `likeness`（被删的一镜分别对前一镜、后一镜），选更像的一边，一样像时选前一镜；只有一边够长时不调。比之前要读这三镜所在视频的分析（连同全部窗口向量），这一步里每个视频只读一次：相邻的镜头多半出自同一个视频。其中有视频已从相册删除或放进回收站时回答 422 `edit_refused`，原因写明这一点；相册答不了回答 503 `photos_unavailable`，计算 Worker 连不上回答 503 `compute_unavailable`，修改稿都不变。
@@ -764,11 +764,11 @@ montage/
 - 迁移回退：加 `kind` 的那一步，Down 自己删掉 `edit`、`recut` 任务名下的步骤、素材、轮次、规划和它们存下的版本的修改稿。回退时外键是关着的，级联不生效。
 - `edit` 与 `recut` 任务不改项目的设置，也不改 `project_assets`。
 - 任务的设置从来源版本的任务快照抄来，只留自己这一种的：`recut` 任务不带 `edit` 的 `pins`，改自重剪版本的 `edit` 任务也不带重剪的那句话与 `base`。所以存出的版本是“改自第 N 版”，不再显示那句重剪的话，也不把重剪的 `base` 再存一遍。
-- `edit` 任务填槽读窗口向量时，窗口身份或维度与来源版本的分析结果不同，直接失败，原因与 `analysis_changed` 相同，不渲染也不存回；`generate` 与 `recut` 任务照旧当作分析正在变化、按可重试故障处理。
+- 三种任务填槽读窗口向量时，视频的窗口正在重做、还没做完，任务等待（`analysis`），做完后接着填槽。`edit` 任务读到的窗口已做完、身份或维度却与来源版本的分析结果不同，直接失败，原因与 `analysis_changed` 相同，不渲染也不存回；`generate` 与 `recut` 任务照旧当作分析正在变化、按可重试故障处理。
 
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
-- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。
+- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。素材重新分析过时（判断同打开修改稿），卡片按新模型重新切、编号照旧，旧编号会指向别的画面，所以 `base` 也不带大纲各画面的 `cards` 和各画面的 `beats`，模板写明这时照 `query`、`shows` 与 `link` 从这一次的卡片里重新挑。
 - 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_montage_worker.py`](../../ai/tests/test_montage_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
 - 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
@@ -787,7 +787,7 @@ montage/
 
 **确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
 
-**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM；有哪些列见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的“镜头清单的格式”，表头在 [`editing.go`](../../internal/montage/editing.go) 的 `shotListHeader`。
+**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM；段落名、备注等文字来自模型，以 `=`、`+`、`-`、`@`、制表符或回车开头的单元格前加一个单引号，电子表格按文字显示而不当公式执行；有哪些列见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的“镜头清单的格式”，表头在 [`editing.go`](../../internal/montage/editing.go) 的 `shotListHeader`。
 
 ## 原型缺陷的修复
 
