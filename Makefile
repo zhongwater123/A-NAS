@@ -407,7 +407,8 @@ secrets-check:
 	@if [ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" != false ]; then echo "secrets-check needs a clone with its whole history" >&2; exit 1; fi
 	$(GITLEAKS) git --log-opts=HEAD --redact=100 --no-banner --verbose .
 
-test:
+# internal/webui's tests serve the built Web UI.
+test: web-build
 	$(GO) test ./...
 
 # CI runs this beside `make check`. It leaves out internal/webui, which only
@@ -531,8 +532,8 @@ packages: build-binaries
 
 # check runs every step, past a failing one (CHECK_FLAGS=-k), so that one run
 # on a development machine reports every failure. CI sets CHECK_FLAGS empty and
-# stops at the first, so that a red run shows within minutes. The quick steps
-# come first. It writes the deploy manifest only once all have passed.
+# stops at the first, so that a red run shows within minutes. It writes the
+# deploy manifest only once all have passed.
 CHECK_FLAGS ?= -k
 
 check:
@@ -544,10 +545,38 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: fmt-check docs-check ops-check vendor-check ai-lint api-check web-typecheck web-lint vet go-lint web-test web-build vuln-check test ai-test ai-sdk-test build-binaries packages
+# check-steps runs CHECK_JOBS steps at a time (make -j) and prints each one's
+# output in one piece when it ends. The slow steps come first, so that each
+# starts once its prerequisites are built (the Go steps wait for web-build).
+# It starts no further step while the load average is above CHECK_LOAD, the
+# number of CPUs (make -l): gates of two sessions on one machine then take
+# turns, instead of slowing each other's tests past their time limits. At the
+# end it lists how long each step took, slowest first, from the start and end
+# of each recipe line that scripts/check-times.sh notes in CHECK_TIMES; the
+# steps' own make runs with CHECK_TIMES set.
+CHECK_JOBS ?= 4
+CHECK_LOAD ?= $(shell nproc 2>/dev/null || echo 4)
+CHECK_STEPS = web-test test go-lint vet vuln-check build-binaries packages web-typecheck web-lint ai-test ai-sdk-test \
+	ops-check docs-check api-check ai-lint vendor-check fmt-check
+
+check-steps:
+	@rm -rf $(BUILD_DIR)/check-times && mkdir -p $(BUILD_DIR)/check-times
+	@status=0; $(MAKE) -j$(CHECK_JOBS) -l$(CHECK_LOAD) --output-sync=target --no-print-directory $(CHECK_STEPS) \
+		VERSION="$(VERSION)" CHECK_TIMES=$(BUILD_DIR)/check-times || status=$$?; \
+	scripts/check-times.sh --report $(BUILD_DIR)/check-times; exit $$status
+
+ifdef CHECK_TIMES
+SHELL := $(CURDIR)/scripts/check-times.sh
+# A stamp file's target has slashes: web/node_modules/.package-lock.json.
+.SHELLFLAGS = $(CHECK_TIMES)/$(subst /,-,$@) -c
+# web-build empties internal/webui/dist and writes it anew, and these read it
+# (internal/webui embeds it): not at the same time. Alone they need no Web UI.
+vet go-lint vuln-check: | web-build
+endif
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
+	rm -rf $(BUILD_DIR)/check-times
 	rm -rf $(BUILD_DIR)/packages
 	rm -rf $(AI_SDK_VENV)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete
