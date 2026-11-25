@@ -1911,16 +1911,20 @@ index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{
 wait "$holder"
 check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
 printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
-failed_starts=0
-until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
-  failed_starts=$((failed_starts + 1))
-  ((failed_starts < 5)) || break
+damaged_at=$(journal_mark)
+# The connection waits in the socket's queue and starts the instance again
+# each time a start fails, a few seconds after Qdrant panics (wait-ready.sh);
+# the third start empties the storage and answers it.
+answered=false
+for _ in 1 2 3; do
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock && { answered=true; break; }
   sleep 1
 done
+failed_starts=$(journalctl -u anas-vectors@a-nas-photos.service --after-cursor "$damaged_at" -o cat --no-pager |
+  grep -c 'Failed with result' || true)
 echo "INFO starts that failed on the damaged index: $failed_starts"
-check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
-check "and starts empty after two failures in a row" \
-  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "a damaged vector index answers once it has started empty" "$answered"
+check "after two failed starts in a row" test "$failed_starts" -eq 2 -a ! -e "$vectors_state/storage/collections/damaged"
 check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
 # A probe in the vector index's own unit, in place of Qdrant.
 cat > /usr/local/lib/anas-vectors-probe.py <<'PY'
