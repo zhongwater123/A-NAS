@@ -182,14 +182,15 @@ jobs:
 
       # With the job's read-only token, zizmor (make ops-check) also runs its
       # online audits, such as whether a pinned action commit belongs to its
-      # repository and whether the action has a known advisory.
+      # repository and whether the action has a known advisory. CHECK_FLAGS is
+      # empty: CI stops at the first failing step instead of running the rest.
       - name: Run checks
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         env:
           ANAS_QDRANT_REQUIRED: "1"
           ANAS_MONTAGE_PYTHON: python3
           GH_TOKEN: ${{ github.token }}
-        run: make check
+        run: make check CHECK_FLAGS=
 
   race:
     name: Go tests with the race detector

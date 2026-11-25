@@ -1,6 +1,6 @@
 // How 家庭中心 says ages, dates and growth, the way Chinese families do.
 import type { FamilyAge } from "../api.generated";
-import { formatDate } from "../lib/time";
+import { dateOnly, formatDate } from "../lib/time";
 
 // ageText is “3 个月 12 天”, “1 岁 2 个月”, “出生当天”.
 export function ageText(age: FamilyAge, withDays = true): string {
@@ -22,20 +22,7 @@ export function monthLabel(monthOfLife: number): string {
   return months ? `${years} 岁 ${months} 个月` : `${years} 岁`;
 }
 
-// The local calendar date of a date-only value, without a time zone shift.
-export function dateOnly(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-export function today(): string {
-  return isoDate(new Date());
-}
-
-export function isoDate(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
+export { dateOnly, daysUntil, isoDate, today } from "../lib/time";
 
 export function longDate(value: string): string {
   return formatDate(dateOnly(value), { year: "numeric", month: "long", day: "numeric" });
@@ -48,13 +35,6 @@ export function shortDate(value: string): string {
     date,
     sameYear ? { month: "long", day: "numeric" } : { year: "numeric", month: "long", day: "numeric" },
   );
-}
-
-// daysUntil counts calendar days from today to a date-only value.
-export function daysUntil(value: string): number {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((dateOnly(value).getTime() - start.getTime()) / 86_400_000);
 }
 
 // bandText says where a value lies among the standard's percentiles.

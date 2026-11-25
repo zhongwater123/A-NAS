@@ -379,7 +379,7 @@ montage/
 
 **样本**：第八版的结果文件来自真人素材，不进公开的仓库。
 - 位置：开发机 C（macOS，见[开发环境](../development/LOCAL_ENVIRONMENT.md)）的 `~/A-NAS-datasets/`：原片在 `videos/`，窗口向量在 `cache/`，卡片与描述在 `剪辑对比/卡片`，规划与镜头表在 `剪辑对比/规划与成片`。
-- 后两个目录 2026-11-23 之前叫 `第五版` 和 `第四版/剪法24（2026-11-08）`。原型的 [`mac-dev.toml`](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/profiles/mac-dev.toml) 仍写旧名，开发机 C 上的旧名是指向新目录的符号链接，删掉它们原型就找不到样本。同一天，卡片与镜头表里写着的关键帧绝对路径也随目录改了，共 24 个文件，这些文件的 SHA-256 因此与 M6 的记录不同；黄金比对不比较这些路径。
+- 后两个目录 2026-11-23 之前叫 `第五版` 和 `第四版/剪法24（2026-11-08）`。原型的 [`mac-dev.toml`](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/profiles/mac-dev.toml) 仍写旧名，开发机 C 上的旧名是指向新目录的符号链接，删掉它们原型就找不到样本。卡片与镜头表里写着的关键帧绝对路径用的也是旧名，同样靠这两个符号链接解析；黄金比对不比较这些路径。2026-11-23 曾把 22 个文件里的路径随目录改成新名，2026-11-24 已换回原文件，内容与 M6 时逐字节相同，输入的 SHA-256 见 [#584](https://github.com/zhongwater123/A-NAS/issues/584)。
 - 组名见原型的 [`cases.toml`](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/profiles/cases.toml)：`pj`（品杰，新西兰）、`ne`（新西兰）、`ch`（川西）。
 - 黄金比对的测试从环境变量给出的目录读样本，没有样本时跳过，所以证据层是“开发机”。M6 的 PR 列出所用各文件的 SHA-256；首版闭环所用的 11 段视频清单与摘要记在 M10 的 PR 里。
 
