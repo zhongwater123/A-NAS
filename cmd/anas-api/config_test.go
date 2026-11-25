@@ -241,6 +241,22 @@ func TestPhotoServiceConfigNeedsAPositiveQuietPeriod(t *testing.T) {
 	}
 }
 
+func TestPhotoServiceConfigNeedsAPositiveVectorIdleTimeout(t *testing.T) {
+	config, err := loadPhotoServiceConfig(map[string]string{})
+	if err != nil || config.VectorIdle != 0 {
+		t.Fatalf("without the variable: %+v, %v; want the client's default", config, err)
+	}
+	config, err = loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT": "5s"})
+	if err != nil || config.VectorIdle.Seconds() != 5 {
+		t.Fatalf("loadPhotoServiceConfig() = %+v, %v", config, err)
+	}
+	for _, value := range []string{"0s", "-1s", "soon"} {
+		if _, err := loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT": value}); err == nil {
+			t.Errorf("vector idle timeout %q was accepted", value)
+		}
+	}
+}
+
 // The photo and share services name every path that is not absolute, in
 // the same order every time, as the Product Service does (#192).
 func TestServiceConfigsNameEveryRelativePath(t *testing.T) {

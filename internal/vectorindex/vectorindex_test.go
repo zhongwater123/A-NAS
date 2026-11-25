@@ -203,10 +203,9 @@ func TestIndex(t *testing.T) {
 // An idle client closes its connection, so that on the NAS the proxy exits
 // and the instance stops; the next request connects again.
 func TestIdleConnectionCloses(t *testing.T) {
-	defer vectorindex.SetIdleTimeout(200 * time.Millisecond)()
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, nil, vectorindex.IdleTimeout(200*time.Millisecond))
 	defer func() { _ = client.Close() }()
 
 	if _, err := client.Collections(ctx); err != nil {
@@ -230,10 +229,9 @@ func TestIdleConnectionCloses(t *testing.T) {
 // Prepare starts the instance without asking it anything, and keeps an open
 // connection from idling, so that the next search finds the instance running.
 func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
-	defer vectorindex.SetIdleTimeout(400 * time.Millisecond)()
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, nil, vectorindex.IdleTimeout(400*time.Millisecond))
 	defer func() { _ = client.Close() }()
 
 	if err := client.Prepare(ctx); err != nil {

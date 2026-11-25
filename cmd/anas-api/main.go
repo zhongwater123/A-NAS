@@ -150,7 +150,11 @@ func runPhotoService(logger *slog.Logger) error {
 	lookup := sessionlookup.NewClient(config.SessionSocket)
 	var vectors photos.VectorIndex
 	if config.VectorSocket != "" {
-		client := vectorindex.New(config.VectorSocket, logger)
+		var options []vectorindex.Option
+		if config.VectorIdle > 0 {
+			options = append(options, vectorindex.IdleTimeout(config.VectorIdle))
+		}
+		client := vectorindex.New(config.VectorSocket, logger, options...)
 		defer func() { _ = client.Close() }()
 		vectors = client
 	}

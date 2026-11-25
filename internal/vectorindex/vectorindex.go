@@ -42,12 +42,12 @@ const keyField = "key"
 // scanPage is how many points a scan reads per request.
 const scanPage = 1000
 
-// idleTimeout closes an unused connection. The proxy exits seconds after the
-// last connection closes, and the instance stops with it
+// defaultIdleTimeout closes an unused connection. The proxy exits seconds
+// after the last connection closes, and the instance stops with it
 // (anas-vectors-proxy@.service): an instance runs while its owner keeps a
 // connection, so a client that is not Warm meets an instance that has to
 // start.
-var idleTimeout = time.Minute
+const defaultIdleTimeout = time.Minute
 
 // callTimeout bounds every call, the start of a cold instance included (its
 // unit allows 90 s), so that a hung instance cannot hold its caller, or keep
@@ -88,6 +88,7 @@ var ErrNoCollection = errors.New("the vector index has no such collection")
 type Client struct {
 	socket string
 	logger *slog.Logger
+	idle   time.Duration
 
 	// connecting serialises opening the connection; client holds it once
 	// open, so that Warm never waits for an instance that is starting.
@@ -95,13 +96,26 @@ type Client struct {
 	client     atomic.Pointer[qdrant.Client]
 }
 
+// Option changes a client that New returns.
+type Option func(*Client)
+
+// IdleTimeout closes an unused connection after d instead of a minute, so
+// that the instance stops sooner, as the system test needs.
+func IdleTimeout(d time.Duration) Option {
+	return func(c *Client) { c.idle = d }
+}
+
 // New returns a client for the instance behind socket. It does not connect
 // until the first request.
-func New(socket string, logger *slog.Logger) *Client {
+func New(socket string, logger *slog.Logger, options ...Option) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Client{socket: socket, logger: logger}
+	c := &Client{socket: socket, logger: logger, idle: defaultIdleTimeout}
+	for _, option := range options {
+		option(c)
+	}
+	return c
 }
 
 // Close drops the connection, if any.
@@ -148,7 +162,7 @@ func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, "unix", socket)
 			}),
-			grpc.WithIdleTimeout(idleTimeout),
+			grpc.WithIdleTimeout(c.idle),
 			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReply)),
 		},
 	})

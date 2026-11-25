@@ -90,7 +90,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - **让实例能空闲退出**：
   - `PoolSize: 1`；
   - `KeepAliveTime: -1`，空闲时不 ping；
-  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接。
+  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接（`vectorindex.IdleTimeout` 可以改短，系统测试的相册服务经 `ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT` 设为 5 秒；产品不设，[预热](#预热)靠这一分钟让连接在使用期间保持）。
 
   否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：核对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
 - **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。

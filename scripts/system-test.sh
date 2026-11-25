@@ -224,9 +224,12 @@ else
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
 # AI starts once the photo library has gone unused for this long, so that the
-# test sees a photo organised in the Worker's sandbox.
+# test sees a photo organised in the Worker's sandbox; and the photo service
+# lets its vector index connection go after 5 idle seconds instead of a
+# minute, so that the test sees the instance stop without waiting it out.
 install -d /etc/systemd/system/anas-photos.service.d
-printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
+printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT=5s\n' \
+  > /etc/systemd/system/anas-photos.service.d/system-test.conf
 # A deleted account is removed after 10 seconds instead of 30 days, so that
 # the test sees it go (docs/specs/account-enable-and-delete.md).
 install -d /etc/systemd/system/anas-api.service.d
@@ -1798,7 +1801,7 @@ while len(frame) < 9:
 sys.exit(0 if frame[3] == 4 else 1)
 PY
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle minute included
+unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle timeout included
   for _ in $(seq 1 180); do
     systemctl is-active --quiet "$1" || return 0
     sleep 0.5
