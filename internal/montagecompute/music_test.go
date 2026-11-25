@@ -5,61 +5,10 @@ package montagecompute_test
 import (
 	"context"
 	"errors"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/montage"
-	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 )
-
-// pythonWorker starts the compute Worker as its unit does, after prelude, and
-// returns its socket. Needs the AI runtime's python, as
-// TestPythonWorkerSpeaksTheProtocol.
-func pythonWorker(t *testing.T, prelude string) string {
-	t.Helper()
-	python := os.Getenv("ANAS_MONTAGE_PYTHON")
-	if python == "" {
-		python = "python3"
-	}
-	if err := exec.Command(python, "-c", "import numpy, PIL").Run(); err != nil {
-		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_MONTAGE_PYTHON)", python)
-	}
-	dir, err := os.MkdirTemp("", "compute")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "compute.sock")
-	worker := exec.Command(python, "-c", "import sys\nfrom anas_montage import worker\n"+prelude+"\nworker.main(['--socket', sys.argv[1]])", socket)
-	worker.Dir = filepath.Join("..", "..", "ai")
-	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
-	worker.Stderr = os.Stderr
-	// The Worker ends with the test binary, which a test timeout ends without cleanups.
-	worker.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	if err := worker.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = worker.Process.Kill(); _ = worker.Wait() })
-	// The socket file appears when the Worker binds it, a moment before it
-	// listens: until then a connection is refused. The Worker drops the
-	// empty connection with a warning.
-	for deadline := time.Now().Add(20 * time.Second); ; {
-		if conn, err := net.Dial("unix", socket); err == nil {
-			_ = conn.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the Worker did not listen")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return socket
-}
 
 // song is a downbeat every two seconds for 200 seconds, the choruses louder.
 func song() (montage.Structure, []float32) {
@@ -85,7 +34,7 @@ func song() (montage.Structure, []float32) {
 // The music operation through the real Worker (ai/anas_montage/music_ops.py),
 // as worker.py's OPS names it.
 func TestTheMusicOperationAnswersFromPython(t *testing.T) {
-	client := montagecompute.Client{SocketPath: pythonWorker(t, "")}
+	client := startWorker(t, "")
 	structure, loudness := song()
 	ctx := context.Background()
 	selection, err := client.Music(ctx, montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
@@ -111,7 +60,7 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 // which the montage center counts; it is not a Worker to wait for without
 // end.
 func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
-	client := montagecompute.Client{SocketPath: pythonWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")}
+	client := startWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")
 	structure, loudness := song()
 	_, err := client.Music(context.Background(), montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
 	if !errors.Is(err, montage.ErrWorkerFailed) {
@@ -123,7 +72,7 @@ func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
 // existed may still be running. It is one to wait for: its refusal says
 // nothing of the song.
 func TestAWorkerWithoutTheMusicOperationIsWaitedFor(t *testing.T) {
-	client := montagecompute.Client{SocketPath: pythonWorker(t, "del worker.OPS['music']")}
+	client := startWorker(t, "del worker.OPS['music']")
 	structure, loudness := song()
 	_, err := client.Music(context.Background(), montage.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
 	if !errors.Is(err, montage.ErrWorkerUnavailable) || errors.Is(err, montage.ErrWorkerRefused) {

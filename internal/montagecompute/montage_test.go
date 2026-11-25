@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,9 +18,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 )
 
-// startWorker starts the Python Worker on a socket of its own, or skips
-// without the AI runtime's python.
-func startWorker(t *testing.T) montagecompute.Client {
+// startWorker starts the Python Worker on a socket of its own, bound before
+// it starts as its unit's socket is, after prelude (Python with the Worker's
+// module imported as worker); or skips without the AI runtime's python.
+func startWorker(t *testing.T, prelude string) montagecompute.Client {
 	t.Helper()
 	python := os.Getenv("ANAS_MONTAGE_PYTHON")
 	if python == "" {
@@ -42,11 +44,14 @@ func startWorker(t *testing.T) montagecompute.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_montage.worker")
+	program := "from anas_montage import worker\n" + prelude + "\nworker.main([])"
+	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-c", program)
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
 	worker.ExtraFiles = []*os.File{inherited}
 	worker.Stderr = os.Stderr
+	// The Worker ends with the test binary, which a test timeout ends without cleanups.
+	worker.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := worker.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +63,7 @@ func startWorker(t *testing.T) montagecompute.Client {
 // case is ai/tests/test_montage_worker.py's tiny_case, one picture of two
 // two-second slots from a card of two beats.
 func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
-	client := startWorker(t)
+	client := startWorker(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
