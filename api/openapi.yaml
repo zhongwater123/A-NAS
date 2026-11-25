@@ -32,6 +32,8 @@ paths:
   /api/v1/session/password: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1password" }
   /api/v1/session/profile: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1profile" }
   /api/v1/session/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1avatar" }
+  /api/v1/session/agent-tokens: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens" }
+  /api/v1/session/agent-tokens/{tokenId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens~1{tokenId}" }
   /api/v1/profiles: { $ref: "paths/accounts.yaml#/~1api~1v1~1profiles" }
   /api/v1/users/{userId}/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1avatar" }
   /api/v1/notifications: { $ref: "paths/accounts.yaml#/~1api~1v1~1notifications" }

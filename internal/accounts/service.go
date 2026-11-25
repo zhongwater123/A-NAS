@@ -185,6 +185,21 @@ var databaseSchema = sqlitedb.Schema{
     handed_album TEXT NOT NULL DEFAULT ''
 );`,
 		Down: "DROP TABLE account_deletions;",
+	}, {
+		// Agent tokens (ADR 0040): one per coding agent a member connects. Only
+		// the hash is kept; the account's deletion takes its tokens along.
+		Up: `CREATE TABLE agent_tokens (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL CHECK (scope IN ('workspace')),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('claude-code', 'codex', 'other')),
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+);
+CREATE INDEX agent_tokens_user_id ON agent_tokens(user_id);`,
+		Down: "DROP TABLE agent_tokens;",
 	}},
 }
 
@@ -948,6 +963,11 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
 		return err
 	}
+	// Agent tokens end with the sessions, for good: enabling the account
+	// again must not bring back a token someone else may hold (ADR 0040).
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID); err != nil {
+		return err
+	}
 	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.disabled", "user", userID, ""); err != nil {
 		return err
 	}
@@ -1017,6 +1037,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
 		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID)
 		s.sessions.forgetUser(userID)
 		return fmt.Errorf("provision account credential: %w", err)
 	}
@@ -1030,6 +1051,11 @@ status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE i
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+		return err
+	}
+	// A reset is how a taken-over account is recovered: the agent tokens go
+	// too, and choosing the new password does not bring them back (ADR 0040).
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID); err != nil {
 		return err
 	}
 	// The member learns of the reset, and LastCredentialReset shows it, only

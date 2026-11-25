@@ -70,6 +70,7 @@ func (h *productHandler) table() []apiroute.Route {
 	for _, domain := range []interface{ Routes() []apiroute.Route }{
 		accountsapi.NewUsers(h.Accounts, logger),
 		accountsapi.NewProfiles(h.Accounts, h.pictures, logger),
+		accountsapi.NewAgentTokens(h.Accounts, logger),
 		storageapi.New(h.Storage, logger),
 		filesapi.New(h.Files, h.FilesChanged, logger),
 		filepreviewapi.New(h.FilePreviews, logger),

@@ -234,6 +234,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/session/agent-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The coding agents the signed-in member connected (ADR 0040), newest first. Tokens nobody used for 90 days are gone; disabling the account or an administrator's password reset removes them all. */
+        get: operations["listAgentTokens"];
+        put?: never;
+        /** @description Connect a coding agent on the member's own computer. The token in the answer is shown once and reaches only the shared workspace's MCP endpoint. An account holds at most 20 tokens (409 agent_token_limit); a name of 1–40 characters and a known kind are required (422 validation_failed). */
+        post: operations["createAgentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session/agent-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Disconnect one of the member's own agents; its later calls answer 401. */
+        delete: operations["revokeAgentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -8284,6 +8319,38 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /**
+         * @description Which coding agent the token was issued for; the connect dialog writes the command for it.
+         * @enum {string}
+         */
+        AgentKind: "claude-code" | "codex" | "other";
+        AgentToken: {
+            id: string;
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+            /** @enum {string} */
+            scope: "workspace";
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Updated at most every 10 minutes; absent until the agent's first call.
+             */
+            lastUsedAt?: string;
+        };
+        AgentTokenList: {
+            items: components["schemas"]["AgentToken"][];
+        };
+        AgentTokenRequest: {
+            /** @description 1–40 characters after trimming, without control characters. */
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+        };
+        AgentTokenCreated: {
+            agentToken: components["schemas"]["AgentToken"];
+            /** @description anas_ws_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash. */
+            token: string;
+        };
         /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
         MissingDisk: {
             id: components["schemas"]["StableResourceID"];
@@ -8969,6 +9036,11 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type AgentKind = components['schemas']['AgentKind'];
+export type AgentToken = components['schemas']['AgentToken'];
+export type AgentTokenList = components['schemas']['AgentTokenList'];
+export type AgentTokenRequest = components['schemas']['AgentTokenRequest'];
+export type AgentTokenCreated = components['schemas']['AgentTokenCreated'];
 export type MissingDisk = components['schemas']['MissingDisk'];
 export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
@@ -9499,6 +9571,78 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
+        };
+    };
+    listAgentTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member's agent tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenList"];
+                };
+            };
+        };
+    };
+    createAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The new token and its value */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenCreated"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    revokeAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
         };
     };
     listProfiles: {

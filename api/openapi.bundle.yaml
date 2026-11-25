@@ -337,6 +337,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+  /api/v1/session/agent-tokens:
+    get:
+      operationId: listAgentTokens
+      description: The coding agents the signed-in member connected (ADR 0040), newest first. Tokens nobody used for 90 days are gone; disabling the account or an administrator's password reset removes them all.
+      responses:
+        '200':
+          description: The member's agent tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTokenList'
+    post:
+      operationId: createAgentToken
+      description: Connect a coding agent on the member's own computer. The token in the answer is shown once and reaches only the shared workspace's MCP endpoint. An account holds at most 20 tokens (409 agent_token_limit); a name of 1–40 characters and a known kind are required (422 validation_failed).
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTokenRequest'
+      responses:
+        '201':
+          description: The new token and its value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTokenCreated'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/session/agent-tokens/{tokenId}:
+    delete:
+      operationId: revokeAgentToken
+      description: Disconnect one of the member's own agents; its later calls answer 401.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Revoked
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/profiles:
     get:
       operationId: listProfiles
@@ -17190,6 +17241,74 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/TaskManagerFan'
+    AgentKind:
+      type: string
+      enum:
+        - claude-code
+        - codex
+        - other
+      description: Which coding agent the token was issued for; the connect dialog writes the command for it.
+    AgentToken:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - kind
+        - scope
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          $ref: '#/components/schemas/AgentKind'
+        scope:
+          type: string
+          enum:
+            - workspace
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          description: Updated at most every 10 minutes; absent until the agent's first call.
+    AgentTokenList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentToken'
+    AgentTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - kind
+      properties:
+        name:
+          type: string
+          description: 1–40 characters after trimming, without control characters.
+        kind:
+          $ref: '#/components/schemas/AgentKind'
+    AgentTokenCreated:
+      type: object
+      additionalProperties: false
+      required:
+        - agentToken
+        - token
+      properties:
+        agentToken:
+          $ref: '#/components/schemas/AgentToken'
+        token:
+          type: string
+          description: anas_ws_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash.
     MissingDisk:
       type: object
       additionalProperties: false
