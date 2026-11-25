@@ -5,14 +5,11 @@
 # connections; Qdrant does not tell systemd itself. A start that gets there
 # is no longer counted as failed (start.sh).
 #
-# systemd waits for this script even after Qdrant has exited, as when it
-# panics loading a damaged segment, so the start fails once the main process
-# ($MAINPID) is gone; this used to take the full 60 seconds. Not at once: the
-# connection that started the instance waits in the socket's queue and starts
-# it again as soon as the start fails. Failing at once, that was some twenty
-# starts in a second, which hit the instance's start limit and then the
-# socket's trigger limit, and the socket failed for good (2026-11-25). Five
-# seconds keep it to a start every few seconds, under both.
+# systemd waits for this script even after Qdrant has exited, so it watches
+# the main process ($MAINPID). It reports a failed start 5 seconds later: the
+# connection queued on the socket starts the instance again at once, and the
+# pause keeps those starts under the socket's trigger limit
+# (docs/investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md).
 #
 # Usage: wait-ready.sh PORT STATE_DIRECTORY
 set -euo pipefail
