@@ -546,13 +546,14 @@ check:
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
 # check-steps runs CHECK_JOBS steps at a time (make -j) and prints each one's
-# output in one piece when it ends. The slow steps come first, so that they
-# start at once. It starts no further step while the load average is above
-# CHECK_LOAD, the number of CPUs (make -l): gates of two sessions on one
-# machine then take turns, instead of slowing each other's tests past their
-# time limits. At the end it lists how long each step took, slowest first,
-# from the start and end of each recipe line that scripts/check-times.sh
-# notes in CHECK_TIMES; the steps' own make runs with CHECK_TIMES set.
+# output in one piece when it ends. The slow steps come first, so that each
+# starts once its prerequisites are built (the Go steps wait for web-build).
+# It starts no further step while the load average is above CHECK_LOAD, the
+# number of CPUs (make -l): gates of two sessions on one machine then take
+# turns, instead of slowing each other's tests past their time limits. At the
+# end it lists how long each step took, slowest first, from the start and end
+# of each recipe line that scripts/check-times.sh notes in CHECK_TIMES; the
+# steps' own make runs with CHECK_TIMES set.
 CHECK_JOBS ?= 4
 CHECK_LOAD ?= $(shell nproc 2>/dev/null || echo 4)
 CHECK_STEPS = web-test test go-lint vet vuln-check build-binaries packages web-typecheck web-lint ai-test ai-sdk-test \
