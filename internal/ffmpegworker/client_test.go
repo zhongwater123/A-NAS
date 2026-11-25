@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,17 +12,12 @@ import (
 // request is refused before it takes a slot or connects.
 func TestWritableInputsAreRefusedBeforeDialing(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "input")
-	writable, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	readable := openFile(t, "")
+	writable, err := os.OpenFile(readable.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = writable.Close() }()
-	readable, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = readable.Close() }()
 	dial := func(context.Context, string) (*net.UnixConn, func(), error) {
 		t.Fatal("a request with a writable input dialled the worker")
 		return nil, nil, nil

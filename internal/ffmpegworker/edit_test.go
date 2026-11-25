@@ -173,11 +173,7 @@ func TestSamplesForAnalysisTakeABackgroundSlot(t *testing.T) {
 		got = append(got, priorityOf(ctx, op))
 		return nil, nil, ErrUnavailable
 	}
-	input, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = input.Close() }()
+	input := openFile(t, "")
 	ctx := context.Background()
 	_, _ = audio(ctx, dial, input, AudioRequest{SampleRate: 22050, Bits: 32, PCM: true, Channels: 1})
 	_, _ = audio(ctx, dial, input, AudioRequest{Bits: 16})

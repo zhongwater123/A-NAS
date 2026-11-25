@@ -401,6 +401,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	if err := segments.Sync(); err != nil {
 		return nil, storage(err)
 	}
+	_ = segments.Close()
 	// The worker gets a descriptor of its own that cannot write (ADR 0017).
 	video, err := os.Open(segments.Name())
 	if err != nil {
