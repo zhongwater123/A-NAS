@@ -161,6 +161,17 @@ paths:
   /api/v1/montage/projects/{projectId}/song/audio: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song~1audio" }
   /api/v1/montage/hero: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero" }
   /api/v1/montage/hero/poster: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero~1poster" }
+  /api/v1/montage/versions/{versionId}/confirm: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1confirm" }
+  /api/v1/montage/versions/{versionId}/recut: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1recut" }
+  /api/v1/montage/versions/{versionId}/outline: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1outline" }
+  /api/v1/montage/versions/{versionId}/draft: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1draft" }
+  /api/v1/montage/drafts/{draftId}/ops: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1ops" }
+  /api/v1/montage/drafts/{draftId}/save: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1save" }
+  /api/v1/montage/drafts/{draftId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1song" }
+  /api/v1/montage/drafts/{draftId}/candidates: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1candidates" }
+  /api/v1/montage/versions/{versionId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1shots" }
+  /api/v1/montage/drafts/{draftId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1shots" }
+  /api/v1/montage/projects/{projectId}/frames/{assetId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1frames~1{assetId}" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }

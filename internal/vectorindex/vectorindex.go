@@ -266,6 +266,59 @@ func (c *Client) DeleteCollection(ctx context.Context, name string) error {
 	return client.DeleteCollection(ctx, name)
 }
 
+// Alias returns the collection alias names, or "" when there is no such
+// alias. Deleting a collection deletes its aliases.
+func (c *Client) Alias(ctx context.Context, alias string) (string, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if alias == "" {
+		return "", ErrInvalid
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return "", err
+	}
+	aliases, err := client.ListAliases(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, description := range aliases {
+		if description.GetAliasName() == alias {
+			return description.GetCollectionName(), nil
+		}
+	}
+	return "", nil
+}
+
+// SwitchAlias points alias at collection in one change, so that a reader
+// of the alias sees either the old collection or the new one, never none:
+// an owner fills a new collection, switches its alias to it, and can switch
+// back while it keeps the old one. It reports whether the alias moved: not
+// when it named collection already.
+func (c *Client) SwitchAlias(ctx context.Context, alias, collection string) (bool, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if alias == "" || collection == "" || alias == collection {
+		return false, ErrInvalid
+	}
+	current, err := c.Alias(ctx, alias)
+	if err != nil || current == collection {
+		return false, err
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return false, err
+	}
+	var actions []*qdrant.AliasOperations
+	if current != "" {
+		actions = append(actions, qdrant.NewAliasDelete(alias))
+	}
+	if err := client.UpdateAliases(ctx, append(actions, qdrant.NewAliasCreate(alias, collection))); err != nil {
+		return false, fmt.Errorf("point alias %s at %s: %w", alias, collection, err)
+	}
+	return true, nil
+}
+
 // Point is what the index keeps for one key.
 type Point struct {
 	// Key is the owner's stable ID of what the vector belongs to, such as a

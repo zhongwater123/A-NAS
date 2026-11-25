@@ -56,6 +56,18 @@ func New(store *montage.Store, logger *slog.Logger) http.Handler {
 		"GET /notices":                         h.notices,
 		"GET /hero":                            h.hero("film"),
 		"GET /hero/poster":                     h.hero("poster"),
+		// Editing a film after it was made (#596).
+		"POST /versions/{versionID}/confirm":         h.confirmVersion,
+		"POST /versions/{versionID}/recut":           h.recut,
+		"GET /versions/{versionID}/outline":          h.versionOutline,
+		"GET /versions/{versionID}/draft":            h.versionDraft,
+		"POST /drafts/{draftID}/ops":                 h.editDraft,
+		"POST /drafts/{draftID}/save":                h.saveDraft,
+		"GET /drafts/{draftID}/song":                 h.draftSong,
+		"GET /drafts/{draftID}/candidates":           h.draftCandidates,
+		"GET /versions/{versionID}/shots":            h.versionShots,
+		"GET /drafts/{draftID}/shots":                h.draftShots,
+		"GET /projects/{projectID}/frames/{assetID}": h.frame,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -102,6 +114,9 @@ func (h *handler) withUser(next route) http.HandlerFunc {
 const maxJSONBytes = 64 << 10
 
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
+	if failEdit(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, montage.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -133,12 +148,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusNotFound, "no_song", "the project has no song yet")
 	case errors.Is(err, montage.ErrSongNotReady):
 		httpjson.WriteError(w, http.StatusConflict, "song_not_ready", "the song is not analysed yet, or cannot be used")
-	case errors.Is(err, montage.ErrSongStart), errors.Is(err, montage.ErrWorkerRefused):
+	case errors.Is(err, montage.ErrSongStart):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_start_unusable", "no usable excerpt starts there")
 	case errors.Is(err, montage.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
-	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed):
+	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed), errors.Is(err, montage.ErrWorkerRefused):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, montage.ErrPhotosUnavailable):

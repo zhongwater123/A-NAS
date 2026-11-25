@@ -114,11 +114,7 @@ func (s *Service) similarities(ctx context.Context, q similarityQuery) (map[stri
 // indexSimilarities answers q with the index; ok is false when the index
 // cannot answer for the model, and the caller reads the Catalog instead.
 func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sims map[string]float64, read vectorRead, ok bool, err error) {
-	if s.indexResting() {
-		s.reportVectorFallback("the vector index failed recently", nil)
-		return nil, vectorRead{}, false, nil
-	}
-	collection, queued, usable, err := s.readableCollection(ctx, q.model)
+	collection, queued, usable, err := s.readableCollection(ctx, s.imageVectors(), q.model)
 	if err != nil || !usable {
 		return nil, vectorRead{}, false, err
 	}
@@ -155,13 +151,10 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 
 	read.warm = s.vectorsWarm()
 	started := time.Now()
-	ask := func(limit int, floor *float32) ([]vectorindex.Hit, error) {
-		hits, err := s.vectors.Search(ctx, collection, vectorindex.Query{Vector: q.vector,
-			Scope: vectorindex.Scope{Field: librariesField, Values: q.scope}, Limit: limit, Exact: true, Floor: floor})
-		if err != nil {
-			s.indexFailed(ctx, err)
-		}
-		return hits, err
+	ask := s.askIndex(ctx, collection)
+	query := func(limit int, floor *float32) vectorindex.Query {
+		return vectorindex.Query{Vector: q.vector, Scope: vectorindex.Scope{Field: librariesField, Values: q.scope},
+			Limit: limit, Exact: true, Floor: floor}
 	}
 	// No more can rank than there are to rank: when a query matches nearly
 	// every name, the index is not paged through for photos that are not
@@ -175,15 +168,15 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 			placedExactly++
 		}
 	}
-	var hits []vectorindex.Hit
-	for {
-		if hits, err = ask(limit, nil); err != nil {
-			return nil, vectorRead{}, false, err
-		}
-		if len(hits) < limit || countUsable(hits, ranks, queued)+placedExactly >= want {
-			break
-		}
-		limit *= 4
+	answers, err := ask([]vectorindex.Query{query(limit, nil)})
+	if err != nil {
+		return nil, vectorRead{}, false, err
+	}
+	hits, limit, err := askDeeper(ask, query(limit, nil), answers[0], func(hits []vectorindex.Hit) bool {
+		return countUsable(hits, ranks, queued)+placedExactly >= want
+	})
+	if err != nil {
+		return nil, vectorRead{}, false, err
 	}
 
 	// Approximate places: the index's float32 score plus the bonus, exact
@@ -222,15 +215,11 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	if exhausted := len(hits) < limit; !exhausted && want > 0 {
 		floor := float32(cut(ranked) - q.maxBonus - similarityMargin)
 		if lowest := hits[len(hits)-1].Score; lowest >= floor {
-			for limit = max(limit*2, 2*len(ranks)+64); ; limit *= 4 {
-				if hits, err = ask(limit, &floor); err != nil {
-					return nil, vectorRead{}, false, err
-				}
-				if len(hits) < limit {
-					break
-				}
+			above, err := askAllAbove(ask, []vectorindex.Query{query(max(limit*2, 2*len(ranks)+64), &floor)})
+			if err != nil {
+				return nil, vectorRead{}, false, err
 			}
-			ranked = place(hits)
+			ranked = place(above[0])
 		}
 	}
 	s.indexAnswered()
@@ -333,31 +322,139 @@ func (s *Service) indexAnswered() {
 	s.health.mu.Unlock()
 }
 
-// readableCollection returns the collection holding model's vectors and the
-// objects the outbox queues, or usable false when the index cannot answer
-// for model: it has no collection for it, or too much is queued.
-func (s *Service) readableCollection(ctx context.Context, model string) (string, map[string]bool, bool, error) {
-	current, err := s.currentImagesCollection(ctx)
+// indexedVectors is one of the collections ranking reads: the image
+// vectors', or the montage windows' (windowsearch.go).
+type indexedVectors struct {
+	// current is the collection sync writes, with the model its vectors
+	// are of, as the Catalog records them; no collection is "".
+	current func(ctx context.Context) (collection, model string, err error)
+	// full, when set, asks whether collection holds everything already,
+	// and says why the Catalog answers when it does not.
+	full func(ctx context.Context, collection string) (full bool, why string, err error)
+	// outbox selects the objects queued for the collection, up to a limit.
+	outbox string
+	// missing and behind are the reasons reported when there is no
+	// collection for the model, and when too much is queued.
+	missing, behind string
+}
+
+func (s *Service) imageVectors() indexedVectors {
+	return indexedVectors{
+		current: func(ctx context.Context) (string, string, error) {
+			current, err := s.currentImagesCollection(ctx)
+			return current.name, current.model, err
+		},
+		outbox:  "SELECT object_id FROM vector_outbox LIMIT ?",
+		missing: "the vector index has no collection for the model",
+		behind:  "too many photos wait for the vector index",
+	}
+}
+
+// readableCollection returns the collection of vectors that holds model's,
+// and the objects its outbox queues: they are scored from the Catalog
+// beside the index's answer, which may hold an older version of them, or
+// nothing. usable is false, and the reason reported, when the index cannot
+// answer for model: it failed recently, it has no collection for the model
+// or one not full yet, or too much is queued.
+func (s *Service) readableCollection(ctx context.Context, vectors indexedVectors, model string) (collection string, queued map[string]bool, usable bool, err error) {
+	if s.indexResting() {
+		s.reportVectorFallback("the vector index failed recently", nil)
+		return "", nil, false, nil
+	}
+	collection, have, err := vectors.current(ctx)
 	if err != nil {
 		return "", nil, false, err
 	}
-	if current.name == "" || current.model != model {
-		s.reportVectorFallback("the vector index has no collection for the model", nil)
+	if collection == "" || have != model {
+		s.reportVectorFallback(vectors.missing, nil)
 		return "", nil, false, nil
 	}
-	objects, err := s.strings(ctx, "SELECT object_id FROM vector_outbox LIMIT ?", maxOutboxDelta+1)
+	if vectors.full != nil {
+		full, why, err := vectors.full(ctx, collection)
+		if err != nil {
+			s.indexFailed(ctx, err)
+			return "", nil, false, err
+		}
+		if !full {
+			s.reportVectorFallback(why, nil)
+			return "", nil, false, nil
+		}
+	}
+	objects, err := s.strings(ctx, vectors.outbox, maxOutboxDelta+1)
 	if err != nil {
 		return "", nil, false, err
 	}
 	if len(objects) > maxOutboxDelta {
-		s.reportVectorFallback("too many photos wait for the vector index", nil)
+		s.reportVectorFallback(vectors.behind, nil)
 		return "", nil, false, nil
 	}
-	queued := make(map[string]bool, len(objects))
+	queued = make(map[string]bool, len(objects))
 	for _, object := range objects {
 		queued[object] = true
 	}
-	return current.name, queued, true, nil
+	return collection, queued, true, nil
+}
+
+// indexAsk asks a collection several queries at once and answers each in
+// order, as the index's SearchBatch does.
+type indexAsk func(queries []vectorindex.Query) ([][]vectorindex.Hit, error)
+
+// askIndex asks collection, and notes it when the index fails (indexFailed).
+func (s *Service) askIndex(ctx context.Context, collection string) indexAsk {
+	return func(queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
+		found, err := s.vectors.SearchBatch(ctx, collection, queries)
+		if err != nil {
+			s.indexFailed(ctx, err)
+		}
+		return found, err
+	}
+}
+
+// askDeeper returns an answer to query of which enough count, or all the
+// index has for it: hits is the answer query got, and while that fills
+// its limit and is not enough, query is asked for four times as many. It
+// returns the limit of the answer too.
+func askDeeper(ask indexAsk, query vectorindex.Query, hits []vectorindex.Hit, enough func([]vectorindex.Hit) bool) ([]vectorindex.Hit, int, error) {
+	for len(hits) >= query.Limit && !enough(hits) {
+		query.Limit *= 4
+		answers, err := ask([]vectorindex.Query{query})
+		if err != nil {
+			return nil, 0, err
+		}
+		hits = answers[0]
+	}
+	return hits, query.Limit, nil
+}
+
+// askAllAbove returns, for each of queries, every point at or above its
+// floor: all are asked at once, and those whose answer fills its limit, so
+// that there may be more, again together for four times as many.
+func askAllAbove(ask indexAsk, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
+	queries = slices.Clone(queries)
+	answers, err := ask(queries)
+	for err == nil {
+		var again []int
+		for i, hits := range answers {
+			if len(hits) == queries[i].Limit {
+				again = append(again, i)
+			}
+		}
+		if len(again) == 0 {
+			break
+		}
+		retry := make([]vectorindex.Query, len(again))
+		for n, i := range again {
+			queries[i].Limit *= 4
+			retry[n] = queries[i]
+		}
+		var more [][]vectorindex.Hit
+		if more, err = ask(retry); err == nil {
+			for n, i := range again {
+				answers[i] = more[n]
+			}
+		}
+	}
+	return answers, err
 }
 
 // scoreFromCatalog adds to scores the exact similarity to vector of each of
@@ -508,11 +605,7 @@ func (s *Service) above(ctx context.Context, model string, scope []string, objec
 // for the model.
 func (s *Service) indexAbove(ctx context.Context, model string, scope []string, objects []string, queries []thresholdQuery,
 	exactAll bool) ([]map[string]float64, bool, error) {
-	if s.indexResting() {
-		s.reportVectorFallback("the vector index failed recently", nil)
-		return nil, false, nil
-	}
-	collection, queued, usable, err := s.readableCollection(ctx, model)
+	collection, queued, usable, err := s.readableCollection(ctx, s.imageVectors(), model)
 	if err != nil || !usable {
 		return nil, false, err
 	}
@@ -527,32 +620,9 @@ func (s *Service) indexAbove(ctx context.Context, model string, scope []string, 
 		requests[i] = vectorindex.Query{Vector: query.vector, Scope: vectorindex.Scope{Field: librariesField, Values: scope},
 			Limit: len(allowed) + 64, Exact: true, Floor: &floors[i]}
 	}
-	answers, err := s.vectors.SearchBatch(ctx, collection, requests)
-	for err == nil {
-		// A query whose answer filled its limit may have more above its floor.
-		var again []int
-		for i, hits := range answers {
-			if len(hits) == requests[i].Limit {
-				again = append(again, i)
-			}
-		}
-		if len(again) == 0 {
-			break
-		}
-		retry := make([]vectorindex.Query, len(again))
-		for n, i := range again {
-			requests[i].Limit *= 4
-			retry[n] = requests[i]
-		}
-		var more [][]vectorindex.Hit
-		if more, err = s.vectors.SearchBatch(ctx, collection, retry); err == nil {
-			for n, i := range again {
-				answers[i] = more[n]
-			}
-		}
-	}
+	// A query whose answer filled its limit may have more above its floor.
+	answers, err := askAllAbove(s.askIndex(ctx, collection), requests)
 	if err != nil {
-		s.indexFailed(ctx, err)
 		return nil, false, err
 	}
 	s.indexAnswered()

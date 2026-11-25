@@ -4149,7 +4149,7 @@ paths:
   /api/v1/montage/projects/{projectId}/generate:
     post:
       operationId: generateMontageFilm
-      summary: 'Start a job that makes a new version of the project''s film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller''s VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing'
+      summary: 'Start a job that makes a new version of the project''s film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller''s VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing'
       parameters:
         - $ref: '#/components/parameters/MontageProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4288,7 +4288,7 @@ paths:
   /api/v1/montage/jobs/{jobId}/replan:
     post:
       operationId: replanMontageJob
-      summary: 'Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing'
+      summary: 'Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project''s latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing'
       parameters:
         - $ref: '#/components/parameters/MontageJobID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4308,7 +4308,7 @@ paths:
   /api/v1/montage/notices:
     get:
       operationId: listMontageNotices
-      summary: 'The desktop''s notices of the caller''s jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day'
+      summary: 'The desktop''s notices of the caller''s jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day'
       responses:
         '200':
           description: The notices, newest first
@@ -4457,6 +4457,334 @@ paths:
                 type: string
                 format: binary
         '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/confirm:
+    post:
+      operationId: confirmMontageVersion
+      summary: 'Choose this version as the project''s film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/recut:
+    post:
+      operationId: recutMontageVersion
+      summary: 'Plan this version again from a sentence (#596): the member''s VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version''s. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - change
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                change:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  description: 'What to change, as a member''s ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask''s page does for the ask.'
+      responses:
+        '202':
+          description: The recut job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/outline:
+    get:
+      operationId: getMontageVersionOutline
+      summary: 'The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409)'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The version's outline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageVersionOutline'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/draft:
+    get:
+      operationId: getMontageVersionDraft
+      summary: 'The caller''s draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version''s videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos'' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member''s version is not_found'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageDraft'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/ops:
+    post:
+      operationId: editMontageDraft
+      summary: 'One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, a shot whose picture the plan described with nothing to search for (empty, or longer than a search) stays as it was and the message says how many did, and with no unlocked shot to search for the shuffle is edit_refused (422). Deleting a shot between two that could each take its slots reads their videos'' analysis (photos_unavailable, 503; edit_refused, 422, while their windows are made again; analysis_changed, 409, once made with another model) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - baseRevision
+                - op
+              properties:
+                baseRevision:
+                  type: integer
+                  minimum: 0
+                op:
+                  $ref: '#/components/schemas/MontageDraftOp'
+      responses:
+        '200':
+          description: The draft after the step, with what it did
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageDraft'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/save:
+    post:
+      operationId: saveMontageDraft
+      summary: 'Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job, and a requestKey used for another draft or another kind of job is a conflict (409). A revision that was saved already answers 202 with the job that saved it, done and with its version, whatever the requestKey: no new job, and nothing is filled or rendered again. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+      responses:
+        '202':
+          description: The edit job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/song:
+    get:
+      operationId: getMontageDraftSong
+      description: 'The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project''s song is now, as the project''s song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft''s songStart.'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+        - name: start
+          in: query
+          description: Seconds to start a decoded song from; ignored for other songs.
+          schema:
+            type: number
+            minimum: 0
+      responses:
+        '200':
+          description: Audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the song.
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/candidates:
+    get:
+      operationId: listMontageDraftCandidates
+      summary: 'The beats that could lead a shot: the rest of its card, the plan''s spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle''s does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+        - name: shot
+          in: query
+          required: true
+          description: The shot's number from 1.
+          schema:
+            type: integer
+            minimum: 1
+        - name: q
+          in: query
+          description: Words to search the project's videos for.
+          schema:
+            type: string
+            maxLength: 200
+        - name: size
+          in: query
+          description: Only this shot size (景别).
+          schema:
+            type: string
+            maxLength: 64
+        - name: scene
+          in: query
+          description: Only this scene; 其他 for the scenes not listed.
+          schema:
+            type: string
+            maxLength: 64
+        - name: landscape
+          in: query
+          description: Only 16:9 videos.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageCandidates'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/versions/{versionId}/shots:
+    get:
+      operationId: getMontageVersionShots
+      summary: 'The version''s shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film'
+      parameters:
+        - $ref: '#/components/parameters/MontageVersionID'
+      responses:
+        '200':
+          description: The shot list
+          content:
+            text/csv:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/drafts/{draftId}/shots:
+    get:
+      operationId: getMontageDraftShots
+      summary: 'The draft''s shot list, as the version''s: a row a shot, the slots it covers, and for a shot that took a deleted shot''s slots, which'
+      parameters:
+        - $ref: '#/components/parameters/MontageDraftID'
+      responses:
+        '200':
+          description: The shot list
+          content:
+            text/csv:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/frames/{assetId}:
+    get:
+      operationId: getMontageFrame
+      summary: 'A frame of one of the project''s videos, a JPEG 320 on its longer side, for the thumbnails of an edit''s shots and candidates. It is not kept: the video''s content does not change, so the browser keeps it. A video that is not the project''s is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, montage_unavailable where the montage center has no media worker'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: t
+          in: query
+          required: true
+          description: Milliseconds into the video.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2147483647
+      responses:
+        '200':
+          description: The frame
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -9569,6 +9897,20 @@ components:
         minLength: 1
     MontageJobID:
       name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageVersionID:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageDraftID:
+      name: draftId
       in: path
       required: true
       schema:
@@ -17280,6 +17622,12 @@ components:
           description: Up to six of its videos, spread over the order they were added, for thumbnails.
           items:
             type: string
+        chosenVersionId:
+          type: string
+          description: 'The version the member chose as the project''s film (#596): the one shown when the project opens.'
+        chosenFilmAssetId:
+          type: string
+          description: The chosen version's film; the list and the home page show it first.
     MontageProjectPage:
       type: object
       additionalProperties: false
@@ -17338,12 +17686,18 @@ components:
       type: object
       additionalProperties: false
       required:
+        - id
         - number
         - jobId
         - plan
         - filmAssetId
         - createdAt
+        - editable
+        - kind
       properties:
+        id:
+          type: string
+          minLength: 1
         number:
           type: integer
           minimum: 1
@@ -17364,6 +17718,30 @@ components:
         gone:
           type: boolean
           description: The member deleted the film from the photo library.
+        editable:
+          type: boolean
+          description: Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played.
+        kind:
+          type: string
+          enum:
+            - plan
+            - edit
+            - recut
+          description: 'plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.'
+        sourceVersionId:
+          type: string
+          description: The version an edit or a recut came from.
+        sourceNumber:
+          type: integer
+          minimum: 1
+          description: That version's number, while it is recorded.
+        draftRevision:
+          type: integer
+          minimum: 0
+          description: 'An edit: the draft''s revision it was rendered from.'
+        change:
+          type: string
+          description: 'A recut: the member''s sentence, 按“<change>”重剪自第 N 版.'
     MontageJobStep:
       type: object
       additionalProperties: false
@@ -17373,7 +17751,7 @@ components:
       properties:
         name:
           type: string
-          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2.'
+          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2. An edit''s are source, fill, render and save.'
           enum:
             - analysis
             - catalog
@@ -17388,6 +17766,7 @@ components:
             - fill-2
             - render-2
             - save-2
+            - source
         state:
           type: string
           enum:
@@ -17412,6 +17791,7 @@ components:
       required:
         - id
         - projectId
+        - kind
         - state
         - steps
         - createdAt
@@ -17422,6 +17802,13 @@ components:
         projectId:
           type: string
           minLength: 1
+        kind:
+          type: string
+          enum:
+            - generate
+            - edit
+            - recut
+          description: generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
         state:
           type: string
           enum:
@@ -17452,7 +17839,8 @@ components:
             - photos_unavailable
             - video_too_long
             - model_unavailable
-          description: 'Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.'
+            - plan_failed
+          description: 'Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for.'
         error:
           type: string
         steps:
@@ -17461,7 +17849,7 @@ components:
             $ref: '#/components/schemas/MontageJobStep'
         missingAssetIds:
           type: array
-          description: The videos missing, too long, or whose analysis failed.
+          description: The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.
           items:
             type: string
         version:
@@ -17518,6 +17906,12 @@ components:
         job:
           $ref: '#/components/schemas/MontageJob'
           description: The project's latest job, for the page to pick up where it was after a reload.
+        chosenVersionId:
+          type: string
+          description: The version the member chose as the project's film; the other versions stay and can be chosen instead.
+        chosenFilmAssetId:
+          type: string
+          description: The chosen version's film.
     MontageNotice:
       type: object
       additionalProperties: false
@@ -17535,6 +17929,7 @@ components:
             - planning
             - needs_input
             - saved
+            - failed
         jobId:
           type: string
         projectId:
@@ -17544,9 +17939,10 @@ components:
           description: The project's name.
         reason:
           type: string
+          description: The job's waitReason; for failed, plan_failed is one the member plans again (replan).
         detail:
           type: string
-          description: 'Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet.'
+          description: 'Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. For failed, the job''s error.'
         filmAssetId:
           type: string
           description: The film saved, for saved.
@@ -17732,6 +18128,385 @@ components:
           description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
         selection:
           $ref: '#/components/schemas/MontageSongSelection'
+    MontageFilmPlan:
+      type: object
+      additionalProperties: false
+      required:
+        - design
+        - opening
+        - ending
+      description: The first step of the plan a version was cut by.
+      properties:
+        design:
+          type: string
+        opening:
+          type: string
+        ending:
+          type: string
+    MontageFilmPart:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - name
+        - summary
+        - level
+        - label
+        - start
+        - end
+      description: A part of the music and of the plan.
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        summary:
+          type: string
+        level:
+          type: string
+          description: 'The music part''s strength, from the song''s analysis: 安静, 中等 or 高潮.'
+        label:
+          type: string
+          description: The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫.
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
+    MontageDraftShot:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - beat
+        - assetId
+        - part
+        - picture
+        - slots
+        - start
+        - end
+        - from
+        - to
+        - query
+        - shotSize
+        - what
+        - locked
+        - changed
+        - extended
+        - portrait
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        beat:
+          type: string
+          description: 'card/n: the beat that leads the shot.'
+        assetId:
+          type: string
+          description: The video it comes from.
+        part:
+          type: integer
+          minimum: 1
+        picture:
+          type: integer
+          minimum: 1
+        slots:
+          type: array
+          minItems: 1
+          description: The music's slots it covers, from 1; more than one where it took a deleted shot's.
+          items:
+            type: integer
+            minimum: 1
+        start:
+          type: number
+          minimum: 0
+          description: Seconds into the film.
+        end:
+          type: number
+          minimum: 0
+        from:
+          type: number
+          minimum: 0
+          description: 'Seconds into its video the rough preview plays from: where the version had it, or the beat''s piece.'
+        to:
+          type: number
+          minimum: 0
+        query:
+          type: string
+          description: 'What the plan asked of its picture: 规划要.'
+        shotSize:
+          type: string
+        what:
+          type: string
+        locked:
+          type: boolean
+        changed:
+          type: boolean
+          description: '已换: not a beat the version had in these slots.'
+        extended:
+          type: boolean
+          description: '延长: it took a deleted shot''s slots.'
+        portrait:
+          type: boolean
+          description: '竖: its video is narrower than 16:9 and is shown on a blurred background.'
+    MontageFilmCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - shots
+        - videos
+        - portrait
+      description: A film's shots, the videos they come from, and how many of those are 竖.
+      properties:
+        shots:
+          type: integer
+          minimum: 0
+        videos:
+          type: integer
+          minimum: 0
+        portrait:
+          type: integer
+          minimum: 0
+    MontageVersionOutline:
+      type: object
+      additionalProperties: false
+      required:
+        - versionId
+        - projectId
+        - versionNumber
+        - seconds
+        - plan
+        - parts
+        - shots
+        - counts
+        - unmet
+      description: 'A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here.'
+      properties:
+        versionId:
+          type: string
+        projectId:
+          type: string
+        versionNumber:
+          type: integer
+          minimum: 1
+        seconds:
+          type: number
+          minimum: 0
+          description: How long the film is.
+        plan:
+          $ref: '#/components/schemas/MontageFilmPlan'
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageFilmPart'
+        shots:
+          type: array
+          description: The film's shots, none of them changed, extended or locked.
+          items:
+            $ref: '#/components/schemas/MontageDraftShot'
+        counts:
+          $ref: '#/components/schemas/MontageFilmCounts'
+        unmet:
+          type: array
+          description: What the plan found the videos do not have, as the planner wrote it.
+          items:
+            type: string
+    MontageDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - versionId
+        - projectId
+        - versionNumber
+        - revision
+        - canUndo
+        - songStart
+        - songTranscode
+        - seconds
+        - plan
+        - parts
+        - shots
+        - counts
+        - updatedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        versionId:
+          type: string
+        projectId:
+          type: string
+        versionNumber:
+          type: integer
+          minimum: 1
+        revision:
+          type: integer
+          minimum: 0
+          description: A step is made on this revision (baseRevision).
+        canUndo:
+          type: boolean
+        songStart:
+          type: number
+          minimum: 0
+          description: Where the version's excerpt starts in its song, in seconds.
+        songTranscode:
+          type: boolean
+          description: 'The draft''s song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does.'
+        seconds:
+          type: number
+          minimum: 0
+          description: How long the film is.
+        plan:
+          $ref: '#/components/schemas/MontageFilmPlan'
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageFilmPart'
+        shots:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageDraftShot'
+        counts:
+          $ref: '#/components/schemas/MontageFilmCounts'
+        message:
+          type: string
+          description: 'What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上.'
+        updatedAt:
+          type: string
+          format: date-time
+    MontageDraftOp:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+      description: One step of an edit (ADR 0039, decision 2; docs/architecture/montage-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred.
+      properties:
+        type:
+          type: string
+          enum:
+            - replace
+            - move
+            - delete
+            - lock
+            - unlock
+            - shuffle
+            - revert
+            - reset
+            - undo
+        shot:
+          type: integer
+          minimum: 1
+          description: 'The shot''s number, from 1: replace, move, delete, lock, unlock, revert.'
+        to:
+          type: integer
+          minimum: 1
+          description: 'move: the shot whose place it takes.'
+        beat:
+          type: string
+          minLength: 1
+          maxLength: 140
+          description: 'replace: the beat, card/n, as a candidate names it.'
+        seed:
+          type: integer
+          minimum: 0
+          description: 'shuffle: the same seed on the same draft picks the same beats.'
+    MontageCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - beat
+        - assetId
+        - from
+        - to
+        - shotSize
+        - what
+        - scene
+        - portrait
+        - fits
+      properties:
+        beat:
+          type: string
+        assetId:
+          type: string
+        from:
+          type: number
+          minimum: 0
+          description: The part of its video a try plays, in seconds.
+        to:
+          type: number
+          minimum: 0
+        shotSize:
+          type: string
+        what:
+          type: string
+        scene:
+          type: string
+        portrait:
+          type: boolean
+        fits:
+          type: boolean
+          description: Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen.
+        usedBy:
+          type: integer
+          minimum: 1
+          description: '已用在第 N 镜: the shot that has it; it cannot be chosen.'
+        score:
+          type: number
+          description: How alike the search found it; only to order by.
+        takenAt:
+          type: string
+          format: date-time
+    MontageCandidates:
+      type: object
+      additionalProperties: false
+      required:
+        - shot
+        - query
+        - sameCard
+        - planned
+        - results
+        - scenes
+      properties:
+        shot:
+          type: integer
+          minimum: 1
+        query:
+          type: string
+          description: The picture's description, which the search box starts with.
+        sameCard:
+          type: array
+          description: The other beats of the shot's card.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        planned:
+          type: array
+          description: The plan's spare beats for its picture.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        results:
+          type: array
+          description: With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape.
+          items:
+            $ref: '#/components/schemas/MontageCandidate'
+        scenes:
+          type: array
+          maxItems: 9
+          description: 'The scenes the cards were described in, most cards first: eight, and the rest as 其他.'
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - scene
+              - cards
+            properties:
+              scene:
+                type: string
+              cards:
+                type: integer
+                minimum: 1
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|quality|emotion|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

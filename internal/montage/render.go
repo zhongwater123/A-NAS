@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,7 +69,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 		return nil, err
 	}
 	request := FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]Card{}, Catalog: run.catalog.Catalog,
-		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known}
+		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins()}
 	for _, id := range run.catalog.Catalog {
 		request.Cards[id] = run.catalog.Cards[id]
 	}
@@ -112,32 +114,59 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		if err != nil {
 			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
-		if analysis.ObjectID != video.ObjectID || analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions {
+		if run.kind == KindEdit && video.windowsChanged(analysis) {
+			// The version was cut with windows the library has analysed
+			// again with another model since: it is played or recut now,
+			// not edited, and trying again changes nothing.
+			return nil, nil, 0, failed("%s", AnalysisChangedReason)
+		}
+		if !video.sameWindows(analysis) {
+			// Made again since the job's first step looked: that step
+			// decides again (analysisKey, editSourceKey).
 			return nil, nil, 0, errors.New("the photo library's analysis changed while the job ran")
 		}
 		if dimensions != 0 && dimensions != analysis.Dimensions {
 			return nil, nil, 0, failed("window vectors have incompatible dimensions")
 		}
 		dimensions = analysis.Dimensions
-		if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
-			return nil, nil, 0, failed("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
+		windows, beneath, err := windowVectors(analysis, raw, func(start, end float64) bool { return overlaps(within, start, end) })
+		if err != nil {
+			return nil, nil, 0, failed("%v", err)
 		}
-		for i, window := range analysis.List {
-			start, end := float64(window.StartMs)/1000, float64(window.EndMs)/1000
-			if !overlaps(within, start, end) {
-				continue
-			}
-			if len(vectors)+dimensions > MaxComputeArrayBytes/4 {
-				return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
-			}
-			rows = append(rows, FillRow{Video: video.AssetID, Start: start, End: end})
-			for d := range dimensions {
-				at := (i*dimensions + d) * 4
-				vectors = append(vectors, math.Float32frombits(binary.LittleEndian.Uint32(raw[at:])))
-			}
+		if len(vectors)+len(beneath) > MaxComputeArrayBytes/4 {
+			return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
 		}
+		for _, window := range windows {
+			rows = append(rows, FillRow{Video: video.AssetID, Start: float64(window.StartMs) / 1000, End: float64(window.EndMs) / 1000})
+		}
+		vectors = append(vectors, beneath...)
 	}
 	return rows, vectors, dimensions, nil
+}
+
+// windowVectors are those of an analysis's windows that keep wants, given
+// each window's start and end in seconds, with their vectors one after
+// another. raw is the analysis's vectors as the photo library keeps them:
+// for each window in order, its dimensions as little-endian float32.
+func windowVectors(analysis photos.GrantAnalysis, raw []byte, keep func(start, end float64) bool) ([]photos.Window, []float32, error) {
+	dimensions := analysis.Dimensions
+	if dimensions <= 0 || dimensions > photos.MaxWindowDimensions || len(raw) != len(analysis.List)*4*dimensions {
+		return nil, nil, fmt.Errorf("%d bytes of vectors for %d windows of dimension %d", len(raw), len(analysis.List), dimensions)
+	}
+	var windows []photos.Window
+	var vectors []float32
+	for i, window := range analysis.List {
+		if !keep(float64(window.StartMs)/1000, float64(window.EndMs)/1000) {
+			continue
+		}
+		windows = append(windows, window)
+		at := len(vectors)
+		vectors = append(vectors, make([]float32, dimensions)...)
+		if _, err := binary.Decode(raw[i*4*dimensions:(i+1)*4*dimensions], binary.LittleEndian, vectors[at:]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return windows, vectors, nil
 }
 
 func catalogSpans(catalog catalogResult) map[string][][2]float64 {
@@ -208,11 +237,20 @@ func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os
 	if err != nil {
 		return nil, jobGrantError(err, []string{assetID})
 	}
+	want, known := "", false
 	for _, asset := range run.assets {
-		if asset.assetID == assetID && asset.objectID != object {
-			_ = file.Close()
-			return nil, &stepNeeds{reason: NeedMissing, missing: []string{assetID}}
+		if asset.assetID == assetID {
+			want, known = asset.objectID, true
 		}
+	}
+	if video, ok := run.assetOf(assetID); !known && ok {
+		// An edit's fill may take a piece from a video no shot of the draft
+		// leads: still the content the version was planned from.
+		want, known = video.ObjectID, true
+	}
+	if known && want != object {
+		_ = file.Close()
+		return nil, &stepNeeds{reason: NeedMissing, missing: []string{assetID}}
 	}
 	return file, nil
 }
@@ -234,6 +272,9 @@ func finite(values ...float64) bool {
 // job's failure, never a film.
 func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if len(answer.Short) > 0 {
+		if pins := run.pins(); pins != nil {
+			return shortOfPins(pins, answer.Short)
+		}
 		return failed("%d slots were left empty", len(answer.Short))
 	}
 	if len(answer.Clips) == 0 || len(answer.Clips) > maxClips {
@@ -241,6 +282,8 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	}
 	total := 0
 	var slots [][2]int
+	// beats are the beats of each slot's shots.
+	var beats [][]string
 	var slot [2]int
 	for i, raw := range answer.Clips {
 		var clip Clip
@@ -281,8 +324,10 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 				return failed("slot %v does not follow frame %d", clip.Slot, total)
 			}
 			slots = append(slots, thisSlot)
+			beats = append(beats, nil)
 			slot = thisSlot
 		}
+		beats[len(beats)-1] = append(beats[len(beats)-1], clip.Beat)
 		total += frames
 		if total > slot[1] {
 			return failed("shot %d overfills its slot", i+1)
@@ -291,7 +336,12 @@ func validateTimeline(run *jobRun, answer FillAnswer) error {
 	if total != slot[1] {
 		return failed("the last slot ends at frame %d, filled to %d", slot[1], total)
 	}
-	if err := checkPlannedSlots(run.planned, slots); err != nil {
+	if pins := run.pins(); pins != nil {
+		// An edit keeps its draft's slots, in the draft's order.
+		if err := checkPinnedSlots(pins, slots, beats); err != nil {
+			return err
+		}
+	} else if err := checkPlannedSlots(run.planned, slots); err != nil {
 		return err
 	}
 	if total != run.excerpt.Frames {
@@ -334,6 +384,52 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 		return failed("the timeline has %d unplanned slots", len(filled)-at)
 	}
 	return nil
+}
+
+// checkPinnedSlots checks an edit's timeline fills its pins' slots, each
+// in its place, and that each is cut with the beat the member chose for it:
+// beats are the beats of each slot's shots. The fill passes over a pin whose
+// card has no footage left around its keyframe, as when the shots beside it
+// took it; a film that silently shows another beat there is not the draft,
+// so the member is told which shots to change.
+func checkPinnedSlots(pins []FillPin, filled [][2]int, beats [][]string) error {
+	if len(pins) != len(filled) {
+		return failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
+	}
+	var passed []string
+	for i, pin := range pins {
+		if want := [2]int{filmFrame(pin.Slot[0]), filmFrame(pin.Slot[1])}; filled[i] != want {
+			return failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
+		}
+		if !slices.Contains(beats[i], pin.Beat) {
+			passed = append(passed, strconv.Itoa(i+1))
+		}
+	}
+	if len(passed) > 0 {
+		return failed("第 %s 镜选的节拍放不进它的位置：同一段录像里相邻的镜头已经用到了那段画面。换一个节拍后再存", strings.Join(passed, "、"))
+	}
+	return nil
+}
+
+// shortOfPins says which of an edit's shots the fill could not fill: short
+// are the fill's unfilled slots, each [part, picture, start, end, frames].
+func shortOfPins(pins []FillPin, short []json.RawMessage) error {
+	var shots []string
+	for _, raw := range short {
+		var slot []float64
+		if err := json.Unmarshal(raw, &slot); err != nil || len(slot) < 4 {
+			continue
+		}
+		for i, pin := range pins {
+			if filmFrame(pin.Slot[0]) == filmFrame(slot[2]) {
+				shots = append(shots, strconv.Itoa(i+1))
+			}
+		}
+	}
+	if len(shots) == 0 {
+		return failed("%d slots were left empty", len(short))
+	}
+	return failed("第 %s 镜选的节拍不够长，也没有别的画面能补上。换一个节拍后再存", strings.Join(shots, "、"))
 }
 
 // --- render ---
@@ -450,7 +546,7 @@ func (s *Store) renderClip(ctx context.Context, run *jobRun, segments *os.File, 
 	defer func() { _ = file.Close() }()
 	frames := clipFrames(clip)
 	request := ffmpegworker.SegmentRequest{Start: clip.Start, Frames: frames, Offset: offset,
-		Blurred: video.Width > 0 && video.Height > 0 && float64(video.Width)/float64(video.Height) < 16.0/9.0-0.01}
+		Blurred: narrow(video.Width, video.Height)}
 	if clip.Slow > 1 {
 		request.Slow = clip.Slow
 	}
@@ -582,10 +678,25 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 	}
 	now := sqlitedb.FormatTime(s.now())
+	// The version keeps its timeline, which editing it reads (#596). A save
+	// replayed after a restart has not loaded the fill: its version has
+	// its job's fill to read instead.
+	var timeline any
+	if len(run.timeline.Clips) > 0 {
+		encoded, err := json.Marshal(timelineResult{Clips: run.timeline.Clips})
+		if err != nil {
+			return nil, err
+		}
+		timeline = string(encoded)
+	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (version_key) DO NOTHING`,
-			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now); err != nil {
+		// An edit's version is an edit of the version it came from, at the
+		// draft's revision; a generate job's was planned.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,
+				kind, source_version_id, draft_revision)
+			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE kind WHEN 'generate' THEN 'plan' ELSE kind END, source_version_id, draft_revision
+			FROM jobs WHERE id = ? ON CONFLICT (version_key) DO NOTHING`,
+			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now, timeline, run.id); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
