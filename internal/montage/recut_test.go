@@ -170,7 +170,9 @@ func TestARecutsBriefCarriesItsSentenceAndBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	asked := compute.briefed[0]
-	if asked.Change != "结尾留长一点" || !strings.Contains(string(asked.Base), "从海边走到山里") || asked.Picked != nil {
+	// The cards are numbered as when the version was cut: the base names them so.
+	if asked.Change != "结尾留长一点" || !strings.Contains(string(asked.Base), "从海边走到山里") || asked.Picked != nil ||
+		!strings.Contains(string(asked.Base), `"cards":["c1","c2"]`) || !strings.Contains(string(asked.Base), `"beats":["c3/2","c3/1"]`) {
 		t.Fatalf("the recut's brief request = %+v", asked)
 	}
 	// A Worker that briefs another template is refused.
@@ -211,24 +213,42 @@ func TestARecutsBaseKeepsThePlansLinks(t *testing.T) {
 	}
 }
 
-// Once the videos were analysed again, their cards are cut anew and the
-// plan's card and beat numbers name other footage: a recut's base keeps what
-// each scene and picture asks for and leaves the numbers out.
-func TestARecutOfAVersionAnalysedAgainPicksItsBeatsAgain(t *testing.T) {
+// The recut's base names the version's cards by their numbers then; its
+// brief names each by the number of the card now in the same place, and
+// leaves out those no longer there (a video taken out, or analysed again and
+// cut anew), whose scenes and pictures the round picks again.
+func TestARecutsBriefNamesTheCardsAsTheyAreNumberedNow(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()
-	env.grants.identity = "another-model|win=2s1f"
-	job, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:again", "结尾留长一点")
+	compute := &editCompute{}
+	env.store.jobCompute = compute
+	job, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "结尾留长一点")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var base string
-	if err := env.store.db.QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
+	// Video A was taken out, and video B's second card cut anew: its first
+	// card (c3) is n1 now.
+	now := map[string]Card{
+		"n1": card("n1", videoB, 0, 10, []float64{1, 5}, "山路", "近景", "特写"),
+		"n2": card("n2", videoB, 10, 12, []float64{11}, "山路", "全景"),
+	}
+	catalog, _ := json.Marshal(catalogResult{Cards: now, Catalog: []string{"n1", "n2"}})
+	env.store.Exec(t, `INSERT INTO steps(job_id, name, input_key, state, result_json, started_at) VALUES(?, 'catalog', 'key', 'done', ?, '2026-11-20T09:00:00Z')`,
+		job.ID, string(catalog))
+	env.store.Exec(t, `INSERT INTO steps(job_id, name, input_key, state, result_json, started_at)
+		SELECT ?, name, input_key, state, result_json, started_at FROM steps WHERE job_id = 'job:1' AND name = 'song'`, job.ID)
+	if _, err := env.store.briefOf(ctx, job.ID, StepOutline, "key", func() (PlanInput, error) { return env.store.storedInput(ctx, job.ID) }); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(base, `"beats"`) || strings.Contains(base, `"cards"`) || !strings.Contains(base, "从海边走到山里") ||
-		!strings.Contains(base, `"query"`) || !strings.Contains(base, `"shows"`) {
-		t.Fatalf("the base of a version analysed again = %s", base)
+	base := string(compute.briefed[0].Base)
+	if strings.Count(base, `"cards"`) != 1 || !strings.Contains(base, `"cards":["n1"]`) ||
+		strings.Count(base, `"beats"`) != 1 || !strings.Contains(base, `"beats":["n1/2","n1/1"]`) {
+		t.Fatalf("the base of a recut whose cards are numbered anew = %s", base)
+	}
+	for _, query := range []string{"海边散步", "海浪", "山路"} {
+		if !strings.Contains(base, query) {
+			t.Fatalf("the base lost what a scene asks for (%s): %s", query, base)
+		}
 	}
 }
 

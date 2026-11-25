@@ -37,13 +37,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	// Analysed again, the videos' cards are cut anew and numbered as before:
-	// the plan's card and beat numbers would name other footage.
-	again, err := s.analysedAgain(ctx, src)
-	if err != nil {
-		return Job{}, false, err
-	}
-	base, err := recutBase(src, again)
+	base, places, err := recutBase(src)
 	if err != nil {
 		return Job{}, false, err
 	}
@@ -66,7 +60,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 			return err
 		}
 		settings.ProjectName, settings.Edit = row.name, nil
-		settings.Recut = &RecutSettings{Change: change, Base: base}
+		settings.Recut = &RecutSettings{Change: change, Base: base, Cards: places}
 		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindRecut, settings: settings, plans: 1,
 			sourceVersion: sql.NullString{String: versionID, Valid: true}}); err != nil {
 			return err
@@ -89,11 +83,10 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 // each part, its pictures as the second step answered them. Both are passed
 // on whole, with each part's and picture's link, which the template asks to
 // keep where the sentence does not touch; only what the earlier request did
-// not find (unmet) is left out, which the new round says for itself. When
-// the videos were analysed again, the cards are not those the plan named:
-// the scenes' cards and the pictures' beats are left out too, and the round
-// picks them again by what each scene and picture asks for (plan-v3.md).
-func recutBase(src *editSource, analysedAgain bool) (json.RawMessage, error) {
+// not find (unmet) is left out, which the new round says for itself. The
+// plan names cards by their numbers then; places are where those cards were
+// in their videos, by which the recut finds them again (alignBase).
+func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
 	var outline map[string]any
 	var shots struct {
 		Answer struct {
@@ -101,16 +94,120 @@ func recutBase(src *editSource, analysedAgain bool) (json.RawMessage, error) {
 		} `json:"answer"`
 	}
 	if err := errors.Join(json.Unmarshal(src.pickedRaw, &outline), json.Unmarshal(src.plannedRaw, &shots)); err != nil {
-		return nil, ErrNotEditable
+		return nil, nil, ErrNotEditable
 	}
 	delete(outline, "unmet")
-	if analysedAgain {
-		forEachIn(outline["parts"], "scenes", func(scene map[string]any) { delete(scene, "cards") })
-		for _, part := range shots.Answer.Parts {
-			forEachIn(part["pictures"], "", func(picture map[string]any) { delete(picture, "beats") })
+	places := map[string]CardPlace{}
+	note := func(id string) (string, bool) {
+		if card, ok := src.cards[id]; ok {
+			places[id] = placeOf(card)
+		}
+		return id, true
+	}
+	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}
+	base.rename(note)
+	encoded, err := json.Marshal(base)
+	return encoded, places, err
+}
+
+// CardPlace is where a card is in its video: the footage it cuts and the
+// instants of its beats. The analysis numbers cards by the videos' order in
+// the job, and cuts and describes them again when the photo library
+// analyses a video again; a card in the same place is the same footage,
+// whatever its number.
+type CardPlace struct {
+	Video string    `json:"video"`
+	Start float64   `json:"start"`
+	End   float64   `json:"end"`
+	Times []float64 `json:"times"`
+}
+
+func placeOf(card Card) CardPlace {
+	return CardPlace{Video: card.Video, Start: card.Start, End: card.End, Times: card.Times}
+}
+
+func (p CardPlace) key() string {
+	encoded, _ := json.Marshal(p)
+	return string(encoded)
+}
+
+// recutPlan is a recut's base as it is passed on.
+type recutPlan struct {
+	Outline map[string]any   `json:"outline"`
+	Shots   []map[string]any `json:"shots"`
+}
+
+// rename passes each card the plan names, by its scenes' cards and its
+// pictures' beats, through to: a card it answers false for is left out, and
+// a scene or picture left with none says none, so that the round picks them
+// again by what it asks for (plan-v3.md).
+func (plan recutPlan) rename(to func(card string) (string, bool)) {
+	forEachIn(plan.Outline["parts"], "scenes", func(scene map[string]any) {
+		renameIn(scene, "cards", to)
+	})
+	for _, part := range plan.Shots {
+		forEachIn(part["pictures"], "", func(picture map[string]any) {
+			renameIn(picture, "beats", func(beat string) (string, bool) {
+				card, n, ok := splitBeat(beat)
+				if !ok {
+					return "", false
+				}
+				card, ok = to(card)
+				return beatID(card, n), ok
+			})
+		})
+	}
+}
+
+func renameIn(object map[string]any, field string, to func(string) (string, bool)) {
+	list, ok := object[field].([]any)
+	if !ok {
+		return
+	}
+	kept := []any{}
+	for _, item := range list {
+		if name, ok := item.(string); ok {
+			if renamed, ok := to(name); ok {
+				kept = append(kept, renamed)
+			}
 		}
 	}
-	return json.Marshal(map[string]any{"outline": outline, "shots": shots.Answer.Parts})
+	if len(kept) == 0 {
+		delete(object, field)
+		return
+	}
+	object[field] = kept
+}
+
+// alignBase is the recut's base for the cards it plans from now: each card
+// the version's plan named, by the number of the card now in its place. The
+// job's videos may have been taken out, or analysed again, since the version
+// was cut: the cards are numbered anew, and a number of then names other
+// footage now. A card no longer in its place (its video gone, or cut or
+// described anew) is left out, and its scenes and pictures are picked again;
+// the rest stay as they were planned. A recut queued before the base kept
+// its cards' places is passed on as it is.
+func alignBase(base json.RawMessage, places map[string]CardPlace, cards []Card) (json.RawMessage, error) {
+	if places == nil {
+		return base, nil
+	}
+	now := map[string]string{}
+	for _, card := range cards {
+		now[placeOf(card).key()] = card.ID
+	}
+	var plan recutPlan
+	if err := json.Unmarshal(base, &plan); err != nil {
+		return nil, err
+	}
+	plan.rename(func(card string) (string, bool) {
+		place, ok := places[card]
+		if !ok {
+			return "", false
+		}
+		id, ok := now[place.key()]
+		return id, ok
+	})
+	return json.Marshal(plan)
 }
 
 // forEachIn calls do with each object of list, a decoded JSON array; with a

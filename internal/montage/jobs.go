@@ -84,6 +84,10 @@ type JobSettings struct {
 type RecutSettings struct {
 	Change string          `json:"change"`
 	Base   json.RawMessage `json:"base"`
+	// Cards are where the cards Base names were in their videos when the
+	// version was cut, by the numbers Base names them by: the brief names
+	// them by their numbers now (alignBase).
+	Cards map[string]CardPlace `json:"cards,omitempty"`
 }
 
 // EditSettings is the draft an edit job renders, as it stood when saved.

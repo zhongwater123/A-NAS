@@ -184,7 +184,10 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 	request := PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
 		Chronological: in.Settings.Chronological, Picked: in.Picked}
 	if recut := in.Settings.Recut; recut != nil {
-		request.Change, request.Base = recut.Change, recut.Base
+		request.Change = recut.Change
+		if request.Base, err = alignBase(recut.Base, recut.Cards, in.Cards); err != nil {
+			return PlanBrief{}, err
+		}
 	}
 	brief, err = s.jobCompute.PlanBrief(ctx, request)
 	if err != nil {
