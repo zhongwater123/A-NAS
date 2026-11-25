@@ -21,12 +21,22 @@ import (
 // together: deleted by the object field, then written again from the
 // Catalog. A video waits in the outbox while its analysis is queued or
 // running, so that its points are written once it is done, not again after
-// every chunk. Nothing searches the collection yet; the Catalog stays the
-// record, and a lost collection is built again from it.
+// every chunk. The Catalog stays the record, and a lost collection is built
+// again from it.
+//
+// The montage center's text search reads the collection (windowsearch.go)
+// by its own name, as sync writes it; the alias windowsAlias only marks the
+// collection that is full. A new model's collection is filled while the
+// alias still names the old one, and the alias moves to it once nothing
+// waits in the outbox. Until then a search reads the Catalog: its texts are
+// of the new model, so nothing reads the old collection. That one stays
+// until the model after, and a model taken back takes its collection up
+// again, every video written into it anew.
 
 const (
 	windowsIndex            = "windows"
-	windowsCollectionPrefix = "video_windows_v1_"
+	windowsAlias            = "video_windows_v1"
+	windowsCollectionPrefix = windowsAlias + "_"
 	objectField             = "object"
 	// windowSyncBatch is how many queued videos one round brings in line;
 	// each may have thousands of points.
@@ -39,8 +49,14 @@ const (
 
 // windowsCollectionName names a new collection for an identity's windows.
 func windowsCollectionName(identity, nonce string) string {
+	return windowsIdentityPrefix(identity) + nonce
+}
+
+// windowsIdentityPrefix starts the name of every collection of an
+// identity's windows.
+func windowsIdentityPrefix(identity string) string {
 	sum := sha256.Sum256([]byte(identity))
-	return windowsCollectionPrefix + hex.EncodeToString(sum[:4]) + "_" + nonce
+	return windowsCollectionPrefix + hex.EncodeToString(sum[:4]) + "_"
 }
 
 type windowsCollection struct{ name, identity string }
@@ -56,10 +72,12 @@ func (s *Service) currentWindowsCollection(ctx context.Context) (windowsCollecti
 }
 
 // windowsCollection returns the collection of the newest windows' identity,
-// making it and queueing every video for it when the index has none. A new
-// model's first stored chunk makes its windows the newest, as the image
-// vectors' newest decides theirs. With no windows at all, there is no
-// collection.
+// the one sync writes, making it and queueing every video for it when the
+// index has none. A new model's first stored chunk makes its windows the
+// newest, as the image vectors' newest decides theirs. An earlier
+// collection of that identity, still kept, is taken up again rather than
+// made anew: the one the alias names, or the one it named before. With no
+// windows at all, there is no collection.
 func (s *Service) windowsCollection(ctx context.Context, index VectorIndex, report func(VectorSyncEvent), verify bool) (windowsCollection, error) {
 	current, err := s.currentWindowsCollection(ctx)
 	if err != nil {
@@ -71,9 +89,20 @@ func (s *Service) windowsCollection(ctx context.Context, index VectorIndex, repo
 		if current.name == "" {
 			return windowsCollection{}, nil
 		}
-		if err := index.DeleteCollection(ctx, current.name); err != nil {
+		// Every collection goes, and its alias with it.
+		names, err := index.Collections(ctx)
+		if err != nil {
 			return windowsCollection{}, err
 		}
+		for _, name := range names {
+			if strings.HasPrefix(name, windowsCollectionPrefix) {
+				if err := index.DeleteCollection(ctx, name); err != nil {
+					return windowsCollection{}, err
+				}
+			}
+		}
+		s.windowsChecked.Store(nil)
+		s.windowsAliased.Store(nil)
 		_, err = s.db.ExecContext(ctx, "DELETE FROM vector_index_state WHERE name = ?", windowsIndex)
 		return windowsCollection{}, err
 	}
@@ -91,18 +120,33 @@ func (s *Service) windowsCollection(ctx context.Context, index VectorIndex, repo
 		s.windowsChecked.Store(&current)
 		return current, nil
 	}
-	var size int
-	if err := s.db.QueryRowContext(ctx, "SELECT length(vector) FROM video_windows WHERE identity = ? LIMIT 1", identity).Scan(&size); err != nil {
+	aliased, err := index.Alias(ctx, windowsAlias)
+	if err != nil {
 		return windowsCollection{}, err
 	}
-	fresh := windowsCollection{name: windowsCollectionName(identity, s.randomHex()[:8]), identity: identity}
-	// No graph: a few thousand points per video, scanned exactly.
-	if err := index.CreateCollection(ctx, vectorindex.Collection{Name: fresh.name, Dimensions: size / 4,
-		Keywords: []string{objectField, librariesField}}); err != nil {
-		return windowsCollection{}, err
-	}
+	target := windowsCollection{identity: identity}
 	for _, name := range names {
-		if strings.HasPrefix(name, windowsCollectionPrefix) {
+		if strings.HasPrefix(name, windowsIdentityPrefix(identity)) && (target.name == "" || name == aliased) {
+			target.name = name
+		}
+	}
+	kind := "reused"
+	if target.name == "" {
+		kind = "created"
+		var size int
+		if err := s.db.QueryRowContext(ctx, "SELECT length(vector) FROM video_windows WHERE identity = ? LIMIT 1", identity).Scan(&size); err != nil {
+			return windowsCollection{}, err
+		}
+		target.name = windowsCollectionName(identity, s.randomHex()[:8])
+		// No graph: a few thousand points per video, scanned exactly.
+		if err := index.CreateCollection(ctx, vectorindex.Collection{Name: target.name, Dimensions: size / 4,
+			Keywords: []string{objectField, librariesField}}); err != nil {
+			return windowsCollection{}, err
+		}
+	}
+	// The collection the alias names is read until the new one is full.
+	for _, name := range names {
+		if strings.HasPrefix(name, windowsCollectionPrefix) && name != target.name && name != aliased {
 			if err := index.DeleteCollection(ctx, name); err != nil {
 				return windowsCollection{}, err
 			}
@@ -112,11 +156,14 @@ func (s *Service) windowsCollection(ctx context.Context, index VectorIndex, repo
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO vector_index_state(name, collection, model, created_at) VALUES(?, ?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET collection = excluded.collection, model = excluded.model, created_at = excluded.created_at`,
-			windowsIndex, fresh.name, fresh.identity, formatTime(s.now())); err != nil {
+			windowsIndex, target.name, target.identity, formatTime(s.now())); err != nil {
 			return err
 		}
-		// The WHERE keeps SQLite from reading ON CONFLICT as part of the
-		// SELECT's join.
+		// Every video is written again, into a collection taken up again
+		// too: nothing kept it in line meanwhile. Points it still holds of
+		// videos gone since are never searched, and the next reconciliation
+		// deletes them. The WHERE keeps SQLite from reading ON CONFLICT as
+		// part of the SELECT's join.
 		result, err := tx.ExecContext(ctx, `INSERT INTO window_outbox(object_id) SELECT DISTINCT object_id FROM video_windows WHERE true
 ON CONFLICT(object_id) DO UPDATE SET version = version + 1`)
 		if err != nil {
@@ -128,11 +175,37 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`)
 	if err != nil {
 		return windowsCollection{}, err
 	}
-	s.windowsChecked.Store(&fresh)
+	s.windowsChecked.Store(&target)
+	s.windowsAliased.Store(nil)
 	if report != nil {
-		report(VectorSyncEvent{Kind: "created", Collection: fresh.name, Queued: int(queued)})
+		report(VectorSyncEvent{Kind: kind, Collection: target.name, Queued: int(queued)})
 	}
-	return fresh, nil
+	return target, nil
+}
+
+// aliasWindows points the alias at the collection sync writes once nothing
+// waits in the outbox: every video is written, and a search may read it. It
+// asks the index only when it does not know the alias to name it already.
+func (s *Service) aliasWindows(ctx context.Context, index VectorIndex, target windowsCollection, report func(VectorSyncEvent)) error {
+	if target.name == "" {
+		return nil
+	}
+	if aliased := s.windowsAliased.Load(); aliased != nil && *aliased == target.name {
+		return nil
+	}
+	var waiting bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM window_outbox)").Scan(&waiting); err != nil || waiting {
+		return err
+	}
+	switched, err := index.SwitchAlias(ctx, windowsAlias, target.name)
+	if err != nil {
+		return err
+	}
+	if switched && report != nil {
+		report(VectorSyncEvent{Kind: "switched", Collection: target.name})
+	}
+	s.windowsAliased.Store(&target.name)
+	return nil
 }
 
 // windowLibraries are the libraries with an untrashed asset of object,
@@ -200,6 +273,7 @@ func (s *Service) SyncWindows(ctx context.Context, index VectorIndex, report fun
 	defer func() {
 		if err != nil {
 			s.windowsChecked.Store(nil)
+			s.windowsAliased.Store(nil)
 		}
 	}()
 	batch, err := s.queuedWindows(ctx)
@@ -239,7 +313,7 @@ func (s *Service) SyncWindows(ctx context.Context, index VectorIndex, report fun
 	if report != nil && collection.name != "" {
 		report(VectorSyncEvent{Kind: "synced", Collection: collection.name, Upserted: upserted, Deleted: deleted, Rejected: rejected})
 	}
-	return true, nil
+	return true, s.aliasWindows(ctx, index, collection, report)
 }
 
 // analysedWindows is the SQL of the objects whose window analysis is
@@ -253,6 +327,8 @@ const analysedWindows = `SELECT object_id FROM jobs WHERE derivation = '` + wind
 // a power cut. A collection the index lost is made again, with every video
 // queued.
 func (s *Service) ReconcileWindows(ctx context.Context, index VectorIndex, report func(VectorSyncEvent)) error {
+	// The alias is looked at again too: the index may have lost it.
+	s.windowsAliased.Store(nil)
 	before, err := s.currentWindowsCollection(ctx)
 	if err != nil {
 		return err
@@ -351,7 +427,7 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, object); err != nil
 	if report != nil {
 		report(VectorSyncEvent{Kind: "reconciled", Collection: current.name, Queued: len(queue)})
 	}
-	return nil
+	return s.aliasWindows(ctx, index, current, report)
 }
 
 // queuedWindow is a video waiting in window_outbox.

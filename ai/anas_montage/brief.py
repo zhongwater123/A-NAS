@@ -15,8 +15,9 @@ from .domain.catalog import MARK, card_mark
 from .domain.options import Case, CutOptions
 from .domain.prompts import CARD_MARKS
 
-# The template the data and the schema go with (prompts/<TEMPLATE>.md).
+# The template the data and the schema go with (prompts/<TEMPLATE>.md); a recut's (#596) starts from a version's plan.
 TEMPLATE = "plan-v2"
+RECUT_TEMPLATE = "plan-v3"
 # What a member who asked for nothing gets: the eighth version's cases each wrote their own.
 DEFAULT_INSTRUCTION = "按拍摄时间顺序，把这些素材剪成一个有开头、中间和结尾的短片"
 
@@ -44,6 +45,18 @@ def music_parts(m):
                       for n, p in enumerate(m["parts"], 1)]}
 
 
+def recut(request, data):
+    """A recut's brief also carries the member's sentence and the plan it starts from: base holds the version's
+    outline and, for each part and picture, the beats it was cut with, what it shows and how it links."""
+    if not request.get("change"):
+        return data, TEMPLATE
+    base = request.get("base") or {}
+    outline = base.get("outline") or {}
+    shots = [[{"beats": pic.get("beats", []), "shows": pic.get("shows", ""), "link": pic.get("link", "")}
+              for pic in part.get("pictures", [])] for part in base.get("shots") or []]
+    return {**data, "change": request["change"], "base": {"outline": outline, "shots": shots}}, RECUT_TEMPLATE
+
+
 def pick_brief(request):
     """The first step: {data, schema}. request: cards (the catalog, in shooting order), music, ask, chronological."""
     case, opts = case_of(request)
@@ -60,7 +73,8 @@ def pick_brief(request):
             "cardCount": len(cards), "lineFormat": CARD_MARKS[0].format(where="所在视频 " if many else ""),
             "catalog": lines, "music": music_parts(m), "order": "free" if opts.free_order else "shooting",
             "partCount": len(m["parts"]), "targetSeconds": round(m["seconds"])}
-    return {"data": data, "schema": schema, "template": TEMPLATE}
+    data, template = recut(request, data)
+    return {"data": data, "schema": schema, "template": template}
 
 
 def shots_brief(request):
@@ -95,5 +109,6 @@ def shots_brief(request):
         parts.append({"part": n, "name": p["name"], "summary": p["summary"], "link": p["link"], "pictures": pictures})
     data = {"instruction": opts.instruction(case), "targetSeconds": round(m["seconds"]), "design": picked["design"],
             "parts": parts}
-    return {"data": data, "schema": built["schema"], "template": TEMPLATE, "slots": built["slots"],
+    data, template = recut(request, data)
+    return {"data": data, "schema": built["schema"], "template": template, "slots": built["slots"],
             "pictures": built["pictures"]}

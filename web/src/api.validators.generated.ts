@@ -8493,7 +8493,7 @@ validate203.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false}
 export const validate22 = validate216;
 const schema102 = {"$ref":"openapi.json#/paths/~1api~1v1~1montage~1notices/get/responses/200/content/application~1json/schema"};
 const schema103 = {"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/MontageNotice"}}}};
-const schema104 = {"type":"object","additionalProperties":false,"required":["kind","jobId","projectId","project","at"],"properties":{"kind":{"type":"string","enum":["waiting_for_planning","planning","needs_input","saved"]},"jobId":{"type":"string"},"projectId":{"type":"string"},"project":{"type":"string","description":"The project's name."},"reason":{"type":"string"},"detail":{"type":"string","description":"Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet."},"filmAssetId":{"type":"string","description":"The film saved, for saved."},"at":{"type":"string","format":"date-time"}}};
+const schema104 = {"type":"object","additionalProperties":false,"required":["kind","jobId","projectId","project","at"],"properties":{"kind":{"type":"string","enum":["waiting_for_planning","planning","needs_input","saved","failed"]},"jobId":{"type":"string"},"projectId":{"type":"string"},"project":{"type":"string","description":"The project's name."},"reason":{"type":"string","description":"The job's waitReason; for failed, plan_failed is one the member plans again (replan)."},"detail":{"type":"string","description":"Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. For failed, the job's error."},"filmAssetId":{"type":"string","description":"The film saved, for saved."},"at":{"type":"string","format":"date-time"}}};
 
 function validate218(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -8529,7 +8529,7 @@ if(typeof data0 !== "string"){
 validate218.errors = [{instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/type",keyword:"type",params:{type: "string"}}];
 return false;
 }
-if(!((((data0 === "waiting_for_planning") || (data0 === "planning")) || (data0 === "needs_input")) || (data0 === "saved"))){
+if(!(((((data0 === "waiting_for_planning") || (data0 === "planning")) || (data0 === "needs_input")) || (data0 === "saved")) || (data0 === "failed"))){
 validate218.errors = [{instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema104.properties.kind.enum}}];
 return false;
 }

@@ -1,0 +1,246 @@
+package montage
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"strings"
+)
+
+// Recutting a version from a sentence (#596, ADR 0039 decision 7): the
+// member's VNAS plans the version again, one 方案, starting from the plan
+// it was cut by and changing only what the sentence asks. It is the one
+// part of editing that plans, so it takes a round of the planning grant.
+
+// RecutVersion starts a recut job of owner's version. The videos, song,
+// excerpt and order are the version's job's; a version edited by hand is
+// planned again from the plan it came from, without the shots changed by
+// hand. The same requestKey again returns the same job; a project with a
+// job in progress answers ErrJobActive.
+func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, change string) (Job, bool, error) {
+	if !printable(requestKey, MaxRequestKey) || strings.TrimSpace(change) == "" || !validText(change, MaxAskRunes) {
+		return Job{}, false, ErrInvalid
+	}
+	if !s.runsJobs() {
+		return Job{}, false, ErrJobsUnavailable
+	}
+	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindRecut, "source_version_id", versionID)
+	if err != nil {
+		return Job{}, false, err
+	}
+	if jobID != "" {
+		job, err := s.Job(ctx, owner, jobID)
+		return job, false, err
+	}
+	src, err := s.versionSource(ctx, owner, versionID)
+	if err != nil {
+		return Job{}, false, err
+	}
+	base, places, err := recutBase(src)
+	if err != nil {
+		return Job{}, false, err
+	}
+	created := false
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		// A retry with the same key may have made the job since the look above.
+		var err error
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindRecut, "source_version_id", versionID); err != nil || jobID != "" {
+			return err
+		}
+		row, err := s.project(ctx, tx, owner, src.projectID)
+		if err != nil {
+			return err
+		}
+		if err := projectIdle(ctx, tx, src.projectID); err != nil {
+			return err
+		}
+		settings, err := jobSettings(ctx, tx, src.planJob)
+		if err != nil {
+			return err
+		}
+		settings.ProjectName, settings.Edit = row.name, nil
+		settings.Recut = &RecutSettings{Change: change, Base: base, Cards: places}
+		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindRecut, settings: settings, plans: 1,
+			sourceVersion: sql.NullString{String: versionID, Valid: true}}); err != nil {
+			return err
+		}
+		created = true
+		// The videos the version was planned from, as they were then.
+		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM job_assets WHERE job_id = ?",
+			jobID, src.planJob)
+		return err
+	})
+	if err != nil {
+		return Job{}, false, err
+	}
+	s.wakeJobs()
+	job, err := s.Job(ctx, owner, jobID)
+	return job, created, err
+}
+
+// recutBase is the plan a recut starts from: the version's outline and, for
+// each part, its pictures as the second step answered them. Both are passed
+// on whole, with each part's and picture's link, which the template asks to
+// keep where the sentence does not touch; only what the earlier request did
+// not find (unmet) is left out, which the new round says for itself. The
+// plan names cards by their numbers then; places are where those cards were
+// in their videos, by which the recut finds them again (alignBase).
+func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
+	var outline map[string]any
+	var shots struct {
+		Answer struct {
+			Parts []map[string]any `json:"parts"`
+		} `json:"answer"`
+	}
+	if err := errors.Join(json.Unmarshal(src.pickedRaw, &outline), json.Unmarshal(src.plannedRaw, &shots)); err != nil {
+		return nil, nil, ErrNotEditable
+	}
+	delete(outline, "unmet")
+	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}
+	places := map[string]CardPlace{}
+	for _, id := range base.cards() {
+		if card, ok := src.cards[id]; ok {
+			places[id] = placeOf(card)
+		}
+	}
+	encoded, err := json.Marshal(base)
+	return encoded, places, err
+}
+
+// CardPlace is where a card is in its video: the footage it cuts and the
+// instants of its beats. The analysis numbers cards by the videos' order in
+// the job, and cuts and describes them again when the photo library
+// analyses a video again; a card in the same place is the same footage,
+// whatever its number.
+type CardPlace struct {
+	Video string    `json:"video"`
+	Start float64   `json:"start"`
+	End   float64   `json:"end"`
+	Times []float64 `json:"times"`
+}
+
+func placeOf(card Card) CardPlace {
+	return CardPlace{Video: card.Video, Start: card.Start, End: card.End, Times: card.Times}
+}
+
+func (p CardPlace) key() string {
+	encoded, _ := json.Marshal(p)
+	return string(encoded)
+}
+
+// recutPlan is a recut's base as it is passed on.
+type recutPlan struct {
+	Outline map[string]any   `json:"outline"`
+	Shots   []map[string]any `json:"shots"`
+}
+
+// cards are the cards the plan names, by its scenes' cards and its pictures'
+// beats.
+func (plan recutPlan) cards() []string {
+	var named []string
+	forEachIn(plan.Outline["parts"], "scenes", func(scene map[string]any) {
+		list, _ := scene["cards"].([]any)
+		for _, item := range list {
+			if id, ok := item.(string); ok {
+				named = append(named, id)
+			}
+		}
+	})
+	for _, part := range plan.Shots {
+		forEachIn(part["pictures"], "", func(picture map[string]any) {
+			list, _ := picture["beats"].([]any)
+			for _, item := range list {
+				if beat, ok := item.(string); ok {
+					named = append(named, cardOf(beat))
+				}
+			}
+		})
+	}
+	return named
+}
+
+// rename passes each card the plan names, by its scenes' cards and its
+// pictures' beats, through to: a card it answers false for is left out, and
+// a scene or picture left with none says none, so that the round picks them
+// again by what it asks for (plan-v3.md).
+func (plan recutPlan) rename(to func(card string) (string, bool)) {
+	forEachIn(plan.Outline["parts"], "scenes", func(scene map[string]any) {
+		renameIn(scene, "cards", to)
+	})
+	for _, part := range plan.Shots {
+		forEachIn(part["pictures"], "", func(picture map[string]any) {
+			renameIn(picture, "beats", func(beat string) (string, bool) {
+				card, n, ok := splitBeat(beat)
+				if !ok {
+					return "", false
+				}
+				card, ok = to(card)
+				return beatID(card, n), ok
+			})
+		})
+	}
+}
+
+func renameIn(object map[string]any, field string, to func(string) (string, bool)) {
+	list, ok := object[field].([]any)
+	if !ok {
+		return
+	}
+	kept := []any{}
+	for _, item := range list {
+		if name, ok := item.(string); ok {
+			if renamed, ok := to(name); ok {
+				kept = append(kept, renamed)
+			}
+		}
+	}
+	if len(kept) == 0 {
+		delete(object, field)
+		return
+	}
+	object[field] = kept
+}
+
+// alignBase is the recut's base for the cards it plans from now: each card
+// the version's plan named, by the number of the card now in its place. The
+// job's videos may have been taken out, or analysed again, since the version
+// was cut: the cards are numbered anew, and a number of then names other
+// footage now. A card no longer in its place (its video gone, or cut or
+// described anew) is left out, and its scenes and pictures are picked again;
+// the rest stay as they were planned.
+func alignBase(base json.RawMessage, places map[string]CardPlace, cards []Card) (json.RawMessage, error) {
+	now := map[string]string{}
+	for _, card := range cards {
+		now[placeOf(card).key()] = card.ID
+	}
+	var plan recutPlan
+	if err := json.Unmarshal(base, &plan); err != nil {
+		return nil, err
+	}
+	plan.rename(func(card string) (string, bool) {
+		place, ok := places[card]
+		if !ok {
+			return "", false
+		}
+		id, ok := now[place.key()]
+		return id, ok
+	})
+	return json.Marshal(plan)
+}
+
+// forEachIn calls do with each object of list, a decoded JSON array; with a
+// field, each object of that array field of each of list's objects instead.
+func forEachIn(list any, field string, do func(map[string]any)) {
+	items, _ := list.([]any)
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		switch {
+		case !ok:
+		case field != "":
+			forEachIn(object[field], "", do)
+		default:
+			do(object)
+		}
+	}
+}

@@ -80,6 +80,7 @@
 - [2026-11-17：剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)
 - [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
 - [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
+- [2026-11-25：规划没有完成时自动重来，到上限仍失败就让任务失败并通知](2026-11-25-montage-planning-retries.md)
 
 ### 家庭待办
 

@@ -354,7 +354,7 @@ export function Go({
             <p className={`${styles.mtError} ${styles.mtHint}`}>{failureText(current)}</p>
           )}
           {act.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(act.error, "montage")}</p>}
-          {going && (
+          {(going || actions.length > 0) && (
             <div className={styles.mtLeave}>
               <span>{active(current) && "可以关掉窗口，任务在设备上继续"}</span>
               <div>
@@ -369,14 +369,17 @@ export function Go({
                     {actionLabels[action]}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className={`${styles.mtBtn} ${styles.small}`}
-                  disabled={act.isPending}
-                  onClick={() => act.mutate("cancel")}
-                >
-                  取消
-                </button>
+                {/* A failed job has ended: there is nothing to cancel. */}
+                {going && (
+                  <button
+                    type="button"
+                    className={`${styles.mtBtn} ${styles.small}`}
+                    disabled={act.isPending}
+                    onClick={() => act.mutate("cancel")}
+                  >
+                    取消
+                  </button>
+                )}
               </div>
             </div>
           )}
