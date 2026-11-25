@@ -2575,7 +2575,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none */
+        /** Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none */
         post: operations["recutMontageVersion"];
         delete?: never;
         options?: never;
@@ -2590,7 +2590,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known answers not_editable (409) */
+        /** The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409) */
         get: operations["getMontageVersionOutline"];
         put?: never;
         post?: never;
@@ -2607,7 +2607,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose draft has a shot with a beat the version's videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found */
+        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version's videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found */
         get: operations["getMontageVersionDraft"];
         put?: never;
         post?: never;

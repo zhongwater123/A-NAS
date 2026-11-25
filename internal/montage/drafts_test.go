@@ -1067,3 +1067,22 @@ func TestAShuffleAvoidsTheCardOfAShotThatStays(t *testing.T) {
 		t.Fatalf("shuffled = %v: shot 2 went onto the card of shot 3, which stays", got)
 	}
 }
+
+// A version saved while its job went on to its next 方案 is not edited (nor
+// recut from) once the job made its analysis or catalog again since: a video
+// taken out or analysed again numbers the cards anew, and the version's
+// numbers would name other footage.
+func TestAVersionWhoseJobWasRedoneSinceIsNotEdited(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
+		t.Fatalf("a version whose job is as it was = %v", err)
+	}
+	env.store.Exec(t, "UPDATE steps SET finished_at = '2026-11-20T08:30:00.000000000Z' WHERE job_id = 'job:1' AND name = 'catalog'")
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("editing a version whose job made its catalog again = %v", err)
+	}
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "开头换热闹点"); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("recutting it = %v", err)
+	}
+}

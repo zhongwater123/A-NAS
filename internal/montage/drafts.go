@@ -192,6 +192,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	if err != nil {
 		return nil, err
 	}
+	switch redone, err := s.redoneSince(ctx, src.planJob, src.planNo); {
+	case err != nil:
+		return nil, err
+	case redone:
+		return nil, ErrNotEditable
+	}
 	stored := timeline.Valid
 	if !stored {
 		fill := planStep("fill", src.plan)
@@ -258,6 +264,53 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 // catalog and excerpt, and the plan's two steps.
 func plannedFrom(plan int) []string {
 	return []string{"analysis", "catalog", "song", planStep("pick", plan), planStep("shots", plan)}
+}
+
+// redoneSince reports whether a step the plan-th 方案 of a job was planned
+// from was done again after that 方案's version was saved. The analysis,
+// catalog and song are the job's, shared by its 方案: a later 方案 makes
+// them again when a video is taken out or analysed again, and the cards are
+// numbered anew, so the version's card and beat numbers no longer name what
+// it was cut from. A job makes one 方案 now; versions made two at a time
+// keep this.
+func (s *Store) redoneSince(ctx context.Context, jobID string, plan int) (bool, error) {
+	var saved string
+	err := s.db.QueryRowContext(ctx, "SELECT created_at FROM versions WHERE job_id = ? AND plan = ?", jobID, plan).Scan(&saved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	savedAt, err := time.Parse(time.RFC3339Nano, saved)
+	if err != nil {
+		return false, err
+	}
+	names := plannedFrom(plan)
+	args := []any{jobID}
+	for _, name := range names {
+		args = append(args, name)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT finished_at FROM steps WHERE job_id = ? AND finished_at IS NOT NULL AND name IN ("+
+		sqlitedb.Placeholders(len(names))+")", args...)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var finished string
+		if err := rows.Scan(&finished); err != nil {
+			return false, err
+		}
+		at, err := time.Parse(time.RFC3339Nano, finished)
+		if err != nil {
+			return false, err
+		}
+		if at.After(savedAt) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // doneResults are what the named steps of a job kept when they were done,
