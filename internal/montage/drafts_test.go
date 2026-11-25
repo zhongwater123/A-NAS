@@ -1035,3 +1035,35 @@ func TestThePreviewStaysWithinTheCard(t *testing.T) {
 		t.Fatalf("the preview of a video ending first = %v–%v, want 3–5.5", from, to)
 	}
 }
+
+// A shot is not shuffled onto the card of the shot after it when that one
+// stays as it is because the plan gave its picture nothing to search for,
+// as it is not when that one is locked: two shots of one card in a row
+// look like no cut.
+func TestAShuffleAvoidsTheCardOfAShotThatStays(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	// Shot 3's picture (c2/2) has no description to search for.
+	env.store.Exec(t, `UPDATE steps SET result_json = replace(result_json, '"海浪"', '""') WHERE name = 'pick'`)
+	// The search finds c2/1 only.
+	for i := 11; i < 15; i++ {
+		env.search.hits = append(env.search.hits, photos.WindowMatch{AssetID: videoA, Window: i, Score: 1})
+	}
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
+		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := int64(7)
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := beats(next); got[1] != "c1/3" || got[2] != "c2/2" {
+		t.Fatalf("shuffled = %v: shot 2 went onto the card of shot 3, which stays", got)
+	}
+}
