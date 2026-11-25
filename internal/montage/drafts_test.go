@@ -52,9 +52,17 @@ type editGrants struct {
 	trashed map[string]bool
 	films   map[string]string
 	// gone are the videos the photo library no longer has; ungrantable
-	// those it no longer lets the grant have; making those whose windows
-	// are being made again.
-	gone, ungrantable, making map[string]bool
+	// those it no longer lets the grant have.
+	gone, ungrantable map[string]bool
+	// windowsState is where the windows of each video are being made again
+	// stand; asked the videos whose analysis the job asked for.
+	windowsState map[string]photos.AnalysisState
+	asked        []string
+}
+
+func (g *editGrants) Analyze(_ context.Context, _ string, ids []string, _ bool) error {
+	g.asked = append(g.asked, ids...)
+	return nil
 }
 
 func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
@@ -68,8 +76,8 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 	if g.ungrantable[assetID] {
 		return photos.GrantAnalysis{}, nil, &photosapi.GrantError{Code: photosapi.GrantAssetsRefused, Message: "an asset cannot be granted"}
 	}
-	if g.making[assetID] {
-		return photos.GrantAnalysis{ObjectID: "object:" + assetID, Windows: photos.AnalysisQueued}, nil, nil
+	if state, ok := g.windowsState[assetID]; ok {
+		return photos.GrantAnalysis{ObjectID: "object:" + assetID, Windows: state}, nil, nil
 	}
 	var list []photos.Window
 	var raw []byte
@@ -671,6 +679,18 @@ func TestCandidatesForAShot(t *testing.T) {
 	if !slices.Equal(names(found.Results), []string{"c3/1", "c2/2"}) || *found.Results[0].Score != 0.9 {
 		t.Fatalf("found = %v", names(found.Results))
 	}
+	// Words as long as a search may be, with blank around them, are searched
+	// for without it, as the photo library counts them.
+	words := strings.Repeat("山", photos.MaxQueryRunes)
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: " " + words + "\n"}); err != nil {
+		t.Fatalf("searching for %d words with blank around them = %v", photos.MaxQueryRunes, err)
+	}
+	if last := env.search.texts[len(env.search.texts)-1]; !slices.Equal(last, []string{words}) {
+		t.Fatal("the blank around the words was searched for")
+	}
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: words + "山"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("searching for more words than a search = %v", err)
+	}
 	env.store.search = nil
 	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"}); !errors.Is(err, ErrSearchUnavailable) {
 		t.Fatalf("searching without the photo library's search = %v", err)
@@ -779,7 +799,7 @@ func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
 	}
 	// Windows being made again are not yet another model, and a video the
 	// library no longer lets the grant read is left to the steps using it.
-	env.grants.making = map[string]bool{videoA: true}
+	env.grants.windowsState = map[string]photos.AnalysisState{videoA: photos.AnalysisWorking}
 	env.grants.ungrantable = map[string]bool{videoB: true}
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
 		t.Fatalf("the draft while the windows are made and a video cannot be read = %v", err)
@@ -942,4 +962,76 @@ func TestAShuffleLeavesAShotItCannotSearchFor(t *testing.T) {
 	env.store.Exec(t, `UPDATE steps SET result_json = replace(replace(result_json, '"query":"海边散步"', '"query":""'), '"query":"山路"', '"query":""') WHERE job_id = 'job:1' AND name = 'pick'`)
 	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, DraftOp{Type: "shuffle", Seed: &seed})
 	refusedWith(t, err, "都没有可以搜索的画面描述")
+}
+
+// A draft whose beat its version's source no longer names (its job's
+// analysis made again since) is not shown, exported or saved, rather than
+// read past its card's beats or saved without its video.
+func TestADraftWithABeatItsSourceLacksIsNotEdited(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beat := draft.Shots[0].Beat
+	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"v9-9/1"`)
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("reading it = %v", err)
+	}
+	if _, err := env.store.DraftShots(ctx, editOwner, draft.ID); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("its shot list = %v", err)
+	}
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1"); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("saving it = %v", err)
+	}
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM jobs WHERE kind = 'edit'"); n != 0 {
+		t.Fatalf("%d edit jobs", n)
+	}
+}
+
+// Deleting a shot between two that could each take its slots reads their
+// videos' windows: while they are made again the member is told to try
+// later, and once made with another model the version is not edited, rather
+// than either failing as the server's own error.
+func TestDeletingAShotWhileItsVideosAreAnalysedAgain(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []DraftOp{{Type: "replace", Shot: 1, Beat: "c1/3"}, {Type: "move", Shot: 1, To: 2}} {
+		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env.grants.windowsState = map[string]photos.AnalysisState{videoA: photos.AnalysisWorking, videoB: photos.AnalysisWorking}
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	refusedWith(t, err, "正在重新分析")
+	env.grants.windowsState = nil
+	env.grants.identity = "another-model|win=2s1f"
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2}); !errors.Is(err, ErrAnalysisChanged) {
+		t.Fatalf("deleting once the videos were analysed with another model = %v", err)
+	}
+}
+
+// The rough preview of a shot longer than what is left of its card (slowed
+// in the version, or taking a deleted shot's slots) stops at the card's end,
+// and never runs past the video's.
+func TestThePreviewStaysWithinTheCard(t *testing.T) {
+	src := &editSource{
+		cards:  map[string]Card{"c1": {ID: "c1", Video: "v", Start: 2, End: 6, Times: []float64{3}}},
+		videos: map[string]analysedVideo{"v": {Duration: 10}},
+		clips:  []timelineClip{{Card: "c1", Beat: "c1/1", Video: "v", Start: 3, End: 5, Slot: [2]float64{0, 4}}},
+	}
+	state := draftState{Slots: []draftSlot{{Start: 0, End: 4}, {Start: 4, End: 8}},
+		Shots: []draftShot{{Beat: "c1/1", First: 0, Last: 1}}}
+	if from, to := src.previewPiece(state.Shots[0], state); from != 3 || to != 6 {
+		t.Fatalf("the preview = %v–%v, want 3–6", from, to)
+	}
+	src.videos["v"] = analysedVideo{Duration: 5.5}
+	if from, to := src.previewPiece(state.Shots[0], state); from != 3 || to != 5.5 {
+		t.Fatalf("the preview of a video ending first = %v–%v, want 3–5.5", from, to)
+	}
 }

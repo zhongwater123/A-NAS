@@ -99,6 +99,26 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	return nil, failed("the fill asked for more than %d spans", maxNeeds)
 }
 
+// windowsNotDone is what the fill does about a video whose windows the photo
+// library has not made (again): what the analysis step does (analysisKey),
+// which an edit has not. It waits while they are queued or made, asks for
+// them when no one is making them, and leaves it to the member, who can ask
+// again (RetryAnalysis), when making them failed.
+func (s *Store) windowsNotDone(ctx context.Context, grantID, assetID string, state photos.AnalysisState) error {
+	switch state {
+	case photos.AnalysisQueued, photos.AnalysisWorking:
+	case photos.AnalysisFailed:
+		return &stepNeeds{reason: NeedAnalysis, missing: []string{assetID}}
+	case photos.AnalysisUnavailable:
+		return &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
+	default:
+		if err := s.analyzeAssets(ctx, grantID, []string{assetID}, false); err != nil {
+			return jobGrantError(err, []string{assetID})
+		}
+	}
+	return &stepWait{reason: WaitAnalysis, delay: waitPoll}
+}
+
 // fillRows are the windows beneath the catalog's cards, with their vectors.
 func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32, int, error) {
 	spans := catalogSpans(run.catalog)
@@ -115,9 +135,7 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
 		if analysis.ObjectID == video.ObjectID && analysis.Windows != photos.AnalysisDone {
-			// Its windows are being made again: wait for them, as the
-			// analysis step waits for windows not done yet.
-			return nil, nil, 0, &stepWait{reason: WaitAnalysis, delay: waitPoll}
+			return nil, nil, 0, s.windowsNotDone(ctx, run.grantID, video.AssetID, analysis.Windows)
 		}
 		changed := analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions
 		if run.kind == KindEdit && analysis.ObjectID == video.ObjectID && changed {

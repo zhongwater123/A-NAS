@@ -238,6 +238,15 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 			if err != nil {
 				return nil, 0, grantError(err)
 			}
+			// Windows being made again have no vectors yet, and those made
+			// with another model are not the version's (checkAnalysis).
+			was := src.videos[video]
+			if analysis.ObjectID == was.ObjectID && analysis.Windows != photos.AnalysisDone {
+				return nil, 0, refuse("这一镜或前后镜头的视频正在重新分析，请稍后再删")
+			}
+			if analysis.ObjectID == was.ObjectID && (analysis.Identity != was.Identity || analysis.Dimensions != was.Dimensions) {
+				return nil, 0, ErrAnalysisChanged
+			}
 			of = analysed{analysis: analysis, raw: raw}
 			read[video] = of
 		}

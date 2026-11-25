@@ -322,6 +322,20 @@ func (src *editSource) beat(beat string) (Card, int, bool) {
 	return card, n, true
 }
 
+// holds reports whether every shot of state leads with a beat of a card of
+// one of the version's videos. What is shown, searched, exported and saved
+// of a draft reads its beats so; one whose beats the source no longer names
+// cannot be edited.
+func (src *editSource) holds(state draftState) bool {
+	for _, shot := range state.Shots {
+		card, _, ok := src.beat(shot.Beat)
+		if _, video := src.videos[card.Video]; !ok || !video {
+			return false
+		}
+	}
+	return true
+}
+
 // cuttable reports whether a card is in the version's catalog, the cards
 // the fill may cut from; a card left out (blurred, upright in a landscape
 // film) is described but cannot lead a shot.
@@ -643,13 +657,21 @@ func (src *editSource) unmet() []string {
 
 // previewPiece is the part of a shot's video the rough preview plays: where
 // the version's shot began for a beat the version had there, played at its
-// own speed, or the beat's piece of the shot's length.
+// own speed, or the beat's piece of the shot's length. Either stays within
+// the beat's card: a shot longer than what is left of it (slowed in the
+// version, or taking a deleted shot's slots) plays to the card's end, not on
+// into the footage after it or past the video's end.
 func (src *editSource) previewPiece(shot draftShot, state draftState) (float64, float64) {
 	length := state.length(shot)
 	start, end := state.Slots[shot.First].Start, state.Slots[shot.Last].End
 	for _, clip := range src.clips {
 		if clip.Beat == shot.Beat && clip.Slot[0] >= start-1e-6 && clip.Slot[1] <= end+1e-6 {
-			return clip.Start, clip.Start + length
+			card, _, _ := src.beat(shot.Beat)
+			to := math.Min(clip.Start+length, card.End)
+			if duration := src.videos[card.Video].Duration; duration > 0 {
+				to = math.Min(to, duration)
+			}
+			return clip.Start, to
 		}
 	}
 	_, from, to := src.piece(shot.Beat, length)
@@ -769,6 +791,9 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &draft.state); err != nil || !draft.state.valid() {
 		return nil, keptDraft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
+	}
+	if !src.holds(draft.state) {
+		return nil, keptDraft{}, ErrNotEditable
 	}
 	draft.updated, _ = time.Parse(time.RFC3339Nano, updated)
 	return src, draft, nil

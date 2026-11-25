@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
 // Saving a draft as a new version (#601): the edit job fills the draft's
@@ -218,21 +219,69 @@ func TestAnEditWaitsForWindowsBeingMade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.grants.making = map[string]bool{videoA: true}
+	env.grants.windowsState = map[string]photos.AnalysisState{videoA: photos.AnalysisQueued}
 	job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	env.runJobs(t)
 	waiting, err := env.store.Job(ctx, editOwner, job.ID)
-	if err != nil || waiting.State != JobWaiting || waiting.WaitReason != WaitAnalysis {
-		t.Fatalf("an edit while the windows are made = %+v, %v", waiting, err)
+	if err != nil || waiting.State != JobWaiting || waiting.WaitReason != WaitAnalysis || len(env.grants.asked) != 0 {
+		t.Fatalf("an edit while the windows are made = %+v, %v; asked %v", waiting, err, env.grants.asked)
 	}
-	env.grants.making = nil
+	env.grants.windowsState = nil
 	env.store.Exec(t, "UPDATE jobs SET not_before = '2000-01-01T00:00:00Z' WHERE id = ?", job.ID)
 	env.runJobs(t)
 	if done, err := env.store.Job(ctx, editOwner, job.ID); err != nil || done.State != JobDone {
 		t.Fatalf("the edit once the windows were made = %+v, %v", done, err)
+	}
+}
+
+// An edit has no analysis step of its own: windows no one is making it asks
+// for, and windows that could not be made it leaves to the member, as the
+// analysis step does, rather than waiting for ever.
+func TestAnEditDoesNotWaitForWindowsNoOneMakes(t *testing.T) {
+	for _, c := range []struct {
+		state  photos.AnalysisState
+		job    string
+		reason string
+		asked  bool
+	}{
+		{photos.AnalysisNone, JobWaiting, WaitAnalysis, true},
+		{photos.AnalysisFailed, JobNeedsInput, NeedAnalysis, false},
+		{photos.AnalysisUnavailable, JobNeedsInput, NeedModel, false},
+	} {
+		t.Run(string(c.state), func(t *testing.T) {
+			env := newEditEnv(t)
+			ctx := t.Context()
+			draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env.grants.windowsState = map[string]photos.AnalysisState{videoA: c.state}
+			job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			env.runJobs(t)
+			got, err := env.store.Job(ctx, editOwner, job.ID)
+			if err != nil || got.State != c.job || got.WaitReason != c.reason {
+				t.Fatalf("an edit with windows %q = %+v, %v", c.state, got, err)
+			}
+			if asked := slices.Contains(env.grants.asked, videoA); asked != c.asked {
+				t.Fatalf("asked for the analysis = %v, want %v", asked, c.asked)
+			}
+			if c.reason == NeedAnalysis {
+				if _, err := env.store.RetryAnalysis(ctx, editOwner, job.ID); err != nil {
+					t.Fatalf("asking again: %v", err)
+				}
+				env.grants.windowsState = nil
+				env.runJobs(t)
+				if done, err := env.store.Job(ctx, editOwner, job.ID); err != nil || done.State != JobDone {
+					t.Fatalf("the edit once the windows were made = %+v, %v", done, err)
+				}
+			}
+		})
 	}
 }
 

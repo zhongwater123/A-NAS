@@ -81,7 +81,10 @@ const (
 
 // DraftCandidates lists the beats that could lead a shot of owner's draft.
 func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, query CandidateQuery) (Candidates, error) {
-	if !validText(query.Q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
+	// The photo library counts a search's words without the blank around
+	// them (photos.QueryText); so does this.
+	q := strings.TrimSpace(query.Q)
+	if !validText(q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
 		return Candidates{}, ErrInvalid
 	}
 	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
@@ -133,7 +136,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 		return candidate.Scene == query.Scene
 	}
 	var results []Candidate
-	searching := strings.TrimSpace(query.Q) != ""
+	searching := q != ""
 	if !searching {
 		for _, id := range src.catalog {
 			for n := range src.cards[id].Times {
@@ -141,7 +144,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 			}
 		}
 	} else {
-		found, err := s.searchBeats(ctx, src, []string{query.Q})
+		found, err := s.searchBeats(ctx, src, []string{q})
 		if err != nil {
 			return Candidates{}, err
 		}
