@@ -37,7 +37,13 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	base, err := recutBase(src)
+	// Analysed again, the videos' cards are cut anew and numbered as before:
+	// the plan's card and beat numbers would name other footage.
+	again, err := s.analysedAgain(ctx, src)
+	if err != nil {
+		return Job{}, false, err
+	}
+	base, err := recutBase(src, again)
 	if err != nil {
 		return Job{}, false, err
 	}
@@ -83,17 +89,42 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 // each part, its pictures as the second step answered them. Both are passed
 // on whole, with each part's and picture's link, which the template asks to
 // keep where the sentence does not touch; only what the earlier request did
-// not find (unmet) is left out, which the new round says for itself.
-func recutBase(src *editSource) (json.RawMessage, error) {
-	var outline map[string]json.RawMessage
+// not find (unmet) is left out, which the new round says for itself. When
+// the videos were analysed again, the cards are not those the plan named:
+// the scenes' cards and the pictures' beats are left out too, and the round
+// picks them again by what each scene and picture asks for (plan-v3.md).
+func recutBase(src *editSource, analysedAgain bool) (json.RawMessage, error) {
+	var outline map[string]any
 	var shots struct {
 		Answer struct {
-			Parts json.RawMessage `json:"parts"`
+			Parts []map[string]any `json:"parts"`
 		} `json:"answer"`
 	}
 	if err := errors.Join(json.Unmarshal(src.pickedRaw, &outline), json.Unmarshal(src.plannedRaw, &shots)); err != nil {
 		return nil, ErrNotEditable
 	}
 	delete(outline, "unmet")
+	if analysedAgain {
+		forEachIn(outline["parts"], "scenes", func(scene map[string]any) { delete(scene, "cards") })
+		for _, part := range shots.Answer.Parts {
+			forEachIn(part["pictures"], "", func(picture map[string]any) { delete(picture, "beats") })
+		}
+	}
 	return json.Marshal(map[string]any{"outline": outline, "shots": shots.Answer.Parts})
+}
+
+// forEachIn calls do with each object of list, a decoded JSON array; with a
+// field, each object of that array field of each of list's objects instead.
+func forEachIn(list any, field string, do func(map[string]any)) {
+	items, _ := list.([]any)
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		switch {
+		case !ok:
+		case field != "":
+			forEachIn(object[field], "", do)
+		default:
+			do(object)
+		}
+	}
 }

@@ -211,6 +211,27 @@ func TestARecutsBaseKeepsThePlansLinks(t *testing.T) {
 	}
 }
 
+// Once the videos were analysed again, their cards are cut anew and the
+// plan's card and beat numbers name other footage: a recut's base keeps what
+// each scene and picture asks for and leaves the numbers out.
+func TestARecutOfAVersionAnalysedAgainPicksItsBeatsAgain(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	env.grants.identity = "another-model|win=2s1f"
+	job, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:again", "结尾留长一点")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base string
+	if err := env.store.db.QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(base, `"beats"`) || strings.Contains(base, `"cards"`) || !strings.Contains(base, "从海边走到山里") ||
+		!strings.Contains(base, `"query"`) || !strings.Contains(base, `"shows"`) {
+		t.Fatalf("the base of a version analysed again = %s", base)
+	}
+}
+
 // Remove takes videos out of the grant, as dropping them from a job asks.
 func (g *editGrants) Remove(context.Context, string, []string) error { return nil }
 
