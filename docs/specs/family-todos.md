@@ -1,7 +1,7 @@
 # 家庭待办
 
-状态：draft
-更新时间：2026-11-17
+状态：implemented
+更新时间：2026-11-25
 
 ## 目标
 
@@ -167,7 +167,7 @@
   - 提醒档位的表驱动测试（离截止 4、3、1、0、-1 天，已处理、已忽略、推迟中、推迟到期当天、没有截止日），“知道了”按人记，换档、推迟、重新打开、改截止日后重新提醒，确认时忽略不在当前提醒里的键；
   - 账号删除后只给她看的待办与她的“知道了”没了，共享待办留着原名字；
   - 迁移的反向步骤由现有的可逆性测试检查。
-- 接口：`internal/httpapi` 的 OpenAPI 契约测试以三个账号走遍七个操作，每个至少一次 2xx，另有 `404`（不存在的 ID；别人只给本人看的待办由存储测试覆盖）、`409 changed`、`409 conflict` 与 `422`（契约允许、服务端拒绝的请求，如不存在的账号或 2026-02-30）；外壳契约测试覆盖读取提醒。
+- 接口：`internal/httpapi` 的 OpenAPI 契约测试以三个账号走遍八个操作，每个至少一次 2xx，另有 `404`（不存在的 ID；别人只给本人看的待办由存储测试覆盖）、`409 changed`、`409 conflict` 与 `422`（契约允许、服务端拒绝的请求，如不存在的账号或 2026-02-30）；外壳契约测试覆盖读取提醒。
 - Web 测试：截止日与提醒文案的纯函数（还有 N 天、今天截止、已过期 N 天，跨年，本地控制台上医疗类只写类别）；待办窗口的新建（带请求键、没有范围字段）、处理、忽略、推迟 7 天、编辑冲突、重新打开、已处理的原地编辑、提醒栏的“知道了”与定位；桌面提示只在点“知道了”时提交，自动隐藏、关闭、“去看看”都不提交，本地控制台被唤醒时重新显示；外壳上有“打开待办”。
 - Fake 预览中的浏览器检查：管理员建 4 条（今天、后天、昨天截止的，以及一条医疗类）；成员不加入家庭中心也能看到并收到提醒；点“知道了”后刷新不再出现，只自动隐藏的刷新后还在；推迟或改截止日后提醒重新出现；同时有疫苗提示和待办提示时互不遮挡；手机宽度下的窗口。
 
@@ -180,5 +180,5 @@
 - 规格：[家庭中心](family-center.md)、[重新启用与删除账号](account-enable-and-delete.md)、[日志](logs.md)、[虚拟伙伴](virtual-companion.md)
 - 问题：[#503](https://github.com/zhongwater123/A-NAS/issues/503)
 - 接口契约：[路径](../../api/paths/todos.yaml)、[组件](../../api/components/todos.yaml)
-- 代码：[迁移](../../internal/family/family.go)、[待办存储](../../internal/family/todos.go)、[提醒](../../internal/family/todo_reminders.go)、[账号删除](../../internal/family/account.go)、[待办接口](../../internal/familyapi/todos.go)、[产品 API 挂载](../../internal/httpapi/routes.go)、[待办窗口](../../web/src/todos/TodosPanel.tsx)、[桌面提醒](../../web/src/todos/TodoNotices.tsx)、[截止日文案](../../web/src/lib/time.ts)、[排序与提示行](../../web/src/todos/format.ts)、[读取与“知道了”](../../web/src/todos/queries.ts)、[窗口注册表](../../web/src/desktop/apps.tsx)
+- 代码：[迁移](../../internal/family/family.go)、[待办存储](../../internal/family/todos.go)、[提醒](../../internal/family/todo_reminders.go)、[账号删除](../../internal/family/account.go)、[待办接口](../../internal/familyapi/todos.go)、[产品 API 挂载](../../internal/httpapi/routes.go)、[待办窗口](../../web/src/todos/TodosPanel.tsx)、[桌面提醒](../../web/src/todos/TodoNotices.tsx)、[截止日文案](../../web/src/lib/time.ts)、[到期、推迟与提示行](../../web/src/todos/format.ts)、[读取与“知道了”](../../web/src/todos/queries.ts)、[窗口注册表](../../web/src/desktop/apps.tsx)
 - 测试：[待办存储测试](../../internal/family/todos_test.go)、[提醒测试](../../internal/family/todo_reminders_test.go)、[账号删除测试](../../internal/family/account_test.go)、[接口契约测试](../../internal/httpapi/todos_test.go)、`web/src/todos` 中的 Web 测试
