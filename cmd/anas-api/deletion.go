@@ -21,7 +21,7 @@ import (
 // the other services forget the account last. The step names are stored with
 // a deletion in progress, so they must not change.
 func accountDeletionSteps(config Config, users *accounts.Service, photoService *photos.Service, fileService *files.Service,
-	removeShares, removeFamily, removeMontage func(context.Context, string) error,
+	removeShares, removeFamily, removeMontage, removeWorkspace func(context.Context, string) error,
 	musicService *music.Service, mediaService *media.Service, transferService *transfers.Service) []accounts.DeletionStep {
 	// The photo service names the album it handed the photos over in.
 	photosStep := func(ctx context.Context, removal accounts.Removal) (accounts.Handover, error) {
@@ -66,6 +66,12 @@ func accountDeletionSteps(config Config, users *accounts.Service, photoService *
 		}),
 		accounts.ForgetStep("transfers", func(ctx context.Context, removal accounts.Removal) error {
 			return transferService.RemoveAccount(ctx, removal.UserID)
+		}),
+		// The shared workspace forgets the account as a member; the pages and
+		// versions it saved stay under its name (ADR 0040). It comes
+		// last, after the steps of deletions already under way.
+		accounts.ForgetStep("workspace", func(ctx context.Context, removal accounts.Removal) error {
+			return removeWorkspace(ctx, removal.UserID)
 		}),
 	}
 }

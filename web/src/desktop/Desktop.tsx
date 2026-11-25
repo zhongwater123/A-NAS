@@ -32,6 +32,7 @@ import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
 import { useWebSearch } from "../websearch/status";
+import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
@@ -56,6 +57,7 @@ import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
 import { useHostState } from "./useHostState";
+import { useReadOnShow } from "./useReadOnShow";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { closedWindow, windowReducer } from "./windows";
 
@@ -64,6 +66,11 @@ import { closedWindow, windowReducer } from "./windows";
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
 const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
 const TodoNotices = lazyCode(() => import("../todos/TodoNotices").then((module) => module.TodoNotices));
+
+// An app's access read again that says the same keeps the old value.
+const sameScoring = (current: ScoringAccess, next: ScoringAccess) =>
+  current.admin === next.admin && current.rater === next.rater;
+const sameWorkspace = (current: WorkspaceAccess | null, next: WorkspaceAccess | null) => current?.admin === next?.admin;
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -181,52 +188,12 @@ export function Desktop({
   const assistantNeedsKey = assistant.needsKey;
   // Only the switch reaches the windows' context, not every minute's read.
   const webSearchEnabled = useWebSearch()?.enabled ?? false;
-  // 照片打分 is read when the account signs in and when the page comes back
-  // into view, so a member an administrator just chose finds it.
-  const [scoring, setScoring] = useState<ScoringAccess>(noScoring);
-  useEffect(() => {
-    let live = true;
-    const read = () =>
-      void scoringAccess()
-        .then((access) => {
-          if (live)
-            setScoring((current) =>
-              current.admin === access.admin && current.rater === access.rater ? current : access,
-            );
-        })
-        .catch(() => undefined);
-    read();
-    const visible = () => {
-      if (!document.hidden) read();
-    };
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      live = false;
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [session.user.id]);
-  // 剪辑中心 is read when the account signs in and when the page comes back
-  // into view, so a read that failed is tried again.
-  const [montage, setMontage] = useState(false);
-  useEffect(() => {
-    let controller = new AbortController();
-    const read = () => {
-      controller.abort();
-      controller = new AbortController();
-      montageEnabled(controller.signal)
-        .then(setMontage)
-        .catch(() => undefined);
-    };
-    read();
-    const visible = () => {
-      if (!document.hidden) read();
-    };
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      controller.abort();
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [session.user.id]);
+  // 照片打分, 剪辑中心 and 共享工作区 are read when the account signs in and
+  // when the page comes back into view: a member an administrator just chose
+  // finds them, one taken out loses them, and a failed read is tried again.
+  const scoring = useReadOnShow(scoringAccess, noScoring, session.user.id, sameScoring);
+  const montage = useReadOnShow(montageEnabled, false, session.user.id);
+  const workspace = useReadOnShow(workspaceAccess, null, session.user.id, sameWorkspace);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -245,6 +212,7 @@ export function Desktop({
       webSearchEnabled,
       scoring,
       montage,
+      workspace,
       open,
       intents,
       intentHandled,
@@ -260,6 +228,7 @@ export function Desktop({
       webSearchEnabled,
       scoring,
       montage,
+      workspace,
       open,
       intents,
       intentHandled,

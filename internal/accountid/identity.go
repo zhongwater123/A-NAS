@@ -45,6 +45,9 @@ const (
 	// MontageServiceUser owns the montage center's store (ADR 0038).
 	MontageServiceUser = "a-nas-montage"
 	MontageServiceUID  = 31003
+	// WorkspaceServiceUser owns the shared workspace's store (ADR 0040).
+	WorkspaceServiceUser = "a-nas-workspace"
+	WorkspaceServiceUID  = 31004
 )
 
 type Role string

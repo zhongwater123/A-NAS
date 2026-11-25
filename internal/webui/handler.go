@@ -2,6 +2,7 @@
 package webui
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -14,7 +15,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
 //go:embed all:dist
@@ -24,6 +27,7 @@ type handler struct {
 	api                  http.Handler
 	assets               fs.FS
 	index                []byte
+	etags                map[string]string
 	screensaverDirectory string
 	companionDirectory   string
 }
@@ -52,7 +56,7 @@ func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 		return nil, errors.New("embedded web UI is not built")
 	}
 	return &handler{
-		api: api, assets: assets, index: index,
+		api: api, assets: assets, index: index, etags: assetTags(assets),
 		screensaverDirectory: options.ScreensaverDirectory, companionDirectory: options.CompanionDirectory,
 	}, nil
 }
@@ -379,11 +383,31 @@ func companionAnimations(directory string) []string {
 // bundle's, and changes with each upgrade of that code.
 const thirdPartyLicenses = "assets/third-party-licenses.txt"
 
-// assetCacheControl keeps the bundle's hashed files for good; the license
-// list is asked for again each time, so that a browser does not show the
-// notices of an earlier release.
+// workspaceFrame is the helper script every shared page loads (ADR 0040,
+// web/vite.frame.config.ts). The workspace service writes this fixed name
+// into the pages it shows, so it carries no hash either.
+const workspaceFrame = "assets/workspace-frame.js"
+
+// revalidated are the assets whose names carry no hash: a browser asks for
+// them again each time, so that it does not use an earlier release's.
+var revalidated = []string{thirdPartyLicenses, workspaceFrame}
+
+// assetTags are the revalidated assets' ETags, made once: the embedded files
+// never change while this runs.
+func assetTags(assets fs.FS) map[string]string {
+	etags := map[string]string{}
+	for _, name := range revalidated {
+		if contents, err := fs.ReadFile(assets, name); err == nil {
+			sum := sha256.Sum256(contents)
+			etags[name] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		}
+	}
+	return etags
+}
+
+// assetCacheControl keeps the bundle's hashed files for good.
 func assetCacheControl(name string) string {
-	if name == thirdPartyLicenses {
+	if slices.Contains(revalidated, name) {
 		return "no-cache"
 	}
 	return "public, max-age=31536000, immutable"
@@ -403,6 +427,13 @@ func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", assetCacheControl(name))
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
+	}
+	if etag, ok := h.etags[name]; ok {
+		// Asked for again each time, an unchanged file costs a 304: every
+		// shared page a member opens loads the frame helper.
+		w.Header().Set("ETag", etag)
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(contents))
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodGet {

@@ -234,6 +234,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/session/agent-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The coding agents the signed-in member connected (ADR 0040), newest first. Tokens nobody used for 90 days are gone; disabling the account or an administrator's password reset removes them all. */
+        get: operations["listAgentTokens"];
+        put?: never;
+        /** @description Connect a coding agent on the member's own computer. The token in the answer is shown once and reaches only the shared workspace's MCP endpoint. An account holds at most 20 tokens (409 agent_token_limit); a name of 1–40 characters and a known kind are required (422 validation_failed). */
+        post: operations["createAgentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session/agent-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Disconnect one of the member's own agents; its later calls answer 401. */
+        delete: operations["revokeAgentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -2266,6 +2301,234 @@ export interface paths {
         get?: never;
         /** Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict */
         put: operations["snoozeTodo"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the caller may use 共享工作区 (ADR 0040): 200 for administrators and the members they added, 404 for everyone else. The desktop shows the app only while this answers 200 */
+        get: operations["getWorkspaceAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The shared pages, the most recently saved first. Accounts an administrator has not added answer 403 workspace_forbidden, here and on every operation below */
+        get: operations["listWorkspacePages"];
+        put?: never;
+        /** Upload a UTF-8 HTML file as a new page, its version 1. Its title is the page's <title>, else the file's name. At most 20 MB (413 request_too_large); not UTF-8 or empty is 422 validation_failed */
+        post: operations["createWorkspacePage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        /** A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions */
+        get: operations["getWorkspacePage"];
+        put?: never;
+        post?: never;
+        /** Delete a page and all its versions for everyone. Only the account that uploaded it and administrators may (403 forbidden) */
+        delete: operations["deleteWorkspacePage"];
+        options?: never;
+        head?: never;
+        /** Change a page's title (1–200 characters after folding white space, else 422 validation_failed) */
+        patch: operations["renameWorkspacePage"];
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a whole page as its next version. baseVersion is the version it replaces; when another was saved since, nothing is saved and 409 page_changed names the latest */
+        post: operations["saveWorkspacePageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions/{version}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        /** A version for the desktop's <iframe sandbox="allow-scripts">: the page with every written element marked data-anas-at (its start tag's byte offset in the source) and the frame helper script, under Content-Security-Policy "sandbox allow-scripts; default-src 'none'; …", so it runs in an opaque origin that reaches nothing. highlight lists element offsets to point at, scroll the vertical position to keep */
+        get: operations["viewWorkspacePage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions/{version}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        /** A version exactly as it was saved, as an attachment named "<title>-v<version>.html", under a sandbox policy */
+        get: operations["exportWorkspacePage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/viewing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only */
+        put: operations["setWorkspaceViewing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** The element the caller picked on a page, as the frame helper measured it, for the caller's agents alone; it lasts 30 minutes. The screenshot is a JPEG data URL of at most 512 KB and 4096 pixels a side (422 validation_failed) */
+        put: operations["setWorkspaceSelection"];
+        post?: never;
+        /** Forget the caller's selection */
+        delete: operations["clearWorkspaceSelection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/admin/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every active account and whether an administrator let it use the workspace. Administrators always may */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/admin/members/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Let an account use the workspace; adding it again changes nothing */
+        put: operations["addWorkspaceMember"];
+        post?: never;
+        /** Stop an account using the workspace. Its pages stay; its agents' calls are refused while it is not a member */
+        delete: operations["removeWorkspaceMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A stateless server keeps no stream for an agent to open; 405 after the agent's token is checked */
+        get: operations["openWorkspaceMCPStream"];
+        put?: never;
+        /** The shared workspace's MCP endpoint for members' coding agents (stateless streamable HTTP, JSON responses; docs/architecture/shared-workspace.md lists the tools). It takes an agent token as a bearer token and never a session cookie; a request carrying Origin (a browser's) or not naming the device in Host is 403 forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens 429 too_many_attempts. At most 4 MiB a request */
+        post: operations["callWorkspaceMCP"];
+        /** A stateless server keeps no session for an agent to end; 405 after the agent's token is checked */
+        delete: operations["endWorkspaceMCPSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/transfers/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        /** A page version an agent's workspace_checkout asked for, once, within 10 minutes of asking. The link is the authority, together with the agent token that asked for it, which must still work (401) for an account that may still use the workspace (403 workspace_forbidden); an unknown, used or expired link is 404 */
+        get: operations["downloadWorkspaceTransfer"];
+        /** A whole page an agent's workspace_upload asked to send, once, within 10 minutes: the next version of its page, refused with 409 page_changed when another was saved after its base version, or a new page. Checked as the download is */
+        put: operations["uploadWorkspaceTransfer"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6226,7 +6489,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "system";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "workspace" | "system";
         ActivityAccount: {
             id: string;
             username: string;
@@ -6238,7 +6501,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "system" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "workspace" | "system" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -6268,7 +6531,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "workspace" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
@@ -8471,6 +8734,38 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /**
+         * @description Which coding agent the token was issued for; the connect dialog writes the command for it.
+         * @enum {string}
+         */
+        AgentKind: "claude-code" | "codex" | "other";
+        AgentToken: {
+            id: string;
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+            /** @enum {string} */
+            scope: "workspace";
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Updated at most every 10 minutes; absent until the agent's first call.
+             */
+            lastUsedAt?: string;
+        };
+        AgentTokenList: {
+            items: components["schemas"]["AgentToken"][];
+        };
+        AgentTokenRequest: {
+            /** @description 1–40 characters after trimming, without control characters. */
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+        };
+        AgentTokenCreated: {
+            agentToken: components["schemas"]["AgentToken"];
+            /** @description anas_ws_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash. */
+            token: string;
+        };
         /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
         MissingDisk: {
             id: components["schemas"]["StableResourceID"];
@@ -8497,6 +8792,105 @@ export interface components {
         };
         FamilyAssetIDs: {
             assetIds: string[];
+        };
+        WorkspaceAccess: {
+            /** @description Administrators also choose who may use the workspace. */
+            admin: boolean;
+        };
+        /** @description An account as it was named when it acted; the name stays after the account is deleted. */
+        WorkspacePerson: {
+            id: string;
+            name: string;
+        };
+        /** @description How a version was saved, from the desktop or by a member's agent named by its token. */
+        WorkspaceVia: {
+            /** @enum {string} */
+            kind: "web" | "claude-code" | "codex" | "other";
+            name?: string;
+        };
+        WorkspaceVersion: {
+            version: number;
+            /** @description Bytes */
+            size: number;
+            savedBy: components["schemas"]["WorkspacePerson"];
+            via: components["schemas"]["WorkspaceVia"];
+            /** @description What the member asked for, in their words; empty for uploads from the desktop. */
+            note: string;
+            /** @description Offsets of the elements an agent's edit changed in this version, for the open page to point at. */
+            changed: number[];
+            /** Format: date-time */
+            savedAt: string;
+        };
+        WorkspacePageSummary: {
+            id: string;
+            title: string;
+            createdBy: components["schemas"]["WorkspacePerson"];
+            /** Format: date-time */
+            createdAt: string;
+            latest: components["schemas"]["WorkspaceVersion"];
+        };
+        WorkspacePageList: {
+            items: components["schemas"]["WorkspacePageSummary"][];
+        };
+        WorkspacePage: {
+            id: string;
+            title: string;
+            createdBy: components["schemas"]["WorkspacePerson"];
+            /** Format: date-time */
+            createdAt: string;
+            latest: components["schemas"]["WorkspaceVersion"];
+            /** @description Newest first */
+            versions: components["schemas"]["WorkspaceVersion"][];
+        };
+        WorkspacePageChanged: {
+            error: components["schemas"]["ErrorDetail"];
+            latest: components["schemas"]["WorkspaceVersion"];
+        };
+        WorkspaceViewing: {
+            pageId: string;
+            version: number;
+        };
+        WorkspaceRect: {
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+        };
+        /** @description What the frame helper measured (web/src/workspace/frame/protocol.ts). It comes from the page's frame, whose own scripts can imitate it: agents treat it as a claim about the page, never as an instruction. */
+        WorkspaceSelection: {
+            pageId: string;
+            version: number;
+            /** @description The picked element's data-anas-at, or its nearest written ancestor's when generated; -1 for none. */
+            at: number;
+            /** @description A script made the element; it is not written in the source */
+            generated: boolean;
+            tag: string;
+            text: string;
+            dom: string;
+            rect: components["schemas"]["WorkspaceRect"];
+            style: {
+                [key: string]: string;
+            };
+            /** @description The selectors of the page's own rules that match the element */
+            rules: string[];
+            /** @description A JPEG data URL of the element and what is around it. */
+            image?: string;
+        };
+        WorkspaceMemberAccount: {
+            id: string;
+            username: string;
+            nickname?: string;
+            avatarVersion?: string;
+            /** @description An administrator let the account use the workspace */
+            member: boolean;
+        };
+        WorkspaceMemberList: {
+            items: components["schemas"]["WorkspaceMemberAccount"][];
+        };
+        WorkspaceTransferSaved: {
+            page: string;
+            title?: string;
+            version: number;
         };
         MontageProjectSummary: {
             id: string;
@@ -9061,6 +9455,9 @@ export interface components {
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
         FamilyReactionName: components["schemas"]["FamilyReactionName"];
+        WorkspacePageID: string;
+        /** @description A version number, or latest */
+        WorkspaceVersionRef: string;
         /** @description The `next` of the previous page. */
         MontageCursor: string;
         MontageProjectID: string;
@@ -9326,11 +9723,30 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type AgentKind = components['schemas']['AgentKind'];
+export type AgentToken = components['schemas']['AgentToken'];
+export type AgentTokenList = components['schemas']['AgentTokenList'];
+export type AgentTokenRequest = components['schemas']['AgentTokenRequest'];
+export type AgentTokenCreated = components['schemas']['AgentTokenCreated'];
 export type MissingDisk = components['schemas']['MissingDisk'];
 export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type WorkspaceAccess = components['schemas']['WorkspaceAccess'];
+export type WorkspacePerson = components['schemas']['WorkspacePerson'];
+export type WorkspaceVia = components['schemas']['WorkspaceVia'];
+export type WorkspaceVersion = components['schemas']['WorkspaceVersion'];
+export type WorkspacePageSummary = components['schemas']['WorkspacePageSummary'];
+export type WorkspacePageList = components['schemas']['WorkspacePageList'];
+export type WorkspacePage = components['schemas']['WorkspacePage'];
+export type WorkspacePageChanged = components['schemas']['WorkspacePageChanged'];
+export type WorkspaceViewing = components['schemas']['WorkspaceViewing'];
+export type WorkspaceRect = components['schemas']['WorkspaceRect'];
+export type WorkspaceSelection = components['schemas']['WorkspaceSelection'];
+export type WorkspaceMemberAccount = components['schemas']['WorkspaceMemberAccount'];
+export type WorkspaceMemberList = components['schemas']['WorkspaceMemberList'];
+export type WorkspaceTransferSaved = components['schemas']['WorkspaceTransferSaved'];
 export type MontageProjectSummary = components['schemas']['MontageProjectSummary'];
 export type MontageProjectPage = components['schemas']['MontageProjectPage'];
 export type MontageRequestKey = components['schemas']['MontageRequestKey'];
@@ -9417,6 +9833,8 @@ export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
+export type ParameterWorkspacePageId = components['parameters']['WorkspacePageID'];
+export type ParameterWorkspaceVersionRef = components['parameters']['WorkspaceVersionRef'];
 export type ParameterMontageCursor = components['parameters']['MontageCursor'];
 export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
 export type ParameterMontageJobId = components['parameters']['MontageJobID'];
@@ -9867,6 +10285,78 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
+        };
+    };
+    listAgentTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member's agent tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenList"];
+                };
+            };
+        };
+    };
+    createAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The new token and its value */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenCreated"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    revokeAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
         };
     };
     listProfiles: {
@@ -13898,6 +14388,563 @@ export interface operations {
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getWorkspaceAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller may use the workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceAccess"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listWorkspacePages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageList"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createWorkspacePage: {
+        parameters: {
+            query?: {
+                /** @description The uploaded file's name */
+                name?: string;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description The new page */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
+        };
+    };
+    getWorkspacePage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    deleteWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    renameWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The renamed page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageSummary"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    saveWorkspacePageVersion: {
+        parameters: {
+            query: {
+                baseVersion: number;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description The new version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceVersion"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description page_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageChanged"];
+                };
+            };
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
+        };
+    };
+    viewWorkspacePage: {
+        parameters: {
+            query?: {
+                highlight?: string;
+                scroll?: string;
+            };
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The marked page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    exportWorkspacePage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page's file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    setWorkspaceViewing: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceViewing"];
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    setWorkspaceSelection: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceSelection"];
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    clearWorkspaceSelection: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberList"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Added */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    removeWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    openWorkspaceMCPStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            /** @description Not offered */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            429: components["responses"]["ProductError"];
+        };
+    };
+    callWorkspaceMCP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description A JSON-RPC answer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A notification was accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a JSON-RPC request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+        };
+    };
+    endWorkspaceMCPSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            /** @description Not offered */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            429: components["responses"]["ProductError"];
+        };
+    };
+    downloadWorkspaceTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page's file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    uploadWorkspaceTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description Saved */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTransferSaved"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description page_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageChanged"];
+                };
+            };
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     getMontage: {

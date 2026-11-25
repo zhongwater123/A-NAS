@@ -26,3 +26,10 @@ func RoutePattern(product http.Handler, r *http.Request) string {
 func Routes(product http.Handler) []apiroute.Route {
 	return apiroute.Expand(product.(*productHandler).table())
 }
+
+// The agent posture's refusals, which the contract tests count as the
+// guard's.
+const (
+	AgentBrowserRefused = agentBrowserRefused
+	AgentHostRefused    = agentHostRefused
+)

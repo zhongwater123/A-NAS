@@ -115,6 +115,9 @@ type config struct {
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
 	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
 	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
+	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
+	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
 	// MontageAssistantLookup=1 looks accounts up by UID for the montage
 	// center's socket for planning, as the unit sets it.
 	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
@@ -153,6 +156,9 @@ func loadConfig(environment map[string]string) (config, error) {
 	}
 	if c.MontageSessionGroup == "" {
 		c.MontageSessionGroup = accountid.MontageServiceUser
+	}
+	if c.WorkspaceSessionGroup == "" {
+		c.WorkspaceSessionGroup = accountid.WorkspaceServiceUser
 	}
 	return c, nil
 }
@@ -273,23 +279,29 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopSessionLookup()
-	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, false, logger)
+	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, false, "", logger)
 	if err != nil {
 		return err
 	}
 	defer stopShareLookup()
-	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, false, logger)
+	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, false, "", logger)
 	if err != nil {
 		return err
 	}
 	defer stopFamilyLookup()
 	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions,
-		config.MontageAssistantLookup == "1", logger)
+		config.MontageAssistantLookup == "1", "", logger)
 	if err != nil {
 		return err
 	}
 	defer stopMontageLookup()
-	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, false, logger)
+	stopWorkspaceLookup, err := serveServiceSessionLookup("workspace", config.WorkspaceSessionGroup, config.WorkspaceSessionSocket, sessions,
+		false, accountid.AgentScopeWorkspace, logger)
+	if err != nil {
+		return err
+	}
+	defer stopWorkspaceLookup()
+	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, false, "", logger)
 	if err != nil {
 		return err
 	}
@@ -487,6 +499,11 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "montage store repair failed", "error", montageErr)
 	}
 	logRepairs(logger, montageRepairs)
+	workspaceRepairs, workspaceErr := executor.EnsureWorkspaceStore(ctx)
+	if workspaceErr != nil {
+		logger.ErrorContext(ctx, "workspace store repair failed", "error", workspaceErr)
+	}
+	logRepairs(logger, workspaceRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
@@ -639,8 +656,10 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 // serveServiceSessionLookup confirms sessions for a service that runs as its
 // own identity, such as the share or family service, on socket, which only
 // that service's group reaches. Each service has its own directory, for
-// listen hands the directory to the group.
-func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, byUID bool, logger *slog.Logger) (func(), error) {
+// listen hands the directory to the group. agentScope, when set, also lets
+// the service resolve the agent tokens of that scope, and only those: the
+// shared workspace's lookup takes workspace tokens (ADR 0040).
+func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, byUID bool, agentScope string, logger *slog.Logger) (func(), error) {
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info(service + " service is not installed; lookup is off")
 		return func() {}, nil
@@ -655,7 +674,11 @@ func serveServiceSessionLookup(service, group, socket string, sessions *sessiond
 	if byUID {
 		accountsByUID = sessions
 	}
-	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, accountsByUID, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	handler := sessionlookup.NewHandler(sessions, accountsByUID, logger)
+	if agentScope != "" {
+		handler = sessionlookup.WithAgentTokens(handler, sessions, agentScope, logger)
+	}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error(service+" session lookup stopped", "error", err)

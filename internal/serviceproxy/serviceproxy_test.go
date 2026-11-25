@@ -51,6 +51,11 @@ func TestOnlyTheVerifiedSessionTokenReachesTheService(t *testing.T) {
 		request.Header.Set("X-A-NAS-Assistant", "on")
 		request.Header.Set("X-A-NAS-Song", "forged")
 		ctx := serviceproxy.WithInternalHeader(context.Background(), "X-A-NAS-Song", "verified song")
+		// An agent's request carries its token and where it came from too
+		// (ADR 0040); each header the Product Service set arrives.
+		ctx = serviceproxy.WithInternalHeader(ctx, serviceproxy.AgentTokenHeader, "agent token")
+		ctx = serviceproxy.WithInternalHeader(ctx, serviceproxy.AgentOriginHeader, "http://192.0.2.7")
+		request.Header.Set(serviceproxy.AgentTokenHeader, "forged token")
 		request = request.WithContext(accounts.WithSessionToken(ctx, "verified"))
 		recorder := httptest.NewRecorder()
 		proxy.ServeHTTP(recorder, request)
@@ -59,7 +64,8 @@ func TestOnlyTheVerifiedSessionTokenReachesTheService(t *testing.T) {
 		}
 		headers := <-received
 		if headers.Get(serviceproxy.SessionHeader) != "verified" || headers.Get("Cookie") != "" || headers.Get("Authorization") != "" || headers.Get("X-CSRF-Token") != "" ||
-			headers.Get("X-A-NAS-Assistant") != "" || headers.Get("X-A-NAS-Song") != "verified song" {
+			headers.Get("X-A-NAS-Assistant") != "" || headers.Get("X-A-NAS-Song") != "verified song" ||
+			headers.Get(serviceproxy.AgentTokenHeader) != "agent token" || headers.Get(serviceproxy.AgentOriginHeader) != "http://192.0.2.7" {
 			t.Fatalf("%s: forwarded headers %+v", name, headers)
 		}
 	}
