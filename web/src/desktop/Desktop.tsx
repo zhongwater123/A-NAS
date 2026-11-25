@@ -51,6 +51,7 @@ import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import styles from "./desktop.module.css";
 import { publishFocusedWindow } from "./focusedWindow";
+import { isLocalConsole, onLocalConsoleDismissed } from "./LocalConsoleScreenSaver";
 import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
@@ -58,10 +59,11 @@ import { useHostState } from "./useHostState";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { closedWindow, windowReducer } from "./windows";
 
-// 家庭中心's hint loads after the desktop, so its code and styles stay out of
-// the first load.
+// 家庭中心's hint, 剪辑中心's notices and 待办's reminder load after the
+// desktop, so their code and styles stay out of the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
 const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
+const TodoNotices = lazyCode(() => import("../todos/TodoNotices").then((module) => module.TodoNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -413,9 +415,33 @@ export function Desktop({
         <ShellPart name="transfer toasts">
           <TransferToasts hidden={focusedID === "transfers"} onOpen={() => open("transfers")} />
         </ShellPart>
-        <ShellPart name="task toasts">
-          <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
-        </ShellPart>
+        <div className={styles.noticeStack}>
+          <ShellPart name="task toasts">
+            <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+          </ShellPart>
+          <ShellPart name="family hints">
+            <Suspense fallback={null}>
+              <FamilyNotices onOpen={() => open("family")} />
+            </Suspense>
+          </ShellPart>
+          {montage && (
+            <ShellPart name="montage hints">
+              <Suspense fallback={null}>
+                <MontageNotices onOpen={() => open("montage")} />
+              </Suspense>
+            </ShellPart>
+          )}
+          <ShellPart name="todo reminders">
+            <Suspense fallback={null}>
+              <TodoNotices
+                userId={session.user.id}
+                shared={isLocalConsole()}
+                onWake={isLocalConsole() ? onLocalConsoleDismissed : undefined}
+                onOpen={(todoId) => open("todos", { todoId })}
+              />
+            </Suspense>
+          </ShellPart>
+        </div>
         <ShellPart name="companion">
           <Companion
             trouble={trouble}
@@ -426,18 +452,6 @@ export function Desktop({
             onOpenHealth={() => openSettings("overview", "health")}
           />
         </ShellPart>
-        <ShellPart name="family hints">
-          <Suspense fallback={null}>
-            <FamilyNotices onOpen={() => open("family")} />
-          </Suspense>
-        </ShellPart>
-        {montage && (
-          <ShellPart name="montage hints">
-            <Suspense fallback={null}>
-              <MontageNotices onOpen={() => open("montage")} />
-            </Suspense>
-          </ShellPart>
-        )}
         <ShellPart name="feedback">
           <FeedbackChannel />
         </ShellPart>

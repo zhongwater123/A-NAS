@@ -229,6 +229,9 @@ type montageFixture struct {
 	embedder *fakeEmbedder
 	gate     *lockedGate
 	compute  *fakeCompute
+	// release is the product release the store opens as; a restart with
+	// another one is an update.
+	release string
 }
 
 func newMontageFixture(t *testing.T) montageFixture {
@@ -244,7 +247,8 @@ func newMontageFixture(t *testing.T) montageFixture {
 // open opens the store, again after a restart.
 func (f *montageFixture) open(t *testing.T) {
 	t.Helper()
-	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true})
+	service, err := photos.Open(f.root, photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true,
+		Release: f.release})
 	if err != nil {
 		t.Fatal(err)
 	}

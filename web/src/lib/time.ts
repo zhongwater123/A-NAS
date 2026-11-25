@@ -38,6 +38,52 @@ export function calendarDays(value: TimeValue, now: TimeValue = Date.now()): num
   return (ordinal(value) - ordinal(now)) / day;
 }
 
+// Date-only values (YYYY-MM-DD) name a local calendar day. new Date() would
+// read them as midnight UTC, a day early west of Greenwich.
+export function dateOnly(value: string): Date {
+  const [year, month, dayOfMonth] = value.split("-").map(Number);
+  return new Date(year, month - 1, dayOfMonth);
+}
+
+// isoDate is the local calendar day of a moment as YYYY-MM-DD.
+export function isoDate(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function today(): string {
+  return isoDate(new Date());
+}
+
+// daysUntil counts calendar days from today to a date-only value: 1 tomorrow,
+// 0 today, -1 yesterday.
+export function daysUntil(value: string, now: TimeValue = Date.now()): number {
+  return calendarDays(dateOnly(value), now);
+}
+
+// dueText says how far off a date-only due date is: “还有 3 天”, “今天截止” or
+// “已过期 2 天”, short enough to sit beside a title of ten characters.
+export function dueText(due: string, now: TimeValue = Date.now()): string {
+  const days = daysUntil(due, now);
+  if (days > 0) return `还有 ${days} 天`;
+  if (days === 0) return "今天截止";
+  return `已过期 ${-days} 天`;
+}
+
+// dayLabel is a date-only value as “11月20日”, with the year when it is not
+// this year's.
+export function dayLabel(value: string, now: TimeValue = Date.now()): string {
+  return calendarDate(dateOnly(value), now);
+}
+
+// untilNextDay is how long it is from now until a little after the next local
+// midnight, when date-only values move a day closer.
+export function untilNextDay(now: TimeValue = Date.now(), after = minute): number {
+  const date = new Date(now);
+  const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  return midnight.getTime() - date.getTime() + after;
+}
+
 export function calendarDate(value: TimeValue, now: TimeValue = Date.now(), weekday?: "short" | "long"): string {
   const date = new Date(value);
   const label = formatDate(date, {

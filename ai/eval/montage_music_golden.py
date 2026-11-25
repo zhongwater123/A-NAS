@@ -32,7 +32,7 @@ import numpy as np
 from anas_montage import music_ops
 from anas_montage.domain import music
 
-CUTS = "剪辑对比/第四版/剪法24（2026-11-08）"
+CUTS = "剪辑对比/规划与成片"
 TARGET = 90.0
 
 

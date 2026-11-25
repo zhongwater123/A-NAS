@@ -18,7 +18,7 @@ structure file:
 Run it with the music runtime's Python (scripts/build-montage-music-runtime.sh), from ai/:
 
     python -m eval.montage_music_allin1 --songs ~/Music/QQ音乐 \\
-      --structures "~/A-NAS-datasets/剪辑对比/第四版/剪法24（2026-11-08）" \\
+      --structures "~/A-NAS-datasets/剪辑对比/规划与成片" \\
       --allin1 MODELS/allin1 --allin1-manifest ../deploy/models/allin1-harmonix-all.json \\
       --demucs MODELS/demucs --demucs-manifest ../deploy/models/htdemucs.json --out results.json
 """
