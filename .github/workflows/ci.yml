@@ -180,28 +180,6 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: scripts/fetch-qdrant.sh
 
-      # golangci-lint keeps the results of its analyses in its own cache, which
-      # setup-go's does not hold: without it the step analysed every package
-      # anew and took 220 of the checks' 400 s (2026-11-25). As
-      # golangci-lint-action does, the key changes weekly and with the linter's
-      # module and settings, and a new key starts from the same week's latest
-      # cache.
-      - name: Name the golangci-lint cache
-        if: ${{ needs.scope.outputs.docs-only != 'true' }}
-        id: lint-cache
-        run: |
-          week="golangci-lint-$(date -u +%G-W%V)"
-          echo "week=$week" >> "$GITHUB_OUTPUT"
-          echo "key=$week-${{ hashFiles('tools/golangci-lint/go.sum', '.golangci.yml') }}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the golangci-lint cache
-        if: ${{ needs.scope.outputs.docs-only != 'true' }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/golangci-lint
-          key: ${{ steps.lint-cache.outputs.key }}
-          restore-keys: ${{ steps.lint-cache.outputs.week }}-
-
       # With the job's read-only token, zizmor (make ops-check) also runs its
       # online audits, such as whether a pinned action commit belongs to its
       # repository and whether the action has a known advisory. CHECK_FLAGS is
