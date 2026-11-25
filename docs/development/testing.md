@@ -13,13 +13,13 @@
 | Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
 | systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
-`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。开发机上 `make check` 以 `make -k` 运行这些目标，一步失败后继续运行其余各步，一次报出全部失败；CI 把 Makefile 的 `CHECK_FLAGS` 设为空，在第一个失败处停止。直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
 
 ## Qdrant 测试依赖
 
 向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。在 Linux x86_64 开发环境中先运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
-清单目前固定 Linux x86_64 包。其他架构使用 `ANAS_QDRANT_BINARY` 前需自行验证同版本二进制的可运行性；项目尚无已验证的 ARM64 完整门禁流程。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
+清单目前固定 Linux x86_64 包。ARM64 Linux 上经 binfmt 注册的 x86_64 模拟（qemu-user-static 或 Rosetta）运行同一个二进制，开发机 C 的做法见 [macOS 环境](environments/macos.md#运行检查)；[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 检查二进制是否已获取、binfmt 是否已注册。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
 
 ## 测试素材
 
