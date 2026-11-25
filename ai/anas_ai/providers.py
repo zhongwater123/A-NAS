@@ -987,7 +987,8 @@ class LlamaReader:
         still count among all of the card's. A card that fits is asked about
         exactly as the prototype asks. Should the estimate be too low, the
         server refuses the prompt or the context cuts the answer short
-        (InvalidInput): the card goes undescribed.
+        (InvalidInput): the card goes undescribed until the next release,
+        which tries the cards that failed once more.
         """
         if any(not data for data in frames):
             raise InvalidInput("empty image")
