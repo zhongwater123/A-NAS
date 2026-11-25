@@ -545,7 +545,7 @@ func (s *Store) renderClip(ctx context.Context, run *jobRun, segments *os.File, 
 	defer func() { _ = file.Close() }()
 	frames := clipFrames(clip)
 	request := ffmpegworker.SegmentRequest{Start: clip.Start, Frames: frames, Offset: offset,
-		Blurred: video.Width > 0 && video.Height > 0 && float64(video.Width)/float64(video.Height) < 16.0/9.0-0.01}
+		Blurred: narrow(video.Width, video.Height)}
 	if clip.Slow > 1 {
 		request.Slow = clip.Slow
 	}

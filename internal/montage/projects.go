@@ -210,6 +210,15 @@ func grantError(err error) error {
 	return fmt.Errorf("%w: %v", ErrPhotosUnavailable, err)
 }
 
+// assetGone reports whether the photo library answered that a video a
+// project holds can no longer be read: deleted, or in the trash. Where a
+// video is read rather than added, that is not a video that cannot be added
+// (grantError), and the reader says what it means there.
+func assetGone(err error) bool {
+	code := photosapi.GrantErrorCode(err)
+	return code == photosapi.GrantAssetNotFound || code == photosapi.GrantAssetsRefused
+}
+
 type projectRow struct {
 	id, owner, name, state string
 	grantID                sql.NullString

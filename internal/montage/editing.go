@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -77,20 +77,18 @@ const (
 	// shownScenes is how many scenes the filter lists; the rest are 其他.
 	shownScenes = 8
 	otherScene  = "其他"
-	// MaxQueryRunes bounds a search's text, as a member's ask.
-	MaxQueryRunes = MaxAskRunes
 )
 
 // DraftCandidates lists the beats that could lead a shot of owner's draft.
 func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, query CandidateQuery) (Candidates, error) {
-	if !validText(query.Q, MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
+	if !validText(query.Q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
 		return Candidates{}, ErrInvalid
 	}
-	draft, err := s.readDraft(ctx, owner, draftID, nil)
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
 		return Candidates{}, err
 	}
-	src, state := draft.source, draft.state
+	state := draft.state
 	i, err := shotAt(state, query.Shot)
 	if err != nil {
 		return Candidates{}, err
@@ -295,13 +293,13 @@ func (s *Store) VersionShots(ctx context.Context, owner, versionID string) ([]by
 // a deleted shot's slots, the note says so. Until the draft is saved as a
 // version, a shot's piece of its video is where the rough preview plays.
 func (s *Store) DraftShots(ctx context.Context, owner, draftID string) ([]byte, error) {
-	draft, err := s.readDraft(ctx, owner, draftID, nil)
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
 		return nil, err
 	}
-	src, state := draft.source, draft.state
+	state := draft.state
 	var rows [][]string
-	for n, shot := range draft.Shots {
+	for n, shot := range src.view(draftID, draft.revision, false, state, draft.updated).Shots {
 		own := state.Shots[n]
 		slots := strconv.Itoa(own.First + 1)
 		if own.Last > own.First {
@@ -373,11 +371,8 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 		return nil, ctx.Err()
 	}
 	file, opened, err := s.grants.Open(ctx, grantID.String, assetID)
-	switch photosapi.GrantErrorCode(err) {
-	case photosapi.GrantAssetNotFound, photosapi.GrantAssetsRefused:
-		// The video was deleted or is in the trash: there is no frame of
-		// it, which is not a video that cannot be added (grantError).
-		return nil, ErrNotFound
+	if assetGone(err) {
+		return nil, ErrNotFound // there is no frame of it
 	}
 	if err != nil {
 		return nil, grantError(err)

@@ -74,32 +74,18 @@ func narrow(width, height int) bool {
 
 // --- what a version was cut from ---
 
-// timelineClip is one shot of a version's timeline as the fill wrote it.
+// timelineClip is one shot of a version's timeline as the fill wrote it:
+// the clip the render cuts, and the plan's part and picture it is of.
 type timelineClip struct {
-	Card     string     `json:"card"`
-	Beats    []int      `json:"beats"`
-	Beat     string     `json:"beat"`
-	Video    string     `json:"video"`
-	Start    float64    `json:"start"`
-	End      float64    `json:"end"`
-	Slot     [2]float64 `json:"slot"`
-	Share    float64    `json:"share"`
-	Slow     float64    `json:"slow,omitempty"`
-	Part     int        `json:"part"`
-	PartName string     `json:"partName"`
-	Picture  int        `json:"picture"`
-	Level    string     `json:"level"`
-	Query    string     `json:"query"`
-	ShotSize string     `json:"shotSize"`
-	What     string     `json:"what"`
+	Clip
+	Part    int `json:"part"`
+	Picture int `json:"picture"`
 }
 
-// plannedPicture and pickedScene are a picture of the plan's two steps:
-// the beats the second step listed, and the first step's description and
-// cards.
+// plannedPicture is a picture as the plan's second step answered it: the
+// beats it listed.
 type plannedPicture struct {
 	Beats []string `json:"beats"`
-	Shows string   `json:"shows"`
 }
 
 type plannedDoc struct {
@@ -121,15 +107,13 @@ type pickedDoc struct {
 		Name    string `json:"name"`
 		Summary string `json:"summary"`
 		Scenes  []struct {
-			Query string   `json:"query"`
-			Cards []string `json:"cards"`
+			Query string `json:"query"`
 		} `json:"scenes"`
 	} `json:"parts"`
 }
 
 type musicDoc struct {
-	Seconds float64 `json:"seconds"`
-	Parts   []struct {
+	Parts []struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
 		Level string  `json:"level"`
@@ -151,8 +135,8 @@ type cardAbout struct {
 // editSource is what editing a version reads: its timeline, and its job's
 // cards, plans, excerpt and videos.
 type editSource struct {
-	versionID, projectID, owner, grantID, jobID string
-	number, plan                                int
+	versionID, projectID, grantID, jobID string
+	number, plan                         int
 	// planJob and planNo are the job and 方案 the version was planned in:
 	// its own, or for an edited version the one it came from.
 	planJob string
@@ -176,7 +160,7 @@ type editSource struct {
 // versionSource reads what owner's version was cut from. A version saved
 // before versions kept their timeline takes its job's fill, and keeps it.
 func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*editSource, error) {
-	src := &editSource{versionID: versionID, owner: owner}
+	src := &editSource{versionID: versionID}
 	var timeline sql.NullString
 	var grantID sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
@@ -204,23 +188,18 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 			src.songTranscode = song.contentType == ""
 		}
 	}
-	results := map[string][]byte{}
-	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", src.planNo), planStep("shots", src.planNo), planStep("fill", src.plan)} {
-		job := src.planJob
-		if name == planStep("fill", src.plan) {
-			job = src.jobID
-		}
-		result, kept, err := s.doneResult(ctx, job, name)
-		if err != nil {
-			return nil, err
-		}
-		if kept {
-			results[name] = result
-		}
+	results, err := s.doneResults(ctx, src.planJob, plannedFrom(src.planNo))
+	if err != nil {
+		return nil, err
 	}
 	stored := timeline.Valid
 	if !stored {
-		timeline.String = string(results[planStep("fill", src.plan)])
+		fill := planStep("fill", src.plan)
+		own, err := s.doneResults(ctx, src.jobID, []string{fill})
+		if err != nil {
+			return nil, err
+		}
+		timeline.String = string(own[fill])
 	}
 	var filled timelineResult
 	var analysis analysisResult
@@ -275,15 +254,34 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	return src, nil
 }
 
-// doneResult is what a job's step kept when it was done; kept is false for
-// a step that is not done, or that kept nothing.
-func (s *Store) doneResult(ctx context.Context, jobID, name string) (result []byte, kept bool, err error) {
-	var stored sql.NullString
-	err = s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ? AND state = 'done'", jobID, name).Scan(&stored)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
+// plannedFrom names the steps a 方案 is planned from: the job's analysis,
+// catalog and excerpt, and the plan's two steps.
+func plannedFrom(plan int) []string {
+	return []string{"analysis", "catalog", "song", planStep("pick", plan), planStep("shots", plan)}
+}
+
+// doneResults are what the named steps of a job kept when they were done,
+// by name; a step that is not done, or that kept nothing, is not among them.
+func (s *Store) doneResults(ctx context.Context, jobID string, names []string) (map[string][]byte, error) {
+	args := []any{jobID}
+	for _, name := range names {
+		args = append(args, name)
 	}
-	return []byte(stored.String), stored.Valid, err
+	rows, err := s.db.QueryContext(ctx, "SELECT name, result_json FROM steps WHERE job_id = ? AND state = 'done' AND result_json IS NOT NULL AND name IN ("+
+		sqlitedb.Placeholders(len(names))+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := map[string][]byte{}
+	for rows.Next() {
+		var name, result string
+		if err := rows.Scan(&name, &result); err != nil {
+			return nil, err
+		}
+		results[name] = []byte(result)
+	}
+	return results, rows.Err()
 }
 
 func (src *editSource) pictureKnown(part, picture int) bool {
@@ -507,8 +505,6 @@ type Draft struct {
 	Message       string      `json:"message,omitempty"`
 	Counts        DraftCounts `json:"counts"`
 	UpdatedAt     time.Time   `json:"updatedAt"`
-	source        *editSource
-	state         draftState
 }
 
 // DraftPlan is the plan the version was cut by: the first step's design,
@@ -567,7 +563,7 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 	draft := Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
 		CanUndo: canUndo, SongStart: src.excerpt.Start, SongTranscode: src.songTranscode, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,
 		Plan:  DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
-		Parts: []DraftPart{}, Shots: []DraftShot{}, source: src, state: state}
+		Parts: []DraftPart{}, Shots: []DraftShot{}}
 	for n, part := range src.music.Parts {
 		about := DraftPart{Number: n + 1, Level: part.Level, Label: part.Label, Start: part.Start, End: part.End}
 		if n < len(src.picked.Parts) {
@@ -733,61 +729,75 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 	return nil
 }
 
-// readDraft reads owner's draft as it stands, with its source when known.
-func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editSource) (Draft, error) {
+// keptDraft is a draft as it is kept: the state it stands at, with its
+// revision and when that was written.
+type keptDraft struct {
+	revision int
+	state    draftState
+	updated  time.Time
+}
+
+// openDraft reads owner's draft as it stands and what its version was cut
+// from, which src is when known.
+func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editSource) (*editSource, keptDraft, error) {
 	var versionID, stateJSON, updated string
-	var revision int
+	var draft keptDraft
 	err := s.db.QueryRowContext(ctx, "SELECT base_version_id, revision, slots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
-		draftID, owner).Scan(&versionID, &revision, &stateJSON, &updated)
+		draftID, owner).Scan(&versionID, &draft.revision, &stateJSON, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Draft{}, ErrNotFound
+		return nil, keptDraft{}, ErrNotFound
 	}
 	if err != nil {
-		return Draft{}, err
+		return nil, keptDraft{}, err
 	}
 	if src == nil {
 		if src, err = s.versionSource(ctx, owner, versionID); err != nil {
-			return Draft{}, err
+			return nil, keptDraft{}, err
 		}
 	}
-	var state draftState
-	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil || !state.valid() {
-		return Draft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
+	if err := json.Unmarshal([]byte(stateJSON), &draft.state); err != nil || !draft.state.valid() {
+		return nil, keptDraft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
 	}
-	canUndo, err := s.canUndo(ctx, draftID, revision)
+	draft.updated, _ = time.Parse(time.RFC3339Nano, updated)
+	return src, draft, nil
+}
+
+// readDraft answers owner's draft as it stands, with its source when known.
+func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editSource) (Draft, error) {
+	src, draft, err := s.openDraft(ctx, owner, draftID, src)
 	if err != nil {
 		return Draft{}, err
 	}
-	at, _ := time.Parse(time.RFC3339Nano, updated)
-	return src.view(draftID, revision, canUndo, state, at), nil
+	canUndo, err := s.canUndo(ctx, draftID, draft.revision)
+	if err != nil {
+		return Draft{}, err
+	}
+	return src.view(draftID, draft.revision, canUndo, draft.state, draft.updated), nil
 }
 
-// undoTarget is the revision undoing revision goes back to, if it is still
-// kept.
-func (s *Store) undoTarget(ctx context.Context, q queryer, draftID string, revision int) (int, string, bool, error) {
-	var back sql.NullInt64
-	if err := q.QueryRowContext(ctx, "SELECT back FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, revision).Scan(&back); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, "", false, nil
-		}
-		return 0, "", false, err
-	}
-	if !back.Valid {
-		return 0, "", false, nil
-	}
-	var stateJSON string
-	err := q.QueryRowContext(ctx, "SELECT slots_json FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, back.Int64).Scan(&stateJSON)
+// undone is the revision an undo goes back to: its state, and the revision
+// undoing goes on to from there.
+type undone struct {
+	revision  int
+	stateJSON string
+	back      sql.NullInt64
+}
+
+// undoTarget is the revision undoing revision goes back to; ok is false
+// when there is none, or it is more than keptRevisions steps back and no
+// longer kept.
+func (s *Store) undoTarget(ctx context.Context, draftID string, revision int) (target undone, ok bool, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT t.revision, t.slots_json, t.back FROM draft_revisions r
+		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
+		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.revision, &target.stateJSON, &target.back)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, "", false, nil // more than keptRevisions steps back
+		return undone{}, false, nil
 	}
-	if err != nil {
-		return 0, "", false, err
-	}
-	return int(back.Int64), stateJSON, true, nil
+	return target, err == nil, err
 }
 
 func (s *Store) canUndo(ctx context.Context, draftID string, revision int) (bool, error) {
-	_, _, ok, err := s.undoTarget(ctx, s.db, draftID, revision)
+	_, ok, err := s.undoTarget(ctx, draftID, revision)
 	return ok, err
 }
 
@@ -805,36 +815,32 @@ type DraftOp struct {
 // that moved on answers ErrDraftConflict, a step the rules refuse an
 // *EditRefusal; either way the draft stays as it was.
 func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, op DraftOp) (Draft, error) {
-	draft, err := s.readDraft(ctx, owner, draftID, nil)
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
 		return Draft{}, err
 	}
-	if draft.Revision != base {
+	if draft.revision != base {
 		return Draft{}, ErrDraftConflict
 	}
-	src, state := draft.source, draft.state
+	state := draft.state
 	var next draftState
 	var message string
 	var seed sql.NullInt64
 	back := sql.NullInt64{Int64: int64(base), Valid: true}
 	switch op.Type {
 	case "undo":
-		target, stateJSON, ok, err := s.undoTarget(ctx, s.db, draftID, base)
+		target, ok, err := s.undoTarget(ctx, draftID, base)
 		if err != nil {
 			return Draft{}, err
 		}
 		if !ok {
 			return Draft{}, refuse("没有可以撤销的步骤")
 		}
-		if err := json.Unmarshal([]byte(stateJSON), &next); err != nil || !next.valid() {
-			return Draft{}, fmt.Errorf("draft %s revision %d holds an unusable state", draftID, target)
+		if err := json.Unmarshal([]byte(target.stateJSON), &next); err != nil || !next.valid() {
+			return Draft{}, fmt.Errorf("draft %s revision %d holds an unusable state", draftID, target.revision)
 		}
 		// Undoing goes on back from where the step undone came from.
-		var further sql.NullInt64
-		if err := s.db.QueryRowContext(ctx, "SELECT back FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, target).Scan(&further); err != nil {
-			return Draft{}, err
-		}
-		back, message = further, "已撤销"
+		back, message = target.back, "已撤销"
 	case "shuffle":
 		var value int64
 		if op.Seed != nil {

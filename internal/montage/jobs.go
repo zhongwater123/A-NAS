@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -97,8 +98,6 @@ const (
 	KindGenerate = "generate"
 	KindEdit     = "edit"
 	KindRecut    = "recut"
-	// VersionPlan is a version a generate job planned.
-	VersionPlan = "plan"
 )
 
 // Step is where one step of a job stands.
@@ -302,6 +301,19 @@ func (s *Store) queueJob(ctx context.Context, tx *sql.Tx, job newJob) (string, e
 		VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
 		id, job.owner, job.projectID, job.requestKey, string(encoded), job.plans, now, now, now, job.kind, job.sourceVersion, job.draft, job.draftRevision)
 	return id, err
+}
+
+// jobSettings are a job's settings as it was started with them.
+func jobSettings(ctx context.Context, q queryer, jobID string) (JobSettings, error) {
+	var encoded string
+	if err := q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded); err != nil {
+		return JobSettings{}, err
+	}
+	var settings JobSettings
+	if err := json.Unmarshal([]byte(encoded), &settings); err != nil {
+		return JobSettings{}, fmt.Errorf("job %s holds unusable settings: %w", jobID, err)
+	}
+	return settings, nil
 }
 
 // settingsOf is a project's settings as a job keeps them.

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -56,13 +55,9 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 		if err := projectIdle(ctx, tx, src.projectID); err != nil {
 			return err
 		}
-		var settingsJSON string
-		if err := tx.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", src.planJob).Scan(&settingsJSON); err != nil {
+		settings, err := jobSettings(ctx, tx, src.planJob)
+		if err != nil {
 			return err
-		}
-		var settings JobSettings
-		if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
-			return fmt.Errorf("the version's job holds unusable settings: %w", err)
 		}
 		settings.ProjectName, settings.Edit = row.name, nil
 		settings.Recut = &RecutSettings{Change: change, Base: base}

@@ -338,7 +338,6 @@ CREATE TABLE drafts (
     slots_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX drafts_by_owner ON drafts(owner_user_id);
 CREATE TABLE draft_revisions (
     draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL,

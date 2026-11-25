@@ -132,11 +132,9 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (round
 // cards, the excerpt and the member's settings.
 func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error) {
 	input := PlanInput{JobID: jobID}
-	var settings, catalogJSON, songJSON string
-	if err := s.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&settings); err != nil {
-		return PlanInput{}, err
-	}
-	if err := json.Unmarshal([]byte(settings), &input.Settings); err != nil {
+	var catalogJSON, songJSON string
+	var err error
+	if input.Settings, err = jobSettings(ctx, s.db, jobID); err != nil {
 		return PlanInput{}, err
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",

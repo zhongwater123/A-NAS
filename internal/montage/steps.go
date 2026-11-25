@@ -74,12 +74,16 @@ type jobRun struct {
 
 type jobAsset struct{ assetID, objectID string }
 
+// stepKey names a step's input for a run: a step whose key is the one its
+// stored result was made with is not run again.
+type stepKey = func(ctx context.Context, run *jobRun) (string, error)
+
 // step is one step: its key from the run so far, and doing it.
 type step struct {
 	name string
 	// plan is the 方案 the step belongs to, 0 for the steps all share.
 	plan int
-	key  func(ctx context.Context, run *jobRun) (string, error)
+	key  stepKey
 	do   func(ctx context.Context, run *jobRun) (any, error)
 	// load takes a stored result back into the run.
 	load func(run *jobRun, result []byte) error
@@ -148,7 +152,7 @@ func (s *Store) steps(kind string, plans int) []step {
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.excerpt) }},
 	}
 	for plan := 1; plan <= plans; plan++ {
-		pick, shots, fill, render := planStep("pick", plan), planStep("shots", plan), planStep("fill", plan), planStep("render", plan)
+		pick, shots, render := planStep("pick", plan), planStep("shots", plan), planStep("render", plan)
 		steps = append(steps,
 			step{name: pick, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
 				if plan > 1 {
@@ -164,24 +168,35 @@ func (s *Store) steps(kind string, plans int) []step {
 			step{name: shots, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
 				return shotsKey(run.keys[pick], run.picked), nil
 			}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
-			step{name: fill, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
-			}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
-			step{name: render, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
-				if plan > 1 {
-					// Two 方案 with the same timeline are still two films.
-					parts = append(parts, fmt.Sprintf("plan %d", plan))
-				}
-				return digest(parts...), nil
-			}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
-				reusable: s.filmKept},
-			step{name: planStep("save", plan), plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				return run.id + "|" + run.keys[render], nil
-			}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
 		)
+		steps = append(steps, s.filmSteps(plan, func(_ context.Context, run *jobRun) (string, error) {
+			return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
+		}, func(_ context.Context, run *jobRun) (string, error) {
+			return run.id + "|" + run.keys[render], nil
+		})...)
 	}
 	return steps
+}
+
+// filmSteps are the steps that make a 方案's film of what was planned: the
+// fill, the render and the save, the same whatever kind of job planned it.
+// fillKey names what the fill cuts from, and saveKey what saves the film
+// once.
+func (s *Store) filmSteps(plan int, fillKey, saveKey stepKey) []step {
+	return []step{
+		{name: planStep("fill", plan), plan: plan, key: fillKey, do: s.fill,
+			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
+		{name: planStep("render", plan), plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+			parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
+			if plan > 1 {
+				// Two 方案 with the same timeline are still two films.
+				parts = append(parts, fmt.Sprintf("plan %d", plan))
+			}
+			return digest(parts...), nil
+		}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
+			reusable: s.filmKept},
+		{name: planStep("save", plan), plan: plan, key: saveKey, do: s.save, load: func(*jobRun, []byte) error { return nil }},
+	}
 }
 
 // stepNames are the names of the steps of a job that makes plans 方案, in order.

@@ -1,19 +1,15 @@
 package montage
 
 import (
+	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"math/bits"
 	mathrand "math/rand/v2"
 	"slices"
-	"sort"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 // The rules of each step (ADR 0039, decision 2;
@@ -217,11 +213,7 @@ func (s *Store) likeness(ctx context.Context, vectors func(beat string) ([]float
 	if dimensions != other {
 		return 0, fmt.Errorf("window vectors of %d and %d dimensions", dimensions, other)
 	}
-	alike, err := s.jobCompute.Likeness(ctx, va, vb, dimensions)
-	if errors.Is(err, ErrWorkerRefused) {
-		return 0, fmt.Errorf("%w: %w", ErrWorkerFailed, err)
-	}
-	return alike, err
+	return s.jobCompute.Likeness(ctx, va, vb, dimensions)
 }
 
 // beatVectors reads the vectors of the windows a beat covers, and their
@@ -239,11 +231,8 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 		of, ok := read[video]
 		if !ok {
 			analysis, raw, err := s.grants.Analysis(ctx, src.grantID, video)
-			switch photosapi.GrantErrorCode(err) {
-			case photosapi.GrantAssetNotFound, photosapi.GrantAssetsRefused:
-				// Gone from the library or in its trash since the version
-				// was made: a refusal of this step, not a video that cannot
-				// be added to a project (grantError).
+			if assetGone(err) {
+				// Since the version was made: a refusal of this step.
 				return nil, 0, refuse("这一镜或前后镜头的视频已从相册删除或放进回收站，不能删这一镜")
 			}
 			if err != nil {
@@ -287,7 +276,12 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 	if len(hits) != len(texts) {
 		return nil, fmt.Errorf("the search answered %d lists for %d texts", len(hits), len(texts))
 	}
-	// Each video's windows by number, and its beats in the catalog.
+	// Each video's windows by number, and its beats in the catalog with
+	// the part of the video each covers.
+	type beatSpan struct {
+		beat       string
+		start, end float64
+	}
 	windows := map[string]map[int]photos.Window{}
 	for id, video := range src.videos {
 		windows[id] = map[int]photos.Window{}
@@ -295,11 +289,13 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 			windows[id][window.Index] = window
 		}
 	}
-	beats := map[string][]string{}
+	beats := map[string][]beatSpan{}
 	for _, id := range src.catalog {
 		card := src.cards[id]
 		for n := range card.Times {
-			beats[card.Video] = append(beats[card.Video], beatID(id, n+1))
+			beat := beatID(id, n+1)
+			_, from, to := src.span(beat)
+			beats[card.Video] = append(beats[card.Video], beatSpan{beat: beat, start: from, end: to})
 		}
 	}
 	answer := make([][]scoredBeat, len(texts))
@@ -311,11 +307,10 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 				continue
 			}
 			start, end := float64(window.StartMs)/1000, float64(window.EndMs)/1000
-			for _, beat := range beats[hit.AssetID] {
-				_, a, b := src.span(beat)
-				if a < end && b > start {
-					if score, seen := best[beat]; !seen || hit.Score > score {
-						best[beat] = hit.Score
+			for _, of := range beats[hit.AssetID] {
+				if of.start < end && of.end > start {
+					if score, seen := best[of.beat]; !seen || hit.Score > score {
+						best[of.beat] = hit.Score
 					}
 				}
 			}
@@ -323,9 +318,8 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 		for beat, score := range best {
 			answer[t] = append(answer[t], scoredBeat{beat: beat, score: score})
 		}
-		sort.Slice(answer[t], func(a, b int) bool {
-			x, y := answer[t][a], answer[t][b]
-			return x.score > y.score || x.score == y.score && x.beat < y.beat
+		slices.SortFunc(answer[t], func(a, b scoredBeat) int {
+			return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(a.beat, b.beat))
 		})
 	}
 	return answer, nil
@@ -342,8 +336,12 @@ const shuffleFrom = 4
 // is wrong.
 func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, seed int64) (draftState, string, error) {
 	var texts []string
+	// asks is which of texts each shot is picked again from; -1 for a shot
+	// that stays as it is, locked or with nothing to search for.
+	asks := make([]int, len(state.Shots))
 	locked, unsearched := 0, 0
-	for _, shot := range state.Shots {
+	for i, shot := range state.Shots {
+		asks[i] = -1
 		if shot.Locked {
 			locked++
 			continue
@@ -354,7 +352,8 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 			unsearched++
 			continue
 		}
-		if !slices.Contains(texts, query) {
+		if asks[i] = slices.Index(texts, query); asks[i] < 0 {
+			asks[i] = len(texts)
 			texts = append(texts, query)
 		}
 	}
@@ -379,16 +378,11 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 	}
 	changed := 0
 	for i, shot := range state.Shots {
-		if shot.Locked {
-			continue
-		}
-		slot := state.Slots[shot.First]
-		query := src.query(slot.Part, slot.Picture)
-		if !searchable(query) {
+		if asks[i] < 0 {
 			used[shot.Beat] = true
 			continue
 		}
-		ranked := found[slices.Index(texts, query)]
+		ranked := found[asks[i]]
 		var before string
 		if i > 0 {
 			before = cardOf(next.Shots[i-1].Beat)
@@ -425,11 +419,11 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 	return next, message, nil
 }
 
-// searchable reports whether the photo library searches for query: not
-// empty and not longer than a search (photos.SearchWindows).
+// searchable reports whether the photo library searches for query
+// (photos.QueryText).
 func searchable(query string) bool {
-	query = strings.TrimSpace(query)
-	return query != "" && utf8.RuneCountInString(query) <= photos.MaxQueryRunes
+	_, ok := photos.QueryText(query)
+	return ok
 }
 
 // reservedLater reports whether beat leads a shot after i: that shot may

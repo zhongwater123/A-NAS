@@ -148,12 +148,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusNotFound, "no_song", "the project has no song yet")
 	case errors.Is(err, montage.ErrSongNotReady):
 		httpjson.WriteError(w, http.StatusConflict, "song_not_ready", "the song is not analysed yet, or cannot be used")
-	case errors.Is(err, montage.ErrSongStart), errors.Is(err, montage.ErrWorkerRefused):
+	case errors.Is(err, montage.ErrSongStart):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_start_unusable", "no usable excerpt starts there")
 	case errors.Is(err, montage.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
-	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed):
+	case errors.Is(err, montage.ErrWorkerUnavailable), errors.Is(err, montage.ErrWorkerFailed), errors.Is(err, montage.ErrWorkerRefused):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, montage.ErrPhotosUnavailable):

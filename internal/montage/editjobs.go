@@ -38,16 +38,16 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		return job, false, err
 	}
 	created := false
-	draft, err := s.readDraft(ctx, owner, draftID, nil)
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
 		return Job{}, false, err
 	}
-	src, state := draft.source, draft.state
+	state := draft.state
 	// A revision saved before is that version: its job answers, rather than
 	// a new one that fills and renders again to find the same film.
 	var saved string
 	err = s.db.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
-		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, draft.Revision).Scan(&saved)
+		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, draft.revision).Scan(&saved)
 	switch {
 	case err == nil:
 		job, err := s.Job(ctx, owner, saved)
@@ -86,25 +86,21 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		if err := tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision); err != nil {
 			return err
 		}
-		if revision != draft.Revision {
+		if revision != draft.revision {
 			return ErrDraftConflict
 		}
 		// The song, its excerpt and the plan are the version's own: the
 		// project may have another song since.
-		var settingsJSON string
-		if err := tx.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", src.jobID).Scan(&settingsJSON); err != nil {
+		settings, err := jobSettings(ctx, tx, src.jobID)
+		if err != nil {
 			return err
-		}
-		var settings JobSettings
-		if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
-			return fmt.Errorf("the version's job holds unusable settings: %w", err)
 		}
 		// An edit of a recut version is not a recut: its sentence and base
 		// stay with the version they planned.
 		settings.ProjectName, settings.Edit, settings.Recut = row.name, &edit, nil
 		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindEdit, settings: settings, plans: 1,
 			sourceVersion: sql.NullString{String: src.versionID, Valid: true}, draft: sql.NullString{String: draftID, Valid: true},
-			draftRevision: sql.NullInt64{Int64: int64(draft.Revision), Valid: true}}); err != nil {
+			draftRevision: sql.NullInt64{Int64: int64(draft.revision), Valid: true}}); err != nil {
 			return err
 		}
 		created = true
@@ -130,26 +126,20 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 // They are the first 方案's steps, so that the fill, render and save are
 // those a generate job runs.
 func (s *Store) editSteps() []step {
-	return []step{
-		{name: StepSource, plan: 1, key: s.editSourceKey, do: func(_ context.Context, run *jobRun) (any, error) {
-			return map[string]any{"cards": len(run.catalog.Catalog), "pins": len(run.pins)}, nil
-		}, load: func(*jobRun, []byte) error { return nil }},
-		{name: "fill", plan: 1, key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(run.keys[StepSource], fillVersion), nil
-		}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
-		{name: "render", plan: 1, key: func(_ context.Context, run *jobRun) (string, error) {
-			return digest(digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key), nil
-		}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) }, reusable: s.filmKept},
-		{name: "save", plan: 1, key: func(ctx context.Context, run *jobRun) (string, error) {
-			// The draft's revision and the render: retrying saves it once.
-			var draftID string
-			var revision int
-			if err := s.db.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", run.id).Scan(&draftID, &revision); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%s|%d|%s", draftID, revision, run.keys["render"]), nil
-		}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
-	}
+	source := step{name: StepSource, plan: 1, key: s.editSourceKey, do: func(_ context.Context, run *jobRun) (any, error) {
+		return map[string]any{"cards": len(run.catalog.Catalog), "pins": len(run.pins)}, nil
+	}, load: func(*jobRun, []byte) error { return nil }}
+	return append([]step{source}, s.filmSteps(1, func(_ context.Context, run *jobRun) (string, error) {
+		return digest(run.keys[StepSource], fillVersion), nil
+	}, func(ctx context.Context, run *jobRun) (string, error) {
+		// The draft's revision and the render: retrying saves it once.
+		var draftID string
+		var revision int
+		if err := s.db.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", run.id).Scan(&draftID, &revision); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s|%d|%s", draftID, revision, run.keys["render"]), nil
+	})...)
 }
 
 // StepSource is an edit job's first step.
@@ -165,16 +155,15 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 	if edit == nil || len(edit.Pins) == 0 {
 		return "", failed("the edit job has no draft")
 	}
-	results := map[string][]byte{}
-	for _, name := range []string{"analysis", "catalog", "song", planStep("pick", edit.Plan), planStep("shots", edit.Plan)} {
-		result, kept, err := s.doneResult(ctx, edit.Job, name)
-		if err != nil {
-			return "", err
-		}
-		if !kept {
+	names := plannedFrom(edit.Plan)
+	results, err := s.doneResults(ctx, edit.Job, names)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range names {
+		if _, kept := results[name]; !kept {
 			return "", failed("the version's plan is gone: no %s", name)
 		}
-		results[name] = result
 	}
 	if err := errors.Join(json.Unmarshal(results["analysis"], &run.analysis), json.Unmarshal(results["catalog"], &run.catalog),
 		json.Unmarshal(results["song"], &run.excerpt)); err != nil {

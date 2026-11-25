@@ -630,6 +630,10 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 			return SongDetail{}, err
 		}
 		selection, err := s.compute.Music(ctx, MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
+		if errors.Is(err, ErrWorkerRefused) {
+			// The Worker takes the song but no excerpt from there.
+			return SongDetail{}, fmt.Errorf("%w: %w", ErrSongStart, err)
+		}
 		if err != nil {
 			return SongDetail{}, err
 		}
