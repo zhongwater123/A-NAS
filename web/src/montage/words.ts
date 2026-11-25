@@ -15,10 +15,12 @@ export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   "fill-2": "填入方案二的镜头",
   "render-2": "渲染方案二",
   "save-2": "保存方案二",
+  // An edit job's first step (#596). No page starts an edit yet: its interface is being redone (#632).
+  source: "读取修改稿",
 };
 
 type StepName = keyof typeof stepNames;
-const shared: ReadonlySet<string> = new Set(["analysis", "catalog", "song"]);
+const shared: ReadonlySet<string> = new Set(["analysis", "catalog", "song", "source"]);
 // The steps as the page groups them: what every 方案 shares (0), then each 方案's own.
 export const stageOf = (name: StepName): number => (shared.has(name) ? 0 : name.endsWith("-2") ? 2 : 1);
 export const stageName = (stage: number) => (stage === 0 ? "准备" : planName(stage));
@@ -62,15 +64,22 @@ const reasons: Record<Reason, { text: (videos: number) => string; actions?: JobA
   model_unavailable: { text: () => "这台设备还没有安装描述画面用的模型，装好后点重试", actions: ["retry"] },
   no_usable_footage: { text: () => "视频里没有可用的画面。取消后添加视频，再开始剪辑" },
   music_invalid: { text: () => "这首歌不能用。取消后换一首，再开始剪辑" },
+  // Jobs stopped before 2026-11-25 for these; VNAS plans again on its own since, and a job whose planning still
+  // does not finish fails (plan_failed).
   vnas_unknown: { text: () => "VNAS 没有交回规划，重新规划？", actions: ["replan"] },
   plan_invalid: { text: () => "规划连续 3 次不合格", actions: ["replan"] },
   plan_error: { text: () => "规划出错", actions: ["replan"] },
   storage_full: { text: () => "空间不足，腾出空间后重试", actions: ["retry"] },
+  plan_failed: { text: () => "规划没有完成", actions: ["replan"] },
 };
 
-// actionsOf are the ways out of a job that needs the member, besides cancelling.
+// actionsOf are the ways out of a job that needs the member, besides cancelling, and of a failed job whose
+// planning the member can start again.
 export const actionsOf = (job: MontageJob): JobAction[] =>
-  (job.state === "needs_input" && job.waitReason && reasons[job.waitReason].actions) || [];
+  ((job.state === "needs_input" || (job.state === "failed" && job.waitReason === "plan_failed")) &&
+    job.waitReason &&
+    reasons[job.waitReason].actions) ||
+  [];
 
 export const active = (job?: MontageJob) =>
   Boolean(job && (job.state === "queued" || job.state === "running" || job.state === "waiting"));
@@ -98,7 +107,7 @@ export function stateText(job: MontageJob): string {
     case "done":
       return "成片已存进相册";
     case "failed":
-      return "没有剪成";
+      return job.waitReason === "plan_failed" ? "规划没有完成，没有剪成" : "没有剪成";
     case "cancelled":
       return "已取消";
   }
@@ -123,5 +132,10 @@ export function limitsOf(ask: string): string[] {
 // as the one that asks to check the photo library for a film it could not
 // confirm; the rest are its own diagnostics, which stay in its log.
 export function failureText(job: MontageJob): string | undefined {
-  return job.error && /[\u4e00-\u9fff]/.test(job.error) ? job.error : undefined;
+  return forMember(job.error);
+}
+
+// forMember is a failure as the montage center wrote it for the member, or nothing for its own diagnostics.
+export function forMember(error?: string): string | undefined {
+  return error && /[\u4e00-\u9fff]/.test(error) ? error : undefined;
 }

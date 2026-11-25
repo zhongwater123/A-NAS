@@ -106,7 +106,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"), montage.Options{
-		Grants: photoservice.LocalGrants(photoService, sessionDirectory(t, controlDB), logger),
+		Grants: photoservice.LocalGrants(photoService, sessionDirectory(t, controlDB), nil, logger),
 		Media:  songMedia{}, Music: songStructure{}, Compute: songExcerpt{}, Logger: logger,
 	})
 	if err != nil {

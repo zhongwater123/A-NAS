@@ -41,6 +41,9 @@ type stepWait struct {
 	// detail says more for the project page, such as why VNAS has not
 	// taken the plan.
 	detail string
+	// missing are the videos waited for, where the member is told which:
+	// an edit's videos in the trash.
+	missing []string
 }
 
 func (w *stepWait) Error() string { return "waiting: " + w.reason }
@@ -65,12 +68,17 @@ func (n *stepNeeds) Error() string {
 
 // stepFailed: the step's input or output is wrong and would be wrong again;
 // the job fails without retrying.
-type stepFailed struct{ err error }
+type stepFailed struct {
+	err error
+	// reason, when set, is the job's reason for failing, which the page and
+	// the member's way out of it read (FailPlanning).
+	reason string
+}
 
 func (f *stepFailed) Error() string { return f.err.Error() }
 func (f *stepFailed) Unwrap() error { return f.err }
 
-func failed(format string, args ...any) error { return &stepFailed{fmt.Errorf(format, args...)} }
+func failed(format string, args ...any) error { return &stepFailed{err: fmt.Errorf(format, args...)} }
 
 // errCancelled is the cause that ends a step the member cancelled.
 var errCancelled = errors.New("the job was cancelled")
@@ -78,7 +86,9 @@ var errCancelled = errors.New("the job was cancelled")
 // claimed is a job the scheduler runs.
 type claimed struct {
 	id, owner, projectID string
-	settings             JobSettings
+	// kind is generate, edit or recut (#596).
+	kind     string
+	settings JobSettings
 	// plans is how many 方案 the job makes, as it started.
 	plans int
 }
@@ -203,10 +213,10 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := s.now()
 		var settings string
-		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, settings_json, plans FROM jobs
+		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
 			WHERE `+dueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
-			Scan(&job.id, &job.owner, &job.projectID, &settings, &job.plans)
+			Scan(&job.id, &job.owner, &job.projectID, &job.kind, &settings, &job.plans)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -341,6 +351,10 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 			// The detail says more for the project page, such as why VNAS has
 			// not taken the plan.
 			state, reason, message, next = JobWaiting, wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay))
+			if len(wait.missing) != 0 {
+				encoded, _ := json.Marshal(wait.missing)
+				missing = string(encoded)
+			}
 		case errors.As(err, &needs):
 			state, reason, class, message = JobNeedsInput, needs.reason, "input", cmp.Or(needs.said, needs.Error())
 			if len(needs.missing) != 0 {
@@ -348,7 +362,7 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 				missing = string(encoded)
 			}
 		case errors.As(err, &bad):
-			state, class, message, finished = JobFailed, "invalid", bad.Error(), at
+			state, reason, class, message, finished = JobFailed, bad.reason, "invalid", bad.Error(), at
 		default:
 			attempts++
 			class, message = "retryable", err.Error()

@@ -39,6 +39,152 @@ func (f *fallbacks) take() []string {
 	return taken
 }
 
+// askedIndex records the limits of the queries of every search it is asked.
+type askedIndex struct {
+	*vectorindex.Client
+	mu     sync.Mutex
+	limits [][]int
+}
+
+func queryLimits(queries []vectorindex.Query) []int {
+	limits := make([]int, len(queries))
+	for i, query := range queries {
+		limits[i] = query.Limit
+	}
+	return limits
+}
+
+func (a *askedIndex) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
+	a.mu.Lock()
+	a.limits = append(a.limits, queryLimits(queries))
+	a.mu.Unlock()
+	return a.Client.SearchBatch(ctx, collection, queries)
+}
+
+// asked returns the limits of each search since it was last asked.
+func (a *askedIndex) asked() [][]int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	limits := a.limits
+	a.limits = nil
+	return limits
+}
+
+// reddish opens a library of count photos, each a red of its own, ranked
+// through a real vector index that records what it is asked, with the
+// colour labels; nothing is synced yet.
+func reddish(t *testing.T, count int) (*photos.Service, *colorEmbedder, *askedIndex, *fallbacks, *clocktest.Clock, string, []photos.Asset) {
+	t.Helper()
+	instance := vectorindextest.Start(t)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
+	t.Cleanup(func() { _ = client.Close() })
+	asked := &askedIndex{Client: client}
+	worker := &colorEmbedder{}
+	fell := &fallbacks{}
+	clock := newClock()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := photos.Open(root, photos.Options{Now: clock.Now, DisableCapacityReserve: true, AI: worker,
+		Labels: colourLabels(t, "colour-1"), Vectors: asked, OnVectorFallback: fell.record})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	private, _ := libraries(t, service, alice)
+	imported := make([]photos.Asset, count)
+	for i := range imported {
+		imported[i] = importPhoto(t, service, alice, private.ID, "", fmt.Sprintf("red%03d.png", i), solidPNG(250, uint8(i), 5))
+	}
+	index(t, service, worker)
+	return service, worker, asked, fell, clock, root, imported
+}
+
+// labelled is what the label paths answer: the counts and the red cluster.
+func labelled(t *testing.T, service *photos.Service) string {
+	t.Helper()
+	counts, ready, err := service.LabelCounts(context.Background(), alice, "")
+	if err != nil || !ready {
+		t.Fatalf("LabelCounts() = %v, %v", ready, err)
+	}
+	page, err := service.LabelPhotos(context.Background(), alice, "red", "", "", 200)
+	if err != nil {
+		t.Fatalf("LabelPhotos() error = %v", err)
+	}
+	return fmt.Sprint(counts, names(page.Assets))
+}
+
+// A label's query asks the index for every photo above its threshold. When
+// an answer fills its limit, as while the index still holds photos since
+// put in the trash, that query alone is asked again for four times as
+// many, and the counts and the cluster are the Catalog's.
+func TestALabelQueryAsksAgainWhenItsAnswerIsFull(t *testing.T) {
+	service, _, asked, fell, _, _, imported := reddish(t, 73)
+	syncAll(t, service, asked)
+	// Three photos stay; the index still holds the other 70, all red.
+	for _, asset := range imported[3:] {
+		if _, err := service.Trash(context.Background(), alice, asset.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	photos.UseVectorIndex(service, nil)
+	want := labelled(t, service)
+	if !strings.Contains(want, "red002.png") || strings.Contains(want, "red003.png") {
+		t.Fatalf("the Catalog's labels = %s; want the three photos left, all red", want)
+	}
+	photos.UseVectorIndex(service, asked)
+	asked.asked()
+	if got := labelled(t, service); got != want {
+		t.Fatalf("through the index the labels = %s, want %s", got, want)
+	}
+	// The limit is the photos that may be found and 64 more. LabelCounts
+	// asks about red and blue at once, and again about red alone;
+	// LabelPhotos about red.
+	if limits := asked.asked(); fmt.Sprint(limits) != "[[67 67] [268] [67] [268]]" {
+		t.Fatalf("the index was asked for %v", limits)
+	}
+	if reasons := fell.take(); len(reasons) != 0 {
+		t.Fatalf("ranking read the Catalog: %v", reasons)
+	}
+}
+
+// Ranking says why it reads the Catalog when the index cannot answer for
+// the model, and finds the same: before sync has made the collection, and
+// while more photos wait for the index than are scored beside its answer.
+func TestRankingSaysWhyItReadsTheCatalog(t *testing.T) {
+	ctx := context.Background()
+	service, _, asked, fell, clock, root, _ := reddish(t, 5)
+	ranked := func() string {
+		t.Helper()
+		return fmt.Sprint(searchEverything(t, service, "红").ids, labelled(t, service))
+	}
+	photos.UseVectorIndex(service, nil)
+	want := ranked()
+	photos.UseVectorIndex(service, asked)
+	read := func(stage string, reasons ...string) {
+		t.Helper()
+		// A reason is reported once in a while.
+		clock.Advance(time.Hour)
+		asked.asked()
+		if got := ranked(); got != want {
+			t.Fatalf("%s: ranked %s, want %s", stage, got, want)
+		}
+		if fell := fell.take(); !slices.Equal(fell, reasons) {
+			t.Fatalf("%s: read the Catalog for %v, want %v", stage, fell, reasons)
+		}
+		if limits := asked.asked(); (len(limits) == 0) != (len(reasons) > 0) {
+			t.Fatalf("%s: the index was asked for %v", stage, limits)
+		}
+	}
+	read("no collection yet", "the vector index has no collection for the model<nil>")
+	syncAll(t, service, asked)
+	read("synced")
+	// One more waits than ranking scores beside the index's answer.
+	if _, err := catalogDB(t, root).ExecContext(ctx, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2001)
+INSERT INTO vector_outbox(object_id) SELECT 'object:waiting-' || i FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	read("many waiting", "too many photos wait for the vector index<nil>")
+}
+
 // indexedLibrary opens a library ranked through a real vector index, with a
 // detector, AI labels, text read in some photos and more photos than search
 // keeps by similarity, some of them in two libraries.
@@ -366,13 +512,6 @@ func (f *failingIndex) call() error {
 		return errors.New("the index is broken")
 	}
 	return nil
-}
-
-func (f *failingIndex) Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error) {
-	if err := f.call(); err != nil {
-		return nil, err
-	}
-	return f.VectorIndex.Search(ctx, collection, query)
 }
 
 func (f *failingIndex) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {

@@ -1358,8 +1358,13 @@ import os
 import socket
 from anas_ai import protocol
 
-# The template the montage center fills: the newest installed.
-TEMPLATE = max((os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")), default="")
+# The templates the montage center fills, as installed: a recut's (#596) carries a change.
+INSTALLED = {os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")}
+
+
+def template(request):
+    want = "plan-v3" if request.get("change") else "plan-v2"
+    return want if want in INSTALLED else ""
 
 
 def with_body(request, fds):
@@ -1391,7 +1396,7 @@ def pick_brief(request):
                   "prefixItems": [part(len(p["slots"])) for p in parts], "items": False}}}
     data = {"catalog": [f"{card['id']} | {card['answer']['summary']}" for card in request["cards"]],
             "partCount": len(parts), "targetSeconds": round(request["music"]["seconds"])}
-    return {"data": data, "schema": schema, "template": TEMPLATE}
+    return {"data": data, "schema": schema, "template": template(request)}
 
 
 def shots_brief(request):
@@ -1411,7 +1416,7 @@ def shots_brief(request):
     schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
         "unmet": {"type": "array", "items": {"type": "string"}},
         "parts": {"type": "object", "required": list(parts), "properties": parts}}}
-    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": TEMPLATE,
+    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": template(request),
             "slots": slots, "pictures": pictures}
 
 

@@ -31,6 +31,8 @@ var PlanningRoutes = []apiroute.Endpoint{
 	{Method: http.MethodPost, Pattern: PathPrefix + "/jobs/{jobID}/replan"},
 	{Method: http.MethodPost, Pattern: PathPrefix + "/jobs/{jobID}/drop-assets"},
 	{Method: http.MethodPost, Pattern: PathPrefix + "/jobs/{jobID}/retry-analysis"},
+	// Recutting a version from a sentence plans it again (#596).
+	{Method: http.MethodPost, Pattern: PathPrefix + "/versions/{versionID}/recut"},
 }
 
 // ProductEndpoints are the endpoints the Product Service forwards as they

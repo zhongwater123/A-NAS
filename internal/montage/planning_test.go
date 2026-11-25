@@ -248,14 +248,30 @@ func TestARoundVNASCouldNotBeReachedForIsTriedAgainLaterEachTime(t *testing.T) {
 	}
 }
 
-// The planning failed before the model planned: it is tried once more a
-// minute later, and a second failure is the member's, with what the planner
-// reported.
-func TestAFailedPlanningIsTriedOnceMoreThenTheMemberIsAsked(t *testing.T) {
+// replansAfterAMinute checks that the job waits a minute after a round that
+// did not finish its planning, wanting none meanwhile, and then wants
+// another on its own.
+func (e *jobEnv) replansAfterAMinute(t *testing.T, jobID string) {
+	t.Helper()
+	if job := e.waitForPlan(t, jobID); e.marked(t) || job.Error != montage.DetailFailed(1) {
+		t.Fatalf("right after the round: job = %+v, marked %v", job, e.marked(t))
+	}
+	e.clock.advance(time.Minute + time.Second)
+	if job := e.waitForPlan(t, jobID); !e.marked(t) {
+		t.Fatalf("not planned again a minute later: job = %+v", job)
+	}
+}
+
+// The planning is tried again on its own, a minute after each round that did
+// not finish it, whether it failed before the model planned or after the model
+// called a tool; after the third the job fails, says how the last ended, and
+// the member plans it again with one click (2026-11-25).
+func TestAPlanningThatDoesNotFinishIsTriedThreeRoundsThenTheJobFails(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	env.grant(t)
 	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
+	// The planning process failed before the prompt went in.
 	claim, err := env.store.ClaimRound(ctx, "user:alice")
 	if err != nil {
 		t.Fatal(err)
@@ -263,35 +279,105 @@ func TestAFailedPlanningIsTriedOnceMoreThenTheMemberIsAsked(t *testing.T) {
 	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "session.create: unknown method", "error"); err != nil {
 		t.Fatal(err)
 	}
-	if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != montage.DetailFailed(1) {
-		t.Fatalf("job = %+v, marked %v", job, env.marked(t))
-	}
-	env.clock.advance(time.Minute + time.Second)
-	if env.waitForPlan(t, job.ID); !env.marked(t) {
-		t.Fatal("not tried once more")
-	}
-	// This time the conversation started and stopped before the model called
-	// a montage tool: it planned nothing.
+	env.replansAfterAMinute(t, job.ID)
+	// The conversation started and stopped before the model called a tool.
 	second := env.round(t)
 	if err := env.store.EndRound(ctx, "user:alice", second.RoundID, "Hermes: the model's gateway answered 502", "error"); err != nil {
 		t.Fatal(err)
 	}
-	needs := env.settle(t, job.ID)
-	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedPlanError ||
-		needs.Error != "Hermes: the model's gateway answered 502" || env.marked(t) {
-		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
-	}
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
+	env.replansAfterAMinute(t, job.ID)
+	// The model called a tool, and then the conversation was cut off.
+	third := env.round(t)
+	if _, err := env.store.Brief(ctx, "user:alice", job.ID, third.AttemptToken, montage.StepOutline); err != nil {
 		t.Fatal(err)
+	}
+	if err := env.store.EndRound(ctx, "user:alice", third.RoundID, "the connection to the planning instance closed", "interrupted"); err != nil {
+		t.Fatal(err)
+	}
+	failed := env.settle(t, job.ID)
+	if failed.State != montage.JobFailed || failed.WaitReason != montage.FailPlanning ||
+		failed.Error != "规划试了 3 轮都没有完成：the connection to the planning instance closed" || env.marked(t) {
+		t.Fatalf("job = %+v, marked %v", failed, env.marked(t))
+	}
+	notices, err := env.store.Notices(ctx, "user:alice")
+	if err != nil || len(notices) != 1 || notices[0].Kind != montage.NoticeFailed || notices[0].Reason != montage.FailPlanning ||
+		notices[0].Detail != failed.Error {
+		t.Fatalf("notices = %+v, %v", notices, err)
+	}
+	// One click plans it again, from where it stopped, with three rounds of its own.
+	replanned, err := env.store.Replan(ctx, "user:alice", job.ID)
+	if err != nil || replanned.State != montage.JobQueued || replanned.FinishedAt != nil {
+		t.Fatalf("Replan() = %+v, %v", replanned, err)
 	}
 	if env.waitForPlan(t, job.ID); !env.marked(t) {
 		t.Fatal("no marker after replanning")
 	}
+	if notices, _ := env.store.Notices(ctx, "user:alice"); len(notices) != 1 || notices[0].Kind != montage.NoticeWaiting {
+		t.Fatalf("notices after replanning = %+v", notices)
+	}
+}
+
+// A failed job goes on only as its project's latest, while no other job of
+// the project runs.
+func TestAFailedPlanningIsPlannedAgainOnlyAsTheProjectsLatestJob(t *testing.T) {
+	ctx := context.Background()
+	env := newPlanEnv(t)
+	env.grant(t)
+	job := env.waitForPlan(t, env.generate(t, "generate:1").ID)
+	for range 3 {
+		claim := env.round(t)
+		if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "out of time", "timeout"); err != nil {
+			t.Fatal(err)
+		}
+		env.clock.advance(time.Minute + time.Second)
+		env.settle(t, job.ID)
+	}
+	if failed := env.settle(t, job.ID); failed.State != montage.JobFailed || failed.WaitReason != montage.FailPlanning {
+		t.Fatalf("job = %+v", failed)
+	}
+	// The member started again instead: the failed job stays as it is.
+	next := env.waitForPlan(t, env.generate(t, "generate:2").ID)
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("replanning a job that is not the latest = %v", err)
+	}
+	if _, err := env.store.Cancel(ctx, "user:alice", next.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrJobState) {
+		t.Fatalf("replanning a job after a later one = %v", err)
+	}
+}
+
+// A failed job goes on with the song it was started with: once the project
+// has another and the first is let go, planning it again is refused.
+func TestAFailedPlanningIsPlannedAgainOnlyWithItsSong(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	put := env.ownSongs(t)
+	put("original")
+	job := env.generate(t, "generate:1")
+	fail := func() {
+		t.Helper()
+		env.store.Exec(t, "UPDATE jobs SET state = ?, wait_reason = ? WHERE id = ?", montage.JobFailed, montage.FailPlanning, job.ID)
+	}
+	fail()
+	if replanned, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil || replanned.State != montage.JobQueued {
+		t.Fatalf("Replan() with its song = %+v, %v", replanned, err)
+	}
+	fail()
+	put("replacement")
+	if err := env.store.ReclaimSongs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrNoSong) {
+		t.Fatalf("Replan() after its song was let go = %v", err)
+	}
 }
 
 // A conversation that stopped after its model called a montage tool may have
-// planned: whatever stopped it, the member decides (#514).
-func TestAnErrorAfterTheModelCalledAToolNeedsTheMember(t *testing.T) {
+// planned part of it: it is planned again on its own a minute later, with
+// what was taken kept (2026-11-25; until then the member decided, #514).
+func TestAnErrorAfterTheModelCalledAToolIsPlannedAgain(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
@@ -301,9 +387,7 @@ func TestAnErrorAfterTheModelCalledAToolNeedsTheMember(t *testing.T) {
 	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "the connection to the planning instance closed", "interrupted"); err != nil {
 		t.Fatal(err)
 	}
-	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || env.marked(t) {
-		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
-	}
+	env.replansAfterAMinute(t, job.ID)
 }
 
 // Doing something that may need planning registers a grant, and a new version
@@ -386,7 +470,7 @@ func TestAJobWhoseRoundRunsSaysVNASIsPlanning(t *testing.T) {
 	}
 }
 
-func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
+func TestARoundThatEndsWithoutAnAnswerIsPlannedAgain(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
@@ -404,23 +488,14 @@ func TestARoundThatEndsWithoutAnAnswerNeedsTheMember(t *testing.T) {
 	// Then the conversation was cut off: twenty minutes after the last call the
 	// round is over.
 	env.clock.advance(2 * time.Minute)
-	needs := env.settle(t, job.ID)
-	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown {
-		t.Fatalf("job = %+v", needs)
-	}
-	// Not started again on its own; the member replans.
-	if env.marked(t) {
-		t.Fatal("a marker for a round that may have called the model")
+	if err := env.store.SweepRounds(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if late := env.submit(t, claim, montage.StepOutline, outline("v1-0")); late.Status != montage.ToolRoundOver {
 		t.Fatalf("an answer after the round's time = %+v", late)
 	}
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
-		t.Fatal(err)
-	}
-	if env.waitForPlan(t, job.ID); !env.marked(t) {
-		t.Fatal("no marker after replanning")
-	}
+	// Planned again on its own a minute later.
+	env.replansAfterAMinute(t, job.ID)
 }
 
 // A model may take long before its first call: a round handed over whose
@@ -444,12 +519,15 @@ func TestARoundWhoseModelHasNotStartedYetIsGivenTheUnitsHour(t *testing.T) {
 	second := env.waitForPlan(t, env.generate(t, "generate:2").ID)
 	env.round(t)
 	env.clock.advance(66 * time.Minute)
-	if needs := env.settle(t, second.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown {
-		t.Fatalf("after the planner's hour without a call: job = %+v", needs)
+	if err := env.store.SweepRounds(context.Background()); err != nil {
+		t.Fatal(err)
 	}
+	env.replansAfterAMinute(t, second.ID)
 }
 
-func TestThreeRefusedAnswersNeedTheMember(t *testing.T) {
+// Three refused answers in a row end the round, which counts as one tried;
+// the next round starts its count over, and its good answer is taken.
+func TestThreeRefusedAnswersEndTheRoundAndItIsPlannedAgain(t *testing.T) {
 	env := newPlanEnv(t)
 	job, claim := env.planning(t)
 	for range 3 {
@@ -460,8 +538,13 @@ func TestThreeRefusedAnswersNeedTheMember(t *testing.T) {
 	if over := env.submit(t, claim, montage.StepOutline, outline("v1-0")); over.Status != montage.ToolRoundOver {
 		t.Fatalf("a fourth answer = %+v", over)
 	}
-	if needs := env.settle(t, job.ID); needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedPlanInvalid {
-		t.Fatalf("job = %+v", needs)
+	env.replansAfterAMinute(t, job.ID)
+	next := env.round(t)
+	if answer := env.submit(t, next, montage.StepOutline, json.RawMessage(`{"parts":[]}`)); answer.Status != montage.ToolRejected {
+		t.Fatalf("the next round's first refusal = %+v", answer)
+	}
+	if taken := env.submit(t, next, montage.StepOutline, outline("v1-0")); taken.Status != montage.ToolAccepted {
+		t.Fatalf("the next round's good outline = %+v", taken)
 	}
 }
 
@@ -796,9 +879,11 @@ func TestNoticesTellWaitingFromPlanning(t *testing.T) {
 	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
-	env.settle(t, job.ID)
-	only(montage.NoticeNeeds, "")
-	// Ten minutes without a round and the job says VNAS has not taken it.
+	// The round ended without a plan: the job waits to be planned again.
+	env.waitForPlan(t, job.ID)
+	only(montage.NoticeWaiting, montage.DetailFailed(1))
+	// Planned again at once, it waits afresh; ten minutes without a round and
+	// the job says VNAS has not taken it.
 	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -940,10 +1025,10 @@ func TestARoundPlansBothPlansTheSecondAfterTheFirst(t *testing.T) {
 }
 
 // A round that handed the first 方案 back and ended before the second: the
-// model may have been called, so no round is started on its own (#514). The
-// first 方案's film is made and saved; for the second the member is asked, and
-// the round she allows plans the second alone.
-func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) {
+// first 方案's film is made and saved, and a minute later the job plans the
+// second on its own, in a round that plans it alone (2026-11-25; until then
+// the member was asked, #514).
+func TestARoundThatEndsAfterTheFirstPlanPlansTheSecondAgain(t *testing.T) {
 	ctx := context.Background()
 	env := newTwoPlanEnv(t)
 	job, claim := env.planning(t)
@@ -954,27 +1039,14 @@ func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) 
 	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
-	needs := env.settle(t, job.ID)
-	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || needs.Step != "pick-2" ||
-		len(needs.Versions) != 1 || needs.Versions[0].Plan != 1 {
-		t.Fatalf("job = %+v", needs)
-	}
-	if env.marked(t) {
-		t.Fatal("a marker for a round the member did not ask for")
-	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, montage.ErrNoPlanWanted) {
-		t.Fatalf("a claim nobody asked for = %v", err)
+	waiting := env.settle(t, job.ID)
+	if waiting.State != montage.JobWaiting || waiting.Step != "pick-2" || len(waiting.Versions) != 1 || waiting.Versions[0].Plan != 1 {
+		t.Fatalf("job = %+v", waiting)
 	}
 	if env.lib.saves != 1 {
 		t.Fatalf("%d films saved before the second 方案 was planned", env.lib.saves)
 	}
-
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
-		t.Fatal(err)
-	}
-	if env.waitForPlan(t, job.ID); !env.marked(t) {
-		t.Fatal("no marker after the member planned again")
-	}
+	env.replansAfterAMinute(t, job.ID)
 	// The first 方案 was not made again, and the new round plans the second.
 	if env.lib.saves != 1 {
 		t.Fatalf("%d films saved after planning again", env.lib.saves)
@@ -996,19 +1068,19 @@ func TestARoundThatEndsAfterTheFirstPlanAsksTheMemberForTheSecond(t *testing.T) 
 	}
 }
 
-// A round that handed in only the first 方案's outline and ended needs the
-// member as before: an outline alone is no 方案 handed back.
-func TestARoundThatEndsWithOnlyAnOutlineNeedsTheMember(t *testing.T) {
+// A round that handed in only the first 方案's outline and ended: an outline
+// alone is no 方案 handed back, and the shots are planned again on their own.
+func TestARoundThatEndsWithOnlyAnOutlinePlansTheShotsAgain(t *testing.T) {
 	env := newTwoPlanEnv(t)
 	job, claim := env.planning(t)
 	env.submit(t, claim, montage.StepOutline, outline("v1-0"))
 	if err := env.store.EndRound(context.Background(), "user:alice", claim.RoundID, "the conversation was cut off", "interrupted"); err != nil {
 		t.Fatal(err)
 	}
-	needs := env.settle(t, job.ID)
-	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedVNASUnknown || needs.Step != "shots" || env.marked(t) {
-		t.Fatalf("job = %+v, marked %v", needs, env.marked(t))
+	if waiting := env.settle(t, job.ID); waiting.State != montage.JobWaiting || waiting.Step != "shots" {
+		t.Fatalf("job = %+v", waiting)
 	}
+	env.replansAfterAMinute(t, job.ID)
 }
 
 // A video deleted for good after the first 方案 was saved: taking it out

@@ -5,11 +5,14 @@ package montagecompute_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -130,5 +133,53 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	}
 	if frames != 120 {
 		t.Fatalf("the clips take %d frames: %s", frames, answer.Clips)
+	}
+
+	// Pinned the other way round (#596), each slot is led by its pin.
+	request.Pins = []montage.FillPin{{Part: 1, Picture: 1, Slot: [2]float64{0, 2}, Beat: "c1/2"}, {Part: 1, Picture: 1, Slot: [2]float64{2, 4}, Beat: "c1/1"}}
+	request.Known = map[string][2]float64{}
+	for range 10 {
+		if answer, err = client.Fill(ctx, request, vectors, dims); err != nil {
+			t.Fatal(err)
+		}
+		if answer.Need == nil {
+			break
+		}
+		request.Known[answer.Need.Name] = [2]float64{answer.Need.Lo, answer.Need.Hi}
+	}
+	var leads []string
+	for _, raw := range answer.Clips {
+		var clip struct {
+			Beat string     `json:"beat"`
+			Slot [2]float64 `json:"slot"`
+		}
+		if err := json.Unmarshal(raw, &clip); err != nil {
+			t.Fatal(err)
+		}
+		leads = append(leads, fmt.Sprintf("%s@%v", clip.Beat, clip.Slot))
+	}
+	if answer.Need != nil || len(answer.Short) != 0 || !slices.Equal(leads, []string{"c1/2@[0 2]", "c1/1@[2 4]"}) {
+		t.Fatalf("Fill() with pins = %v, %+v", leads, answer)
+	}
+	request.Pins[1].Slot = [2]float64{2.5, 4}
+	if _, err := client.Fill(ctx, request, vectors, dims); !errors.Is(err, montage.ErrWorkerRefused) {
+		t.Fatalf("Fill() with a gap between pins = %v", err)
+	}
+
+	alike, err := client.Likeness(ctx, vectors[:2*dims], vectors[:dims], dims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0.0
+	for d := range dims {
+		want += float64((vectors[d] + vectors[dims+d]) / 2 * vectors[d])
+	}
+	var norm float64
+	for d := range dims {
+		mean := float64((vectors[d] + vectors[dims+d]) / 2)
+		norm += mean * mean
+	}
+	if want /= math.Sqrt(norm); math.Abs(alike-want) > 1e-5 {
+		t.Fatalf("Likeness() = %v, want %v", alike, want)
 	}
 }
