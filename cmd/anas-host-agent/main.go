@@ -115,6 +115,9 @@ type config struct {
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
 	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
 	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
+	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
+	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
 	// MontageAssistantLookup=1 looks accounts up by UID for the montage
 	// center's socket for planning, as the unit sets it.
 	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
@@ -153,6 +156,9 @@ func loadConfig(environment map[string]string) (config, error) {
 	}
 	if c.MontageSessionGroup == "" {
 		c.MontageSessionGroup = accountid.MontageServiceUser
+	}
+	if c.WorkspaceSessionGroup == "" {
+		c.WorkspaceSessionGroup = accountid.WorkspaceServiceUser
 	}
 	return c, nil
 }
@@ -289,6 +295,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopMontageLookup()
+	stopWorkspaceLookup, err := serveServiceSessionLookup("workspace", config.WorkspaceSessionGroup, config.WorkspaceSessionSocket, sessions,
+		false, accountid.AgentScopeWorkspace, logger)
+	if err != nil {
+		return err
+	}
+	defer stopWorkspaceLookup()
 	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, false, "", logger)
 	if err != nil {
 		return err
@@ -487,6 +499,11 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "montage store repair failed", "error", montageErr)
 	}
 	logRepairs(logger, montageRepairs)
+	workspaceRepairs, workspaceErr := executor.EnsureWorkspaceStore(ctx)
+	if workspaceErr != nil {
+		logger.ErrorContext(ctx, "workspace store repair failed", "error", workspaceErr)
+	}
+	logRepairs(logger, workspaceRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)

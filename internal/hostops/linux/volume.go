@@ -193,6 +193,7 @@ func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation
 	_, _ = e.EnsureSharesStore(ctx)
 	_, _ = e.EnsureFamilyStore(ctx)
 	_, _ = e.EnsureMontageStore(ctx)
+	_, _ = e.EnsureWorkspaceStore(ctx)
 	volume := datavolume.Volume{ID: "volume:data", FilesystemUUID: uuid, Layout: operation.Layout, State: datavolume.VolumeStateAvailable}
 	sizes := make([]uint64, 0, len(operation.Disks))
 	for _, disk := range operation.Disks {

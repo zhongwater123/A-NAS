@@ -12166,6 +12166,7 @@ components:
         - shares
         - family
         - montage
+        - workspace
         - containers
         - ai
         - media

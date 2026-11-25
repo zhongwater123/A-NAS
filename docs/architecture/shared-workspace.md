@@ -17,12 +17,13 @@
    ├─ internal/workspaceapi：浏览器的接口、隔离浏览、导出、一次性传输、活动记录
    ├─ internal/workspacemcp：MCP 工具（官方 Go SDK，无状态，JSON 响应）
    └─ internal/workspace：workspace.db（数据卷子卷 workspace）、源码位置、片段修改、内存里的“正在看”与“选中”
-   │  /run/a-nas-workspace-sessions/sessions.sock
+   │  /run/a-nas-workspace-sessions/workspace.sock
    ▼
 Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、agent 令牌与令牌 ID
 ```
 
 - 服务以 `storeservice.Run` 运行，与剪辑服务相同：数据卷离线或只读时回答 `503 workspace_unavailable`，数据卷回来后重新打开库。
+- 单元 [`anas-workspace.service`](../../deploy/systemd/system/anas-workspace.service)：没有网络（`PrivateNetwork`，只有 `AF_UNIX`）、`ProtectSystem=strict`、只写数据卷，不带附加组，不连其他服务的套接字。`workspace/` 由 Host Agent 在数据卷就绪时建为子卷，属主 `a-nas-workspace`、`0700`，每 15 分钟修复漂移（`EnsureWorkspaceStore`）。产品服务经 `a-nas-workspace` 附加组连接 `/run/a-nas-workspace/workspace.sock`；Host Agent 的会话查询目录交给同一个组。其余接线（软件包脚本、`a-nas-check`、系统更新的恢复、日志白名单、系统测试）照[剪辑中心的接线清单](montage-center.md#接线清单)。
 - `storeservice.Config` 有可选的 `Authenticate` 钩子，缺省仍是 `modules.Authenticate`（模块在用，只认会话）。共享工作区的钩子按请求选择：带 `X-A-NAS-Agent-Token` 的按 agent 令牌认证；路径是 `/api/v1/workspace/transfers/` 的交给一次性地址自己授权；其余按会话认证。
 - 开发模式在产品进程里运行同一套处理器，库在 `DataMount/workspace`，会话与令牌由产品服务自己的账号库回答。
 

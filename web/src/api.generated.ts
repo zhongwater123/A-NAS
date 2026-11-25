@@ -6344,7 +6344,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "workspace" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
