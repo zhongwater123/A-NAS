@@ -708,10 +708,11 @@ install -d /etc/systemd/system/smbd.service.d
 ip link set anas-late0 up
 # The product waits 20 s for the address and tries again 5 s later; the
 # test's copy waits 5 s and tries again after 1 s.
-sed -e "s/\b$iface\b/anas-late0/g" -e 's/timeout 20 sh/timeout 5 sh/' -e 's/^RestartSec=.*/RestartSec=1s/' \
-  /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
-check "the test's copy of smbd's address wait is shorter" \
-  bash -c "grep -Fq 'timeout 5 sh' '$late_dropin' && grep -qx 'RestartSec=1s' '$late_dropin'"
+{
+  sed -e "s/\b$iface\b/anas-late0/g" -e 's/timeout 20 sh/timeout 5 sh/' /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf
+  echo 'RestartSec=1s'
+} >"$late_dropin"
+check "the test's copy of smbd's address wait is shorter" grep -Fq 'timeout 5 sh' "$late_dropin"
 systemctl daemon-reload
 systemctl stop smbd
 systemctl start --no-block smbd
@@ -1923,15 +1924,11 @@ damaged_at=$(journal_mark)
 # The connection waits in the socket's queue and starts the instance again
 # each time a start fails, a few seconds after Qdrant panics (wait-ready.sh);
 # the third start empties the storage and answers it.
-answered=false
-for _ in 1 2 3; do
-  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock && { answered=true; break; }
-  sleep 1
-done
+check "a damaged vector index answers once it has started empty" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
 failed_starts=$(journalctl -u anas-vectors@a-nas-photos.service --after-cursor "$damaged_at" -o cat --no-pager |
   grep -c 'Failed with result' || true)
 echo "INFO starts that failed on the damaged index: $failed_starts"
-check "a damaged vector index answers once it has started empty" "$answered"
 check "after two failed starts in a row" test "$failed_starts" -eq 2 -a ! -e "$vectors_state/storage/collections/damaged"
 check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
 # A probe in the vector index's own unit, in place of Qdrant.
