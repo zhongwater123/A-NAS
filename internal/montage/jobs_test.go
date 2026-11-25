@@ -1283,6 +1283,44 @@ func TestVideosWithoutCardsLeaveNothingToCutFrom(t *testing.T) {
 	}
 }
 
+// An analysis that goes stale between the lookup and the read, as when the
+// photo library makes the windows again for a new model, is waited for
+// again: the library leaves out what is no longer current, and planning
+// from what is left would miss the video's cards (#584).
+func TestAnalysisInvalidatedAfterLookupWaits(t *testing.T) {
+	for name, stale := range map[string]func(*photos.GrantAnalysis){
+		"windows": func(analysis *photos.GrantAnalysis) {
+			analysis.Windows, analysis.Identity = photos.AnalysisQueued, ""
+		},
+		"cards": func(analysis *photos.GrantAnalysis) {
+			analysis.Cards, analysis.CardsIdentity, analysis.CardList = photos.AnalysisQueued, "", nil
+		},
+		"quality": func(analysis *photos.GrantAnalysis) {
+			analysis.Quality, analysis.QualityIdentity = photos.AnalysisQueued, ""
+		},
+		"descriptions": func(analysis *photos.GrantAnalysis) {
+			analysis.Described, analysis.DescriptionsIdentity, analysis.Descriptions = photos.AnalysisQueued, "", nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newJobEnv(t)
+			env.lib.set(func() {
+				env.lib.described = func(_ string, analysis *photos.GrantAnalysis) { stale(analysis) }
+			})
+			job := env.generate(t, "first")
+			waiting := env.settle(t, job.ID)
+			if waiting.State != montage.JobWaiting || waiting.WaitReason != montage.WaitAnalysis || waiting.Step == "catalog" || env.planner.picks != 0 {
+				t.Fatalf("job = %+v, picks = %d", waiting, env.planner.picks)
+			}
+			env.lib.set(func() { env.lib.described = nil })
+			env.clock.advance(time.Minute)
+			if done := env.settle(t, job.ID); done.State != montage.JobDone {
+				t.Fatalf("job = %+v", done)
+			}
+		})
+	}
+}
+
 // A deleted account's running job is stopped, and its intermediate files go
 // with its jobs.
 func TestRemovingAnAccountStopsItsRunningJobAndTakesItsFiles(t *testing.T) {

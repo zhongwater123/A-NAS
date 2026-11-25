@@ -624,6 +624,12 @@ type analysisResult struct {
 	Videos []analysedVideo `json:"videos"`
 }
 
+// allDone reports whether every stage of a video's analysis is done: the
+// one rule for the lookup's states and for the analysis read after it.
+func allDone(states ...photos.AnalysisState) bool {
+	return !slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone })
+}
+
 // analysisKey reads the photo library's analysis of every video: the key
 // is their objects and what the analysis made of them. A video not
 // analysed yet makes the job wait; one whose analysis failed needs the
@@ -661,7 +667,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			unavailable = true
 		case slices.Contains(states, photos.AnalysisFailed):
 			broken = append(broken, asset.assetID)
-		case slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }):
+		case !allDone(states...):
 			pending = append(pending, asset.assetID)
 		}
 	}
@@ -691,6 +697,16 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		}
 		if analysis.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
+		}
+		// The analysis may have gone stale since the lookup, as when the
+		// windows are made again for a new model: the library then answers
+		// with its state and leaves out what is no longer current. Planning
+		// from that would leave the video's cards out, or find no footage
+		// at all; the next round's lookup decides again.
+		if !allDone(analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described) {
+			s.logger.InfoContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
+				"windows", analysis.Windows, "cards", analysis.Cards, "quality", analysis.Quality, "descriptions", analysis.Described)
+			return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 		}
 		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
 			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsIdentity: analysis.DescriptionsIdentity,

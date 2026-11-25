@@ -1,7 +1,7 @@
 # 部署 A-NAS 软件包
 
 状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；Experimental NAS 自 2026-11-17 起按本手册升级，最近一次见[当前状态](../status/CURRENT.md)）
-更新时间：2026-11-23
+更新时间：2026-11-25
 
 ## 目的
 
@@ -40,7 +40,8 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    make system-test
    make release REPO=/mnt/d/A-NAS-releases/apt CONTENT=/mnt/d/A-NAS-releases/content
    ```
-   - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与助手试用的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
+   - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与 AI 助手的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
+   - 软件源缺少内容包且本地也缺少对应的运行环境时，按[恢复内容库中的运行环境](#恢复内容库中的运行环境)准备文件，再运行 `make release`。
    - `make release` 要存档密钥的口令（[管理发布签名密钥](manage-release-key.md)第 6 步）。
    - 预期：最后三行是 `A-NAS <版本> (<提交>) is in …`、签名密钥的指纹（主密钥与本机的子密钥）与 `a-nas-archive-keyring` 的 SHA-256。
    - 完成标准：把版本、指纹与哈希交给部署的人。打了 release 标签的提交进 `release` 与 `dev`，其他提交只进 `dev`。
@@ -103,6 +104,29 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    a-nas-site
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
+
+## 恢复内容库中的运行环境
+
+开发机从私有仓库 [A-NAS-assets 的归档索引](https://github.com/zhongwater123/A-NAS-assets#运行环境与源码包)取回已有文件。索引中运行环境与源码包的 Release 标签为 `sha256-<压缩包的 SHA-256>`。
+
+**AI 助手（Hermes）。** 发布脚本按[当前提交的清单](../../ai/assistant/runtime.json)核对压缩包的大小和 SHA-256。重建可能改变哈希。先将 `CONTENT` 设为传给 `make release` 的内容库目录，再从 A-NAS 仓库根目录运行以下命令。`gh` 需有权读取资产仓库。在 WSL 中使用 Windows 上的 GitHub CLI 时，将命令中的 `gh` 换成 `gh.exe`。
+
+```bash
+(
+  set -eu
+  sha=$(jq -er .sha256 ai/assistant/runtime.json)
+  file=$(jq -er .file ai/assistant/runtime.json)
+  dir=${CONTENT:?请先设置内容库目录}/assistant-runtimes/$sha
+  mkdir -p "$dir"
+  cd "$dir"
+  gh release download "sha256-$sha" --repo zhongwater123/A-NAS-assets --pattern "$file"
+  printf '%s  %s\n' "$sha" "$file" | sha256sum -c -
+)
+```
+
+**AI Worker 与网页搜索。** `make release` 的缺包提示会给出 `ai-runtimes/<ID>.tar.gz` 或 `search-runtimes/<ID>.tar.gz`。按该 ID 查找标题以 `ai-runtime-<ID>` 或 `search-runtime-<ID>` 开头的 Release，把附件放到提示的路径，核对文件的 SHA-256 与 Release 标签一致。若无匹配归档，分别用 [AI 构建脚本](../../scripts/build-ai-runtime.sh)或[搜索构建脚本](../../scripts/build-search-runtime.sh)生成当前 ID 的压缩包，再把它复制到该路径。
+
+**SearXNG 源码。** 若搜索构建脚本从上游下载的源码与[清单](../../deploy/search/searxng.json)不符，用清单的 SHA-256 找到对应 Release，将 `searxng.tar.gz` 放到仓库的 `build/search-source/<SHA-256>/`。再次运行构建脚本时，它会先核对本地文件的大小和哈希。
 
 ## 可选硬件包
 
