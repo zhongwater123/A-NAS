@@ -48,7 +48,8 @@
 
 - 修复：
   - [`deploy/qdrant/wait-ready.sh`](../../deploy/qdrant/wait-ready.sh) 在 `$MAINPID` 不在后 5 秒失败：排队的连接因此每隔约 6 秒才再拉起一次实例，第三次启动清空存储后回答它；
-  - [`ai/assistant/wait-port.sh`](../../ai/assistant/wait-port.sh) 对 SIGTERM 立即退出；
+  - [`anas-vectors@.service`](../../deploy/systemd/system/anas-vectors@.service) 与代理一样设 `StartLimitIntervalSec=0`：实例不再因启动频率限制拒绝启动，代理也就不会立即以依赖失败结束；
+  - [`anas-assistant@.service`](../../deploy/systemd/system/anas-assistant@.service) 与由它生成的单元（[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)）的每条命令都用 `tini` 运行，生成时检查；
   - [`ai/assistant-spike/disable-system-test.sh`](../../ai/assistant-spike/disable-system-test.sh) 的替身用 `tini` 运行。
 - 测试：上面的最小单元；[系统测试](../development/testing.md#系统测试)前后在共享开发服务器上的同一段日志，见下表（修复后 799 项全部通过）。
 
@@ -61,7 +62,7 @@
 
 ## 后续工作
 
-- `PrivatePIDs=` 下 `wait-port.sh` 看不到主进程，`hermes serve` 一启动就退出时，单元仍显示“启动中”，到 `TimeoutStartSec`（120 秒）才失败。要早于此判失败，需要主进程自己报告就绪（`Type=notify`），没有做。
+- `PrivatePIDs=` 下 `wait-port.sh` 看不到主进程，`hermes serve` 一启动就退出时，单元仍显示“启动中”，到 `TimeoutStartSec`（120 秒）才失败。要早于此判失败，需要主进程自己报告就绪（`Type=notify`），没有做；做时 `anas-assistant-api@.service` 也要设 `StartLimitIntervalSec=0`，理由同向量索引。
 - [`deploy/AGENTS.md`](../../deploy/AGENTS.md) 记下这两条，供以后的单元与测试替身遵守。
 
 ## 关联

@@ -43,7 +43,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次 `/usr/lib/a-nas/vectors/qdrant` 的链接，检查完存储后 `exec` 同一个 Qdrant，软件包升级换掉链接的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
   - **版本**：版本戳记录写入存储的 Qdrant 版本（`qdrant --version`）。版本相同或同一 minor 内的补丁升级，保留存储；换了 minor（单节点不能跳过 minor 版本），或比写入者更旧（降级），清空。
   - **启动失败**：连续两次启动失败也清空，例如段损坏让 Qdrant 加载时 panic（系统测试用损坏的集合配置验证）。每次启动先计为失败，`wait-ready.sh` 等到端口可连后清掉计数。
-- `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。Qdrant 先退出时（例如上面的 panic），systemd 仍等这个脚本结束，所以脚本看到主进程（`$MAINPID`）不在，5 秒后判为失败，不再等满 60 秒。不立即失败：拉起实例的连接还排在套接字的队列里，启动一失败就再次拉起它；立即失败时一秒内约二十次，先撞上实例的启动频率限制，再撞上套接字的触发上限，套接字就此进入 failed。隔 5 秒，损坏的索引约 15 秒内经三次启动恢复（[调查](../investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md)）。
+- `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。Qdrant 先退出时（例如上面的 panic）systemd 仍等这个脚本，所以它看 `$MAINPID`，主进程不在后 5 秒判为失败。排队的连接随即再次拉起实例：这 5 秒和实例的 `StartLimitIntervalSec=0` 让套接字不至于因触发上限永久失败，损坏的索引经三次启动恢复（[调查](../investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md)）。
 
 ### 配置
 
@@ -90,7 +90,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - **让实例能空闲退出**：
   - `PoolSize: 1`；
   - `KeepAliveTime: -1`，空闲时不 ping；
-  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接（`vectorindex.IdleTimeout` 可以改短，系统测试的相册服务经 `ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT` 设为 5 秒；产品不设，[预热](#预热)靠这一分钟让连接在使用期间保持）。
+  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接（`Options.IdleTimeout`；只有系统测试经 `ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT` 改为 5 秒，[预热](#预热)靠这一分钟让连接在使用期间保持）。
 
   否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：核对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
 - **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。
