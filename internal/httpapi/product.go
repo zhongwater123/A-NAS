@@ -14,14 +14,17 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/accountsapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
@@ -59,6 +62,12 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
+	// Montage serves /api/v1/montage, 剪辑中心, like Family; nil while its
+	// switch is off (ADR 0038).
+	Montage http.Handler
+	// PlanGrants registers the member's planning grant for the montage
+	// center's background planning (the File Broker); nil goes on without.
+	PlanGrants montageapi.PlanRegistrar
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
 	// its mounts and finds the caller behind the session token itself.
@@ -90,7 +99,11 @@ type ProductDependencies struct {
 	SystemLogs systemlog.Reader
 	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
 	// routes out.
-	WebSearch *websearchapi.API
+	WebSearch    *websearchapi.API
+	PhoneHotspot phonehotspot.Switch
+	// AssistantKey serves Settings → VNAS, the AI assistant's model key (ADR 0024); nil
+	// leaves its routes out.
+	AssistantKey *assistantkeyapi.API
 	// SystemUpdate serves Settings → 系统更新 (docs/specs/system-update.md);
 	// nil leaves its routes out.
 	SystemUpdate *systemupdateapi.API
@@ -260,7 +273,7 @@ func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Requ
 	if h.AssistantKeeper != nil {
 		h.AssistantKeeper.Forget(token)
 	}
-	//nolint:gosec // G124: Secure only through the internet entry; the LAN entry is plain HTTP (ADR 0012).
+	//nolint:gosec // G124: The LAN entry also supports plain HTTP (ADR 0012).
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: overHTTPS(r)})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -310,12 +323,16 @@ func (h *productHandler) setSessionCookie(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// overHTTPS reports whether the browser reached the device over HTTPS, which
-// only the internet entry serves (ADR 0032); a Secure cookie would not come
-// back over the LAN entry's plain HTTP.
+// Caddy overwrites the forwarding headers before reaching the loopback
+// listener. Both the internet and the isolated hotspot terminate TLS in Caddy.
 func overHTTPS(r *http.Request) bool {
 	_, internet := webentry.Internet(r)
-	return internet
+	if internet || r.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return err == nil && net.ParseIP(host).IsLoopback() &&
+		r.Header.Get("X-Forwarded-For") != "" && r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 type sessionResponse struct {

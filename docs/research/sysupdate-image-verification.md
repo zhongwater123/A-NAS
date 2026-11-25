@@ -37,6 +37,13 @@ ADR 0034 决定 2 提出：家里的设备以 mkosi 构建的整机镜像运行�
 - **ESP 每次断电都留下“未正常卸载”。** 三次断电后内核都报 `FAT-fs (vda1): Volume was not properly unmounted`，没有发现文件损坏。最后一次在 ESP 中留下 136 MiB 的临时 UKI（`.#sysupdatea-nas_5+3-0.efi…`），下一次成功的更新之后它不见了。512 MiB 的 ESP 放得下两个 UKI 加一个临时文件，再小就不够。可以只在需要时挂载 ESP（automount），并在镜像中带上 `fsck.vfat`。
 - **主机侧调用 CLI。** Debian 13 没有打包 257 引入的 `systemd-sysupdated` 与 `updatectl`；上游已宣布其 D-Bus 接口将在 263 删除、改用 Varlink。Host Agent 的更新服务应调用 `systemd-sysupdate --json=short`（`list`、`check-new`、`update`、`pending`、`--component=`）。
 
+### 第 5 步动手前补测的两项（2026-11-13）
+
+在 Debian 13 的镜像构建容器中（同一个 systemd 257）补测，结果决定了设备镜像的做法（[构建与安装设备镜像](../runbooks/build-device-image.md)）：
+
+- **版本号里不能有 `~`。** systemd-sysupdate 不认 `~`：本地目录中 `1.0.1~rc.6` 的文件被当作不存在，`1.0.1+dev20261113.80` 照常装上。把 `~` 换成 `-`、`^` 或 `_` 都不行：`systemd-analyze compare-versions` 把 `1.0.1-rc.7` 排在 `1.0.1` 之后，`^` 则 sysupdate 也不认。Debian 版本本身（含 `~` 与 `+dev`）在 systemd 与 dpkg 的比较中顺序一致，问题只在 sysupdate 的文件名。设备的更新文件因此用提交在 main 上的序号编号，Debian 版本写在扩展的发布文件中。
+- **推送来的目录可以当作下载来核对。** `[Source] Type=url-file` 的 `Path=file:///…/` 被 systemd-pull 接受，`SHA256SUMS` 的签名与每个文件的哈希照常核对：签名之后被改过的文件报 `file has been tampered with`，换一把密钥签的 `SHA256SUMS` 报 `Signature verification failed`，都不安装。`Type=regular-file` 的本地来源则不核对签名。所以设备直接从推送的目录取用，不需要软件包设备那样先同步到 root 的目录。
+
 ## 第 6 项：产品层做成 sysext 时软件包的约束
 
 演示软件包按 Debian 习惯布局（服务、sysusers、tmpfiles、`/etc` 中的配置文件、`postinst`），做成 sysext 后：

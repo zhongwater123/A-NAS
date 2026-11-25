@@ -3,6 +3,7 @@ package vectorindex_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -116,9 +117,7 @@ func TestIndex(t *testing.T) {
 	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "images", Dimensions: 3, Keywords: []string{"libraries"}}); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() {
-		t.Error("not Warm right after a request")
-	}
+	waitForWarm(t, client)
 	// A vector of another size is refused as such, not as a connection fault.
 	if err := client.Upsert(ctx, "images", []vectorindex.Point{{Key: "short", Vector: []float32{1, 0}}}); !errors.Is(err, vectorindex.ErrRejected) {
 		t.Errorf("Upsert of a 2-d vector into 3-d = %v, want ErrRejected", err)
@@ -240,9 +239,10 @@ func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	if err := client.Prepare(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() || instance.Connections() == 0 {
-		t.Fatal("not Warm after Prepare")
+	if instance.Connections() == 0 {
+		t.Fatal("no connection after Prepare")
 	}
+	waitForWarm(t, client)
 	// Preparing again and again for longer than the idle timeout keeps the
 	// connection open.
 	for range 6 {
@@ -253,6 +253,20 @@ func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	}
 	if instance.Connections() == 0 {
 		t.Fatal("the connection closed while it was being prepared")
+	}
+}
+
+// gRPC publishes its ready picker before its connectivity state. A successful
+// RPC can therefore return before Warm observes Ready, even with a live
+// connection. Wait for that observation rather than assuming their order.
+func waitForWarm(t *testing.T, client *vectorindex.Client) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !client.Warm() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection did not become Warm")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -314,5 +328,38 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 	}
 	if took := time.Since(started); took > 5*time.Second {
 		t.Errorf("a hung instance held the call for %s", took)
+	}
+}
+
+// A video's window points go together when the video does: deleting by the
+// object field removes every one of them, and only them.
+func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, nil)
+	defer func() { _ = client.Close() }()
+	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "windows", Dimensions: 3, Keywords: []string{"object", "libraries"}}); err != nil {
+		t.Fatal(err)
+	}
+	var points []vectorindex.Point
+	for i, object := range []string{"video:a", "video:a", "video:a", "video:b"} {
+		points = append(points, vectorindex.Point{Key: fmt.Sprintf("%s#%d", object, i), Vector: unit(1, float32(i), 0),
+			Keywords: map[string][]string{"object": {object}, "libraries": {"shared"}}})
+	}
+	if err := client.Upsert(ctx, "windows", points); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "object", []string{"video:a", "video:none"}); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	if err := client.Scan(ctx, "windows", nil, func(entry vectorindex.Entry) error { left = append(left, entry.Key); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(left, []string{"video:b#3"}) {
+		t.Fatalf("left after deleting video:a = %v", left)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "", []string{"x"}); !errors.Is(err, vectorindex.ErrInvalid) {
+		t.Fatalf("DeleteMatching without a field = %v", err)
 	}
 }

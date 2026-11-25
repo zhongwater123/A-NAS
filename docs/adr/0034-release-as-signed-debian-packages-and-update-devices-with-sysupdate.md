@@ -64,7 +64,7 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    - 软件包：
      - `a-nas`：产品的二进制、单元、安装逻辑、AI Worker 的代码、网页搜索的配置与容器代理；
      - 内容包：每个模型、两个运行环境、Qdrant 与 llama.cpp 各一个。包名带内容的标识（模型与 Qdrant、llama.cpp 取 SHA-256 的前 12 位，运行环境取它的 ID），版本固定为 1，例如 `a-nas-model-dfine-m-obj365-cd832825f883`、`a-nas-ai-runtime-842b388a0f1987f5`。`a-nas` 依赖它固定的这些名字，所以内容不变时 apt 不下载；回滚时旧内容如果还装着，只降产品包。内容仍放在 `/opt/a-nas/<种类>/<标识>`，旧的由 `apt autoremove` 删除（[`scripts/lib/content.sh`](../../scripts/lib/content.sh)）；
-     - `a-nas-assistant-trial`：助手试用包，`Depends` 同一版本的 `a-nas`，所以两者总是一起更新。它的 Hermes 运行环境也是内容包，固定在 [`ai/assistant-spike/runtime.json`](../../ai/assistant-spike/runtime.json)；
+     - `a-nas-assistant-trial`：原先的助手试用包。2026-11-18 起助手随 `a-nas` 安装，它的 Hermes 运行环境是 `a-nas` 依赖的内容包，固定在 [`ai/assistant/runtime.json`](../../ai/assistant/runtime.json)；这个包只剩一个空的过渡版本，让装过试用的设备更新过来，`a-nas` 的 postinst 一次接管试用，下一个版本由系统更新卸掉（[手册](../runbooks/enable-ai-assistant.md#从试用接管)）；
      - 已有的 `a-nas-host` 与 `a-nas-console`（ADR 0031），以及装有签名公钥的 `a-nas-archive-keyring`。
      - `a-nas-host` 依赖的 Docker 与 Caddy：上游官方软件包的副本，按 SHA-256 固定（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)，2026-11-12）。
      - `a-nas-docker-policy`：Docker 的地址池校验与 systemd 附加配置。`a-nas-host` 要求不低于本 release 的版本，产品回滚时与 Docker 一样保留；安装命令显式选择它，避免旧宿主机包不再依赖它后被 `apt autoremove` 清理（[ADR 0013](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。
@@ -79,7 +79,7 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    - 分区：systemd-repart 建两个只读的 `/usr` 槽位与一个持久的根分区。`/etc` 与 `/var`（含 `/var/lib/a-nas`）在持久的根分区上，用户数据在数据卷上，切换 `/usr` 槽位不动它们。
    - 启动：systemd-boot 加载统一内核镜像，并按启动计数判断新版本。新版本启动后通过健康检查（`boot-complete.target`）才算成功，否则 systemd-boot 退回上一个版本。健康检查失败时重启（`FailureAction=reboot`），内核崩溃后也自动重启（`panic=`）；内核卡死要靠硬件看门狗。
    - 更新：systemd-sysupdate 从 HTTPS 下载带版本号的 `/usr` 镜像与内核镜像，以 `SHA256SUMS` 及其 GPG 签名校验，写进未在使用的槽位。
-   - 产品层（`a-nas` 与助手试用包）做成 system extension，由 systemd-sysupdate 的 `product` 组件单独更新，不重启设备。模型等很少变化的内容也各自作为组件，只在变化时下载。基础镜像只在 Debian 或依赖变化时发布。
+   - 产品层（`a-nas`，含助手）做成 system extension，由 systemd-sysupdate 的 `product` 组件单独更新，不重启设备。模型等很少变化的内容也各自作为组件，只在变化时下载。基础镜像只在 Debian 或依赖变化时发布。
    - 产品中的更新服务（经 Host Agent）调用 `systemd-sysupdate --json=short` 检查、下载与安装更新，并决定何时重启，在“设置”中显示更新状态。systemd-sysupdate 自带的两个定时器在镜像中禁用。apt 在设备上只读，同 TrueNAS 的做法。
    - systemd-sysupdate 在上游仍是实验组件。第 3 步已证明 Debian 13 的 systemd 257 满足要求，有两处缺陷要在镜像中绕开，见“第 3 步的验证结论”。
    - Experimental NAS 这类由人装好 Debian 的宿主机，继续用第 1 条的 apt 更新；改用镜像要重装系统盘，时间由用户决定。
@@ -99,7 +99,7 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    2026-11-11 完成：[部署 A-NAS 软件包](../runbooks/deploy-a-nas-packages.md)。正式签名密钥与软件源的位置待用户决定（[签名密钥](../decisions/2026-11-11-release-signing-key.md)、[放在哪里](../decisions/2026-11-11-update-hosting.md)）。
 3. **镜像与 systemd-sysupdate 的验证（2026-11-10 完成）**：在虚拟机中用 mkosi 构建镜像，以 Debian 13 的 systemd 257 验证自动退回、断电、数据不变、下载量、产品层做成 system extension，以及是否需要更新的 systemd。结论见下一节，做法与数据见[研究记录](../research/sysupdate-image-verification.md)。
 4. **更新服务与界面**：Host Agent 的更新服务与“设置”中的更新页，见[系统更新规格](../specs/system-update.md)。2026-11-13 软件包设备的部分完成：独立的 `anas-update` 单元由 root 同步开发机推送的软件源、检查、下载、安装、运行 `a-nas-check` 与回退，Host Agent 只留下请求、读取状态；镜像设备随第 5 步接入。
-5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。
+5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。2026-11-13 第一部分完成：镜像与签名的更新文件（`make image`），在虚拟机中按设备的做法更新的测试（`make image-test`），[手册](../runbooks/build-device-image.md)。2026-11-17 第二部分完成：镜像设备接入“设置 → 系统更新”（[规格](../specs/system-update.md)）。基础镜像仍由 systemd-sysupdate 写入；产品与内容改由更新服务按每个 release 的签名清单复制并核对，因为 systemd-sysupdate 的保留规则会删掉正在用或回退要用的版本，也不能在写入后、切换前停下；新的基础镜像带着自己的产品，systemd-boot 退回时上一基础镜像也带回它的产品。更新文件按架构分目录（`x86-64/`），为以后的 arm64 留出位置。
 6. **Experimental NAS 改用镜像**：用户决定时间后重装系统盘。数据卷在另外的硬盘上，不受影响。
 
 ## 第 3 步的验证结论（2026-11-10）

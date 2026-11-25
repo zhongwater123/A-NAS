@@ -60,6 +60,23 @@ ask_passphrase() {
   fi
 }
 
+# signs_without_passphrase GNUPGHOME KEY: KEY there signs without a
+# passphrase, as the test key does.
+signs_without_passphrase() {
+  # shellcheck disable=SC2016 # the container's shell expands these
+  in_image "$1:/gnupg" -- bash -c 'printf x | gpg --batch --quiet --pinentry-mode loopback --passphrase "" \
+    --local-user "$1!" --detach-sign >/dev/null 2>&1' bash "$2"
+}
+
+# passphrase_unlocks GNUPGHOME KEY: the passphrase ask_passphrase read unlocks
+# KEY there. gpg imports a secret key without its passphrase, so only a
+# signature proves it.
+passphrase_unlocks() {
+  # shellcheck disable=SC2016 # the container's shell expands these
+  in_image --passphrase "$1:/gnupg" -- bash -c 'printf x | gpg --batch --quiet --pinentry-mode loopback \
+    --passphrase-file /secret/passphrase --local-user "$1!" --detach-sign >/dev/null 2>&1' bash "$2"
+}
+
 # public_key KEY OUT: KEY's public key in OpenPGP's binary form into the file
 # OUT. KEY is a GnuPG home, whose primary key is taken, or a key file, armored
 # or binary, such as deploy/release/a-nas-archive-key.asc.

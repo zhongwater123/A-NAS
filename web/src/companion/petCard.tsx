@@ -21,7 +21,7 @@
 // waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
 // (companion.module.css). The character's credit is in Settings → 概览 (credit.ts), not on
 // the companion.
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
 import {
@@ -76,8 +76,9 @@ import {
   takeChanged,
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
+import type { DeviceTrouble } from "./health";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { memberQuiet, setCompanionMode, useCompanionMode } from "./quiet";
+import { memberQuiet, memberSleep, setCompanionMode, setMemberSleep, useCompanionMode } from "./quiet";
 import { clearBox, withinArea } from "./stepAside";
 import {
   COMPANION_PET,
@@ -89,7 +90,9 @@ import {
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
+  turnInFlight,
   turnUnderWay,
+  waitingConversation,
 } from "./workStatus";
 
 // As dsh-pet's own page builds its card (client/pet.ts): React handed in, the styles put in once.
@@ -265,9 +268,18 @@ function firstRead(state: PollState): { baseline: Record<string, number>; leaves
  * shows neither its idle clip nor a yawn first.
  */
 function asleepFromTheStart(animations: Animations): string | null {
-  if (!memberQuiet()) return null;
   const own = companionState.read().pets[COMPANION_PET];
-  if (own && readSleep(own.sleep)?.sleeping) return null;
+  const sleeping = own !== undefined && readSleep(own.sleep)?.sleeping === true;
+  if (!memberQuiet()) {
+    // As usual again after hidden, which took the card off the page while the member's sleep went on
+    // (quiet.ts memberSleep): it comes awake, as from quiet. A sleep VNAS asked for goes on.
+    if (memberSleep()) {
+      setMemberSleep(false);
+      if (sleeping) companionSleep.wake(COMPANION_PET);
+    }
+    return null;
+  }
+  if (sleeping) return null;
   const names = pickSleepNames(animations);
   if (!names) return null;
   companionSleep.enter(COMPANION_PET, { ...names, start: names.loop });
@@ -329,6 +341,9 @@ function useWorkSign(leaves: Leaves, quiet: boolean): string | undefined {
 
 /** How long what happened while the member was away waits to be told when they come back. */
 const AWAY_KEEP_MS = 12 * 60 * 60 * 1000;
+
+/** How long a return's read of the notices may take before another return reads them anew (comeBack). */
+export const REFRESH_STALE_MS = 15_000;
 
 /** What happened while the member was away: how a turn ended, and new results by their notice's id. */
 interface Away {
@@ -455,24 +470,27 @@ function playbackSettled(playbackId: string): boolean {
 export function CompanionCard({
   installed,
   pool,
+  trouble,
   ...openers
-}: { installed: InstalledAnimations; pool?: string } & CompanionOpeners) {
+}: { installed: InstalledAnimations; pool?: string; trouble?: DeviceTrouble } & CompanionOpeners) {
   // Safari draws no alpha in VP9: it needs dsh-pet's HEVC animations, which this pool may lack.
   const format = prefersMov() ? "mov" : "webm";
   const animations = useMemo(
     () => installedAnimations((name) => Boolean(installed[name]?.[format])),
     [installed, format],
   );
-  return animations ? <Card animations={animations} pool={pool} openers={openers} /> : null;
+  return animations ? <Card animations={animations} pool={pool} trouble={trouble} openers={openers} /> : null;
 }
 
 function Card({
   animations,
   pool,
+  trouble,
   openers = {},
 }: {
   animations: Animations;
   pool?: string;
+  trouble?: DeviceTrouble;
   openers?: CompanionOpeners;
 }) {
   /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
@@ -521,7 +539,18 @@ function Card({
     const timer = window.setTimeout(() => setTold(null), BUBBLE_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [told]);
-  const comeBack = useRef(() => {});
+  /** Tells what waited (below); listed once the notices it read again for that have come. */
+  const comeBack = useRef<(listed?: boolean) => void>(() => {});
+  /** A refresh of the notices a return asked for is under way (comeBack). */
+  const refreshing = useRef<{ at: number } | null>(null);
+  /** The card is on the page: a refresh that comes back after it left tells nobody. */
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
   const wakingUp = useRef(false);
   /** Where the companion was last left, null while it is in its corner. */
@@ -948,22 +977,45 @@ function Card({
   // well (only its check, no fireworks again). Nothing during a turn, which keeps it for the turn's end;
   // nothing asleep or locked. On the screen the family shares, no task's name.
   useEffect(() => {
-    comeBack.current = () => {
+    comeBack.current = (listed = false) => {
       if (document.hidden || localConsoleCovered() || wakingUp.current) return;
-      // Back during a turn: what waits stays until the turn ends, and is told then. Asleep (quiet, or put to
-      // sleep by VNAS) or locked, it stays until the companion is free.
+      // The list read again comes back late: the member may have gone again meanwhile. What waits waits.
+      if (listed && awayFrom(pausedRef.current)) return;
+      // Back during a turn: what waits stays until the turn ends, and is told then. A turn of this window counts
+      // from its prompt, before its first stage too. Asleep (quiet, or put to sleep by VNAS) or locked, it stays
+      // until the companion is free.
       const state = companionState.read();
       const stage = readWorkStatus(state.sections.workStatus)?.state ?? null;
-      if (stage !== null && stage !== "success" && stage !== "error") return;
+      if (turnInFlight() || (stage !== null && stage !== "success" && stage !== "error")) return;
       const own = state.pets[COMPANION_PET];
       if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
       const { ended, results } = away.current;
-      away.current = nothingAway();
       const now = Date.now();
       const recent = (at: number) => now - at < AWAY_KEEP_MS;
       const waiting = new Set([...results].filter(([, at]) => recent(at)).map(([id]) => id));
       const outcome = ended && recent(ended.at) ? ended.state : null;
-      if (outcome === null && waiting.size === 0) return;
+      if (outcome === null && waiting.size === 0) {
+        away.current = nothingAway();
+        return;
+      }
+      // A new result waits, unless an error comes first: the list is read again, as another device may have
+      // read the result, and what to tell is decided when it comes, by how things are then (above). Nothing is
+      // taken until it is told. One read at a time: input meanwhile asks for no other, the one under way
+      // decides; one that has not come back in REFRESH_STALE_MS (a NAS that never answers) gives way to a new
+      // one, and decides nothing if it comes after all. A card the page let go of meanwhile (hidden) tells nobody.
+      if (outcome !== "error" && waiting.size > 0 && !listed) {
+        const under = refreshing.current;
+        if (under && performance.now() - under.at < REFRESH_STALE_MS) return;
+        const read = { at: performance.now() };
+        refreshing.current = read;
+        void loadTaskNotices().finally(() => {
+          if (refreshing.current !== read) return;
+          refreshing.current = null;
+          if (mounted.current) comeBack.current(true);
+        });
+        return;
+      }
+      away.current = nothingAway();
       const tell = () => {
         toldAt.current = Date.now();
       };
@@ -982,24 +1034,18 @@ function Card({
         tell();
         setTold({ sign: "success", at: now });
       };
-      if (waiting.size === 0) {
+      const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
+      if (unread.length === 0) {
         done();
         return;
       }
-      void loadTaskNotices().finally(() => {
-        const unread = currentTaskNotices().filter((notice) => waiting.has(notice.id));
-        if (unread.length === 0) {
-          done();
-          return;
-        }
-        tell();
-        const task = unread.at(-1)?.task?.name;
-        const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
-        companionState.writePet(COMPANION_PET, "say", { text, anim: false });
-        const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
-        if (responses.length > 0)
-          companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
-      });
+      tell();
+      const task = unread.at(-1)?.task?.name;
+      const text = isLocalConsole() || !task ? "有新结果" : `${shortDetail(task)} 有新结果`;
+      companionState.writePet(COMPANION_PET, "say", { text, anim: false });
+      const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
+      if (responses.length > 0)
+        companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
     };
   }, [animations]);
 
@@ -1048,9 +1094,18 @@ function Card({
     const [quietBefore, asleepBefore] = [wasQuiet.current, wasAsleep.current];
     wasQuiet.current = quiet;
     wasAsleep.current = asleep;
-    if (quiet && asleep) quietSleep.current = true;
+    // The sleep is the member's while it sleeps quiet: kept past this card, which hidden takes off the page
+    // (asleepFromTheStart wakes the next one).
+    if (quiet && asleep) {
+      quietSleep.current = true;
+      setMemberSleep(true);
+    }
+    if (!asleep) setMemberSleep(false);
     // As usual again from Settings: it wakes.
-    if (quietBefore && !quiet && asleep) companionSleep.wake(COMPANION_PET);
+    if (quietBefore && !quiet && asleep) {
+      setMemberSleep(false);
+      companionSleep.wake(COMPANION_PET);
+    }
     if (!asleepBefore || asleep) return;
     // Woken by the member while quiet: as usual again.
     if (quiet) setCompanionMode("normal");
@@ -1078,13 +1133,36 @@ function Card({
   }, [quiet, asleep, clipSpeed]);
 
   // A click on the companion, or Enter or Space on it, asks it what is going on, and it answers with the
-  // first that holds: a card of this window's turn waits for the member (the VNAS window comes up with the
-  // card in view); a result of a scheduled task is unread (it opens, as its notice's 查看结果 does); a turn
-  // of this window is under way (its step's line, how many steps and how long, with no clip); a turn just
-  // ended in an error, its cross still up (the VNAS window comes up). With nothing to tell it plays a click
-  // response, as the card does. What it says also goes to the screen reader. A drag let go, a sleeping or
-  // locked companion are the card's own. On the screen the family shares, no task's name or object.
-  const [spoken, setSpoken] = useState("");
+  // first that holds: the device is in a critical trouble not told yet since it came (what is wrong, and
+  // Settings' overview comes up, where its health and what to do are); a card of this window's turn waits for
+  // the member (the VNAS window comes up with the card in view); a result of a scheduled task is unread (it
+  // opens, as its notice's 查看结果 does); a turn of this window is under way (its step's line, how many steps
+  // and how long, with no clip); a turn just ended in an error, its cross still up (the VNAS window comes up);
+  // the trouble told before, still there (told again). A trouble that stays for days does not stand in front
+  // of every card. With nothing to tell it plays a click response, as the card does. What it says also goes to
+  // the screen reader. A drag let go, a sleeping or locked companion are the card's own. On the screen the
+  // family shares, no task's name or object.
+  /**
+   * What it said last, for the screen reader, with a count: each answer goes in as a node of its own, so
+   * the same words said again are read again, which the same text set twice would not be.
+   */
+  const [spoken, setSpoken] = useState({ text: "", count: 0 });
+  /**
+   * The trouble last told on a click (its key): it waits behind the rest until another trouble comes, or
+   * this one goes and comes back.
+   */
+  const toldTrouble = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trouble) toldTrouble.current = null;
+  }, [trouble]);
+  // The trouble's words describe the companion's button, dsh-pet's hit area, so a screen reader names it as
+  // it reaches the companion; the hit area is dsh-pet's to draw (view.ts), so the page sets the reference on
+  // it. Checked on every render, in case dsh-pet draws it anew.
+  const troubleLine = useId();
+  useEffect(() => {
+    const hit = clipSpeed.current?.querySelector(".dsh-pet-hit");
+    if (hit && hit.getAttribute("aria-describedby") !== troubleLine) hit.setAttribute("aria-describedby", troubleLine);
+  });
 
   const ask = useRef<() => boolean>(() => false);
   useEffect(() => {
@@ -1094,18 +1172,36 @@ function Card({
       const shared = isLocalConsole();
       const say = (text: string) => {
         companionState.writePet(COMPANION_PET, "say", { text, anim: false });
-        setSpoken(text);
+        setSpoken((last) => ({ text, count: last.count + 1 }));
       };
+      const tellTrouble = (told: DeviceTrouble) => {
+        toldTrouble.current = told.key;
+        say(`${told.text}\n打开设置看看`);
+        openers.onOpenHealth?.();
+        return true;
+      };
+      // A trouble asked about the first time comes before all; told once, it waits behind what else there is.
+      if (trouble && toldTrouble.current !== trouble.key) return tellTrouble(trouble);
       if (cardWaiting()) {
         say("等你确认");
-        openers.onOpenVnas?.();
-        window.setTimeout(
-          () =>
+        // The window opens the card's conversation, from another one or from its memory or tasks, at the
+        // cards (AssistantPanel). The focus stays on the companion, not on the card's buttons: an Enter that
+        // asked it must not answer the card.
+        const conversation = waitingConversation();
+        const focused = document.activeElement;
+        openers.onOpenVnas?.(conversation ? { conversation } : undefined);
+        window.setTimeout(() => {
+          if (!conversation)
             document
               .querySelector('[data-window-id="assistant"] [aria-label="本对话中等你确认或回答的事"]')
-              ?.scrollIntoView({ block: "nearest" }),
-          0,
-        );
+              ?.scrollIntoView({ block: "nearest" });
+          if (
+            focused instanceof HTMLElement &&
+            focused !== document.activeElement &&
+            clipSpeed.current?.contains(focused)
+          )
+            focused.focus({ preventScroll: true });
+        }, 0);
         return true;
       }
       const unread = currentTaskNotices().at(-1);
@@ -1127,9 +1223,10 @@ function Card({
         openers.onOpenVnas?.();
         return true;
       }
+      if (trouble) return tellTrouble(trouble);
       return false;
     };
-  }, [openers, work]);
+  }, [clipSpeed, openers, work, trouble]);
   useEffect(() => {
     const layer = clipSpeed.current;
     if (!layer) return;
@@ -1179,6 +1276,7 @@ function Card({
       style={layer}
       className={styles.layer}
       data-companion-work={work}
+      data-companion-trouble={trouble ? "" : undefined}
       data-companion-rest={paused ? "" : undefined}
       data-vnas-overlay=""
     >
@@ -1192,7 +1290,11 @@ function Card({
         onPlace={place}
       />
       <p className="sr-only" aria-live="polite">
-        {spoken}
+        {spoken.text && <span key={spoken.count}>{spoken.text}</span>}
+      </p>
+      {/* On the page from the start, so that a trouble that comes is read out as it comes. */}
+      <p id={troubleLine} className="sr-only" aria-live="polite">
+        {trouble ? `设备需要处理：${trouble.text}` : ""}
       </p>
     </div>
   );

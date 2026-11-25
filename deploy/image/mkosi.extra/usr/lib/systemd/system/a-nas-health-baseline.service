@@ -1,0 +1,16 @@
+# What fails on a boot that systemd-boot does not count: the baseline that
+# the next version's counted boot is judged against (a-nas-health.service,
+# /usr/lib/a-nas-image/health). It never fails the boot. DefaultDependencies=no
+# lets it run after multi-user.target, which wants it.
+[Unit]
+Description=A-NAS health baseline for the next image version
+ConditionPathExists=!/sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+DefaultDependencies=no
+After=multi-user.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+StateDirectory=a-nas-health
+ExecStart=/usr/lib/a-nas-image/health record

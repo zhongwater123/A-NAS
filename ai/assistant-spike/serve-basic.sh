@@ -8,7 +8,7 @@ other=$([ "$user" = alice ] && echo bob || echo alice)
 sock=/run/a-nas-assistant/$user.sock
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 # The instance's secret, the old session token: since Hermes's login gate is on, only a password.
-secret=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+secret=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/var/lib/a-nas-host/assistant/tokens/$user.env")
 rest() { curl -sS --max-time 150 --unix-socket "$sock" -o /dev/null -w '%{http_code}' "$@"; }
 
 systemctl stop "anas-assistant-api@$user.service" "anas-assistant@$user.service" 2>/dev/null

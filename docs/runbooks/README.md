@@ -13,22 +13,34 @@
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
 - [部署 A-NAS 软件包](deploy-a-nas-packages.md)（draft；签名软件源、apt 升级与回滚，系统测试已验证）
 - [管理发布签名密钥](manage-release-key.md)（draft；存档密钥的生成、两台开发机的子密钥、换机、增加与吊销，一次性密钥已验证）
+- [构建与安装设备镜像](build-device-image.md)（draft；整盘镜像与更新文件、写到新设备的系统盘、手动更新与回滚，虚拟机测试）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
 - [启用相册本地 AI](enable-photo-ai.md)（verified；2026-10-10 部署 `6833c7637f73`）
 - [启用相册物体检测](enable-photo-objects.md)（verified；2026-10-13 部署 `bb1ec71bff65`）
 - [启用向量索引](enable-vector-index.md)（draft；实验 NAS 已执行第 1–4 步与第 6 步，第 5 步的读路径核对待部署后执行）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
+- [准备实验 NAS 的热点网卡](prepare-experimental-nas-hotspot-radio.md)（draft）
 - [启用互联网访问](enable-internet-access.md)（draft；边缘服务器已准备，NAS 一侧与开放待执行）
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [启用网页搜索](enable-web-search.md)（draft；实验 NAS 已执行第 1–3 步，空闲外发待查明）
 - [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
-- [在实验 NAS 上试用 AI 助手](try-ai-assistant-on-experimental-nas.md)（draft；云端模型，仅开发测试）
+- [启用 AI 助手（VNAS）](enable-ai-assistant.md)（draft；管理员填写 DeepSeek 密钥，接管实验 NAS 上的试用；系统测试已验证，实验 NAS 待执行）
 - [把硬盘加入数据卷](add-a-disk-to-the-data-volume.md)（draft；实验 NAS 待执行）
 - [镜像缺盘与更换硬盘](replace-a-mirror-disk.md)（draft；实验 NAS 待执行）
 - [在实验 NAS 上验收已部署的功能](accept-features-on-experimental-nas.md)（draft；按模块分节，验收完成的节随即删去）
 - [安装与移除照片打分](install-and-remove-photo-scoring.md)（draft；系统测试已验证，实验 NAS 待执行）
+- [启用配乐分析](enable-montage-music.md)（draft；allin1 版权待议期间只手动装在实验 NAS 上，待执行）
+- [在实验 NAS 上演示剪辑中心](demo-montage-center.md)（draft；只在实验 NAS 上用 drop-in 打开，待执行）
 
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `verb-object.md`。高风险步骤必须在执行前给出稳定目标身份、预期变化和停止条件；每一步都写明完成标准。
+
+## 交给 root 执行的命令
+
+开发者没有 root，root 操作由维护者在 NAS 的终端里执行。终端会截断长段粘贴（2026-10-10 一段 40 行的 heredoc 末尾被吞，写出的脚本不完整），半截的 root 脚本很危险。所以超过几行的 root 操作这样交付：
+
+1. 以 `anas-dev` 把脚本暂存为 `~anas-dev/<名称>-<提交>.sh`，用 `bash -n` 检查语法，算出它的 SHA-256。
+2. 交给维护者三行短命令：用 `install -m 0700` 把脚本放进 `/root/`；用 `sha256sum --check` 核对上一步给出的哈希；运行它并 `| tee /tmp/a-nas-<名称>.log; chmod 644 /tmp/a-nas-<名称>.log`，开发者再用只读账号读日志。
+3. 只读的诊断也这样做：脚本把结果写进 `/tmp/anas-*.txt` 并 `chmod 644`。

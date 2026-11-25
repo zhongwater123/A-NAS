@@ -58,6 +58,10 @@ export function originLabel(detail?: string): string | undefined {
   return undefined;
 }
 
+function handoverLabel(choice?: string): string {
+  return choice === "transfer" ? "转给管理员" : "一并删除";
+}
+
 const signInFailures: Record<string, string> = {
   invalid_password: "密码错误",
   unknown_user: "账号不存在",
@@ -211,6 +215,13 @@ const familyActions: Record<string, string> = {
   "family.record_restored": "恢复了家庭记录",
   "family.comment_deleted": "删除了家庭留言",
   "family.vaccine_plan_changed": "修改了接种计划",
+  // 家庭待办 keeps its events with the family service's.
+  "family.todo_added": "新建了待办",
+  "family.todo_updated": "修改了待办",
+  "family.todo_done": "把待办标为已处理",
+  "family.todo_ignored": "忽略了待办",
+  "family.todo_reopened": "重新打开了待办",
+  "family.todo_snoozed": "推迟了待办",
 };
 
 // describeSystemUpdate: an administrator's request, such as
@@ -237,9 +248,14 @@ function describeSystemUpdate(action: string, actor: Part, raw?: string): Descri
     case "download":
       return { parts: [actor, "开始下载 A-NAS", version], meta: [] };
     case "install":
-      return { parts: [actor, "开始安装 A-NAS", version], meta: [] };
+      return { parts: [actor, text("by") === "automatic" ? "请求安装 A-NAS" : "开始安装 A-NAS", version], meta: [] };
     case "revert":
       return { parts: [actor, "开始回到 A-NAS", version], meta: [] };
+    case "restart":
+      return {
+        parts: [actor, text("by") === "automatic" ? "请求重启设备以使用 A-NAS" : "重启了设备以使用 A-NAS", version],
+        meta: [],
+      };
     case "settings":
       return {
         parts: [actor, "修改了系统更新设置"],
@@ -306,6 +322,30 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [subject, "的 Linux 账号与系统中已有的账号冲突"], meta: ["需要按运行手册处理"], tone: "danger" };
     case "user.disabled":
       return { parts: [actor, "禁用了", subject, "的账号"], meta: [], tone: "warning" };
+    case "user.enabled":
+      return { parts: [actor, "重新启用了", subject, "的账号"], meta: [] };
+    // A deleted account is gone from the directory; the detail keeps its name.
+    case "user.deletion_scheduled":
+      return {
+        parts: [actor, "删除了账号", name(detail.username || "（未知）")],
+        meta: [
+          `个人空间${handoverLabel(detail.personalSpace)}`,
+          `私有图库${handoverLabel(detail.library)}`,
+          detail.dueAt ? `${formatDateTime(detail.dueAt)} 执行，此前可以撤销` : "到期执行，此前可以撤销",
+        ],
+        tone: "danger",
+      };
+    case "user.deletion_cancelled":
+      return { parts: [actor, "撤销了删除账号", name(detail.username || "（未知）")], meta: ["账号仍为禁用"] };
+    case "user.deleted":
+      return {
+        parts: ["账号", name(detail.username || "（未知）"), "已彻底删除"],
+        meta: [
+          detail.folder ? `文件转入“${detail.folder}”` : "",
+          detail.album ? `照片转入“${detail.album}”相册` : "",
+        ].filter(Boolean),
+        tone: "danger",
+      };
     case "user.credential_reset":
       return { parts: [actor, "重置了", subject, "的密码"], meta: ["对方下次登录时需要设置新密码"], tone: "warning" };
     case "user.password_changed":

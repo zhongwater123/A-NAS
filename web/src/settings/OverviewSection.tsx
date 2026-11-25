@@ -1,11 +1,11 @@
-import { ChevronRight, CircleFadingArrowUp, Copy } from "lucide-react";
+import { ChevronRight, CircleFadingArrowUp, Copy, Power } from "lucide-react";
 import { useId } from "react";
 
 import type { Disk, Health, SystemUpdateStatus } from "../api.generated";
 import type { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes } from "../lib/bytes";
-import { hasNewVersion } from "../systemupdate/status";
+import { hasNewVersion, waitsForRestart } from "../systemupdate/status";
 import { versionLabel } from "../systemupdate/texts";
 import { CompanionCredit } from "./CompanionCredit";
 import { DeviceTemperatures, diskTemperature } from "./DeviceTemperatures";
@@ -91,7 +91,7 @@ export function OverviewSection({
       </div>
       <HealthFindings
         snapshot={snapshot}
-        update={hasNewVersion(update) ? update : undefined}
+        update={hasNewVersion(update) || waitsForRestart(update) ? update : undefined}
         onOpenStorage={onOpenStorage}
         onOpenUpdate={onOpenUpdate}
       />
@@ -279,14 +279,24 @@ function HealthFindings({
   if (count === 0) return null;
   return (
     <Group title="需要处理" aside={`${count} 项`}>
-      {update?.candidate && (
+      {update?.phase === "restart-pending" ? (
         <Row
-          icon={<CircleFadingArrowUp className={`${styles.healthIcon} ${styles.accent}`} aria-hidden="true" />}
-          label={<strong>有新版本 {versionLabel(update.candidate)}</strong>}
-          detail={update.phase === "ready" ? "可以安装" : "可以下载"}
+          icon={<Power className={`${styles.healthIcon} ${styles.accent}`} aria-hidden="true" />}
+          label={<strong>{versionLabel(update.target ?? "")} 已装好</strong>}
+          detail="重启后生效"
           anchor="new-version"
           onClick={onOpenUpdate}
         />
+      ) : (
+        update?.candidate && (
+          <Row
+            icon={<CircleFadingArrowUp className={`${styles.healthIcon} ${styles.accent}`} aria-hidden="true" />}
+            label={<strong>有新版本 {versionLabel(update.candidate)}</strong>}
+            detail={update.phase === "ready" ? "可以安装" : "可以下载"}
+            anchor="new-version"
+            onClick={onOpenUpdate}
+          />
+        )
       )}
       {findings.map((finding, index) => {
         const described = describeFinding(finding, snapshot.disks);

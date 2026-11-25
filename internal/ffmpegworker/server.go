@@ -3,7 +3,9 @@ package ffmpegworker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // Output limits for buffered operations.
@@ -23,32 +27,62 @@ var timeouts = map[string]time.Duration{OpProbe: time.Minute, OpFrame: time.Minu
 // Serve answers one request on conn and returns when it is done.
 func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 	defer conn.Close()
-	var request Request
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	file, err := readFrame(conn, &request)
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	body, files, err := unixmsg.ReadBodyFiles(conn, maxFrame, maxFiles)
 	if err != nil {
+		if errors.Is(err, unixmsg.ErrTooManyFiles) {
+			return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
+		}
 		return err
 	}
+	defer unixmsg.CloseFiles(files)
 	_ = conn.SetReadDeadline(time.Time{})
-	if file == nil {
+	// Every request names its operation and may ask for an acknowledgement;
+	// the editing operations decode the rest strictly.
+	var head struct {
+		Op  string `json:"op"`
+		Ack bool   `json:"ack"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		return fmt.Errorf("decode message: %w", err)
+	}
+	if len(files) == 0 {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: "no file descriptor"}, nil)
 	}
-	defer func() { _ = file.Close() }()
-	if request.Ack {
+	if head.Ack {
 		if err := writeFrame(conn, Response{Accepted: true}, nil); err != nil {
 			return err
 		}
 	}
-	// The descriptor shares its offset with the sender's, which an earlier
-	// operation on the same file may have moved; fd: reads from the offset.
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return writeFrame(conn, Response{Code: CodeUnreadable, Message: "the file cannot seek"}, nil)
+	if !isEditing(head.Op) && len(files) != 1 {
+		return writeFrame(conn, Response{Code: CodeInvalid, Message: "the operation takes one file descriptor"}, nil)
 	}
+	// A descriptor shares its offset with the sender's, which an earlier
+	// operation on the same file may have moved; fd: reads from the offset.
+	for _, file := range files {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return writeFrame(conn, Response{Code: CodeUnreadable, Message: "the file cannot seek"}, nil)
+		}
+	}
+	if isEditing(head.Op) {
+		return serveEditing(ctx, conn, tools, head.Op, body, files)
+	}
+	var request Request
+	if err := json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("decode message: %w", err)
+	}
+	if request.Op == OpAudio && request.PCM {
+		if err := decodeStrict(body, &request); err != nil {
+			return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
+		}
+	}
+	file := files[0]
 	if err := request.Validate(); err != nil {
 		return writeFrame(conn, Response{Code: CodeInvalid, Message: err.Error()}, nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeouts[request.Op])
 	defer cancel()
+	_ = conn.SetWriteDeadline(time.Time{})
 	program, args := tools.command(request)
 	if program == "" {
 		return writeFrame(conn, Response{Code: CodeUnavailable, Message: "decoder is unavailable"}, nil)
@@ -65,22 +99,19 @@ func Serve(ctx context.Context, conn *net.UnixConn, tools Tools) error {
 		defer func() { _ = input.Close() }()
 		stdin = input
 	}
-	command := exec.CommandContext(ctx, program, args...)
+	command, stderr := newCommand(ctx, program, args, request.PCM && request.Op == OpAudio)
 	command.Stdin = stdin
-	command.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"}
-	var stderr limitedBuffer
-	stderr.limit = 8 << 10
-	command.Stderr = &stderr
-	if request.Op == OpStream || request.Op == OpAudio {
-		return serveStream(ctx, conn, command, &stderr)
-	}
-	// Buffered previews also stop decoding when the caller goes away.
+	// The peer sends nothing beyond its request. Watch even before the
+	// decoder produces its first bytes.
 	go func() { _, _ = conn.Read(make([]byte, 1)); cancel() }()
+	if request.Op == OpStream || request.Op == OpAudio {
+		return serveStream(ctx, conn, command, stderr)
+	}
 	var stdout limitedBuffer
 	stdout.limit = maxOutput[request.Op]
 	command.Stdout = &stdout
 	if err := command.Run(); err != nil || stdout.overflow || stdout.Len() == 0 {
-		return writeFrame(conn, failure(err, &stderr, stdout.overflow), nil)
+		return writeFrame(conn, failure(err, stderr, stdout.overflow), nil)
 	}
 	if err := writeFrame(conn, Response{OK: true}, nil); err != nil {
 		return err
@@ -151,24 +182,22 @@ func serveStream(ctx context.Context, conn *net.UnixConn, command *exec.Cmd, std
 		return err
 	}
 	if err := command.Start(); err != nil {
-		return writeFrame(conn, Response{Code: CodeFailed, Message: err.Error()}, nil)
+		return writeFrame(conn, failure(err, stderr, false), nil)
 	}
 	buffer := make([]byte, 64<<10)
 	count, _ := io.ReadAtLeast(stdout, buffer, 1)
 	if count == 0 {
-		return writeFrame(conn, failure(command.Wait(), stderr, false), nil)
+		err := command.Wait()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return writeFrame(conn, failure(err, stderr, false), nil)
 	}
 	if err := writeFrame(conn, Response{OK: true}, nil); err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
 		return err
 	}
-	// The peer never writes after its request: a read that returns means it
-	// has gone.
-	go func() {
-		_, _ = conn.Read(make([]byte, 1))
-		_ = command.Process.Kill()
-	}()
 	_, err = conn.Write(buffer[:count])
 	if err == nil {
 		_, err = io.CopyBuffer(conn, stdout, buffer)

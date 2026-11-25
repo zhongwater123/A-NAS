@@ -11,7 +11,7 @@ description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check �
 
 - 开发机的 Go、Node、jq 与 ShellCheck 只在 WSL 中；开发机 B 由 `. ~/.anas-env` 加入 `PATH`。
 - 在 `/mnt/<盘符>` 上运行时 vitest worker 启动超时，复制到 WSL 的 ext4 目录后正常。复制时排除 `.git`、`web/node_modules` 与 `build`。
-- 副本没有 `.git`，所以运行 `make check-steps`。它就是 `make check` 的全部检查；`make check` 之后还要用 `git rev-parse` 写部署用的 `build/.validated-build`，只在部署前需要，见[测试与验证](../../../docs/development/testing.md)和[暂存注意事项](../../../docs/runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
+- 副本没有 `.git`，所以运行 `make -k check-steps`。它就是 `make check` 的全部检查，`-k` 让一步失败后其余各步照常运行；`make check` 之后还要用 `git rev-parse` 写部署用的 `build/.validated-build`，只在部署前需要，见[测试与验证](../../../docs/development/testing.md)和[暂存注意事项](../../../docs/runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
 
 ## 一次只跑一个门禁
 
@@ -43,7 +43,7 @@ echo "$(basename "$dst") since $(date +%T)" > ~/anas-check/.gate.holder
 # The vector index tests run the pinned Qdrant (docs/development/testing.md).
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
-if timeout 90m make check-steps PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+if timeout 90m make -k check-steps PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 
@@ -55,4 +55,4 @@ EOF
 
 - 在最终报告或 PR 中写明 `PASS` 或失败的目标，并给出日志路径，例如 `~/anas-check/<检出名>.log`。
 - 失败时先读日志尾部，修复当前变更引起的问题后重跑同一命令。与当前变更无关的失败如实报告，不要绕过。
-- Web 测试每个用例最多 20 秒、`findBy…` 与 `waitFor` 最多等 5 秒（[`vite.config.ts`](../../../web/vite.config.ts)、[`setup.ts`](../../../web/src/test/setup.ts)），给与其他会话共用 CPU 的开发机留出余量，不要在单个用例或命令行上另设。本机负载极高时仍有个别用例超时或 `findBy…` 找不到元素：先在副本的 `web/` 中运行 `npx vitest run <失败的文件>` 单独重跑；通过的话，在报告中写明是负载导致的超时，再运行 `web-test` 之后的目标：`make web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries`。负载不高时单独重跑仍失败，就不是等待时间的问题，按缺陷调查，不要再放宽上限。
+- Web 测试每个用例最多 20 秒、`findBy…` 与 `waitFor` 最多等 5 秒（[`vite.config.ts`](../../../web/vite.config.ts)、[`setup.ts`](../../../web/src/test/setup.ts)），给与其他会话共用 CPU 的开发机留出余量，不要在单个用例或命令行上另设。本机负载极高时仍有个别用例超时或 `findBy…` 找不到元素：先在副本的 `web/` 中运行 `npx vitest run <失败的文件>` 单独重跑；通过的话，在报告中写明是负载导致的超时；`-k` 已让其余各步照常跑完，日志里没有别的失败就不必再跑。负载不高时单独重跑仍失败，就不是等待时间的问题，按缺陷调查，不要再放宽上限。

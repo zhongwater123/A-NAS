@@ -17,7 +17,7 @@ system=/var/log/fake-model.jsonl.system.txt
 # shellcheck source=policy.sh
 . /spike/policy.sh
 policy "$([[ ${1:-} == --managed ]] && echo "$2")"
-echo "logging.level in the managed policy: $(sed -n '/^logging:/,/^[a-z]/s/^  level: //p' /etc/hermes/config.yaml)"
+echo "logging.level in the managed policy: $(sed -n '/^logging:/,/^[a-z]/s/^  level: //p' /usr/lib/a-nas/assistant/managed/config.yaml)"
 
 rest() {  # rest METHOD PATH [JSON]: the body, then the status on its own line
   curl -sS --max-time 150 --unix-socket "$sock" -X "$1" -H "Authorization: Bearer $token" \

@@ -16,6 +16,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/imagerender"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
@@ -44,7 +45,7 @@ func Normalize(data []byte) (id, dataURL string) {
 		if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > 2048 || config.Height > 2048 || config.Width*config.Height > 1024*1024 {
 			return "", ""
 		}
-		original, _, err := image.Decode(bytes.NewReader(data))
+		original, err := imagerender.Decode(bytes.NewReader(data))
 		if err != nil {
 			return "", ""
 		}

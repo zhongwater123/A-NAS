@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -29,9 +30,9 @@ import (
 // session (ADR 0024 decision 10) it notes the task as an empty file named
 // after it in AssistantRuns/<username>, which only root may enter, and starts
 // the member's cron unit. The round takes what waits there as its own
-// (ai/assistant-spike/run-requests.sh), queues each task with Hermes's own
+// (ai/assistant/run-requests.sh), queues each task with Hermes's own
 // trigger_job and runs it as it runs a task that is due
-// (ai/assistant-spike/cron_round.py). A request that comes while a round runs
+// (ai/assistant/cron_round.py). A request that comes while a round runs
 // stays for the next one, which the waker starts.
 
 var (
@@ -60,13 +61,19 @@ func (s *Server) serveAssistantRun(req wire.Request) wire.Response {
 	if s.config.AssistantSockets == "" || s.config.AssistantRuns == "" {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is not enabled"}}
 	}
+	// Without the administrator's key the round would find no model, and a request left
+	// waiting would run whenever a key is saved again.
+	if s.config.AssistantOn != nil && !s.config.AssistantOn() {
+		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is off: no model key is saved"}}
+	}
 	if !accountid.ValidAssistantAccount(identity.Username) {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeForbidden, Message: "this account has no assistant"}}
 	}
 	if !assistantTaskPattern.MatchString(req.Task) {
 		return wire.Response{Error: &wire.Error{Code: wire.CodeInvalidRequest, Message: "invalid task"}}
 	}
-	if err := s.noteAssistantRun(identity.Username, req.Task); err != nil {
+	noted, err := s.noteAssistantRun(identity.Username, req.Task)
+	if err != nil {
 		if errors.Is(err, errTooManyRuns) {
 			return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: err.Error()}}
 		}
@@ -77,8 +84,12 @@ func (s *Server) serveAssistantRun(req wire.Request) wire.Response {
 	defer cancel()
 	if err := s.config.StartAssistantRound(start, identity.Username); err != nil {
 		// Nothing will run it: an account without the units, or a disabled
-		// one whose units are masked.
-		_ = os.Remove(filepath.Join(s.config.AssistantRuns, identity.Username, req.Task))
+		// one whose units are masked. A request that waited already was
+		// accepted by an earlier call, whose round may be under way: it is
+		// not this call's to take back.
+		if noted {
+			_ = os.Remove(filepath.Join(s.config.AssistantRuns, identity.Username, req.Task))
+		}
 		s.config.Logger.Error("assistant round not started", "username", identity.Username, "task", req.Task, "error", err)
 		return wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the task cannot be run right now"}}
 	}
@@ -87,29 +98,38 @@ func (s *Server) serveAssistantRun(req wire.Request) wire.Response {
 }
 
 // noteAssistantRun leaves the member's request where the next round finds
-// it. A round takes the whole directory by renaming it, so a request that
+// it, and reports whether this call made it: a task asked for twice waits
+// once. A round takes the whole directory by renaming it, so a request that
 // finds the directory gone makes it again: it is then the next round's.
-func (s *Server) noteAssistantRun(username, task string) error {
+func (s *Server) noteAssistantRun(username, task string) (bool, error) {
 	if err := os.MkdirAll(s.config.AssistantRuns, 0o700); err != nil {
-		return err
+		return false, err
 	}
 	waiting := filepath.Join(s.config.AssistantRuns, username)
 	for attempt := 0; ; attempt++ {
 		if err := os.Mkdir(waiting, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-			return err
+			return false, err
 		}
 		entries, err := os.ReadDir(waiting)
+		if err == nil && slices.ContainsFunc(entries, func(entry fs.DirEntry) bool { return entry.Name() == task }) {
+			return false, nil
+		}
 		if err == nil && len(entries) >= maxAssistantRuns {
-			return errTooManyRuns
+			return false, errTooManyRuns
 		}
 		if err == nil {
 			var file *os.File
-			if file, err = os.OpenFile(filepath.Join(waiting, task), os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600); err == nil {
-				return file.Close()
+			file, err = os.OpenFile(filepath.Join(waiting, task), os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+			if err == nil {
+				return true, file.Close()
+			}
+			if errors.Is(err, fs.ErrExist) {
+				// Another call asked for the same task just now.
+				return false, nil
 			}
 		}
 		if !errors.Is(err, fs.ErrNotExist) || attempt > 0 {
-			return err
+			return false, err
 		}
 	}
 }

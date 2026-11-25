@@ -13,7 +13,7 @@ import types
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "cron_round.py"
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "cron_round.py"
 PAST = "2020-01-01T00:00:00+00:00"
 JOB = "a1b2c3d4e5f6"
 

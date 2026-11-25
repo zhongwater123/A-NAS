@@ -9,10 +9,11 @@ import workspaceStyles from "../ui/workspace.module.css";
 import { BatchesPage, RatersPage } from "./Admin";
 import { claimThumbnailURL, listBatches, listRecent, type ScoringRaterBatch, scoringError } from "./api";
 import { GuideContent } from "./Guide";
-import { formatCount, formatScore } from "./model";
+import { formatCount, formatScore, isLevels } from "./model";
 import { Stage } from "./Stage";
 import styles from "./scoring.module.css";
 import { type ScoringAccess, scoringAccess } from "./status";
+import { Tutorial } from "./Tutorial";
 
 type Page = "rate" | "batches" | "raters";
 
@@ -44,7 +45,9 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
   // without signing in again.
   const [access, setAccess] = useState(initial);
   const [page, setPage] = useState<Page>(initial.rater ? "rate" : "batches");
-  const [scoring, setScoring] = useState<{ batch: ScoringRaterBatch; guide: boolean }>();
+  // Opening a batch shows the tutorial every time, then the batch's guide
+  // the first time on this browser, then the photos.
+  const [scoring, setScoring] = useState<{ batch: ScoringRaterBatch; tutorial: boolean; guide: boolean }>();
   const { toast, element: toasts } = useToasts(styles.scToasts);
   const refused = useCallback((text: string) => toast(text, "error"), [toast]);
   const readAccess = useCallback(() => {
@@ -61,6 +64,17 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
     };
   }, []);
 
+  if (scoring?.tutorial) {
+    return (
+      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
+        <Tutorial
+          batch={scoring.batch}
+          onBack={() => setScoring(undefined)}
+          onDone={() => setScoring({ ...scoring, tutorial: false })}
+        />
+      </div>
+    );
+  }
   if (scoring?.guide) {
     return (
       <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
@@ -69,7 +83,7 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
           onBack={() => setScoring(undefined)}
           onStart={() => {
             markGuideSeen(userId, scoring.batch.id);
-            setScoring({ batch: scoring.batch, guide: false });
+            setScoring({ batch: scoring.batch, tutorial: false, guide: false });
           }}
         />
       </div>
@@ -77,14 +91,15 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
   }
   if (scoring) {
     return (
-      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
+      // The stage asks this window, with its notices, to fill the screen.
+      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`} data-scoring-window>
         <Stage batch={scoring.batch} onBack={() => setScoring(undefined)} onRefused={refused} />
         {toasts}
       </div>
     );
   }
 
-  const open = (batch: ScoringRaterBatch) => setScoring({ batch, guide: !guideSeen(userId, batch.id) });
+  const open = (batch: ScoringRaterBatch) => setScoring({ batch, tutorial: true, guide: !guideSeen(userId, batch.id) });
   return (
     <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
       {access.admin && (
@@ -213,11 +228,20 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
   return (
     <div className={styles.scCover}>
       {recent.map((item) => {
-        const score = formatScore(Math.round(item.score * 100));
+        // A batch that hides scores from raters shows none here either.
+        const score = batch.hideDecimals
+          ? undefined
+          : formatScore(Math.round(item.score * 100), batch.scale, batch.dimensions[0].id);
+        const alt =
+          score === undefined
+            ? "你打过的照片"
+            : isLevels(batch.scale)
+              ? `你打了“${score}”的照片`
+              : `你打了 ${score} 分的照片`;
         return (
           <figure key={item.token}>
-            <img src={claimThumbnailURL(item.token)} alt={`你打了 ${score} 分的照片`} loading="lazy" />
-            <figcaption>{score}</figcaption>
+            <img src={claimThumbnailURL(item.token)} alt={alt} loading="lazy" />
+            {score !== undefined && <figcaption>{score}</figcaption>}
           </figure>
         );
       })}

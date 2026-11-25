@@ -233,6 +233,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
+    expect(within(desktop).getByRole("button", { name: "打开待办" }).hasAttribute("disabled")).toBe(false);
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
     // The terminal moved into 设置 → 终端.
     for (const retired of [
@@ -757,6 +758,52 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
   });
 
+  it("shows 剪辑中心 only while the device turns it on, and opens its empty project list", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
+    await user.click(icons[0]);
+    expect(await screen.findByText("还没有项目")).toBeInTheDocument();
+    unmount();
+
+    serveDesktop({ montage: false });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+  });
+
+  it("asks again whether 剪辑中心 is on when the page comes back into view", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    // The first read fails as on a network error, which the contract does not describe.
+    let failed = false;
+    server.use(
+      http.untyped.get(
+        `${window.location.origin}/api/v1/montage`,
+        () => {
+          failed = true;
+          return HttpResponse.error();
+        },
+        { once: true },
+      ),
+    );
+    const shown = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    try {
+      render(<App />);
+      await waitFor(() => expect(failed).toBe(true));
+      await screen.findAllByRole("button", { name: "打开相册" });
+      expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((await screen.findAllByRole("button", { name: "打开剪辑中心" })).length).toBeGreaterThan(0);
+    } finally {
+      shown.mockRestore();
+    }
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     serveDesktop();
     serveWindows();
@@ -1275,6 +1322,28 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(within(notice).getByRole("button", { name: "知道了" }));
     expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull();
     await waitFor(() => expect(acknowledged).toEqual(["notification:1"]));
+  });
+
+  it("tells the administrator where a deleted account's files and photos went", async () => {
+    serveDesktop({
+      notifications: [
+        {
+          id: "notification:3",
+          kind: "account_deleted",
+          actorUsername: "carol",
+          folder: "carol 的文件",
+          album: "carol 的照片",
+          createdAt: "2026-12-16T10:00:00Z",
+        },
+      ],
+    });
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(
+      within(notice).getByText(
+        /账号 carol 已于 .* 删除。文件在你个人空间的“carol 的文件”文件夹，照片在你私有图库的“carol 的照片”相册。/,
+      ),
+    ).toBeTruthy();
   });
 
   it("tells the owner when an administrator viewed the private photo library", async () => {

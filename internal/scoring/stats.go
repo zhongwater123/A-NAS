@@ -53,7 +53,7 @@ type answer struct {
 	repeatOf int64
 	viewMs   int
 	created  string
-	// scores holds every dimension a score answered, overall included.
+	// scores holds every dimension a score answered, the first included.
 	scores map[string]int
 }
 
@@ -68,12 +68,12 @@ func (s *Store) Stats(ctx context.Context, batchID string) ([]RaterStats, error)
 	err = each(ctx, s.db, `SELECT id, item_id, rater, kind, score, coalesce(repeat_of, 0), view_ms, created_at
 		FROM ratings WHERE batch_id = ? AND superseded_at IS NULL ORDER BY id`, []any{batchID}, func(rows *sql.Rows) error {
 		a := answer{scores: map[string]int{}}
-		var overall sql.NullInt64
-		if err := rows.Scan(&a.id, &a.item, &a.rater, &a.kind, &overall, &a.repeatOf, &a.viewMs, &a.created); err != nil {
+		var first sql.NullInt64
+		if err := rows.Scan(&a.id, &a.item, &a.rater, &a.kind, &first, &a.repeatOf, &a.viewMs, &a.created); err != nil {
 			return err
 		}
-		if overall.Valid {
-			a.scores[Overall] = int(overall.Int64)
+		if first.Valid {
+			a.scores[batch.Dimensions[0]] = int(first.Int64)
 		}
 		index[a.id] = len(answers)
 		answers = append(answers, a)

@@ -63,25 +63,48 @@ func (s Store) SaveSettings(settings Settings) error {
 // PutRequest leaves a request for the next run of the service.
 func (s Store) PutRequest(request Request) error { return s.write("request.json", request) }
 
-// TakeRequest returns the request left for this run and removes it; a run
-// without one is the timer's tick.
-func (s Store) TakeRequest() (Request, error) {
-	request := Request{Kind: RequestTick}
-	if err := s.read("request.json", &request); err != nil {
-		return Request{}, err
+const staleRequest = 10 * time.Minute
+
+// ErrStaleRequest is a request that waited for a run that never started.
+var ErrStaleRequest = errors.New("a system update request no run took")
+
+// TakeRequest returns the request the Host Agent left and removes it; ok is
+// false when there is none. One left before notBefore waited for a run that
+// never started: it is removed and refused with ErrStaleRequest, not carried
+// out late, outside the install window and past the checks the Product
+// Service made before asking. One that cannot be read is removed too, so
+// that it fails one run, not every run.
+func (s Store) TakeRequest(notBefore time.Time) (request Request, ok bool, err error) {
+	// Detach the pending file before reading it so a new request cannot be
+	// removed with the old one. systemd serializes consumers.
+	const claimed = ".request-claimed.json"
+	path := s.path(claimed)
+	err = os.Rename(s.path("request.json"), path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Request{}, false, nil
 	}
-	if err := os.Remove(s.path("request.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Request{}, err
+	if err != nil {
+		return Request{}, false, err
 	}
-	return request, nil
+	defer func() { _ = os.Remove(path) }()
+	info, err := os.Stat(path)
+	if err != nil {
+		return Request{}, false, err
+	}
+	if err := s.read(claimed, &request); err != nil {
+		return Request{}, false, err
+	}
+	if info.ModTime().Before(notBefore) {
+		return Request{}, false, fmt.Errorf("%w: %s by %s, left at %s", ErrStaleRequest, request.Kind, request.By,
+			info.ModTime().UTC().Format(time.RFC3339))
+	}
+	return request, true, nil
 }
 
-// RequestWaiting reports whether a request was left within the last
-// minute and no run has taken it yet: the unit that takes it is starting.
-// An older one waits for a run that did not start, which the next run takes.
+// RequestWaiting reports whether a live request is waiting for the service.
 func (s Store) RequestWaiting(now time.Time) bool {
 	info, err := os.Stat(s.path("request.json"))
-	return err == nil && now.Sub(info.ModTime()) < time.Minute
+	return err == nil && !info.ModTime().Before(now.Add(-staleRequest))
 }
 
 func (s Store) read(name string, into any) error {

@@ -15,21 +15,38 @@ import type {
 } from "../../api.generated";
 import { http } from "../server";
 
-// Every 打分项 a batch can choose, as the module lists them.
+const builtIn = (id: string, name: string, description = ""): ScoringDimension => ({
+  id,
+  name,
+  description,
+  custom: false,
+});
+
+// Every 打分项 a batch can choose, as the module lists them: the built-in
+// ones, the scoring handbook's first, then one an administrator made.
 export const scoringCatalogue: ScoringDimension[] = [
-  { id: "overall", name: "总分" },
-  { id: "composition", name: "构图" },
-  { id: "light_color", name: "光影色彩" },
-  { id: "sharpness", name: "清晰度" },
-  { id: "narrative", name: "叙事意境" },
-  { id: "preference", name: "喜好程度" },
+  builtIn("overall", "总体", "整体拍得好不好，有没有让人想多看一会儿的感觉"),
+  builtIn("composition", "构图", "画面安排得好不好，主体清不清楚"),
+  builtIn("light_color", "光影色彩", "光线和颜色好不好看"),
+  builtIn("quality", "画质", "按正常大小看有没有抖动、虚焦、噪点，不用 100% 查看"),
+  builtIn("emotion", "情绪", "平静还是激烈，只看感觉不看好坏：1 平静，5 激烈"),
+  builtIn("sharpness", "清晰度"),
+  builtIn("narrative", "叙事意境"),
+  builtIn("preference", "喜好程度"),
+  { id: "custom_1", name: "色彩和谐", description: "整张照片的颜色是否协调", custom: true },
 ];
 
-// dimensionsOf is the catalogue's entries for ids, in the catalogue's order.
-export const dimensionsOf = (...ids: string[]) => scoringCatalogue.filter((dimension) => ids.includes(dimension.id));
+// dimensionsOf is the catalogue's entries for ids, in the order given, which
+// is the order raters score them.
+export const dimensionsOf = (...ids: string[]) =>
+  ids.map((id) => {
+    const dimension = scoringCatalogue.find((entry) => entry.id === id);
+    if (!dimension) throw new Error(`no 打分项 ${id}`);
+    return dimension;
+  });
 
 export function scoringMe(admin: boolean, rater: boolean): ScoringMe {
-  return { admin, rater, dimensions: scoringCatalogue };
+  return { admin, rater };
 }
 
 export function raterBatch(overrides: Partial<ScoringRaterBatch> = {}): ScoringRaterBatch {
@@ -38,6 +55,8 @@ export function raterBatch(overrides: Partial<ScoringRaterBatch> = {}): ScoringR
     name: "风景第一批",
     rubric: "看构图与光线",
     dimensions: dimensionsOf("overall"),
+    scale: "hundredths",
+    hideDecimals: false,
     rated: 0,
     finished: false,
     ...overrides,
@@ -52,6 +71,8 @@ export function adminBatch(overrides: Partial<ScoringBatch> = {}): ScoringBatch 
     required: 3,
     rubric: "看构图与光线",
     dimensions: dimensionsOf("overall"),
+    scale: "hundredths",
+    hideDecimals: false,
     state: "open",
     createdAt: "2026-11-12T01:00:00Z",
     import: { files: 120, imported: 118, skipped: 2, skippedBy: [{ reason: "unsupported_type", count: 2 }] },

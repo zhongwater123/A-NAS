@@ -18,7 +18,6 @@ import type {
 } from "../../api.generated";
 import { healthyState, metricsState, session as sessionFixture } from "../fixtures";
 import { http, server } from "../server";
-import { scoringCatalogue } from "./scoring";
 import { webSearchStatus } from "./websearch";
 
 export const session = sessionFixture();
@@ -37,6 +36,8 @@ export interface ShellOptions {
   webSearch?: WebSearchStatus;
   // Photo scoring is installed only when a test says what the account may do.
   scoring?: Pick<ScoringMe, "admin" | "rater">;
+  // 剪辑中心 is off, as on a device without ANAS_MONTAGE_ENABLED, unless a test turns it on.
+  montage?: boolean;
 }
 
 export function shellHandlers(options: ShellOptions = {}) {
@@ -60,8 +61,19 @@ export function shellHandlers(options: ShellOptions = {}) {
       response(200).json({ items: options.scoring ? [{ id: "scoring" }] : [] }),
     ),
     http.get("/api/v1/modules/scoring/me", ({ response }) =>
-      response(200).json({ ...(options.scoring ?? { admin: false, rater: false }), dimensions: scoringCatalogue }),
+      response(200).json(options.scoring ?? { admin: false, rater: false }),
     ),
+    http.get("/api/v1/montage", ({ response }) =>
+      options.montage
+        ? response(204).empty()
+        : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
+    ),
+    http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
+    // The device keeps no film of its own for 剪辑中心's home page.
+    http.get("/api/v1/montage/hero", ({ response }) =>
+      response(404).json({ error: { code: "not_found", message: "resource not found" } }),
+    ),
+    http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [] })),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/shares/notifications", ({ response }) => response(200).json({ items: [] })),
@@ -69,6 +81,8 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/feedback", ({ response }) => response(200).json({ items: [] })),
     // 家庭中心's hints after signing in.
     http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
+    // 待办's reminders after signing in.
+    http.get("/api/v1/todos/reminders", ({ response }) => response(200).json({ items: [] })),
     // The companion's animations, served beside the API (internal/webui): none installed.
     http.untyped.get(`/companion/animations`, () => HttpResponse.json({ pool: "", animations: {} })),
   ];

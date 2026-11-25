@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
@@ -27,6 +28,9 @@ const (
 	// AccountUIDPath names the active user behind a Linux UID, for a member's
 	// AI assistant, which runs as the member's own UID and has no session.
 	AccountUIDPath = "/v1/accounts/resolve-uid"
+	// DeletionPath names an account whose deletion has started, for the
+	// services that remove what they keep for it.
+	DeletionPath = "/v1/accounts/deletions/"
 )
 
 type Resolver interface {
@@ -100,6 +104,22 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 			}
 		})
 	}
+	if deletions, ok := resolver.(interface {
+		AccountDeletion(context.Context, string) (accountid.AccountDeletion, error)
+	}); ok {
+		mux.HandleFunc("GET "+DeletionPath+"{userID}", func(w http.ResponseWriter, r *http.Request) {
+			deletion, err := deletions.AccountDeletion(r.Context(), r.PathValue("userID"))
+			switch {
+			case errors.Is(err, accountid.ErrNotDeleting):
+				httpjson.Write(w, http.StatusNotFound, errorResponse{Error: "not_deleting"})
+			case err != nil:
+				logger.ErrorContext(r.Context(), "account deletion lookup failed", "error", err)
+				httpjson.Write(w, http.StatusServiceUnavailable, errorResponse{Error: "accounts_unavailable"})
+			default:
+				httpjson.Write(w, http.StatusOK, deletion)
+			}
+		})
+	}
 	if directory, ok := resolver.(interface {
 		ActiveProfiles(context.Context) ([]accountid.Profile, error)
 	}); ok {
@@ -169,6 +189,32 @@ func (c *Client) lookup(ctx context.Context, path string, query any, missingStat
 		return accountid.SessionUser{}, missing
 	default:
 		return accountid.SessionUser{}, fmt.Errorf("session lookup answered %s", response.Status)
+	}
+}
+
+// AccountDeletion returns the started deletion of userID, or
+// accountid.ErrNotDeleting.
+func (c *Client) AccountDeletion(ctx context.Context, userID string) (accountid.AccountDeletion, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent"+DeletionPath+url.PathEscape(userID), nil)
+	if err != nil {
+		return accountid.AccountDeletion{}, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return accountid.AccountDeletion{}, fmt.Errorf("reach the session lookup: %w", err)
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK:
+		var deletion accountid.AccountDeletion
+		if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&deletion); err != nil || deletion.UserID != userID {
+			return accountid.AccountDeletion{}, errors.New("session lookup returned an invalid deletion")
+		}
+		return deletion, nil
+	case http.StatusNotFound:
+		return accountid.AccountDeletion{}, accountid.ErrNotDeleting
+	default:
+		return accountid.AccountDeletion{}, fmt.Errorf("account deletion lookup answered %s", response.Status)
 	}
 }
 

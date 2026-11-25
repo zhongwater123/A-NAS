@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-11-12
+更新时间：2026-11-23
 
 ## 目的
 
@@ -13,6 +13,7 @@
 - 目标：Experimental NAS 当前的 release，开始前记下 `dpkg-query -W a-nas`。
 - 风险：只用可丢弃测试数据；安装应用、上传与扫描会占用数据卷空间与 CPU。
 - 停止条件：数据卷离线或只读、服务反复重启、出现非预期的数据丢失时停止，按[调查模板](../investigations/_TEMPLATE.md)记录。
+- 先小后大：几个服务接力完成的功能（如剪辑中心），先用最小样本走通全程，例如一段一分钟以内的视频和一首歌，确认每一步都能走完、每处等待都写明在等什么；再换真实数据测用时、内存与质量。先上真实数据，链路上的问题会藏在几十分钟的分析之后（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
 
 ## 步骤
 
@@ -25,7 +26,7 @@
 
 ### 文件管理、登录与账号
 
-- Agent空间（#177）：更新 Host Agent、产品服务及助手试用包后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
+- Agent空间（#177）：更新 Host Agent 与产品服务后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
 - 跨空间移动（#180）：只用可丢弃目录，在 Web 从 Shared 移到个人空间，复制期间经另一成员的 SMB 新增和覆盖文件；移动者可从源空间回收站恢复这些内容，其他成员不可读取其回收站。用没有并发写入的文件核对移动前后的修改时间一致。源副本在回收站中继续占用容量，验收结束后只清理本次测试数据（[调查](../investigations/2026-10-27-cross-space-move-lost-source-changes.md)）。
 
 - 文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口与资源文件夹跳转；在个人空间与 Shared 上传、删除、恢复（[issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
@@ -54,6 +55,7 @@
 
 ### 桌面、设置与本机屏幕
 
+- 手机直连热点（#615）部署后按[热点手册](prepare-experimental-nas-hotspot-radio.md#验证与回退)核对实体网卡切换、手机 HTTPS 登录与上传、有线入口和停止清理。
 - 屏保与息屏：按[本地控制台手册](operate-local-kiosk.md#验收)，含个性化的第 10、11 项。直连屏幕是 iPad mini 的 LCD，系统调不了背光，Cage 0.2.0 也没有输出电源管理，黑屏期间背光仍亮；能否切断信号另行验证。
 - 屏保与黑屏的 CPU：VA-API 驱动已于 2026-10-29 装上；部署覆盖期间停止渲染下层页面的版本后，按[本地控制台手册](operate-local-kiosk.md#验收)第 12 项测量；屏保播放时 kiosk 会话远低于 0.3 个核，黑屏时接近 0（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 程序坞悬停预览（#154）：本机屏幕上预览大文件夹或相册窗口时没有明显卡顿。
@@ -69,6 +71,8 @@
 - 人物与宠物（#119、#134）：首次扫描已有照片，记录每张耗时与 Worker 内存，再用家庭照片验收命名、合并、移出与搜索。
 - 超大图片（#265）：上传超出解码预算的图片（如 16384 × 16384 的 16 位 PNG）被拒绝并说明原因，相册服务没有因内存上限重启（[调查](../investigations/2026-10-26-photo-decode-memory-budget.md)）。
 - 视频（#146）：用 iPhone（HEVC、竖拍、实况 MOV）、安卓与摄像机的真实文件验收导入、封面、播放与转码负载。Catalog 已到第 13 次迁移，回滚到更早的 release 前须先彻底删除视频资产。
+- 向量索引（#411）：按[启用向量索引第 5 步](enable-vector-index.md#步骤)核对相册排序从索引读的结果与精确扫描一致（[读路径](../architecture/vector-index.md#读路径)）。
+- 读文字（OCR 步骤 6）：按[实施方案](../architecture/photo-ocr.md)在实验 NAS 上验收，含 VNAS 用读出的文字回答（[助手的工具](../architecture/photo-ocr.md#助手的工具)）。
 
 ### 家庭中心
 
@@ -107,6 +111,7 @@
 ### 网页搜索
 
 - 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
+- 空闲时的外发流量：按[启用手册](enable-web-search.md)查明没有人搜索时 SearXNG 向外发了什么。
 
 ### AI 助手（试用）
 
@@ -114,7 +119,22 @@
 - VNAS 操作桌面（#156、#199）：删除、移动、改名、分享、复制、恢复、反馈与设置类的写入先问，新建、收藏与标签不问；终端、Docker 与应用中心每一步先问。
 - 记忆：复盘自建的 `anas-photos` 出现在该账号“记忆”的“VNAS 自己总结”中（[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。
 - 对话窗口：打开曾经崩溃的那段对话；仍显示“这个对话暂时无法显示”时，把浏览器控制台中 `VNAS conversation render failed` 之后的报错补进[调查](../investigations/2026-10-21-vnas-window-crash-and-stacked-cards.md)。
-- 产品服务部署时同次更新试用 bundle（[试用手册](try-ai-assistant-on-experimental-nas.md)）。
+- 助手随 `a-nas` 一起更新（[启用 AI 助手](enable-ai-assistant.md)）。
+- V1 转正（[决定](../decisions/2026-11-17-assistant-v1-cloud-model.md)）：按[启用手册的“验证”](enable-ai-assistant.md#验证)试用。
+
+### 虚拟伙伴
+
+- V1（[规格](../specs/virtual-companion.md)）：测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
+
+### 剪辑中心
+
+按[演示手册](demo-montage-center.md)打开并走一次之后（2026-11-20 已完整出片一次，[基线](../architecture/montage-center.md#首版闭环的基线)），再核对：
+
+- 生成途中刷新页面、关闭再打开窗口，进度从服务端恢复；途中 `systemctl restart anas-montage`，已完成的分析与规划不重做：相册描述的 AI Worker 调用次数与规划的轮数都不增加（[规格](../specs/montage-center.md#首版闭环实验-nas)第 2、3 步）。
+- 成员在 VNAS 历史里打开“剪辑规划 · <项目名>”，说一句要求（如“开场太快了”），复盘记下；下一次规划的对话用上了它（[规划会话](../architecture/montage-planning-session.md#学习)）。
+- 品杰一组：两个方案与第八版直连 Claude 的成片人工对比，记下差异（[规格](../specs/montage-center.md#剪辑行为迁移)）。
+- 渲染时在相册播放一段需要转码的视频，播放不卡；记下 FFmpeg 切片的内存峰值（2026-11-20 到了 3 GiB 上限）。
+- 配乐分析按[手册](enable-montage-music.md)第 5 步实测。
 
 ## 验证
 

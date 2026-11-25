@@ -1,6 +1,11 @@
 /* The settings window: its sections, their shared parts and the storage
    wizard. The sections come first, in the order they had in the window's
    stylesheet, so that the shared rules below still win their ties. */
+.networkValue {
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
 /* ── 日志 (logs.css) ── */
 /* Settings → 日志: an activity timeline and a service log console in the
    grouped-card style of the other settings sections. */
@@ -2632,16 +2637,21 @@
   background: var(--set-bg);
   container: settingsmain / inline-size;
 }
+/* The column never outgrows the page: in a narrow window a long title or row
+   shrinks and ellipsizes instead of widening what .set-main scrolls. */
 .set-page {
   max-width: 664px;
   margin: 0 auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
   animation: set-page-in 0.22s var(--set-ease);
 }
 /* The title stays at the top of the scrolling page. Its background and the
    line under it reach across the page's side padding; once the page has
-   scrolled, the title shrinks in place without moving the content. */
+   scrolled, the title shrinks in place without moving the content.
+   Both reach out as shadows cut to their own height: a box reaching past
+   .set-main's edges would widen what it scrolls, a shadow does not. */
 .set-header {
   position: sticky;
   top: 0;
@@ -2659,11 +2669,13 @@
 .set-header::after {
   content: "";
   position: absolute;
-  right: -100vmax;
+  right: 0;
   bottom: 0;
-  left: -100vmax;
+  left: 0;
   height: 1px;
   background: var(--set-line-strong);
+  box-shadow: 0 0 0 100vmax var(--set-line-strong);
+  clip-path: inset(0 -100vmax);
   opacity: 0;
   transition: opacity 0.2s;
 }
@@ -3020,11 +3032,16 @@ button.set-row-command.danger {
   height: 16px;
 }
 .set-field,
-.set-field > label {
+.set-field > label,
+.set-field > [role="group"] {
   display: grid;
   gap: 6px;
 }
-.set-field > label > span:first-child {
+.set-field > [role="group"] > .set-segmented {
+  justify-self: start;
+}
+.set-field > label > span:first-child,
+.set-field > [role="group"] > span:first-child {
   color: var(--set-text);
   font-size: 13px;
   font-weight: 600;
@@ -4483,7 +4500,8 @@ button.ov-fact:hover .ov-fact-head svg {
 .acct-state.status-disabled {
   color: var(--set-faint);
 }
-.acct-state.status-error {
+.acct-state.status-error,
+.acct-state.status-deleting {
   color: var(--set-danger);
 }
 .acct-avatar {
@@ -5087,4 +5105,30 @@ button.set-row-command:disabled {
 }
 button.set-row-command:disabled:hover {
   background: transparent;
+}
+
+/* 设置 → VNAS: what goes to DeepSeek, and the administrator's consent before saving the key. */
+.set-disclosure {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--set-warning-soft);
+  color: var(--set-text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.set-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.set-consent input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--set-accent);
 }

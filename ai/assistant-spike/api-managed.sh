@@ -3,7 +3,7 @@
 # assistant's own (writable) Hermes home? Simulates a bypassed write guard.
 set -uo pipefail
 # The member's user config is written by root and bound read-only into the sandbox.
-home=/etc/a-nas-assistant/members/alice
+home=/var/lib/a-nas-host/assistant/members/alice
 cp -p "$home/config.yaml" /tmp/user-config.yaml
 cat > "$home/config.yaml" <<'YAML'
 model:

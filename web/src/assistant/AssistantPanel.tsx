@@ -152,9 +152,12 @@ export function AssistantPanel({
 }: {
   username: string;
   onShowPhoto?(assetId: string): void;
-  /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
-  intent?: { sessionId?: string; title?: string };
-  onIntentHandled?(handled: { sessionId?: string; title?: string }): void;
+  /**
+   * What the desktop asks the window to show: a run of a scheduled task, or the tasks; or, for the companion,
+   * a conversation at the cards that wait for the member.
+   */
+  intent?: { sessionId?: string; title?: string; conversationId?: string };
+  onIntentHandled?(handled: { sessionId?: string; title?: string; conversationId?: string }): void;
 }) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
@@ -495,14 +498,22 @@ export function AssistantPanel({
     sentPlan.current = planned;
     sendPlan(planned.text);
   }, [planned]);
-  // A toast on the desktop opens a run, or the tasks.
+  // A toast on the desktop opens a run, or the tasks. The companion opens the conversation whose card waits
+  // for the member, from another conversation or from the memory or the tasks, at its cards (toCards).
   const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  const [toCards, setToCards] = useState<{ conversation: string }>();
   if (intentBefore !== intent) {
     setIntentBefore(intent);
-    if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
+    if (intent?.conversationId) {
+      setActiveId(intent.conversationId);
+      setView("chat");
+      setToCards({ conversation: intent.conversationId });
+    } else if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
     else if (intent) setView("tasks");
-  }
-  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string }) => onIntentHandled?.(handled));
+  } else if (toCards && (activeId !== toCards.conversation || view !== "chat")) setToCards(undefined);
+  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string; conversationId?: string }) =>
+    onIntentHandled?.(handled),
+  );
   useEffect(() => {
     if (!intent) return;
     if (intent.sessionId) readRun(intent.sessionId);
@@ -583,13 +594,22 @@ export function AssistantPanel({
     )
     .filter((approval) => approval.status === "awaiting" || approval.status === "deciding")
     .sort((a, b) => a.createdAt - b.createdAt);
+  // Opened at a conversation's cards: they come into view once they show, once for each opening, without taking
+  // the focus. Another conversation or page opened meanwhile drops it (above).
+  const cardsSection = useRef<HTMLElement>(null);
+  const shownCards = useRef<{ conversation: string }>(undefined);
+  useEffect(() => {
+    if (toCards === undefined || shownCards.current === toCards || here.length === 0) return;
+    shownCards.current = toCards;
+    cardsSection.current?.scrollIntoView({ block: "nearest" });
+  }, [toCards, here.length]);
   const unreachable = !gateway.ready && gateway.problem;
   const runOpen = Boolean(run && run.id === activeId && !active);
   const dock = (
     <>
       {controlAsk && <ControlCard ask={controlAsk} />}
       {here.length > 0 && (
-        <section className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
+        <section ref={cardsSection} className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
           {here.map((approval) =>
             approval.kind === "command" ? (
               <CommandCard
@@ -1503,15 +1523,25 @@ const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, st
   );
 };
 
-function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean): Promise<void> }) {
+export function ApprovalCard({
+  approval,
+  onDecide,
+}: {
+  approval: Approval;
+  onDecide(confirm: boolean): Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
   const choose = (confirm: boolean) => {
     setBusy(true);
     void onDecide(confirm).finally(() => setBusy(false));
   };
+  const [seen, setSeen] = useState(false);
   const { change, status } = approval;
   if (!change) return null;
   const operations = change.operations ?? [];
+  // A write whose new content the card cannot show whole needs the member to
+  // say so before confirming: the rest goes in unseen (#172).
+  const unseen = operations.some((operation) => operation.op === "write" && (operation.partial || operation.binary));
   return (
     <article className={styles.asChange}>
       <header>
@@ -1528,6 +1558,12 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
           <OperationRow key={index} operation={operation} />
         ))}
       </ul>
+      {unseen && status === "awaiting" && (
+        <label className={styles.asUnseen}>
+          <input type="checkbox" checked={seen} disabled={busy} onChange={(event) => setSeen(event.target.checked)} />
+          有文件没有完整显示，我知道确认后会写入全部内容
+        </label>
+      )}
       <footer>
         <button
           type="button"
@@ -1540,7 +1576,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
         <button
           type="button"
           className={styles.asConfirm}
-          disabled={busy || status !== "awaiting"}
+          disabled={busy || status !== "awaiting" || (unseen && !seen)}
           onClick={() => choose(true)}
         >
           {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
@@ -1748,8 +1784,25 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
           <FilePen />
           <span>{created ? "新建" : "修改"}</span>
           <code>{target}</code>
+          {operation.size !== undefined && (
+            <small>
+              {operation.beforeSize !== undefined ? `${formatBytes(operation.beforeSize)} → ` : ""}
+              {formatBytes(operation.size)}
+            </small>
+          )}
         </div>
-        <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
+        {operation.beforeBinary && <p className={styles.asOpNote}>原文件不是文本，这里无法显示</p>}
+        {operation.binary ? (
+          <p className={styles.asOpWarn}>新内容不是文本，这里无法显示</p>
+        ) : (
+          <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
+        )}
+        {operation.partial && operation.size !== undefined && (
+          <p className={styles.asOpWarn}>
+            新内容只显示了开头，还有 {formatBytes(operation.hiddenSize ?? operation.size - 64 * 1024)} 没有显示
+          </p>
+        )}
+        {operation.beforePartial && !operation.beforeBinary && <p className={styles.asOpNote}>原文件只显示了开头</p>}
       </li>
     );
   }

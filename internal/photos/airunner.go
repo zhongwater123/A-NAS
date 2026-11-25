@@ -30,8 +30,9 @@ type aiRunner struct {
 	mu sync.Mutex
 	// model, detector, faces, animals and reader are the Worker's models
 	// whose stale results have already been queued again; empty until a
-	// round asks.
-	model, detector, faces, animals, reader string
+	// round asks. windows is the identity of the window vectors that model
+	// makes.
+	model, detector, faces, animals, reader, windows string
 	// generation counts the times they were forgotten, so that a requeue
 	// running meanwhile does not record them again.
 	generation int
@@ -201,16 +202,37 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
+	// The montage center's analysis is work a member waits for: someone using
+	// the photo library does not hold it back, while short memory and the
+	// device's other work still do (MemberGate). The cards and their quality
+	// need no model of the AI Worker, so they come before its gate. Work the
+	// gate hung up ends the round, as a hung-up chunk of windows does below.
+	montage, forMembers := forMember(gate)
+	if worked, ended, err := r.montageCards(ctx, montage, detector); worked || ended || err != nil {
+		return worked, err
+	}
+	// While the library is in use, the montage center's windows and
+	// descriptions go on alone: the photos' own work waits.
+	montageOnly := false
 	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {
-		r.progress.set(AIPaused, reason, "")
-		r.releaseModels(ctx, detector, reason)
-		return false, nil
+		if reason == "foreground" && forMembers {
+			if open, why := montage.Open(ctx, r.memoryNeed()); !open {
+				reason = why
+			} else if montageOnly, err = r.lib.montageAnalysisDue(ctx); err != nil {
+				return false, err
+			}
+		}
+		if !montageOnly {
+			r.progress.set(AIPaused, reason, "")
+			r.releaseModels(ctx, detector, reason)
+			return false, nil
+		}
 	}
 	// Any call starts the Worker through its socket and keeps it from
 	// exiting when idle, so once its model is known ask only when there is
 	// work for it. A new model comes with a release, whose install restarts
 	// this service, or shows up in a search (noticeModel).
-	if model := r.knownModel(); model != "" && next == nil {
+	if model := r.knownModel(); model != "" && next == nil && !montageOnly {
 		waiting, err := r.workWaiting(ctx, model)
 		if err != nil || !waiting {
 			if state, _, _ := r.progress.get(); err == nil && state != AIUnavailable {
@@ -246,7 +268,11 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 		if err := r.lib.storeWorkerRecord(record); err != nil {
 			return false, err
 		}
-		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
+		weighed := gate
+		if montageOnly {
+			weighed = montage
+		}
+		if open, reason := weighed.Open(ctx, info.MemoryBytes); !open {
 			r.progress.set(AIPaused, reason, "")
 			if reason == "memory_for_models" || reason == "memory_low" || reason == "memory_pressure" {
 				// This round's call may have started the Worker, which would
@@ -272,6 +298,22 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	}
 	if err := r.requeueStale(ctx, info); err != nil {
 		return false, err
+	}
+	// The montage center's analysis comes first: a member waits for it. A
+	// chunk the gate hung up ends the round as a paused detection does.
+	if worked, ended, err := r.montageWindows(ctx, embedder, montage, info); worked || ended || err != nil {
+		return worked, err
+	}
+	// Then the descriptions, in the reading phase: one card a round.
+	if claimed, described, err := r.montageDescribe(ctx, embedder, montage, info); claimed || err != nil {
+		return described, err
+	}
+	if montageOnly {
+		// Nothing of the montage center's was left to do; the photos' own
+		// work waits for the library to be quiet.
+		r.progress.set(AIPaused, "foreground", "")
+		r.releaseModels(ctx, detector, "foreground")
+		return false, nil
 	}
 	// Query texts, the labels' and the text route's, are few and short; they
 	// come before photos. Then the vectors stored before the route's queries
@@ -427,7 +469,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		return false, nil
 	}
 	detectCtx, cancel := context.WithCancel(ctx)
-	stopWatching := watchGate(detectCtx, gate, info.MemoryBytes, cancel)
+	stopWatching := watchGate(detectCtx, gate.Open, info.MemoryBytes, cancel)
 	ahead := make(chan *detectionInput, 1)
 	go func() {
 		// A fault shows again at the next claim.
@@ -535,10 +577,10 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 	return carryOn(err)
 }
 
-// watchGate cancels a running detection when gate closes for work whose
-// models take need. stop ends the watch and returns why gate closed, or ""
-// when it stayed open.
-func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc) (stop func() string) {
+// watchGate cancels running work when check, a Gate's Open or a
+// RunningGate's Continue, says no for work whose models take need. stop
+// ends the watch and returns why it said no, or "" when it never did.
+func watchGate(ctx context.Context, check func(context.Context, uint64) (bool, string), need uint64, cancel context.CancelFunc) (stop func() string) {
 	done := make(chan struct{})
 	var reason string
 	var watcher sync.WaitGroup
@@ -552,7 +594,7 @@ func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.Cance
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if open, why := gate.Open(ctx, need); !open {
+				if open, why := check(ctx, need); !open {
 					reason = why
 					cancel()
 					return
@@ -679,6 +721,11 @@ SELECT object_id, derivation, 'pending', ?, ? FROM embeddings WHERE derivation =
 ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, info.Model); err != nil {
 			return err
 		}
+		// The montage center's window vectors: only those a grant still
+		// refers to (ADR 0038).
+		if err := lib.requeueStaleWindows(ctx, windowsIdentity(info.Model, info.Dimensions)); err != nil {
+			return err
+		}
 	}
 	if info.Detector != "" && detector != info.Detector {
 		if _, err := lib.db.ExecContext(ctx, `
@@ -716,6 +763,12 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
 		}
+		// The montage center's descriptions: only those a grant still refers
+		// to, the cards that failed under another release among them
+		// (staleFailure). A new reader also starts the failed jobs over.
+		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
+			return err
+		}
 		if record.Reader != info.OCR {
 			record.Reader = info.OCR
 			if err := lib.storeWorkerRecord(record); err != nil {
@@ -727,6 +780,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 	defer r.mu.Unlock()
 	if r.generation == generation {
 		r.model, r.detector, r.faces, r.animals, r.reader = info.Model, info.Detector, info.Faces, info.Animals, info.OCR
+		r.windows = windowsIdentity(info.Model, info.Dimensions)
 	}
 	return nil
 }
@@ -735,7 +789,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 func (r *aiRunner) forgetModels() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.model, r.detector, r.faces, r.animals, r.reader = "", "", "", "", ""
+	r.model, r.detector, r.faces, r.animals, r.reader, r.windows = "", "", "", "", "", ""
 	r.generation++
 }
 
@@ -745,6 +799,14 @@ func (r *aiRunner) knownModel() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.model
+}
+
+// knownWindows is the identity of the window vectors the Worker's model
+// makes, or "" while knownModel is.
+func (r *aiRunner) knownWindows() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.windows
 }
 
 // workerModels are the detector, face and animal models the runner last
@@ -761,7 +823,7 @@ func (r *aiRunner) noticeModel(model string) {
 	r.mu.Lock()
 	changed := r.model != "" && r.model != model
 	if changed {
-		r.model = ""
+		r.model, r.windows = "", ""
 		r.generation++
 	}
 	r.mu.Unlock()
@@ -791,13 +853,16 @@ func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) 
 	reading := r.reader != ""
 	r.mu.Unlock()
 	now := formatTime(lib.now())
+	if due, err := lib.montageWorkWaiting(ctx); due || err != nil {
+		return due, err
+	}
 	var due bool
 	err := lib.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM jobs WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
-    OR (? AND derivation = ?))
+SELECT EXISTS (SELECT 1 FROM jobs j WHERE (derivation = ? OR (? AND derivation = ?) OR (? AND derivation = ?) OR (? AND derivation = ?)
+    OR (? AND derivation = ?) OR (? AND derivation = ? AND `+describeReady+`))
   AND ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until <= ?)))`,
 		embeddingDerivation, detecting, detectionDerivation, facing, facesDerivation, petting, petsDerivation,
-		reading, textDerivation, now, now).Scan(&due)
+		reading, textDerivation, reading, describeDerivation, now, now).Scan(&due)
 	return due, err
 }
 

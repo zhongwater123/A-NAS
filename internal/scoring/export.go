@@ -57,13 +57,13 @@ var requiredColumns = []Column{
 	{"rater", "打分人", "打分人的用户名；账号已不在时是账号 ID"},
 }
 
-// ExportFields are the choices of columns, in their order in an export.
-// Each 打分项 is a field of its own between image_size and duration.
-var ExportFields = []string{
-	"nickname", "rater_id", "image_size",
-	Overall, "composition", "light_color", Sharpness, "narrative", "preference",
-	"duration", "submitted_at", "kind", "links", "viewport", "display", "pixel_ratio",
-}
+// The choices of columns, in their order in an export: who answered and the
+// photo, then each of the batch's 打分项, a field of its own in the order
+// raters score them, then the rest.
+var (
+	exportFieldsBefore = []string{"nickname", "rater_id", "image_size"}
+	exportFieldsAfter  = []string{"duration", "submitted_at", "kind", "links", "viewport", "display", "pixel_ratio"}
+)
 
 var fieldColumns = map[string][]Column{
 	"nickname":     {{"nickname", "昵称", "打分人的昵称"}},
@@ -95,8 +95,9 @@ type ExportSummary struct {
 	Scores, Skips, Superseded, Repeats int
 }
 
-// columns checks options against batch and returns the export's columns.
-func (options *ExportOptions) columns(batch Batch) ([]Column, error) {
+// columns checks options against batch, whose 打分项 catalogue describes,
+// and returns the export's columns.
+func (options *ExportOptions) columns(batch Batch, catalogue Catalogue) ([]Column, error) {
 	switch options.Format {
 	case "":
 		options.Format = "csv"
@@ -111,23 +112,33 @@ func (options *ExportOptions) columns(batch Batch) ([]Column, error) {
 	}
 	columns := slices.Clone(requiredColumns)
 	for _, field := range options.Fields {
-		if !slices.Contains(ExportFields, field) {
+		switch _, dimension := catalogue.find(field); {
+		case slices.Contains(exportFieldsBefore, field), slices.Contains(exportFieldsAfter, field), slices.Contains(batch.Dimensions, field):
+		case dimension:
+			return nil, invalid("this batch does not score %s", field)
+		default:
 			return nil, invalid("%q is not an export field", field)
 		}
-		if knownDimension(field) && !slices.Contains(batch.Dimensions, field) {
-			return nil, invalid("this batch does not score %s", DimensionName(field))
+	}
+	add := func(fields []string) {
+		for _, field := range fields {
+			if slices.Contains(options.Fields, field) {
+				columns = append(columns, fieldColumns[field]...)
+			}
 		}
 	}
-	for _, field := range ExportFields {
-		if !slices.Contains(options.Fields, field) {
+	add(exportFieldsBefore)
+	for _, dimension := range catalogue.Describe(batch.Dimensions) {
+		if !slices.Contains(options.Fields, dimension.ID) {
 			continue
 		}
-		if knownDimension(field) {
-			columns = append(columns, Column{field, DimensionName(field), "0 到 5，两位小数；跳过和标记没有分数"})
-			continue
+		description := batch.Scale.describe(dimension.ID) + "；跳过和标记没有分数"
+		if dimension.Description != "" {
+			description = dimension.Description + "。" + description
 		}
-		columns = append(columns, fieldColumns[field]...)
+		columns = append(columns, Column{dimension.ID, dimension.Name, description})
 	}
+	add(exportFieldsAfter)
 	return columns, nil
 }
 
@@ -164,21 +175,22 @@ type exportImage struct {
 }
 
 // exportRows reads every answer of the batch, oldest first, with its
-// scores and the time of the answers it replaced.
-func exportRows(ctx context.Context, db querier, batchID string) ([]exportRow, error) {
+// scores, the first of which is first, and the time of the answers it
+// replaced.
+func exportRows(ctx context.Context, db querier, batchID, first string) ([]exportRow, error) {
 	var rows []exportRow
 	index := map[int64]int{}
 	err := each(ctx, db, `SELECT id, item_id, rater, kind, score, coalesce(repeat_of, 0), coalesce(replaces, 0), superseded_at IS NOT NULL,
 		view_ms, viewport_width, viewport_height, display_width, display_height, pixel_ratio, created_at
 		FROM ratings WHERE batch_id = ? ORDER BY id`, []any{batchID}, func(result *sql.Rows) error {
 		row := exportRow{scores: map[string]int{}}
-		var overall sql.NullInt64
-		if err := result.Scan(&row.id, &row.item, &row.rater, &row.kind, &overall, &row.repeatOf, &row.replaces, &row.superseded,
+		var firstScore sql.NullInt64
+		if err := result.Scan(&row.id, &row.item, &row.rater, &row.kind, &firstScore, &row.repeatOf, &row.replaces, &row.superseded,
 			&row.viewMs, &row.viewportWidth, &row.viewportHeight, &row.displayWidth, &row.displayHeight, &row.pixelRatio, &row.created); err != nil {
 			return err
 		}
-		if overall.Valid {
-			row.scores[Overall] = int(overall.Int64)
+		if firstScore.Valid {
+			row.scores[first] = int(firstScore.Int64)
 		}
 		index[row.id] = len(rows)
 		rows = append(rows, row)
@@ -268,13 +280,19 @@ type exportBatch struct {
 	Required   int               `json:"required"`
 	Rubric     string            `json:"rubric"`
 	Dimensions []exportDimension `json:"dimensions"`
-	State      string            `json:"state"`
-	CreatedAt  string            `json:"createdAt"`
+	// Scale is how raters scored, and HideDecimals whether they saw only
+	// the place on the number line; the scores keep the scale's decimals
+	// either way.
+	Scale        Scale  `json:"scale"`
+	HideDecimals bool   `json:"hideDecimals"`
+	State        string `json:"state"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 type exportDimension struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type exportCount struct {
@@ -298,7 +316,11 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 	if err != nil {
 		return err
 	}
-	columns, err := options.columns(batch)
+	catalogue, err := s.Catalogue(ctx)
+	if err != nil {
+		return err
+	}
+	columns, err := options.columns(batch, catalogue)
 	if err != nil {
 		return err
 	}
@@ -309,7 +331,7 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := exportRows(ctx, tx, batchID)
+	rows, err := exportRows(ctx, tx, batchID, batch.Dimensions[0])
 	if err != nil {
 		return err
 	}
@@ -353,7 +375,7 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 		}
 		values := make([]any, len(columns))
 		for i, column := range columns {
-			values[i] = row.value(column.Key, images[row.item], people[row.rater])
+			values[i] = row.value(column.Key, images[row.item], people[row.rater], batch.Scale)
 		}
 		if err := table.row(values); err != nil {
 			return err
@@ -364,9 +386,9 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 		return err
 	}
 
-	dimensions := make([]exportDimension, len(batch.Dimensions))
-	for i, id := range batch.Dimensions {
-		dimensions[i] = exportDimension{ID: id, Name: DimensionName(id)}
+	dimensions := []exportDimension{}
+	for _, dimension := range catalogue.Describe(batch.Dimensions) {
+		dimensions = append(dimensions, exportDimension{ID: dimension.ID, Name: dimension.Name, Description: dimension.Description})
 	}
 	include := []string{}
 	for _, kind := range exportIncludes {
@@ -384,7 +406,8 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 	if err := encoder.Encode(exportManifest{
 		Format: ExportFormat, ExportedAt: now.Format(time.RFC3339), Module: module,
 		Batch: exportBatch{ID: batch.ID, Name: batch.Name, Source: batch.Source, Required: batch.Required, Rubric: batch.Rubric,
-			Dimensions: dimensions, State: batch.State, CreatedAt: batch.CreatedAt.UTC().Format(time.RFC3339)},
+			Dimensions: dimensions, Scale: batch.Scale, HideDecimals: batch.HideDecimals, State: batch.State,
+			CreatedAt: batch.CreatedAt.UTC().Format(time.RFC3339)},
 		Rows:    exportCount{Include: include, Count: count},
 		File:    exportFile{Name: name, SHA256: hex.EncodeToString(digest.Sum(nil))},
 		Columns: columns,
@@ -395,8 +418,8 @@ func (s *Store) Export(ctx context.Context, batchID string, options ExportOption
 }
 
 // value is what column key shows for the row: a number, a string, a bool, a
-// list of strings or nil for nothing.
-func (r exportRow) value(key string, image exportImage, person Person) any {
+// list of strings or nil for nothing. Scores have the decimals of scale.
+func (r exportRow) value(key string, image exportImage, person Person, scale Scale) any {
 	nullInt := func(value sql.NullInt64) any {
 		if value.Valid && value.Int64 > 0 {
 			return value.Int64
@@ -428,7 +451,7 @@ func (r exportRow) value(key string, image exportImage, person Person) any {
 	case "image_height":
 		return image.height
 	case "duration_s":
-		return twoPlaces(math.Round(float64(r.totalMs)/10) / 100)
+		return fixed{math.Round(float64(r.totalMs)/10) / 100, 2}
 	case "submitted_at":
 		if at, err := time.Parse(sqlitedb.TimeLayout, r.created); err == nil {
 			return at.Local().Format(time.RFC3339)
@@ -461,18 +484,21 @@ func (r exportRow) value(key string, image exportImage, person Person) any {
 		return nil
 	}
 	if score, ok := r.scores[key]; ok {
-		return twoPlaces(points(score))
+		return fixed{points(score), scale.Places()}
 	}
 	return nil
 }
 
-// twoPlaces is a score in points or a time in seconds, written with two
-// decimals in both formats.
-type twoPlaces float64
-
-func (v twoPlaces) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.FormatFloat(float64(v), 'f', 2, 64)), nil
+// fixed is a score in points or a time in seconds, written with as many
+// decimals as places in both formats.
+type fixed struct {
+	value  float64
+	places int
 }
+
+func (v fixed) String() string { return strconv.FormatFloat(v.value, 'f', v.places, 64) }
+
+func (v fixed) MarshalJSON() ([]byte, error) { return []byte(v.String()), nil }
 
 // tableWriter writes rows as CSV or as JSON Lines with the columns' keys.
 type tableWriter struct {
@@ -569,8 +595,8 @@ func csvCell(value any) string {
 		return strconv.Itoa(v)
 	case int64:
 		return strconv.FormatInt(v, 10)
-	case twoPlaces:
-		return strconv.FormatFloat(float64(v), 'f', 2, 64)
+	case fixed:
+		return v.String()
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	}

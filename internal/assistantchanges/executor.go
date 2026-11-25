@@ -22,6 +22,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
@@ -76,6 +77,9 @@ type Executor struct {
 	Root   string
 	Volume string
 	Now    func() time.Time
+	// Admits checks the data volume's reserve before a change writes to it;
+	// nil uses capacity.Admits.
+	Admits func(path string, incoming int64) (bool, error)
 
 	mu       sync.Mutex
 	accounts map[string]*ledger
@@ -209,6 +213,61 @@ func staged(steps []step) int64 {
 	return size
 }
 
+// adds is what the steps add to the data volume: the files they write and
+// the files and folders they copy. A file a step replaces goes to the
+// recycle bin, which frees nothing.
+func adds(steps []step) int64 {
+	var size int64
+	for _, s := range steps {
+		if s.Op == "write" || s.Op == "copy" {
+			size += s.SourceSize
+		}
+	}
+	return size
+}
+
+// snapshots bounds the file contents keep writes before confirmation. Root
+// normally lives on the data volume too, and these copies remain there while
+// the change is applied. Even an empty draft may save an old-file preview.
+func snapshots(steps []step) int64 {
+	size := staged(steps)
+	for _, s := range steps {
+		if s.Op == "write" {
+			// keep probes one extra byte to detect a growing draft.
+			size++
+			if s.Before.Exists {
+				size += min(s.Before.Size, previewLimit)
+			}
+		}
+	}
+	return size
+}
+
+// noRoom is why a change that would take the data volume below its reserve
+// is refused.
+const noRoom = "数据卷剩余空间不足：这些写入会让它低于保留容量，先腾出空间再提交"
+
+// room refuses steps whose writes would leave the data volume under the
+// reserve that the files, photos and family center keep too (#181), so
+// that the assistant cannot fill the volume everything shares.
+func (e *Executor) room(incoming int64) error {
+	if incoming == 0 {
+		return nil
+	}
+	admits := e.Admits
+	if admits == nil {
+		admits = capacity.Admits
+	}
+	admitted, err := admits(e.Volume, incoming)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return invalid{noRoom}
+	}
+	return nil
+}
+
 func (e *Executor) now() time.Time {
 	if e.Now != nil {
 		return e.Now()
@@ -240,6 +299,12 @@ func (e *Executor) Prepare(ctx context.Context, account string, member filesyste
 	}
 	if err == nil {
 		err = e.inspect(ctx, member, c.Steps)
+	}
+	if err == nil {
+		err = independentCopies(c.Steps)
+	}
+	if err == nil {
+		err = e.room(adds(c.Steps) + snapshots(c.Steps))
 	}
 	var dir string
 	if err == nil {
@@ -528,6 +593,36 @@ func (e *Executor) inspect(ctx context.Context, member filesystem.FileSystem, st
 	return nil
 }
 
+// independentCopies keeps a copy's measured source independent of the
+// operations that run before it, including old files entering the recycle
+// bin. Otherwise a write followed by a copy could copy more than was admitted.
+// Include the copy itself: copying a folder into itself would grow its source.
+func independentCopies(steps []step) error {
+	for i, s := range steps {
+		if s.Op != "copy" {
+			continue
+		}
+		for j, earlier := range steps[:i+1] {
+			var changed []string
+			switch earlier.Op {
+			case "write", "copy", "delete":
+				changed = append(changed, earlier.Rel)
+				if earlier.Before.Exists {
+					changed = append(changed, earlier.Trash)
+				}
+			case "move":
+				changed = append(changed, earlier.Rel, earlier.ToRel)
+			}
+			for _, rel := range changed {
+				if s.SourceRel == rel || strings.HasPrefix(s.SourceRel, rel+"/") || strings.HasPrefix(rel, s.SourceRel+"/") {
+					return invalid{fmt.Sprintf("第 %d 项：复制来源 %s 与第 %d 项更改的路径重叠，请拆成两批提交", i+1, s.Source, j+1)}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // plan checks one step against what its paths are now and records them.
 func (e *Executor) plan(ctx context.Context, member filesystem.FileSystem, s *step) string {
 	var err error
@@ -589,7 +684,7 @@ func (e *Executor) keep(ctx context.Context, member filesystem.FileSystem, steps
 				problems = append(problems, fmt.Sprintf("第 %d 项：%s", i+1, describe(err, s.Path)))
 				continue
 			}
-			if _, _, err := copyInto(name+".before", target, previewLimit); err != nil {
+			if _, _, err := copyInto(name+".before", target, min(s.Before.Size, previewLimit)); err != nil {
 				return err
 			}
 		}
@@ -656,7 +751,10 @@ func (e *Executor) fingerprint(ctx context.Context, member filesystem.FileSystem
 // it stopped, if it did.
 func (e *Executor) apply(ctx context.Context, account string, member filesystem.FileSystem, c change) (int, string) {
 	dir := filepath.Join(e.Root, account, c.ID)
-	for _, s := range c.Steps {
+	if err := independentCopies(c.Steps); err != nil {
+		return 0, Reasons(err)
+	}
+	for i, s := range c.Steps {
 		now, err := e.fingerprint(ctx, member, s.Rel)
 		if err != nil {
 			return 0, describe(err, s.Path)
@@ -668,7 +766,18 @@ func (e *Executor) apply(ctx context.Context, account string, member filesystem.
 			if now, err = e.fingerprint(ctx, member, s.SourceRel); err != nil || now != *s.SourceBefore {
 				return 0, s.Source + " 在用户确认前后被改动过，请重新提交"
 			}
+			// Editing an existing descendant does not change a folder's own
+			// fingerprint. Admission uses the source's current whole size.
+			if c.Steps[i].SourceSize, err = member.Usage(ctx, e.abs(s.SourceRel)); err != nil {
+				return 0, describe(err, s.Source)
+			}
 		}
+	}
+	// The space may have gone since the card; nothing is changed then.
+	if err := e.room(adds(c.Steps)); errors.Is(err, ErrInvalid) {
+		return 0, noRoom
+	} else if err != nil {
+		return 0, describe(err, "数据卷")
 	}
 	for n, s := range c.Steps {
 		var err error
@@ -689,6 +798,9 @@ func (e *Executor) apply(ctx context.Context, account string, member filesystem.
 			err = e.copy(ctx, member, s)
 		}
 		if err != nil {
+			if errors.Is(err, ErrInvalid) {
+				return n, Reasons(err)
+			}
 			return n, describe(err, s.Path)
 		}
 	}
@@ -735,6 +847,15 @@ func (e *Executor) write(ctx context.Context, member filesystem.FileSystem, s st
 // copy copies the source next to the target under a name of its own, moves a
 // file the target replaces into the recycle bin, and puts the copy in place.
 func (e *Executor) copy(ctx context.Context, member filesystem.FileSystem, s step) error {
+	// A previous step may take time, during which another writer can grow
+	// this tree or use the free space. Recheck immediately before copying.
+	size, err := member.Usage(ctx, e.abs(s.SourceRel))
+	if err != nil {
+		return err
+	}
+	if err := e.room(size); err != nil {
+		return err
+	}
 	parent := path.Dir(s.Rel)
 	if err := member.MkdirAll(ctx, e.abs(parent)); err != nil {
 		return err
@@ -794,23 +915,30 @@ func describe(err error, target string) string {
 	}
 }
 
-func preview(data []byte) *string {
+func preview(data []byte, size int64) *string {
 	if !utf8.Valid(data) {
-		// A cut through the last character still counts as text.
-		trimmed := data
-		for i := 0; i < 3 && len(trimmed) > 0 && !utf8.Valid(trimmed); i++ {
-			trimmed = trimmed[:len(trimmed)-1]
-		}
-		if !utf8.Valid(trimmed) {
+		// Only a truncated preview may end in an incomplete rune. At EOF
+		// these bytes are the actual content and must not be hidden.
+		if int64(len(data)) >= size {
 			return nil
 		}
-		data = trimmed
+		for n := 1; n < utf8.UTFMax && n <= len(data); n++ {
+			prefix, tail := data[:len(data)-n], data[len(data)-n:]
+			if !utf8.FullRune(tail) && utf8.Valid(prefix) {
+				return new(string(prefix))
+			}
+		}
+		return nil
 	}
 	text := string(data)
 	return &text
 }
 
-// preview is the card: each operation, with the old and new text of every write.
+// preview is the card: each operation, with the old and new text of every
+// write. A card shows the start of each file only, so a write also says how
+// large the file was and will be, and whether the new content is shown only
+// in part or is not text at all (#172): the member then knows the card does
+// not show everything the write puts there.
 func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 	type operation struct {
 		Op     string  `json:"op"`
@@ -822,6 +950,17 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		Exists bool    `json:"exists"`
 		Before *string `json:"before,omitempty"`
 		After  *string `json:"after,omitempty"`
+		// BeforeSize is the size of the file a write replaces.
+		BeforeSize *int64 `json:"beforeSize,omitempty"`
+		// Partial: After is only the start of the new content.
+		// Binary: the new content is not text, so there is no After.
+		// BeforePartial: Before is only the start of the old file.
+		Partial          bool  `json:"partial,omitempty"`
+		Binary           bool  `json:"binary,omitempty"`
+		BeforePartial    bool  `json:"beforePartial,omitempty"`
+		BeforeBinary     bool  `json:"beforeBinary,omitempty"`
+		HiddenSize       int64 `json:"hiddenSize,omitempty"`
+		BeforeHiddenSize int64 `json:"beforeHiddenSize,omitempty"`
 	}
 	dir := filepath.Join(e.Root, account, c.ID)
 	ops := make([]operation, 0, len(c.Steps))
@@ -832,11 +971,33 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == filesystem.KindDirectory
 		}
 		if s.Op == "write" {
+			size := s.SourceSize
+			op.Size = &size
+			if s.Before.Exists {
+				before := s.Before.Size
+				op.BeforeSize = &before
+			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)+".before"), previewLimit); err == nil {
-				op.Before = preview(data)
+				op.Before = preview(data, s.Before.Size)
 			}
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)), previewLimit); err == nil {
-				op.After = preview(data)
+				op.After = preview(data, size)
+			}
+			// A copy cut to its start once the change ended reads short as
+			// well: what decides is the size of the file the write leaves.
+			op.Binary = op.After == nil && size > 0
+			op.HiddenSize = size
+			if op.After != nil {
+				op.HiddenSize = max(0, size-int64(len(*op.After)))
+			}
+			op.Partial = !op.Binary && op.HiddenSize > 0
+			if s.Before.Exists {
+				op.BeforeBinary = op.Before == nil && s.Before.Size > 0
+				op.BeforeHiddenSize = s.Before.Size
+				if op.Before != nil {
+					op.BeforeHiddenSize = max(0, s.Before.Size-int64(len(*op.Before)))
+				}
+				op.BeforePartial = !op.BeforeBinary && op.BeforeHiddenSize > 0
 			}
 		}
 		ops = append(ops, op)

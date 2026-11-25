@@ -340,6 +340,32 @@ func (c *Client) Delete(ctx context.Context, collection string, keys []string) e
 	return err
 }
 
+// DeleteMatching removes the points whose keyword field holds any of
+// values, for an owner with many points per thing: the montage center's
+// window vectors are many per video, and when a video goes its windows are
+// no longer there to name each point.
+func (c *Client) DeleteMatching(ctx context.Context, collection, field string, values []string) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if len(values) == 0 {
+		return nil
+	}
+	if field == "" || field == keyField {
+		return ErrInvalid
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return err
+	}
+	wait := true
+	_, err = client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collection,
+		Wait:           &wait,
+		Points:         qdrant.NewPointsSelectorFilter(&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(field, values...)}}),
+	})
+	return err
+}
+
 // Scope limits a search to the points whose keyword Field holds any of
 // Values.
 type Scope struct {

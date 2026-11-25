@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/systemupdate"
@@ -35,12 +36,12 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestCheck, By: "owner"}); !errors.Is(err, systemupdate.ErrBusy) {
 		t.Fatalf("a request before the unit started = %v, want ErrBusy", err)
 	}
-	request, err := store.TakeRequest()
-	if err != nil || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
-		t.Fatalf("the request left for the service = %+v, %v", request, err)
+	request, ok, err := store.TakeRequest(time.Now().Add(-time.Minute))
+	if err != nil || !ok || request != (systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}) {
+		t.Fatalf("the request left for the service = %+v, %v, %v", request, ok, err)
 	}
-	if !slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
-		t.Fatalf("the service was not started: %v", runner.commands)
+	if !slices.Contains(runner.commands, "systemctl start anas-update.path") {
+		t.Fatalf("the request watcher was not started: %v", runner.commands)
 	}
 	info, err := os.Stat(store.Dir)
 	if err != nil || info.Mode().Perm() != 0o700 {
@@ -70,6 +71,55 @@ func TestTheSystemUpdateIsARequestFileAndAUnitStart(t *testing.T) {
 	}
 	if _, err := executor.SetSystemUpdateSettings(ctx, systemupdate.Settings{WindowStart: "02:00", WindowEnd: "02:00"}); err == nil {
 		t.Fatal("an empty install window was saved")
+	}
+}
+
+func TestTheFirstReadAfterARestartIntoANewBaseStartsTheService(t *testing.T) {
+	root := t.TempDir()
+	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
+	runner := &systemdRunner{activeState: "inactive"}
+	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	bootID := filepath.Join(root, "proc", "sys", "kernel", "random", "boot_id")
+	if err := os.MkdirAll(filepath.Dir(bootID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bootID, []byte("boot-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(systemupdate.State{Phase: systemupdate.PhaseRestartPending, Target: "2", Current: "1",
+		Image: &systemupdate.Image{BootID: "boot-1", TargetBase: "1002"}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// Before the restart: it waits for the administrator.
+	if status, err := executor.SystemUpdate(ctx); err != nil || status.Running ||
+		slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
+		t.Fatalf("before the restart = %+v, %v; commands %v", status, err, runner.commands)
+	}
+	if err := os.WriteFile(bootID, []byte("boot-2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := executor.SystemUpdate(ctx)
+	if err != nil || !status.Running || !slices.Contains(runner.commands, "systemctl start --no-block anas-update.service") {
+		t.Fatalf("after the restart = %+v, %v; commands %v", status, err, runner.commands)
+	}
+}
+
+func TestARequestIsNotLeftIfTheWatcherDoesNotStart(t *testing.T) {
+	root := t.TempDir()
+	store := updater.Store{Dir: filepath.Join(root, "var", "lib", "a-nas-update")}
+	runner := &systemdRunner{activeState: "inactive", runErr: errors.New("Failed to start anas-update.path")}
+	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	ctx := context.Background()
+	if _, err := executor.RequestSystemUpdate(ctx, systemupdate.Request{Kind: systemupdate.RequestInstall, By: "owner"}); err == nil {
+		t.Fatal("RequestSystemUpdate() succeeded although the unit did not start")
+	}
+	// The administrator was told it failed: no later run carries it out.
+	if _, ok, err := store.TakeRequest(time.Time{}); ok || err != nil {
+		t.Fatalf("the failed request was left for a later run: %v, %v", ok, err)
+	}
+	if status, err := executor.SystemUpdate(ctx); err != nil || status.Running {
+		t.Fatalf("SystemUpdate() = %+v, %v; want idle", status, err)
 	}
 }
 

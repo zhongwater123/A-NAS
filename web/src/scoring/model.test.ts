@@ -7,12 +7,18 @@ import {
   formatCorrelation,
   formatScore,
   formatSeconds,
+  keysFor,
   lanes,
+  nudgeScore,
   orientationMatrix,
   parseScore,
+  pickScore,
   Stopwatch,
   share,
+  snapScore,
   stageAction,
+  typeable,
+  typingRuleFor,
   uprightSize,
 } from "./model";
 
@@ -44,6 +50,13 @@ describe("stageAction", () => {
     expect(key("Z", { shiftKey: true })).toEqual({ kind: "zoom" });
   });
 
+  it("turns photos with [ and ] and fills the screen with F", () => {
+    expect(key("[")).toEqual({ kind: "previous" });
+    expect(key("]")).toEqual({ kind: "next" });
+    expect(key("f")).toEqual({ kind: "fullscreen" });
+    expect(key("F", { shiftKey: true })).toEqual({ kind: "fullscreen" });
+  });
+
   it("leaves the browser's shortcuts and other keys alone", () => {
     expect(key("5", { ctrlKey: true })).toBeUndefined();
     expect(key("s", { metaKey: true })).toBeUndefined();
@@ -61,6 +74,85 @@ describe("scores", () => {
     expect(parseScore("-1")).toBeUndefined();
     expect(formatScore(347)).toBe("3.47");
     expect(formatScore(0)).toBe("0.00");
+  });
+
+  it("keeps each scale's scores: a tenth, a whole point or a level", () => {
+    expect(snapScore(347, "tenths")).toBe(350);
+    expect(snapScore(349, "whole")).toBe(300);
+    expect(snapScore(351, "whole")).toBe(400);
+    expect([0, 199, 200, 399, 400, 500].map((score) => snapScore(score, "three"))).toEqual([
+      100, 100, 300, 300, 500, 500,
+    ]);
+    expect(formatScore(350, "tenths")).toBe("3.5");
+    expect(formatScore(300, "whole")).toBe("3");
+    expect(formatScore(300, "three")).toBe("中");
+    expect(parseScore("3.5", "tenths")).toBe(350);
+    expect(parseScore("3.47", "tenths")).toBeUndefined();
+    expect(parseScore("3", "whole")).toBe(300);
+    expect(parseScore("3.5", "whole")).toBeUndefined();
+    expect(pickScore(200, "three")).toBeUndefined();
+    expect(pickScore(500, "three")).toBe(500);
+    expect(pickScore(200, "whole")).toBe(200);
+  });
+
+  it("scores five levels in whole points from 1, each with its word", () => {
+    // A reference score below 1 is shown as the lowest level.
+    expect([0, 149, 150, 347, 500].map((score) => snapScore(score, "five"))).toEqual([100, 100, 200, 300, 500]);
+    expect([100, 200, 300, 400, 500].map((score) => formatScore(score, "five"))).toEqual([
+      "很差",
+      "较差",
+      "一般",
+      "好",
+      "很好",
+    ]);
+    expect(pickScore(0, "five")).toBeUndefined();
+    expect(pickScore(400, "five")).toBe(400);
+    expect(typeable("five", false)).toBe(false);
+    expect(nudgeScore(undefined, -10, "five")).toBe(300);
+    expect(nudgeScore(300, 10, "five")).toBe(400);
+    expect(nudgeScore(500, 10, "five")).toBe(500);
+    expect(nudgeScore(100, -1, "five")).toBe(100);
+  });
+
+  it("names the levels of 情绪 from calm to intense, and every other 打分项 from poor to good", () => {
+    expect([100, 200, 300, 400, 500].map((score) => formatScore(score, "five", "emotion"))).toEqual([
+      "很平静",
+      "安静",
+      "中间",
+      "有张力",
+      "激烈",
+    ]);
+    expect(formatScore(300, "five", "custom_1")).toBe("一般");
+    // Three levels of 情绪 do not judge either.
+    expect([100, 300, 500].map((score) => formatScore(score, "three", "emotion"))).toEqual(["平静", "中间", "激烈"]);
+    expect(formatScore(300, "three", "overall")).toBe("中");
+    // The keys under the reading name the same levels.
+    expect(keysFor("three", "emotion")).toBe("1 平静　3 中间　5 激烈");
+    expect(keysFor("three", "overall")).toBe("1 差　3 中　5 好");
+    expect(keysFor("five", "emotion")).toBe("1–5 选档　← → 换一档");
+  });
+
+  it("starts 情绪 at 1 on a number line, typed, picked or placed", () => {
+    expect(parseScore("0.99", "hundredths", "emotion")).toBeUndefined();
+    expect(parseScore("1", "whole", "emotion")).toBe(100);
+    expect(parseScore("0", "whole", "overall")).toBe(0);
+    expect(pickScore(0, "tenths", "emotion")).toBeUndefined();
+    expect(pickScore(0, "tenths", "overall")).toBe(0);
+    expect(snapScore(20, "hundredths", "emotion")).toBe(100);
+    expect(snapScore(20, "hundredths", "overall")).toBe(20);
+    expect(typingRuleFor("tenths", "emotion")).toBe("1 到 5 之间，最多一位小数");
+    expect(typingRuleFor("five", "emotion")).toBe("1 到 5 之间的整数");
+  });
+
+  it("moves a score by one step of its scale with the arrows, from the middle when there is none", () => {
+    expect(nudgeScore(undefined, 10, "hundredths")).toBe(250);
+    expect(nudgeScore(347, -1, "hundredths")).toBe(346);
+    expect(nudgeScore(350, 1, "tenths")).toBe(360);
+    expect(nudgeScore(undefined, -10, "whole")).toBe(200);
+    expect(nudgeScore(500, 10, "whole")).toBe(500);
+    expect(nudgeScore(undefined, 10, "three")).toBe(300);
+    expect(nudgeScore(300, -10, "three")).toBe(100);
+    expect(nudgeScore(100, -10, "three")).toBe(100);
   });
 
   it("stacks thumbnails that would overlap and keeps apart ones that do not", () => {
@@ -115,6 +207,17 @@ describe("the time on a photo", () => {
     expect(watch.elapsed(10_000)).toBe(4_000);
     watch.start(20_000, false);
     expect(watch.elapsed(30_000)).toBe(0);
+  });
+
+  it("goes on from the time a photo had when the rater comes back to it", () => {
+    const watch = new Stopwatch();
+    watch.start(1_000, true);
+    const had = watch.elapsed(21_000);
+    // The last photo is changed meanwhile, on a time of its own.
+    watch.start(21_000, true);
+    expect(watch.elapsed(25_000)).toBe(4_000);
+    watch.start(25_000, true, had);
+    expect(watch.elapsed(25_800)).toBe(20_800);
   });
 });
 

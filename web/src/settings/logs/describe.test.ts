@@ -58,6 +58,23 @@ describe("activity sentences", () => {
     expect(describeActivity(unknown, owner.id).meta[0]).toBe("账号不存在");
   });
 
+  it("names a deleted account from the detail, which outlives it", () => {
+    expect(sentence(event({ category: "account", action: "user.enabled", actor: owner, subject: alice }))).toBe(
+      "你 重新启用了 alice 的账号",
+    );
+    const scheduled = event({
+      category: "account",
+      action: "user.deletion_scheduled",
+      actor: owner,
+      detail: '{"username":"carol","personalSpace":"transfer","library":"delete","dueAt":"2026-12-16T10:00:00Z"}',
+    });
+    expect(sentence(scheduled)).toBe("你 删除了账号 carol");
+    expect(describeActivity(scheduled, owner.id).meta.slice(0, 2)).toEqual(["个人空间转给管理员", "私有图库一并删除"]);
+    expect(
+      sentence(event({ category: "account", action: "user.deleted", actor: owner, detail: '{"username":"carol"}' })),
+    ).toBe("账号 carol 已彻底删除");
+  });
+
   it("describes account changes and administrative viewing", () => {
     expect(
       sentence(event({ category: "account", action: "user.credential_reset", actor: owner, subject: alice })),
@@ -235,6 +252,21 @@ describe("activity sentences", () => {
         event({ category: "system", action: "system.update.install", actor: alice, detail: `{"version":"${next}"}` }),
       ),
     ).toBe("alice 开始安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
+    expect(
+      sentence(
+        event({
+          category: "system",
+          action: "system.update.install",
+          system: true,
+          detail: JSON.stringify({ version: next, by: "automatic" }),
+        }),
+      ),
+    ).toBe("系统 请求安装 A-NAS 1.0.1-rc.6 开发版 4e842653");
+    expect(
+      sentence(
+        event({ category: "system", action: "system.update.restart", actor: alice, detail: `{"version":"${next}"}` }),
+      ),
+    ).toBe("alice 重启了设备以使用 A-NAS 1.0.1-rc.6 开发版 4e842653");
     const back = describeActivity(
       event({
         category: "system",
