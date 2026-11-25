@@ -143,8 +143,8 @@ schemas:
       step: { type: string, description: The step the job is at or stopped at. }
       waitReason:
         type: string
-        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, plan_error, storage_full, photos_unavailable, video_too_long, model_unavailable]
-        description: "Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for."
+        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, plan_error, storage_full, photos_unavailable, video_too_long, model_unavailable, plan_failed]
+        description: "Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for."
       error: { type: string }
       steps: { type: array, items: { $ref: "#/schemas/MontageJobStep" } }
       missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.", items: { type: string } }
@@ -157,12 +157,12 @@ schemas:
     additionalProperties: false
     required: [kind, jobId, projectId, project, at]
     properties:
-      kind: { type: string, enum: [waiting_for_planning, planning, needs_input, saved] }
+      kind: { type: string, enum: [waiting_for_planning, planning, needs_input, saved, failed] }
       jobId: { type: string }
       projectId: { type: string }
       project: { type: string, description: The project's name. }
-      reason: { type: string }
-      detail: { type: string, description: "Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet." }
+      reason: { type: string, description: "The job's waitReason; for failed, plan_failed is one the member plans again (replan)." }
+      detail: { type: string, description: "Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. For failed, the job's error." }
       filmAssetId: { type: string, description: "The film saved, for saved." }
       at: { type: string, format: date-time }
   MontageNotices:

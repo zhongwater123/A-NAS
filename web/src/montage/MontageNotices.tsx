@@ -1,15 +1,18 @@
 // 剪辑中心 tells a member on the desktop how their films go
 // (docs/specs/montage-center.md, 桌面提示): a job waiting for VNAS to plan it
-// and why, a round of VNAS planning it, a job needing them, or a film just
-// saved into the photo library. The desktop only shows these; planning runs
-// on the device whether it is open or not. Each notice shows once on this
-// device until the job moves on, or the reason it waits changes.
+// and why, a round of VNAS planning it, a job needing them, a film just
+// saved into the photo library, or a job that failed and why; one whose
+// planning failed is planned again from the notice. The desktop only shows
+// these; planning runs on the device whether it is open or not. Each notice
+// shows once on this device until the job moves on, or the reason it waits
+// changes.
 import { Clapperboard } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { DeskNotice } from "../ui/DeskNotice";
-import { listNotices, type MontageNotice } from "./api";
+import { listNotices, type MontageNotice, replan } from "./api";
 import styles from "./notices.module.css";
+import { forMember } from "./words";
 
 const POLL_MS = 60_000;
 const SEEN = "montage-notices-seen";
@@ -72,6 +75,19 @@ export function MontageNotices({ onOpen }: { onOpen: () => void }) {
     remember(notices.map(key));
     setNotices([]);
   };
+  // One job whose planning failed: the notice plans it again, as the project page's 重新规划 does; when that
+  // cannot be done, the montage center opens on where the job stands.
+  const failed = notices.filter((notice) => notice.kind === "failed" && notice.reason === "plan_failed");
+  const action =
+    failed.length === 1
+      ? {
+          label: "重新规划",
+          onClick: () => {
+            dismiss();
+            void replan(failed[0].jobId).catch(() => onOpen());
+          },
+        }
+      : undefined;
 
   return (
     <DeskNotice
@@ -80,6 +96,7 @@ export function MontageNotices({ onOpen }: { onOpen: () => void }) {
       source="剪辑中心"
       icon={<Clapperboard />}
       lines={summarize(notices)}
+      action={action}
       onOpen={onOpen}
       onDismiss={dismiss}
     />
@@ -100,6 +117,10 @@ export function summarize(notices: MontageNotice[]): string[] {
         return `${project}需要你处理一下`;
       case "saved":
         return `${project}的成片已存进相册`;
+      case "failed": {
+        const said = forMember(notice.detail);
+        return `${project}没有剪成${said ? `：${said}` : ""}`;
+      }
       default:
         return project;
     }

@@ -234,7 +234,7 @@
 /api/v1/montage/jobs/{jobId}/replan:
   post:
     operationId: replanMontageJob
-    summary: "Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing"
+    summary: "Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project's latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing"
     parameters: [{ $ref: "../components/montage.yaml#/parameters/MontageJobID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "200": { description: The job, content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageJob" } } } }
@@ -244,7 +244,7 @@
 /api/v1/montage/notices:
   get:
     operationId: listMontageNotices
-    summary: "The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day"
+    summary: "The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day"
     responses:
       "200": { description: "The notices, newest first", content: { application/json: { schema: { $ref: "../components/montage.yaml#/schemas/MontageNotices" } } } }
 /api/v1/montage/hero:

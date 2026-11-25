@@ -951,12 +951,9 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	case errors.Is(err, ErrPlanInvalid):
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: err}
 	case errors.Is(err, ErrPlanFailed):
-		// The page shows what the planner reported, after "规划出错".
-		said := ""
-		if failure, ok := errors.AsType[*planFailed](err); ok {
-			said = failure.said
-		}
-		return nil, &stepNeeds{reason: NeedPlanError, err: err, said: cmp.Or(said, err.Error())}
+		// Planned as many rounds as a job is, none finished: the job fails
+		// and says why, and the member plans it again with one click (Replan).
+		return nil, &stepFailed{err: err, reason: FailPlanning}
 	case err != nil:
 		return nil, err
 	}

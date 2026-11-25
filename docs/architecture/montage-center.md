@@ -1,7 +1,7 @@
 # 剪辑中心首版实施方案
 
-状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施票是 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue，见“交付”）
-更新时间：2026-11-24
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来）
+更新时间：2026-11-25
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
@@ -510,7 +510,7 @@ montage/
   - 方案二的输入键：第一步是 `planKey(方案一第一步的键, 2)`，第二步仍是 `shotsKey(本方案第一步的键, 本方案的大纲)`。任务的步骤与工具用同一对函数，所以答案存进 `plan_answers` 的键就是步骤要找的键。
   - brief：第一步的 brief 两个方案相同，存在方案一的键下，只做一次；第二步的按各自的键存。方案二的 `montage_brief` 在返回前另拼上 `plan` 与 `earlierOutlines`（方案一收下的大纲），让它换一种讲法；这两项不存进 `plan_briefs`。
   - 一轮的身份只记方案一第一步的键（`rounds.input_key`），领取时也按它连接 `steps`。
-  - 这一轮在方案二交齐之前结束：方案一照常往下做、存进相册，方案二进入 `needs_input(vnas_unknown)`，由成员决定是否重新规划，不自动再开一轮（#514：模型可能已经调用过）。
+  - 这一轮在方案二交齐之前结束：方案一照常往下做、存进相册，1 分钟后自动再要一轮，只规划方案二（2026-11-25 用户[决定](../decisions/2026-11-25-montage-planning-retries.md)；原来按 #514 停下等成员）。
 - **答案的上限**写在 brief 的 Schema 里，模型交之前就知道：每个方案的场景数等于段落数（`prefixItems`，`items: false`）；文字答案每项最多 120 字，全部文字最多 1,500 字，枚举不计（[#607](https://github.com/zhongwater123/A-NAS/pull/607)）。
 
 **规则、数据与 Schema 分开**
@@ -579,7 +579,7 @@ montage/
 不引入 River，它的 SQLite 驱动官方仍标为实验性；也不引入 Temporal 一类外部服务。
 
 **状态**：`queued` → `running`，之后进入下面之一：
-- `done`、`failed`、`cancelled`；
+- `done`、`failed`、`cancelled`；规划试了 3 轮都没有完成的任务 `failed`，原因 `plan_failed`，成员点“重新规划”接着规划（见“规划”与[规划会话的重试](montage-planning-session.md#4-重试)）；
 - `waiting`，原因 `analysis`（相册分析未完成，或本地模型不可用）、`asset_trashed`、`vnas`；
 - `needs_input`，原因：
 
@@ -589,8 +589,8 @@ montage/
 | `analysis_failed` | 相册对某段素材的分析失败（不是 I/O 类），等用户点“重试分析”或去掉这段素材 |
 | `no_usable_footage` | 没有可用画面 |
 | `music_invalid` | 歌曲不合格 |
-| `vnas_unknown` | 规划没有交回 |
-| `plan_invalid` | 规划连续 3 次不合格 |
+| `vnas_unknown` | 规划没有交回（只有 2026-11-25 之前停下的任务；之后系统自动重来） |
+| `plan_invalid` | 规划连续 3 次不合格（同上） |
 | `storage_full` | 渲染或存回相册时空间不足 |
 
 **执行**
@@ -628,7 +628,7 @@ montage/
 | 等待 | 相册分析未完成或被准入推迟；FFmpeg 在排队 | 不计次数。相册分析未完成时为 `waiting(analysis)`；FFmpeg 排队时步骤显示“排队中” |
 | 可重试故障 | Worker 退出、超时、OOM、I/O 错误 | 最多 3 次（首次加两次重试，间隔 1、2 分钟），用完后 `failed` |
 | 需要修改输入 | 素材缺失、分析失败、没有可用画面、歌曲不合格、空间不足 | `needs_input`，等用户处理 |
-| VNAS 结果未知 | 这一轮结束了没有交回规划 | `needs_input(vnas_unknown)`，见“规划” |
+| 规划没有完成 | 这一轮结束了没有交回规划，或答案连续 3 次不合格 | 1 分钟后自动重来，同样的输入最多 3 轮，用完后 `failed(plan_failed)`，见“规划” |
 
 **取消**
 - 置 `cancel_requested`；排队中的任务立即变成 `cancelled`。
@@ -680,8 +680,8 @@ montage/
 | POST | `/jobs/{id}/drop-assets` | `{assetIds}`：从这个任务去掉缺失或分析失败的素材后继续。同时改 `job_assets` 与 `project_assets`，并经 `remove` 从授权里去掉；去掉后素材为空时回答 409，只能取消 |
 | POST | `/jobs/{id}/retry-analysis` | 相册分析失败后重试 |
 | POST | `/jobs/{id}/retry` | 空间不足时腾出空间后，从停下的步骤重试 |
-| POST | `/jobs/{id}/replan` | 规划没有交回或不合格时重新规划 |
-| GET | `/notices` | 桌面提示：等待规划与正在规划的任务、需要处理的任务、刚存进相册的成片 |
+| POST | `/jobs/{id}/replan` | 规划没有完成而失败（`plan_failed`）、或 VNAS 还没接手时重新规划；失败的任务只在是项目最新的、项目没有别的任务在跑时接着 |
+| GET | `/notices` | 桌面提示：等待规划与正在规划的任务、需要处理的任务、刚存进相册的成片、刚失败的任务 |
 | PUT | `/projects/{id}/song` | `{trackId}`：从音乐库复制这首歌并开始分析（见“配乐”） |
 | GET | `/projects/{id}/song`、`/projects/{id}/song/audio` | 分析进度、节拍、段落、副歌与默认选段，以及复制自音乐库的哪一首（`trackId`）；试听副本，支持 Range |
 | GET | `/hero`、`/hero/poster` | 设备上的主页背景片与封面（剪辑中心数据目录下的 `hero/hero.mp4`、`hero.jpg`），不属于软件；没有时回答 404，页面改为轮播成员自己的视频 |
@@ -721,7 +721,7 @@ montage/
 
 ## 出片后的二次编辑
 
-确认一版、修改镜头与一句话重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。为什么这样做见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)，分票见 ADR 的“交付”。界面 2026-11-24 起按新的交互重新设计，规格随新界面改写，本节记的是已经实现的服务端；新界面的分票另定。在首版闭环（M10）之后实施。
+确认一版、修改镜头与一句话重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。为什么这样做见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)，子 issue 见 ADR 的“交付”。界面 2026-11-24 起按新的交互重新设计，规格随新界面改写，本节记的是已经实现的服务端；新界面的子 issue 随 [#632](https://github.com/zhongwater123/A-NAS/issues/632) 另定。在首版闭环（M10）之后实施。
 
 **版本的时间线**：二次编辑都从一个版本出发，所以存回时把这一版的时间线（`fill` 的 `clips`，连同段落、画面与小节槽的划分）写进 `versions.timeline_json`，与写版本行在同一个事务里。之前的版本没有这一列，第一次读这一版（概要、修改稿、镜头清单或重剪）时从它的任务的填槽步骤结果补上；步骤结果也没有时，这一版只能播放，不能修改或重剪。
 - 分析、目录与歌曲三步是任务的，两个方案共用：方案一存好后、方案二还在做时移除了视频或素材重新分析过，这几步会重做并覆盖结果，卡片重新编号，方案一的卡片号与节拍号就指向了别的画面。所以读一个版本的规划时，它所来自的规划所在任务的分析、目录、歌曲与这一方案的规划两步，有哪一步在那个方案的版本存好之后又完成过，这一版只能播放，回答 409 `not_editable`，也不能重剪。生成改成一次只出一版（2026-11-24 决定）后，存版本就是任务的最后一步，不会再出现这种情况；已经按两个方案存下的版本仍按这一条判断（[`drafts.go`](../../internal/montage/drafts.go) 的 `redoneSince`）。读版本（修改稿、概要、镜头清单、重剪）与编辑任务的第一步用同一个 `loadPlan` 读这几步，分析只读每个视频的概要与窗口，不读卡片：卡片以目录为准。
@@ -808,7 +808,7 @@ montage/
 
 按批次分别开 PR，直接进 main，不开长期 feature 分支。服务端开关在出片闭环完成前保持关闭，所以前几批合并后，用户既看不到入口，也调不到接口。相册、FFmpeg、AI 的扩展都是新增，不改变现有行为。
 
-| 票 | 内容 | 依赖 | 不能拆开的义务 |
+| issue | 内容 | 依赖 | 不能拆开的义务 |
 |---|---|---|---|
 | P1（[#548](https://github.com/zhongwater123/A-NAS/issues/548)） | Hermes 探针（开发机，用 AI 助手 V1 转正时固定的 Hermes 提交；转正换了提交就重跑）。逐项验证：规划这一轮只开放 `montage` 工具组（必过）；这一轮结束后不跑后台复盘，或复盘也只有 `montage`（必过）；任务能建成不自己到期的、能触发、能连同运行的会话一起删；中途被杀的运行会不会被 Hermes 再次触发；运行里能调 montage 工具；拿得到结束状态；不调用模型就能查出没有密钥；Hermes 怎样对待零工具的服务器；内存峰值。2026-11-18 在开发机做完，两项必过都过了，见[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546) | — | 结果写进 Hermes 研究文档；是接受 ADR 0038 决定 5 的前提。不通过时退回哪种做法，先问评审人 |
 | P2（[#549](https://github.com/zhongwater123/A-NAS/issues/549)） | 配乐探针（开发机）：导出 beat_this 的 small 模型并与 PyTorch 对照；`beats`、`sections`、`music` 在 10 首歌上的结果对照门槛（见“配乐”）。2026-11-18 做完：节拍与重拍过了门槛，副歌 4/9 没过；同日用户决定改用 allin1，门槛只在退回 beat_this 时用 | — | 结果与门槛写进一份研究文档；不通过时怎么办，先问评审人 |
@@ -830,7 +830,7 @@ montage/
 - **先后**：P1、P2 已做完。M1–M8b 不碰助手，M0 之后照常推进；allin1 的商业版权待议不挡开发，挡 M10 打开开关；M9、M10 等 [AI 助手 V1 转正](../decisions/2026-11-17-assistant-v1-cloud-model.md)合并。转正之前，规划的端到端只能在系统测试里用替身模型验证。
 - 第八版代码在 PR #454 的分支上（2026-11-17）。M6 从提交 `19f2d6db` 复制 `domain/`，并在 PR 描述里写明来源。
 - **出片后的二次编辑**：R1–R6 是 [#596](https://github.com/zhongwater123/A-NAS/issues/596) 的子 issue，内容与依赖见 [ADR 0039 的交付](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付)，都在 M10 之后。2026-11-24 界面改版后，服务端先合入：R2–R5，把 R2 的 `searchWindows` 接到 R3 的候选与重洗的那一步（交付表里没有这一行，实施时在 [#617](https://github.com/zhongwater123/A-NAS/pull/617) 里叫 R7），以及从 R6 拆出的版本概要、段落标签与配乐能否跳转；R1 只合入本页与术语表中描述服务端的部分，规格与 R6 的网页随新界面重做。
-- **整体验收**归 M10：在实验 NAS 上走完规格里的“首版闭环”。各票只对自己那部分的验收负责。
+- **整体验收**归 M10：在实验 NAS 上走完规格里的“首版闭环”。各 issue 只对自己那部分的验收负责。
 
 ## 考虑过的替代方案
 

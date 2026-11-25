@@ -68,12 +68,17 @@ func (n *stepNeeds) Error() string {
 
 // stepFailed: the step's input or output is wrong and would be wrong again;
 // the job fails without retrying.
-type stepFailed struct{ err error }
+type stepFailed struct {
+	err error
+	// reason, when set, is the job's reason for failing, which the page and
+	// the member's way out of it read (FailPlanning).
+	reason string
+}
 
 func (f *stepFailed) Error() string { return f.err.Error() }
 func (f *stepFailed) Unwrap() error { return f.err }
 
-func failed(format string, args ...any) error { return &stepFailed{fmt.Errorf(format, args...)} }
+func failed(format string, args ...any) error { return &stepFailed{err: fmt.Errorf(format, args...)} }
 
 // errCancelled is the cause that ends a step the member cancelled.
 var errCancelled = errors.New("the job was cancelled")
@@ -357,7 +362,7 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 				missing = string(encoded)
 			}
 		case errors.As(err, &bad):
-			state, class, message, finished = JobFailed, "invalid", bad.Error(), at
+			state, reason, class, message, finished = JobFailed, bad.reason, "invalid", bad.Error(), at
 		default:
 			attempts++
 			class, message = "retryable", err.Error()

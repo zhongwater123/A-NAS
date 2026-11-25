@@ -33,19 +33,26 @@ const (
 	JobCancelled  = "cancelled"
 )
 
-// Why a job waits or needs the member.
+// Why a job waits, needs the member, or failed. The member is asked only
+// for what they can change; what VNAS could not plan is planned again on its
+// own, and after the last round the job fails (FailPlanning). The three
+// planning reasons a job needed the member for are those of jobs stopped
+// before 2026-11-25, which can still be planned again (Replan).
 const (
-	WaitAnalysis     = "analysis"
-	WaitTrashed      = "asset_trashed"
-	WaitVNAS         = "vnas"
-	NeedMissing      = "asset_missing"
-	NeedAnalysis     = "analysis_failed"
-	NeedNoFootage    = "no_usable_footage"
-	NeedMusic        = "music_invalid"
-	NeedVNASUnknown  = "vnas_unknown"
-	NeedPlanInvalid  = "plan_invalid"
-	NeedPlanError    = "plan_error" // the planning failed twice before the model planned
-	NeedStorageFull  = "storage_full"
+	WaitAnalysis    = "analysis"
+	WaitTrashed     = "asset_trashed"
+	WaitVNAS        = "vnas"
+	NeedMissing     = "asset_missing"
+	NeedAnalysis    = "analysis_failed"
+	NeedNoFootage   = "no_usable_footage"
+	NeedMusic       = "music_invalid"
+	NeedVNASUnknown = "vnas_unknown"
+	NeedPlanInvalid = "plan_invalid"
+	NeedPlanError   = "plan_error"
+	NeedStorageFull = "storage_full"
+	// FailPlanning: the planning was tried maxPlanRounds rounds and none
+	// finished it; the job failed, its error says how the last ended.
+	FailPlanning     = "plan_failed"
 	jobLease         = 5 * time.Minute
 	jobMaxAttempts   = 3
 	jobRetryDelay    = time.Minute
@@ -487,16 +494,16 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 	return s.Job(ctx, owner, jobID)
 }
 
-// resume puts a job that waits or needs the member back in the queue. It no
-// longer wants a round: a round is claimed only for a job that came to
-// planning and waits there (awaitPlan).
+// resume puts a job that waits, needs the member or failed back in the
+// queue. It no longer wants a round: a round is claimed only for a job that
+// came to planning and waits there (awaitPlan).
 func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, states ...string) error {
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
 	args := []any{sqlitedb.FormatTime(s.now()), sqlitedb.FormatTime(s.now()), jobID, owner}
 	for _, state := range states {
 		args = append(args, state)
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?,
+	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
 		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
 	if err != nil {
 		return err
@@ -628,24 +635,33 @@ func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 	return s.Job(ctx, owner, jobID)
 }
 
-// Replan plans again from the step not yet taken, when the plan was not
-// handed back, kept failing its checks, the planning failed, or it waits for a
-// VNAS that has not taken it. A round still in progress is over: what it hands
-// back from now on is not kept, and its refusals and failures do not count
-// against the new epoch.
+// Replan plans again from the step not yet taken: the member's one click
+// after the planning failed (FailPlanning), or while the job waits for a
+// VNAS that has not taken it; and for a job stopped before 2026-11-25 whose
+// plan was not handed back, kept failing its checks or whose planning failed.
+// A round still in progress is over: what it hands back from now on is not
+// kept, and the rounds tried so far do not count against the new epoch.
+// A failed job goes on only as its project's latest, while no other job of
+// the project runs, and with the song it was started with still there.
 func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	job, err := s.Job(ctx, owner, jobID)
 	if err != nil {
 		return Job{}, err
 	}
-	if !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, NeedPlanError, WaitVNAS}, job.WaitReason) {
+	failedPlanning := job.State == JobFailed && job.WaitReason == FailPlanning
+	if !failedPlanning && !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, NeedPlanError, WaitVNAS}, job.WaitReason) {
 		return Job{}, ErrJobState
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		if failedPlanning {
+			if err := s.reopenable(ctx, tx, job.ProjectID, jobID); err != nil {
+				return err
+			}
+		}
 		if err := s.newPlanEpoch(ctx, tx, jobID, "planned again"); err != nil {
 			return err
 		}
-		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting)
+		return s.resume(ctx, tx, owner, jobID, JobNeedsInput, JobWaiting, JobFailed)
 	})
 	if err != nil {
 		return Job{}, err
@@ -653,6 +669,30 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	s.syncMarkers(ctx)
 	s.wakeJobs()
 	return s.Job(ctx, owner, jobID)
+}
+
+// reopenable answers whether a failed job may go on: it is its project's
+// latest, no other job of the project runs (a project has one at a time),
+// and the song it was started with is still kept, which ending it may have
+// let go (releaseSong) when the project has another since.
+func (s *Store) reopenable(ctx context.Context, tx *sql.Tx, projectID, jobID string) error {
+	var latest string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).
+		Scan(&latest); err != nil {
+		return err
+	}
+	if latest != jobID {
+		return ErrJobState
+	}
+	if err := projectIdle(ctx, tx, projectID); err != nil {
+		return err
+	}
+	settings, err := jobSettings(ctx, tx, jobID)
+	if err != nil {
+		return err
+	}
+	_, err = s.song(ctx, tx, settings.SongID)
+	return err
 }
 
 // Notice is what the desktop tells a member about their jobs.
@@ -663,7 +703,7 @@ type Notice struct {
 	Project   string `json:"project"`
 	Reason    string `json:"reason,omitempty"`
 	// Detail says why a job still waits for VNAS, in the project page's
-	// words (DetailVNASOff and the others).
+	// words (DetailVNASOff and the others), or what made one fail.
 	Detail string    `json:"detail,omitempty"`
 	FilmID string    `json:"filmAssetId,omitempty"`
 	At     time.Time `json:"at"`
@@ -675,21 +715,26 @@ const (
 	NoticePlanning = "planning"
 	NoticeNeeds    = "needs_input"
 	NoticeSaved    = "saved"
+	// NoticeFailed: a job failed lately; its reason says whether the member
+	// can plan it again (FailPlanning).
+	NoticeFailed = "failed"
 )
 
-// noticeWindow is how long a saved film stays a notice.
+// noticeWindow is how long a saved film, or a job that failed, stays a
+// notice.
 const noticeWindow = 24 * time.Hour
 
 // Notices lists owner's jobs that wait for planning, are being planned, need
-// the member, or saved a film lately. A job is being planned while a round
-// of its epoch is claimed or started: it waits for VNAS all the while, so
-// its own state does not tell.
+// the member, saved a film lately, or failed lately. A job is being planned
+// while a round of its epoch is claimed or started: it waits for VNAS all
+// the while, so its own state does not tell.
 func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
+	since := sqlitedb.FormatTime(s.now().Add(-noticeWindow))
 	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
 		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
 		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
 		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
-		  OR (j.state = 'done' AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, WaitVNAS, sqlitedb.FormatTime(s.now().Add(-noticeWindow)))
+		  OR (j.state IN ('done', 'failed') AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, WaitVNAS, since)
 	if err != nil {
 		return nil, err
 	}
@@ -705,6 +750,8 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]Notice, error) {
 		switch {
 		case state == JobDone:
 			n.Kind = NoticeSaved
+		case state == JobFailed:
+			n.Kind, n.Detail = NoticeFailed, detail
 		case state == JobWaiting && planning:
 			n.Kind = NoticePlanning
 		case state == JobWaiting:

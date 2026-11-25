@@ -383,6 +383,29 @@ describe("剪辑中心", () => {
     await waitFor(() => expect(seen.did).toEqual(["replan"]));
   });
 
+  it("says a job failed when three rounds of planning did not finish, and plans it again with one click", async () => {
+    const seen = fresh();
+    const failed = job("failed", {
+      waitReason: "plan_failed",
+      step: "pick",
+      error: "规划试了 3 轮都没有完成：the connection to the planning instance closed",
+    });
+    serve(
+      () => project({ job: failed }),
+      () => failed,
+      seen,
+    );
+    const page = await openProject();
+    expect(await within(page).findByText("规划没有完成，没有剪成")).toBeInTheDocument();
+    expect(
+      within(page).getByText("规划试了 3 轮都没有完成：the connection to the planning instance closed"),
+    ).toBeInTheDocument();
+    // The job has ended: nothing to cancel.
+    expect(within(page).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+    await userEvent.click(within(page).getByRole("button", { name: "重新规划" }));
+    await waitFor(() => expect(seen.did).toEqual(["replan"]));
+  });
+
   it("says why a job waits: for VNAS with the reason, and for the photo library", async () => {
     let waiting = job("waiting", { waitReason: "vnas", step: "pick", error: "VNAS 没有开启" });
     serve(
