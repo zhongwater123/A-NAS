@@ -1,7 +1,7 @@
 // The helper script inside a shared page's sandboxed frame (ADR 0040). The
 // workspace service adds it to every page it shows, as
-// <script src="/assets/workspace-frame.js" data-page data-version
-// data-highlight data-scroll>, and it talks to the desktop only through
+// <script src="/assets/workspace-frame.js" data-page data-highlight
+// data-scroll>, and it talks to the desktop only through
 // postMessage (./protocol.ts). It runs beside the page's own scripts, in an
 // origin of its own: it can read the page, never the desktop.
 //
@@ -9,7 +9,7 @@
 // an opaque origin would need CORS.
 import { createContext, domToCanvas } from "modern-screenshot";
 
-import { type FromFrame, type Picked, type Rect, readToFrame } from "./protocol";
+import { type FromFrame, limits, type Picked, type Rect, readToFrame } from "./protocol";
 
 const AT = "data-anas-at";
 const PIN = "data-anas-pin";
@@ -87,8 +87,8 @@ export function measure(el: Element): Picked {
     at: anchor ? Number(anchor.getAttribute(AT)) : -1,
     generated: anchor !== el,
     tag: el.tagName.toLowerCase(),
-    text: (shown ?? el.textContent ?? "").trim().slice(0, 2000),
-    dom: sourceOf(el).slice(0, 8000),
+    text: (shown ?? el.textContent ?? "").trim().slice(0, limits.text),
+    dom: sourceOf(el).slice(0, limits.dom),
     rect: { x: box.x, y: box.y, w: box.width, h: box.height },
     style,
     rules: rulesFor(el, el.ownerDocument.styleSheets),
@@ -232,13 +232,14 @@ function canvasColor(doc: Document): string {
   return "#ffffff";
 }
 
+// maxEdge is a screenshot's longer side at most.
+const maxEdge = 1280;
+
 // capture draws the whole document, as the page itself shows it, and crops
-// the part of the viewport in rect (all of it without one) to a JPEG whose
-// longer side is at most maxEdge.
-async function capture(doc: Document, skip: Node, rect?: Rect, maxEdge = 1280) {
+// the part of the viewport in rect to a JPEG.
+async function capture(doc: Document, skip: Node, rect: Rect): Promise<string> {
   const view = doc.defaultView;
   if (!view) throw new Error("no window");
-  const started = performance.now();
   const root = doc.documentElement;
   const viewport = { w: root.clientWidth, h: root.clientHeight };
   const pins = pinsForNow(doc);
@@ -265,11 +266,10 @@ async function capture(doc: Document, skip: Node, rect?: Rect, maxEdge = 1280) {
   } finally {
     for (const el of doc.querySelectorAll(`[${PIN}]`)) el.removeAttribute(PIN);
   }
-  const drawMs = Math.round(performance.now() - started);
-  const left = Math.max(0, rect?.x ?? 0);
-  const top = Math.max(0, rect?.y ?? 0);
-  const width = Math.max(1, Math.min(viewport.w, (rect?.x ?? 0) + (rect?.w ?? viewport.w)) - left);
-  const height = Math.max(1, Math.min(viewport.h, (rect?.y ?? 0) + (rect?.h ?? viewport.h)) - top);
+  const left = Math.max(0, rect.x);
+  const top = Math.max(0, rect.y);
+  const width = Math.max(1, Math.min(viewport.w, rect.x + rect.w) - left);
+  const height = Math.max(1, Math.min(viewport.h, rect.y + rect.h) - top);
   const scale = Math.min(1, maxEdge / Math.max(width, height));
   const out = doc.createElement("canvas");
   out.width = Math.max(1, Math.round(width * scale));
@@ -280,7 +280,7 @@ async function capture(doc: Document, skip: Node, rect?: Rect, maxEdge = 1280) {
   // A smaller picture when the first is too large for the service.
   let image = out.toDataURL("image/jpeg", 0.85);
   if (image.length > 600_000) image = out.toDataURL("image/jpeg", 0.6);
-  return { image, drawMs };
+  return image;
 }
 
 // startHelper runs the helper for the script element that loaded it, until
@@ -315,14 +315,21 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
   };
   let picking = false;
   let hover: HTMLElement | undefined;
+  // hovered is what hover outlines: moving within it draws nothing again.
+  let hovered: Element | undefined;
   let mark: HTMLElement | undefined;
+  const unhover = () => {
+    layer().remove(hover);
+    hovered = undefined;
+  };
   const label = (el: Element) => el.tagName.toLowerCase() + (written(el) === el ? "" : " · 脚本生成");
   listen(
     "pointermove",
     (event) => {
       const target = event.target;
-      if (!picking || !(target instanceof Element) || target === overlay?.host) return;
-      layer().remove(hover);
+      if (!picking || !(target instanceof Element) || target === overlay?.host || target === hovered) return;
+      unhover();
+      hovered = target;
       hover = layer().outline(target, written(target) === target ? PICKED : GENERATED, label(target));
     },
     { capture: true },
@@ -336,7 +343,7 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
         event.preventDefault();
         event.stopImmediatePropagation();
         if (type !== "click" || !(event.target instanceof Element)) return;
-        layer().remove(hover);
+        unhover();
         layer().remove(mark);
         mark = layer().outline(event.target, PICKED, label(event.target));
         post({ type: "anas:picked", ...measure(event.target) });
@@ -351,15 +358,15 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
     if (!message) return;
     if (message.type === "anas:pick") {
       picking = message.on;
-      if (!picking) layer().remove(hover);
+      if (!picking) unhover();
       doc.documentElement.style.cursor = picking ? "crosshair" : "";
     } else if (message.type === "anas:clear") {
       layer().remove(mark);
       mark = undefined;
     } else {
       capture(doc, layer().host, message.rect).then(
-        (result) => post({ type: "anas:captured", id: message.id, ...result }),
-        (error: unknown) => post({ type: "anas:captured", id: message.id, error: String(error) }),
+        (image) => post({ type: "anas:captured", id: message.id, image }),
+        () => post({ type: "anas:captured", id: message.id }),
       );
     }
   });
@@ -381,7 +388,7 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
       }, 4000);
       setTimeout(() => layer().remove(box), 4700);
     }
-    post({ type: "anas:ready", title: doc.title, blocked: [...blocked] });
+    post({ type: "anas:ready", blocked: [...blocked] });
   };
   if (doc.readyState === "complete") ready();
   else listen("load", ready, { once: true });

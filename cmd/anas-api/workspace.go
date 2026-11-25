@@ -9,13 +9,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
+	"github.com/zhongwater123/A-NAS/internal/storeservice"
 	"github.com/zhongwater123/A-NAS/internal/workspace"
 	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 	"github.com/zhongwater123/A-NAS/internal/workspaceservice"
@@ -62,26 +62,11 @@ func configuredWorkspace(config Config, controlDB string, logger *slog.Logger) (
 		return nil, nil, nil, err
 	}
 	directory := sessiondir.New(controlDB)
-	upkeep, stopUpkeep := context.WithCancel(context.Background())
-	upkept := make(chan struct{})
-	go func() {
-		defer close(upkept)
-		ticker := time.NewTicker(workspaceservice.UpkeepInterval)
-		defer ticker.Stop()
-		for {
-			if err := store.Upkeep(upkeep); err != nil && upkeep.Err() == nil {
-				logger.Warn("workspace upkeep failed", "error", err)
-			}
-			select {
-			case <-upkeep.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	stopUpkeep := storeservice.Every(context.Background(), workspaceservice.UpkeepInterval, func(ctx context.Context) {
+		workspaceservice.Upkeep(ctx, store, logger)
+	})
 	closeStore := func() {
 		stopUpkeep()
-		<-upkept
 		_ = store.Close()
 		_ = directory.Close()
 	}

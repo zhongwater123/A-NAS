@@ -24,7 +24,7 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 
 - 服务以 `storeservice.Run` 运行，与剪辑服务相同：数据卷离线或只读时回答 `503 workspace_unavailable`，数据卷回来后重新打开库。
 - 单元 [`anas-workspace.service`](../../deploy/systemd/system/anas-workspace.service)：没有网络（`PrivateNetwork`，只有 `AF_UNIX`）、`ProtectSystem=strict`、只写数据卷，不带附加组，不连其他服务的套接字。`workspace/` 由 Host Agent 在数据卷就绪时建为子卷，属主 `a-nas-workspace`、`0700`，每 15 分钟修复漂移（`EnsureWorkspaceStore`）。产品服务经 `a-nas-workspace` 附加组连接 `/run/a-nas-workspace/workspace.sock`；Host Agent 的会话查询目录交给同一个组。其余接线（软件包脚本、`a-nas-check`、系统更新的恢复、日志白名单、系统测试）照[剪辑中心的接线清单](montage-center.md#接线清单)。
-- `storeservice.Config` 有可选的 `Authenticate` 钩子，缺省仍是 `modules.Authenticate`（模块在用，只认会话）。共享工作区的钩子按请求选择：带 `X-A-NAS-Agent-Token` 的按 agent 令牌认证；路径是 `/api/v1/workspace/transfers/` 的交给一次性地址自己授权；其余按会话认证。
+- `storeservice.Config` 有可选的 `Authenticate` 钩子，缺省仍是 `modules.Authenticate`（模块在用，只认会话）。共享工作区的钩子按请求选择：带 `X-A-NAS-Agent-Token` 的按 agent 令牌认证；路径是 `/api/v1/workspace/transfers/` 的交给一次性地址自己授权；其余交给 `modules.Authenticate`，与其他服务的会话认证是同一份代码。
 - 开发模式在产品进程里运行同一套处理器，库在 `DataMount/workspace`，会话与令牌由产品服务自己的账号库回答。
 
 ## 数据
@@ -115,8 +115,8 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 
 | 方向 | 消息 |
 |---|---|
-| 桌面 → 框架 | `anas:pick {on}`；`anas:clear`（去掉选中元素的框）；`anas:capture {id, rect?}` |
-| 框架 → 桌面 | `anas:ready {title, blocked[]}`；`anas:blocked {uri, directive}`；`anas:error {message}`；`anas:picked {at, generated, tag, text, dom, rect, style, rules}`；`anas:captured {id, image | error, drawMs}`；`anas:scrolled {y}` |
+| 桌面 → 框架 | `anas:pick {on}`；`anas:clear`（去掉选中元素的框）；`anas:capture {id, rect}` |
+| 框架 → 桌面 | `anas:ready {blocked[]}`；`anas:blocked {uri, directive}`；`anas:error {message}`；`anas:picked {at, generated, tag, text, dom, rect, style, rules}`；`anas:captured {id, image?}`（截图失败或不是 JPEG 时没有 image）；`anas:scrolled {y}` |
 
 ## 跨进程接缝
 

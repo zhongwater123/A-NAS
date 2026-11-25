@@ -2,17 +2,11 @@ package workspace
 
 import (
 	"context"
-	"time"
+	"database/sql"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
-
-// Member is an account an administrator let use the workspace.
-type Member struct {
-	AccountID string    `json:"accountId"`
-	AddedBy   string    `json:"addedBy"`
-	AddedAt   time.Time `json:"addedAt"`
-}
 
 // CanUse reports whether actor may use the workspace: administrators always,
 // members once an administrator added them.
@@ -25,24 +19,22 @@ func (s *Store) CanUse(ctx context.Context, actor Actor) (bool, error) {
 	return found > 0, err
 }
 
-// Members lists the accounts an administrator added.
-func (s *Store) Members(ctx context.Context) ([]Member, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT account_id, added_by, added_at FROM members ORDER BY added_at, account_id")
+// MemberIDs returns the accounts an administrator added.
+func (s *Store) MemberIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT account_id FROM members")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	members := []Member{}
+	ids := map[string]bool{}
 	for rows.Next() {
-		var member Member
-		var addedAt string
-		if err := rows.Scan(&member.AccountID, &member.AddedBy, &addedAt); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		member.AddedAt = parseTime(addedAt)
-		members = append(members, member)
+		ids[id] = true
 	}
-	return members, rows.Err()
+	return ids, rows.Err()
 }
 
 // AddMember lets an account use the workspace; adding it again changes
@@ -51,22 +43,17 @@ func (s *Store) AddMember(ctx context.Context, actor Actor, accountID string) er
 	if !actor.Admin {
 		return ErrForbidden
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, "INSERT INTO members(account_id, added_by, added_at) VALUES(?,?,?) ON CONFLICT(account_id) DO NOTHING",
-		accountID, actor.AccountID, formatTime(s.now()))
-	if err != nil {
-		return err
-	}
-	if added, _ := result.RowsAffected(); added > 0 {
-		if err := s.audit(ctx, tx, actor, "workspace.member_added", "member", accountID, ""); err != nil {
+	return sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "INSERT INTO members(account_id, added_by, added_at) VALUES(?,?,?) ON CONFLICT(account_id) DO NOTHING",
+			accountID, actor.AccountID, formatTime(s.now()))
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if added, _ := result.RowsAffected(); added > 0 {
+			return s.audit(ctx, tx, actor, "workspace.member_added", "member", accountID, "")
+		}
+		return nil
+	})
 }
 
 // RemoveMember stops an account from using the workspace. What it saved
@@ -75,21 +62,17 @@ func (s *Store) RemoveMember(ctx context.Context, actor Actor, accountID string)
 	if !actor.Admin {
 		return ErrForbidden
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, "DELETE FROM members WHERE account_id = ?", accountID)
-	if err != nil {
-		return err
-	}
-	if removed, _ := result.RowsAffected(); removed > 0 {
-		if err := s.audit(ctx, tx, actor, "workspace.member_removed", "member", accountID, ""); err != nil {
+	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "DELETE FROM members WHERE account_id = ?", accountID)
+		if err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
+		if removed, _ := result.RowsAffected(); removed > 0 {
+			return s.audit(ctx, tx, actor, "workspace.member_removed", "member", accountID, "")
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	s.live.forgetAccount(accountID)
@@ -100,21 +83,19 @@ func (s *Store) RemoveMember(ctx context.Context, actor Actor, accountID string)
 // transfer links and what it was looking at. The pages and versions it saved
 // stay under the name it had.
 func (s *Store) RemoveAccount(ctx context.Context, accountID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, statement := range []string{
-		"DELETE FROM members WHERE account_id = ?",
-		"DELETE FROM transfers WHERE account_id = ?",
-		"DELETE FROM audit_events WHERE actor_user_id = ?",
-	} {
-		if _, err := tx.ExecContext(ctx, statement, accountID); err != nil {
-			return err
+	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		for _, statement := range []string{
+			"DELETE FROM members WHERE account_id = ?",
+			"DELETE FROM transfers WHERE account_id = ?",
+			"DELETE FROM audit_events WHERE actor_user_id = ?",
+		} {
+			if _, err := tx.ExecContext(ctx, statement, accountID); err != nil {
+				return err
+			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	s.live.forgetAccount(accountID)

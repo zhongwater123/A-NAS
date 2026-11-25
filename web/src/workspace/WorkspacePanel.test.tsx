@@ -101,7 +101,7 @@ describe("共享工作区", () => {
     const user = userEvent.setup();
     render(<WorkspacePanel userId={reader.id} admin={false} />);
     const pick = await screen.findByRole("button", { name: "选取" });
-    await fromFrame({ type: "anas:ready", title: "家庭相册分享 PRD", blocked: [] });
+    await fromFrame({ type: "anas:ready", blocked: [] });
     const toFrame = vi.spyOn((await frame()).contentWindow as Window, "postMessage");
     await user.click(pick);
     expect(toFrame).toHaveBeenCalledWith({ type: "anas:pick", on: true }, "*");
@@ -152,7 +152,6 @@ describe("共享工作区", () => {
     render(<WorkspacePanel userId={reader.id} admin={false} />);
     await fromFrame({
       type: "anas:ready",
-      title: "家庭相册分享 PRD",
       blocked: [{ uri: "https://cdn.example.com/a.css", directive: "style-src-elem" }],
     });
     await fromFrame({ type: "anas:blocked", uri: "https://img.example.com/x.png", directive: "img-src" });

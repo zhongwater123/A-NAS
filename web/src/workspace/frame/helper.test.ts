@@ -85,7 +85,7 @@ describe("the frame helper's messages", () => {
     window.dispatchEvent(new MessageEvent("message", { data, origin: from, source: window }));
 
   it("tells the desktop, and only the desktop, that the page is ready", () => {
-    expect(sent).toContainEqual({ type: "anas:ready", title: "家庭相册分享 PRD", blocked: [] });
+    expect(sent).toContainEqual({ type: "anas:ready", blocked: [] });
     expect(new Set(targets)).toEqual(new Set([origin]));
   });
 

@@ -13,12 +13,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
 	"image"
 	_ "image/jpeg" // selection screenshots
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -55,6 +57,17 @@ const (
 	// (web/src/workspace/frame), served by internal/webui.
 	FrameScript = "/assets/workspace-frame.js"
 )
+
+// AgentRoutes are the MCP endpoint's methods, the Product Service's own
+// routes under its agent posture: Streamable HTTP uses all three.
+var AgentRoutes = []apiroute.Endpoint{
+	{Method: http.MethodPost, Pattern: MCPPath}, {Method: http.MethodGet, Pattern: MCPPath}, {Method: http.MethodDelete, Pattern: MCPPath},
+}
+
+// LinkRoutes are the one-time transfer links, public on the Product Service.
+var LinkRoutes = []apiroute.Endpoint{
+	{Method: http.MethodGet, Pattern: TransfersPrefix + "{key}"}, {Method: http.MethodPut, Pattern: TransfersPrefix + "{key}"},
+}
 
 // framePolicy runs a page's own scripts and styles in an opaque origin that
 // reaches nothing (ADR 0040 decision 2).
@@ -136,11 +149,13 @@ func New(store *workspace.Store, options Options) http.Handler {
 	}
 	// The agents' and the links' operations are the Product Service's own
 	// routes, not part of the desktop's mount.
-	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
-		h.mux.ServeMux.HandleFunc(method+" "+MCPPath, h.member(h.agent))
+	for _, route := range AgentRoutes {
+		h.mux.ServeMux.HandleFunc(route.Method+" "+route.Pattern, h.member(h.agent))
 	}
-	h.mux.ServeMux.HandleFunc("GET "+TransfersPrefix+"{key}", h.download)
-	h.mux.ServeMux.HandleFunc("PUT "+TransfersPrefix+"{key}", h.upload)
+	links := map[string]http.HandlerFunc{http.MethodGet: h.download, http.MethodPut: h.upload}
+	for _, route := range LinkRoutes {
+		h.mux.ServeMux.HandleFunc(route.Method+" "+route.Pattern, links[route.Method])
+	}
 	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.signedIn(h.activity))
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -155,25 +170,15 @@ func Endpoints() []apiroute.Endpoint {
 
 // MemberEndpoints are the operations under PathPrefix, mounted for every
 // member who may use the workspace.
-func MemberEndpoints() []apiroute.Endpoint {
-	var endpoints []apiroute.Endpoint
-	for _, endpoint := range Endpoints() {
-		if !strings.HasPrefix(endpoint.Pattern, AdminPrefix+"/") {
-			endpoints = append(endpoints, endpoint)
-		}
-	}
-	return endpoints
-}
+func MemberEndpoints() []apiroute.Endpoint { return slices.DeleteFunc(Endpoints(), administrators) }
 
 // AdminEndpoints are the administrators' operations under AdminPrefix.
 func AdminEndpoints() []apiroute.Endpoint {
-	var endpoints []apiroute.Endpoint
-	for _, endpoint := range Endpoints() {
-		if strings.HasPrefix(endpoint.Pattern, AdminPrefix+"/") {
-			endpoints = append(endpoints, endpoint)
-		}
-	}
-	return endpoints
+	return slices.DeleteFunc(Endpoints(), func(e apiroute.Endpoint) bool { return !administrators(e) })
+}
+
+func administrators(endpoint apiroute.Endpoint) bool {
+	return strings.HasPrefix(endpoint.Pattern, AdminPrefix+"/")
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -368,8 +373,8 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request, _ workspace.Calle
 		return
 	}
 	query := r.URL.Query()
-	helper := fmt.Sprintf(`<script src="%s" data-page="%s" data-version="%d" data-highlight="%s" data-scroll="%s"></script>`,
-		attribute(h.options.FrameScript), attribute(summary.ID), summary.Latest.Version, attribute(numbers(query.Get("highlight"))), attribute(numbers(query.Get("scroll"))))
+	helper := fmt.Sprintf(`<script src="%s" data-page="%s" data-highlight="%s" data-scroll="%s"></script>`,
+		html.EscapeString(h.options.FrameScript), html.EscapeString(summary.ID), numbers(query.Get("highlight")), numbers(query.Get("scroll")))
 	header := w.Header()
 	header.Set("Content-Security-Policy", framePolicy)
 	header.Set("X-Frame-Options", "SAMEORIGIN")
@@ -417,7 +422,7 @@ func (h *handler) viewing(w http.ResponseWriter, r *http.Request, caller workspa
 	if !httpjson.Read(w, r, 4<<10, &request) {
 		return
 	}
-	if _, _, err := h.store.Content(r.Context(), request.PageID, request.Version); err != nil {
+	if _, _, err := h.store.Version(r.Context(), request.PageID, request.Version); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -446,7 +451,7 @@ func (h *handler) setSelection(w http.ResponseWriter, r *http.Request, caller wo
 	if !httpjson.Read(w, r, maxJSONBytes, &request) {
 		return
 	}
-	if _, _, err := h.store.Content(r.Context(), request.PageID, request.Version); err != nil {
+	if _, _, err := h.store.Version(r.Context(), request.PageID, request.Version); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -461,7 +466,7 @@ func (h *handler) setSelection(w http.ResponseWriter, r *http.Request, caller wo
 	}
 	h.store.SetSelection(caller.Actor.AccountID, workspace.Selection{
 		PageID: request.PageID, Version: request.Version, At: request.At, Generated: request.Generated,
-		Tag: cut(request.Tag, 40), Text: cut(request.Text, 2000), DOM: cut(request.DOM, 8000),
+		Tag: workspace.Cut(request.Tag, 40), Text: workspace.Cut(request.Text, 2000), DOM: workspace.Cut(request.DOM, 8000),
 		Rect: request.Rect, Style: request.Style, Rules: request.Rules, Image: picture,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -585,14 +590,10 @@ func (h *handler) listMembers(w http.ResponseWriter, r *http.Request, _ workspac
 		h.fail(w, r, err)
 		return
 	}
-	members, err := h.store.Members(r.Context())
+	added, err := h.store.MemberIDs(r.Context())
 	if err != nil {
 		h.fail(w, r, err)
 		return
-	}
-	added := map[string]bool{}
-	for _, member := range members {
-		added[member.AccountID] = true
 	}
 	type account struct {
 		accountid.Profile
@@ -635,11 +636,6 @@ func (h *handler) activity(w http.ResponseWriter, r *http.Request, caller worksp
 	activityapi.WriteServicePage(w, events)
 }
 
-// attribute escapes value for a double-quoted HTML attribute.
-func attribute(value string) string {
-	return strings.NewReplacer("&", "&amp;", `"`, "&quot;", "<", "&lt;", ">", "&gt;").Replace(value)
-}
-
 // numbers keeps only a comma-separated list of numbers.
 func numbers(value string) string {
 	var kept []string
@@ -663,11 +659,4 @@ func safeName(title string) string {
 		return "page"
 	}
 	return name
-}
-
-func cut(value string, runes int) string {
-	if r := []rune(value); len(r) > runes {
-		return string(r[:runes])
-	}
-	return value
 }

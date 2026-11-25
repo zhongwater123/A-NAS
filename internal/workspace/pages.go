@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Person is an account as it was named when it acted.
@@ -130,11 +132,29 @@ func (s *Store) page(ctx context.Context, q queryer, id string) (Page, error) {
 // Content returns a version's source and what it was; version 0 is the
 // latest.
 func (s *Store) Content(ctx context.Context, pageID string, version int) ([]byte, PageSummary, error) {
-	var summary PageSummary
 	var content []byte
+	summary, _, err := s.describe(ctx, pageID, version, &content)
+	return content, summary, err
+}
+
+// Version returns what a version was without its source, and the page's
+// latest version; version 0 is the latest.
+func (s *Store) Version(ctx context.Context, pageID string, version int) (PageSummary, int, error) {
+	return s.describe(ctx, pageID, version, nil)
+}
+
+// describe reads a version, and its source into content unless that is nil.
+func (s *Store) describe(ctx context.Context, pageID string, version int, content *[]byte) (PageSummary, int, error) {
+	var summary PageSummary
 	var createdAt string
-	query := `SELECT ` + versionColumns + `, v.content, p.id, p.title, p.created_by, p.created_by_name, p.created_at
-FROM pages p JOIN versions v ON v.page_id = p.id WHERE p.id = ? AND v.version = `
+	var latest int
+	columns := versionColumns + ", p.id, p.title, p.created_by, p.created_by_name, p.created_at, p.latest_version"
+	targets := []any{&summary.ID, &summary.Title, &summary.CreatedBy.ID, &summary.CreatedBy.Name, &createdAt, &latest}
+	if content != nil {
+		columns += ", v.content"
+		targets = append(targets, content)
+	}
+	query := "SELECT " + columns + " FROM pages p JOIN versions v ON v.page_id = p.id WHERE p.id = ? AND v.version = "
 	arguments := []any{pageID}
 	if version > 0 {
 		query += "?"
@@ -142,16 +162,15 @@ FROM pages p JOIN versions v ON v.page_id = p.id WHERE p.id = ? AND v.version = 
 	} else {
 		query += "p.latest_version"
 	}
-	info, err := scanVersion(s.db.QueryRowContext(ctx, query, arguments...).Scan, &content, &summary.ID, &summary.Title,
-		&summary.CreatedBy.ID, &summary.CreatedBy.Name, &createdAt)
+	info, err := scanVersion(s.db.QueryRowContext(ctx, query, arguments...).Scan, targets...)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, PageSummary{}, ErrNotFound
+		return PageSummary{}, 0, ErrNotFound
 	}
 	if err != nil {
-		return nil, PageSummary{}, err
+		return PageSummary{}, 0, err
 	}
 	summary.Latest, summary.CreatedAt = info, parseTime(createdAt)
-	return content, summary, nil
+	return summary, latest, nil
 }
 
 // CreatePage stores a new page as its version 1. Its title is the page's
@@ -164,9 +183,9 @@ func (s *Store) CreatePage(ctx context.Context, actor Actor, fileName string, co
 	if err != nil {
 		return Page{}, err
 	}
-	title := shortTitle(cleanTitle(Title(content)))
+	title := Cut(cleanTitle(Title(content)), MaxTitleRunes)
 	if title == "" {
-		title = shortTitle(cleanTitle(strings.TrimSuffix(path.Base(strings.ReplaceAll(fileName, `\`, "/")), path.Ext(fileName))))
+		title = Cut(cleanTitle(strings.TrimSuffix(path.Base(strings.ReplaceAll(fileName, `\`, "/")), path.Ext(fileName))), MaxTitleRunes)
 	}
 	if title == "" || title == "." || title == "/" {
 		title = "未命名页面"
@@ -178,26 +197,25 @@ func (s *Store) CreatePage(ctx context.Context, actor Actor, fileName string, co
 	defer s.writes.Unlock()
 	id := newID("page")
 	now := s.now()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var page Page
+	err = sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO pages(id, title, created_by, created_by_name, created_at, latest_version, updated_at) VALUES(?,?,?,?,?,1,?)",
+			id, title, actor.AccountID, actor.Name, formatTime(now), formatTime(now)); err != nil {
+			return err
+		}
+		if err := s.insertVersion(ctx, tx, id, 1, content, actor, via, note, nil, now); err != nil {
+			return err
+		}
+		if err := s.audit(ctx, tx, actor, "workspace.page_created", "page", id, title); err != nil {
+			return err
+		}
+		page, err = s.page(ctx, tx, id)
+		return err
+	})
 	if err != nil {
 		return Page{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "INSERT INTO pages(id, title, created_by, created_by_name, created_at, latest_version, updated_at) VALUES(?,?,?,?,?,1,?)",
-		id, title, actor.AccountID, actor.Name, formatTime(now), formatTime(now)); err != nil {
-		return Page{}, err
-	}
-	if err := s.insertVersion(ctx, tx, id, 1, content, actor, via, note, nil, now); err != nil {
-		return Page{}, err
-	}
-	if err := s.audit(ctx, tx, actor, "workspace.page_created", "page", id, title); err != nil {
-		return Page{}, err
-	}
-	page, err := s.page(ctx, tx, id)
-	if err != nil {
-		return Page{}, err
-	}
-	return page, tx.Commit()
+	return page, nil
 }
 
 // SaveVersion stores content as the page's next version. base is the
@@ -216,7 +234,7 @@ func (s *Store) SaveVersion(ctx context.Context, actor Actor, pageID string, bas
 	}
 	s.writes.Lock()
 	defer s.writes.Unlock()
-	return s.commitVersion(ctx, actor, pageID, func(latest VersionInfo, _ []byte) ([]byte, []int, error) {
+	return s.commitVersion(ctx, actor, pageID, func(latest VersionInfo, _ func() ([]byte, error)) ([]byte, []int, error) {
 		if base != latest.Version {
 			return nil, nil, &PageChangedError{Latest: latest}
 		}
@@ -278,8 +296,12 @@ func (s *Store) EditPage(ctx context.Context, actor Actor, pageID string, base i
 	defer s.writes.Unlock()
 	var onTopOf int
 	var lines [][2]int
-	info, err := s.commitVersion(ctx, actor, pageID, func(latest VersionInfo, source []byte) ([]byte, []int, error) {
+	info, err := s.commitVersion(ctx, actor, pageID, func(latest VersionInfo, read func() ([]byte, error)) ([]byte, []int, error) {
 		onTopOf = latest.Version
+		source, err := read()
+		if err != nil {
+			return nil, nil, err
+		}
 		updated, positions, err := ApplyEdits(source, edits, latest.Version)
 		if err != nil {
 			return nil, nil, err
@@ -331,44 +353,45 @@ func ApplyEdits(source []byte, edits []Edit, latest int) ([]byte, []int, error) 
 	return []byte(text), positions, nil
 }
 
-// commitVersion reads the latest version, lets change make the next one, and
-// stores it. The caller holds s.writes.
-func (s *Store) commitVersion(ctx context.Context, actor Actor, pageID string, change func(VersionInfo, []byte) ([]byte, []int, error), via Via, note string) (VersionInfo, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+// commitVersion lets change make the next version from the latest, reading
+// the latest's source only when change asks, and stores it. The caller holds
+// s.writes, so the latest stays the latest meanwhile and change works outside
+// the transaction, which holds the store's only connection.
+func (s *Store) commitVersion(ctx context.Context, actor Actor, pageID string, change func(VersionInfo, func() ([]byte, error)) ([]byte, []int, error), via Via, note string) (VersionInfo, error) {
+	summary, _, err := s.Version(ctx, pageID, 0)
 	if err != nil {
 		return VersionInfo{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	var title string
-	var source []byte
-	latest, err := scanVersion(tx.QueryRowContext(ctx, `SELECT `+versionColumns+`, v.content, p.title
-FROM pages p JOIN versions v ON v.page_id = p.id AND v.version = p.latest_version WHERE p.id = ?`, pageID).Scan, &source, &title)
-	if errors.Is(err, sql.ErrNoRows) {
-		return VersionInfo{}, ErrNotFound
-	}
+	latest := summary.Latest
+	content, changed, err := change(latest, func() ([]byte, error) {
+		source, _, err := s.Content(ctx, pageID, latest.Version)
+		return source, err
+	})
 	if err != nil {
 		return VersionInfo{}, err
 	}
-	content, changed, err := change(latest, source)
-	if err != nil {
-		return VersionInfo{}, err
+	if changed == nil {
+		changed = []int{}
 	}
 	next := latest.Version + 1
 	now := s.now()
-	if err := s.insertVersion(ctx, tx, pageID, next, content, actor, via, note, changed, now); err != nil {
-		return VersionInfo{}, err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE pages SET latest_version = ?, updated_at = ? WHERE id = ?", next, formatTime(now), pageID); err != nil {
-		return VersionInfo{}, err
-	}
-	if err := s.audit(ctx, tx, actor, "workspace.page_saved", "page", pageID, fmt.Sprintf("%s v%d", title, next)); err != nil {
-		return VersionInfo{}, err
-	}
-	info, err := scanVersion(tx.QueryRowContext(ctx, "SELECT "+versionColumns+" FROM versions v WHERE v.page_id = ? AND v.version = ?", pageID, next).Scan)
+	err = sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		if err := s.insertVersion(ctx, tx, pageID, next, content, actor, via, note, changed, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE pages SET latest_version = ?, updated_at = ? WHERE id = ?", next, formatTime(now), pageID); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, actor, "workspace.page_saved", "page", pageID, fmt.Sprintf("%s v%d", summary.Title, next))
+	})
 	if err != nil {
 		return VersionInfo{}, err
 	}
-	return info, tx.Commit()
+	// As scanVersion would read it back.
+	return VersionInfo{
+		Version: next, Size: int64(len(content)), SavedBy: Person{ID: actor.AccountID, Name: actor.Name},
+		Via: Via{Kind: via.Kind, Name: via.Name}, Note: note, Changed: changed, SavedAt: parseTime(formatTime(now)),
+	}, nil
 }
 
 func (s *Store) insertVersion(ctx context.Context, q queryer, pageID string, version int, content []byte, actor Actor, via Via, note string, changed []int, at time.Time) error {
@@ -394,26 +417,25 @@ func (s *Store) RenamePage(ctx context.Context, actor Actor, pageID, title strin
 	}
 	s.writes.Lock()
 	defer s.writes.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var page Page
+	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "UPDATE pages SET title = ? WHERE id = ?", title, pageID)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed == 0 {
+			return ErrNotFound
+		}
+		if err := s.audit(ctx, tx, actor, "workspace.page_renamed", "page", pageID, title); err != nil {
+			return err
+		}
+		page, err = s.page(ctx, tx, pageID)
+		return err
+	})
 	if err != nil {
 		return PageSummary{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, "UPDATE pages SET title = ? WHERE id = ?", title, pageID)
-	if err != nil {
-		return PageSummary{}, err
-	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return PageSummary{}, ErrNotFound
-	}
-	if err := s.audit(ctx, tx, actor, "workspace.page_renamed", "page", pageID, title); err != nil {
-		return PageSummary{}, err
-	}
-	page, err := s.page(ctx, tx, pageID)
-	if err != nil {
-		return PageSummary{}, err
-	}
-	return page.PageSummary, tx.Commit()
+	return page.PageSummary, nil
 }
 
 // DeletePage removes a page and all its versions. Only the account that
@@ -421,32 +443,27 @@ func (s *Store) RenamePage(ctx context.Context, actor Actor, pageID, title strin
 func (s *Store) DeletePage(ctx context.Context, actor Actor, pageID string) error {
 	s.writes.Lock()
 	defer s.writes.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		var createdBy, title string
+		err := tx.QueryRowContext(ctx, "SELECT created_by, title FROM pages WHERE id = ?", pageID).Scan(&createdBy, &title)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if createdBy != actor.AccountID && !actor.Admin {
+			return ErrForbidden
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM pages WHERE id = ?", pageID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE page_id = ?", pageID); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, actor, "workspace.page_deleted", "page", pageID, title)
+	})
 	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var createdBy, title string
-	err = tx.QueryRowContext(ctx, "SELECT created_by, title FROM pages WHERE id = ?", pageID).Scan(&createdBy, &title)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if createdBy != actor.AccountID && !actor.Admin {
-		return ErrForbidden
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM pages WHERE id = ?", pageID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE page_id = ?", pageID); err != nil {
-		return err
-	}
-	if err := s.audit(ctx, tx, actor, "workspace.page_deleted", "page", pageID, title); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.live.forgetPage(pageID)
@@ -476,12 +493,12 @@ func cleanTitle(title string) string {
 	}, title)), " ")
 }
 
-// shortTitle cuts a title taken from a page or a file name to MaxTitleRunes.
-func shortTitle(title string) string {
-	if runes := []rune(title); len(runes) > MaxTitleRunes {
-		return string(runes[:MaxTitleRunes])
+// Cut keeps value's first runes characters, never splitting one.
+func Cut(value string, runes int) string {
+	if r := []rune(value); len(r) > runes {
+		return string(r[:runes])
 	}
-	return title
+	return value
 }
 
 func cleanNote(note string) (string, error) {

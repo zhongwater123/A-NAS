@@ -3,12 +3,12 @@ package workspace
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // TransferLife is how long a one-time transfer link may wait for its use.
@@ -49,7 +49,7 @@ func (s *Store) CreateTransfer(ctx context.Context, transfer Transfer) (string, 
 		return "", time.Time{}, fmt.Errorf("%w: unknown direction %q", ErrInvalid, transfer.Direction)
 	}
 	if transfer.PageID != "" {
-		if _, err := s.Page(ctx, transfer.PageID); err != nil {
+		if _, _, err := s.Version(ctx, transfer.PageID, 0); err != nil {
 			return "", time.Time{}, err
 		}
 	} else if transfer.Direction == Download {
@@ -62,7 +62,7 @@ func (s *Store) CreateTransfer(ctx context.Context, transfer Transfer) (string, 
 	key := rand.Text()
 	expires := s.now().Add(TransferLife)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO transfers(key_hash, direction, page_id, version, account_id, account_name, token_id, via_kind, via_name, note, expires_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?)`, transferHash(key), string(transfer.Direction), transfer.PageID, transfer.Version, transfer.Actor.AccountID,
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`, accountid.TokenHash(key), string(transfer.Direction), transfer.PageID, transfer.Version, transfer.Actor.AccountID,
 		transfer.Actor.Name, transfer.Via.TokenID, string(transfer.Via.Kind), transfer.Via.Name, note, formatTime(expires))
 	if err != nil {
 		return "", time.Time{}, err
@@ -77,7 +77,7 @@ func (s *Store) TakeTransfer(ctx context.Context, key string, direction Directio
 	var transfer Transfer
 	var kind, expires string
 	err := s.db.QueryRowContext(ctx, `DELETE FROM transfers WHERE key_hash = ? AND direction = ?
-RETURNING page_id, version, account_id, account_name, token_id, via_kind, via_name, note, expires_at`, transferHash(key), string(direction)).
+RETURNING page_id, version, account_id, account_name, token_id, via_kind, via_name, note, expires_at`, accountid.TokenHash(key), string(direction)).
 		Scan(&transfer.PageID, &transfer.Version, &transfer.Actor.AccountID, &transfer.Actor.Name, &transfer.Via.TokenID, &kind, &transfer.Via.Name, &transfer.Note, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Transfer{}, ErrNotFound
@@ -90,9 +90,4 @@ RETURNING page_id, version, account_id, account_name, token_id, via_kind, via_na
 		return Transfer{}, ErrNotFound
 	}
 	return transfer, nil
-}
-
-func transferHash(key string) string {
-	digest := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(digest[:])
 }

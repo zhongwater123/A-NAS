@@ -38,15 +38,16 @@ export interface Picked {
 export type ToFrame =
   | { type: "anas:pick"; on: boolean }
   | { type: "anas:clear" }
-  | { type: "anas:capture"; id: number; rect?: Rect };
+  | { type: "anas:capture"; id: number; rect: Rect };
 
 // Frame → desktop.
 export type FromFrame =
-  | { type: "anas:ready"; title: string; blocked: Blocked[] }
+  | { type: "anas:ready"; blocked: Blocked[] }
   | ({ type: "anas:blocked" } & Blocked)
   | { type: "anas:error"; message: string }
   | ({ type: "anas:picked" } & Picked)
-  | { type: "anas:captured"; id: number; image?: string; error?: string; drawMs?: number }
+  // Without an image when the screenshot failed or was not a JPEG.
+  | { type: "anas:captured"; id: number; image?: string }
   | { type: "anas:scrolled"; y: number };
 
 // Limits on what the desktop keeps of a message; the service cuts again.
@@ -118,7 +119,7 @@ export function readFromFrame(data: unknown): FromFrame | undefined {
             .map(readBlocked)
             .filter((item) => item !== undefined)
         : [];
-      return { type: "anas:ready", title: text(data.title, 200) ?? "", blocked };
+      return { type: "anas:ready", blocked };
     }
     case "anas:blocked": {
       const blocked = readBlocked(data);
@@ -141,9 +142,7 @@ export function readFromFrame(data: unknown): FromFrame | undefined {
         data.image.length <= maxImageChars
           ? data.image
           : undefined;
-      const error = text(data.error, limits.message);
-      if (!image && error === undefined) return { type: "anas:captured", id, error: "截图无效" };
-      return { type: "anas:captured", id, image, error, drawMs: finite(data.drawMs) };
+      return image ? { type: "anas:captured", id, image } : { type: "anas:captured", id };
     }
     case "anas:scrolled": {
       const y = finite(data.y);
@@ -165,10 +164,8 @@ export function readToFrame(data: unknown): ToFrame | undefined {
       return { type: "anas:clear" };
     case "anas:capture": {
       const id = finite(data.id);
-      if (id === undefined) return undefined;
-      const rect = data.rect === undefined ? undefined : readRect(data.rect);
-      if (data.rect !== undefined && !rect) return undefined;
-      return rect ? { type: "anas:capture", id, rect } : { type: "anas:capture", id };
+      const rect = readRect(data.rect);
+      return id === undefined || !rect ? undefined : { type: "anas:capture", id, rect };
     }
     default:
       return undefined;

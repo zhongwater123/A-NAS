@@ -24,7 +24,8 @@ func TestTheLicenseListIsAskedForAgainAndTheBundleIsKept(t *testing.T) {
 // Every shared page loads the frame helper (ADR 0040): a browser asks for it
 // again each time and gets a 304 while it is unchanged.
 func TestTheFrameHelperIsRevalidated(t *testing.T) {
-	h := &handler{assets: fstest.MapFS{workspaceFrame: {Data: []byte("(()=>{})();")}}}
+	assets := fstest.MapFS{workspaceFrame: {Data: []byte("(()=>{})();")}}
+	h := &handler{assets: assets, etags: assetTags(assets)}
 	first := httptest.NewRecorder()
 	h.serveAsset(first, httptest.NewRequest(http.MethodGet, "/"+workspaceFrame, nil))
 	tag := first.Header().Get("ETag")

@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/workspace"
 	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
@@ -38,7 +39,8 @@ type Directory interface {
 //     its token;
 //   - a one-time transfer link by nothing here: the link's handler uses it
 //     up and checks the token that asked for it;
-//   - every other request by its session.
+//   - every other request by the session check every store service uses
+//     (modules.Authenticate).
 //
 // Names come from the accounts' profiles, read at most every 30 seconds.
 func Authenticate(directory Directory, logger *slog.Logger, next http.Handler) http.Handler {
@@ -46,50 +48,38 @@ func Authenticate(directory Directory, logger *slog.Logger, next http.Handler) h
 		logger = slog.Default()
 	}
 	names := &profileNames{directory: directory}
-	unavailable := func(w http.ResponseWriter, r *http.Request, err error) {
-		logger.WarnContext(r.Context(), "workspace lookup failed", "error", err)
-		httpjson.WriteError(w, http.StatusServiceUnavailable, workspaceapi.Unavailable, "the account lookup is unavailable")
-	}
+	member := modules.Authenticate(directory, "workspace", workspaceapi.Unavailable, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, _ := accounts.UserFrom(r.Context())
+		next.ServeHTTP(w, r.WithContext(workspace.WithCaller(r.Context(), workspace.Caller{
+			Actor: workspace.Actor{AccountID: user.ID, Name: names.name(r.Context(), user.ID, user.Username), Admin: user.Role == accountid.RoleAdmin},
+			Via:   workspace.Web,
+		})))
+	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, workspaceapi.TransfersPrefix) {
+		token := r.Header.Get(workspaceapi.AgentTokenHeader)
+		switch {
+		case strings.HasPrefix(r.URL.Path, workspaceapi.TransfersPrefix):
 			next.ServeHTTP(w, r)
 			return
+		case token == "":
+			member.ServeHTTP(w, r)
+			return
 		}
-		var caller workspace.Caller
-		if token := r.Header.Get(workspaceapi.AgentTokenHeader); token != "" {
-			user, err := directory.ResolveAgentToken(r.Context(), token, accountid.AgentScopeWorkspace)
-			if errors.Is(err, accountid.ErrAgentTokenNotFound) {
-				httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "the agent token is invalid or revoked")
-				return
-			}
-			if err != nil {
-				unavailable(w, r, err)
-				return
-			}
-			caller = workspace.Caller{
-				Actor:  workspace.Actor{AccountID: user.UserID, Name: names.name(r.Context(), user.UserID, user.Username), Admin: user.Role == accountid.RoleAdmin},
-				Via:    workspace.Via{Kind: viaKind(user.TokenKind), Name: user.TokenName, TokenID: user.TokenID},
-				Origin: r.Header.Get(workspaceapi.OriginHeader),
-			}
-		} else {
-			user, err := directory.ResolveSessionUser(r.Context(), r.Header.Get(serviceproxy.SessionHeader))
-			switch {
-			case errors.Is(err, accountid.ErrSessionNotFound) || err == nil && user.UserID == "":
-				httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
-				return
-			case err != nil:
-				unavailable(w, r, err)
-				return
-			case user.MustChangePassword:
-				httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
-				return
-			}
-			caller = workspace.Caller{
-				Actor: workspace.Actor{AccountID: user.UserID, Name: names.name(r.Context(), user.UserID, user.Username), Admin: user.Role == accountid.RoleAdmin},
-				Via:   workspace.Web,
-			}
+		user, err := directory.ResolveAgentToken(r.Context(), token, accountid.AgentScopeWorkspace)
+		if errors.Is(err, accountid.ErrAgentTokenNotFound) {
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "the agent token is invalid or revoked")
+			return
 		}
-		next.ServeHTTP(w, r.WithContext(workspace.WithCaller(r.Context(), caller)))
+		if err != nil {
+			logger.WarnContext(r.Context(), "workspace agent token lookup failed", "error", err)
+			httpjson.WriteError(w, http.StatusServiceUnavailable, workspaceapi.Unavailable, "the account lookup is unavailable")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(workspace.WithCaller(r.Context(), workspace.Caller{
+			Actor:  workspace.Actor{AccountID: user.UserID, Name: names.name(r.Context(), user.UserID, user.Username), Admin: user.Role == accountid.RoleAdmin},
+			Via:    workspace.Via{Kind: viaKind(user.TokenKind), Name: user.TokenName, TokenID: user.TokenID},
+			Origin: r.Header.Get(workspaceapi.OriginHeader),
+		})))
 	})
 }
 
@@ -109,13 +99,15 @@ type profileNames struct {
 	names     map[string]string
 }
 
-// name is the account's nickname, else its username.
+// name is the account's nickname, else its username. A failed read waits as
+// long as a good one before the next try.
 func (p *profileNames) name(ctx context.Context, accountID, username string) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.names == nil || time.Since(p.read) > 30*time.Second {
+	if time.Since(p.read) > 30*time.Second {
+		p.read = time.Now()
 		if profiles, err := p.directory.ActiveProfiles(ctx); err == nil {
-			p.names, p.read = map[string]string{}, time.Now()
+			p.names = map[string]string{}
 			for _, profile := range profiles {
 				if profile.Nickname != "" {
 					p.names[profile.ID] = profile.Nickname

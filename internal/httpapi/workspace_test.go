@@ -162,7 +162,7 @@ func TestTheWorkspaceKeepsToTheContract(t *testing.T) {
 		strings.Contains(policy, "allow-same-origin") || view.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("view = %d, policy %q", view.Code, policy)
 	}
-	if !strings.Contains(view.Body.String(), `<script src="/assets/workspace-frame.js" data-page="`+page.ID+`" data-version="1" data-highlight="12,40" data-scroll="300"></script>`) {
+	if !strings.Contains(view.Body.String(), `<script src="/assets/workspace-frame.js" data-page="`+page.ID+`" data-highlight="12,40" data-scroll="300"></script>`) {
 		t.Fatalf("the view has no helper: %.300s", view.Body.String())
 	}
 	file := f.member.call(t, http.MethodGet, "/api/v1/workspace/pages/"+page.ID+"/versions/1/file", "")

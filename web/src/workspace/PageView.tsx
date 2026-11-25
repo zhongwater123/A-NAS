@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Crosshair, Download, Globe, RotateCw, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, Crosshair, Download, Globe, TriangleAlert, X } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -22,7 +22,8 @@ import {
 } from "./api";
 import { type Blocked, type Picked, readFromFrame, type ToFrame } from "./frame/protocol";
 import type { Kit } from "./kit";
-import { arrivalText, isHTML, savedText } from "./words";
+import { Failed, HTMLPicker } from "./parts";
+import { arrivalText, savedText } from "./words";
 import styles from "./workspace.module.css";
 
 export const pageKey = (pageId: string) => ["workspace", "page", pageId] as const;
@@ -99,18 +100,7 @@ export function PageView({
   }, [pageId, version]);
 
   if (!page || !load) {
-    if (query.isError && !missing) {
-      return (
-        <div className={styles.wsCentered}>
-          <TriangleAlert className={styles.wsCenteredIcon} aria-hidden="true" />
-          <p>{errorText(query.error, "workspace")}</p>
-          <button type="button" className={styles.wsButton} onClick={() => void query.refetch()}>
-            <RotateCw size={15} aria-hidden="true" />
-            重试
-          </button>
-        </div>
-      );
-    }
+    if (query.isError && !missing) return <Failed error={query.error} onRetry={() => void query.refetch()} />;
     return (
       <div className={styles.wsCentered}>
         <span className="loader" role="status" aria-label="正在打开页面" />
@@ -355,19 +345,11 @@ function Viewer({
           导出
         </a>
         <RowMenu label={`更多操作：${page.title}`} items={more} triggerClassName={styles.wsIconButton} />
-        <input
+        <HTMLPicker
           ref={upload}
-          type="file"
-          accept=".html,.htm,text/html"
-          hidden
           disabled={busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) return;
-            if (!isHTML(file)) kit.toast({ text: "只能上传 .html 文件", tone: "error" });
-            else void uploadVersion(file, load.version);
-          }}
+          toast={kit.toast}
+          onFile={(file) => void uploadVersion(file, load.version)}
         />
       </header>
       {incoming && (

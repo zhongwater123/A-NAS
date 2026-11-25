@@ -361,6 +361,19 @@ type sqlExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// endSignIns removes an account's sessions and agent tokens, as disabling
+// it or resetting its password does. The tokens go for good: enabling the
+// account again or choosing a new password must not bring back a token
+// someone else may hold (ADR 0040).
+func endSignIns(ctx context.Context, exec sqlExecutor, userID string) error {
+	for _, statement := range []string{"DELETE FROM sessions WHERE user_id = ?", "DELETE FROM agent_tokens WHERE user_id = ?"} {
+		if _, err := exec.ExecContext(ctx, statement, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func allocateUID(ctx context.Context, db sqlExecutor, userID string, now time.Time) (int, error) {
 	var last int
 	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(uid), ?) FROM linux_identities", FirstUserUID-1).Scan(&last); err != nil {
@@ -960,12 +973,7 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if _, err := tx.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
-		return err
-	}
-	// Agent tokens end with the sessions, for good: enabling the account
-	// again must not bring back a token someone else may hold (ADR 0040).
-	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID); err != nil {
+	if err := endSignIns(ctx, tx, userID); err != nil {
 		return err
 	}
 	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.disabled", "user", userID, ""); err != nil {
@@ -1036,8 +1044,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		UID: uid, Enabled: false,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
-		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
-		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID)
+		_ = endSignIns(ctx, s.store.db, userID)
 		s.sessions.forgetUser(userID)
 		return fmt.Errorf("provision account credential: %w", err)
 	}
@@ -1050,12 +1057,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
-		return err
-	}
-	// A reset is how a taken-over account is recovered: the agent tokens go
-	// too, and choosing the new password does not bring them back (ADR 0040).
-	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_tokens WHERE user_id = ?", userID); err != nil {
+	if err := endSignIns(ctx, tx, userID); err != nil {
 		return err
 	}
 	// The member learns of the reset, and LastCredentialReset shows it, only

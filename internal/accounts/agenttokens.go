@@ -121,7 +121,7 @@ WHERE user_id = ? ORDER BY created_at DESC, id`, actor.ID)
 	defer rows.Close()
 	tokens := []AgentToken{}
 	for rows.Next() {
-		token, err := scanAgentToken(rows)
+		token, err := scanAgentToken(rows.Scan)
 		if err != nil {
 			return nil, err
 		}
@@ -185,14 +185,11 @@ func (s *Service) resolveAgentToken(ctx context.Context, value, scope string) (A
 		return AgentCaller{}, ErrAgentTokenInvalid
 	}
 	var caller AgentCaller
-	var kind, createdAt string
-	var lastUsed sql.NullString
-	err := s.store.db.QueryRowContext(ctx, `
+	token, err := scanAgentToken(s.store.db.QueryRowContext(ctx, `
 SELECT t.id, t.name, t.kind, t.scope, t.created_at, t.last_used_at,
        u.id, u.username, u.role, u.status, u.must_change_password, u.nickname, u.avatar_version
 FROM agent_tokens t JOIN users u ON u.id = t.user_id
-WHERE t.token_hash = ?`, tokenHash(value)).Scan(
-		&caller.Token.ID, &caller.Token.Name, &kind, &caller.Token.Scope, &createdAt, &lastUsed,
+WHERE t.token_hash = ?`, tokenHash(value)).Scan,
 		&caller.User.ID, &caller.User.Username, &caller.User.Role, &caller.User.Status, &caller.User.MustChangePassword,
 		&caller.User.Nickname, &caller.User.AvatarVersion)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -201,13 +198,10 @@ WHERE t.token_hash = ?`, tokenHash(value)).Scan(
 	if err != nil {
 		return AgentCaller{}, err
 	}
-	caller.Token.Kind = AgentKind(kind)
-	caller.Token.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	lastUse := caller.Token.CreatedAt
-	if lastUsed.Valid {
-		used, _ := time.Parse(time.RFC3339Nano, lastUsed.String)
-		caller.Token.LastUsedAt = &used
-		lastUse = used
+	caller.Token = token
+	lastUse := token.CreatedAt
+	if token.LastUsedAt != nil {
+		lastUse = *token.LastUsedAt
 	}
 	now := s.now().UTC()
 	if accountid.AgentTokenIdle(lastUse, now) {
@@ -234,11 +228,12 @@ func deleteIdleAgentTokens(ctx context.Context, db sqlExecutor, userID string, n
 	return err
 }
 
-func scanAgentToken(rows *sql.Rows) (AgentToken, error) {
+// scanAgentToken reads a token's columns, then extra.
+func scanAgentToken(scan func(...any) error, extra ...any) (AgentToken, error) {
 	var token AgentToken
 	var kind, createdAt string
 	var lastUsed sql.NullString
-	if err := rows.Scan(&token.ID, &token.Name, &kind, &token.Scope, &createdAt, &lastUsed); err != nil {
+	if err := scan(append([]any{&token.ID, &token.Name, &kind, &token.Scope, &createdAt, &lastUsed}, extra...)...); err != nil {
 		return AgentToken{}, err
 	}
 	token.Kind = AgentKind(kind)

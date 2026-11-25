@@ -4,12 +4,10 @@
       "name": "the page is ready, with what was blocked",
       "data": {
         "type": "anas:ready",
-        "title": "家庭相册分享 PRD",
         "blocked": [{ "uri": "https://cdn.example.com/a.css", "directive": "style-src-elem" }]
       },
       "read": {
         "type": "anas:ready",
-        "title": "家庭相册分享 PRD",
         "blocked": [{ "uri": "https://cdn.example.com/a.css", "directive": "style-src-elem" }]
       }
     },
@@ -98,18 +96,18 @@
     },
     {
       "name": "a screenshot",
-      "data": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ", "drawMs": 180 },
-      "read": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ", "drawMs": 180 }
+      "data": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ" },
+      "read": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ" }
     },
     {
       "name": "a picture that is not a JPEG is not kept",
       "data": { "type": "anas:captured", "id": 4, "image": "data:text/html,<script>alert(1)</script>" },
-      "read": { "type": "anas:captured", "id": 4, "error": "截图无效" }
+      "read": { "type": "anas:captured", "id": 4 }
     },
     {
-      "name": "a screenshot that failed",
-      "data": { "type": "anas:captured", "id": 5, "error": "SecurityError" },
-      "read": { "type": "anas:captured", "id": 5, "error": "SecurityError" }
+      "name": "a screenshot that failed carries no picture",
+      "data": { "type": "anas:captured", "id": 5 },
+      "read": { "type": "anas:captured", "id": 5 }
     },
     {
       "name": "the reader scrolled",
@@ -138,9 +136,9 @@
       "read": { "type": "anas:capture", "id": 1, "rect": { "x": 552, "y": 364, "w": 192, "h": 132 } }
     },
     {
-      "name": "a screenshot of the view",
+      "name": "a screenshot names its part",
       "data": { "type": "anas:capture", "id": 2 },
-      "read": { "type": "anas:capture", "id": 2 }
+      "read": null
     },
     {
       "name": "a screenshot with a broken part",

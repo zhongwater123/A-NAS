@@ -247,8 +247,8 @@ func TestAdministratorsChooseWhoUsesTheWorkspace(t *testing.T) {
 	if ok, _ := f.store.CanUse(ctx, f.alice); !ok {
 		t.Fatal("an added member cannot use the workspace")
 	}
-	if members, err := f.store.Members(ctx); err != nil || len(members) != 1 || members[0].AddedBy != f.admin.AccountID {
-		t.Fatalf("Members() = %+v, %v", members, err)
+	if members, err := f.store.MemberIDs(ctx); err != nil || len(members) != 1 || !members[f.alice.AccountID] {
+		t.Fatalf("MemberIDs() = %+v, %v", members, err)
 	}
 	events, err := f.store.Activity(ctx, f.admin, activity.Query{Limit: 10})
 	if err != nil || len(events) != 1 || events[0].Action != "workspace.member_added" {

@@ -74,6 +74,7 @@ export const removeMember = (accountId: string) =>
 
 // The account's agent tokens are the Product Service's own (ADR 0040);
 // 设置 → 我的账号 lists them too.
+export const agentTokensKey = ["workspace", "agent-tokens"] as const;
 export async function listAgentTokens(signal?: AbortSignal): Promise<AgentToken[]> {
   return (await call(client.GET("/api/v1/session/agent-tokens", { signal }))).items;
 }

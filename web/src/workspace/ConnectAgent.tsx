@@ -4,8 +4,9 @@ import { type FormEvent, type RefObject, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
 import { copyText } from "../lib/clipboard";
+import { namesDeviceByAddress } from "../lib/deviceHost";
 import { Modal } from "../ui/modal";
-import { type AgentKind, createAgentToken, listAgentTokens } from "./api";
+import { type AgentKind, agentTokensKey, createAgentToken, listAgentTokens } from "./api";
 import { kindLabel } from "./words";
 import styles from "./workspace.module.css";
 
@@ -13,12 +14,6 @@ import styles from "./workspace.module.css";
 const serverName = "a-nas";
 // Codex reads the token from this environment variable.
 const codexVariable = "ANAS_WORKSPACE_TOKEN";
-
-// agentHost tells whether the desktop's address works for an agent: the
-// Product Service takes agent calls only at an IP address or localhost
-// (ADR 0040, against DNS rebinding).
-export const agentHost = (hostname: string) =>
-  hostname === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.startsWith("[");
 
 // commandFor is what the member runs on their computer to connect the agent.
 export function commandFor(kind: AgentKind, endpoint: string, token: string): string {
@@ -124,7 +119,7 @@ function Command({ created, onClose }: { created: Created; onClose: () => void }
   const [copied, setCopied] = useState(false);
   // The agent's first call marks the token used.
   const tokens = useQuery({
-    queryKey: ["workspace", "agent-tokens"],
+    queryKey: agentTokensKey,
     queryFn: ({ signal }) => listAgentTokens(signal),
     refetchInterval: (query) =>
       query.state.data?.some((token) => token.id === created.id && token.lastUsedAt) ? false : 2_000,
@@ -151,7 +146,7 @@ function Command({ created, onClose }: { created: Created; onClose: () => void }
         </button>
       </div>
       <p className={styles.wsFaint}>命令里的令牌只显示这一次，只能用于共享工作区。</p>
-      {!agentHost(location.hostname) && (
+      {!namesDeviceByAddress(location.hostname) && (
         <p className={`${styles.wsNotice} ${styles.warn}`}>
           <TriangleAlert size={14} aria-hidden="true" />
           agent 只能按 IP 地址连接：把命令里的 {location.hostname} 换成 NAS 的 IP 地址。

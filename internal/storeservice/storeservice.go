@@ -61,10 +61,11 @@ type Config[S io.Closer] struct {
 	CheckStore    func(string) error
 	RetryInterval time.Duration
 	Logger        *slog.Logger
-	// Authenticate, when set, wraps the API instead of the session check
-	// (modules.Authenticate): the shared workspace also takes agent tokens
-	// and one-time transfer links (ADR 0040). It must confirm every caller
-	// with the Host Agent itself, as the session check does.
+	// Authenticate, when set, wraps the API in place of
+	// modules.Authenticate, for a service that takes more than sessions:
+	// the shared workspace adds agent tokens and one-time transfer links
+	// (ADR 0040) and leaves sessions to modules.Authenticate. It must
+	// confirm every caller with the Host Agent itself.
 	Authenticate func(http.Handler) http.Handler
 }
 
@@ -261,14 +262,21 @@ func upkeep[S io.Closer](ctx context.Context, config Config[S], store S) func() 
 	if config.Upkeep == nil {
 		return func() {}
 	}
+	return Every(ctx, config.UpkeepInterval, func(ctx context.Context) { config.Upkeep(ctx, store) })
+}
+
+// Every runs run now and then every interval until what it returns is
+// called, which ends the run in progress and waits for it: call it before
+// closing what run uses. Development runs a store's upkeep this way too.
+func Every(ctx context.Context, interval time.Duration, run func(context.Context)) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(config.UpkeepInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
-			config.Upkeep(ctx, store)
+			run(ctx)
 			select {
 			case <-ctx.Done():
 				return

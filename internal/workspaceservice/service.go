@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
@@ -46,10 +44,7 @@ var ErrStoreUnavailable = errors.New("workspace store on the data volume is unav
 // directory on the writable, verified data volume, so pages are never
 // written to the system disk.
 func RequireOwnedStore(root string) error {
-	if err := modules.RequireOwnedStore(root); err != nil {
-		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
+	if err := modules.RequireDataVolumeStore(root); err != nil {
 		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
 	}
 	return nil
@@ -85,16 +80,19 @@ func Run(ctx context.Context, config Config) error {
 		API: func(store *workspace.Store) http.Handler {
 			return workspaceapi.New(store, workspaceapi.Options{Logger: config.Logger, Directory: config.Directory})
 		},
-		Remove: RemoveAccount,
-		Upkeep: func(ctx context.Context, store *workspace.Store) {
-			if err := store.Upkeep(ctx); err != nil && ctx.Err() == nil {
-				config.Logger.WarnContext(ctx, "workspace upkeep failed", "error", err)
-			}
-		},
+		Remove:         RemoveAccount,
+		Upkeep:         func(ctx context.Context, store *workspace.Store) { Upkeep(ctx, store, config.Logger) },
 		UpkeepInterval: UpkeepInterval,
 		CheckStore:     config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
 		Authenticate: func(next http.Handler) http.Handler { return Authenticate(config.Directory, config.Logger, next) },
 	})
+}
+
+// Upkeep runs store's upkeep, logging a failure unless ctx ended.
+func Upkeep(ctx context.Context, store *workspace.Store, logger *slog.Logger) {
+	if err := store.Upkeep(ctx); err != nil && ctx.Err() == nil {
+		logger.WarnContext(ctx, "workspace upkeep failed", "error", err)
+	}
 }
 
 // RemoveAccount forgets a deleted account in store.

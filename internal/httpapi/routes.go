@@ -155,11 +155,11 @@ func (h *productHandler) mounts() []apiroute.Route {
 		// the links' routes are not part of the desktop's mount (ADR 0040).
 		mount(workspaceapi.PathPrefix, apiroute.Session, serve(h.Workspace), workspaceapi.MemberEndpoints())
 		mount(workspaceapi.AdminPrefix, apiroute.Admin, serve(h.Workspace), workspaceapi.AdminEndpoints())
-		for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
-			routes = append(routes, apiroute.Route{Method: method, Pattern: workspaceapi.MCPPath, Posture: apiroute.Agent, Handler: serve(h.Workspace)})
+		for _, route := range workspaceapi.AgentRoutes {
+			routes = append(routes, apiroute.Route{Method: route.Method, Pattern: route.Pattern, Posture: apiroute.Agent, Handler: serve(h.Workspace)})
 		}
-		for _, method := range []string{http.MethodGet, http.MethodPut} {
-			routes = append(routes, apiroute.Route{Method: method, Pattern: workspaceapi.TransfersPrefix + "{key}", Posture: apiroute.Public, Handler: serve(h.Workspace)})
+		for _, route := range workspaceapi.LinkRoutes {
+			routes = append(routes, apiroute.Route{Method: route.Method, Pattern: route.Pattern, Posture: apiroute.Public, Handler: serve(h.Workspace)})
 		}
 	}
 	if h.Media != nil {

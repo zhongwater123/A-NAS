@@ -1,11 +1,9 @@
 package sessionlookup
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -85,39 +83,12 @@ func WithAgentTokens(next http.Handler, tokens AgentTokenResolver, scope string,
 // lookup does not accept. The scope is the socket's: the argument names what
 // the caller expects and is not sent.
 func (c *Client) ResolveAgentToken(ctx context.Context, token, _ string) (accountid.AgentTokenUser, error) {
-	return c.agentToken(ctx, AgentTokenPath, agentTokenRequest{Token: token})
+	return lookup(ctx, c, AgentTokenPath, agentTokenRequest{Token: token}, accountid.ErrAgentTokenNotFound, namesToken)
 }
 
 // AgentTokenByID answers as ResolveAgentToken does for the token with id.
 func (c *Client) AgentTokenByID(ctx context.Context, id, _ string) (accountid.AgentTokenUser, error) {
-	return c.agentToken(ctx, AgentTokenIDPath, agentTokenRequest{ID: id})
+	return lookup(ctx, c, AgentTokenIDPath, agentTokenRequest{ID: id}, accountid.ErrAgentTokenNotFound, namesToken)
 }
 
-func (c *Client) agentToken(ctx context.Context, path string, query agentTokenRequest) (accountid.AgentTokenUser, error) {
-	body, err := json.Marshal(query)
-	if err != nil {
-		return accountid.AgentTokenUser{}, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://host-agent"+path, bytes.NewReader(body))
-	if err != nil {
-		return accountid.AgentTokenUser{}, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := c.client.Do(request)
-	if err != nil {
-		return accountid.AgentTokenUser{}, fmt.Errorf("reach the session lookup: %w", err)
-	}
-	defer response.Body.Close()
-	switch response.StatusCode {
-	case http.StatusOK:
-		var user accountid.AgentTokenUser
-		if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&user); err != nil || user.UserID == "" || user.TokenID == "" {
-			return accountid.AgentTokenUser{}, errors.New("session lookup returned an invalid agent token")
-		}
-		return user, nil
-	case http.StatusUnauthorized:
-		return accountid.AgentTokenUser{}, accountid.ErrAgentTokenNotFound
-	default:
-		return accountid.AgentTokenUser{}, fmt.Errorf("agent token lookup answered %s", response.Status)
-	}
-}
+func namesToken(user accountid.AgentTokenUser) bool { return user.UserID != "" && user.TokenID != "" }

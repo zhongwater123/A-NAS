@@ -152,7 +152,6 @@ CREATE INDEX pages_updated ON pages(updated_at DESC, id);
 CREATE TABLE versions (
     page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     version INTEGER NOT NULL,
-    content BLOB NOT NULL,
     size INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
     saved_by TEXT NOT NULL,
@@ -163,6 +162,9 @@ CREATE TABLE versions (
     note TEXT NOT NULL DEFAULT '',
     changed TEXT NOT NULL DEFAULT '[]',
     saved_at TEXT NOT NULL,
+    -- Last: SQLite reads a column after a large value through all of
+    -- its overflow pages.
+    content BLOB NOT NULL,
     PRIMARY KEY (page_id, version)
 );
 CREATE TABLE members (

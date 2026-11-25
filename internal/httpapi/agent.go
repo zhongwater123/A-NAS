@@ -2,21 +2,16 @@ package httpapi
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/activity"
-	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
-	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
 
 // Answers of the agent posture that only its guard gives.
@@ -90,21 +85,4 @@ func bearerToken(r *http.Request) (string, bool) {
 func refuseAgent(w http.ResponseWriter, message string) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="A-NAS"`)
 	httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", message)
-}
-
-func (h *productHandler) workspaceActivitySource() func(*http.Request, activity.Query) ([]activity.Event, error) {
-	if h.Workspace == nil {
-		return nil
-	}
-	return func(r *http.Request, q activity.Query) ([]activity.Event, error) {
-		request := r.Clone(r.Context())
-		request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
-		request.URL = &url.URL{Path: workspaceapi.ActivityPath, RawQuery: q.Values().Encode()}
-		response := &bufferedResponse{header: http.Header{}}
-		h.guard(apiroute.Route{Posture: apiroute.Session, Handler: serve(h.Workspace)})(response, request)
-		if response.status != http.StatusOK {
-			return nil, fmt.Errorf("workspace activity status %d", response.status)
-		}
-		return activityapi.DecodeServicePage(&response.body)
-	}
 }

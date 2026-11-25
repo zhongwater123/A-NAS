@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileCode2, PlugZap, RotateCw, TriangleAlert, Upload, Users } from "lucide-react";
+import { FileCode2, PlugZap, Upload, Users } from "lucide-react";
 import { type DragEvent, useCallback, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
+import { carriesFiles } from "../lib/pickedFiles";
 import { relativeTime } from "../lib/time";
 import { useDialogs, useToasts } from "../ui/feedback";
 import { useWindowShown } from "../ui/useWindowShown";
@@ -11,7 +12,8 @@ import { ConnectAgent } from "./ConnectAgent";
 import type { Kit } from "./kit";
 import { Members } from "./Members";
 import { PageView, pagesKey } from "./PageView";
-import { isHTML, savedText } from "./words";
+import { acceptHTML, Failed, HTMLPicker } from "./parts";
+import { savedText } from "./words";
 import styles from "./workspace.module.css";
 
 // WorkspacePanel is the 共享工作区 window (docs/specs/shared-workspace.md):
@@ -34,7 +36,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
   const shown = useWindowShown(root);
   const { toast, element: toasts } = useToasts();
   const { confirm, prompt, dialog } = useDialogs();
-  const kit = useMemo<Kit>(() => ({ toast, confirm, prompt, container: root }), [toast, confirm, prompt]);
+  const kit = useMemo<Kit>(() => ({ toast, confirm, prompt }), [toast, confirm, prompt]);
   const queries = useQueryClient();
   const list = useQuery({
     queryKey: pagesKey,
@@ -52,10 +54,6 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
   const picker = useRef<HTMLInputElement>(null);
 
   const upload = async (file: File) => {
-    if (!isHTML(file)) {
-      toast({ text: "只能上传 .html 文件", tone: "error" });
-      return;
-    }
     setUploading(true);
     try {
       const page = await createPage(file);
@@ -71,7 +69,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
     event.preventDefault();
     setDropping(false);
     const file = event.dataTransfer.files[0];
-    if (file) void upload(file);
+    if (file && acceptHTML(file, toast)) void upload(file);
   };
   // A page deleted here or by someone else gives way to the newest.
   const gone = useCallback(() => {
@@ -84,7 +82,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
       className={styles.wsApp}
       ref={root}
       onDragOver={(event) => {
-        if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+        if (!carriesFiles(event.dataTransfer)) return;
         event.preventDefault();
         setDropping(true);
       }}
@@ -103,17 +101,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
           <Upload size={15} aria-hidden="true" />
           {uploading ? "正在上传…" : "上传页面"}
         </button>
-        <input
-          ref={picker}
-          type="file"
-          accept=".html,.htm,text/html"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) void upload(file);
-          }}
-        />
+        <HTMLPicker ref={picker} toast={toast} onFile={(file) => void upload(file)} />
         <nav className={styles.wsList} aria-label="页面">
           {pages.map((page) => (
             <PageRow key={page.id} page={page} open={page.id === open} onOpen={() => setChosen(page.id)} />
@@ -134,14 +122,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
       </aside>
       <main className={styles.wsMain}>
         {list.isError && !list.data ? (
-          <div className={styles.wsCentered}>
-            <TriangleAlert className={styles.wsCenteredIcon} aria-hidden="true" />
-            <p>{errorText(list.error, "workspace")}</p>
-            <button type="button" className={styles.wsButton} onClick={() => void list.refetch()}>
-              <RotateCw size={15} aria-hidden="true" />
-              重试
-            </button>
-          </div>
+          <Failed error={list.error} onRetry={() => void list.refetch()} />
         ) : !list.data ? (
           <div className={styles.wsCentered}>
             <span className="loader" role="status" aria-label="正在读取页面" />

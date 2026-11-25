@@ -71,9 +71,9 @@ func walk(src []byte, visit func(token html.TokenType, raw []byte, offset int, n
 			}
 			return
 		}
-		// Raw is only valid until the next call, and TagName lower-cases it
-		// in place.
-		raw := bytes.Clone(tokenizer.Raw())
+		// The token is src's own bytes here; the tokenizer's copy is only
+		// valid until the next call, and TagName lower-cases it in place.
+		raw := src[offset : offset+len(tokenizer.Raw())]
 		name := ""
 		if token == html.StartTagToken || token == html.SelfClosingTagToken || token == html.EndTagToken {
 			tag, _ := tokenizer.TagName()
@@ -267,23 +267,33 @@ type Segment struct {
 // ReadSegment returns whole lines of src from line from (1-based) while they
 // fit in maxChars characters, with long inline data folded.
 func ReadSegment(src []byte, from, maxChars int) Segment {
-	lines := strings.SplitAfter(string(src), "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	total := bytes.Count(src, []byte{'\n'})
+	if len(src) > 0 && src[len(src)-1] != '\n' {
+		total++
 	}
-	segment := Segment{TotalLines: len(lines)}
+	segment := Segment{TotalLines: total}
 	if from < 1 {
 		from = 1
 	}
-	if from > len(lines) {
+	if from > total {
 		return segment
+	}
+	// Only the lines shown are copied: an agent reads a large page segment
+	// by segment.
+	rest := src
+	for range from - 1 {
+		rest = rest[bytes.IndexByte(rest, '\n')+1:]
 	}
 	var text strings.Builder
 	count := 0
 	folded := 0
 	line := from
-	for ; line <= len(lines); line++ {
-		shown := foldedData.ReplaceAllStringFunc(lines[line-1], func(match string) string {
+	for ; line <= total; line++ {
+		current := rest
+		if end := bytes.IndexByte(rest, '\n'); end >= 0 {
+			current, rest = rest[:end+1], rest[end+1:]
+		}
+		shown := foldedData.ReplaceAllStringFunc(string(current), func(match string) string {
 			folded++
 			mime, _, _ := strings.Cut(strings.TrimPrefix(match, "data:"), ";")
 			payload := len(match) - strings.Index(match, ",") - 1
@@ -306,7 +316,7 @@ func ReadSegment(src []byte, from, maxChars int) Segment {
 	segment.Text = text.String()
 	segment.FirstLine = from
 	segment.LastLine = line - 1
-	if line <= len(lines) {
+	if line <= total {
 		segment.NextLine = line
 	}
 	segment.Folded = folded
