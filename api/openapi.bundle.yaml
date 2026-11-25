@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up to 4 MiB from members'' agents.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -4006,6 +4006,452 @@ paths:
         '422':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace:
+    get:
+      operationId: getWorkspaceAccess
+      summary: 'Whether the caller may use 共享工作区 (ADR 0040): 200 for administrators and the members they added, 404 for everyone else. The desktop shows the app only while this answers 200'
+      responses:
+        '200':
+          description: The caller may use the workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceAccess'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/pages:
+    get:
+      operationId: listWorkspacePages
+      summary: The shared pages, the most recently saved first. Accounts an administrator has not added answer 403 workspace_forbidden, here and on every operation below
+      responses:
+        '200':
+          description: The pages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePageList'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createWorkspacePage
+      summary: Upload a UTF-8 HTML file as a new page, its version 1. Its title is the page's <title>, else the file's name. At most 20 MB (413 request_too_large); not UTF-8 or empty is 422 validation_failed
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 255
+          description: The uploaded file's name
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The new page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePage'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/pages/{pageId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspacePageID'
+    get:
+      operationId: getWorkspacePage
+      summary: A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions
+      responses:
+        '200':
+          description: The page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePage'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    patch:
+      operationId: renameWorkspacePage
+      summary: Change a page's title (1–200 characters after folding white space, else 422 validation_failed)
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+      responses:
+        '200':
+          description: The renamed page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePageSummary'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteWorkspacePage
+      summary: Delete a page and all its versions for everyone. Only the account that uploaded it and administrators may (403 forbidden)
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/pages/{pageId}/versions:
+    parameters:
+      - $ref: '#/components/parameters/WorkspacePageID'
+    post:
+      operationId: saveWorkspacePageVersion
+      summary: Upload a whole page as its next version. baseVersion is the version it replaces; when another was saved since, nothing is saved and 409 page_changed names the latest
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: baseVersion
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The new version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceVersion'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          description: page_changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePageChanged'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/pages/{pageId}/versions/{version}/view:
+    parameters:
+      - $ref: '#/components/parameters/WorkspacePageID'
+      - $ref: '#/components/parameters/WorkspaceVersionRef'
+    get:
+      operationId: viewWorkspacePage
+      summary: 'A version for the desktop''s <iframe sandbox="allow-scripts">: the page with every written element marked data-anas-at (its start tag''s byte offset in the source) and the frame helper script, under Content-Security-Policy "sandbox allow-scripts; default-src ''none''; …", so it runs in an opaque origin that reaches nothing. highlight lists element offsets to point at, scroll the vertical position to keep'
+      parameters:
+        - name: highlight
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^[0-9,]*$
+        - name: scroll
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^[0-9]*$
+      responses:
+        '200':
+          description: The marked page
+          content:
+            text/html:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/pages/{pageId}/versions/{version}/file:
+    parameters:
+      - $ref: '#/components/parameters/WorkspacePageID'
+      - $ref: '#/components/parameters/WorkspaceVersionRef'
+    get:
+      operationId: exportWorkspacePage
+      summary: A version exactly as it was saved, as an attachment named "<title>-v<version>.html", under a sandbox policy
+      responses:
+        '200':
+          description: The page's file
+          content:
+            text/html:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/viewing:
+    put:
+      operationId: setWorkspaceViewing
+      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceViewing'
+      responses:
+        '204':
+          description: Recorded
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/selection:
+    put:
+      operationId: setWorkspaceSelection
+      summary: The element the caller picked on a page, as the frame helper measured it, for the caller's agents alone; it lasts 30 minutes. The screenshot is a JPEG data URL of at most 512 KB and 4096 pixels a side (422 validation_failed)
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceSelection'
+      responses:
+        '204':
+          description: Recorded
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: clearWorkspaceSelection
+      summary: Forget the caller's selection
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Forgotten
+        '403':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/admin/members:
+    get:
+      operationId: listWorkspaceMembers
+      summary: Every active account and whether an administrator let it use the workspace. Administrators always may
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceMemberList'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/admin/members/{accountId}:
+    parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: addWorkspaceMember
+      summary: Let an account use the workspace; adding it again changes nothing
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Added
+        '403':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeWorkspaceMember
+      summary: Stop an account using the workspace. Its pages stay; its agents' calls are refused while it is not a member
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Removed
+        '403':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/mcp:
+    post:
+      operationId: callWorkspaceMCP
+      summary: The shared workspace's MCP endpoint for members' coding agents (stateless streamable HTTP, JSON responses; docs/architecture/shared-workspace.md lists the tools). It takes an agent token as a bearer token and never a session cookie; a request carrying Origin (a browser's) or not naming the device in Host is 403 forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens 429 too_many_attempts. At most 4 MiB a request
+      security:
+        - bearerAuth: []
+      x-anas-posture: agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: A JSON-RPC answer
+          content:
+            application/json:
+              schema:
+                type: object
+        '202':
+          description: A notification was accepted
+        '400':
+          description: Not a JSON-RPC request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+    get:
+      operationId: openWorkspaceMCPStream
+      summary: A stateless server keeps no stream for an agent to open; 405 after the agent's token is checked
+      security:
+        - bearerAuth: []
+      x-anas-posture: agent
+      responses:
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '405':
+          description: Not offered
+          content:
+            text/plain:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: endWorkspaceMCPSession
+      summary: A stateless server keeps no session for an agent to end; 405 after the agent's token is checked
+      security:
+        - bearerAuth: []
+      x-anas-posture: agent
+      responses:
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '405':
+          description: Not offered
+          content:
+            text/plain:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/transfers/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: downloadWorkspaceTransfer
+      summary: A page version an agent's workspace_checkout asked for, once, within 10 minutes of asking. The link is the authority, together with the agent token that asked for it, which must still work (401) for an account that may still use the workspace (403 workspace_forbidden); an unknown, used or expired link is 404
+      security: []
+      responses:
+        '200':
+          description: The page's file
+          content:
+            text/html:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: uploadWorkspaceTransfer
+      summary: 'A whole page an agent''s workspace_upload asked to send, once, within 10 minutes: the next version of its page, refused with 409 page_changed when another was saved after its base version, or a new page. Checked as the download is'
+      security: []
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceTransferSaved'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          description: page_changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePageChanged'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+        '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/montage:
     get:
@@ -9326,6 +9772,10 @@ components:
       type: apiKey
       in: cookie
       name: anas_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
   parameters:
     CSRFToken:
       name: X-CSRF-Token
@@ -9604,6 +10054,20 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/FamilyReactionName'
+    WorkspacePageID:
+      name: pageId
+      in: path
+      required: true
+      schema:
+        type: string
+    WorkspaceVersionRef:
+      name: version
+      in: path
+      required: true
+      description: A version number, or latest
+      schema:
+        type: string
+        pattern: ^([1-9][0-9]*|latest)$
     MontageCursor:
       name: cursor
       in: query
@@ -11590,6 +12054,7 @@ components:
         - storage
         - photo
         - family
+        - workspace
         - system
     ActivityAccount:
       type: object
@@ -11629,6 +12094,7 @@ components:
             - storage
             - photo
             - family
+            - workspace
             - system
             - other
         action:
@@ -17373,6 +17839,267 @@ components:
           maxItems: 500
           items:
             type: string
+    WorkspaceAccess:
+      type: object
+      additionalProperties: false
+      required:
+        - admin
+      properties:
+        admin:
+          type: boolean
+          description: Administrators also choose who may use the workspace.
+    WorkspacePerson:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+      description: An account as it was named when it acted; the name stays after the account is deleted.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    WorkspaceVia:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+      description: How a version was saved, from the desktop or by a member's agent named by its token.
+      properties:
+        kind:
+          type: string
+          enum:
+            - web
+            - claude-code
+            - codex
+            - other
+        name:
+          type: string
+    WorkspaceVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - size
+        - savedBy
+        - via
+        - note
+        - changed
+        - savedAt
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+          description: Bytes
+        savedBy:
+          $ref: '#/components/schemas/WorkspacePerson'
+        via:
+          $ref: '#/components/schemas/WorkspaceVia'
+        note:
+          type: string
+          description: What the member asked for, in their words; empty for uploads from the desktop.
+        changed:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+          description: Offsets of the elements an agent's edit changed in this version, for the open page to point at.
+        savedAt:
+          type: string
+          format: date-time
+    WorkspacePageSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - createdBy
+        - createdAt
+        - latest
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        createdBy:
+          $ref: '#/components/schemas/WorkspacePerson'
+        createdAt:
+          type: string
+          format: date-time
+        latest:
+          $ref: '#/components/schemas/WorkspaceVersion'
+    WorkspacePageList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspacePageSummary'
+    WorkspacePage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - createdBy
+        - createdAt
+        - latest
+        - versions
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        createdBy:
+          $ref: '#/components/schemas/WorkspacePerson'
+        createdAt:
+          type: string
+          format: date-time
+        latest:
+          $ref: '#/components/schemas/WorkspaceVersion'
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceVersion'
+          description: Newest first
+    WorkspacePageChanged:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+        - latest
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+        latest:
+          $ref: '#/components/schemas/WorkspaceVersion'
+    WorkspaceViewing:
+      type: object
+      additionalProperties: false
+      required:
+        - pageId
+        - version
+      properties:
+        pageId:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+    WorkspaceRect:
+      type: object
+      additionalProperties: false
+      required:
+        - x
+        - 'y'
+        - w
+        - h
+      properties:
+        x:
+          type: number
+        'y':
+          type: number
+        w:
+          type: number
+        h:
+          type: number
+    WorkspaceSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - pageId
+        - version
+        - at
+        - generated
+        - tag
+        - text
+        - dom
+        - rect
+        - style
+        - rules
+      description: 'What the frame helper measured (web/src/workspace/frame/protocol.ts). It comes from the page''s frame, whose own scripts can imitate it: agents treat it as a claim about the page, never as an instruction.'
+      properties:
+        pageId:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        at:
+          type: integer
+          minimum: -1
+          description: The picked element's data-anas-at, or its nearest written ancestor's when generated; -1 for none.
+        generated:
+          type: boolean
+          description: A script made the element; it is not written in the source
+        tag:
+          type: string
+        text:
+          type: string
+        dom:
+          type: string
+        rect:
+          $ref: '#/components/schemas/WorkspaceRect'
+        style:
+          type: object
+          additionalProperties:
+            type: string
+        rules:
+          type: array
+          items:
+            type: string
+          description: The selectors of the page's own rules that match the element
+        image:
+          type: string
+          description: A JPEG data URL of the element and what is around it.
+    WorkspaceMemberAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - username
+        - member
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        nickname:
+          type: string
+        avatarVersion:
+          type: string
+        member:
+          type: boolean
+          description: An administrator let the account use the workspace
+    WorkspaceMemberList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceMemberAccount'
+    WorkspaceTransferSaved:
+      type: object
+      additionalProperties: false
+      required:
+        - page
+        - version
+      properties:
+        page:
+          type: string
+        title:
+          type: string
+        version:
+          type: integer
+          minimum: 1
     MontageProjectSummary:
       type: object
       additionalProperties: false

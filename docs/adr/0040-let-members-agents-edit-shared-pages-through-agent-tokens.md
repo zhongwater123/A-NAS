@@ -19,7 +19,7 @@
    - 令牌不绑定客户端地址，这与会话不同（[不变量 9](../architecture/OVERVIEW.md#不变量)）：agent 所在的电脑换了地址仍要能用。
 4. **产品服务上的第五种路由姿态 `agent`。**
    - 它只认 `Authorization: Bearer`，不认 Cookie，也不要 CSRF 令牌（令牌不会被浏览器自动带上）。
-   - 带 `Origin` 或 `Sec-Fetch-Site` 头的请求一律拒绝：只有浏览器会带，浏览器不该调用这里。`Host` 要指向本机，只认 `localhost` 与 IP 地址，同终端与 Docker 的写操作（[ADR 0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 决定 4）。
+   - 带 `Origin` 头的请求一律拒绝：浏览器发出的写请求与跨源请求都带它，浏览器不该调用这里。`Sec-Fetch-*` 不作依据：命令行的 HTTP 客户端（如 Node 的）也可能带。`Host` 要指向本机，只认 `localhost` 与 IP 地址，同终端与 Docker 的写操作（[ADR 0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 决定 4）。
    - 产品服务先核验令牌、账号状态与须改密，按客户端限流失败的尝试，再经转发的内部请求头把令牌交给共享工作区服务；共享工作区服务不信产品服务的结论，自己向 Host Agent 再确认一次（[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md) 的原则）。
 5. **MCP 接口。** 用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`），无状态的 HTTP 传输、JSON 响应，挂在 `POST|GET|DELETE /api/v1/workspace/mcp`。请求体在服务端限 4 MiB；这是“JSON 只经 `internal/httpjson`”的例外，因为 SDK 自己读写 JSON-RPC。
 6. **一次性传输地址。** 整份下载与上传给 agent 一个随机地址 `/api/v1/workspace/transfers/{key}`（128 位随机数，10 分钟内只能用一次，绑定账号、页面、基线版本与签发它的令牌 ID），以便 agent 用 `curl.exe` 传文件，内容不经过对话。这条路由在产品服务上是 public 姿态，由地址本身授权；使用时共享工作区服务按令牌 ID 向 Host Agent 确认签发它的令牌仍然有效。

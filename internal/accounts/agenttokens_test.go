@@ -3,8 +3,10 @@ package accounts_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,11 +48,20 @@ func newAgentTokenFixture(t *testing.T) agentTokenFixture {
 	return agentTokenFixture{service: service, directory: directory, now: &now, admin: admin, alice: alice}
 }
 
+var clients atomic.Int32
+
+// anotherClient is a context from a LAN client no other call used, so that
+// the deliberate failures of a test do not make its other calls wait.
+func anotherClient() context.Context {
+	n := clients.Add(1)
+	return accounts.WithClientOrigin(context.Background(), accounts.ClientOrigin{Via: accounts.ViaLAN, Address: fmt.Sprintf("10.9.%d.%d", n/250, n%250+1)})
+}
+
 // resolvable reports whether both the Product Service and the Host Agent
 // accept value for the shared workspace.
 func (f agentTokenFixture) resolvable(t *testing.T, value string) bool {
 	t.Helper()
-	ctx := context.Background()
+	ctx := anotherClient()
 	_, productErr := f.service.ResolveAgentToken(ctx, value, accountid.AgentScopeWorkspace)
 	_, hostErr := f.directory.ResolveAgentToken(ctx, value, accountid.AgentScopeWorkspace)
 	if (productErr == nil) != (hostErr == nil) {
@@ -148,7 +159,7 @@ func TestAgentTokensReachOnlyTheirScopeAndEndWhenIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.ResolveAgentToken(ctx, value, "photos"); !errors.Is(err, accounts.ErrAgentTokenInvalid) {
+	if _, err := f.service.ResolveAgentToken(anotherClient(), value, "photos"); !errors.Is(err, accounts.ErrAgentTokenInvalid) {
 		t.Fatalf("a workspace token resolved for photos: %v", err)
 	}
 	if _, err := f.directory.ResolveAgentToken(ctx, value, "photos"); !errors.Is(err, accountid.ErrAgentTokenNotFound) {
@@ -253,5 +264,33 @@ func TestDisablingOrResettingAnAccountEndsItsAgentTokensForGood(t *testing.T) {
 	}
 	if f.resolvable(t, resetToken) {
 		t.Fatal("choosing a new password brought the token back")
+	}
+}
+
+func TestAClientThatKeepsPresentingBadTokensWaits(t *testing.T) {
+	ctx := context.Background()
+	f := newAgentTokenFixture(t)
+	_, value, err := f.service.CreateAgentToken(ctx, f.alice, "laptop", accounts.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guesser := anotherClient()
+	forged := accountid.AgentTokenPrefix + strings.Repeat("0", 64)
+	for range 5 {
+		if _, err := f.service.ResolveAgentToken(guesser, forged, accountid.AgentScopeWorkspace); !errors.Is(err, accounts.ErrAgentTokenInvalid) {
+			t.Fatalf("a forged token: %v", err)
+		}
+	}
+	_, err = f.service.ResolveAgentToken(guesser, value, accountid.AgentScopeWorkspace)
+	throttled, ok := errors.AsType[*accounts.ThrottledError](err)
+	if !ok || throttled.RetryAfter != 30*time.Second {
+		t.Fatalf("the sixth attempt from a guessing client: %v", err)
+	}
+	if _, err := f.service.ResolveAgentToken(anotherClient(), value, accountid.AgentScopeWorkspace); err != nil {
+		t.Fatalf("another client waits for the guesser: %v", err)
+	}
+	*f.now = f.now.Add(30 * time.Second)
+	if _, err := f.service.ResolveAgentToken(guesser, value, accountid.AgentScopeWorkspace); err != nil {
+		t.Fatalf("after the wait: %v", err)
 	}
 }

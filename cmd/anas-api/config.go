@@ -91,6 +91,8 @@ type Config struct {
 	// shows no entry, and hiding the entry alone would not stop the API.
 	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
 	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	// WorkspaceSocket is the shared workspace's service (ADR 0040).
+	WorkspaceSocket string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
 	// MontageMusicSocket and MontageComputeSocket reach the montage
 	// center's Workers in development, where the montage center runs in
 	// this process; without them its songs wait.
@@ -259,7 +261,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket},
+		{"ANAS_WORKSPACE_SOCKET", &c.WorkspaceSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
 		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
@@ -519,6 +522,30 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 	})
 	if len(problems) > 0 {
 		return montageServiceConfig{}, errors.Join(problems...)
+	}
+	return c, nil
+}
+
+// workspaceServiceConfig configures the shared workspace's service (ADR
+// 0040), which runs from this binary as its own process and identity.
+type workspaceServiceConfig struct {
+	Root          string `env:"ANAS_WORKSPACE_ROOT" envDefault:"/srv/a-nas/data/workspace"`
+	Socket        string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
+	SessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
+}
+
+// loadWorkspaceServiceConfig resolves and validates the workspace service's
+// configuration, reporting every problem at once.
+func loadWorkspaceServiceConfig(environment map[string]string) (workspaceServiceConfig, error) {
+	c, err := envconfig.Parse[workspaceServiceConfig](environment)
+	if err != nil {
+		return workspaceServiceConfig{}, err
+	}
+	problems := absolutePaths(map[string]*string{
+		"ANAS_WORKSPACE_ROOT": &c.Root, "ANAS_WORKSPACE_SOCKET": &c.Socket, "ANAS_WORKSPACE_SESSION_SOCKET": &c.SessionSocket,
+	})
+	if len(problems) > 0 {
+		return workspaceServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

@@ -92,7 +92,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 产品 API 按领域拆包（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）：
 
 - 领域逻辑在 `internal/<domain>`，不依赖 HTTP；它的 HTTP 接口在 `internal/<domain>api`，负责解析请求、调用领域服务，并把领域错误映射为状态码与错误码。别的接口也要回答这个领域的错误时，复用该包导出的 `WriteError`，例如 `filesapi.WriteError` 与 `accountsapi.WriteError`。
-- `<domain>api` 用 `Routes()` 返回 [`apiroute.Route`](../../internal/apiroute/apiroute.go) 列表，每项包含方法、路径、姿态与处理函数。姿态有五种：`public`、`session`、`mutation`、`admin` 与 `agent`。`agent` 只用于成员电脑上的编码 agent（[ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)）：不认 Cookie、不要 CSRF 令牌，只认 `Authorization: Bearer` 的 Agent令牌，拒绝带 `Origin` 或 `Sec-Fetch-Site` 头的请求，失败的尝试按登录失败限流；令牌经转发的内部请求头交给服务，服务自己向 Host Agent 再确认。OpenAPI 中这类操作用 `bearerAuth` 方案并标 `x-anas-posture: agent`。
+- `<domain>api` 用 `Routes()` 返回 [`apiroute.Route`](../../internal/apiroute/apiroute.go) 列表，每项包含方法、路径、姿态与处理函数。姿态有五种：`public`、`session`、`mutation`、`admin` 与 `agent`。`agent` 只用于成员电脑上的编码 agent（[ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)）：不认 Cookie、不要 CSRF 令牌，只认 `Authorization: Bearer` 的 Agent令牌，拒绝带 `Origin` 头的请求，失败的尝试按登录失败限流；令牌经转发的内部请求头交给服务，服务自己向 Host Agent 再确认。OpenAPI 中这类操作用 `bearerAuth` 方案并标 `x-anas-posture: agent`。
 - 产品服务（[`internal/httpapi`](../../internal/httpapi/routes.go)）把各包的路由与自己的合成一张表，在处理函数之前统一检查姿态：
   - 本客户端的会话 Cookie；
   - 管理员重置密码后，先要求改密；

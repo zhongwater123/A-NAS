@@ -27,21 +27,25 @@ type Sources struct {
 	// works whether the library runs in this process or in the photo service.
 	Photos func(r *http.Request, q activity.Query) ([]activity.Event, error)
 	Family func(r *http.Request, q activity.Query) ([]activity.Event, error)
-	Logger *slog.Logger
+	// Workspace reads the caller's events of the shared workspace (ADR 0040)
+	// through the workspace API, as Family does.
+	Workspace func(r *http.Request, q activity.Query) ([]activity.Event, error)
+	Logger    *slog.Logger
 }
 
 // API serves the log.
 type API struct {
-	accounts *accounts.Service
-	files    *files.Service
-	storage  *storage.Service
-	photos   func(*http.Request, activity.Query) ([]activity.Event, error)
-	family   func(*http.Request, activity.Query) ([]activity.Event, error)
-	logger   *slog.Logger
+	accounts  *accounts.Service
+	files     *files.Service
+	storage   *storage.Service
+	photos    func(*http.Request, activity.Query) ([]activity.Event, error)
+	family    func(*http.Request, activity.Query) ([]activity.Event, error)
+	workspace func(*http.Request, activity.Query) ([]activity.Event, error)
+	logger    *slog.Logger
 }
 
 func New(sources Sources) *API {
-	return &API{accounts: sources.Accounts, files: sources.Files, storage: sources.Storage, photos: sources.Photos, family: sources.Family, logger: sources.Logger}
+	return &API{accounts: sources.Accounts, files: sources.Files, storage: sources.Storage, photos: sources.Photos, family: sources.Family, workspace: sources.Workspace, logger: sources.Logger}
 }
 
 func (a *API) Routes() []apiroute.Route {
@@ -174,6 +178,9 @@ func (a *API) activity(w http.ResponseWriter, r *http.Request, session accounts.
 	// Photo events are only ever shown to the account that made them.
 	if a.family != nil && (actorFilter == "" || actorFilter == viewer.ID) {
 		read([]activity.Category{activity.CategoryFamily}, func() ([]activity.Event, error) { return a.family(r, q) })
+	}
+	if a.workspace != nil && (actorFilter == "" || actorFilter == viewer.ID) {
+		read([]activity.Category{activity.CategoryWorkspace}, func() ([]activity.Event, error) { return a.workspace(r, q) })
 	}
 	if a.photos != nil && (actorFilter == "" || actorFilter == viewer.ID) {
 		read([]activity.Category{activity.CategoryPhoto}, func() ([]activity.Event, error) { return a.photos(r, q) })

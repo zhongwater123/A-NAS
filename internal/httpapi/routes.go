@@ -32,6 +32,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
 
 // table is every route of the product API with its posture. A domain's own
@@ -77,7 +78,8 @@ func (h *productHandler) table() []apiroute.Route {
 		personalizationapi.New(h.Personalization, h.pictures, logger),
 		musicapi.New(h.Music, logger),
 		phonehotspotapi.New(h.PhoneHotspot, logger),
-		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(), Logger: logger}),
+		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(),
+			Workspace: h.workspaceActivitySource(), Logger: logger}),
 		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),
 		taskmanagerapi.New(tasks, string(h.DataSource), logger),
 	} {
@@ -148,6 +150,18 @@ func (h *productHandler) mounts() []apiroute.Route {
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
 	}
+	if h.Workspace != nil {
+		// The workspace service confirms the session itself; the agents' and
+		// the links' routes are not part of the desktop's mount (ADR 0040).
+		mount(workspaceapi.PathPrefix, apiroute.Session, serve(h.Workspace), workspaceapi.MemberEndpoints())
+		mount(workspaceapi.AdminPrefix, apiroute.Admin, serve(h.Workspace), workspaceapi.AdminEndpoints())
+		for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+			routes = append(routes, apiroute.Route{Method: method, Pattern: workspaceapi.MCPPath, Posture: apiroute.Agent, Handler: serve(h.Workspace)})
+		}
+		for _, method := range []string{http.MethodGet, http.MethodPut} {
+			routes = append(routes, apiroute.Route{Method: method, Pattern: workspaceapi.TransfersPrefix + "{key}", Posture: apiroute.Public, Handler: serve(h.Workspace)})
+		}
+	}
 	if h.Media != nil {
 		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.Media), mediaapi.Endpoints())
 	}
@@ -197,8 +211,12 @@ func (h *productHandler) register(routes []apiroute.Route) {
 // mounted route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
-	case route.Posture < apiroute.Public || route.Posture > apiroute.Admin:
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Agent:
 		return fmt.Errorf("route %s %s has no valid posture (%d)", route.Method, route.Pattern, route.Posture)
+	case route.Posture == apiroute.Agent && route.Method == "":
+		return fmt.Errorf("route %s is mounted for every method as agent; give each agent operation its method", route.Pattern)
+	case route.Posture == apiroute.Agent:
+		return nil
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
 	case route.Method == "" && len(route.Endpoints) == 0:
@@ -220,6 +238,9 @@ func checkPosture(route apiroute.Route) error {
 func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 	if route.Posture == apiroute.Public {
 		return func(w http.ResponseWriter, r *http.Request) { route.Handler(w, r, accounts.Session{}) }
+	}
+	if route.Posture == apiroute.Agent {
+		return h.guardAgent(route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.Accounts == nil {

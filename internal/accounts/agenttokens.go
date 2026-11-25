@@ -154,12 +154,33 @@ func (s *Service) RevokeAgentToken(ctx context.Context, actor User, tokenID stri
 	return tx.Commit()
 }
 
+// agentTokenAttempts is the name agent token attempts count under in the
+// sign-in failures: a client that keeps presenting bad tokens waits as one
+// that keeps guessing a password does (#175), and the waits for its
+// sign-ins and its tokens add up.
+const agentTokenAttempts = "\x00agent token"
+
 // ResolveAgentToken returns who calls with value for scope. It fails with
 // ErrAgentTokenInvalid for a token that is unknown, of another scope, idle
 // past the limit, or whose account is not active or must first choose a new
-// password: the Product Service's guard refuses all of these alike. A use is
-// recorded at most every agentTokenTouch.
+// password: the Product Service's guard refuses all of these alike. The
+// client (WithClientOrigin) waits after repeated failures, with a
+// *ThrottledError. A use is recorded at most every agentTokenTouch.
 func (s *Service) ResolveAgentToken(ctx context.Context, value, scope string) (AgentCaller, error) {
+	client := originFrom(ctx).throttleClient()
+	if wait := s.signIns.wait(s.now(), client, agentTokenAttempts); wait > 0 {
+		return AgentCaller{}, &ThrottledError{RetryAfter: wait}
+	}
+	caller, err := s.resolveAgentToken(ctx, value, scope)
+	if errors.Is(err, ErrAgentTokenInvalid) {
+		s.signIns.failed(s.now(), client, agentTokenAttempts)
+	} else if err == nil {
+		s.signIns.succeeded(client, agentTokenAttempts)
+	}
+	return caller, err
+}
+
+func (s *Service) resolveAgentToken(ctx context.Context, value, scope string) (AgentCaller, error) {
 	if !accountid.LooksLikeAgentToken(value) {
 		return AgentCaller{}, ErrAgentTokenInvalid
 	}

@@ -61,6 +61,11 @@ type Config[S io.Closer] struct {
 	CheckStore    func(string) error
 	RetryInterval time.Duration
 	Logger        *slog.Logger
+	// Authenticate, when set, wraps the API instead of the session check
+	// (modules.Authenticate): the shared workspace also takes agent tokens
+	// and one-time transfer links (ADR 0040). It must confirm every caller
+	// with the Host Agent itself, as the session check does.
+	Authenticate func(http.Handler) http.Handler
 }
 
 // shutdownGrace is how long stopping waits for open requests.
@@ -112,7 +117,13 @@ func Run[S io.Closer](parent context.Context, config Config[S]) error {
 	// carries no session; what to do comes from the Host Agent.
 	routes := http.NewServeMux()
 	routes.Handle(accountremoval.Path, served)
-	routes.Handle("/", modules.Authenticate(config.Sessions, config.Name, config.Unavailable, config.Logger, served))
+	authenticate := config.Authenticate
+	if authenticate == nil {
+		authenticate = func(next http.Handler) http.Handler {
+			return modules.Authenticate(config.Sessions, config.Name, config.Unavailable, config.Logger, next)
+		}
+	}
+	routes.Handle("/", authenticate(served))
 	server := &http.Server{
 		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20,

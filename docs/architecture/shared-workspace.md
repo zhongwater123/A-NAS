@@ -66,7 +66,7 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 
 产品服务的 `guard` 对 `apiroute.Agent` 路由：
 
-1. 有 `Origin` 或 `Sec-Fetch-Site` 头时回 `403 forbidden`；`Host` 不指向本机（`localorigin.DeviceHost`）时回 `403 forbidden`。
+1. 有 `Origin` 头时回 `403 forbidden`（浏览器的写请求与跨源请求都带它；`Sec-Fetch-*` 命令行客户端也可能带，不作依据）；`Host` 不指向本机（`localorigin.DeviceHost`）时回 `403 forbidden`。
 2. 取 `Authorization: Bearer`；没有时回 `401 authentication_required`，并带 `WWW-Authenticate: Bearer`。
 3. 记下客户端（`withClientOrigin`），按 `accounts` 的登录失败计数限流，过多时 `429 too_many_attempts`。
 4. 在 `control.db` 核验令牌、范围、账号状态与须改密；失败回 `401`，成功清掉失败计数。
