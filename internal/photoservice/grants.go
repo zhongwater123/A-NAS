@@ -271,14 +271,10 @@ type SessionsAndAccounts interface {
 }
 
 // LocalGrants serves the grant operations in this process, for development,
-// with the same checks as the grant socket.
-func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, logger *slog.Logger) photosapi.Grants {
-	return LocalGatedGrants(service, sessions, nil, logger)
-}
-
-// LocalGatedGrants is LocalGrants whose searches hold back the background
-// AI work gate lets through, as the grant socket's do.
-func LocalGatedGrants(service *photos.Service, sessions SessionsAndAccounts, gate *Gate, logger *slog.Logger) photosapi.Grants {
+// with the same checks as the grant socket. Its searches hold back the
+// background AI work gate lets through, as the grant socket's do; a nil
+// gate holds nothing back.
+func LocalGrants(service *photos.Service, sessions SessionsAndAccounts, gate *Gate, logger *slog.Logger) photosapi.Grants {
 	var opened atomic.Pointer[photos.Service]
 	opened.Store(service)
 	server := &grantServer{service: &opened, sessions: sessions, accounts: sessions, gate: gate, logger: logger}

@@ -279,7 +279,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
-		montageGrants = photoservice.LocalGatedGrants(photoService, sessions, photoGate, logger)
+		montageGrants = photoservice.LocalGrants(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {

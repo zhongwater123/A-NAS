@@ -131,11 +131,18 @@ type candidate struct {
 // inLocalAI is the rule of inLocalAI(objectID) on a candidate already read.
 func (c candidate) inLocalAI() bool { return !c.video }
 
+// QueryText is text as a search takes it, without the space around it; ok
+// is false for text no search takes, empty or longer than MaxQueryRunes.
+func QueryText(text string) (query string, ok bool) {
+	query = strings.TrimSpace(text)
+	return query, query != "" && utf8.RuneCountInString(query) <= MaxQueryRunes
+}
+
 // Search returns photos matching the query by name or meaning. Trashed photos
 // are never included.
 func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest) (SearchPage, error) {
-	query := strings.TrimSpace(request.Query)
-	if query == "" || utf8.RuneCountInString(query) > MaxQueryRunes {
+	query, ok := QueryText(request.Query)
+	if !ok {
 		return SearchPage{}, ErrInvalidQuery
 	}
 	after, err := decodeSearchCursor(request.Cursor)

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
@@ -92,8 +91,8 @@ func (s *Service) SearchWindows(ctx context.Context, owner Principal, grantID st
 	}
 	queries := make([]string, len(texts))
 	for i, text := range texts {
-		queries[i] = strings.TrimSpace(text)
-		if queries[i] == "" || utf8.RuneCountInString(queries[i]) > MaxQueryRunes {
+		var ok bool
+		if queries[i], ok = QueryText(text); !ok {
 			return nil, ErrInvalidQuery
 		}
 	}
@@ -160,8 +159,8 @@ func (s *Service) searchedVideos(ctx context.Context, owner Principal, grantID s
 	}
 	videos := map[string]searchedVideo{}
 	identities := map[string]bool{}
-	for start := 0; start < len(assetIDs); start += MaxGrantAssets {
-		looked, progress, err := s.lookupGrant(ctx, owner, grantID, assetIDs[start:min(len(assetIDs), start+MaxGrantAssets)])
+	for batch := range slices.Chunk(assetIDs, MaxGrantAssets) {
+		looked, progress, err := s.lookupGrant(ctx, owner, grantID, batch)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -449,8 +448,7 @@ func (s *Service) windowVectors(ctx context.Context, identity string, needed map
 	stored := map[string][]float32{}
 	for _, object := range slices.Sorted(maps.Keys(needed)) {
 		indexes := slices.Sorted(maps.Keys(needed[object]))
-		for start := 0; start < len(indexes); start += vectorReadBatch {
-			batch := indexes[start:min(len(indexes), start+vectorReadBatch)]
+		for batch := range slices.Chunk(indexes, vectorReadBatch) {
 			args := []any{object, identity}
 			for _, idx := range batch {
 				args = append(args, idx)

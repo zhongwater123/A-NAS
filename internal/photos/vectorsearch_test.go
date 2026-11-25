@@ -54,14 +54,6 @@ func queryLimits(queries []vectorindex.Query) []int {
 	return limits
 }
 
-func (a *askedIndex) Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error) {
-	found, err := a.SearchBatch(ctx, collection, []vectorindex.Query{query})
-	if err != nil {
-		return nil, err
-	}
-	return found[0], nil
-}
-
 func (a *askedIndex) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {
 	a.mu.Lock()
 	a.limits = append(a.limits, queryLimits(queries))
@@ -520,13 +512,6 @@ func (f *failingIndex) call() error {
 		return errors.New("the index is broken")
 	}
 	return nil
-}
-
-func (f *failingIndex) Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error) {
-	if err := f.call(); err != nil {
-		return nil, err
-	}
-	return f.VectorIndex.Search(ctx, collection, query)
 }
 
 func (f *failingIndex) SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -280,8 +281,7 @@ func (g Grants) SaveFilm(ctx context.Context, grantID, versionKey, name string, 
 func (g Grants) SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error) {
 	matches := make([][]photos.WindowMatch, 0, len(texts))
 	size := max(1, min(photos.MaxWindowSearchTexts, photos.MaxWindowSearchHits/max(k, 1)))
-	for start := 0; start < len(texts); start += size {
-		batch := texts[start:min(len(texts), start+size)]
+	for batch := range slices.Chunk(texts, size) {
 		response, err := g.plain(ctx, GrantRequest{Op: GrantSearchWindows, GrantID: grantID, Texts: batch, K: k})
 		if err != nil {
 			return nil, err

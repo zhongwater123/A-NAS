@@ -33,7 +33,6 @@ type VectorIndex interface {
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
 	DeleteMatching(ctx context.Context, collection, field string, values []string) error
-	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
 	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
 	Alias(ctx context.Context, alias string) (string, error)

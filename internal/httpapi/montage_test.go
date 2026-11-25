@@ -79,7 +79,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	}
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
-		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
+		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
 			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
