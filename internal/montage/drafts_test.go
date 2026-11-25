@@ -980,7 +980,12 @@ func TestADraftWithABeatItsSourceLacksIsNotEdited(t *testing.T) {
 		t.Fatal(err)
 	}
 	beat := draft.Shots[0].Beat
-	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"v9-9/1"`)
+	// A beat of a card described but left out of the catalog cannot be either.
+	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"c5/1"`)
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("reading it with a beat out of the catalog = %v", err)
+	}
+	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"c5/1"`, `"beat":"v9-9/1"`)
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
 		t.Fatalf("reading it = %v", err)
 	}
@@ -1122,5 +1127,16 @@ func TestAShuffleAvoidsTheCardOfAShotThatFindsNothing(t *testing.T) {
 	}
 	if got := beats(next); got[1] != "c1/3" || got[2] != "c2/2" {
 		t.Fatalf("shuffled = %v: shot 2 went onto the card of shot 3, which found nothing to pick", got)
+	}
+}
+
+// A shot of the version's timeline whose card is of another video now (the
+// cards numbered anew) is not read as that video's.
+func TestAVersionWhoseCardIsOfAnotherVideoNowIsNotEdited(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	env.store.Exec(t, `UPDATE versions SET timeline_json = replace(timeline_json, '"video":"`+videoB+`"', '"video":"asset:c"') WHERE id = 'version:1'`)
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("editing a version whose card is of another video = %v", err)
 	}
 }

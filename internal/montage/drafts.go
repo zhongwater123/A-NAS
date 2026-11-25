@@ -244,7 +244,8 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		if _, _, known := src.beat(clip.Beat); !known || !src.pictureKnown(clip.Part, clip.Picture) {
 			return nil, ErrNotEditable
 		}
-		if _, ok := src.cards[clip.Card]; !ok {
+		// A card numbered anew names another video's footage (redoneSince).
+		if card, ok := src.cards[clip.Card]; !ok || card.Video != clip.Video {
 			return nil, ErrNotEditable
 		}
 	}
@@ -375,14 +376,14 @@ func (src *editSource) beat(beat string) (Card, int, bool) {
 	return card, n, true
 }
 
-// holds reports whether every shot of state leads with a beat of a card of
-// one of the version's videos. What is shown, searched, exported and saved
-// of a draft reads its beats so; one whose beats the source no longer names
-// cannot be edited.
+// holds reports whether every shot of state leads with a beat of a card the
+// version may cut from, of one of its videos. What is shown, searched,
+// exported and saved of a draft reads its beats so; one whose beats the
+// source no longer names cannot be edited.
 func (src *editSource) holds(state draftState) bool {
 	for _, shot := range state.Shots {
 		card, _, ok := src.beat(shot.Beat)
-		if _, video := src.videos[card.Video]; !ok || !video {
+		if _, video := src.videos[card.Video]; !ok || !video || !src.cuttable(card.ID) {
 			return false
 		}
 	}
