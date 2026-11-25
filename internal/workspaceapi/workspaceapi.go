@@ -643,7 +643,7 @@ func attribute(value string) string {
 // numbers keeps only a comma-separated list of numbers.
 func numbers(value string) string {
 	var kept []string
-	for _, part := range strings.Split(value, ",") {
+	for part := range strings.SplitSeq(value, ",") {
 		if _, err := strconv.Atoi(part); err == nil && len(kept) < 50 {
 			kept = append(kept, part)
 		}

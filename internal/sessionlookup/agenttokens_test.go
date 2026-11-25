@@ -61,8 +61,8 @@ func serveAgentTokens(t *testing.T, tokens *agentTokens, scope string) *sessionl
 
 func TestAgentTokensResolveOnlyForTheSocketsScope(t *testing.T) {
 	alice := accountid.AgentTokenUser{
-		SessionUser: accountid.SessionUser{UserID: "user:alice", Username: "alice", Role: accountid.RoleMember},
-		TokenID:     "agent:1", TokenName: "laptop", TokenKind: "codex",
+		UserID: "user:alice", Username: "alice", Role: accountid.RoleMember,
+		TokenID: "agent:1", TokenName: "laptop", TokenKind: "codex",
 	}
 	tokens := &agentTokens{byValue: map[string]accountid.AgentTokenUser{"alice-token": alice}}
 	client := serveAgentTokens(t, tokens, accountid.AgentScopeWorkspace)

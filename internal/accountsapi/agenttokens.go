@@ -24,6 +24,8 @@ func NewAgentTokens(service *accounts.Service, logger *slog.Logger) *AgentTokens
 }
 
 // AgentTokensPath is where a member manages agent tokens.
+//
+//nolint:gosec // G101: a route, not a credential.
 const AgentTokensPath = "/api/v1/session/agent-tokens"
 
 func (a *AgentTokens) Routes() []apiroute.Route {

@@ -28,6 +28,7 @@ const SessionHeader = "X-A-NAS-Session"
 // posture to the service behind it, which confirms it again (ADR 0040);
 // AgentOriginHeader the scheme and host the agent reached the device at.
 const (
+	//nolint:gosec // G101: the header's name, not a credential.
 	AgentTokenHeader  = "X-A-NAS-Agent-Token"
 	AgentOriginHeader = "X-A-NAS-Agent-Origin"
 )

@@ -16,8 +16,10 @@ import (
 
 const (
 	// AgentTokenPath names the account behind an agent token (ADR 0040).
+	//nolint:gosec // G101: a route, not a credential.
 	AgentTokenPath = "/v1/agent-tokens/resolve"
 	// AgentTokenIDPath confirms that a token, named by its ID, is still good.
+	//nolint:gosec // G101: a route, not a credential.
 	AgentTokenIDPath = "/v1/agent-tokens/check"
 )
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -43,10 +44,7 @@ func Annotate(src []byte, helper string) []byte {
 			insert()
 		case html.StartTagToken, html.SelfClosingTagToken:
 			insert()
-			split := 1 + len(name)
-			if split > len(raw) {
-				split = len(raw)
-			}
+			split := min(1+len(name), len(raw))
 			out.Write(raw[:split])
 			out.WriteString(" " + AnchorAttribute + `="` + strconv.Itoa(offset) + `"`)
 			out.Write(raw[split:])
@@ -97,7 +95,7 @@ var impliedEnds = func() map[string]map[string]bool {
 		"option": {"option": true}, "optgroup": {"option": true, "optgroup": true},
 	}
 	// A paragraph ends where a block begins.
-	for _, block := range strings.Fields("address article aside blockquote details div dl fieldset figcaption figure footer form " +
+	for block := range strings.FieldsSeq("address article aside blockquote details div dl fieldset figcaption figure footer form " +
 		"h1 h2 h3 h4 h5 h6 header hgroup hr main menu nav ol p pre section table ul") {
 		if ends[block] == nil {
 			ends[block] = map[string]bool{}
@@ -135,14 +133,14 @@ func Spans(src []byte) map[int]int {
 		case html.SelfClosingTagToken:
 			spans[offset] = offset + len(raw)
 		case html.EndTagToken:
-			for i := len(stack) - 1; i >= 0; i-- {
-				if stack[i].name != name {
+			for i, element := range slices.Backward(stack) {
+				if element.name != name {
 					continue
 				}
 				for j := len(stack) - 1; j > i; j-- {
 					spans[stack[j].at] = offset
 				}
-				spans[stack[i].at] = offset + len(raw)
+				spans[element.at] = offset + len(raw)
 				stack = stack[:i]
 				return
 			}
