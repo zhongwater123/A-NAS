@@ -22,6 +22,7 @@ description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check �
 - 持有锁的门禁限时 90 分钟，`pip-audit` 限时 10 分钟（它曾因 DNS 卡住 14 小时），一个卡住的门禁不会挡住后面的会话太久。进程结束，锁就释放，不用手动清理。
 - [system-test](../system-test/SKILL.md) 沿用这段脚本，也在同一把锁下排队。单独跑的 `go test -race` 整包测试同样先取锁：把命令放在脚本里取锁那两行之后。
 - 只跑一个 vitest 文件或一个 Go 包时，不用取锁。
+- 一个门禁自己同时跑几个目标（[并行](../../../docs/development/testing.md#并行)）。下面的脚本给 `CHECK_JOBS=2`：WSL 默认只有主机一半的内存，2026-11-25 开发机 B 上同时跑 4 个目标时 WSL 已用内存峰值 7.1 GB（共 7.7 GB），一条平时 3 秒的 Web 用例超过了 20 秒；2 个时峰值 3.8 GB，全程约 4 分钟。
 
 ## 步骤
 
@@ -43,7 +44,7 @@ echo "$(basename "$dst") since $(date +%T)" > ~/anas-check/.gate.holder
 # The vector index tests run the pinned Qdrant (docs/development/testing.md).
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
-if timeout 90m make -k check-steps PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+if timeout 90m make -k check-steps CHECK_JOBS=2 PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 

@@ -43,8 +43,10 @@ export default defineConfig({
     setupFiles: ["./src/test/forms.ts", "./src/test/setup.ts"],
     css: true,
     pool: "threads",
-    fileParallelism: false,
-    maxWorkers: 1,
+    // Four test files at a time. Vitest's own default, a worker for every
+    // core but one, would take a development machine that other sessions'
+    // gates share; VITEST_MAX_WORKERS sets another number for one run.
+    maxWorkers: 4,
     // Development machines share their cores with other sessions' builds and
     // tests; the 5 s default failed tests that only waited for the CPU. A test
     // that never finishes still fails, 20 s later.

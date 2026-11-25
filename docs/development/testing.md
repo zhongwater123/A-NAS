@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-24
+更新时间：2026-11-25
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -14,6 +14,15 @@
 | systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
 `make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。开发机上 `make check` 以 `make -k` 运行这些目标，一步失败后继续运行其余各步，一次报出全部失败；CI 把 Makefile 的 `CHECK_FLAGS` 设为空，在第一个失败处停止。直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+
+### 并行
+
+- `make check-steps` 同时运行 `CHECK_JOBS` 个目标（默认 4，`CHECK_JOBS=1` 逐个运行）。每个目标结束时整段打印它的输出，所以一个长目标运行期间日志没有新行。最后列出每个目标的秒数，从慢到快，最后一行是全程（[`scripts/check-times.sh`](../../scripts/check-times.sh)）。
+- 负载均值高于 `CHECK_LOAD`（默认为 CPU 数）时不再启动新目标（`make -l`）：同一台机器上两个会话的门禁会轮流，而不是互相把对方的测试拖过时限。2026-11-25 在开发服务器上，两个不带这个上限的门禁同时运行时，一条平时 2 秒的 Web 用例超过了 20 秒。
+- 4 个目标同时运行时内存峰值约 5 GB（开发服务器上限 14 个 CPU 时各进程常驻内存之和），逐个运行约 3 GB。内存不到 8 GB 的环境（WSL 默认只有主机的一半）给 `CHECK_JOBS=2`，峰值与逐个运行相当。
+- 目标之间真实的先后写在 Makefile 里：`make test` 依赖 `web-build`（`internal/webui` 的测试读构建好的页面）；`vet`、`go-lint` 与 `vuln-check` 只在门禁中排在 `web-build` 之后，因为它先清空再重写它们嵌入的 `internal/webui/dist`，单独运行时不构建页面。新加的目标若读写别的目标的产物，同样写明依赖，不靠列表顺序。
+- Web 测试同时运行 4 个测试文件（`web/vite.config.ts` 的 `maxWorkers`），`VITEST_MAX_WORKERS` 改变一次运行的数目。一个文件里的用例仍逐个运行，所以最慢的文件决定 Web 测试的下限：用例不要等真实的时长，用假时钟或等它真正等待的条件。
+- 并行与负载会暴露测试自己的竞态，例如看到套接字文件就去连（文件在 bind 时出现，比 listen 早）。这类失败按缺陷修：等就绪的条件，不等固定时长，也不放宽时限。
 
 ## Qdrant 测试依赖
 
