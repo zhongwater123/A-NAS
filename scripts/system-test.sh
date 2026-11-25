@@ -706,7 +706,12 @@ late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
 ip link add anas-late0 type veth peer name anas-late1
 install -d /etc/systemd/system/smbd.service.d
 ip link set anas-late0 up
-sed "s/\b$iface\b/anas-late0/g" /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+# The product waits 20 s for the address and tries again 5 s later; the
+# test's copy waits 5 s and tries again after 1 s.
+sed -e "s/\b$iface\b/anas-late0/g" -e 's/timeout 20 sh/timeout 5 sh/' -e 's/^RestartSec=.*/RestartSec=1s/' \
+  /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+check "the test's copy of smbd's address wait is shorter" \
+  bash -c "grep -Fq 'timeout 5 sh' '$late_dropin' && grep -qx 'RestartSec=1s' '$late_dropin'"
 systemctl daemon-reload
 systemctl stop smbd
 systemctl start --no-block smbd
