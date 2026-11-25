@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
@@ -63,10 +62,7 @@ var ErrStoreUnavailable = errors.New("montage store on the data volume is unavai
 // directory on the writable, verified data volume, so the montage center's
 // records are never written to the system disk.
 func RequireOwnedStore(root string) error {
-	if err := modules.RequireOwnedStore(root); err != nil {
-		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
+	if err := modules.RequireDataVolumeStore(root); err != nil {
 		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
 	}
 	return nil

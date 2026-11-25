@@ -123,7 +123,7 @@ func TestSessionsFromBeforeTheBindingAreBoundOrRefused(t *testing.T) {
 	}
 	// The binding predates control.db's steps (ADR 0034): such a database is
 	// at version 0, which only the baseline completes.
-	if _, err := db.Exec("UPDATE sessions SET client = ''; DROP TABLE account_deletions; DROP TABLE schema_downgrades; PRAGMA user_version = 0"); err != nil {
+	if _, err := db.Exec("UPDATE sessions SET client = ''; DROP TABLE account_deletions; DROP TABLE agent_tokens; DROP TABLE schema_downgrades; PRAGMA user_version = 0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

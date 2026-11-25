@@ -114,6 +114,16 @@ if [[ "${1:-}" != --inside ]]; then
   ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
     "$legacy_product/usr/lib/systemd/system" ||
     { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
+  # Nor the shared workspace (ADR 0040). Its account stays for the same reason
+  # as the montage account's.
+  rm "$legacy_product/usr/lib/systemd/system/anas-workspace.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-workspace.service"
+  sed -i -e 's/ *anas-workspace\.service//g' -e "s/ 'anas-workspace workspace\/workspace\.db workspace'//" \
+    -e 's/ a-nas-workspace:31004//' -e 's/ workspace\/workspace\.db//' \
+    "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
+  ! grep -rqE 'anas-workspace|workspace\.db' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+    "$legacy_product/usr/lib/systemd/system" ||
+    { echo "the previous release still names the workspace service" >&2; exit 2; }
   dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
@@ -629,7 +639,7 @@ check "smbd then listens only on the loopback and SMB interface's addresses" smb
 
 # --- Every service runs under its production unit (issue #38).
 # One unit per check: systemctl is-active A B succeeds when any of them is (#423).
-for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage smbd; do
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage anas-workspace smbd; do
   check "services are active: $unit" systemctl is-active --quiet "$unit"
 done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
@@ -1086,13 +1096,75 @@ check "the montage service's sandbox opens no network socket" systemctl start an
 rm /etc/systemd/system/anas-montage-probe.service
 systemctl daemon-reload
 
+# --- Shared workspace (ADR 0040): its own identity and store, off the
+# network. The Product Service forwards /api/v1/workspace with the session
+# and /api/v1/workspace/mcp with a member's agent token; the workspace service
+# confirms either with the Host Agent itself.
+check "workspace store belongs to the workspace service alone" \
+  test "$(stat -c '%a %U' "$data/workspace")" = "700 a-nas-workspace"
+check "Product Service account cannot list the workspace store" denied a-nas ls "$data/workspace"
+check "the workspace socket is the service's, for the Product Service's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-workspace/workspace.sock):$(stat -c '%a %G' /run/a-nas-workspace)" = "660 a-nas-workspace:a-nas-workspace:750 a-nas-workspace"
+check "its session lookup, which also resolves agent tokens, is for the workspace account's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-workspace-sessions)" = "750 root:a-nas-workspace"
+check "the photo service cannot ask it about agent tokens" \
+  denied a-nas-photos python3 -c "$unix_connect" /run/a-nas-workspace-sessions/workspace.sock
+check "without a session the workspace answers 401" test "$(status_of "$api/api/v1/workspace/pages")" = 401
+check "the administrator may use the workspace" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace" | jq -r .admin)" = true
+check "a member the administrator has not added is not shown it" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/workspace"):$(status_of -b /tmp/alice.jar "$api/api/v1/workspace/pages")" = 404:403
+printf '<!doctype html>\n<html><head><title>System test PRD</title></head>\n<body><button>Order</button></body></html>\n' >/tmp/prd.html
+workspace_page=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: text/html' \
+  --data-binary @/tmp/prd.html "$api/api/v1/workspace/pages?name=prd.html" | jq -r .id || true)
+check "the administrator uploads a page" test -n "$workspace_page" -a "$workspace_page" != null
+check "the page is served in a sandbox of its own with no network" bash -c "curl -fsS -D - -o /dev/null -b /tmp/owner.jar \
+  '$api/api/v1/workspace/pages/$workspace_page/versions/1/view' | grep -qi '^content-security-policy: sandbox allow-scripts; default-src .none.'"
+curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d '{"name":"system test","kind":"claude-code"}' "$api/api/v1/session/agent-tokens" | jq -r .token >/tmp/workspace-token || true
+check "the administrator connects an agent" grep -Eqx 'anas_ws_[0-9a-f]{64}' /tmp/workspace-token
+# mcp BODY [CURL OPTION...]: a JSON-RPC request to the MCP endpoint as a
+# member's agent sends it, with the token in /tmp/workspace-token.
+mcp() {
+  curl -sS -H "Authorization: Bearer $(cat /tmp/workspace-token)" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-06-18' "${@:2}" -d "$1" "$api/api/v1/workspace/mcp"
+}
+# workspace_tool NAME ARGUMENTS: the text of the tool's answer.
+workspace_tool() {
+  mcp "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" |
+    jq -er '.result | select(.isError != true) | .content[0].text'
+}
+check "the agent lists the pages through the Product Service" grep -q 'System test PRD' <(workspace_tool workspace_list_pages '{}' || true)
+workspace_tool workspace_edit_page "{\"page\":\"$workspace_page\",\"base_version\":1,\"note\":\"把按钮改成 Buy\",\"edits\":[{\"old_text\":\"<button>Order</button>\",\"new_text\":\"<button>Buy</button>\"}]}" >/dev/null || true
+check "the agent's edit is a new version, saved by the administrator through it" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace/pages/$workspace_page" | jq -r '.latest | "\(.version) \(.via.kind) \(.note)"')" = "2 claude-code 把按钮改成 Buy"
+check "the new version holds the change" \
+  grep -q '<button>Buy</button>' <(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace/pages/$workspace_page/versions/2/file" || true)
+check "without a token the MCP endpoint answers 401 and asks for a Bearer token" \
+  bash -c "curl -sS -D - -o /dev/null -H 'Content-Type: application/json' -d '{}' '$api/api/v1/workspace/mcp' | grep -qi '^www-authenticate: Bearer'"
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+mcp_status() { mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' -o /dev/null -w '%{http_code}' "$@"; }
+check "the MCP endpoint answers the agent" test "$(mcp_status)" = 200
+check "a browser cannot use the MCP endpoint, even with a token" test "$(mcp_status -H "Origin: $api")" = 403
+check "a session cookie does not open the MCP endpoint" test "$(status_of -b /tmp/owner.jar -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$api/api/v1/workspace/mcp")" = 401
+check "an agent token does not open the desktop's routes" \
+  test "$(status_of -H "Authorization: Bearer $(cat /tmp/workspace-token)" "$api/api/v1/workspace/pages")" = 401
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
+  /usr/lib/systemd/system/anas-workspace.service > /etc/systemd/system/anas-workspace-probe.service
+systemctl daemon-reload
+check "the workspace service's sandbox opens no network socket" systemctl start anas-workspace-probe.service
+rm /etc/systemd/system/anas-workspace-probe.service
+systemctl daemon-reload
+
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo, share, family and montage services hold databases open for
-# writing on it, which a read-only remount refuses.
+# in. The photo, share, family, montage and workspace services hold databases
+# open for writing on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares anas-family anas-montage
+systemctl stop anas-photos anas-shares anas-family anas-montage anas-workspace
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 systemctl start anas-montage
 montage_unavailable() {
@@ -1104,6 +1176,17 @@ montage_unavailable() {
 }
 check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
 systemctl stop anas-montage
+systemctl start anas-workspace
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+workspace_unavailable() {
+  for _ in $(seq 1 50); do
+    [[ "$(curl -s -b /tmp/owner.jar "$api/api/v1/workspace/pages" | jq -r .error.code)" == workspace_unavailable ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "on a read-only volume the shared workspace answers workspace_unavailable" workspace_unavailable
+systemctl stop anas-workspace
 readonly_at=$(journal_mark)
 systemctl restart anas-host-agent
 journal_wait 10 "$readonly_at" 'data-volume reconciliation failed' -u anas-host-agent || true
@@ -1122,7 +1205,7 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(journal_mark)
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares anas-family anas-montage
+systemctl start anas-photos anas-shares anas-family anas-montage anas-workspace
 check "once the volume is writable, the Host Agent reconciles it" \
   journal_wait 10 "$writable_at" 'data volume reconciled' -u anas-host-agent
 check "and reports nothing wrong" \
@@ -1130,6 +1213,8 @@ check "and reports nothing wrong" \
 check "sharing recovers on the writable volume" shares_ready
 check "the montage center recovers on the writable volume" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/montage/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
+check "the shared workspace recovers on the writable volume" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied a-nas ls "$data/spaces/private/alice"
@@ -1969,7 +2054,7 @@ journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -
 search_socket=/run/a-nas-search/search.sock
 # The Product Service holds a-nas-search through its unit's SupplementaryGroups,
 # not as a login group of a-nas.
-as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-search "$@"; }
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-workspace,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -2496,6 +2581,8 @@ carol_uid=$(id -u carol)
 check "the administrator has a folder named like the handover" test "$(status_of -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' -d '{"parentId":"","name":"carol 的文件"}' \
   "$api/api/v1/spaces/$owner_private/directories")" = 201
+check "the administrator lets her use the shared workspace" test "$(status_of -X PUT -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/workspace/admin/members/$carol_user")" = 204
 check "the administrator disables the member before deleting her" test "$(status_of -X POST -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/disable")" = 204
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -2521,6 +2608,9 @@ check "the member is removed once her time is up" carol_gone
 check "her Linux account is gone" bash -c '! getent passwd carol && ! getent group carol'
 check "her Samba account is gone" bash -c '! pdbedit --user carol >/dev/null 2>&1'
 check "her personal space is gone" test ! -e /srv/a-nas/data/spaces/private/carol
+check "the shared workspace forgot her" test "$(python3 -c 'import sqlite3, sys
+print(sqlite3.connect("file:/srv/a-nas/data/workspace/workspace.db?mode=ro", uri=True).execute(
+    "SELECT COUNT(*) FROM members WHERE account_id = ?", (sys.argv[1],)).fetchone()[0])' "$carol_user")" = 0
 handed="/srv/a-nas/data/spaces/private/owner/carol 的文件 (2)"
 check "her files are in the administrator's personal space" grep -qx 'carol keeps this' "$handed/carol.txt"
 check "the handed-over files belong to the administrator" test "$(stat -c %U "$handed/carol.txt")" = owner
@@ -2961,12 +3051,18 @@ login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "the upgrade copied the montage database on the data volume" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
+check "and the workspace database" \
+  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/workspace/workspace.db')"
 check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
 check "the previous release, which came before the montage center, has no montage unit" \
   test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
   not-found:inactive
 check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "nor a workspace unit, whose service stopped before its unit went" \
+  test "$(systemctl show -p LoadState --value anas-workspace.service):$(systemctl show -p ActiveState --value anas-workspace.service)" = \
+  not-found:inactive
+check "no workspace process runs on the previous release" fails pgrep -u a-nas-workspace
 check "nor the photo service's grant socket, which stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
   not-found:inactive
@@ -3004,6 +3100,11 @@ check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
   test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
   "active:31003:700 a-nas-montage:660 a-nas-montage"
+check "after upgrading again the workspace service has its account, store and socket" \
+  test "$(systemctl is-active anas-workspace):$(id -u a-nas-workspace):$(stat -c '%a %U' "$data/workspace"):$(stat -c '%a %G' /run/a-nas-workspace/workspace.sock)" = \
+  "active:31004:700 a-nas-workspace:660 a-nas-workspace"
+check "and the shared page is still there" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages/$workspace_page') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
   test "$(systemctl is-active anas-montage-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true

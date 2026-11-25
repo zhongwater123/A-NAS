@@ -196,7 +196,7 @@ wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
-for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-search anas-site \
+for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-workspace anas-search anas-site \
   anas-assistant-gateway anas-assistant-cron-waker anas-montage-planner; do
   wants multi-user.target "$unit.service"
 done

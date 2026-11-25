@@ -1,4 +1,4 @@
-import { Clapperboard, ListTodo, Settings, Share2 } from "lucide-react";
+import { Clapperboard, FileCode2, ListTodo, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -13,6 +13,7 @@ import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
 import { lazyCode } from "../ui/lazyCode";
+import type { WorkspaceAccess } from "../workspace/status";
 import {
   AppCenterIcon,
   BackupCenterIcon,
@@ -46,6 +47,7 @@ const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then
 const TodosPanel = lazyCode(() => import("../todos/TodosPanel").then((module) => module.TodosPanel));
 const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 const WebSearchPanel = lazyCode(() => import("../websearch/WebSearchPanel").then((module) => module.WebSearchPanel));
+const WorkspacePanel = lazyCode(() => import("../workspace/WorkspacePanel").then((module) => module.WorkspacePanel));
 
 // What another window can ask an app to show when it opens it.
 export interface WindowIntentPayloads {
@@ -94,6 +96,8 @@ export interface WindowContext {
   scoring: ScoringAccess;
   // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
   montage: boolean;
+  // 共享工作区 shows to administrators and the members they added (ADR 0040); null to everyone else.
+  workspace: WorkspaceAccess | null;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -363,6 +367,18 @@ const definitions = {
       visible: ({ montage }) => montage,
     },
     render: ({ session }) => <MontagePanel userId={session.user.id} />,
+  },
+  workspace: {
+    title: "共享工作区",
+    icon: FileCode2,
+    tone: "workspace",
+    bounds: { x: 160, y: 40, width: 1180, height: 760 },
+    launcher: {
+      id: "workspace",
+      keywords: "共享 工作区 页面 HTML PRD 文档 原型 agent Claude Code Codex workspace",
+      visible: ({ workspace }) => Boolean(workspace),
+    },
+    render: ({ session, workspace }) => <WorkspacePanel userId={session.user.id} admin={workspace?.admin ?? false} />,
   },
   scoring: {
     title: "照片打分",

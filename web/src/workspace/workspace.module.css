@@ -1,0 +1,580 @@
+/* 共享工作区: a document tool, so the page itself is the content. A quiet
+   list on the left, the open page filling the rest, one accent for what the
+   member does and for what changed. Colours come from the desktop's tokens
+   (docs/architecture/web-desktop.md). */
+.ws-app {
+  /* The window's dialogs and toasts (ui/modal, ui/feedback) read these. */
+  --ph-surface: var(--color-surface);
+  --ph-ink: var(--color-text);
+  --ph-ink-2: var(--color-muted);
+  --ph-muted: var(--color-faint);
+  --ph-accent: var(--color-accent);
+  --ph-accent-soft: var(--color-accent-soft);
+  --ph-danger: var(--color-danger);
+  --ph-ease: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --ph-toasts-bottom: 24px;
+  --ws-mono: ui-monospace, SFMono-Regular, Consolas, "Noto Sans Mono CJK SC", monospace;
+  position: relative;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+:where(.ws-app) :where(button, input) {
+  font: inherit;
+  color: inherit;
+}
+:where(.ws-app) :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Buttons: one plain style, a filled one for the main action. */
+.ws-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.ws-button:hover:not(:disabled) {
+  background: var(--color-bg);
+}
+.ws-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.ws-button.primary {
+  border-color: transparent;
+  color: #fff;
+  background: var(--color-accent);
+}
+.ws-button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 88%, black);
+}
+.ws-button.on {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.ws-icon-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+.ws-icon-button:hover {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+.ws-link {
+  flex: none;
+  padding: 0;
+  border: 0;
+  color: var(--color-accent);
+  background: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-faint {
+  color: var(--color-faint);
+  font-weight: 400;
+}
+
+/* The list of pages. */
+.ws-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-3);
+  border-right: 1px solid var(--color-line);
+  background: var(--color-bg);
+}
+.ws-side > .ws-button {
+  width: 100%;
+}
+.ws-list {
+  flex: 1;
+  min-height: 0;
+  margin: var(--space-3) calc(-1 * var(--space-1)) 0;
+  padding: 0 var(--space-1);
+  overflow-y: auto;
+}
+.ws-row {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-row:hover {
+  background: rgba(20, 30, 45, 0.05);
+}
+.ws-row[aria-current="page"] {
+  background: var(--color-surface);
+  box-shadow:
+    0 0 0 1px var(--color-line),
+    var(--shadow-card);
+}
+.ws-row-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-row[aria-current="page"] .ws-row-title {
+  color: var(--color-accent);
+}
+.ws-row-meta {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-side-foot {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line);
+}
+.ws-side-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  background: none;
+  cursor: pointer;
+}
+.ws-side-action:hover {
+  color: var(--color-text);
+  background: rgba(20, 30, 45, 0.05);
+}
+
+/* The open page. */
+.ws-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.ws-centered {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-muted);
+  text-align: center;
+}
+.ws-centered p {
+  margin: 0;
+}
+.ws-centered-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--color-faint);
+}
+.ws-viewer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.ws-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px var(--space-3) 10px var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+}
+.ws-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Notices between the bar and the page. */
+.ws-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 7px var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-muted);
+  background: var(--color-bg);
+  font-size: 13px;
+}
+.ws-notice > span {
+  flex: 1;
+  min-width: 0;
+}
+.ws-notice.news {
+  color: var(--color-text);
+  background: var(--color-accent-soft);
+}
+.ws-notice.warn {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+details.ws-notice {
+  display: block;
+}
+.ws-notice summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.ws-notice ul {
+  margin: 6px 0 2px;
+  padding-left: 20px;
+  color: var(--color-muted);
+  font-family: var(--ws-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+.ws-notice-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  background: none;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.ws-notice-close:hover {
+  opacity: 1;
+}
+.ws-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+.ws-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.ws-progress {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  height: 2px;
+  overflow: hidden;
+}
+.ws-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: var(--color-accent);
+  animation: ws-progress 1.1s ease-in-out infinite;
+}
+@keyframes ws-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+.ws-pick-hint,
+.ws-selection {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  border-radius: var(--radius-pill);
+  transform: translateX(-50%);
+  box-shadow: 0 8px 24px rgba(10, 14, 22, 0.18);
+}
+.ws-pick-hint {
+  top: 12px;
+  padding: 6px 14px;
+  color: #fff;
+  background: var(--color-accent);
+  font-weight: 500;
+  pointer-events: none;
+}
+.ws-selection {
+  bottom: 16px;
+  padding: 6px 6px 6px 14px;
+  color: #f3f5f8;
+  background: rgba(27, 30, 36, 0.94);
+}
+.ws-selection > svg {
+  flex: none;
+  color: #8fb4ff;
+}
+.ws-selection-what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-selection-what code {
+  font-family: var(--ws-mono);
+  font-size: 12px;
+  color: #c6d6ff;
+}
+.ws-selection-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: #aab2bf;
+  font-size: 12.5px;
+}
+.ws-selection-state svg {
+  color: #6ee7a8;
+}
+.ws-drop {
+  position: absolute;
+  z-index: 20;
+  inset: 8px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 2px dashed var(--color-accent);
+  border-radius: var(--radius-lg);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent-soft) 88%, transparent);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* The version menu opens outside the window, so it reads tokens only. */
+.ws-versions {
+  z-index: 10000;
+  width: 320px;
+  max-height: 360px;
+  padding: 4px;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow:
+    0 0 0 1px var(--color-line-strong),
+    0 12px 32px rgba(10, 14, 22, 0.18);
+  font-size: 13px;
+}
+.ws-version {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  outline: none;
+  cursor: pointer;
+}
+.ws-version[data-highlighted] {
+  background: var(--color-bg);
+}
+.ws-version[data-current] b {
+  color: var(--color-accent);
+}
+.ws-version-who {
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-version-note {
+  grid-column: 2;
+  color: var(--color-text);
+}
+
+/* Dialogs. */
+.ws-form {
+  display: grid;
+  gap: var(--space-4);
+}
+.ws-field {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ws-field > span,
+.ws-field > legend {
+  padding: 0;
+  color: var(--color-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.ws-field > legend {
+  margin-bottom: 6px;
+}
+.ws-input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.ws-segments {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+.ws-segment {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  font-weight: 500;
+  cursor: pointer;
+}
+.ws-segment:has(input:checked) {
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow:
+    0 0 0 1px var(--color-line),
+    var(--shadow-card);
+}
+.ws-segment:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+}
+.ws-segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.ws-error {
+  margin: 0;
+  color: var(--color-danger);
+}
+.ws-step {
+  margin: 0;
+}
+.ws-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2);
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--radius-md);
+  background: #1b2029;
+}
+.ws-command pre {
+  margin: 0;
+  font-variant-ligatures: none;
+  overflow-x: auto;
+  color: #e6e9ef;
+  font-family: var(--ws-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.ws-form > .ws-notice {
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+.ws-form > .ws-faint {
+  margin: -8px 0 0;
+  font-size: 12.5px;
+}
+.ws-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-muted);
+}
+.ws-waiting.done {
+  color: var(--color-success);
+  font-weight: 600;
+}
+.ws-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.ws-members {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ws-member:hover {
+  background: var(--color-bg);
+}
+.ws-member input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+.ws-member > span:first-of-type {
+  flex: 1;
+}

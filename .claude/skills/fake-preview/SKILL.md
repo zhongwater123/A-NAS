@@ -53,6 +53,7 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
 - 影视、音乐、视频与 HEIC 需要 `ffmpeg`、`ffprobe` 与 `heif-thumbnailer`：开发模式在进程内运行 FFmpeg Worker，WSL 中没有这些命令时，相关功能报错。
 - 相册本地 AI 与 AI 助手默认不可用；文件权限、Samba 与 systemd 沙箱只能由 [system-test](../system-test/SKILL.md) 或实机验证。
+- Claude Code 桌面版的浏览器面板拦下所有内嵌框架，同源的普通 iframe 也一样（2026-11-25 实测），共享工作区的页面在那里是空白的。看这类窗口时用 Chrome 或 Edge 打开同一地址；要自动操作就用无头 Chrome。
 
 ## 只改界面时
 

@@ -19,6 +19,7 @@ export const categoryInfo: Record<ActivityCategory | "other", { label: string; t
   storage: { label: "存储", tone: "storage" },
   photo: { label: "相册", tone: "photo" },
   family: { label: "家庭中心", tone: "account" },
+  workspace: { label: "共享工作区", tone: "file" },
   system: { label: "系统", tone: "storage" },
   other: { label: "其他", tone: "other" },
 };
@@ -195,6 +196,17 @@ function verbOf(action: string): Verb | undefined {
   return fileVerbs[action] ?? photoVerbs[action];
 }
 
+// The shared workspace's events name the page by its title, or the account
+// added or removed (docs/specs/shared-workspace.md).
+const workspaceActions: Record<string, string> = {
+  "workspace.page_created": "上传了共享页面",
+  "workspace.page_saved": "保存了共享页面的新版本",
+  "workspace.page_renamed": "修改了共享页面的标题",
+  "workspace.page_deleted": "删除了共享页面",
+  "workspace.member_added": "允许一个账号使用共享工作区",
+  "workspace.member_removed": "不再允许一个账号使用共享工作区",
+};
+
 const familyActions: Record<string, string> = {
   "family.joined": "加入了家庭",
   "family.join_requested": "申请加入家庭",
@@ -301,6 +313,8 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       detail.expiresAt ? `${formatDateTime(detail.expiresAt)} 自动结束` : "",
     ].filter(Boolean);
   if (familyActions[event.action]) return { parts: [actor, familyActions[event.action]], meta: [] };
+  if (workspaceActions[event.action])
+    return { parts: [actor, workspaceActions[event.action]], meta: event.detail ? [event.detail] : [] };
   if (event.action.startsWith("system.update."))
     return describeSystemUpdate(event.action.slice("system.update.".length), actor, event.detail);
   switch (event.action) {
@@ -324,6 +338,10 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [actor, "禁用了", subject, "的账号"], meta: [], tone: "warning" };
     case "user.enabled":
       return { parts: [actor, "重新启用了", subject, "的账号"], meta: [] };
+    case "user.agent_token_created":
+      return { parts: [actor, "连接了 agent", name(event.detail ?? "")], meta: [] };
+    case "user.agent_token_revoked":
+      return { parts: [actor, "断开了 agent", name(event.detail ?? "")], meta: [] };
     // A deleted account is gone from the directory; the detail keeps its name.
     case "user.deletion_scheduled":
       return {
