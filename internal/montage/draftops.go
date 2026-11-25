@@ -80,9 +80,7 @@ func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, 
 		next.Shots[i].Beat = original
 		return next, fmt.Sprintf("第 %d 镜已还原", op.Shot), nil
 	case "reset":
-		fresh := src.newDraftState()
-		fresh.Slots = state.Slots
-		return fresh, "已全部还原", nil
+		return src.newDraftState(), "已全部还原", nil
 	}
 	return draftState{}, "", ErrInvalid
 }

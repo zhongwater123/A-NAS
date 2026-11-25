@@ -171,8 +171,8 @@ anas-photos
 | `plan_briefs` | job_id、step、input_key、brief_json | 计算 Worker 为某一步、某个输入键做的 brief，只做一次；任务的步骤先做好，工具来读时直接用 |
 | `plans` | job_id、plan、step、round_id、catalog_key、answer_json、accepted_at、voided_at | `plan` 是第几个方案；答案由任务的步骤从 `plan_answers` 取来写入，`round_id` 不再填写。每个任务每个方案每步只有一份有效答案。“重新规划”从还没收下的那一步开始；去掉素材使目录变化时，已收下的答案标为作废，两步都重新规划；每次“生成”是新任务，两步都重新规划 |
 | `versions` | id、project_id、number、job_id、plan、version_key、film_asset_id、kind、source_version_id、draft_revision、timeline_json、created_at | 成片存进相册后才写一行，一个任务的每个方案一行（`job_id` 与 `plan` 唯一）；失败或取消的任务不留版本，已存的方案留着。`number` 在项目内从 1 递增，是成片文件名里的版本号。`version_key` 与渲染输出的字节无关：生成与重剪的版本由任务 ID 与渲染步骤的 `input_key` 组成，存为新版本的由修改稿 ID、修订号与渲染步骤的 `input_key` 组成，同一修订重试只存一次。`kind` 按任务种类：生成任务的版本是 `plan`，存为新版本是 `edit`，重剪是 `recut`；`timeline_json` 是这一版的时间线，存回时在同一个事务里写入，修改稿、粗预览与镜头清单都从它读 |
-| `drafts` | id、owner_user_id、project_id、base_version_id、revision、slots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`slots_json` 记这一版的音乐槽，和按成片顺序盖住它们的镜头：每镜的节拍、盖住第几到第几个槽（删掉一镜就是把它的槽并给前一镜或后一镜）、哪个槽是它自己的（`home`，“还原这一镜”与“已换”按它判断）、是否锁定 |
-| `draft_revisions` | draft_id、revision、op、seed、back、slots_json、created_at | 每一步一行。`back` 是撤销这一步回到的修订：普通的一步是它之前的修订，撤销的一步是被撤销那一步的 `back`，所以连续撤销一直往回走，不会变成重做。保留最近 100 个修订和撤销链上的修订，最多 101 行，所以不管其中几步是撤销，都能撤销最近 100 步 |
+| `drafts` | id、owner_user_id、project_id、base_version_id、revision、shots_json、updated_at | 修改稿，每个版本一份（`base_version_id` 唯一）。`shots_json` 记按成片顺序盖住这一版音乐槽的镜头；音乐槽本身从不改变，不存在这里，打开时从版本的时间线（`versions.timeline_json`）读出。每镜记：每镜的节拍、盖住第几到第几个槽（删掉一镜就是把它的槽并给前一镜或后一镜）、哪个槽是它自己的（`home`，“还原这一镜”与“已换”按它判断）、是否锁定 |
+| `draft_revisions` | draft_id、revision、op、seed、back、shots_json、created_at | 每一步一行，`shots_json` 同 `drafts`，只有镜头。`back` 是撤销这一步回到的修订：普通的一步是它之前的修订，撤销的一步是被撤销那一步的 `back`，所以连续撤销一直往回走，不会变成重做。保留最近 100 个修订和撤销链上的修订，最多 101 行，所以不管其中几步是撤销，都能撤销最近 100 步 |
 | `revocations` | grant_id、next_try、attempts | 撤销授权时相册不可用，就记在这里重试 |
 | `songs` | id、owner_user_id、sha256、title、duration、state、reason、analysis_version、analysis_json、created_at | 成员选过的歌：副本的摘要、分析结果（节拍、重拍、段落、副歌、响度）与不可用的原因 |
 

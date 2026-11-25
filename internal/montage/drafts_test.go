@@ -989,11 +989,11 @@ func TestADraftWithABeatItsSourceLacksIsNotEdited(t *testing.T) {
 	}
 	beat := draft.Shots[0].Beat
 	// A beat of a card described but left out of the catalog cannot be either.
-	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"c5/1"`)
+	env.store.Exec(t, "UPDATE drafts SET shots_json = replace(shots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"c5/1"`)
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
 		t.Fatalf("reading it with a beat out of the catalog = %v", err)
 	}
-	env.store.Exec(t, "UPDATE drafts SET slots_json = replace(slots_json, ?, ?)", `"beat":"c5/1"`, `"beat":"v9-9/1"`)
+	env.store.Exec(t, "UPDATE drafts SET shots_json = replace(shots_json, ?, ?)", `"beat":"c5/1"`, `"beat":"v9-9/1"`)
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
 		t.Fatalf("reading it = %v", err)
 	}
@@ -1146,5 +1146,37 @@ func TestAVersionWhoseCardIsOfAnotherVideoNowIsNotEdited(t *testing.T) {
 	env.store.Exec(t, `UPDATE versions SET timeline_json = replace(timeline_json, '"video":"`+videoB+`"', '"video":"asset:c"') WHERE id = 'version:1'`)
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
 		t.Fatalf("editing a version whose card is of another video = %v", err)
+	}
+}
+
+// A draft and its revisions keep only their shots: the slots are the
+// version's, read from its timeline, the same for every revision.
+func TestADraftKeepsOnlyItsShots(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := env.store.Count(t, `SELECT (SELECT COUNT(*) FROM drafts WHERE shots_json LIKE '%"start"%' OR shots_json LIKE '%"slots"%')
+		+ (SELECT COUNT(*) FROM draft_revisions WHERE shots_json LIKE '%"start"%' OR shots_json LIKE '%"slots"%')`); n != 0 {
+		t.Fatalf("%d rows keep the slots", n)
+	}
+	// Undone and reset, the draft stands over the same slots.
+	undone, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "undo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset, err := env.store.EditDraft(ctx, editOwner, draft.ID, undone.Revision, DraftOp{Type: "reset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range []Draft{undone, reset} {
+		if !slices.Equal(beats(got), []string{"c1/1", "c2/1", "c2/2", "c3/2"}) || got.Seconds != 14 || len(got.Shots[3].Slots) != 1 {
+			t.Fatalf("the draft = %v over %v s", beats(got), got.Seconds)
+		}
 	}
 }

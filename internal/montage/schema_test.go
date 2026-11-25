@@ -47,9 +47,9 @@ func TestGoingBackBeforeJobKindsForgetsEditsAndRecuts(t *testing.T) {
 			VALUES('version:1', 'project:1', 1, 'job:1', 1, 'v1', 'asset:film1', '` + at + `', 'plan', NULL, NULL),
 				('version:2', 'project:1', 2, 'job:2', 1, 'v2', 'asset:film2', '` + at + `', 'edit', 'version:1', 1),
 				('version:3', 'project:1', 3, 'job:3', 1, 'v3', 'asset:film3', '` + at + `', 'recut', 'version:1', NULL)`,
-		`INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, slots_json, updated_at)
+		`INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
 			VALUES('draft:1', 'user:alice', 'project:1', 'version:1', 1, '{}', '` + at + `'), ('draft:2', 'user:alice', 'project:1', 'version:2', 0, '{}', '` + at + `')`,
-		`INSERT INTO draft_revisions(draft_id, revision, op, slots_json, created_at) VALUES('draft:1', 0, 'create', '{}', '` + at + `'),
+		`INSERT INTO draft_revisions(draft_id, revision, op, shots_json, created_at) VALUES('draft:1', 0, 'create', '{}', '` + at + `'),
 			('draft:2', 0, 'create', '{}', '` + at + `')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {

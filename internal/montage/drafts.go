@@ -470,10 +470,33 @@ type draftShot struct {
 }
 
 // draftState is a revision of a draft: the version's slots, and the shots
-// that cover them in film order.
+// that cover them in film order. Only the shots are kept (encode): the
+// slots are the version's, read from its timeline (slots).
 type draftState struct {
-	Slots []draftSlot `json:"slots"`
+	Slots []draftSlot
+	Shots []draftShot
+}
+
+// keptShots is a revision as it is kept.
+type keptShots struct {
 	Shots []draftShot `json:"shots"`
+}
+
+// encode is the state as a revision keeps it.
+func (state draftState) encode() (string, error) {
+	encoded, err := json.Marshal(keptShots{Shots: state.Shots})
+	return string(encoded), err
+}
+
+// stateOf is a kept revision over the version's slots; ok is false when its
+// shots do not cover them.
+func (src *editSource) stateOf(kept string) (draftState, bool) {
+	var shots keptShots
+	if err := json.Unmarshal([]byte(kept), &shots); err != nil {
+		return draftState{}, false
+	}
+	state := draftState{Slots: src.slots(), Shots: shots.Shots}
+	return state, state.valid()
 }
 
 // slots are the version's slots in film order, each with the beat that
@@ -749,24 +772,23 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draf
 	var id string
 	err = s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		state := src.newDraftState()
-		encoded, err := json.Marshal(state)
+		encoded, err := src.newDraftState().encode()
 		if err != nil {
 			return Draft{}, err
 		}
 		id = newID("draft")
 		now := sqlitedb.FormatTime(s.now())
 		err = s.withTx(ctx, func(tx *sql.Tx) error {
-			result, err := tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, slots_json, updated_at)
-				VALUES(?, ?, ?, ?, 0, ?, ?) ON CONFLICT (base_version_id) DO NOTHING`, id, owner, src.projectID, versionID, string(encoded), now)
+			result, err := tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
+				VALUES(?, ?, ?, ?, 0, ?, ?) ON CONFLICT (base_version_id) DO NOTHING`, id, owner, src.projectID, versionID, encoded, now)
 			if err != nil {
 				return err
 			}
 			if n, err := result.RowsAffected(); err != nil || n == 0 {
 				return err // another request made it first
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, slots_json, created_at) VALUES(?, 0, 'create', ?, ?)`,
-				id, string(encoded), now)
+			_, err = tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, shots_json, created_at) VALUES(?, 0, 'create', ?, ?)`,
+				id, encoded, now)
 			return err
 		})
 		if err != nil {
@@ -823,7 +845,7 @@ type keptDraft struct {
 func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editSource) (*editSource, keptDraft, error) {
 	var versionID, stateJSON, updated string
 	var draft keptDraft
-	err := s.db.QueryRowContext(ctx, "SELECT base_version_id, revision, slots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
+	err := s.db.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
 		draftID, owner).Scan(&versionID, &draft.revision, &stateJSON, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, keptDraft{}, ErrNotFound
@@ -836,7 +858,8 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 			return nil, keptDraft{}, err
 		}
 	}
-	if err := json.Unmarshal([]byte(stateJSON), &draft.state); err != nil || !draft.state.valid() {
+	var ok bool
+	if draft.state, ok = src.stateOf(stateJSON); !ok {
 		return nil, keptDraft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
 	}
 	if !src.holds(draft.state) {
@@ -859,21 +882,21 @@ func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editS
 	return src.view(draftID, draft.revision, canUndo, draft.state, draft.updated), nil
 }
 
-// undone is the revision an undo goes back to: its state, and the revision
-// undoing goes on to from there.
+// undone is the revision an undo goes back to: its shots as kept, and the
+// revision undoing goes on to from there.
 type undone struct {
-	revision  int
-	stateJSON string
-	back      sql.NullInt64
+	revision int
+	shots    string
+	back     sql.NullInt64
 }
 
 // undoTarget is the revision undoing revision goes back to; ok is false
 // when there is none, or it is more than keptRevisions steps back and no
 // longer kept.
 func (s *Store) undoTarget(ctx context.Context, draftID string, revision int) (target undone, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT t.revision, t.slots_json, t.back FROM draft_revisions r
+	err = s.db.QueryRowContext(ctx, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
 		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
-		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.revision, &target.stateJSON, &target.back)
+		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.revision, &target.shots, &target.back)
 	if errors.Is(err, sql.ErrNoRows) {
 		return undone{}, false, nil
 	}
@@ -920,7 +943,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		if !ok {
 			return Draft{}, refuse("没有可以撤销的步骤")
 		}
-		if err := json.Unmarshal([]byte(target.stateJSON), &next); err != nil || !next.valid() {
+		if next, ok = src.stateOf(target.shots); !ok {
 			return Draft{}, fmt.Errorf("draft %s revision %d holds an unusable state", draftID, target.revision)
 		}
 		// Undoing goes on back from where the step undone came from.
@@ -950,14 +973,14 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	if !next.valid() {
 		return Draft{}, fmt.Errorf("draft %s: a %s step left shots that do not cover the slots", draftID, op.Type)
 	}
-	encoded, err := json.Marshal(next)
+	encoded, err := next.encode()
 	if err != nil {
 		return Draft{}, err
 	}
 	now := s.now()
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, slots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
-			string(encoded), sqlitedb.FormatTime(now), draftID, owner, base)
+		result, err := tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, shots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
+			encoded, sqlitedb.FormatTime(now), draftID, owner, base)
 		if err != nil {
 			return err
 		}
@@ -966,8 +989,8 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		} else if n == 0 {
 			return ErrDraftConflict
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, slots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-			draftID, base+1, op.Type, seed, back, string(encoded), sqlitedb.FormatTime(now)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+			draftID, base+1, op.Type, seed, back, encoded, sqlitedb.FormatTime(now)); err != nil {
 			return err
 		}
 		return trimRevisions(ctx, tx, draftID, base+1)

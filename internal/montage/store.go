@@ -323,9 +323,10 @@ ALTER TABLE projects DROP COLUMN song_track;
 		// 8: editing a film after it was made (#596, ADR 0039). A project
 		// keeps the version its member chose; a version its timeline, which
 		// the save writes and a version from before is given from its job's
-		// fill. A draft is a member's edit of one version, slot by slot; each
-		// step is a revision, the last hundred kept, and back is the revision
-		// undoing it goes to.
+		// fill. A draft is a member's edit of one version: its shots over the
+		// version's slots, which the version's timeline holds and a draft does
+		// not keep; each step is a revision, the last hundred kept, and back is
+		// the revision undoing it goes to.
 		{Up: `
 ALTER TABLE projects ADD COLUMN chosen_version_id TEXT;
 ALTER TABLE versions ADD COLUMN timeline_json TEXT;
@@ -335,7 +336,7 @@ CREATE TABLE drafts (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     base_version_id TEXT NOT NULL UNIQUE REFERENCES versions(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL,
-    slots_json TEXT NOT NULL,
+    shots_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE TABLE draft_revisions (
@@ -344,7 +345,7 @@ CREATE TABLE draft_revisions (
     op TEXT NOT NULL,
     seed INTEGER,
     back INTEGER,
-    slots_json TEXT NOT NULL,
+    shots_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (draft_id, revision)
 );
