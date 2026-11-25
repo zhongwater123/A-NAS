@@ -1,11 +1,11 @@
 # 成员在等的后台 AI 工作要不要等相册空闲
 
-状态：decided（2026-11-25，用户）
+状态：superseded（2026-11-25 用户选 A，规则改写进 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 4 与后果；本记录只留问题、选项与代价）
 更新时间：2026-11-25
 
 ## 问题
 
-相册的 AI 门控原来对所有后台 AI 工作一视同仁：有人在用相册（前台请求进行中，或最后一个结束后的 5 分钟里）就不开始，正在做的立即挂断。
+相册的 AI 门控原来对所有后台 AI 工作一视同仁：有人在用相册（前台请求进行中，或最后一个结束后的 5 分钟里）就不开始；正在做的检测、读文字与剪辑分析立即挂断，向量推理不能中断，做完为止。
 
 2026-11-19 在实验 NAS 上第一次验收剪辑中心，剪辑任务在“等待分析”停了一个多小时（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）：
 - 剪辑中心的分析和相册自己的后台工作共用这条规则；
@@ -45,7 +45,7 @@
 
 选项 A 所列的两项代价一并接受：描述卡片期间搜索照片要排在这张描述之后；读文字模型占的 CPU 不计入门控。“没有测量的”几项仍没有测。
 
-按[与 ADR 的分界](README.md#与-adr-的分界)第 2 条，规则写在 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 的决定 4 与后果；代码不变（[PR #649](https://github.com/zhongwater123/A-NAS/pull/649) 只改文档）。
+按[与 ADR 的分界](README.md#与-adr-的分界)第 2 条，规则只写在 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 的决定 4 与后果，本记录标为 `superseded`；代码不变（[PR #649](https://github.com/zhongwater123/A-NAS/pull/649) 只改文档）。
 
 ## 关联
 
