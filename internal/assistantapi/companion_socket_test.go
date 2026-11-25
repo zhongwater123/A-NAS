@@ -91,8 +91,38 @@ func setFor[T any](t *testing.T, variable *T, value T) {
 
 const wakeCall = `{"tool":"wake","args":{}}`
 
+// wakeReadingAnyRefusal sends wakeCall on a connection of its own and returns
+// the answer. Like anas_window_call.py, it reads the answer even when the
+// send failed: a connection over the UID's bound is answered busy and closed
+// as it is accepted, possibly before the call goes out.
+func wakeReadingAnyRefusal(t *testing.T, path string) map[string]any {
+	t.Helper()
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	request, err := http.NewRequest(http.MethodPost, "http://companion/call", strings.NewReader(wakeCall))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	_ = request.Write(conn)
+	_ = conn.SetReadDeadline(time.Now().Add(socketWait))
+	response, err := http.ReadResponse(bufio.NewReader(conn), request)
+	if err != nil {
+		t.Fatalf("no answer to a call: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var data map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&data); err != nil {
+		t.Fatalf("an answer of %d: %v", response.StatusCode, err)
+	}
+	return data
+}
+
 func TestAUIDsConnectionsAreBoundedBeforeAnythingIsRead(t *testing.T) {
-	path, client := companionSocket(t)
+	path, _ := companionSocket(t)
 	// Connections that send nothing take every place the UID has...
 	var held []net.Conn
 	for range maxCompanionConnections {
@@ -115,24 +145,21 @@ func TestAUIDsConnectionsAreBoundedBeforeAnythingIsRead(t *testing.T) {
 	}
 	closedSoon(t, conn, reader)
 
-	// Once one of them closes, a call gets through again.
+	// Once one of them closes, a call gets through again. Until the server
+	// has seen it close, a call is refused like the one above, and the
+	// refusal may come before the call is sent: net/http's client then
+	// reports a broken pipe, or drops the answer as unsolicited, so each
+	// call reads its answer the way anas_window_call.py does.
 	_ = held[0].Close()
 	deadline := time.Now().Add(socketWait)
 	for {
-		response, err := client.Post("http://companion/call", "application/json", strings.NewReader(wakeCall))
-		if err != nil {
-			t.Fatal(err)
-		}
-		data = nil
-		_ = json.NewDecoder(response.Body).Decode(&data)
-		_ = response.Body.Close()
+		data = wakeReadingAnyRefusal(t, path)
 		if data["status"] == "no_desktop" {
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("after a connection closed: %v", data)
 		}
-		client.CloseIdleConnections()
 		time.Sleep(20 * time.Millisecond)
 	}
 }

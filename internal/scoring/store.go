@@ -41,6 +41,8 @@ var (
 	ErrNotReady = errors.New("batch is still importing")
 	// ErrInUse reports deleting a batch that already has ratings.
 	ErrInUse = errors.New("batch already has ratings")
+	// ErrNameTaken refuses a custom 打分项 named like another.
+	ErrNameTaken = errors.New("a scoring dimension has this name")
 )
 
 func invalid(format string, args ...any) error {
@@ -71,6 +73,10 @@ const (
 	MaxScore = 500
 	// Recent is how many of a rater's latest scores the ruler shows.
 	Recent = 12
+	// DefaultMinLongEdge is the shortest longer side, in pixels, of a photo
+	// to score; smaller ones are skipped on import. Anchors are exempt: they
+	// are shown, never scored.
+	DefaultMinLongEdge = 2400
 	// maxOriginalBytes skips files no camera writes; the decode budget
 	// bounds the pixels separately.
 	maxOriginalBytes = 1 << 30
@@ -96,18 +102,21 @@ type Options struct {
 	Now       func() time.Time
 	// Random returns a uniform float in [0, 1).
 	Random func() float64
+	// MinLongEdge replaces DefaultMinLongEdge when it is not 0.
+	MinLongEdge int
 }
 
 // Store is the module's state in dir.
 type Store struct {
-	db        *sql.DB
-	dir       string
-	photosDir string
-	photos    Photos
-	logger    *slog.Logger
-	now       func() time.Time
-	random    func() float64
-	wake      chan struct{}
+	db          *sql.DB
+	dir         string
+	photosDir   string
+	photos      Photos
+	logger      *slog.Logger
+	now         func() time.Time
+	random      func() float64
+	minLongEdge int
+	wake        chan struct{}
 }
 
 // Open opens or creates the store in dir, which must exist.
@@ -115,7 +124,7 @@ func Open(dir string, options Options) (*Store, error) {
 	if options.Photos == nil || options.PhotosDir == "" {
 		return nil, errors.New("scoring store needs the photos folder")
 	}
-	for _, sub := range []string{"previews", "thumbnails", "backups", "staging"} {
+	for _, sub := range []string{"previews", "thumbnails", "full", "backups", "staging"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
 			return nil, err
 		}
@@ -126,7 +135,10 @@ func Open(dir string, options Options) (*Store, error) {
 	}
 	store := &Store{
 		db: db, dir: dir, photosDir: filepath.Clean(options.PhotosDir), photos: options.Photos,
-		logger: options.Logger, now: options.Now, random: options.Random, wake: make(chan struct{}, 1),
+		logger: options.Logger, now: options.Now, random: options.Random, minLongEdge: options.MinLongEdge, wake: make(chan struct{}, 1),
+	}
+	if store.minLongEdge == 0 {
+		store.minLongEdge = DefaultMinLongEdge
 	}
 	if store.logger == nil {
 		store.logger = slog.Default()
@@ -149,9 +161,19 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
 
-const schemaVersion = 1
+// schema takes the database from each version to the next; its version is
+// how many steps have run (sqlitedb.Schema). The first four were released
+// without a Down; every later step has one.
+var schema = sqlitedb.Schema{
+	Name: "scoring.db",
+	Steps: []sqlitedb.Step{
+		{Up: schemaV1}, {Up: schemaV2}, {Up: schemaV3}, {Up: schemaV4},
+		{Up: schemaV5, Down: schemaV5Down},
+	},
+	WithoutDown: 4,
+}
 
-const schema = `
+const schemaV1 = `
 CREATE TABLE raters (
 	account_id TEXT PRIMARY KEY,
 	added_by TEXT NOT NULL,
@@ -239,29 +261,139 @@ CREATE INDEX ratings_claim ON ratings(claim_token);
 CREATE INDEX ratings_repeat_of ON ratings(repeat_of) WHERE repeat_of IS NOT NULL;
 `
 
+// schemaV2 adds 打分项: a batch's dimensions, and a rating's scores on those
+// other than overall, which stays in ratings.score. Every batch from before
+// scores overall alone.
+const schemaV2 = `
+ALTER TABLE batches ADD COLUMN dimensions TEXT NOT NULL DEFAULT 'overall';
+CREATE TABLE rating_scores (
+	rating_id INTEGER NOT NULL REFERENCES ratings(id),
+	dimension TEXT NOT NULL CHECK (dimension <> 'overall'),
+	score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 500),
+	PRIMARY KEY (rating_id, dimension)
+) WITHOUT ROWID;
+`
+
+// schemaV3 lets a batch score any 打分项 in the order the administrator
+// chose them, custom ones among them: ratings.score keeps a rating's first
+// 打分项, which was overall in every batch before, and rating_scores the
+// others, overall among them when it is not first.
+const schemaV3 = `
+CREATE TABLE custom_dimensions (
+	id TEXT PRIMARY KEY,
+	number INTEGER NOT NULL UNIQUE CHECK (number > 0),
+	name TEXT NOT NULL UNIQUE,
+	description TEXT NOT NULL,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	CHECK (id = 'custom_' || number)
+);
+CREATE TABLE rating_scores_v3 (
+	rating_id INTEGER NOT NULL REFERENCES ratings(id),
+	dimension TEXT NOT NULL,
+	score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 500),
+	PRIMARY KEY (rating_id, dimension)
+) WITHOUT ROWID;
+INSERT INTO rating_scores_v3 (rating_id, dimension, score) SELECT rating_id, dimension, score FROM rating_scores;
+DROP TABLE rating_scores;
+ALTER TABLE rating_scores_v3 RENAME TO rating_scores;
+`
+
+// schemaV4 gives every batch a scale, which every batch before had on the
+// number line with two decimals, and lets a scale with decimals keep them
+// from raters.
+const schemaV4 = `
+ALTER TABLE batches ADD COLUMN scale TEXT NOT NULL DEFAULT 'hundredths'
+	CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three'));
+ALTER TABLE batches ADD COLUMN hide_decimals INTEGER NOT NULL DEFAULT 0
+	CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'));
+`
+
+// schemaV5 lets a batch be scored on five levels. SQLite cannot change a
+// column's CHECK, so batches is rebuilt with every row as it was; the step
+// runs with foreign keys off, so that items and anchors keep their batch.
+//
+// The same version names overall 总体 and adds 画质 and 情绪 (BuiltIn). A
+// custom 打分项 an administrator gave one of those names keeps its ID and
+// gets 自定义 added to its name, or its ID when that name is taken too, so
+// that names stay unique as CreateDimension keeps them.
+const schemaV5 = `
+UPDATE custom_dimensions SET name = CASE
+	WHEN EXISTS (SELECT 1 FROM custom_dimensions AS other WHERE other.name = custom_dimensions.name || '（自定义）')
+		THEN custom_dimensions.name || '（' || custom_dimensions.id || '）'
+	ELSE custom_dimensions.name || '（自定义）'
+END
+WHERE name IN ('总体', '画质', '情绪');
+CREATE TABLE batches_v5 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three', 'five')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v5 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v5 RENAME TO batches;
+`
+
+// schemaV5Down takes batches back to version 4's scales. A five-level batch
+// becomes whole points, whose scores include all of its own; renamed custom
+// 打分项 keep their new names, which version 4 accepts as well. No build
+// runs it yet: the builds of version 4 migrate without sqlitedb.Schema and
+// refuse a newer database (migrate), but sqlitedb wants every step after
+// the released ones reversible, and the stored Down is what a build with
+// this schema and fewer steps would use.
+const schemaV5Down = `
+CREATE TABLE batches_v4 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v4 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions,
+		CASE scale WHEN 'five' THEN 'whole' ELSE scale END, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v4 RENAME TO batches;
+`
+
+// migrate brings the database to the schema's version, copying it first when
+// it has to be upgraded. Builds of version 4 and before migrated by hand and
+// refuse a database newer than theirs instead of taking it back, so going
+// back to one of them means restoring that copy
+// (docs/runbooks/install-and-remove-photo-scoring.md).
 func (s *Store) migrate(ctx context.Context) error {
 	var version int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	switch {
-	case version == schemaVersion:
-		return nil
-	case version > schemaVersion:
-		return fmt.Errorf("scoring database version %d is newer than this module (%d)", version, schemaVersion)
+	if version > 0 && version < len(schema.Steps) {
+		name := fmt.Sprintf("scoring-%s-v%d.db", s.now().UTC().Format("2006-01-02"), version)
+		if err := s.copyTo(ctx, filepath.Join(s.dir, "backups", name)); err != nil {
+			return fmt.Errorf("copy scoring.db before upgrading it from version %d: %w", version, err)
+		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, schema); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.Migrate(ctx, s.db, schema)
 }
 
 // each runs scan for every row of query and closes the rows.

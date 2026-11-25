@@ -6,8 +6,11 @@ import { setSession } from "../api/client";
 import { session } from "../test/fixtures";
 import { type WebSearchOptions, webSearchHandlers, webSearchStatus } from "../test/handlers/websearch";
 import { server } from "../test/server";
+import { fixToday } from "../test/today";
 import { resetWebSearch } from "../websearch/status";
 import { WebSearchSection } from "./WebSearchSection";
+
+fixToday();
 
 function serve(options: WebSearchOptions = {}) {
   const webSearch = webSearchHandlers(options);

@@ -45,6 +45,11 @@ const (
 	// or "fields" with Schema, a JSON object whose empty values the model
 	// fills (docs/architecture/photo-ocr.md). Hanging up cancels it too.
 	OpReadText = "read_text"
+	// OpDescribeFrames describes a montage card from its key frames, one
+	// descriptor each (docs/architecture/photo-ai.md, 剪辑中心的分析):
+	// Offsets, Groups and Duration lay them out; the prompt and schema are
+	// the Worker's, named by the answer's Template. Hanging up cancels it.
+	OpDescribeFrames = "describe_frames"
 	// OpRelease frees memory: What is "detector" to drop the background
 	// models (the detector, the face models, the animal model and the text
 	// reader), or "all" for the Worker to exit after answering.
@@ -55,6 +60,14 @@ const (
 // model, and the model then writes a few tokens a second on the NAS.
 const readTimeout = 10 * time.Minute
 
+// describeTimeout bounds a card's description: up to 20 key frames, an
+// answer of up to 1,800 tokens, and up to three tries.
+const describeTimeout = 15 * time.Minute
+
+// MaxDescribeFrames is the most key frames describe_frames takes, and so
+// the most descriptors the Worker receives with a request.
+const MaxDescribeFrames = 20
+
 // Error codes the Worker answers with.
 const (
 	// CodeInvalidInput: the Worker cannot read this input; the same input
@@ -63,6 +76,12 @@ const (
 	// CodeUnavailable: the Worker runs but cannot serve, for example because
 	// its model file is missing or does not match the manifest.
 	CodeUnavailable = "unavailable"
+	// CodeInvalidRequest: the request is malformed, such as more key frames
+	// than describe_frames takes.
+	CodeInvalidRequest = "invalid_request"
+	// CodeInvalidResult: the model's answer did not fit the schema however
+	// often the Worker asked again.
+	CodeInvalidResult = "invalid_result"
 )
 
 type Request struct {
@@ -75,6 +94,10 @@ type Request struct {
 	Kind string `json:"kind,omitempty"`
 	// Schema is the JSON object whose empty values read_text fills.
 	Schema json.RawMessage `json:"schema,omitempty"`
+	// Offsets, Groups and Duration lay out describe_frames' key frames.
+	Offsets  []float64 `json:"offsets,omitempty"`
+	Groups   []int     `json:"groups,omitempty"`
+	Duration float64   `json:"duration,omitempty"`
 }
 
 type Response struct {
@@ -103,8 +126,11 @@ type Response struct {
 	// Reading answers read_text.
 	Reading *WireReading `json:"reading,omitempty"`
 	// Vectors answer embed_animals, one per box, each as Vector is.
-	Vectors [][]byte   `json:"vectors,omitempty"`
-	Error   *WireError `json:"error,omitempty"`
+	Vectors [][]byte `json:"vectors,omitempty"`
+	// Template and Description answer describe_frames.
+	Template    string          `json:"template,omitempty"`
+	Description json.RawMessage `json:"description,omitempty"`
+	Error       *WireError      `json:"error,omitempty"`
 }
 
 // WireFace is one face as detect_faces answers it: box and landmarks as
@@ -154,7 +180,7 @@ type WireError struct {
 }
 
 // Client implements photos.Embedder, photos.Detector, photos.FaceDetector,
-// photos.AnimalEmbedder and photos.TextReader.
+// photos.AnimalEmbedder, photos.TextReader and photos.CardDescriber.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -168,6 +194,7 @@ var (
 	_ photos.FaceDetector   = Client{}
 	_ photos.AnimalEmbedder = Client{}
 	_ photos.TextReader     = Client{}
+	_ photos.CardDescriber  = Client{}
 )
 
 func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
@@ -202,6 +229,22 @@ func (c Client) ReadText(ctx context.Context, image *os.File, schema json.RawMes
 		tokens[i] = photos.TokenProb{Token: token.Token, LogProb: token.LogProb}
 	}
 	return response.Model, photos.Reading{Text: response.Reading.Text, Tokens: tokens, Finish: response.Reading.Finish}, nil
+}
+
+// DescribeFrames describes a montage card from its key frames, in order.
+// The Worker checks the layout and refuses more than MaxDescribeFrames
+// frames (CodeInvalidRequest).
+func (c Client) DescribeFrames(ctx context.Context, frames []*os.File, card photos.CardLayout) (string, string, json.RawMessage, error) {
+	c.Timeout = max(c.Timeout, describeTimeout)
+	request := Request{Op: OpDescribeFrames, Offsets: card.Offsets, Groups: card.Groups, Duration: card.Duration}
+	response, err := c.callFiles(ctx, request, frames)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if response.Model == "" || response.Template == "" || len(response.Description) == 0 {
+		return "", "", nil, errors.New("AI worker returned no description")
+	}
+	return response.Model, response.Template, response.Description, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {
@@ -320,6 +363,14 @@ func vectorOf(response Response) ([]float32, error) {
 // that keeps killing it cannot be retried forever. Cancelling ctx hangs up,
 // which stops a detection; the error then wraps context.Canceled.
 func (c Client) call(ctx context.Context, request Request, file *os.File) (Response, error) {
+	if file == nil {
+		return c.callFiles(ctx, request, nil)
+	}
+	return c.callFiles(ctx, request, []*os.File{file})
+}
+
+// callFiles is call with any number of descriptors, sent in order.
+func (c Client) callFiles(ctx context.Context, request Request, files []*os.File) (Response, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
@@ -336,8 +387,8 @@ func (c Client) call(ctx context.Context, request Request, file *os.File) (Respo
 	defer stop()
 
 	unixConn := conn.(*net.UnixConn)
-	err = unixmsg.Write(unixConn, request, file, MaxFrame)
-	runtime.KeepAlive(file)
+	err = unixmsg.WriteFiles(unixConn, request, files, MaxFrame)
+	runtime.KeepAlive(files)
 	if err != nil {
 		return Response{}, fmt.Errorf("send to AI worker: %w", err)
 	}
@@ -355,8 +406,10 @@ func (c Client) call(ctx context.Context, request Request, file *os.File) (Respo
 			return Response{}, errors.New("AI worker failed without a reason")
 		}
 		switch response.Error.Code {
-		case CodeInvalidInput:
+		case CodeInvalidInput, CodeInvalidRequest:
 			return Response{}, fmt.Errorf("%w: %s", photos.ErrAIRejected, response.Error.Message)
+		case CodeInvalidResult:
+			return Response{}, fmt.Errorf("%w: %s", photos.ErrAIInvalidResult, response.Error.Message)
 		case CodeUnavailable:
 			return Response{}, fmt.Errorf("%w: %s", photos.ErrAIUnavailable, response.Error.Message)
 		default:

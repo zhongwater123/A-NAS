@@ -29,6 +29,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -64,7 +65,10 @@ type Options struct {
 	// Accounts names the member whose assistant called on the companion
 	// socket, from the caller's UID; without it no call is taken.
 	Accounts AccountResolver
-	Logger   *slog.Logger
+	// Key tells the status why a member has no assistant: without the
+	// administrator's model key nobody has one.
+	Key    KeyState
+	Logger *slog.Logger
 	// Context ends what the API runs in the background: the instances kept
 	// for signed-in members, the watch over their scheduled tasks, and the
 	// gateway connections. Wait returns once the first two stopped. Without
@@ -179,13 +183,25 @@ func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, stri
 	}
 }
 
-func (h *Handler) status(w http.ResponseWriter, _ *http.Request, account string) {
+// KeyState reads whether the administrator saved the assistant's model key.
+type KeyState interface {
+	AssistantKey(ctx context.Context) (assistantkey.State, error)
+}
+
+func (h *Handler) status(w http.ResponseWriter, r *http.Request, account string) {
 	available := true
 	if h.options.SocketDir != "" {
 		_, err := os.Stat(filepath.Join(h.options.SocketDir, account+".sock"))
 		available = err == nil
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"available": available})
+	status := map[string]any{"available": available}
+	// The desktop tells a member whose device has no key that the administrator sets one.
+	if !available && h.options.Key != nil {
+		if key, err := h.options.Key.AssistantKey(r.Context()); err == nil && !key.Configured {
+			status["reason"] = "no_key"
+		}
+	}
+	httpjson.Write(w, http.StatusOK, status)
 }
 
 // session is what the desktop needs of a stored Hermes session.

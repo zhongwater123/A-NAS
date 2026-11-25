@@ -1,0 +1,85 @@
+parameters:
+  TodoID: { name: todoId, in: path, required: true, schema: { type: string, minLength: 1 } }
+schemas:
+  TodoDate: { type: string, format: date, description: "A calendar date without time of day or zone; today is the device's local date." }
+  TodoCategory:
+    type: string
+    enum: [bill, medical, insurance, id_document, contract, other]
+    description: "What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one."
+  TodoScope:
+    type: string
+    enum: [shared, private]
+    description: "shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared."
+  TodoStatus: { type: string, enum: [open, done, ignored] }
+  TodoStage:
+    type: string
+    enum: [soon, today, overdue]
+    description: "soon: due within 3 days; today: due today; overdue: the due date has passed."
+  Todo:
+    type: object
+    additionalProperties: false
+    required: [id, title, category, scope, status, source, remindRound, version, createdAt, createdById, createdByName]
+    properties:
+      id: { type: string }
+      title: { type: string, minLength: 1, maxLength: 10 }
+      category: { $ref: "#/schemas/TodoCategory" }
+      due: { $ref: "#/schemas/TodoDate" }
+      ownerId: { type: string, description: "Account ID of whom it is for; absent means the whole family." }
+      ownerName: { type: string, description: "Username of the owner when it was set, shown once the account is gone." }
+      amountCents: { type: integer, minimum: 0, description: "Amount in fen (分) of renminbi; there is no other currency." }
+      scope: { $ref: "#/schemas/TodoScope" }
+      status: { $ref: "#/schemas/TodoStatus" }
+      snoozedUntil: { $ref: "#/schemas/TodoDate", description: "The day reminders resume; the to-do is snoozed while today is before it." }
+      remindRound: { type: integer, minimum: 0, description: "Grows when the to-do is snoozed, opened again or given another due date, which starts its reminders over." }
+      source: { type: string, enum: [manual], description: "Where it came from; manual: added by hand." }
+      version: { type: integer, minimum: 1, description: "Counts edits to the fields; changing the status or snoozing does not change it." }
+      createdAt: { type: string, format: date-time }
+      createdById: { type: string, description: Account ID of who added it. }
+      createdByName: { type: string, description: "Username of who added it, when they added it." }
+      updatedAt: { type: string, format: date-time }
+      closedAt: { type: string, format: date-time, description: Set while it is done or ignored. }
+      closedById: { type: string, description: Account ID of who marked it done or ignored. }
+      closedByName: { type: string, description: "Username of who marked it done or ignored, when they did." }
+  TodoFields:
+    type: object
+    additionalProperties: false
+    required: [title]
+    properties:
+      requestKey: { type: string, maxLength: 128, description: "Repeating a request with the same key returns the first to-do." }
+      title: { type: string, minLength: 1, maxLength: 10, description: "At most 10 characters, which a shared screen can show whole." }
+      category: { $ref: "#/schemas/TodoCategory", description: "other when absent." }
+      due: { $ref: "#/schemas/TodoDate" }
+      ownerId: { type: string, minLength: 1, description: "An active account's ID; absent means the whole family." }
+      amountCents: { type: integer, minimum: 0, description: "Amount in fen (分) of renminbi." }
+  TodoEdit:
+    type: object
+    additionalProperties: false
+    required: [title, version]
+    properties:
+      title: { type: string, minLength: 1, maxLength: 10 }
+      category: { $ref: "#/schemas/TodoCategory", description: "other when absent." }
+      due: { $ref: "#/schemas/TodoDate" }
+      ownerId: { type: string, minLength: 1, description: "An account's ID; absent means the whole family. A new owner must be an active account." }
+      amountCents: { type: integer, minimum: 0, description: "Amount in fen (分) of renminbi." }
+      version: { type: integer, minimum: 1, description: The version the edit was made from. }
+  TodoOwner:
+    type: object
+    additionalProperties: false
+    required: [id, username]
+    description: "An active account a to-do can be given to."
+    properties:
+      id: { type: string }
+      username: { type: string }
+  TodoReminder:
+    type: object
+    additionalProperties: false
+    required: [key, todoId, stage, title, category, due, scope]
+    properties:
+      key: { type: string, description: "Names this reminder to the caller; acknowledging it stops this stage until the reminders start over." }
+      todoId: { type: string }
+      stage: { $ref: "#/schemas/TodoStage" }
+      title: { type: string }
+      category: { $ref: "#/schemas/TodoCategory" }
+      due: { $ref: "#/schemas/TodoDate" }
+      scope: { $ref: "#/schemas/TodoScope" }
+      ownerId: { type: string, description: "Account ID of whom it is for; absent means the whole family." }

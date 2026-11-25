@@ -1,0 +1,42 @@
+#!/bin/bash
+# mkosi runs this last, once the packages, presets and accounts are in place,
+# with the image at $BUILDROOT.
+set -euo pipefail
+root=$BUILDROOT
+
+# Each device makes its own SSH host keys at its first boot
+# (sshd-keygen.service); those that openssh-server made here would be every
+# device's, and in every copy of the image.
+rm -f -- "$root"/etc/ssh/ssh_host_*
+
+# /etc as this image's packages and presets left it. The persistent root keeps
+# a device's /etc across updates, so a-nas-etc.service gives a device what a
+# later image adds there (a new package's configuration, PAM file or unit
+# link) and leaves what an earlier image put there, changed or not: the
+# administrator may have changed or removed it. Accounts and what belongs to
+# one machine stay out.
+factory=$root/usr/share/factory/etc
+rm -rf -- "$factory"
+install -d -m 0755 "$factory"
+tar -C "$root/etc" -cf - \
+  --exclude=./machine-id --exclude=./hostname --exclude=./adjtime --exclude=./.updated --exclude=./.pwd.lock \
+  --exclude=./ld.so.cache --exclude=./udev/hwdb.bin \
+  --exclude=./passwd --exclude=./passwd- --exclude=./group --exclude=./group- \
+  --exclude=./shadow --exclude=./shadow- --exclude=./gshadow --exclude=./gshadow- \
+  --exclude=./subuid --exclude=./subuid- --exclude=./subgid --exclude=./subgid- . | tar -C "$factory" -xpf -
+
+# The accounts that package scripts made with useradd or adduser rather than
+# a sysusers.d file: systemd-sysusers makes those a device lacks at its next
+# boot, with these IDs where they are free.
+defined=$(cat "$root"/usr/lib/sysusers.d/*.conf | awk '$1 ~ /^[ugm]!?$/ { print $2 }' | sort -u)
+{
+  echo "# The accounts that this image's package scripts made (deploy/image/mkosi.finalize)."
+  awk -F: -v defined="$defined" '
+    BEGIN { n = split(defined, names, "\n"); for (i = 1; i <= n; i++) skip[names[i]] = 1 }
+    FNR == 1 { file++ }
+    $3 < 1 || $3 > 999 || ($1 in skip) { next }
+    file == 1 { print "g", $1, $3; members[$1] = $4; next }
+    { printf "u %s %s:%s %s %s %s\n", $1, $3, $4, ($5 == "" ? "-" : "\"" $5 "\""), ($6 == "" ? "-" : $6), ($7 == "" ? "-" : $7) }
+    END { for (g in members) { m = split(members[g], who, ","); for (i = 1; i <= m; i++) print "m", who[i], g } }
+  ' "$root/etc/group" "$root/etc/passwd"
+} >"$root/usr/lib/sysusers.d/a-nas-image-accounts.conf"

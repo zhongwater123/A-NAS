@@ -9,9 +9,9 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
-    container agent, and each member's AI assistant (proposed in ADR 0024). Every operation that takes a JSON body
-    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 65 KiB for
+    the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    container agent, and each member's AI assistant (ADR 0024). Every operation that takes a JSON body
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
     feedback resolved.
 servers:
@@ -39,7 +39,9 @@ paths:
   /api/v1/users/{userId}/viewing: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1viewing" }
   /api/v1/viewing/{grantId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1viewing~1{grantId}" }
   /api/v1/users: { $ref: "paths/accounts.yaml#/~1api~1v1~1users" }
-  /api/v1/users/{userId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}" }
+  /api/v1/users/{userId}/disable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1disable" }
+  /api/v1/users/{userId}/enable: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1enable" }
+  /api/v1/users/{userId}/deletion: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1deletion" }
   /api/v1/users/{userId}/credential: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1credential" }
   /api/v1/local-display: { $ref: "paths/desktop.yaml#/~1api~1v1~1local-display" }
   /api/v1/wallpaper: { $ref: "paths/desktop.yaml#/~1api~1v1~1wallpaper" }
@@ -76,11 +78,15 @@ paths:
   /api/v1/activity: { $ref: "paths/logs.yaml#/~1api~1v1~1activity" }
   /api/v1/system-logs: { $ref: "paths/logs.yaml#/~1api~1v1~1system-logs" }
   /api/v1/web-search: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search" }
+  /api/v1/network/phone-hotspot: { $ref: "paths/phone-hotspot.yaml#/~1api~1v1~1network~1phone-hotspot" }
   /api/v1/web-search/query: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1query" }
   /api/v1/web-search/thumbnail: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1thumbnail" }
   /api/v1/web-search/license: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license" }
   /api/v1/web-search/license/text: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license~1text" }
   /api/v1/web-search/source: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1source" }
+  /api/v1/system/update: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update" }
+  /api/v1/system/update/actions: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update~1actions" }
+  /api/v1/system/update/settings: { $ref: "paths/system-update.yaml#/~1api~1v1~1system~1update~1settings" }
   /api/v1/transfers: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers" }
   /api/v1/transfers/downloads: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1downloads" }
   /api/v1/transfers/{transferId}: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1{transferId}" }
@@ -132,6 +138,29 @@ paths:
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
+  /api/v1/todos: { $ref: "paths/todos.yaml#/~1api~1v1~1todos" }
+  /api/v1/todos/owners: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1owners" }
+  /api/v1/todos/reminders: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders" }
+  /api/v1/todos/reminders/seen: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders~1seen" }
+  /api/v1/todos/{todoId}: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}" }
+  /api/v1/todos/{todoId}/status: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1status" }
+  /api/v1/todos/{todoId}/snooze: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1snooze" }
+  /api/v1/montage: { $ref: "paths/montage.yaml#/~1api~1v1~1montage" }
+  /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
+  /api/v1/montage/projects/{projectId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}" }
+  /api/v1/montage/projects/{projectId}/assets: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1assets" }
+  /api/v1/montage/projects/{projectId}/generate: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1generate" }
+  /api/v1/montage/jobs/{jobId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}" }
+  /api/v1/montage/jobs/{jobId}/cancel: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1cancel" }
+  /api/v1/montage/jobs/{jobId}/drop-assets: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1drop-assets" }
+  /api/v1/montage/jobs/{jobId}/retry-analysis: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1retry-analysis" }
+  /api/v1/montage/jobs/{jobId}/retry: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1retry" }
+  /api/v1/montage/jobs/{jobId}/replan: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1replan" }
+  /api/v1/montage/notices: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1notices" }
+  /api/v1/montage/projects/{projectId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song" }
+  /api/v1/montage/projects/{projectId}/song/audio: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song~1audio" }
+  /api/v1/montage/hero: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero" }
+  /api/v1/montage/hero/poster: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero~1poster" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }
@@ -140,14 +169,17 @@ paths:
   /api/v1/modules/scoring/batches/{batchId}/recent: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1recent" }
   /api/v1/modules/scoring/batches/{batchId}/claims: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches~1{batchId}~1claims" }
   /api/v1/modules/scoring/claims/{token}/image: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1image" }
+  /api/v1/modules/scoring/claims/{token}/full: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1full" }
   /api/v1/modules/scoring/claims/{token}/thumbnail: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1thumbnail" }
   /api/v1/modules/scoring/claims/{token}/rating: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1claims~1{token}~1rating" }
   /api/v1/modules/scoring/admin/sources: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1sources" }
+  /api/v1/modules/scoring/admin/dimensions: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1dimensions" }
   /api/v1/modules/scoring/admin/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches" }
   /api/v1/modules/scoring/admin/batches/{batchId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}" }
   /api/v1/modules/scoring/admin/batches/{batchId}/stats: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1stats" }
   /api/v1/modules/scoring/admin/batches/{batchId}/cover: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1cover" }
   /api/v1/modules/scoring/admin/batches/{batchId}/export: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1export" }
+  /api/v1/modules/scoring/admin/batches/{batchId}/export/summary: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1batches~1{batchId}~1export~1summary" }
   /api/v1/modules/scoring/admin/raters: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters" }
   /api/v1/modules/scoring/admin/raters/{accountId}: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1admin~1raters~1{accountId}" }
   /api/v1/photos/libraries: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1libraries" }
@@ -259,6 +291,7 @@ paths:
   /api/v1/feedback/{feedbackId}/comments/{commentId}: { $ref: "paths/feedback.yaml#/~1api~1v1~1feedback~1{feedbackId}~1comments~1{commentId}" }
   /api/v1/feedback/{feedbackId}/images/{imageId}: { $ref: "paths/feedback.yaml#/~1api~1v1~1feedback~1{feedbackId}~1images~1{imageId}" }
   /api/v1/assistant/status: { $ref: "paths/assistant.yaml#/~1api~1v1~1assistant~1status" }
+  /api/v1/assistant-key: { $ref: "paths/assistant.yaml#/~1api~1v1~1assistant-key" }
   /api/v1/assistant/ws: { $ref: "paths/assistant.yaml#/~1api~1v1~1assistant~1ws" }
   /api/v1/assistant/sessions: { $ref: "paths/assistant.yaml#/~1api~1v1~1assistant~1sessions" }
   /api/v1/assistant/sessions/{sessionId}: { $ref: "paths/assistant.yaml#/~1api~1v1~1assistant~1sessions~1{sessionId}" }
@@ -314,6 +347,7 @@ components:
     FamilyRecordID: { $ref: "components/family.yaml#/parameters/FamilyRecordID" }
     FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
     FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
+    TodoID: { $ref: "components/todos.yaml#/parameters/TodoID" }
     ScoringBatchID: { $ref: "components/scoring.yaml#/parameters/ScoringBatchID" }
     ScoringAnchorID: { $ref: "components/scoring.yaml#/parameters/ScoringAnchorID" }
     ScoringClaimToken: { $ref: "components/scoring.yaml#/parameters/ScoringClaimToken" }
@@ -378,6 +412,9 @@ components:
     NewUsername: { $ref: "components/accounts.yaml#/schemas/NewUsername" }
     NewPassword: { $ref: "components/accounts.yaml#/schemas/NewPassword" }
     User: { $ref: "components/accounts.yaml#/schemas/User" }
+    Deletion: { $ref: "components/accounts.yaml#/schemas/Deletion" }
+    DeletionChoice: { $ref: "components/accounts.yaml#/schemas/DeletionChoice" }
+    DeletionRequest: { $ref: "components/accounts.yaml#/schemas/DeletionRequest" }
     Profile: { $ref: "components/accounts.yaml#/schemas/Profile" }
     ProfileChange: { $ref: "components/accounts.yaml#/schemas/ProfileChange" }
     PasswordChange: { $ref: "components/accounts.yaml#/schemas/PasswordChange" }
@@ -422,6 +459,8 @@ components:
     SystemLogPage: { $ref: "components/logs.yaml#/schemas/SystemLogPage" }
     WebSearchCategory: { $ref: "components/web-search.yaml#/schemas/WebSearchCategory" }
     WebSearchStatus: { $ref: "components/web-search.yaml#/schemas/WebSearchStatus" }
+    PhoneHotspotStatus: { $ref: "components/phone-hotspot.yaml#/schemas/PhoneHotspotStatus" }
+    PhoneHotspotRequest: { $ref: "components/phone-hotspot.yaml#/schemas/PhoneHotspotRequest" }
     WebSearchPausedEngine: { $ref: "components/web-search.yaml#/schemas/WebSearchPausedEngine" }
     WebSearchSettings: { $ref: "components/web-search.yaml#/schemas/WebSearchSettings" }
     WebSearchQuery: { $ref: "components/web-search.yaml#/schemas/WebSearchQuery" }
@@ -432,6 +471,12 @@ components:
     WebSearchFound: { $ref: "components/web-search.yaml#/schemas/WebSearchFound" }
     WebSearchPackage: { $ref: "components/web-search.yaml#/schemas/WebSearchPackage" }
     WebSearchLicense: { $ref: "components/web-search.yaml#/schemas/WebSearchLicense" }
+    SystemUpdatePhase: { $ref: "components/system-update.yaml#/schemas/SystemUpdatePhase" }
+    SystemUpdateProblem: { $ref: "components/system-update.yaml#/schemas/SystemUpdateProblem" }
+    SystemUpdateRecord: { $ref: "components/system-update.yaml#/schemas/SystemUpdateRecord" }
+    SystemUpdateSettings: { $ref: "components/system-update.yaml#/schemas/SystemUpdateSettings" }
+    SystemUpdateAction: { $ref: "components/system-update.yaml#/schemas/SystemUpdateAction" }
+    SystemUpdateStatus: { $ref: "components/system-update.yaml#/schemas/SystemUpdateStatus" }
     Transfer: { $ref: "components/transfers.yaml#/schemas/Transfer" }
     TransferLocation: { $ref: "components/transfers.yaml#/schemas/TransferLocation" }
     TransferFailure: { $ref: "components/transfers.yaml#/schemas/TransferFailure" }
@@ -474,7 +519,18 @@ components:
     FamilyTimelineEntry: { $ref: "components/family.yaml#/schemas/FamilyTimelineEntry" }
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
+    TodoDate: { $ref: "components/todos.yaml#/schemas/TodoDate" }
+    TodoCategory: { $ref: "components/todos.yaml#/schemas/TodoCategory" }
+    TodoScope: { $ref: "components/todos.yaml#/schemas/TodoScope" }
+    TodoStatus: { $ref: "components/todos.yaml#/schemas/TodoStatus" }
+    TodoStage: { $ref: "components/todos.yaml#/schemas/TodoStage" }
+    Todo: { $ref: "components/todos.yaml#/schemas/Todo" }
+    TodoFields: { $ref: "components/todos.yaml#/schemas/TodoFields" }
+    TodoEdit: { $ref: "components/todos.yaml#/schemas/TodoEdit" }
+    TodoOwner: { $ref: "components/todos.yaml#/schemas/TodoOwner" }
+    TodoReminder: { $ref: "components/todos.yaml#/schemas/TodoReminder" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
+    ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }
     ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }
     ScoringAnchor: { $ref: "components/scoring.yaml#/schemas/ScoringAnchor" }
     ScoringRecentScore: { $ref: "components/scoring.yaml#/schemas/ScoringRecentScore" }
@@ -548,6 +604,8 @@ components:
     FeedbackComment: { $ref: "components/feedback.yaml#/schemas/FeedbackComment" }
     FeedbackImage: { $ref: "components/feedback.yaml#/schemas/FeedbackImage" }
     AssistantStatus: { $ref: "components/assistant.yaml#/schemas/AssistantStatus" }
+    AssistantKeyState: { $ref: "components/assistant.yaml#/schemas/AssistantKeyState" }
+    AssistantKeyRequest: { $ref: "components/assistant.yaml#/schemas/AssistantKeyRequest" }
     AssistantSession: { $ref: "components/assistant.yaml#/schemas/AssistantSession" }
     AssistantTask: { $ref: "components/assistant.yaml#/schemas/AssistantTask" }
     AssistantTaskEnvelope: { $ref: "components/assistant.yaml#/schemas/AssistantTaskEnvelope" }

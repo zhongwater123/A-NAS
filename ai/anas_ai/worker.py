@@ -4,8 +4,10 @@
         [--face-detector FILE --face-detector-manifest FILE --face-embedder FILE --face-embedder-manifest FILE]
         [--animal-embedder FILE --animal-embedder-manifest FILE]
         [--ocr-server FILE --ocr-runtime-manifest FILE --ocr-model FILE --ocr-model-manifest FILE
-         --ocr-mmproj FILE --ocr-mmproj-manifest FILE] [--socket PATH]
-    python3 -m anas_ai.worker --fake [--fake-detector] [--fake-faces] [--fake-animals] [--fake-reader] [--socket PATH]
+         --ocr-mmproj FILE --ocr-mmproj-manifest FILE]
+        [--aesthetic-scorer DIR --aesthetic-scorer-manifest FILE] [--socket PATH]
+    python3 -m anas_ai.worker --fake [--fake-detector] [--fake-faces] [--fake-animals] [--fake-reader]
+        [--fake-scorer] [--socket PATH]
 
 Under systemd socket activation the listener arrives as descriptor 3 and
 --socket is not needed. The Worker serves one connection at a time and exits
@@ -14,9 +16,9 @@ the models' memory; systemd starts it again on the next connection.
 
 The image vector model is needed for search, so without it the Worker answers
 "unavailable" to everything. The object detector, the face models, the animal
-model and the text reader only serve background work: without one, only its
-operation is unavailable. The text reader runs llama-server as a child, which
-release and the Worker's exit stop.
+model, the text reader and the aesthetic scorer only serve background work:
+without one, only its operation is unavailable. The text reader runs
+llama-server as a child, which release and the Worker's exit stop.
 """
 
 import argparse
@@ -31,12 +33,14 @@ import socket
 import sys
 import threading
 
-from anas_ai import protocol, providers
+from anas_ai import describe, protocol, providers
 
 IDLE_SECONDS = 600
 # The photo service sends thumbnails and a 1600 px detector input; anything
 # larger is not what it sends.
 MAX_IMAGE_BYTES = 32 << 20
+# A key frame for describe_frames is 512 pixels wide.
+MAX_KEYFRAME_BYTES = 4 << 20
 # The photo service sends queries of at most 200 characters.
 MAX_QUERY_CHARS = 1000
 SYSTEMD_FIRST_FD = 3
@@ -47,7 +51,8 @@ log = logging.getLogger("anas-ai")
 
 
 class Detector:
-    """A background model (the object detector, the face or animal models, the text reader), or why there is none."""
+    """A background model (the object detector, the face or animal models, the text reader, the aesthetic
+    scorer), or why there is none."""
 
     def __init__(self, provider=None, reason=None):
         self.provider = provider
@@ -83,7 +88,7 @@ def started_memory():
 
 
 def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS, detector=None, faces=None,
-          animals=None, started=0, reader=None):
+          animals=None, started=0, reader=None, scorer=None):
     """Answers connections until none arrives for idle_seconds or one asks it to release everything.
 
     started is what the Worker held before serving, which info adds to its models' memory.
@@ -92,6 +97,7 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
     reader = reader or Detector(reason="no text reader")
+    scorer = scorer or Detector(reason="no aesthetic scorer")
     listener.settimeout(idle_seconds)
     while True:
         try:
@@ -101,20 +107,26 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
             return
         with conn:
             conn.settimeout(None)
-            if handle(conn, provider, unavailable_reason, detector, faces, animals, started, reader):
+            if handle(conn, provider, unavailable_reason, detector, faces, animals, started, reader, scorer):
                 log.info("released everything; exiting")
                 return
 
 
-def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0, reader=None):
+def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0, reader=None,
+           scorer=None):
     """Answers one request; returns whether the Worker should exit."""
     try:
-        request, fds = protocol.read_request(conn)
+        request, fds = protocol.read_request(conn, protocol.MAX_FDS)
+    except protocol.TooManyDescriptors as error:
+        with contextlib.suppress(OSError):
+            protocol.write_response(conn, protocol.failure(protocol.CODE_INVALID_REQUEST, str(error)))
+        return False
     except (protocol.ProtocolError, OSError, ValueError) as error:
         log.warning("dropped a malformed request: %s", error)
         return False
     try:
-        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals, started, reader)
+        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals, started, reader,
+                           scorer)
     finally:
         for fd in fds:
             os.close(fd)
@@ -128,11 +140,12 @@ def handle(conn, provider, unavailable_reason, detector, faces=None, animals=Non
 
 
 def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None, animals=None, started=0,
-            reader=None):
+            reader=None, scorer=None):
     """The response to request, or None when the caller hung up before it was ready."""
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
     reader = reader or Detector(reason="no text reader")
+    scorer = scorer or Detector(reason="no aesthetic scorer")
     if unavailable_reason is not None:
         return protocol.failure(protocol.CODE_UNAVAILABLE, unavailable_reason)
     op = request.get("op")
@@ -152,6 +165,11 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
             # (docs/architecture/photo-ocr.md#资源策略).
             fields["ocrModel"] = reader.provider.model
             fields["ocrMemoryBytes"] = started + reader.provider.memory
+        if scorer.provider is not None:
+            # Scoring holds a vision tower of its own in PyTorch, about as
+            # large as the other models together: a phase of its own too.
+            fields["aestheticModel"] = scorer.provider.model
+            fields["aestheticMemoryBytes"] = started + scorer.provider.memory
         return protocol.ok(**fields)
     if op == protocol.OP_EMBED_IMAGE:
         if len(fds) != 1:
@@ -192,11 +210,34 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
             return protocol.failure(protocol.CODE_INVALID_INPUT, 'read_text needs one image descriptor and "kind": '
                                     '"text", or "fields" with a non-empty "schema" object')
         return detected(Reading(reader.provider, kind, schema), fds[0], conn, "reading")
+    if op == protocol.OP_SCORE_AESTHETIC:
+        if scorer.provider is None:
+            return protocol.failure(protocol.CODE_UNAVAILABLE, scorer.reason)
+        if len(fds) != 1:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, "score_aesthetic needs exactly one image descriptor")
+        return detected(Scoring(scorer.provider), fds[0], conn, "scores")
+    if op == protocol.OP_DESCRIBE_FRAMES:
+        if reader.provider is None:
+            return protocol.failure(protocol.CODE_UNAVAILABLE, reader.reason)
+        offsets, groups, duration = request.get("offsets"), request.get("groups"), request.get("duration")
+        if not describe.valid_layout(offsets, groups, duration) or len(fds) != len(offsets):
+            return protocol.failure(protocol.CODE_INVALID_REQUEST, (
+                f"describe_frames needs {describe.FEWEST_FRAMES} to {describe.MOST_FRAMES} image descriptors, "
+                '"offsets" rising from 0 for each, "groups" counting beats from 1 in order, and "duration" '
+                "not before the last offset"))
+        try:
+            frames = [read_limited(fd, MAX_KEYFRAME_BYTES) for fd in fds]
+        except providers.InvalidInput as error:
+            return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
+        found = watched(Describing(reader.provider, offsets, groups, duration), frames, conn, "description")
+        if found is not None and found["ok"]:
+            found["template"] = describe.TEMPLATE
+        return found
     if op == protocol.OP_RELEASE:
         what = request.get("what")
         if what not in ("detector", "all"):
             return protocol.failure(protocol.CODE_INVALID_INPUT, 'release needs "what": "detector" or "all"')
-        for background in (detector, faces, animals, reader):
+        for background in (detector, faces, animals, reader, scorer):
             if background.provider is not None:
                 background.provider.release()
         return protocol.ok()
@@ -264,18 +305,51 @@ class Reading:
         return self.provider.read(data, self.kind, self.schema, run)
 
 
+class Scoring:
+    """An aesthetic scorer, run the way detections run."""
+
+    def __init__(self, provider):
+        self.provider = provider
+        self.model = provider.model
+
+    def run_options(self):
+        return self.provider.run_options()
+
+    def detect(self, data, run):
+        return self.provider.score(data, run)
+
+
+class Describing:
+    """A text reader bound to one card's layout, describing its key frames the way detections run."""
+
+    def __init__(self, provider, offsets, groups, duration):
+        self.provider, self.offsets, self.groups, self.duration = provider, offsets, groups, duration
+        self.model = provider.model
+
+    def run_options(self):
+        return self.provider.run_options()
+
+    def detect(self, frames, run):
+        return self.provider.describe(frames, self.offsets, self.groups, self.duration, run)
+
+
 def detected(detector, fd, conn, key):
     """Answers with what detector finds in the image under key ("boxes",
-    "faces" or "vectors"), or None when the caller hung up.
-
-    The detection runs on its own thread while this one watches the
-    connection: when the photo service hangs up because the user became
-    active, the detection is told to stop and the Worker is free at once.
-    """
+    "faces" or "vectors"), or None when the caller hung up."""
     try:
         data = read_limited(fd, MAX_IMAGE_BYTES)
     except providers.InvalidInput as error:
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
+    return watched(detector, data, conn, key)
+
+
+def watched(detector, data, conn, key):
+    """Answers with what detector makes of data under key, or None when the caller hung up.
+
+    The work runs on its own thread while this one watches the connection:
+    when the photo service hangs up because the user became active, the work
+    is told to stop and the Worker is free at once.
+    """
     run = detector.run_options()
     outcome = {}
 
@@ -304,6 +378,8 @@ def detected(detector, fd, conn, key):
         return protocol.failure(protocol.CODE_INVALID_INPUT, str(error))
     if isinstance(error, providers.Unavailable):
         return protocol.failure(protocol.CODE_UNAVAILABLE, str(error))
+    if isinstance(error, providers.InvalidResult):
+        return protocol.failure(protocol.CODE_INVALID_RESULT, str(error))
     if error is not None:
         log.error("detecting %s failed: %r", key, error)
         return protocol.failure(protocol.CODE_INTERNAL, type(error).__name__)
@@ -356,12 +432,15 @@ def main(argv=None):
     parser.add_argument("--ocr-model-manifest", help="its manifest")
     parser.add_argument("--ocr-mmproj", help="the text reader's vision encoder, a .gguf file")
     parser.add_argument("--ocr-mmproj-manifest", help="its manifest")
+    parser.add_argument("--aesthetic-scorer", help="the aesthetic scorer's bundle, a directory with its MANIFEST.json")
+    parser.add_argument("--aesthetic-scorer-manifest", help="the manifest that pins the bundle's MANIFEST.json")
     parser.add_argument("--threads", type=int, help="detector threads (default: the cores less the reserve)")
     parser.add_argument("--fake", action="store_true", help="serve deterministic fake vectors")
     parser.add_argument("--fake-detector", action="store_true", help="serve deterministic fake boxes")
     parser.add_argument("--fake-faces", action="store_true", help="serve deterministic fake faces")
     parser.add_argument("--fake-animals", action="store_true", help="serve deterministic fake animal vectors")
     parser.add_argument("--fake-reader", action="store_true", help="serve deterministic fake readings")
+    parser.add_argument("--fake-scorer", action="store_true", help="serve deterministic fake aesthetic scores")
     parser.add_argument("--idle-seconds", type=int, default=IDLE_SECONDS)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
@@ -421,6 +500,16 @@ def main(argv=None):
         except providers.Unavailable as error:
             reader = Detector(reason=str(error))
             log.error("text reader unavailable: %s", error)
+    scorer = Detector(reason="no aesthetic scorer")
+    if args.fake_scorer:
+        scorer = Detector(providers.FakeScorer())
+    elif args.aesthetic_scorer and args.aesthetic_scorer_manifest and os.path.exists(args.aesthetic_scorer):
+        try:
+            scorer = Detector(providers.AestheticScorer(args.aesthetic_scorer, args.aesthetic_scorer_manifest,
+                                                        args.threads))
+        except providers.Unavailable as error:
+            scorer = Detector(reason=str(error))
+            log.error("aesthetic scorer unavailable: %s", error)
     if provider is not None:
         log.info("serving %s (%d dimensions)", provider.model, provider.dimensions)
     if detector.provider is not None:
@@ -431,6 +520,8 @@ def main(argv=None):
         log.info("telling pets apart with %s", animals.provider.model)
     if reader.provider is not None:
         log.info("reading text with %s", reader.provider.model)
+    if scorer.provider is not None:
+        log.info("scoring photos with %s", scorer.provider.model)
     started = started_memory()
     log.info("started with %d MiB", started >> 20)
     # systemd stops the Worker with SIGTERM, and so may whatever else runs it;
@@ -439,12 +530,13 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     with listening_socket(args.socket) as listener:
         try:
-            serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started, reader)
+            serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started, reader, scorer)
         except SystemExit:
             pass
         finally:
-            if reader.provider is not None:
-                reader.provider.release()
+            for background in (reader, scorer):
+                if background.provider is not None:
+                    background.provider.release()
     # Hand the memory back at once. Tearing the models down object by object
     # took 40 seconds under memory pressure on the local stack, and until the
     # process ends systemd cannot start the Worker the next search needs.

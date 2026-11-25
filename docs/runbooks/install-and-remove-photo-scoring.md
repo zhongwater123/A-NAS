@@ -1,7 +1,7 @@
 # 安装与移除照片打分
 
 状态：draft
-更新时间：2026-11-12
+更新时间：2026-11-13
 
 ## 目的
 
@@ -35,8 +35,8 @@
 
 ### 导出（打分期间定期做，移除前必须做）
 
-1. 管理员在“照片打分 → 批次”中逐个打开批次，点“导出”，把 zip 存到 NAS 以外的地方。
-2. 核对：zip 中有 `manifest.json`、`images.jsonl`、`ratings.jsonl`、`raters.jsonl`；`manifest.json` 中每个文件的行数与 SHA-256 与文件一致（`sha256sum`、`wc -l`）。
+1. 管理员在“照片打分 → 批次”中逐个打开批次，点“导出”。移除前留存用的导出选 JSON Lines，勾上全部记录种类（跳过与标记、被撤销的旧分数、重复检查）与全部字段，这样留下的是完整记录；平时给训练侧的导出按需选。把 zip 存到 NAS 以外的地方。
+2. 核对：zip 中有 `manifest.json` 与 `ratings.jsonl`（或 `ratings.csv`）；`manifest.json` 的 `file.sha256` 与表一致（`sha256sum`），`rows.count` 等于 JSON Lines 的行数（`wc -l`）或 CSV 去掉表头后的记录数，`rows.include` 列出全部三种记录。
 
 ### 移除
 
@@ -68,7 +68,7 @@
 ## 回滚或恢复
 
 - 安装失败：读脚本输出与 `journalctl -u anas-module-scoring -n 50`，修正后重跑安装脚本；或运行移除脚本回到安装前（存储为空时可按移除第 3–5 步删除）。
-- 更新后服务起不来：用上一版的 `anas-scoring` 重跑安装脚本。数据库只会被更新的版本迁移，旧版本遇到更新的数据库会拒绝启动；这时从 `module-scoring/backups/` 中更新前那天的备份恢复：停服务，复制备份为 `scoring.db`（删除 `scoring.db-wal` 与 `scoring.db-shm`），属主改为 31100，再启动。
+- 更新后服务起不来：用上一版的 `anas-scoring` 重跑安装脚本。数据库版本 5 及以后的版本，遇到更新的版本留下的数据库，会按它存下的反向步骤退回；版本 4 及以前的版本会拒绝启动。拒绝时从 `module-scoring/backups/` 恢复更新前的副本：模块升级数据库之前把它复制为 `scoring-<日期>-v<原版本>.db`，没有这份副本时用更新前那天的 `scoring-<日期>.db`。停服务，复制副本为 `scoring.db`（删除 `scoring.db-wal` 与 `scoring.db-shm`），属主改为 31100，再启动。副本之后打的分会丢失：装回旧版本之前，先在新版本里导出。
 - 移除脚本运行后发现还要打分：在删除子卷之前重跑安装脚本即可，数据都在。
 - 子卷删除后无法恢复打分系统的状态；导出的 zip 是唯一留存的数据。
 

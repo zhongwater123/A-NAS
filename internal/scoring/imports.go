@@ -133,7 +133,12 @@ func (s *Store) scan(ctx context.Context, batchID, source string) error {
 // already did, and adds it to the batch. A file it cannot use is skipped
 // with the reason, never retried.
 func (s *Store) importFile(ctx context.Context, batchID, source, file string, anchor sql.NullInt64) error {
-	content, reason, err := s.render(ctx, filepath.Join(s.photosDir, source, filepath.FromSlash(file)))
+	// Anchors are shown, never scored, so any size will do.
+	minLongEdge := s.minLongEdge
+	if anchor.Valid {
+		minLongEdge = 0
+	}
+	content, reason, err := s.render(ctx, filepath.Join(s.photosDir, source, filepath.FromSlash(file)), minLongEdge)
 	if err != nil {
 		return err
 	}
@@ -178,9 +183,10 @@ type content struct {
 }
 
 // render reads one original read-only. A file that is not a JPEG, PNG or
-// WebP picture, too large, or that the decoder rejects or panics on yields a
-// reason to skip it; err is left for failures worth retrying.
-func (s *Store) render(ctx context.Context, name string) (found content, reason string, err error) {
+// WebP picture, whose longer side is under minLongEdge, too large, or that
+// the decoder rejects or panics on yields a reason to skip it; err is left
+// for failures worth retrying.
+func (s *Store) render(ctx context.Context, name string, minLongEdge int) (found content, reason string, err error) {
 	// Errors reading the original concern that file alone (it went away,
 	// is unreadable or not a regular file): skip it rather than retry it
 	// forever.
@@ -206,6 +212,20 @@ func (s *Store) render(ctx context.Context, name string) (found content, reason 
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return content{}, "unreadable", nil
+	}
+	// The header alone tells the size, before the whole file is read; the
+	// EXIF orientation only swaps the sides.
+	if minLongEdge > 0 {
+		config, err := decodeConfig(file)
+		switch {
+		case err != nil:
+			return content{}, "undecodable", nil
+		case max(config.Width, config.Height) < minLongEdge:
+			return content{}, "too_small", nil
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return content{}, "unreadable", nil
+		}
 	}
 	hash := sha256.New()
 	size, err := io.Copy(hash, io.LimitReader(file, maxOriginalBytes+1))
@@ -245,6 +265,19 @@ func (s *Store) render(ctx context.Context, name string) (found content, reason 
 		return content{}, "", err
 	}
 	return found, "", nil
+}
+
+// decodeConfig reads a picture's size from its header; a decoder panic is
+// logged without the file's name and reported as an error.
+func decodeConfig(r io.Reader) (config image.Config, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo scoring size", recovered)
+			err = errors.New("the decoder panicked")
+		}
+	}()
+	config, _, err = image.DecodeConfig(r)
+	return config, err
 }
 
 // renderPreview decodes under the shared budget and encodes the upright

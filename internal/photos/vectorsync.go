@@ -32,6 +32,7 @@ type VectorIndex interface {
 	DeleteCollection(ctx context.Context, name string) error
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
+	DeleteMatching(ctx context.Context, collection, field string, values []string) error
 	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
 	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
@@ -104,16 +105,22 @@ func vectorSyncBackoff(idle time.Duration, failures int) time.Duration {
 
 // RunVectorSync keeps index in line with the Catalog until ctx ends, a batch
 // at a time while gate allows background work, and compares the whole index
-// with the Catalog once it has caught up and daily after that.
+// with the Catalog once it has caught up and daily after that. The montage
+// center's window vectors come once the photos' are in line, with failures
+// and a daily comparison of their own, so that a windows collection the
+// index keeps refusing holds up neither the photos' sync nor theirs.
 func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gate, idle time.Duration,
 	report func(VectorSyncEvent), logError func(error)) {
-	var reconciled time.Time
-	failures := 0
-	failed := func(err error) {
-		failures++
+	var reconciled, windowsReconciled, windowsRetry time.Time
+	failures, windowFailures := 0, 0
+	logged := func(err error) {
 		if ctx.Err() == nil && logError != nil {
 			logError(err)
 		}
+	}
+	failed := func(err error) {
+		failures++
+		logged(err)
 	}
 	for {
 		wait := idle
@@ -136,6 +143,19 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 					failures, reconciled = 0, s.now()
 					continue
 				}
+			case !s.now().Before(windowsRetry):
+				worked, err := s.syncWindows(ctx, index, report, &windowsReconciled)
+				switch {
+				case err != nil:
+					windowFailures++
+					windowsRetry = s.now().Add(vectorSyncBackoff(idle, windowFailures))
+					logged(err)
+				case worked:
+					windowFailures = 0
+					continue
+				default:
+					windowFailures = 0
+				}
 			}
 			if failures > 0 {
 				wait = vectorSyncBackoff(idle, failures)
@@ -155,6 +175,23 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 		case <-time.After(wait):
 		}
 	}
+}
+
+// syncWindows brings a batch of window points in line or, with none queued
+// and the last comparison a day old, compares them with the Catalog. It
+// reports whether there was anything to do.
+func (s *Service) syncWindows(ctx context.Context, index VectorIndex, report func(VectorSyncEvent), reconciled *time.Time) (bool, error) {
+	if worked, err := s.SyncWindows(ctx, index, report); worked || err != nil {
+		return worked, err
+	}
+	if s.now().Sub(*reconciled) < vectorReconcileInterval {
+		return false, nil
+	}
+	if err := s.ReconcileWindows(ctx, index, report); err != nil {
+		return false, err
+	}
+	*reconciled = s.now()
+	return true, nil
 }
 
 // SyncVectors brings one batch of queued objects in line, first making a
@@ -494,8 +531,12 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, object); err != nil
 // later is built anew.
 func (s *Service) ForgetVectorIndex(ctx context.Context) error {
 	s.vectorChecked.Store(nil)
+	s.windowsChecked.Store(nil)
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM vector_outbox"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM window_outbox"); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM vector_index_state")

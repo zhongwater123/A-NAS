@@ -11,7 +11,19 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { type FormEvent, Fragment, useCallback, useEffect, useId, useState } from "react";
+import {
+  type Dispatch,
+  type FormEvent,
+  Fragment,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import { displayName } from "../people/people";
 import { Dialog, EmptyState, Notice, Spinner } from "../ui/workspace";
@@ -19,12 +31,19 @@ import {
   batchStats,
   coverURL,
   createBatch,
+  createDimension,
   deleteBatch,
+  type ExportChoice,
+  exportSummary,
   exportURL,
   listAdminBatches,
+  listDimensions,
   listRaters,
   listSources,
   type ScoringBatch,
+  type ScoringDimension,
+  type ScoringDimensionStats,
+  type ScoringExportSummary,
   type ScoringRaterEntry,
   type ScoringRaterStats,
   scoringError,
@@ -34,6 +53,12 @@ import {
 import {
   agreementGood,
   agreementPoor,
+  type ExportField,
+  type ExportInclude,
+  exportColumns,
+  exportDefaults,
+  exportGroups,
+  exportIncludes,
   fastShareAlert,
   formatCorrelation,
   formatCount,
@@ -41,8 +66,10 @@ import {
   formatPoints,
   formatSeconds,
   formatWhen,
+  isLevels,
   repeatGood,
   repeatPoor,
+  type Scale,
   sameRunAlert,
   share,
   stateLabel,
@@ -262,7 +289,9 @@ function BatchDetail({
 }) {
   const [stats, setStats] = useState<ScoringRaterStats[]>();
   const [statsFailure, setStatsFailure] = useState("");
+  const [shownDimension, setShownDimension] = useState(batch.dimensions[0].id);
   const [editing, setEditing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
   const loadStats = useCallback(
@@ -327,10 +356,10 @@ function BatchDetail({
             重新开放
           </button>
         )}
-        <a className={styles.scPrimary} href={exportURL(batch.id)} download>
+        <button type="button" className={styles.scPrimary} onClick={() => setExporting(true)}>
           <Download />
           导出
-        </a>
+        </button>
       </header>
       {batch.state === "importing" && (
         <Notice tone="info">
@@ -361,9 +390,15 @@ function BatchDetail({
             </dl>
           </div>
           {batch.import.skipped > 0 && (
-            <p className={styles.scMuted}>
-              导入时跳过 {formatCount(batch.import.skipped)}{" "}
-              个文件：格式不支持、无法解码，或参考照片的文件名不以分数开头。
+            <p className={styles.scSkipped}>
+              导入时跳过 <b>{formatCount(batch.import.skipped)}</b> 个文件：
+              {batch.import.skippedBy.map(({ reason, count }, index) => (
+                <Fragment key={reason}>
+                  {index > 0 && "，"}
+                  {skipReasons[reason]} <b>{formatCount(count)}</b> 个
+                </Fragment>
+              ))}
+              。
             </p>
           )}
         </section>
@@ -381,6 +416,16 @@ function BatchDetail({
             <dd>照片打分 / {batch.source}</dd>
             <dt>每张</dt>
             <dd>{batch.required} 人打分</dd>
+            <dt>打分项</dt>
+            <dd>
+              <span className={styles.scItemTags}>
+                {batch.dimensions.map((dimension) => (
+                  <span key={dimension.id}>{dimension.name}</span>
+                ))}
+              </span>
+            </dd>
+            <dt>打分方式</dt>
+            <dd>{scaleSaid(batch)}</dd>
             <dt>打分标准</dt>
             <dd className={styles.scRubricClamp}>{batch.rubric || "没有写"}</dd>
           </dl>
@@ -390,6 +435,20 @@ function BatchDetail({
         <header>
           <h3>打分人</h3>
           <span className={styles.scGrow} />
+          {batch.dimensions.length > 1 && (
+            <div className={styles.scTabs} role="group" aria-label="按打分项看">
+              {batch.dimensions.map((dimension) => (
+                <button
+                  key={dimension.id}
+                  type="button"
+                  aria-pressed={dimension.id === shownDimension}
+                  onClick={() => setShownDimension(dimension.id)}
+                >
+                  {dimension.name}
+                </button>
+              ))}
+            </div>
+          )}
           <button type="button" className={styles.scLink} onClick={() => void loadStats()}>
             <RefreshCw />
             刷新
@@ -398,9 +457,16 @@ function BatchDetail({
         {statsFailure && <Notice tone="danger">{statsFailure}</Notice>}
         {!stats && !statsFailure && <Spinner small />}
         {stats?.length === 0 && <p className={styles.scMuted}>还没有人打分。</p>}
-        {stats && stats.length > 0 && <StatsTable stats={stats} />}
+        {stats && stats.length > 0 && (
+          <StatsTable
+            stats={stats}
+            dimension={batch.dimensions.find((dimension) => dimension.id === shownDimension) ?? batch.dimensions[0]}
+            several={batch.dimensions.length > 1}
+            scale={batch.scale}
+          />
+        )}
       </section>
-      {batch.complete + batch.started === 0 && batch.state !== "importing" && (
+      {batch.answers === 0 && batch.state !== "importing" && (
         <div>
           <button type="button" className={styles.scDanger} onClick={() => setDeleting(true)}>
             <Trash2 />
@@ -419,6 +485,7 @@ function BatchDetail({
           }}
         />
       )}
+      {exporting && <ExportDialog batch={batch} onClose={() => setExporting(false)} />}
       {deleting && (
         <Dialog
           title={`删除“${batch.name}”？`}
@@ -472,11 +539,11 @@ function tintOf(id: string) {
 
 // Spread draws a rater's mean and one standard deviation either side on the
 // same 0 to 5 scale the raters use.
-function Spread({ row }: { row: ScoringRaterStats }) {
-  if (row.scores === 0) return <span className={styles.scMuted}>—</span>;
+function Spread({ scores, item }: { scores: number; item: ScoringDimensionStats | undefined }) {
+  if (scores === 0 || !item) return <span className={styles.scMuted}>—</span>;
   const at = (points: number) => `${(Math.min(5, Math.max(0, points)) / 5) * 100}%`;
-  const low = Math.max(0, row.mean - row.standardDeviation);
-  const high = Math.min(5, row.mean + row.standardDeviation);
+  const low = Math.max(0, item.mean - item.standardDeviation);
+  const high = Math.min(5, item.mean + item.standardDeviation);
   return (
     <div className={styles.scSpread}>
       <div className={styles.scAxis} aria-hidden="true">
@@ -484,10 +551,10 @@ function Spread({ row }: { row: ScoringRaterStats }) {
           <i key={point} style={{ insetInlineStart: at(point) }} />
         ))}
         <span style={{ insetInlineStart: at(low), inlineSize: `${((high - low) / 5) * 100}%` }} />
-        <b style={{ insetInlineStart: at(row.mean) }} />
+        <b style={{ insetInlineStart: at(item.mean) }} />
       </div>
       <small>
-        {formatPoints(row.mean)} ± {formatPoints(row.standardDeviation)}
+        {formatPoints(item.mean)} ± {formatPoints(item.standardDeviation)}
       </small>
     </div>
   );
@@ -495,15 +562,26 @@ function Spread({ row }: { row: ScoringRaterStats }) {
 
 const tone = (good: boolean, poor: boolean) => (good ? styles.good : poor ? styles.poor : undefined);
 
-// StatsTable is each rater of a batch: what they give, how much they agree
-// with the others and with themselves, and the habits worth a word.
-function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
+// StatsTable is each rater of a batch on one 打分项: what they give, how much
+// they agree with the others and with themselves, and the habits worth a
+// word. Counts and viewing time are of whole photos, the same on every item.
+function StatsTable({
+  stats,
+  dimension,
+  several,
+  scale,
+}: {
+  stats: ScoringRaterStats[];
+  dimension: ScoringDimension;
+  several: boolean;
+  scale: Scale;
+}) {
   return (
     <table className={styles.scTable}>
       <thead>
         <tr>
           <th scope="col">打分人</th>
-          <th scope="col">平均分 ± 标准差</th>
+          <th scope="col">{several ? `${dimension.name} 平均分 ± 标准差` : "平均分 ± 标准差"}</th>
           <th scope="col" title="给出的分数；跳过是无法判断，标记是图片有问题">
             打分
           </th>
@@ -513,7 +591,7 @@ function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
           <th scope="col" title="同一张照片隔一段时间再出现时，两次分数之差的平均">
             重复差
           </th>
-          <th scope="col" title="从照片出现到打分，所有打分的中位数">
+          <th scope="col" title="从照片出现到打完最后一项，所有打分的中位数">
             看图
           </th>
         </tr>
@@ -523,13 +601,17 @@ function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
           const name = row.rater.username
             ? displayName({ username: row.rater.username, nickname: row.rater.nickname })
             : "已停用的账号";
+          const item = row.dimensions.find((candidate) => candidate.dimension === dimension.id);
           const alerts = [];
           if (row.scores > 0 && row.fastShare >= fastShareAlert) {
-            alerts.push(`${formatPercent(row.fastShare)} 的分数在 1 秒内打出`);
+            alerts.push(`${formatPercent(row.fastShare)} 的照片在 1 秒内打完`);
           }
-          if (row.longestRun >= sameRunAlert) alerts.push(`连续 ${formatCount(row.longestRun)} 张同分`);
-          const agreement = row.agreement;
-          const repeat = row.repeatDifference;
+          // Whole points and three levels give one score many times in a row.
+          if (item && withDecimals(scale) && item.longestRun >= sameRunAlert) {
+            alerts.push(`${several ? dimension.name : ""}连续 ${formatCount(item.longestRun)} 张同分`);
+          }
+          const agreement = item?.agreement ?? null;
+          const repeat = item?.repeatDifference ?? null;
           return (
             <Fragment key={row.rater.id}>
               <tr>
@@ -545,7 +627,7 @@ function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
                   </div>
                 </th>
                 <td>
-                  <Spread row={row} />
+                  <Spread scores={row.scores} item={item} />
                 </td>
                 <td className={styles.scMetric}>
                   <strong>{formatCount(row.scores)}</strong>
@@ -562,7 +644,7 @@ function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
                     {formatCorrelation(agreement)}
                   </strong>
                   <small>
-                    {agreement === null ? "共同照片不足 20 张" : `按 ${formatCount(row.agreementPhotos)} 张`}
+                    {agreement === null ? "共同照片不足 20 张" : `按 ${formatCount(item?.agreementPhotos ?? 0)} 张`}
                   </small>
                 </td>
                 <td className={styles.scMetric}>
@@ -594,13 +676,43 @@ function StatsTable({ stats }: { stats: ScoringRaterStats[] }) {
   );
 }
 
+type DimensionID = ScoringDimension["id"];
+
+// A batch scores at most this many 打分项; the module refuses more.
+const mostDimensions = 8;
+
+// useCatalogue is every 打分项 a batch can choose, from the module, and a
+// way to add one made here.
+function useCatalogue() {
+  const [catalogue, setCatalogue] = useState<ScoringDimension[]>();
+  useEffect(() => {
+    let live = true;
+    listDimensions().then(
+      (items) => live && setCatalogue(items),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  const add = useCallback(
+    (dimension: ScoringDimension) => setCatalogue((current) => [...(current ?? []), dimension]),
+    [],
+  );
+  return { catalogue, add };
+}
+
 function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (batch: ScoringBatch) => void }) {
+  const { catalogue, add } = useCatalogue();
   const [sources, setSources] = useState<string[]>();
   const [failure, setFailure] = useState("");
   const [source, setSource] = useState("");
   const [name, setName] = useState("");
   const [required, setRequired] = useState(3);
   const [rubric, setRubric] = useState("");
+  const [dimensions, setDimensions] = useState<DimensionID[]>([]);
+  const [scale, setScale] = useState<Scale>("five");
+  const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
@@ -622,7 +734,17 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
     event.preventDefault();
     setBusy(true);
     try {
-      onCreated(await createBatch({ name: name.trim(), source, required, rubric: rubric.trim() }));
+      onCreated(
+        await createBatch({
+          name: name.trim(),
+          source,
+          required,
+          rubric: rubric.trim(),
+          dimensions,
+          scale,
+          hideDecimals: hidden,
+        }),
+      );
     } catch (caught) {
       setFailure(scoringError(caught));
       setBusy(false);
@@ -644,7 +766,7 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
             type="submit"
             form="scoring-new-batch"
             className={styles.scPrimary}
-            disabled={busy || !source || !name.trim()}
+            disabled={busy || !source || !name.trim() || dimensions.length === 0}
           >
             新建
           </button>
@@ -686,13 +808,312 @@ function NewBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated
               setRequired={setRequired}
               rubric={rubric}
               setRubric={setRubric}
+              items={
+                <>
+                  <DimensionPicker
+                    catalogue={catalogue}
+                    onMade={add}
+                    chosen={dimensions}
+                    setChosen={setDimensions}
+                    locked={false}
+                  />
+                  <ScalePicker scale={scale} setScale={setScale} hidden={hidden} setHidden={setHidden} locked={false} />
+                </>
+              }
             />
+            <MinimumNote />
           </>
         )}
       </form>
     </Dialog>
   );
 }
+
+// DimensionPicker chooses a batch's 打分项. The order they are picked in is
+// the order raters score them, shown as the number on each; another click
+// takes one out and the later ones move up. One made here is picked at once.
+// A batch with an answer keeps the ones it has.
+function DimensionPicker({
+  catalogue,
+  onMade,
+  chosen,
+  setChosen,
+  locked,
+}: {
+  catalogue: ScoringDimension[] | undefined;
+  onMade: (dimension: ScoringDimension) => void;
+  chosen: DimensionID[];
+  setChosen: Dispatch<SetStateAction<DimensionID[]>>;
+  locked: boolean;
+}) {
+  const label = useId();
+  const hint = useId();
+  const [making, setMaking] = useState(false);
+  if (!catalogue) return <Spinner small />;
+  const full = chosen.length >= mostDimensions;
+  // Each click builds on the one before, however quick they come.
+  const toggle = (id: DimensionID) =>
+    setChosen((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
+  return (
+    <div className={styles.scField}>
+      <div className={styles.scFieldHead}>
+        <span id={label} className={styles.scFieldLabel}>
+          打分项
+        </span>
+        <small>
+          {chosen.length} / {mostDimensions}
+        </small>
+      </div>
+      <div className={styles.scChips} role="group" aria-labelledby={label} aria-describedby={hint}>
+        {catalogue.map((dimension) => {
+          const at = chosen.indexOf(dimension.id);
+          return (
+            <button
+              key={dimension.id}
+              type="button"
+              className={`${styles.scChip} ${styles.scPick}`}
+              aria-pressed={at >= 0}
+              aria-label={at >= 0 ? `${dimension.name}，第 ${at + 1} 项` : dimension.name}
+              title={dimension.description || undefined}
+              disabled={locked || (at < 0 && full)}
+              onClick={() => toggle(dimension.id)}
+            >
+              <i aria-hidden="true">{at >= 0 ? at + 1 : ""}</i>
+              {dimension.name}
+              {dimension.custom && <small>自定义</small>}
+            </button>
+          );
+        })}
+        {!locked && !making && (
+          <button
+            type="button"
+            className={`${styles.scChip} ${styles.scMake}`}
+            disabled={full}
+            onClick={() => setMaking(true)}
+          >
+            <Plus aria-hidden="true" />
+            自定义…
+          </button>
+        )}
+      </div>
+      {making && (
+        <DimensionMaker
+          onCancel={() => setMaking(false)}
+          onMade={(dimension) => {
+            onMade(dimension);
+            setChosen((current) => [...current, dimension.id]);
+            setMaking(false);
+          }}
+        />
+      )}
+      <p id={hint} className={`${styles.scHint}${!locked && chosen.length === 0 ? ` ${styles.warn}` : ""}`}>
+        {locked
+          ? "批次已有打分，打分项与顺序不能再改。"
+          : chosen.length === 0
+            ? "至少选一项。按点选的先后顺序打分，再点一次取消。"
+            : "按点选的先后顺序打分，再点一次取消。有人打过分后不能再改。"}
+      </p>
+    </div>
+  );
+}
+
+// The scales a batch can be scored on, each with what a score looks like;
+// a new batch starts on the first.
+const scaleChoices: { scale: Scale; example: string; name: string; about: string }[] = [
+  { scale: "five", example: "好", name: "五档", about: "很差 1 · 较差 2 · 一般 3 · 好 4 · 很好 5" },
+  { scale: "hundredths", example: "3.47", name: "数轴 · 两位小数", about: "0–5，精确到 0.01" },
+  { scale: "tenths", example: "3.5", name: "数轴 · 一位小数", about: "0–5，精确到 0.1" },
+  { scale: "whole", example: "3", name: "数轴 · 整数", about: "0–5，只有整数" },
+  { scale: "three", example: "中", name: "三档", about: "差 1 · 中 3 · 好 5" },
+];
+const withDecimals = (scale: Scale) => scale === "hundredths" || scale === "tenths";
+
+// scaleSaid names a batch's scale on its page.
+const scaleSaid = (batch: Pick<ScoringBatch, "scale" | "hideDecimals">) => {
+  const choice = scaleChoices.find((candidate) => candidate.scale === batch.scale);
+  return `${choice?.name ?? batch.scale}${batch.hideDecimals ? "，打分人看不到分数" : ""}`;
+};
+
+// ScalePicker chooses how every 打分项 of a batch is scored and, on a scale
+// with decimals, whether raters see them or score by the place on the number
+// line alone. A batch with an answer keeps its own.
+function ScalePicker({
+  scale,
+  setScale,
+  hidden,
+  setHidden,
+  locked,
+}: {
+  scale: Scale;
+  setScale: (scale: Scale) => void;
+  hidden: boolean;
+  setHidden: (hidden: boolean) => void;
+  locked: boolean;
+}) {
+  const label = useId();
+  const hint = useId();
+  const group = useId();
+  const step = scale === "hundredths" ? "0.01" : "0.1";
+  return (
+    <div className={styles.scField}>
+      <div className={styles.scFieldHead}>
+        <span id={label} className={styles.scFieldLabel}>
+          打分方式
+        </span>
+      </div>
+      <div className={styles.scScales} role="radiogroup" aria-labelledby={label} aria-describedby={hint}>
+        {scaleChoices.map((choice) => (
+          <label key={choice.scale} className={styles.scScaleChoice}>
+            <input
+              type="radio"
+              name={group}
+              value={choice.scale}
+              checked={choice.scale === scale}
+              disabled={locked}
+              onChange={() => {
+                setScale(choice.scale);
+                if (!withDecimals(choice.scale)) setHidden(false);
+              }}
+            />
+            <span
+              className={`${styles.scScaleExample}${isLevels(choice.scale) ? ` ${styles.word}` : ""}`}
+              aria-hidden="true"
+            >
+              {choice.example}
+            </span>
+            <b>{choice.name}</b>
+            <small>{choice.about}</small>
+          </label>
+        ))}
+      </div>
+      {withDecimals(scale) && (
+        <label className={styles.scCheck}>
+          <input
+            type="checkbox"
+            checked={!hidden}
+            disabled={locked}
+            onChange={(event) => setHidden(!event.target.checked)}
+          />
+          <span>
+            打分人看得到小数
+            <small>
+              {hidden
+                ? `数轴上只标 0–5 整数，打分人按位置打分，看不到分数；导出的分数仍精确到 ${step}。`
+                : `打分时显示选中的分数，如 ${scale === "hundredths" ? "3.47" : "3.5"}。`}
+            </small>
+          </span>
+        </label>
+      )}
+      <p id={hint} className={styles.scHint}>
+        {locked ? "批次已有打分，打分方式不能再改。" : "所有打分项用同一种方式。有人打过分后不能再改。"}
+      </p>
+    </div>
+  );
+}
+
+// A custom 打分项's name and description, in characters, as the module
+// allows them.
+const longestDimensionName = 8;
+const longestDimensionDescription = 40;
+
+// DimensionMaker makes a custom 打分项, which every later batch can choose
+// too. It sits inside the batch's form, so Enter adds it instead of
+// submitting the batch.
+function DimensionMaker({ onCancel, onMade }: { onCancel: () => void; onMade: (dimension: ScoringDimension) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [failure, setFailure] = useState("");
+  const [busy, setBusy] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => nameInput.current?.focus(), []);
+  const ready = name.trim() !== "" && !busy;
+  const add = async () => {
+    if (!ready) return;
+    setBusy(true);
+    setFailure("");
+    try {
+      onMade(await createDimension({ name: name.trim(), description: description.trim() }));
+    } catch (caught) {
+      setFailure(scoringError(caught));
+      setBusy(false);
+    }
+  };
+  const enter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void add();
+  };
+  return (
+    <div className={styles.scMaker} role="group" aria-label="新的打分项">
+      <label className={styles.scMakerField}>
+        <span>名称</span>
+        <span className={styles.scInput}>
+          <input
+            ref={nameInput}
+            value={name}
+            maxLength={longestDimensionName}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={enter}
+          />
+          <small aria-hidden="true">
+            {[...name].length} / {longestDimensionName}
+          </small>
+        </span>
+      </label>
+      <label className={styles.scMakerField}>
+        <span>说明（打分人会看到，可不填）</span>
+        <span className={styles.scInput}>
+          <input
+            value={description}
+            maxLength={longestDimensionDescription}
+            placeholder="例如：前景、中景、远景是否分明"
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={enter}
+          />
+        </span>
+      </label>
+      <span className={styles.scMakerGo}>
+        <button type="button" className={styles.scQuiet} disabled={busy} onClick={onCancel}>
+          取消
+        </button>
+        <button type="button" className={styles.scPrimary} disabled={!ready} onClick={() => void add()}>
+          添加并选上
+        </button>
+      </span>
+      {failure && (
+        <p className={styles.scMakerFailure} role="alert">
+          {failure}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MinimumNote() {
+  return (
+    <p className={styles.scNote}>
+      <Info aria-hidden="true" />
+      <span>
+        长边不足 2400 像素的照片不加入批次。
+        <br />
+        参考照片放在照片文件夹的 <code>_锚点</code> 子文件夹里，文件名以 0–5 的参考分开头，如{" "}
+        <code>3.5-湖边日落.jpg</code>。
+      </span>
+    </p>
+  );
+}
+
+// Why the import skipped files, as the batch page says it.
+const skipReasons: Record<ScoringBatch["import"]["skippedBy"][number]["reason"], string> = {
+  too_small: "长边不足 2400 像素",
+  unsupported_type: "格式不支持",
+  undecodable: "无法解码",
+  too_large: "太大",
+  unreadable: "读不出来",
+  missing: "已不在",
+  not_a_file: "不是普通文件",
+  anchor_name: "参考照片的文件名不以分数开头",
+};
 
 const fewestRaters = 1;
 const mostRaters = 10;
@@ -704,6 +1125,7 @@ function BatchFields({
   setRequired,
   rubric,
   setRubric,
+  items,
 }: {
   name: string;
   setName: (value: string) => void;
@@ -711,8 +1133,9 @@ function BatchFields({
   setRequired: (value: number) => void;
   rubric: string;
   setRubric: (value: string) => void;
+  // The 打分项 picker, between the count and the guide.
+  items: ReactNode;
 }) {
-  const hint = useId();
   const requiredLabel = useId();
   const setCount = (value: number) => setRequired(Math.min(mostRaters, Math.max(fewestRaters, Math.round(value) || 1)));
   return (
@@ -756,24 +1179,17 @@ function BatchFields({
           </div>
         </div>
       </div>
+      {items}
       <label className={styles.scField}>
         <span className={styles.scFieldLabel}>打分标准</span>
         <textarea
           value={rubric}
           maxLength={2000}
-          rows={5}
-          placeholder="打分人开始前会看到，例如每个分数段是什么样的照片"
-          aria-describedby={hint}
+          rows={4}
+          placeholder="打分人开始前会看到，例如每个分数段、每个打分项看什么"
           onChange={(event) => setRubric(event.target.value)}
         />
       </label>
-      <p id={hint} className={styles.scNote}>
-        <Info aria-hidden="true" />
-        <span>
-          参考照片放在照片文件夹的 <code>_锚点</code> 子文件夹里，文件名以 0–5 的参考分开头，如{" "}
-          <code>3.5-湖边日落.jpg</code>。
-        </span>
-      </p>
     </>
   );
 }
@@ -787,16 +1203,28 @@ function EditBatchDialog({
   onClose: () => void;
   onSaved: (batch: ScoringBatch) => void;
 }) {
+  const { catalogue, add } = useCatalogue();
   const [name, setName] = useState(batch.name);
   const [required, setRequired] = useState(batch.required);
   const [rubric, setRubric] = useState(batch.rubric);
+  const [dimensions, setDimensions] = useState(batch.dimensions.map((dimension) => dimension.id));
+  const [scale, setScale] = useState<Scale>(batch.scale);
+  const [hidden, setHidden] = useState(batch.hideDecimals);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
+  const locked = batch.answers > 0;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     try {
-      onSaved(await updateBatch(batch.id, { name: name.trim(), required, rubric: rubric.trim() }));
+      onSaved(
+        await updateBatch(batch.id, {
+          name: name.trim(),
+          required,
+          rubric: rubric.trim(),
+          ...(locked ? {} : { dimensions, scale, hideDecimals: hidden }),
+        }),
+      );
     } catch (caught) {
       setFailure(scoringError(caught));
       setBusy(false);
@@ -814,7 +1242,12 @@ function EditBatchDialog({
           <button type="button" className={styles.scQuiet} disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="submit" form="scoring-edit-batch" className={styles.scPrimary} disabled={busy || !name.trim()}>
+          <button
+            type="submit"
+            form="scoring-edit-batch"
+            className={styles.scPrimary}
+            disabled={busy || !name.trim() || dimensions.length === 0}
+          >
             保存
           </button>
         </>
@@ -829,8 +1262,206 @@ function EditBatchDialog({
           setRequired={setRequired}
           rubric={rubric}
           setRubric={setRubric}
+          items={
+            <>
+              <DimensionPicker
+                catalogue={catalogue}
+                onMade={add}
+                chosen={dimensions}
+                setChosen={setDimensions}
+                locked={locked}
+              />
+              <ScalePicker scale={scale} setScale={setScale} hidden={hidden} setHidden={setHidden} locked={locked} />
+            </>
+          }
         />
       </form>
+    </Dialog>
+  );
+}
+
+// The export dialog remembers its last choice in this browser, beside the
+// 打分项, which start all chosen for each batch.
+const exportKey = "a-nas.scoring.export";
+type Remembered = Pick<ExportChoice, "format" | "include"> & { fields: ExportField[] };
+function rememberedExport(): Remembered | undefined {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(exportKey) ?? "null") as Remembered | null;
+    return stored && Array.isArray(stored.fields) && Array.isArray(stored.include) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function rememberExport(choice: Remembered) {
+  try {
+    window.localStorage.setItem(exportKey, JSON.stringify(choice));
+  } catch {
+    // Without storage the dialog starts from the defaults next time.
+  }
+}
+
+// ExportDialog chooses an export's format, rows and columns. Every row is one
+// answer and has the photo and the rater; the rest is the administrator's.
+function ExportDialog({ batch, onClose }: { batch: ScoringBatch; onClose: () => void }) {
+  const dimensionIds = batch.dimensions.map((dimension) => dimension.id as ExportField);
+  const [remembered] = useState(rememberedExport);
+  const [format, setFormat] = useState<ExportChoice["format"]>(remembered?.format ?? "csv");
+  const [fields, setFields] = useState<ExportField[]>(() => [
+    ...dimensionIds,
+    ...(remembered?.fields ?? exportDefaults).filter((field) => !dimensionIds.includes(field)),
+  ]);
+  const [include, setInclude] = useState<ExportInclude[]>(remembered?.include ?? []);
+  const [summary, setSummary] = useState<ScoringExportSummary>();
+  const formatLabel = useId();
+  const rowsLabel = useId();
+  const fieldsLabel = useId();
+  useEffect(() => {
+    let live = true;
+    exportSummary(batch.id).then(
+      (counts) => live && setSummary(counts),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [batch.id]);
+  const toggleField = (field: ExportField) =>
+    setFields((current) =>
+      current.includes(field) ? current.filter((other) => other !== field) : [...current, field],
+    );
+  const toggleInclude = (kind: ExportInclude) => {
+    const next = include.includes(kind) ? include.filter((other) => other !== kind) : [...include, kind];
+    // Rows of several kinds need the kind to tell them apart.
+    if (include.length === 0 && next.length > 0 && !fields.includes("kind")) setFields([...fields, "kind"]);
+    setInclude(next);
+  };
+  const rows = summary ? summary.scores + include.reduce((sum, kind) => sum + summary[kind], 0) : undefined;
+  const choice: ExportChoice = { format, fields, include };
+  const chip = (pressed: boolean, label: string, onClick: () => void, key: string) => (
+    <button key={key} type="button" className={styles.scChip} aria-pressed={pressed} onClick={onClick}>
+      <i aria-hidden="true" />
+      {label}
+    </button>
+  );
+  return (
+    <Dialog
+      title={`导出“${batch.name}”`}
+      className={styles.scDialog}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <span className={styles.scExportCount}>
+            {rows === undefined ? (
+              ""
+            ) : (
+              <>
+                将导出 <b>{formatCount(rows)}</b> 条
+              </>
+            )}
+          </span>
+          <button type="button" className={styles.scQuiet} onClick={onClose}>
+            取消
+          </button>
+          <a
+            className={styles.scPrimary}
+            href={exportURL(batch.id, choice)}
+            download
+            onClick={() => {
+              rememberExport({ format, include, fields: fields.filter((field) => !dimensionIds.includes(field)) });
+              onClose();
+            }}
+          >
+            导出
+          </a>
+        </>
+      }
+    >
+      <div className={styles.scForm}>
+        <div className={styles.scField}>
+          <span id={formatLabel} className={styles.scFieldLabel}>
+            格式
+          </span>
+          <div className={styles.scFormatLine}>
+            <div className={styles.scTabs} role="group" aria-labelledby={formatLabel}>
+              <button type="button" aria-pressed={format === "csv"} onClick={() => setFormat("csv")}>
+                表格 CSV
+              </button>
+              <button type="button" aria-pressed={format === "jsonl"} onClick={() => setFormat("jsonl")}>
+                JSON Lines
+              </button>
+            </div>
+            <span className={styles.scHint}>每行一条打分：一张照片和一位打分人</span>
+          </div>
+        </div>
+        <div className={styles.scField}>
+          <span id={rowsLabel} className={styles.scFieldLabel}>
+            包含哪些记录
+          </span>
+          <div className={styles.scChips} role="group" aria-labelledby={rowsLabel}>
+            <button type="button" className={styles.scChip} aria-pressed disabled>
+              <i aria-hidden="true" />
+              当前有效的分数
+            </button>
+            {exportIncludes.map(({ include: kind, label }) =>
+              chip(include.includes(kind), label, () => toggleInclude(kind), kind),
+            )}
+          </div>
+        </div>
+        <div className={styles.scField}>
+          <span id={fieldsLabel} className={styles.scFieldLabel}>
+            字段
+          </span>
+          <div className={styles.scFieldGroups} role="group" aria-labelledby={fieldsLabel}>
+            <span>图片</span>
+            <div className={styles.scChips}>
+              <button type="button" className={styles.scChip} aria-pressed disabled>
+                <i aria-hidden="true" />
+                图片 ID 与路径<small>必含</small>
+              </button>
+              {exportGroups[1].fields.map(({ field, label }) =>
+                chip(fields.includes(field), label, () => toggleField(field), field),
+              )}
+            </div>
+            <span>打分人</span>
+            <div className={styles.scChips}>
+              <button type="button" className={styles.scChip} aria-pressed disabled>
+                <i aria-hidden="true" />
+                用户名<small>必含</small>
+              </button>
+              {exportGroups[0].fields.map(({ field, label }) =>
+                chip(fields.includes(field), label, () => toggleField(field), field),
+              )}
+            </div>
+            <span>分数</span>
+            <div className={styles.scChips}>
+              {batch.dimensions.map((dimension) =>
+                chip(
+                  fields.includes(dimension.id as ExportField),
+                  dimension.name,
+                  () => toggleField(dimension.id as ExportField),
+                  dimension.id,
+                ),
+              )}
+            </div>
+            {exportGroups.slice(2).map((group) => (
+              <Fragment key={group.label}>
+                <span>{group.label}</span>
+                <div className={styles.scChips}>
+                  {group.fields.map(({ field, label }) =>
+                    chip(fields.includes(field), label, () => toggleField(field), field),
+                  )}
+                </div>
+              </Fragment>
+            ))}
+          </div>
+        </div>
+        <div className={styles.scColumns} aria-label="导出的列">
+          {exportColumns(fields, dimensionIds).map((column) => (
+            <code key={column}>{column}</code>
+          ))}
+        </div>
+      </div>
     </Dialog>
   );
 }

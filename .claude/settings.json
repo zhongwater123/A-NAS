@@ -32,8 +32,14 @@
           {
             "type": "command",
             "if": "Edit(//**/*.go)",
-            "command": "input=$(cat); cwd=${input#*'\"cwd\"'}; cwd=${cwd#*'\"'}; cwd=${cwd%%'\"'*}; nl='\n'; found=$(git -C \"$cwd\" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) && [ \"${found#*\"$nl\"}\" = \"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" ] && script=${found%%\"$nl\"*}/.claude/hooks/gofmt.sh && [ -f \"$script\" ] || script=$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh; [ -f \"$script\" ] || exit 0; printf '%s' \"$input\" | bash \"$script\"",
-            "timeout": 60
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "if": "Edit(//**/web/**)",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "timeout": 120
           }
         ]
       },
@@ -43,8 +49,14 @@
           {
             "type": "command",
             "if": "Write(//**/*.go)",
-            "command": "input=$(cat); cwd=${input#*'\"cwd\"'}; cwd=${cwd#*'\"'}; cwd=${cwd%%'\"'*}; nl='\n'; found=$(git -C \"$cwd\" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null) && [ \"${found#*\"$nl\"}\" = \"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" ] && script=${found%%\"$nl\"*}/.claude/hooks/gofmt.sh && [ -f \"$script\" ] || script=$CLAUDE_PROJECT_DIR/.claude/hooks/gofmt.sh; [ -f \"$script\" ] || exit 0; printf '%s' \"$input\" | bash \"$script\"",
-            "timeout": 60
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "if": "Write(//**/web/**)",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\"",
+            "timeout": 120
           }
         ]
       }

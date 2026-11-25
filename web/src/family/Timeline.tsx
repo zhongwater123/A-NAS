@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { relativeTime } from "../lib/time";
+import { Modal } from "../ui/modal";
 import {
   addComment,
   deleteComment,
@@ -21,7 +22,7 @@ import type { Draft } from "./Composer";
 import { canDelete, useFamily } from "./context";
 import styles from "./family.module.css";
 import { assess, bandShort, decimal, kindLabels, monthLabel, monthRange, sealText, shortDate, verbs } from "./format";
-import { ItemMenu, MemberFace, Modal, MonthTitle, Mosaic, scrollerOf, scrollWithin, useMemberName } from "./parts";
+import { ItemMenu, MemberFace, MonthTitle, Mosaic, scrollerOf, scrollWithin, useMemberName } from "./parts";
 import { QuickJournal } from "./QuickJournal";
 import { ReactionPicker, Reactions, useReact } from "./Reactions";
 import { Scrubber } from "./Scrubber";
@@ -561,7 +562,7 @@ function TrashDialog({ baby, onClose, onRestored }: { baby: FamilyBaby; onClose:
     }
   };
   return (
-    <Modal title="最近删除" onClose={onClose}>
+    <Modal title="最近删除" container={family.container} onClose={onClose}>
       <p className={styles.fcNote}>
         删除的记录保留 15 天，之后永久删除。
         {family.overview.me.guardian ? "家长可以恢复任何人的记录。" : "你可以恢复自己添加的记录。"}

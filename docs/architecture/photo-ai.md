@@ -81,9 +81,9 @@ M2 交付后，成员可以：
 
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
-- 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。
-- 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
+- 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。一条请求最多 20 个描述符（`describe_frames` 的关键帧）；超出的被内核丢弃，Worker 读完这一帧后答 `invalid_request`。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。`describe_frames` 用同一个读文字模型描述剪辑中心的一张卡片（见下文“剪辑中心的分析”）。
+- 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待；`invalid_request` 表示请求本身越界（描述符太多、字段不合规则）；`invalid_result` 表示模型的回答重问几次仍不合 Schema。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
 ### 输入图片
@@ -101,6 +101,33 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 已实现部分（[`photoservice/gate.go`](../../internal/photoservice/gate.go)）：相册服务自己的请求计入前台活动，但读取 AI 状态不计入，窗口可以一直轮询；CPU、I/O、内存压力经 `prometheus/procfs` 读取，内核没有压力信息时只看活动。Host Agent 的活动信号与温度尚未实现，在此之前 Web 文件与 SMB 只通过系统压力影响门控。
 - 门控关闭时停止领取新任务；正在进行的检测被取消并退回队列、不计尝试次数，无法中断的向量推理允许完成。系统可用内存低于 1 GiB 余量时门控同样关闭，并请 Worker 卸载模型；后台任务要加载的模型放不下（加载后不足 1 GiB）时只等待、不卸载；检测队列清空或有人使用设备时只卸载检测会话，CPU 与 I/O 压力只取消、不卸载（[资源策略](photo-objects.md#资源策略)）。关闭期间至多每分钟（不长于空闲期）复查一次。空闲期默认 5 分钟，系统测试用 `ANAS_PHOTOS_AI_QUIET_PERIOD` 缩短。
 - 更换模型后，第一次见到新模型 ID 时把旧模型的向量全部重新排队；旧向量在新向量写入前继续保留。
+- **剪辑中心的分析**（[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）：只为剪辑中心经项目授权请求过的视频排 `montage-windows/v1`，视频仍不进 `inLocalAI`。
+  - **入队**：已有当前分析身份的完整窗口就不排；两个授权请求同一个视频只排一次。分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。相册服务启动后、AI 运行器还没问过 Worker 时，只有一种身份的完整窗口也算完成，第一轮发现模型不同再重排。
+  - **调度**：每轮先做它。先用只读查询确认有到期的剪辑任务，再删掉已没有授权引用的待做任务，然后领一个。一个视频一个任务，每轮只做 30 个窗口（一块），没做完就放回队首、不耗尝试次数，下一轮先问门控；块内每 30 秒续一次租约。
+  - **取帧与编码**：用 FFmpeg Worker 的 `frames`（后台优先级），按缩略图的流程转成长边 512、质量 82 的 JPEG，灰度标准差小于 8 记为纯色，再交给 `embed_image`。
+  - **不等相册空闲**（2026-11-19，实验 NAS 验收时发现）：剪辑中心的窗口、卡片、画质与描述是成员的任务在等的工作，门控回答它们时不看前台活动（`Gate.OpenForMember`、`ContinueForMember`，[`photos.MemberGate`](../../internal/photos/montagewindows.go)），CPU、I/O、内存的条件照旧。原因：门控按全机计前台活动，任何成员在用相册，所有人的剪辑任务都等；剪辑中心自己的窗口也读相册（当时主页背景还轮播成员的视频），成员开着窗口等，任务就一直停在“等待分析”。相册在用时，一轮只做剪辑中心的分析，照片自己的 AI 工作照旧等相册空闲 5 分钟。
+  - **挂断**：前台有人用或内存不足时立即挂断（剪辑中心的分析只在内存不足时挂断，见上一条）。门控单独回答这两项（`Gate.Continue`），所以 CPU 压力同时存在也不会掩盖内存不足；CPU、I/O 压力只在块与块之间生效。挂断后本轮结束，和暂停的检测一样按原因卸载模型，照片的 AI 工作也等下一轮；已算完的窗口保留。
+  - **失败**：取帧或解码失败按缩略图的规则分类；AI Worker 自己的错误按照片向量的规则记 `io`，最多试 3 次；超过 6 小时（10,800 个窗口）的视频记 `too_long`，不分析。
+  - **结果**：存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用。写入前确认任务还在，块进行中视频被清除或分析被删除时丢弃这一块。同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
+  - **交给剪辑中心**：`analysis` 的 JSON 只有状态、身份、窗口数与维数；窗口放在封口的 memfd 里，先是全部向量（小端 float32），再是每个窗口的起止毫秒与标记（各一个小端 uint32），所以应答大小与视频长短无关。`lookup` 一次读出全部资产的分析进度。
+  - **换模型**：只重排仍被未撤销的授权引用的对象；授权撤销后在 7 天内再次授权的，由入队时的身份判断重排。没有授权引用满 7 天的分析由每小时的维护删除。
+  - 窗口完成后排 `montage-cards/v1`，再按卡片逐张排 `montage-quality/v1`。Catalog 第 19 步建 `video_cards`、`video_card_quality` 与 `montage_card_results`，并记录回滚步骤。完成身份包含上游分析身份，也记录零卡片和零画质的成功结果。授权的 `analysis` 返回两项身份，`analyze(retry=true)` 重排失败的任务。
+  - **卡片与画质的调度**：每轮先于 AI Worker 的门控做，不问 AI Worker。先用只读查询确认有到期的任务，再删掉已没有授权引用、也没人在做的卡片与画质任务，然后领一个；再次授权并请求分析时补排缺的任务。门控挂断或服务停止时任务退回原位、不耗尝试次数，本轮结束，按原因卸载模型。计算 Worker 或 FFmpeg Worker 连不上时任务等 1 分钟、不耗尝试次数，本轮接着做照片的 AI 工作；每次都结束本轮的话，Worker 不在期间照片的工作会一直等。计算 Worker 执行中失败或超时、读 Catalog 或原始文件出错记 `io`，最多试 3 次；请求被拒绝记 `invalid_result`，原始文件不存在记 `missing_original`，都不再重试。
+  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。相册进入前台或内存不足时中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
+- **卡片描述**（`describe_frames`，[`describe.py`](../../ai/anas_ai/describe.py)）：
+  - 输入一张卡片的 3–20 张关键帧（每张一个描述符）、每张离卡片开头的秒数（`offsets`）、分组布局（`groups`，从 1 数的节拍）与卡片时长（`duration`）；越界答 `invalid_request`。
+  - 提示词、体裁（旅行，`TRAVEL`）与 Schema 固定在 Worker 里，版本 `montage-card/v1`，随回答的 `template` 返回：第八版（提交 `19f2d6db`）的 `PROMPT`、`CAMERAS` 与 Schema 原样搬来，只加一句不要转写画面里的证件号、票号、车牌等号码。
+  - 用读文字的 llama-server，设置照第八版：系统提示词、`response_format` 按 Schema 约束、温度 0.2、回答上限 1,800 token、不开思考；回答不合 Schema、截断或陷入重复时依次以重复惩罚 1.1、1.2、1.3 重问，三次都不合格答 `invalid_result`。重问复用同一提示的缓存。
+  - **关键帧放不下时抽帧**：上下文 8,192 token 里要给回答留足 1,800。提问前按关键帧的像素估算提示的 token（提示词约 620；每张关键帧是它的标签加每 32×32 像素一个视觉 token，512×910 的竖拍约 485，512×288 的横拍约 165），放得下的卡片原样提问。放不下的（竖拍 12 张及以上）从第一张到最后一张均匀取放得下的张数再提问，没有取到关键帧的节拍不写。回答里每个节拍的 `frames` 是它的关键帧在这张卡片全部关键帧里的序号（从 1 起），所以抽过帧的卡片节拍数少于关键帧数，使用方按 `frames` 找到节拍对应的关键帧。每次描述在日志里记下估算值与 llama-server 实际数出的提示 token 数。估算偏低时仍有兜底：提示过长，或回答被截断且实测提示 token 数已挤占 1,800 token 的回答预算时，答 `invalid_input`。
+  - 和 `read_text` 一样在线程里运行、调用方挂断即停；客户端对它的超时是 15 分钟。
+- **相册的 `montage-describe/v1`**（[`montagedescribe.go`](../../internal/photos/montagedescribe.go)）：在画质步骤（`montage-quality/v1`）完成的事务里排队，只描述画质结果 `reasons` 为空的卡片；重新切卡片时一并删掉旧描述。
+  - 每轮一张卡片，属于读文字阶段：按 `ocrMemoryBytes` 问准入，通过后释放检测模型；只有读文字模型装不下时，本轮继续处理能运行的相册任务；没描述完的任务放回队首、不耗尝试次数，调用期间每 30 秒续租。
+  - 关键帧由 FFmpeg Worker 的 `frames` 取（宽 512、质量 3，第八版的设置），取帧与描述期间每 200 毫秒检查前台活动和内存压力，触发时挂断，任务退回原位。
+  - 存进 `video_card_descriptions`（migration 20，带回滚）之前，用 `textread.MaskNumbers` 把每段文字里的身份证号、银行卡号、手机号与 15 位以上数字串换成 `[身份证号]` 一类标签，相册不保留原文。
+  - 超出上下文（`invalid_input`）或回答不合 Schema（`invalid_result`）的卡片只把错误记在这张卡片上，同一段视频的其他卡片照常；Worker 崩溃、超时、取不到关键帧等临时故障按卡片最多尝试三次，之后记录该卡错误并继续；成员重试时重新处理失败卡片。回答的模板与相册认的不一致、号码过滤读不了回答，也只记在这张卡片上。原始文件打不开（不是“不存在”）记 `io`、耗一次尝试，三次后整个任务失败；启动时不重排失败的描述任务（一次尝试最长 15 分钟），相册没见过的读文字模型会重排。每条描述记下写入它的版本（Catalog 第 22 步，带回滚）：在别的版本下失败的卡片与过期的一样补排，所以每个新版本为仍被授权引用的视频、以及重新授权的视频，把失败的卡片各重试一次；描述成功的卡片不动，没有版本号时（开发与 Fake 模式）不重试。
+  - 分析身份是读文字模型、`montage-card/v1`、体裁、关键帧设置、号码过滤版本、切卡身份与画质身份。更换读文字模型或在保留期内重新授权并请求分析时，补排缺失或过期的描述。
+  - Worker 没有读文字模型时画质完成也不排描述，`lookup` 的 `descriptions` 报 `unavailable`（本地模型不可用）；画质完成且没有合格卡片时直接报完成。有了读文字模型（随新版本重启）后，第一轮为仍被授权引用、画质已完成而缺当前描述的对象补排。
+  - 开发机实测（2026-11-18，Apple 芯片，Homebrew 的 llama-server b11960，本机下载的 Qwen3.5-4B Q4_K_M 与 mmproj F16，`LlamaReader` 自己的启动参数 `-c 8192 -np 1 --image-max-tokens 1024`）：把品杰样本的关键帧转成 512×910 的竖拍，11 张（样本里关键帧最多的卡片）提示 5,955 token，50 秒描述完、回答完整；12 张 6,440 token；20 张 10,320 token，llama-server 拒绝，当时这张卡片记为描述失败。每张竖拍约 485 token，与方案按第八版估的 450 相近。抽帧的估算取自这组数字；抽帧后的描述、横拍等其他画幅的估算、固定版本 b11655 与清单里的模型文件都还没有实测，留到实验 NAS 验收。
 
 ### 存储（Catalog migration 4–7）
 
@@ -168,6 +195,18 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - AI 处理状态与照片状态分离：`pending → running → ready / failed`，失败保存稳定错误类别。
 - 每条向量记录模型 ID（含权重哈希与预处理版本）。更换模型或预处理后，旧结果标记为 `stale`，后台重建；重建期间旧向量是否继续参与搜索是规格中的待定项，建议继续参与直到新向量就绪。
 - 删除最后一个引用时，向量与 AI 标签随对象删除；用户元数据随照片资产删除。
+
+### 美学打分
+
+按 [#480](https://github.com/zhongwater123/A-NAS/issues/480) 的方案一，Worker 内用 PyTorch 运行打分器，给缩略图打美学、技术两个分（1–5，不截断）。目前只做到 Worker，相册服务的任务、存储与界面未接入。
+
+- **打分器**：Qwen3.5-4B 的冻结视觉塔和两个 MLP 头由 [#480 的推理代码](../../ai/qv_head/)加载；设备只安装推理所需的模块。
+- **模型文件**：[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)固定发布包 tar 的 SHA-256。内容包装入 `MANIFEST.json`、`model/` 和视觉塔原附的许可证，`ai/aesthetic-scorer.bundle` 链接到 `/opt/a-nas/models/<tar 的 SHA-256>/`。视觉塔与 OCR 的 mmproj 格式不同，安装该模型时系统盘多占约 667 MB。
+- **校验与加载**：Worker 启动时验证发布清单的哈希和结构。首次打分在同一 systemd 沙箱的子进程中启动 CPU 运行时，先设置线程数，再校验权重并加载模型。后续请求复用子进程；挂断或 `release` 时回收子进程，包括首次加载期间。
+- **运行环境**：CPU 版 PyTorch 和 torchvision 从官方 CPU wheel 安装，版本与哈希见[锁文件](../../ai/requirements.txt)。依赖门禁从 wheel 文件名提取上游公开版本进行公告审计。单元启用 Hugging Face 和 transformers 离线模式，并将其缓存放在 Worker 的缓存目录。
+- **协议**：`score_aesthetic` 接收一个缩略图描述符，返回 `model` 与 `scores`（`aesthetic`、`technical`）。模型 ID 包含已验证的发布清单 SHA-256（覆盖视觉塔、打分头及预处理配置）与推理库版本。`info` 以 `aestheticModel` 和 `aestheticMemoryBytes` 单独报告打分器，供后续调度使用。
+- **资源**：清单 `memoryBytes` 先按 2 GiB（开发机实测常驻约 1.7 GB、峰值约 1.9 GB）；推理线程与其他模型相同，为可用逻辑核数减 2。开发机 CPU 上 512 px 缩略图每张约 5.5 秒，只适合空闲时后台整理。
+- **验收与分发**：默认发布、设备镜像与主包依赖均不包含打分权重。内部验收可将原始 tar 放入内容库的 `models/<SHA-256>/`，用 `scripts/build-content-packages.sh --aesthetic-scorer-only OUT CONTENT` 单独构建模型包，安装后重启 AI Worker 即可打分。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。目标 NAS（i3-12100）的打分耗时与 Worker cgroup 峰值内存待实测。
 
 ## 切片与顺序
 

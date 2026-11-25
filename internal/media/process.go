@@ -242,37 +242,73 @@ func truncate(value string, limit int) string {
 	return value[:limit]
 }
 
-// pruneCache removes resized artwork no title refers to any more.
+// pruneCache removes what the cache keeps for what the catalog no longer
+// has: resized artwork no title refers to, and the frames and converted
+// subtitles of videos that are gone. Deleting a library or an account drops
+// its videos' files at once; a frame or subtitle that work already under way
+// wrote after that goes here. The folders are listed before the catalog is
+// read: a file listed was written after its video was added, so a video the
+// read does not find is gone.
 func (s *Service) pruneCache(ctx context.Context) {
 	if s.cacheDir == "" {
 		return
 	}
-	referenced := map[string]bool{}
-	rows, err := s.store.db.QueryContext(ctx, `
+	folders := map[string][]os.DirEntry{}
+	for _, folder := range []string{"artwork", "frames", "subtitles"} {
+		folders[folder], _ = os.ReadDir(filepath.Join(s.cacheDir, folder))
+	}
+	images, err := s.cacheKeys(ctx, `
 SELECT poster_entry FROM videos UNION SELECT backdrop_entry FROM videos UNION SELECT thumb_entry FROM videos
 UNION SELECT poster_entry FROM shows UNION SELECT backdrop_entry FROM shows`)
 	if err != nil {
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil && id != "" {
-			referenced[cacheName(id)] = true
-		}
-	}
-	// A read cut short would leave artwork in use looking unreferenced.
-	if errors.Join(rows.Err(), rows.Close()) != nil {
-		return
-	}
-	entries, err := os.ReadDir(filepath.Join(s.cacheDir, "artwork"))
+	videos, err := s.cacheKeys(ctx, "SELECT id FROM videos")
 	if err != nil {
 		return
 	}
-	for _, entry := range entries {
-		// Names are <entry>--<size>-<modified>.jpg and <entry>--undecodable-<modified>.
-		if key, _, _ := strings.Cut(entry.Name(), "--"); !referenced[key] {
-			_ = os.Remove(filepath.Join(s.cacheDir, "artwork", entry.Name()))
+	// Names are <entry>--<size>-<modified>.jpg and <entry>--undecodable-<modified>
+	// in artwork, <video>.jpg in frames and <video>-<track>-<modified>.vtt in
+	// subtitles; cache names of IDs have no "-".
+	keys := map[string]func(name string) bool{
+		"artwork":   func(name string) bool { key, _, _ := strings.Cut(name, "--"); return images[key] },
+		"frames":    func(name string) bool { return videos[strings.TrimSuffix(name, ".jpg")] },
+		"subtitles": func(name string) bool { key, _, _ := strings.Cut(name, "-"); return videos[key] },
+	}
+	for folder, entries := range folders {
+		for _, entry := range entries {
+			if keys[folder](entry.Name()) || writing(entry) {
+				continue
+			}
+			_ = os.Remove(filepath.Join(s.cacheDir, folder, entry.Name()))
 		}
 	}
+}
+
+// cacheKeys reads the IDs a query lists as cache names. A read cut short is
+// an error: what was not read could still be in use.
+func (s *Service) cacheKeys(ctx context.Context, query string) (map[string]bool, error) {
+	rows, err := s.store.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil && id != "" {
+			keys[cacheName(id)] = true
+		}
+	}
+	return keys, errors.Join(rows.Err(), rows.Close())
+}
+
+// writing tells a temporary file of writeAtomically that may still be in
+// use: one older than an hour was left by a crash.
+func writing(entry os.DirEntry) bool {
+	if !strings.HasPrefix(entry.Name(), ".") {
+		return false
+	}
+	info, err := entry.Info()
+	return err == nil && time.Since(info.ModTime()) < time.Hour
 }

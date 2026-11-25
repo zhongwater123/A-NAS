@@ -156,15 +156,12 @@
   display: grid;
   place-items: center;
   border-radius: 11px;
-  background: var(--bk-gradient);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.4),
-    0 6px 14px rgba(15, 142, 163, 0.28);
 }
-.bk-brand-mark svg {
-  width: 23px;
-  height: 23px;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
+.bk-brand-mark > svg,
+.bk-ring-mark > svg {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
 }
 .bk-brand strong {
   display: block;
@@ -306,10 +303,6 @@
   width: 26px;
   height: 26px;
   border-radius: var(--radius-sm);
-}
-.bk-brand-mark.small svg {
-  width: 16px;
-  height: 16px;
 }
 .bk-app.narrow .bk-sidebar {
   position: absolute;
@@ -466,15 +459,6 @@
   display: grid;
   place-items: center;
   border-radius: 22px;
-  background: var(--bk-gradient);
-  box-shadow:
-    0 10px 24px rgba(15, 142, 163, 0.32),
-    inset 0 1px 1px rgba(255, 255, 255, 0.4);
-}
-.bk-ring-mark svg {
-  width: 42px;
-  height: 42px;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
 }
 .bk-hero-copy {
   min-width: 0;
@@ -2308,10 +2292,6 @@
   .bk-ring-mark {
     inset: 24px;
     border-radius: 17px;
-  }
-  .bk-ring-mark svg {
-    width: 32px;
-    height: 32px;
   }
   .bk-coverage,
   .bk-external-hero {

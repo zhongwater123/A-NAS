@@ -6,8 +6,11 @@ import type { FileEntry, Space } from "../api.generated";
 import { backupHandlers, restores } from "../test/handlers/backup";
 import { filesHandlers } from "../test/handlers/files";
 import { server } from "../test/server";
+import { fixToday } from "../test/today";
 import type { SnapshotMatch } from "./api";
 import { VersionsDialog } from "./VersionsDialog";
+
+fixToday();
 
 const personal: Space = {
   id: "space:personal",

@@ -1,6 +1,6 @@
 # 架构决策记录
 
-ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权衡的决定。普通依赖升级、易撤销配置和实现细节不创建 ADR；用户作出的可以改回来的产品决定（默认值、阈值、范围、优先级）写[决定记录](../decisions/README.md)。同一个决定只写在一处，分界见[决定记录](../decisions/README.md#与-adr-的分界)。`proposed` 的 ADR 等用户接受，列在[当前状态](../status/CURRENT.md#待用户决定)的“待用户决定”中。
+ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权衡的决定。普通依赖升级、易撤销配置和实现细节不创建 ADR；用户作出的可以改回来的产品决定（默认值、阈值、范围、优先级）写[决定记录](../decisions/README.md)。同一个决定只写在一处，分界见[决定记录](../decisions/README.md#与-adr-的分界)。`proposed` 的 ADR 等用户接受，在下面的索引中标 `（proposed）`；[当前状态](../status/CURRENT.md#待用户决定)只链接本索引，不逐条列出。
 
 ## 索引
 
@@ -36,7 +36,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - 0027：语音处理在云端转写与整理，声纹只在本机计算和保存（draft，[PR #203](https://github.com/zhongwater123/A-NAS/pull/203)）
 
 - [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（accepted；修订 0011 的数据位置：派生的向量索引放在系统盘）
-- [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed）
+- [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed；决定 6：家庭服务另外持有家庭待办）
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
 - [0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（proposed）
@@ -44,6 +44,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
 - [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
 - [0037：可移除模块以独立服务接入，A-NAS 只提供登录、转发与存储](0037-plug-removable-modules-in-as-separate-services.md)（proposed）
+- [0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问](0038-keep-montage-media-in-the-photo-library.md)（修订 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10）
+- [0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本](0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（修订剪辑中心规格的非目标）
 
 ## 格式
 

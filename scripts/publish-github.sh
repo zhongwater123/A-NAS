@@ -33,13 +33,15 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/signing.sh
 . "$repo_root/scripts/lib/signing.sh"
 # The packages the A-NAS releases version, which KEEP prunes.
-product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-archive-keyring)$'
+product='^(a-nas|a-nas-host|a-nas-console|a-nas-assistant-trial|a-nas-archive-keyring|a-nas-hotspot-radio)$'
 
 flat() {
   local out=$1 repo dist=$3 gnupg=$4 keep=${5:-} index key entries list count oldest other package version file sha
+  local arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+  case "$arch" in amd64 | arm64) ;; *) echo "unsupported repository architecture: $arch" >&2; return 2 ;; esac
   repo=$(cd "$2" && pwd)
   gnupg=$(cd "$gnupg" && pwd)
-  index=$repo/dists/$dist/main/binary-amd64/Packages
+  index=$repo/dists/$dist/main/binary-$arch/Packages
   [[ -f "$index" ]] || { echo "no distribution $dist in $repo" >&2; return 2; }
   [[ ! -e "$out" ]] || { echo "$out exists: name a new directory" >&2; return 2; }
   mkdir -p "$out"
@@ -84,11 +86,11 @@ flat() {
     cd /flat
     apt-ftparchive packages . >Packages
     apt-ftparchive -o APT::FTPArchive::Release::Origin=A-NAS -o APT::FTPArchive::Release::Label=A-NAS \
-      -o APT::FTPArchive::Release::Suite="$1" -o APT::FTPArchive::Release::Architectures=amd64 release . >Release.new
+      -o APT::FTPArchive::Release::Suite="$1" -o APT::FTPArchive::Release::Architectures="$3" release . >Release.new
     mv Release.new Release
     sign=(gpg --batch --quiet --pinentry-mode loopback --local-user "$2!")
     [[ ! -f /secret/passphrase ]] || sign+=(--passphrase-file /secret/passphrase)
-    "${sign[@]}" --clearsign --output InRelease Release' bash "$dist" "$key"
+    "${sign[@]}" --clearsign --output InRelease Release' bash "$dist" "$key" "$arch"
   echo "$dist: $(grep -c '^Package: ' "$out/Packages") package versions in $out"
 }
 
@@ -133,11 +135,18 @@ case "${1:-}" in
     dist=$2
     [[ "$dist" == release || "$dist" == dev ]] || { echo "DIST is release or dev, not $dist" >&2; exit 2; }
     github=${GITHUB_REPO:-zhongwater123/A-NAS-dist}
-    tag=${TAG:-apt-$dist}
+    arch=${ANAS_TARGET_ARCH:-$(dpkg --print-architecture)}
+    default_tag=apt-$dist
+    [[ "$arch" == amd64 ]] || default_tag+=-$arch
+    tag=${TAG:-$default_tag}
+    if [[ "$arch" != amd64 && ( "$tag" == apt-dev || "$tag" == apt-release ) ]]; then
+      echo "$tag is reserved for the amd64 repository" >&2
+      exit 2
+    fi
     keep=
     [[ "$dist" == release ]] || keep=20
     if [[ -n "${ANAS_RELEASE_TEST_KEY:-}" ]]; then
-      [[ "$tag" != apt-release && "$tag" != apt-dev ]] ||
+      [[ ! "$tag" =~ ^apt-(release|dev)(-arm64)?$ ]] ||
         { echo "a test key does not publish $tag: devices trust the archive key there" >&2; exit 2; }
       gnupg=$HOME/.local/share/a-nas/release-test-key
     else

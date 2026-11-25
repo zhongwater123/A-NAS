@@ -42,6 +42,9 @@ const (
 	NotificationAdminLibraryViewing NotificationKind = "admin_library_viewing"
 	//nolint:gosec // G101: the name of a notification kind, not a credential.
 	NotificationCredentialReset NotificationKind = "credential_reset"
+	// NotificationAccountDeleted tells the administrator that an account
+	// they deleted is gone, and where what it handed over now is.
+	NotificationAccountDeleted NotificationKind = "account_deleted"
 )
 
 type Notification struct {
@@ -51,14 +54,20 @@ type Notification struct {
 	Reason        string           `json:"reason,omitempty"`
 	ExpiresAt     *time.Time       `json:"expiresAt,omitempty"`
 	// Task is the run an assistant_task notification tells of.
-	Task      *AssistantTaskRun `json:"task,omitempty"`
-	CreatedAt time.Time         `json:"createdAt"`
+	Task *AssistantTaskRun `json:"task,omitempty"`
+	// Folder and Album name, in the administrator's personal space and
+	// private library, what a deleted account handed over.
+	Folder    string    `json:"folder,omitempty"`
+	Album     string    `json:"album,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type notificationDetail struct {
 	Reason    string            `json:"reason,omitempty"`
 	ExpiresAt *time.Time        `json:"expiresAt,omitempty"`
 	Task      *AssistantTaskRun `json:"task,omitempty"`
+	Folder    string            `json:"folder,omitempty"`
+	Album     string            `json:"album,omitempty"`
 }
 
 // StartViewing opens another account's private space read-only to an
@@ -195,22 +204,27 @@ func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, p
 	if reason == "" || len([]rune(reason)) > 500 {
 		return "", "", ErrReasonRequired
 	}
-	var encodedHash string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", actor.ID).Scan(&encodedHash); err != nil || encodedHash == "" {
-		return "", "", ErrInvalidCredentials
-	}
-	if matches, err := s.passwords.matches(ctx, password, encodedHash); err != nil || !matches {
-		return "", "", ErrInvalidCredentials
+	if err := s.confirmPassword(ctx, actor, password); err != nil {
+		return "", "", err
 	}
 	if ownerUserID == actor.ID {
 		return "", "", ErrForbidden
 	}
 	var spaceID string
-	err := s.store.db.QueryRowContext(ctx, "SELECT id FROM spaces WHERE kind = 'private' AND owner_user_id = ?", ownerUserID).Scan(&spaceID)
+	var removing bool
+	err := s.store.db.QueryRowContext(ctx, `SELECT id, EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id = ? AND d.started_at IS NOT NULL)
+FROM spaces WHERE kind = 'private' AND owner_user_id = ?`, ownerUserID, ownerUserID).Scan(&spaceID, &removing)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", ErrUserNotFound
 	}
-	return reason, spaceID, err
+	if err != nil {
+		return "", "", err
+	}
+	// Its space and library are being handed over or deleted.
+	if removing {
+		return "", "", ErrDeletionStarted
+	}
+	return reason, spaceID, nil
 }
 
 // LibraryViewings lists the actor's unexpired, unended grants to view
@@ -345,6 +359,8 @@ WHERE user_id = ? AND acknowledged_at IS NULL ORDER BY created_at, id`, actor.ID
 			notification.Reason = decoded.Reason
 			notification.ExpiresAt = decoded.ExpiresAt
 			notification.Task = decoded.Task
+			notification.Folder = decoded.Folder
+			notification.Album = decoded.Album
 		}
 		notifications = append(notifications, notification)
 	}
@@ -404,6 +420,10 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 		UserID: actor.ID, PrivateSpaceID: privateSpaceID, Username: actor.Username, Password: newPassword,
 		Role: actor.Role, UID: uid, Enabled: true,
 	}
+	// A synchronization that read "must choose a password" finishes first
+	// (identityMu): it would switch off the SMB credential set here.
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	if err := s.credentials.SetCredential(ctx, request); err != nil {
 		return fmt.Errorf("%w: %v", ErrCredentialProvision, err)
 	}

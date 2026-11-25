@@ -25,11 +25,14 @@
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [互联网访问](internet-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [宿主机网络与手机直连热点](host-network-and-phone-hotspot.md)（draft）
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented）
+- [系统更新](system-update.md)（软件包设备 implemented；镜像设备 draft）
 - [设备温度与风扇](device-temperatures.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented）
+- [重新启用与删除账号](account-enable-and-delete.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
 - [音乐](music.md)（implemented）
@@ -43,6 +46,8 @@
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [照片打分](photo-scoring.md)（draft；可移除模块，实验 NAS 待安装）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
+- [家庭待办](family-todos.md)（draft）
+- [剪辑中心](montage-center.md)（首版 implemented；二次编辑见 ADR 0039）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 

@@ -9,26 +9,29 @@ import os
 import shutil
 import socket
 import struct
+import subprocess
 import tempfile
 import threading
 import time
 import unittest
 import weakref
+from unittest.mock import patch
 
 from anas_ai import protocol, providers, worker
 
 
-def call(path, request, image=None, timeout=5):
+def call(path, request, image=None, images=None, *, timeout=5):
     """Sends one request the way internal/aiworker does and returns the response."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(timeout)
         conn.connect(path)
         payload = json.dumps(request).encode()
         frame = struct.pack(">I", len(payload)) + payload
-        if image is None:
-            conn.sendall(frame)
+        files = [image] if image is not None else images or []
+        if files:
+            socket.send_fds(conn, [frame], [file.fileno() for file in files])
         else:
-            socket.send_fds(conn, [frame], [image.fileno()])
+            conn.sendall(frame)
         header = b""
         while len(header) < 4:
             part = conn.recv(4 - len(header))
@@ -59,7 +62,7 @@ class Failing:
 
 class WorkerTest(unittest.TestCase):
     def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None, started=0,
-              reader=None):
+              reader=None, scorer=None):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
@@ -67,7 +70,7 @@ class WorkerTest(unittest.TestCase):
         self.addCleanup(listener.close)
         thread = threading.Thread(target=worker.serve,
                                   args=(listener, provider, reason, idle_seconds, detector, faces, animals, started,
-                                        reader),
+                                        reader, scorer),
                                   daemon=True)
         thread.start()
         return path, thread
@@ -326,6 +329,133 @@ class WorkerTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)
         self.assertEqual(fake.cancelled, 1)
 
+    def test_scores_photos_with_the_fake(self):
+        fake = providers.FakeScorer()
+        fake.memory = 2 << 30
+        path, _ = self.start(providers.FakeProvider(dimensions=8), scorer=worker.Detector(fake), started=300 << 20)
+        info = call(path, {"op": "info"})
+        # Scoring is a phase of its own: its memory is not added to the other models'.
+        self.assertEqual((info["aestheticModel"], info["aestheticMemoryBytes"], info["memoryBytes"]),
+                         (fake.model, (300 << 20) + (2 << 30), 300 << 20))
+        seen = set()
+        for content in (b"photo %d" % i for i in range(10)):
+            scored = call(path, {"op": "score_aesthetic"}, self.image(content))
+            self.assertTrue(scored["ok"], scored)
+            self.assertEqual(scored["model"], fake.model)
+            self.assertEqual(scored, call(path, {"op": "score_aesthetic"}, self.image(content)))
+            self.assertEqual(set(scored["scores"]), {"aesthetic", "technical"})
+            self.assertTrue(all(1 <= value <= 5 for value in scored["scores"].values()))
+            seen.add(scored["scores"]["aesthetic"])
+        self.assertGreater(len(seen), 1)
+        self.assertEqual(call(path, {"op": "score_aesthetic"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "score_aesthetic"}, self.image(b""))["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+
+    def test_scoring_is_unavailable_without_a_scorer(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), scorer=worker.Detector(reason="no scorer bundle"))
+        self.assertNotIn("aestheticModel", call(path, {"op": "info"}))
+        response = call(path, {"op": "score_aesthetic"}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "no scorer bundle"})
+        self.assertTrue(call(path, {"op": "embed_image"}, self.image(b"photo"))["ok"])
+
+    def test_hanging_up_stops_the_scoring(self):
+        fake = providers.FakeScorer(delay=30)
+        path, _ = self.start(providers.FakeProvider(), scorer=worker.Detector(fake))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps({"op": "score_aesthetic"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
+
+    def card(self, count=3, content=b"frame"):
+        """A describe_frames request for count key frames, a beat each, and the frames."""
+        request = {"op": "describe_frames", "offsets": [2.0 * k for k in range(count)],
+                   "groups": list(range(1, count + 1)), "duration": 2.0 * count}
+        return request, [self.image(content + str(k).encode()) for k in range(count)]
+
+    def test_describes_a_card_from_its_key_frames(self):
+        fake = providers.FakeReader()
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(fake))
+        request, frames = self.card(4)
+        response = call(path, request, images=frames)
+        self.assertTrue(response["ok"], response)
+        self.assertEqual((response["model"], response["template"]), (fake.model, "montage-card/v1"))
+        description = response["description"]
+        self.assertEqual([beat["frames"] for beat in description["beats"]], [[1, 1], [2, 2], [3, 3], [4, 4]])
+        self.assertEqual(set(description), {"camera", "beats", "process", "summary", "scene"})
+        request, frames = self.card(4)
+        self.assertEqual(call(path, request, images=frames)["description"], description)
+        # Frames grouped two to a beat make two beats.
+        request["groups"] = [1, 1, 2, 2]
+        response = call(path, request, images=self.card(4)[1])
+        self.assertEqual([beat["frames"] for beat in response["description"]["beats"]], [[1, 2], [3, 4]])
+        self.assertTrue(fake.loaded)
+
+    def test_a_card_out_of_bounds_is_an_invalid_request(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(providers.FakeReader()))
+        # More than 20 key frames: the kernel drops the rest, and the request is refused whole.
+        request, frames = self.card(21)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        request, frames = self.card(2)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        request, frames = self.card(20)
+        self.assertTrue(call(path, request, images=frames)["ok"])
+        request, frames = self.card(3)
+        for change in ({"offsets": [0, 2]}, {"offsets": [0, 4, 2]}, {"offsets": [-1, 2, 4]}, {"offsets": [0, "2", 4]},
+                       {"groups": [1, 1]}, {"groups": [2, 2, 3]}, {"groups": [1, 3, 3]}, {"groups": [1, 2, 1]},
+                       {"groups": [1, True, 2]}, {"duration": 3}, {"duration": None}, {"duration": float("nan")},
+                       {"offsets": None}, {"offsets": 5}, {"offsets": True}, {"duration": 10**400}):
+            bad = {**request, **change}
+            self.assertEqual(call(path, bad, images=frames)["error"]["code"], protocol.CODE_INVALID_REQUEST, change)
+        self.assertEqual(call(path, request)["error"]["code"], protocol.CODE_INVALID_REQUEST)
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        request, frames = self.card(3, b"")
+        frames[1] = self.image(b"")
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_INPUT)
+        # One descriptor more than an operation takes is refused as it was.
+        self.assertEqual(call(path, {"op": "embed_image"}, images=[self.image(b"a"), self.image(b"b")])["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+
+    def test_an_answer_that_never_fits_the_schema_is_an_invalid_result(self):
+        fake = providers.FakeReader(answers=["{", '{"camera": "海上"}', "```json\n[]\n```"])
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(fake))
+        request, frames = self.card()
+        response = call(path, request, images=frames)
+        self.assertEqual(response["error"]["code"], protocol.CODE_INVALID_RESULT)
+        self.assertEqual(response["error"]["message"].count(";"), 2)
+
+    def test_a_card_past_the_context_is_invalid_input(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(providers.FakeReader()))
+        request, frames = self.card(3, providers.FAKE_REFUSE)
+        self.assertEqual(call(path, request, images=frames)["error"]["code"], protocol.CODE_INVALID_INPUT)
+
+    def test_describing_is_unavailable_without_a_reader(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(reason="no OCR model"))
+        request, frames = self.card()
+        self.assertEqual(call(path, request, images=frames)["error"],
+                         {"code": protocol.CODE_UNAVAILABLE, "message": "no OCR model"})
+
+    def test_hanging_up_stops_the_description(self):
+        fake = providers.FakeReader(delay=30)
+        path, _ = self.start(providers.FakeProvider(), reader=worker.Detector(fake))
+        request, frames = self.card()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps(request).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [frame.fileno() for frame in frames])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
+
     def test_leaves_cores_for_the_user(self):
         self.assertEqual(providers.inference_threads(), max(1, len(os.sched_getaffinity(0)) - providers.RESERVED_CORES))
 
@@ -398,6 +528,112 @@ class ManifestTest(unittest.TestCase):
                        "sha256": hashlib.sha256(b"weights").hexdigest()}, file)
         with self.assertRaises(providers.Unavailable):
             providers.MediaPipeProvider(model, manifest)
+
+
+# The fields of a scorer bundle's MANIFEST.json that the Worker reads.
+SCORER_RELEASE = {"name": "test-scorer", "version": "1.0.0", "dimensions": ["aesthetic", "technical"],
+                  "tower_sha256": "a" * 64, "head_sha256": "b" * 64,
+                  "tower": {"taps": [5], "min_pixels": 65536, "max_pixels": 1048576, "precision": "bf16"}}
+
+
+class ScorerBundleTest(unittest.TestCase):
+    """What the aesthetic scorer checks when the Worker starts, before it loads anything."""
+
+    def bundle(self, release=None, kind="qv-head", pin=None):
+        """A bundle directory holding only its MANIFEST.json, and the deploy manifest that pins it."""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        content = json.dumps(release or SCORER_RELEASE).encode()
+        with open(os.path.join(directory, "MANIFEST.json"), "wb") as file:
+            file.write(content)
+        manifest = os.path.join(directory, "deploy.json")
+        pinned = pin or {"sizeBytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+        with open(manifest, "w", encoding="utf-8") as file:
+            json.dump({"name": "test-scorer", "kind": kind, "memoryBytes": 2 << 30, "bundleManifest": pinned}, file)
+        return directory, manifest
+
+    def test_only_the_pinned_bundle_and_kind_pass_the_check(self):
+        for bundle, manifest in (self.bundle(kind="onnx"), self.bundle(pin={"sizeBytes": 2, "sha256": "0" * 64}),
+                                 self.bundle(release={**SCORER_RELEASE, "dimensions": ["aesthetic"]})):
+            with self.assertRaises(providers.Unavailable):
+                providers.AestheticScorer(bundle, manifest, threads=1)
+
+    @unittest.skipIf(importlib.util.find_spec("torch"), "PyTorch is installed")
+    def test_a_runtime_without_pytorch_is_unavailable(self):
+        with self.assertRaisesRegex(providers.Unavailable, "no torch"):
+            providers.AestheticScorer(*self.bundle(), threads=1)
+
+    def valid_release(self):
+        metrics = {"srcc": 1, "plcc": 1, "mae_1_5": 0}
+        return {**SCORER_RELEASE, "schema_version": "1.0", "created_at": "2026-01-01T00:00:00Z",
+                   "base_model": {"model_id": "model", "license": "test", "revision": "0" * 40},
+                   "score_min": 1, "score_max": 5, "train_run_id": "train", "best_epoch": 1,
+                   "eval": {"dataset": "eva", "run_id": "eval", "n_items": 1, "ids_fingerprint": "a" * 64,
+                            "metrics": dict.fromkeys(SCORER_RELEASE["dimensions"], metrics),
+                            "device": "cpu", "latency_p50_ms": 1},
+                   "git_commit": "1" * 40, "git_dirty": False,
+                   "files": [{"path": path, "sha256": "a" * 64, "size_bytes": 1} for path in
+                             ("model/head.pt", "model/tower/config.json", "model/tower/model.safetensors",
+                              "model/tower/preprocessor_config.json")]}
+
+    @unittest.skipUnless(importlib.util.find_spec("pydantic"), "requires the scorer schema dependency")
+    @patch("importlib.metadata.version", return_value="test")
+    def test_model_id_includes_preprocessing_and_bad_schema_is_unavailable(self, _version):
+        release = self.valid_release()
+        first = providers.AestheticScorer(*self.bundle(release), threads=1)
+        release["files"][-1]["sha256"] = "b" * 64
+        second = providers.AestheticScorer(*self.bundle(release), threads=1)
+        self.assertNotEqual(first.model, second.model)
+        self.assertIsNone(first._process)
+        del release["tower"]
+        with self.assertRaises(providers.Unavailable):
+            providers.AestheticScorer(*self.bundle(release), threads=1)
+
+
+    @unittest.skipUnless(importlib.util.find_spec("pydantic"), "requires the scorer schema dependency")
+    @patch("importlib.metadata.version", return_value="test")
+    def test_cancel_during_cold_load_reaps_child_and_allows_retry(self, _version):
+        scorer = providers.AestheticScorer(*self.bundle(self.valid_release()), threads=1)
+        self.addCleanup(scorer.release)
+        run = scorer.run_options()
+
+        def cancel_when_loading():
+            deadline = time.monotonic() + 5
+            while not (scorer._bundle / "first-load").exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            run.terminate = True
+
+        # Stand in for native loading without requiring torch or 680 MB of weights.
+        child = """
+import sys, time
+from pathlib import Path
+from multiprocessing.connection import Connection
+with Connection(int(sys.argv[1])) as channel:
+    channel.recv_bytes()
+    marker = Path(sys.argv[2]) / "first-load"
+    if not marker.exists():
+        marker.touch()
+        time.sleep(30)
+    channel.send_bytes(b'["ready",null]')
+    channel.recv_bytes()
+    channel.send_bytes(b'["scores",{"aesthetic":2.5,"technical":3.5}]')
+"""
+        popen = subprocess.Popen
+
+        def start_child(args, **kwargs):
+            return popen([args[0], "-c", child, *args[3:]], **kwargs)
+
+        with patch("anas_ai.providers.subprocess.Popen", side_effect=start_child):
+            cancellation = threading.Thread(target=cancel_when_loading)
+            cancellation.start()
+            try:
+                with self.assertRaises(providers.Cancelled):
+                    scorer.score(b"photo", run)
+            finally:
+                cancellation.join()
+            self.assertTrue((scorer._bundle / "first-load").exists())
+            self.assertIsNone(scorer._process)
+            self.assertEqual(scorer.score(b"photo", scorer.run_options()), {"aesthetic": 2.5, "technical": 3.5})
 
 
 if __name__ == "__main__":

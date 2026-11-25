@@ -432,6 +432,183 @@ CREATE TABLE text_handles (
     UNIQUE (account, asset_id, key)
 );
 `},
+	// 17: project grants of the montage center (ADR 0038 decision 3). A
+	// member registers a project's videos while present; the montage center
+	// then reaches them under the grant, and the Policy decides again on
+	// every use. A grant is one per (owner, project); an asset leaves it when
+	// it is purged. A revoked grant lets go of its assets and keeps only its
+	// row, marked, until the owner's account is removed.
+	{Up: `
+CREATE TABLE montage_grants (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    UNIQUE (owner_user_id, project_id)
+);
+
+CREATE TABLE montage_grant_assets (
+    grant_id TEXT NOT NULL REFERENCES montage_grants(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (grant_id, asset_id)
+);
+CREATE INDEX montage_grant_assets_by_asset ON montage_grant_assets(asset_id);
+`, Down: `
+DROP TABLE montage_grant_assets;
+DROP TABLE montage_grants;
+`},
+	// 18: the montage center's analysis of the videos its grants asked for
+	// (ADR 0038 decision 4), starting with the window vectors
+	// (montage-windows/v1). Results follow the content object; the vectors
+	// stay here, the record, and reach the vector index through their own
+	// outbox, as the image vectors do (ADR 0028 decision 1).
+	// montage_objects says, per object, which analysis a grant asked for
+	// and since when no grant has referred to it.
+	{Up: `
+CREATE TABLE montage_objects (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    requested_at TEXT NOT NULL,
+    unreferenced_since TEXT
+);
+
+CREATE TABLE video_windows (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    flat INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    identity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, idx)
+);
+CREATE INDEX video_windows_by_created ON video_windows(created_at);
+
+CREATE TABLE window_outbox (
+    object_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TRIGGER video_windows_outbox_insert AFTER INSERT ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_update AFTER UPDATE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_delete AFTER DELETE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_insert AFTER INSERT ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_delete AFTER DELETE ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = OLD.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_update AFTER UPDATE OF trashed_at, library_id ON assets
+WHEN (OLD.trashed_at IS NOT NEW.trashed_at OR OLD.library_id IS NOT NEW.library_id)
+  AND EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+`, Down: `
+DROP TRIGGER assets_window_outbox_update;
+DROP TRIGGER assets_window_outbox_delete;
+DROP TRIGGER assets_window_outbox_insert;
+DROP TRIGGER video_windows_outbox_delete;
+DROP TRIGGER video_windows_outbox_update;
+DROP TRIGGER video_windows_outbox_insert;
+DROP TABLE window_outbox;
+DROP TABLE video_windows;
+DROP TABLE montage_objects;
+DELETE FROM jobs WHERE derivation LIKE 'montage-%';
+DELETE FROM vector_index_state WHERE name = 'windows';
+`},
+	// 19: the montage analysis's cards and their quality
+	// (montage-cards/v1, montage-quality/v1), cut and measured by the
+	// montage compute Worker from the windows; per content object, like the
+	// windows.
+	{Up: `
+CREATE TABLE montage_card_results (
+    object_id TEXT PRIMARY KEY REFERENCES montage_objects(object_id) ON DELETE CASCADE,
+    cards_identity TEXT NOT NULL,
+    quality_identity TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE video_cards (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    keyframes TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+
+CREATE TABLE video_card_quality (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_quality;
+DROP TABLE video_cards;
+DROP TABLE montage_card_results;
+DELETE FROM jobs WHERE derivation IN ('montage-cards/v1', 'montage-quality/v1');
+`},
+	// 20: the montage center's card descriptions (montage-describe/v1). A
+	// card the reader could not describe keeps its error and no result.
+	// millis is how long the description took, for the NAS's measurements.
+	{Up: `
+CREATE TABLE video_card_descriptions (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL,
+    millis INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_descriptions;
+DELETE FROM jobs WHERE derivation = 'montage-describe/v1';
+`},
+	// 21: the films the montage center saved (ADR 0038): one per
+	// (owner, version key), written with the film's asset, so that a save
+	// cut short and tried again never makes a second film.
+	{Up: `
+CREATE TABLE montage_films (
+    owner_user_id TEXT NOT NULL,
+    version_key TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_user_id, version_key)
+);
+`, Down: `
+DROP TABLE montage_films;
+`},
+	// 22: the release that wrote each card description. A description that
+	// failed under another release is tried again (staleFailure); those
+	// written before this step have none, so the first release with it
+	// tries the failures it found once.
+	{Up: `
+ALTER TABLE video_card_descriptions ADD COLUMN written_release TEXT;
+`, Down: `
+ALTER TABLE video_card_descriptions DROP COLUMN written_release;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had
@@ -729,13 +906,5 @@ func (s *Service) directoryByID(ctx context.Context, q queryer, directoryID stri
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, fn)
 }

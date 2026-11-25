@@ -47,6 +47,11 @@ func TestIconTheDecoderPanicsOnIsDropped(t *testing.T) {
 	}
 	imagetest.RequirePanicLogged(t, panics(), "task icon")
 }
+func TestIconWithAPixelOutsideThePaletteIsDropped(t *testing.T) {
+	if id, source := Normalize(imagetest.OutsidePalettePicture()); id != "" || source != "" {
+		t.Fatalf("Normalize() = %q, %q, want no icon", id, source)
+	}
+}
 func TestStaticSVGAndUnsafeArtwork(t *testing.T) {
 	safe := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><defs><linearGradient id="a"><stop offset="0" stop-color="#123"/></linearGradient></defs><path fill="url(#a)" d="M0 0h24v24z"/></svg>`
 	id, source := Normalize([]byte(safe))

@@ -1,0 +1,25 @@
+[Unit]
+Description=Starts the A-NAS assistants' scheduled tasks when they are due
+# Each due Hermes job runs in its member's sandbox through anas-assistant-cron@.service,
+# Hermes's gateway for one round (cron_round.py); `hermes serve` runs no scheduler
+# (cron-waker.py). Without the administrator's model key the assistant is off, and so is this
+# (the Host Agent starts and stops it with the key).
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/lib/a-nas/assistant/cron-waker.py
+Restart=always
+RestartSec=10s
+# It only reads the members' job stores and starts units; its notes on the rounds it started
+# (which it holds back when a round moved no due job) are in its runtime directory.
+RuntimeDirectory=anas-assistant-cron-waker
+RuntimeDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadOnlyPaths=/srv/a-nas/data/assistant
+
+[Install]
+WantedBy=multi-user.target

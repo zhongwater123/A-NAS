@@ -11,7 +11,6 @@
   --ws-accent-soft: var(--color-accent-soft);
   /* A title the user has opened before, as browsers mark visited links. */
   --ws-visited: #6a4bc4;
-  --ws-tile: linear-gradient(155deg, #3d6bff, #1b2a8c);
   --ws-placeholder: linear-gradient(135deg, #e7ebf2, #d9dfe9);
   --ws-shimmer: linear-gradient(90deg, #e2e7ee 25%, #edf0f5 50%, #e2e7ee 75%);
   --ws-column: 680px;
@@ -41,20 +40,6 @@
 .ws-home .ws-tabs {
   justify-content: center;
 }
-.ws-home-mark,
-.ws-off-mark {
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  color: #fff;
-  background: var(--ws-tile);
-  box-shadow:
-    0 12px 28px rgba(27, 42, 140, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
 .ws-bar {
   display: flex;
   flex-direction: column;

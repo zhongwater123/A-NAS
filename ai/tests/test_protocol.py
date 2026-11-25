@@ -121,7 +121,7 @@ class ProtocolTest(unittest.TestCase):
         conn, _ = self.connection(struct.pack(">I", len(payload)) + payload + b"!")
         self.assertEqual(protocol.read_request(conn), ({"op": "info"}, []))
 
-    def test_receives_at_most_one_image_descriptor(self):
+    def test_rejects_excess_descriptors_and_closes_the_received_descriptor(self):
         sender, receiver = socket.socketpair()
         self.enterContext(sender)
         self.enterContext(receiver)
@@ -133,10 +133,11 @@ class ProtocolTest(unittest.TestCase):
         self.addCleanup(self.close_received, conn)
         payload = b'{"op":"embed_image"}'
         socket.send_fds(sender, [struct.pack(">I", len(payload)) + payload], [first.fileno(), second.fileno()])
-        request, fds = protocol.read_request(conn)
-        self.assertEqual(request, {"op": "embed_image"})
-        self.assertEqual(len(fds), 1)
-        os.fstat(fds[0])
+        with self.assertRaises(protocol.TooManyDescriptors):
+            protocol.read_request(conn)
+        self.assert_closed(conn)
+        os.fstat(first.fileno())
+        os.fstat(second.fileno())
 
     def test_closes_descriptor_on_truncated_header_body_and_invalid_json(self):
         for frame, error in (

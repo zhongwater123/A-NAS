@@ -1,11 +1,22 @@
-import { FolderLock, Images, KeyRound, type LucideIcon, UserPlus, UserX } from "lucide-react";
+import { FolderLock, Images, KeyRound, type LucideIcon, Trash2, Undo2, UserCheck, UserPlus, UserX } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
-import type { User } from "../api.generated";
+import type { DeletionChoice, User } from "../api.generated";
 import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "../auth/accountRules";
+import { calendarDate } from "../lib/time";
 import { displayName, fullName } from "../people/people";
 import { PasswordInput } from "./AccountSection";
-import { createMember, disableMember, listUsers, resetMember, startViewing, type ViewingScope } from "./api";
+import {
+  cancelDeletion,
+  createMember,
+  disableMember,
+  enableMember,
+  listUsers,
+  resetMember,
+  scheduleDeletion,
+  startViewing,
+  type ViewingScope,
+} from "./api";
 import { roleLabel, statusLabel } from "./labels";
 import {
   Avatar,
@@ -13,11 +24,13 @@ import {
   Field,
   Group,
   IconTile,
+  type MenuItem,
   Modal,
   messageOf,
   PageHeader,
   Pill,
   RowMenu,
+  Segmented,
   useSettingsKit,
 } from "./parts";
 import styles from "./settings.module.css";
@@ -26,7 +39,14 @@ type UserDialog =
   | { kind: "create" }
   | { kind: "reset"; user: User }
   | { kind: "viewing"; user: User; scope: ViewingScope }
-  | { kind: "disable"; user: User };
+  | { kind: "disable"; user: User }
+  | { kind: "enable"; user: User }
+  | { kind: "delete"; user: User }
+  | { kind: "cancelDeletion"; user: User };
+
+// A deleted account waits this long, disabled and unchanged, before its data
+// is removed (docs/specs/account-enable-and-delete.md).
+const deletionDays = 30;
 
 // UsersSection is Settings → 用户与权限, shown to administrators only: the
 // household's accounts and what an administrator may do to each
@@ -101,10 +121,16 @@ export function UsersSection({
                   </span>
                   <small>
                     {roleLabel(user.role)}
-                    {user.status !== "active" && (
-                      <span className={`${styles.acctState} ${styles[`status-${user.status}`] ?? ""}`}>
-                        {statusLabel(user.status)}
+                    {user.deletion ? (
+                      <span className={`${styles.acctState} ${styles["status-deleting"] ?? ""}`}>
+                        {deletionLabel(user.deletion)}
                       </span>
+                    ) : (
+                      user.status !== "active" && (
+                        <span className={`${styles.acctState} ${styles[`status-${user.status}`] ?? ""}`}>
+                          {statusLabel(user.status)}
+                        </span>
+                      )
                     )}
                   </small>
                 </div>
@@ -114,30 +140,7 @@ export function UsersSection({
                       修改我的密码
                     </button>
                   ) : (
-                    <RowMenu
-                      label={`${fullName(user)} 的更多操作`}
-                      items={[
-                        { label: "重置密码…", icon: KeyRound, onSelect: () => setDialog({ kind: "reset", user }) },
-                        {
-                          label: "查看个人空间…",
-                          icon: FolderLock,
-                          onSelect: () => setDialog({ kind: "viewing", user, scope: "space" }),
-                        },
-                        {
-                          label: "查看私有图库…",
-                          icon: Images,
-                          onSelect: () => setDialog({ kind: "viewing", user, scope: "library" }),
-                        },
-                        "separator",
-                        {
-                          label: user.status === "disabled" ? "账号已禁用" : "禁用账号…",
-                          icon: UserX,
-                          danger: true,
-                          disabled: user.status === "disabled",
-                          onSelect: () => setDialog({ kind: "disable", user }),
-                        },
-                      ]}
-                    />
+                    <RowMenu label={`${fullName(user)} 的更多操作`} items={menuOf(user, setDialog)} />
                   )}
                 </div>
               </div>
@@ -156,6 +159,50 @@ export function UsersSection({
   );
 }
 
+// deletionLabel says where a deleted account stands.
+function deletionLabel(deletion: NonNullable<User["deletion"]>): string {
+  if (deletion.retrying) return "删除未完成，将自动重试";
+  if (deletion.started) return "正在删除";
+  return `待删除 · ${calendarDate(deletion.dueAt)}删除`;
+}
+
+// menuOf lists what an administrator may do to another account in its state.
+function menuOf(user: User, open: (dialog: UserDialog) => void): MenuItem[] {
+  const viewing: MenuItem[] = [
+    { label: "查看个人空间…", icon: FolderLock, onSelect: () => open({ kind: "viewing", user, scope: "space" }) },
+    { label: "查看私有图库…", icon: Images, onSelect: () => open({ kind: "viewing", user, scope: "library" }) },
+  ];
+  if (user.deletion?.started) return viewing.map((item) => (item === "separator" ? item : { ...item, disabled: true }));
+  if (user.deletion) {
+    return [
+      ...viewing,
+      "separator",
+      { label: "撤销删除…", icon: Undo2, onSelect: () => open({ kind: "cancelDeletion", user }) },
+    ];
+  }
+  const reset: MenuItem = { label: "重置密码…", icon: KeyRound, onSelect: () => open({ kind: "reset", user }) };
+  if (user.status === "disabled") {
+    return [
+      reset,
+      ...viewing,
+      "separator",
+      { label: "重新启用…", icon: UserCheck, onSelect: () => open({ kind: "enable", user }) },
+      { label: "删除账号…", icon: Trash2, danger: true, onSelect: () => open({ kind: "delete", user }) },
+    ];
+  }
+  return [
+    reset,
+    ...viewing,
+    "separator",
+    { label: "禁用账号…", icon: UserX, danger: true, onSelect: () => open({ kind: "disable", user }) },
+  ];
+}
+
+const deletionChoices = [
+  { value: "transfer", label: "转给我" },
+  { value: "delete", label: "一并删除" },
+] as const;
+
 function UserDialogView({
   dialog,
   onClose,
@@ -167,6 +214,9 @@ function UserDialogView({
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [personalSpace, setPersonalSpace] = useState<DeletionChoice>("transfer");
+  const [library, setLibrary] = useState<DeletionChoice>("transfer");
+  const [dueAt] = useState(() => Date.now() + deletionDays * 86_400_000);
   const run = async (action: () => Promise<string>) => {
     setBusy(true);
     setError("");
@@ -209,6 +259,22 @@ function UserDialogView({
           ? `已开启对 ${fullName(user)} 私有图库的只读查看，可在相册中选择“只读查看 · ${displayName(user)}”。`
           : `已开启对 ${fullName(user)} 个人空间的只读查看，可在文件管理中选择“只读查看 · ${displayName(user)}”。`;
       });
+    } else if (dialog.kind === "enable") {
+      void run(async () => {
+        await enableMember(dialog.user.id);
+        return `已重新启用 ${fullName(dialog.user)}。`;
+      });
+    } else if (dialog.kind === "delete") {
+      void run(async () => {
+        const deleted = await scheduleDeletion(dialog.user.id, value("password"), personalSpace, library);
+        const due = deleted.deletion ? calendarDate(deleted.deletion.dueAt) : `${deletionDays} 天后`;
+        return `${fullName(dialog.user)} 将于${due}删除，在此之前可以撤销。`;
+      });
+    } else if (dialog.kind === "cancelDeletion") {
+      void run(async () => {
+        await cancelDeletion(dialog.user.id);
+        return `已撤销删除 ${fullName(dialog.user)}，账号仍为禁用。`;
+      });
     } else {
       void run(async () => {
         await disableMember(dialog.user.id);
@@ -250,9 +316,36 @@ function UserDialogView({
       label: `禁用 ${fullName(dialog.user)}`,
       icon: UserX,
       tone: "danger",
-      description: `${displayName(dialog.user)} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开；个人空间中的文件不会被删除。账号禁用后暂时无法重新启用。`,
+      description: `${displayName(dialog.user)} 将无法登录网页和 SMB 共享，已建立的 SMB 连接会立即断开，发出的分享会撤销；个人空间中的文件不会被删除。之后可以重新启用。`,
       submit: "禁用账号",
       danger: true,
+    },
+    enable: dialog.kind === "enable" && {
+      title: `重新启用 ${fullName(dialog.user)}？`,
+      label: `重新启用 ${fullName(dialog.user)}`,
+      icon: UserCheck,
+      tone: "accent",
+      description: `${displayName(dialog.user)} 可以用原来的密码登录网页和 SMB 共享，AI 助手随之恢复。禁用时撤销的分享不会恢复。`,
+      submit: "重新启用",
+      danger: false,
+    },
+    delete: dialog.kind === "delete" && {
+      title: `删除 ${fullName(dialog.user)}？`,
+      label: `删除 ${fullName(dialog.user)}`,
+      icon: Trash2,
+      tone: "danger",
+      description: `账号保持禁用 ${deletionDays} 天，${calendarDate(dueAt)}彻底删除，在此之前可以撤销。到期后选了“转给我”的内容转入你的名下，其余数据删除，无法恢复；账号名之后可以重新使用。`,
+      submit: "删除账号",
+      danger: true,
+    },
+    cancelDeletion: dialog.kind === "cancelDeletion" && {
+      title: `撤销删除 ${fullName(dialog.user)}？`,
+      label: `撤销删除 ${fullName(dialog.user)}`,
+      icon: Undo2,
+      tone: "accent",
+      description: "账号不再删除，仍为禁用，数据保持原样。之后可以重新启用。",
+      submit: "撤销删除",
+      danger: false,
     },
   }[dialog.kind] as {
     title: string;
@@ -294,6 +387,35 @@ function UserDialogView({
           <Field label="新密码" hint={passwordRuleText}>
             <PasswordInput name="password" autoComplete="new-password" minLength={12} autoFocus />
           </Field>
+        )}
+        {dialog.kind === "delete" && (
+          <>
+            <Field
+              group
+              label="个人空间"
+              hint={
+                personalSpace === "transfer"
+                  ? `放进你个人空间的“${dialog.user.username} 的文件”文件夹`
+                  : "连同回收站、快照一起删除"
+              }
+            >
+              <Segmented label="个人空间" value={personalSpace} choices={deletionChoices} onChange={setPersonalSpace} />
+            </Field>
+            <Field
+              group
+              label="私有图库"
+              hint={
+                library === "transfer"
+                  ? `放进你私有图库的“${dialog.user.username} 的照片”相册`
+                  : "连同图库回收站一起删除"
+              }
+            >
+              <Segmented label="私有图库" value={library} choices={deletionChoices} onChange={setLibrary} />
+            </Field>
+            <Field label="你的密码" hint="为确认是你本人操作">
+              <PasswordInput name="password" autoComplete="current-password" />
+            </Field>
+          </>
         )}
         {dialog.kind === "viewing" && (
           <>

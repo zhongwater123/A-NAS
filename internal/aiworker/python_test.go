@@ -2,20 +2,26 @@ package aiworker_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/aiworker"
 	"github.com/zhongwater123/A-NAS/internal/aiworker/aiworkertest"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
 // The Go client and the Python Worker in ai/ must agree on framing, vector
-// and box encoding, descriptor passing and release; the fakes need no model.
+// and box encoding, descriptor passing, error codes and release; the fakes
+// need no model.
 func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -40,7 +46,7 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_ai.worker",
-		"--fake", "--fake-detector", "--fake-faces", "--fake-animals", "--idle-seconds", "60")
+		"--fake", "--fake-detector", "--fake-faces", "--fake-animals", "--fake-reader", "--idle-seconds", "60")
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
 	worker.ExtraFiles = []*os.File{inherited}
@@ -150,6 +156,41 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 	model, vectors, err := client.EmbedAnimals(context.Background(), open("photo 1"), [][4]float32{{0.1, 0.2, 0.5, 0.9}, {0.5, 0, 1, 0.5}})
 	if err != nil || model != "fake-animals-sha256" || len(vectors) != 2 || len(vectors[1]) != 64 || !unit(vectors[1]) {
 		t.Fatalf("EmbedAnimals() = %q, %d vectors, %v", model, len(vectors), err)
+	}
+
+	// A card's key frames travel one descriptor each, up to 20 in a message.
+	describe := func(count int, marker string) (string, string, json.RawMessage, error) {
+		t.Helper()
+		frames := make([]*os.File, count)
+		card := photos.CardLayout{Duration: float64(2 * count)}
+		for i := range frames {
+			frames[i] = open(fmt.Sprintf("%skey frame %d", marker, i))
+			card.Offsets, card.Groups = append(card.Offsets, float64(2*i)), append(card.Groups, i+1)
+		}
+		return client.DescribeFrames(context.Background(), frames, card)
+	}
+	for _, count := range []int{3, 20} {
+		model, template, description, err := describe(count, "")
+		var answer struct {
+			Beats []struct {
+				Frames []int `json:"frames"`
+			} `json:"beats"`
+			Summary string `json:"summary"`
+		}
+		if err != nil || model != "fake-reader-sha256" || template != "montage-card/v1" ||
+			json.Unmarshal(description, &answer) != nil || len(answer.Beats) != count ||
+			answer.Beats[count-1].Frames[0] != count || answer.Summary == "" {
+			t.Fatalf("DescribeFrames(%d frames) = %q, %q, %s, %v", count, model, template, description, err)
+		}
+	}
+	if _, _, _, err := describe(21, ""); !errors.Is(err, photos.ErrAIRejected) || !strings.Contains(err.Error(), "descriptors") {
+		t.Fatalf("DescribeFrames(21 frames) error = %v, want the Worker's invalid_request", err)
+	}
+	if _, _, _, err := describe(3, "fake:invalid"); !errors.Is(err, photos.ErrAIInvalidResult) {
+		t.Fatalf("DescribeFrames() of an answer past the schema error = %v, want the Worker's invalid_result", err)
+	}
+	if _, _, _, err := describe(3, "fake:too-long"); !errors.Is(err, photos.ErrAIRejected) {
+		t.Fatalf("DescribeFrames() past the context error = %v, want ErrAIRejected", err)
 	}
 
 	if err := client.Release(context.Background(), false); err != nil {

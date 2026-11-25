@@ -2,15 +2,19 @@
 // re-encodes it as an upright JPEG without the original's metadata. The photo
 // service and the photo scoring module both render pictures they did not
 // create, so both bound the decode the same way (OVERVIEW invariant 18).
+// Every other service whose decoded pixels reach imaging decodes with Decode.
 package imagerender
 
 import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -25,6 +29,8 @@ var (
 	ErrUnsupported = errors.New("unsupported image")
 	// ErrTooLarge reports a picture whose decoded pixels exceed the budget.
 	ErrTooLarge = errors.New("image exceeds the decode budget")
+
+	errOutsidePalette = fmt.Errorf("%w: a pixel lies outside the palette", ErrUnsupported)
 )
 
 const (
@@ -87,11 +93,42 @@ func WithDecoded(ctx context.Context, r io.ReadSeeker, use func(image.Image) err
 	if _, err := r.Seek(start, io.SeekStart); err != nil {
 		return err
 	}
-	src, err := imaging.Decode(r)
+	src, err := Decode(r)
 	if err != nil {
 		return err
 	}
 	return use(src)
+}
+
+// Decode decodes r as imaging.Decode does with opts, and refuses a paletted
+// picture with a pixel outside its palette. Every in-process decode whose
+// pixels reach imaging goes through it (OVERVIEW invariant 18).
+//
+// imaging looks a paletted picture's pixels up in its palette without a bound
+// check (CVE-2023-36308, which no imaging release fixes). It does so in
+// goroutines of its own, where no decode guard can recover the panic, so the
+// process ends. The decoders registered today refuse such a pixel or extend
+// the palette to cover it; this check keeps the crash closed for any decoder.
+// The AutoOrientation option has turned nothing yet when the check runs:
+// imaging reads the orientation from JPEG files only, and they never decode to
+// a paletted picture.
+func Decode(r io.Reader, opts ...imaging.DecodeOption) (image.Image, error) {
+	src, err := imaging.Decode(r, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if outsidePalette(src) {
+		return nil, errOutsidePalette
+	}
+	return src, nil
+}
+
+// outsidePalette reports whether img is a paletted picture with a pixel past
+// the end of its palette.
+func outsidePalette(img image.Image) bool {
+	paletted, ok := img.(*image.Paletted)
+	return ok && len(paletted.Palette) < 256 && len(paletted.Pix) > 0 &&
+		int(slices.Max(paletted.Pix)) >= len(paletted.Palette)
 }
 
 // UprightJPEG scales an image to fit edge, turns it upright and encodes a
@@ -108,6 +145,24 @@ func UprightJPEG(src image.Image, orientation, edge, quality int) ([]byte, int, 
 		return nil, 0, 0, err
 	}
 	return buffer.Bytes(), bounds.Dx(), bounds.Dy(), nil
+}
+
+// FullJPEG encodes an image at its own size as a JPEG of the given quality,
+// in its stored orientation, which callers apply when they show it. Like
+// UprightJPEG it writes none of the original's metadata. An opaque image is
+// encoded as it is, without the copies scaling and turning would make, so
+// that a large photo fits a small memory limit; one with transparency is
+// first flattened on white.
+func FullJPEG(src image.Image, quality int) ([]byte, error) {
+	if opaque, ok := src.(interface{ Opaque() bool }); !ok || !opaque.Opaque() {
+		bounds := src.Bounds()
+		src = imaging.Overlay(imaging.New(bounds.Dx(), bounds.Dy(), color.White), src, image.Point{}, 1)
+	}
+	var buffer bytes.Buffer
+	if err := jpeg.Encode(&buffer, src, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 // Orient applies an EXIF orientation; imaging rotates counter-clockwise.

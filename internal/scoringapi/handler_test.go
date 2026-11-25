@@ -99,7 +99,8 @@ func setup(t *testing.T) api {
 			t.Fatal(err)
 		}
 	}
-	store, err := scoring.Open(t.TempDir(), scoring.Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	// The test photos are small; any size will do.
+	store, err := scoring.Open(t.TempDir(), scoring.Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), MinLongEdge: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,30 +126,42 @@ type batchList struct {
 	} `json:"items"`
 }
 
+// createOpen makes a batch of the test folder and waits for its import.
+func (a api) createOpen(body map[string]any) string {
+	a.t.Helper()
+	created := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches", body)
+	if created.Code != http.StatusCreated {
+		a.t.Fatalf("create: %d %s", created.Code, created.Body)
+	}
+	batch := decode[struct{ ID string }](a.t, created).ID
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		batches := decode[batchList](a.t, a.call("admin-token", http.MethodGet, scoringapi.AdminPrefix+"/batches", nil))
+		for _, item := range batches.Items {
+			if item.ID == batch && item.State == "open" {
+				return batch
+			}
+		}
+		if time.Now().After(deadline) {
+			a.t.Fatalf("import did not finish: %+v", batches)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+type meBody struct {
+	Admin bool `json:"admin"`
+	Rater bool `json:"rater"`
+}
+
 func TestRatersSeeOnlyTheirOwnWorkAndAdministratorsSeeEveryone(t *testing.T) {
 	a := setup(t)
 	if code := a.call("", http.MethodGet, scoringapi.PathPrefix+"/me", nil).Code; code != http.StatusUnauthorized {
 		t.Fatalf("without a session: %d", code)
 	}
-	created := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
-		map[string]any{"name": "第一批", "source": "第一批", "required": 2, "rubric": "看构图"})
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create: %d %s", created.Code, created.Body)
-	}
-	batch := decode[struct{ ID string }](t, created).ID
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		batches := decode[batchList](t, a.call("admin-token", http.MethodGet, scoringapi.AdminPrefix+"/batches", nil))
-		if len(batches.Items) == 1 && batches.Items[0].State == "open" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("import did not finish: %+v", batches)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if me := decode[map[string]bool](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/me", nil)); me["rater"] || me["admin"] {
-		t.Fatalf("alice before being chosen: %v", me)
+	batch := a.createOpen(map[string]any{"name": "第一批", "source": "第一批", "required": 2, "rubric": "看构图", "dimensions": []string{"overall"}})
+	if me := decode[meBody](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/me", nil)); me.Rater || me.Admin {
+		t.Fatalf("alice before being chosen: %+v", me)
 	}
 	if code := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil).Code; code != http.StatusForbidden {
 		t.Fatalf("batches for a member not chosen: %d", code)
@@ -237,5 +250,137 @@ func TestRatersSeeOnlyTheirOwnWorkAndAdministratorsSeeEveryone(t *testing.T) {
 	}
 	if code := a.call("admin-token", http.MethodDelete, scoringapi.AdminPrefix+"/batches/"+batch, nil).Code; code != http.StatusConflict {
 		t.Fatalf("deleting a rated batch: %d", code)
+	}
+}
+
+func TestDimensionsTheFullViewAndTheExportsColumns(t *testing.T) {
+	a := setup(t)
+	batch := a.createOpen(map[string]any{"name": "清晰", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"sharpness", "overall"}})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	batches := decode[struct {
+		Items []struct {
+			Dimensions []struct{ ID string } `json:"dimensions"`
+		} `json:"items"`
+	}](t, a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil))
+	// The order chosen is the order scored; the first is in score.
+	if len(batches.Items) != 1 || len(batches.Items[0].Dimensions) != 2 || batches.Items[0].Dimensions[0].ID != "sharpness" {
+		t.Fatalf("alice's batches: %+v", batches)
+	}
+	claims := decode[struct {
+		Items []struct{ Token string } `json:"items"`
+	}](t, a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil))
+	token := claims.Items[0].Token
+	path := scoringapi.PathPrefix + "/claims/" + token
+	without := map[string]any{"submission": "alice-dim-01", "kind": "score", "score": 3.2, "viewMs": 2000}
+	if code := a.call("alice-token", http.MethodPut, path+"/rating", without).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("an answer without overall: %d", code)
+	}
+	with := map[string]any{"submission": "alice-dim-02", "kind": "score", "score": 3.2, "scores": map[string]float64{"overall": 2.45}, "viewMs": 2000}
+	if rated := a.call("alice-token", http.MethodPut, path+"/rating", with); rated.Code != http.StatusOK {
+		t.Fatalf("an answer with overall: %d %s", rated.Code, rated.Body)
+	}
+	recent := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches/"+batch+"/recent", nil)
+	if !strings.Contains(recent.Body.String(), `"score":3.2,"scores":{"overall":2.45}`) {
+		t.Fatalf("recent: %s", recent.Body)
+	}
+	full := a.call("alice-token", http.MethodGet, path+"/full", nil)
+	if full.Code != http.StatusOK || full.Header().Get("Content-Type") != "image/jpeg" || full.Header().Get("X-Image-Orientation") != "1" {
+		t.Fatalf("full view: %d %v", full.Code, full.Header())
+	}
+	if code := a.call("bob-token", http.MethodGet, path+"/full", nil).Code; code != http.StatusNotFound {
+		t.Fatalf("bob's full view of alice's photo: %d", code)
+	}
+	patch := a.call("admin-token", http.MethodPatch, scoringapi.AdminPrefix+"/batches/"+batch, map[string]any{"dimensions": []string{"overall"}})
+	if patch.Code != http.StatusConflict {
+		t.Fatalf("changing an answered batch's dimensions: %d %s", patch.Code, patch.Body)
+	}
+	export := scoringapi.AdminPrefix + "/batches/" + batch + "/export"
+	if code := a.call("admin-token", http.MethodGet, export+"?fields=composition", nil).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("exporting a dimension the batch does not score: %d", code)
+	}
+	if got := a.call("admin-token", http.MethodGet, export+"?format=jsonl&fields=sharpness,duration&include=skips", nil); got.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", got.Code, got.Body)
+	}
+	summary := a.call("admin-token", http.MethodGet, export+"/summary", nil)
+	if summary.Code != http.StatusOK || decode[map[string]int](t, summary)["scores"] != 1 {
+		t.Fatalf("summary: %d %s", summary.Code, summary.Body)
+	}
+}
+
+func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
+	a := setup(t)
+	dimensions := scoringapi.AdminPrefix + "/dimensions"
+	harmony := map[string]any{"name": "色彩和谐", "description": "颜色是否协调"}
+	if code := a.call("alice-token", http.MethodPost, dimensions, harmony).Code; code != http.StatusForbidden {
+		t.Fatalf("a member making a dimension: %d", code)
+	}
+	made := a.call("admin-token", http.MethodPost, dimensions, harmony)
+	if made.Code != http.StatusCreated || !strings.Contains(made.Body.String(), `"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true`) {
+		t.Fatalf("making a dimension: %d %s", made.Code, made.Body)
+	}
+	for _, again := range []map[string]any{harmony, {"name": "构图"}} {
+		if taken := a.call("admin-token", http.MethodPost, dimensions, again); taken.Code != http.StatusConflict || !strings.Contains(taken.Body.String(), "dimension_exists") {
+			t.Fatalf("a taken name %v: %d %s", again["name"], taken.Code, taken.Body)
+		}
+	}
+	if code := a.call("admin-token", http.MethodPost, dimensions, map[string]any{"name": "一个太长的打分项名称"}).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("a name too long: %d", code)
+	}
+	catalogue := decode[struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Custom bool   `json:"custom"`
+		} `json:"items"`
+	}](t, a.call("admin-token", http.MethodGet, dimensions, nil))
+	if len(catalogue.Items) != 9 || catalogue.Items[0].ID != "overall" || catalogue.Items[8].ID != "custom_1" || !catalogue.Items[8].Custom {
+		t.Fatalf("catalogue: %+v", catalogue)
+	}
+	if code := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
+		map[string]any{"name": "空", "source": "第一批", "required": 1, "rubric": ""}).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("a batch without dimensions: %d", code)
+	}
+	a.createOpen(map[string]any{"name": "和谐", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"custom_1", "composition"}})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	batches := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil)
+	if !strings.Contains(batches.Body.String(), `"dimensions":[{"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true},{"id":"composition","name":"构图","description":"画面安排得好不好，主体清不清楚","custom":false}]`) {
+		t.Fatalf("alice's batches: %s", batches.Body)
+	}
+}
+
+func TestBatchesTellRatersTheirScaleAndTakeOnlyItsScores(t *testing.T) {
+	a := setup(t)
+	batches := scoringapi.AdminPrefix + "/batches"
+	wholeHidden := map[string]any{"name": "整数", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"},
+		"scale": "whole", "hideDecimals": true}
+	if code := a.call("admin-token", http.MethodPost, batches, wholeHidden).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("hiding the decimals of whole points: %d", code)
+	}
+	batch := a.createOpen(map[string]any{"name": "一位小数", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"},
+		"scale": "tenths", "hideDecimals": true})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	listed := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil)
+	if !strings.Contains(listed.Body.String(), `"scale":"tenths","hideDecimals":true`) {
+		t.Fatalf("alice's batches: %s", listed.Body)
+	}
+	claims := decode[struct {
+		Items []struct{ Token string } `json:"items"`
+	}](t, a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil))
+	rating := scoringapi.PathPrefix + "/claims/" + claims.Items[0].Token + "/rating"
+	offScale := map[string]any{"submission": "alice-0001", "kind": "score", "score": 3.47, "viewMs": 3100}
+	if code := a.call("alice-token", http.MethodPut, rating, offScale).Code; code != http.StatusUnprocessableEntity {
+		t.Fatalf("3.47 on a scale of tenths: %d", code)
+	}
+	onScale := map[string]any{"submission": "alice-0002", "kind": "score", "score": 3.5, "viewMs": 3100}
+	if rated := a.call("alice-token", http.MethodPut, rating, onScale); rated.Code != http.StatusOK {
+		t.Fatalf("3.5 on a scale of tenths: %d %s", rated.Code, rated.Body)
+	}
+	if code := a.call("admin-token", http.MethodPatch, batches+"/"+batch, map[string]any{"scale": "three"}).Code; code != http.StatusConflict {
+		t.Fatalf("changing the scale of a scored batch: %d", code)
 	}
 }

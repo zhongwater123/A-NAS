@@ -1,0 +1,112 @@
+/* A window's own dialogs (modal.tsx), moved from 家庭中心 and keeping its
+   class names. They read the window's --ph-* palette; the few values a
+   window may want in its own style have neutral defaults. */
+@layer ui {
+  .fc-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    background: var(--ph-modal-backdrop, rgba(15, 18, 25, 0.3));
+    animation: fc-fade 0.18s ease-out;
+  }
+  .fc-modal {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 31;
+    display: flex;
+    flex-direction: column;
+    width: min(480px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    border-radius: 18px;
+    color: var(--ph-ink);
+    background: var(--ph-surface);
+    box-shadow: var(--ph-modal-shadow, 0 0 0 1px rgba(0, 0, 0, 0.06), 0 30px 80px rgba(10, 14, 22, 0.28));
+    outline: none;
+    transform: translate(-50%, -50%);
+    animation: fc-pop 0.22s var(--ph-ease, ease-out);
+  }
+  .fc-modal.wide {
+    width: min(600px, calc(100% - 32px));
+  }
+  .fc-modal.large {
+    width: min(940px, calc(100% - 32px));
+    height: min(700px, calc(100% - 32px));
+  }
+  .fc-modal.large .fc-modal-body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .fc-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 16px 6px 24px;
+  }
+  .fc-modal-head h2 {
+    flex: 1;
+    margin: 0;
+    font-family: var(--ph-heading-font, inherit);
+    font-size: var(--ph-heading-size, 17px);
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .fc-modal-close {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      color 0.15s,
+      opacity 0.15s;
+  }
+  .fc-modal-close:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+  .fc-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 12px 24px 18px;
+    overflow-y: auto;
+  }
+  .fc-modal-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--ph-line, rgba(0, 0, 0, 0.08));
+  }
+  @keyframes fc-fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fc-pop {
+    from {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
+    }
+  }
+}
+
+/* Outside the layer: a window's own base rules, such as
+   :where(.fc-app) :where(button) { color: inherit }, are not in a layer and
+   would win over anything inside one, whatever its specificity. */
+.fc-modal-close {
+  color: var(--ph-muted);
+  background: none;
+}
+.fc-modal-close:not(:disabled):hover {
+  color: var(--ph-ink);
+  background: var(--ph-hover, rgba(0, 0, 0, 0.05));
+}

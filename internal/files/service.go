@@ -984,7 +984,9 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 		} else if found && twin.Kind == EntryKindFile {
 			existing = twin.Name
 		}
-		if replaced, err = s.trashForReplacement(ctx, actor, item.SpaceID, root, targetParentID, filepath.Join(parent, existing)); err != nil {
+		// Nothing happens between the user's answer and this move, so the
+		// file under the name now is the one to replace.
+		if replaced, err = s.trashForReplacement(ctx, actor, item.SpaceID, root, targetParentID, filepath.Join(parent, existing), nil); err != nil {
 			return Restored{}, err
 		}
 	}

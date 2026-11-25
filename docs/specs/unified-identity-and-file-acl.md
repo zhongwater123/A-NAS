@@ -1,7 +1,7 @@
 # 统一身份与文件授权
 
 状态：implemented（ADR 0008，[#11–#16](https://github.com/zhongwater123/A-NAS/issues?q=is%3Aissue+%5BADR+0008%5D)）；实机验收进度见[当前状态](../status/CURRENT.md)
-更新时间：2026-10-26
+更新时间：2026-11-16
 
 ## 目标
 
@@ -84,12 +84,12 @@
 - 产品服务账号 `a-nas` 不在任何空间 ACL 中，自己不能读写任何空间。但它是账号与会话的权威：密码哈希与会话表由它写入，凭据与查看授权也由它向 Host Agent 下达，因此被攻破时可以为任何账号签发会话。文件代理与 ACL 防住的是产品服务之外的入口，以及产品服务自身的路径处理缺陷；把密码校验与会话签发移到 Host Agent 是后续工作（[#98](https://github.com/zhongwater123/A-NAS/issues/98) E01）。
 - 回收站中的条目只有删除者能看到、恢复或彻底删除；管理员也不能处理其他成员在共享文件夹中删除的文件。
 - 后台目录对账与回收站到期清除需要用户的有效会话：长期未登录用户的 SMB 删除与到期清除在其下次登录时处理。
-- 永久转移数据只在删除账号时提供；产品尚无删除账号功能，因此当前不提供转移。
+- 永久转移数据只在删除账号时提供：到期执行时，成员的个人空间可以转给删除它的管理员（[重新启用与删除账号](account-enable-and-delete.md)）。
 - 只在空间与共享文件夹根目录设置 ACL；Web 只在同一空间内改名移动，跨空间剪切先复制再删除原条目。复制出的文件以 `0660`、目录以 `0770` 新建（与 Samba 的 `create mask`、`directory mask` 一致），继承目标根目录的默认 ACL，不受原条目更窄模式位的屏蔽；后台一致性任务修复漂移并记录修复事件。
 - 数据卷离线时文件代理拒绝所有文件操作，不在系统盘创建替代目录。
-- UID 永不复用；删除账号后其 UID 仍保留。
-- 账号名不能修改：个人空间目录、回收站目录、Samba 个人共享与身份注册表都以账号名为键。删除账号（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）需要同时决定账号名是否也像 UID 一样永不复用。
-- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话，同时停止并屏蔽该账号的助手、API/socket、定时任务与复盘单元；管理员重置已禁用账号的密码不会重新启用该账号。禁用先在同一事务中改状态、删除全部会话并写审计，再停用宿主机服务：Host Agent 未能停用 SMB 或助手时，网页登录已经结束，接口保留 `503 smb_disable_pending` 错误码；再次禁用重试宿主机步骤，产品服务启动时的身份同步也会补做停用。启动同步失败时从 2 秒起加倍间隔重试，最长 15 分钟一次，直到成功或服务停止。
+- UID 永不复用；删除账号后其 UID 仍保留，它在共享文件夹中留下的文件仍以这个 UID 为属主。
+- 账号名不能修改：个人空间目录、回收站目录、Samba 个人共享与身份注册表都以账号名为键。删除账号的数据全部清除后，账号名可以再用；新账号拿到新 UID（[决定](../decisions/2026-11-16-account-deletion.md)）。
+- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话，同时停止并屏蔽该账号的助手、API/socket、定时任务与复盘单元；管理员重置已禁用账号的密码不会重新启用该账号。重新启用见[重新启用与删除账号](account-enable-and-delete.md)：它解除这些停用，身份同步对启用中的账号补做未完成的部分。禁用先在同一事务中改状态、删除全部会话并写审计，再停用宿主机服务：Host Agent 未能停用 SMB 或助手时，网页登录已经结束，接口保留 `503 smb_disable_pending` 错误码；再次禁用重试宿主机步骤，产品服务启动时的身份同步也会补做停用。启动同步失败时从 2 秒起加倍间隔重试，最长 15 分钟一次，直到成功或服务停止。
 
 ## 验收证据
 
@@ -102,7 +102,7 @@
 ## 关联
 
 - ADR：[0008 统一 Linux 身份与文件系统 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0007 类型化特权边界](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
-- 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)
+- 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)、[重新启用与删除账号](account-enable-and-delete.md)
 - 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)、[成员账户架构审查 #98](https://github.com/zhongwater123/A-NAS/issues/98)
 - 调查：[smbstatus 的告警让禁用与身份同步失败](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)
 - 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/auth/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)

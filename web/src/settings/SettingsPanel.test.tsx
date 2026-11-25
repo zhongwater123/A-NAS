@@ -8,9 +8,11 @@ import { setSession } from "../api/client";
 import type { ActivityPage, Disk, FileEntry, Session, Space, Volume } from "../api.generated";
 import { companionMode, setCompanionMode } from "../companion/quiet";
 import { useHostState } from "../desktop/useHostState";
+import { resetSystemUpdate } from "../systemupdate/status";
 import { healthyState, session as signIn } from "../test/fixtures";
 import { type SettingsOptions, settingsHandlers, terminalHandlers } from "../test/handlers/settings";
 import { disk, storagePlan, volume } from "../test/handlers/storage";
+import { nextVersion, systemUpdateStatus } from "../test/handlers/systemupdate";
 import { accountHandlers, alice, membersHandlers } from "../test/handlers/users";
 import { apiError, http, pathOf, server } from "../test/server";
 import { SettingsPanel, type SettingsSection, useStoragePlan } from "./SettingsPanel";
@@ -63,7 +65,17 @@ const member = signIn(alice);
 // section, the host state and any storage plan, which outlive the window,
 // and App takes an account its owner changed into the session. open shows
 // the window or leaves it closed.
-function Settings({ signedIn, open = true }: { signedIn: Session; open?: boolean }) {
+function Settings({
+  signedIn,
+  open = true,
+  intent,
+  onIntentHandled,
+}: {
+  signedIn: Session;
+  open?: boolean;
+  intent?: { anchor: string };
+  onIntentHandled?: (handled: { anchor: string }) => void;
+}) {
   const [current, setCurrent] = useState(signedIn);
   const host = useHostState(true);
   const [section, setSection] = useState<SettingsSection>("overview");
@@ -75,6 +87,8 @@ function Settings({ signedIn, open = true }: { signedIn: Session; open?: boolean
       host={host}
       section={section}
       onSectionChange={setSection}
+      intent={intent}
+      onIntentHandled={onIntentHandled}
       storagePlan={storagePlan}
       onUserChange={(user) => setCurrent((value) => ({ ...value, user }))}
       onLogout={() => undefined}
@@ -170,6 +184,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setSession();
+  resetSystemUpdate();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -211,6 +226,28 @@ describe("Settings host state", () => {
 
     expect(await screen.findByText("连接中断，正在显示上次成功读取的数据")).toBeTruthy();
     expect(screen.getByText("anas-fake")).toBeTruthy();
+  });
+
+  it("brings the row the desktop asks for into view, though its section shows already", async () => {
+    // jsdom does not scroll.
+    const scrollBy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: scrollBy });
+    try {
+      serve();
+      setSession(owner);
+      const handled: unknown[] = [];
+      const health = { anchor: "health" };
+      const view = render(<Settings signedIn={owner} />);
+      expect(await screen.findByText("anas-fake")).toBeTruthy();
+      const row = screen.getByRole("region", { name: "设备状态" });
+      expect(row).not.toHaveAttribute("data-found");
+      view.rerender(<Settings signedIn={owner} intent={health} onIntentHandled={(taken) => handled.push(taken)} />);
+      await waitFor(() => expect(row).toHaveAttribute("data-found"));
+      expect(scrollBy).toHaveBeenCalled();
+      expect(handled).toEqual([health]);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollBy");
+    }
   });
 
   it("retries after an initial 503 response", async () => {
@@ -608,6 +645,20 @@ describe("Settings", () => {
     expect(await screen.findByText("运行正常")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "需要处理" })).toBeNull();
     expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
+  });
+
+  it("lists a new version for administrators, marks 系统更新 and leads there", async () => {
+    serve({ systemUpdate: { status: systemUpdateStatus({ phase: "ready", candidate: nextVersion }) } });
+    const user = userEvent.setup();
+    renderSettings();
+    const notice = await screen.findByRole("button", { name: /有新版本 1\.0\.1-rc\.6 开发版 4e842653/ });
+    expect(within(screen.getByRole("region", { name: "需要处理" })).getByText("1 项")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
+    const update = within(sections()).getByRole("button", { name: /系统更新/ });
+    expect(within(update).getByText("有新版本")).toBeTruthy();
+    await user.click(notice);
+    expect(update.getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByRole("heading", { name: "1.0.1-rc.6 开发版 4e842653 可以安装" })).toBeTruthy();
   });
 
   it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {
@@ -1257,7 +1308,86 @@ describe("Settings", () => {
       within(screen.getByRole("form", { name: "禁用 alice" })).getByRole("button", { name: "禁用账号" }),
     );
     expect(await screen.findByText("已禁用 alice。")).toBeTruthy();
-    expect(members.sent.disabled).toEqual(["/api/v1/users/user%3Aalice"]);
+    expect(members.sent.disabled).toEqual(["/api/v1/users/user%3Aalice/disable"]);
+  });
+
+  it("enables a disabled member again with the password it had", async () => {
+    serve();
+    const members = membersHandlers([owner.user, { ...alice, status: "disabled" }]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    expect(await screen.findByText("已禁用")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "alice 的更多操作" }));
+    expect(screen.queryByRole("menuitem", { name: "禁用账号…" })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "重新启用…" }));
+    const confirm = screen.getByRole("form", { name: "重新启用 alice" });
+    expect(within(screen.getByRole("dialog")).getByText(/原来的密码/)).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "重新启用" }));
+    expect(await screen.findByText("已重新启用 alice。")).toBeTruthy();
+    expect(members.sent.enabled).toEqual(["/api/v1/users/user%3Aalice/enable"]);
+  });
+
+  it("deletes a disabled member after the choices and the administrator's password", async () => {
+    // Radix's radio group sizes the input it keeps in a form with
+    // ResizeObserver, which jsdom lacks.
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    serve();
+    const members = membersHandlers([owner.user, { ...alice, status: "disabled" }]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    await user.click(await screen.findByRole("button", { name: "alice 的更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除账号…" }));
+    const form = screen.getByRole("form", { name: "删除 alice" });
+    expect(within(form).getByText("放进你个人空间的“alice 的文件”文件夹")).toBeTruthy();
+    const library = within(form).getByRole("group", { name: "私有图库" });
+    await user.click(within(library).getByRole("radio", { name: "一并删除" }));
+    expect(within(form).getByText("连同图库回收站一起删除")).toBeTruthy();
+    await user.type(within(form).getByLabelText("你的密码"), "owner password 1");
+    await user.click(within(form).getByRole("button", { name: "删除账号" }));
+    expect(await screen.findByText(/alice 将于.*删除，在此之前可以撤销。/)).toBeTruthy();
+    expect(members.sent.deletions).toEqual([
+      {
+        path: "/api/v1/users/user%3Aalice/deletion",
+        body: { password: "owner password 1", personalSpace: "transfer", library: "delete" },
+      },
+    ]);
+  });
+
+  it("keeps a member waiting to be deleted, which stays disabled", async () => {
+    serve();
+    const waiting = {
+      ...alice,
+      status: "disabled" as const,
+      deletion: {
+        dueAt: "2026-12-16T10:00:00Z",
+        personalSpace: "transfer" as const,
+        library: "delete" as const,
+        started: false,
+      },
+    };
+    const members = membersHandlers([owner.user, waiting]);
+    server.use(...members.handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "用户与权限");
+    expect(await screen.findByText(/待删除 · .*删除/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "alice 的更多操作" }));
+    expect(screen.queryByRole("menuitem", { name: "重新启用…" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "重置密码…" })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "撤销删除…" }));
+    await user.click(
+      within(screen.getByRole("form", { name: "撤销删除 alice" })).getByRole("button", { name: "撤销删除" }),
+    );
+    expect(await screen.findByText("已撤销删除 alice，账号仍为禁用。")).toBeTruthy();
+    expect(members.sent.cancelled).toEqual(["/api/v1/users/user%3Aalice/deletion"]);
   });
 });
 

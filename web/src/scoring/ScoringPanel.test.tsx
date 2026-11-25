@@ -1,12 +1,23 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import type { ScoringBatchInput } from "../api.generated";
 import { session } from "../test/fixtures";
-import { adminBatch, raterBatch, raterEntry, raterHandlers, raterStats } from "../test/handlers/scoring";
-import { http, server } from "../test/server";
+import {
+  adminBatch,
+  dimensionStats,
+  dimensionsOf,
+  raterBatch,
+  raterEntry,
+  raterHandlers,
+  raterStats,
+  scoringCatalogue,
+  scoringMe,
+} from "../test/handlers/scoring";
+import { apiError, http, server } from "../test/server";
 import { ScoringPanel } from "./ScoringPanel";
 
 // jsdom loads no images; a decoded photo is what the stage waits for.
@@ -20,15 +31,24 @@ afterEach(() => {
 });
 
 const shownPhoto = () => screen.findByRole("img", { name: "要打分的照片" });
+// Opens the batch on its card and closes the tutorial it shows first.
+async function openBatch(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "开始打分" }));
+  await user.click(await screen.findByRole("button", { name: "完成" }));
+}
 // The stage's count sets its number apart from the words around it.
 const counted = (text: string) => (_: string, element: Element | null) =>
   element?.matches("[aria-live]") === true && element.textContent === text;
 
-// The window reads the account's roles again when it opens.
+// The window reads the account's roles again when it opens; administrators
+// read the 打分项 a batch can choose.
 function serveAccess(admin: boolean, rater: boolean) {
   server.use(
     http.get("/api/v1/modules", ({ response }) => response(200).json({ items: [{ id: "scoring" }] })),
-    http.get("/api/v1/modules/scoring/me", ({ response }) => response(200).json({ admin, rater })),
+    http.get("/api/v1/modules/scoring/me", ({ response }) => response(200).json(scoringMe(admin, rater))),
+    http.get("/api/v1/modules/scoring/admin/dimensions", ({ response }) =>
+      response(200).json({ items: scoringCatalogue }),
+    ),
   );
 }
 
@@ -42,7 +62,7 @@ describe("ScoringPanel for a rater", () => {
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
 
-    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await openBatch(user);
     expect(screen.getByText("看构图与光线")).toBeTruthy();
     expect(await screen.findByText("4.50 分")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "开始打分" }));
@@ -51,7 +71,7 @@ describe("ScoringPanel for a rater", () => {
     expect(first.getAttribute("src")).toContain("/claims/t1/image");
     // 3, then two tenths up and one hundredth down: 3.19.
     await user.keyboard("3{ArrowRight}{ArrowRight}{Shift>}{ArrowLeft}{/Shift}");
-    expect((screen.getByRole("textbox", { name: "分数，0 到 5，最多两位小数" }) as HTMLInputElement).value).toBe(
+    expect((screen.getByRole("textbox", { name: "分数，0 到 5 之间，最多两位小数" }) as HTMLInputElement).value).toBe(
       "3.19",
     );
     expect(screen.getByRole("slider", { name: "分数" }).getAttribute("aria-valuetext")).toBe("3.19");
@@ -63,6 +83,12 @@ describe("ScoringPanel for a rater", () => {
     await waitFor(() => expect(answered).toHaveLength(1));
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 3.19 } });
     expect(answered[0].body.submission).toMatch(/^[0-9a-f-]{36}$/);
+    // The next photo starts with no score.
+    expect((screen.getByRole("textbox", { name: "分数，0 到 5 之间，最多两位小数" }) as HTMLInputElement).value).toBe(
+      "",
+    );
+    expect(screen.getByRole("slider", { name: "分数" }).getAttribute("aria-valuetext")).toBe("未打分");
+    expect((screen.getByRole("button", { name: /确定/ }) as HTMLButtonElement).disabled).toBe(true);
     // The photo just scored now sits on the ruler, whole, at its score.
     const thumbnail = screen.getByRole("img", { name: "3.19 分的照片" });
     expect(thumbnail.getAttribute("src")).toContain("/claims/t1/thumbnail");
@@ -75,7 +101,7 @@ describe("ScoringPanel for a rater", () => {
     await waitFor(() => expect(screen.queryByRole("img", { name: "你打过 3.19 分的照片" })).toBeNull());
 
     // A score typed in the box: refused past two decimals, sent once valid.
-    const box = screen.getByRole("textbox", { name: "分数，0 到 5，最多两位小数" });
+    const box = screen.getByRole("textbox", { name: "分数，0 到 5 之间，最多两位小数" });
     await user.clear(box);
     await user.type(box, "4.555");
     expect(screen.getByRole("alert").textContent).toBe("0 到 5 之间，最多两位小数");
@@ -86,11 +112,15 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[1]).toMatchObject({ token: "t2", body: { score: 5 } });
     screen.getByRole("application").focus();
 
-    // Backspace goes back to the photo just scored; a new key replaces its score.
+    // Backspace takes the last step back, to the photo just scored with its
+    // score; a new key replaces it.
     await user.keyboard("{Backspace}");
-    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · 原来 5.00 · Esc 取消");
+    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · Esc 不改");
     await waitFor(() =>
       expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect((screen.getByRole("textbox", { name: "分数，0 到 5 之间，最多两位小数" }) as HTMLInputElement).value).toBe(
+      "5.00",
     );
     await user.keyboard("4{Enter}");
     await waitFor(() => expect(answered).toHaveLength(3));
@@ -112,10 +142,309 @@ describe("ScoringPanel for a rater", () => {
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "继续打分" }));
+    // The tutorial comes first on every visit; the guide only the first time.
+    await user.click(await screen.findByRole("button", { name: "完成" }));
     await shownPhoto();
+    await user.keyboard("3");
     await user.click(screen.getByRole("button", { name: /确定/ }));
     expect(await screen.findByText("这个批次你已经打完了")).toBeTruthy();
     expect(screen.getByText(counted("已打 6 张"))).toBeTruthy();
+  });
+
+  it("scores a batch's 打分项 one after another, answers after the last and steps back", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      dimensions: dimensionsOf("overall", "composition", "sharpness"),
+    });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2", "t3"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await openBatch(user);
+    await shownPhoto();
+    const items = screen.getByRole("list", { name: "打分项" });
+    const current = () => within(items).getByRole("button", { current: "step" }).textContent;
+    const arrow = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+    const box = (name: string) =>
+      (screen.getByRole("textbox", { name: `${name}，0 到 5 之间，最多两位小数` }) as HTMLInputElement).value;
+    // A new photo starts empty: nothing to confirm, and no way on or back yet.
+    expect(current()).toContain("总体");
+    expect((screen.getByRole("button", { name: /下一项/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(arrow("下一张").disabled).toBe(true);
+    expect(arrow("上一张").disabled).toBe(true);
+    // Enter confirms 总体 and moves on; nothing is sent yet.
+    await user.keyboard("3{Enter}");
+    expect(current()).toContain("构图");
+    expect(within(items).getByRole("button", { name: /总体/ }).textContent).toContain("3.00");
+    // A pick of the pointer, once released, moves on by itself.
+    await user.keyboard("2");
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "构图" }) },
+      { keys: "[/MouseLeft]" },
+    ]);
+    await waitFor(() => expect(current()).toContain("清晰度"));
+    // ↑ goes back without losing what was set.
+    await user.keyboard("{ArrowUp}");
+    expect(current()).toContain("构图");
+    await user.keyboard("{ArrowDown}");
+    // The way on opens once every item has a score.
+    expect(arrow("下一张").disabled).toBe(true);
+    await user.keyboard("4");
+    expect(arrow("下一张").disabled).toBe(false);
+    expect(answered).toHaveLength(0);
+    // A pick on the last item answers the photo and the next one comes, empty.
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "清晰度" }) },
+      { keys: "[/MouseLeft]" },
+    ]);
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({
+      token: "t1",
+      body: { kind: "score", score: 3, scores: { composition: 2, sharpness: 4 } },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect(current()).toContain("总体");
+    expect(within(items).getByRole("button", { name: /构图/ }).textContent).toContain("—");
+    expect(box("总体")).toBe("");
+
+    // 撤销一步 goes back one item, and from the first item to the last
+    // photo's last item; Esc comes back with what was set here.
+    await user.keyboard("3{Enter}");
+    expect(current()).toContain("构图");
+    await user.keyboard("{Backspace}");
+    expect(current()).toContain("总体");
+    expect(box("总体")).toBe("3.00");
+    await user.keyboard("{Backspace}");
+    expect((await screen.findByRole("status")).textContent).toBe("正在改上一张 · Esc 不改");
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t1/image"),
+    );
+    expect(current()).toContain("清晰度");
+    expect(box("清晰度")).toBe("4.00");
+    expect(arrow("上一张").disabled).toBe(true);
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect(box("总体")).toBe("3.00");
+
+    // The arrows: back to the last photo, and on with its scores as they stand.
+    await user.click(arrow("上一张"));
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t1/image"),
+    );
+    expect(current()).toContain("总体");
+    await user.click(arrow("下一张"));
+    await waitFor(() => expect(answered).toHaveLength(2));
+    expect(answered[1]).toMatchObject({ token: "t1", body: { score: 3, scores: { composition: 2, sharpness: 4 } } });
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+    );
+    expect(box("总体")).toBe("3.00");
+  });
+
+  it("names the 打分项 of a batch that starts with a custom one and answers it first", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, dimensions: dimensionsOf("custom_1", "overall") });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await openBatch(user);
+    await shownPhoto();
+    // The custom one comes first, with what it asks to look at.
+    expect(screen.getByText("整张照片的颜色是否协调")).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "色彩和谐" })).toBeTruthy();
+    await user.keyboard("3{Enter}");
+    expect(screen.getByRole("slider", { name: "总体" })).toBeTruthy();
+    await user.keyboard("4{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 3, scores: { overall: 4 } } });
+  });
+
+  it("shows the handbook's tutorial each time a batch opens, with photos to try, and 完成 skips it", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      scale: "five",
+      dimensions: dimensionsOf("overall", "sharpness"),
+    });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
+    // The rules of a five-level batch, without the one about a 打分项 it lacks.
+    expect(screen.getByText("只打整数")).toBeTruthy();
+    expect(screen.queryByText("情绪是描述")).toBeNull();
+    // 总体 as the handbook explains it, under the batch's name; 清晰度 has
+    // no section of its own.
+    expect(screen.getByRole("heading", { name: /总体/ })).toBeTruthy();
+    expect(screen.getByText("这张照片整体拍得好不好，有没有让人想多看一会儿的感觉？")).toBeTruthy();
+    expect(screen.getByText("清晰度")).toBeTruthy();
+    // A try: the handbook's level shows only once the rater picked one.
+    const first = screen.getAllByRole("group", { name: "这张照片的总体你打几分" })[0];
+    expect(screen.queryByText("手册 3 分")).toBeNull();
+    await user.click(within(first).getByRole("button", { name: "4" }));
+    expect(screen.getByText("手册 3 分")).toBeTruthy();
+    expect(screen.getByText("差 1 分")).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "先试着打一个分，或直接看答案" })[0]);
+    expect(screen.getByText("手册 5 分")).toBeTruthy();
+    // Back to the batches, and the tutorial shows again on the next visit.
+    await user.click(screen.getByRole("button", { name: "批次" }));
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
+    expect(screen.queryByText("手册 3 分")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "完成" }));
+    await shownPhoto();
+  });
+
+  it("fits the tutorial to a batch of three levels that scores 构图 before 总体", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      scale: "three",
+      dimensions: dimensionsOf("composition", "overall"),
+    });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers } = raterHandlers(batch, ["t1"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    // The batch's own order, not the handbook's 总体 first.
+    expect(screen.getByText("按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。")).toBeTruthy();
+    expect(screen.queryByText(/凭第一感觉打“总体”/)).toBeNull();
+    // Three levels have no 2 or 4, in the rules or the tries.
+    expect(screen.queryByText("只打整数")).toBeNull();
+    expect(
+      screen.getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。"),
+    ).toBeTruthy();
+    const first = screen.getAllByRole("group", { name: "这张照片的构图你打几分" })[0];
+    expect(
+      within(first)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["1", "3", "5"]);
+  });
+
+  it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, scale: "three" });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await openBatch(user);
+    await shownPhoto();
+    const slider = screen.getByRole("slider", { name: "分数" });
+    // Nothing to type, and 2 is no level.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("点选一档，或按 1、3、5")).toBeTruthy();
+    await user.keyboard("2");
+    expect(slider.getAttribute("aria-valuetext")).toBe("未打分");
+    await user.keyboard("3");
+    expect(slider.getAttribute("aria-valuetext")).toBe("中");
+    await user.keyboard("{ArrowRight}");
+    expect(slider.getAttribute("aria-valuetext")).toBe("好");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 5 } });
+  });
+
+  it("scores a batch of five levels with 1 to 5 and the arrows from 3, showing the level", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, scale: "five" });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await openBatch(user);
+    await shownPhoto();
+    const slider = screen.getByRole("slider", { name: "分数" });
+    // Nothing to type, and 0 is no level.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("点选一档，或按 1–5")).toBeTruthy();
+    await user.keyboard("0");
+    expect(slider.getAttribute("aria-valuetext")).toBe("未打分");
+    await user.keyboard("{ArrowLeft}");
+    expect(slider.getAttribute("aria-valuetext")).toBe("一般");
+    await user.keyboard("2");
+    expect(slider.getAttribute("aria-valuetext")).toBe("较差");
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(slider.getAttribute("aria-valuetext")).toBe("好");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 4 } });
+  });
+
+  it("keeps every score from a rater of a batch that hides them, and answers in its tenths", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, scale: "tenths", hideDecimals: true });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await openBatch(user);
+    await shownPhoto();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(screen.getByRole("slider", { name: "分数" }).getAttribute("aria-valuetext")).toBe("已选");
+    expect(screen.getByText("已选")).toBeTruthy();
+    expect(screen.queryByText("2.6")).toBeNull();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 2.6 } });
+  });
+
+  it("shows the photo at 100% on a click or while Z is held, in every batch", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}` });
+    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    const { handlers } = raterHandlers(batch, ["t1", "t2"]);
+    let gone = false;
+    // Handlers are tried in order: this one first, falling through until the original is gone.
+    server.use(
+      http.untyped.get("/api/v1/modules/scoring/claims/:token/full", () =>
+        gone ? new HttpResponse(null, { status: 410 }) : undefined,
+      ),
+      ...handlers,
+    );
+    // jsdom has no object URLs and loads no images: the 100% view stays loading.
+    const created = vi.fn(() => "blob:full");
+    const { createObjectURL, revokeObjectURL } = URL;
+    URL.createObjectURL = created;
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const user = userEvent.setup();
+      render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+      await openBatch(user);
+      await shownPhoto();
+      await user.keyboard("{z>}");
+      expect(await screen.findByRole("status", { name: "正在载入 100% 原图" })).toBeTruthy();
+      await waitFor(() => expect(created).toHaveBeenCalled());
+      await user.keyboard("{/z}");
+      expect(screen.queryByRole("status", { name: "正在载入 100% 原图" })).toBeNull();
+      // A click looks, and another click comes back.
+      await user.click(await shownPhoto());
+      const loading = await screen.findByRole("status", { name: "正在载入 100% 原图" });
+      await user.click(loading);
+      expect(screen.queryByRole("status", { name: "正在载入 100% 原图" })).toBeNull();
+      // A photo whose original changed says so.
+      await user.keyboard("3{Enter}");
+      await waitFor(() =>
+        expect(screen.getByRole("img", { name: "要打分的照片" }).getAttribute("src")).toContain("/claims/t2/image"),
+      );
+      gone = true;
+      await user.keyboard("{z>}");
+      expect(await screen.findByText("原图已不在，或已不是导入时的照片")).toBeTruthy();
+      await user.keyboard("{/z}");
+    } finally {
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
   });
 
   it("lists no batch until an administrator opens one", async () => {
@@ -132,9 +461,17 @@ describe("ScoringPanel for an administrator", () => {
     serveAccess(true, false);
   });
 
-  it("creates a batch from a folder of 照片打分", async () => {
+  it("creates a batch from a folder of 照片打分, scoring 打分项 in the order they are picked", async () => {
     const created: ScoringBatchInput[] = [];
+    const made: { name: string; description?: string }[] = [];
     server.use(
+      http.post("/api/v1/modules/scoring/admin/dimensions", async ({ request, response }) => {
+        const body = await request.json();
+        made.push(body);
+        return body.name === "构图"
+          ? response(409).json(apiError("dimension_exists", "a scoring dimension has this name"))
+          : response(201).json({ id: "custom_2", name: body.name, description: body.description ?? "", custom: true });
+      }),
       http.get("/api/v1/modules/scoring/admin/batches", ({ response }) => response(200).json({ items: [] })),
       http.get("/api/v1/modules/scoring/admin/sources", ({ response }) =>
         response(200).json({ items: [{ name: "风景第一批" }, { name: "城市" }] }),
@@ -143,7 +480,12 @@ describe("ScoringPanel for an administrator", () => {
         const body = await request.json();
         created.push(body);
         return response(201).json(
-          adminBatch({ name: body.name, state: "importing", import: { files: 0, imported: 0, skipped: 0 } }),
+          adminBatch({
+            name: body.name,
+            state: "importing",
+            import: { files: 0, imported: 0, skipped: 0, skippedBy: [] },
+            answers: 0,
+          }),
         );
       }),
     );
@@ -158,9 +500,77 @@ describe("ScoringPanel for an administrator", () => {
     await user.click(within(dialog).getByRole("button", { name: "多一人" }));
     expect((within(dialog).getByRole("spinbutton", { name: "每张照片几人打分" }) as HTMLInputElement).value).toBe("4");
     await user.type(within(dialog).getByRole("textbox", { name: "打分标准" }), "5 分是可以印出来挂墙上的");
-    await user.click(within(dialog).getByRole("button", { name: "新建" }));
+    // Nothing is picked at first, and a batch needs one 打分项 at least.
+    const create = within(dialog).getByRole("button", { name: "新建" }) as HTMLButtonElement;
+    await within(dialog).findByRole("button", { name: "总体" });
+    expect(within(dialog).getByText("至少选一项", { exact: false })).toBeTruthy();
+    expect(create.disabled).toBe(true);
+    // Clicks in quick succession each count, and take out again.
+    const light = within(dialog).getByRole("button", { name: "光影色彩" });
+    const liking = within(dialog).getByRole("button", { name: "喜好程度" });
+    act(() => {
+      light.click();
+      liking.click();
+    });
+    expect(within(dialog).getByRole("button", { name: "喜好程度，第 2 项" })).toBe(liking);
+    act(() => {
+      light.click();
+      liking.click();
+    });
+    expect(liking.getAttribute("aria-pressed")).toBe("false");
+    // The order of the clicks is the order raters score them; another click
+    // takes one out and the later ones move up.
+    await user.click(within(dialog).getByRole("button", { name: "清晰度" }));
+    await user.click(within(dialog).getByRole("button", { name: "色彩和谐" }));
+    await user.click(within(dialog).getByRole("button", { name: "总体" }));
+    await user.click(within(dialog).getByRole("button", { name: "清晰度，第 1 项" }));
+    expect(within(dialog).getByRole("button", { name: "色彩和谐，第 1 项" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByRole("button", { name: "总体，第 2 项" })).toBeTruthy();
+    // A new custom one is picked at once, last; a taken name is refused.
+    await user.click(within(dialog).getByRole("button", { name: "自定义…" }));
+    const maker = within(dialog).getByRole("group", { name: "新的打分项" });
+    await user.type(within(maker).getByRole("textbox", { name: /名称/ }), "构图{Enter}");
+    expect(await within(maker).findByRole("alert")).toHaveProperty("textContent", "已有同名的打分项");
+    await user.clear(within(maker).getByRole("textbox", { name: /名称/ }));
+    await user.type(within(maker).getByRole("textbox", { name: /名称/ }), "空间层次");
+    await user.type(within(maker).getByRole("textbox", { name: /说明/ }), "前景、中景、远景是否分明");
+    await user.click(within(maker).getByRole("button", { name: "添加并选上" }));
+    expect(await within(dialog).findByRole("button", { name: "空间层次，第 3 项" })).toBeTruthy();
+    expect(within(dialog).queryByRole("group", { name: "新的打分项" })).toBeNull();
+    expect(made.at(-1)).toEqual({ name: "空间层次", description: "前景、中景、远景是否分明" });
+    expect(within(dialog).getByText("长边不足 2400 像素的照片不加入批次。", { exact: false })).toBeTruthy();
+    // Five levels, the first card, unless chosen otherwise; they have no
+    // decimals to hide.
+    const scales = within(dialog).getAllByRole("radio") as HTMLInputElement[];
+    expect(scales[0].checked && scales[0].value).toBe("five");
+    const shown = () => within(dialog).queryByRole("checkbox", { name: /打分人看得到小数/ }) as HTMLInputElement | null;
+    expect(shown()).toBeNull();
+    // A number line with decimals shows them to raters unless told not to.
+    await user.click(within(dialog).getByRole("radio", { name: /两位小数/ }));
+    expect(shown()?.checked).toBe(true);
+    await user.click(within(dialog).getByRole("radio", { name: /一位小数/ }));
+    await user.click(shown()!);
+    expect(within(dialog).getByText(/导出的分数仍精确到 0\.1/)).toBeTruthy();
+    // Three levels have no decimals to hide, and going back shows them again.
+    await user.click(within(dialog).getByRole("radio", { name: /三档/ }));
+    expect(shown()).toBeNull();
+    await user.click(within(dialog).getByRole("radio", { name: /一位小数/ }));
+    expect(shown()?.checked).toBe(true);
+    await user.click(shown()!);
+    expect(create.disabled).toBe(false);
+    await user.click(create);
     await waitFor(() =>
-      expect(created).toEqual([{ name: "城市", source: "城市", required: 4, rubric: "5 分是可以印出来挂墙上的" }]),
+      expect(created).toEqual([
+        {
+          name: "城市",
+          source: "城市",
+          required: 4,
+          rubric: "5 分是可以印出来挂墙上的",
+          dimensions: ["custom_1", "overall", "custom_2"],
+          scale: "tenths",
+          hideDecimals: true,
+        },
+      ]),
     );
     expect(await screen.findByText("正在读取文件夹")).toBeTruthy();
   });
@@ -169,7 +579,22 @@ describe("ScoringPanel for an administrator", () => {
     let state: "open" | "closed" = "open";
     server.use(
       http.get("/api/v1/modules/scoring/admin/batches", ({ response }) =>
-        response(200).json({ items: [adminBatch({ state })] }),
+        response(200).json({
+          items: [
+            adminBatch({
+              state,
+              import: {
+                files: 160,
+                imported: 118,
+                skipped: 42,
+                skippedBy: [
+                  { reason: "too_small", count: 40 },
+                  { reason: "unsupported_type", count: 2 },
+                ],
+              },
+            }),
+          ],
+        }),
       ),
       http.get("/api/v1/modules/scoring/admin/batches/{batchId}/stats", ({ response }) =>
         response(200).json({
@@ -177,10 +602,8 @@ describe("ScoringPanel for an administrator", () => {
             raterStats(),
             raterStats({
               rater: { id: "user:bob", username: "bob" },
-              agreement: null,
-              repeatDifference: null,
               fastShare: 0.17,
-              longestRun: 23,
+              dimensions: [dimensionStats({ agreement: null, repeatDifference: null, longestRun: 23 })],
             }),
           ],
         }),
@@ -205,14 +628,71 @@ describe("ScoringPanel for an administrator", () => {
     expect(alice.textContent).toContain("3.4 秒");
     expect(within(table).getByRole("row", { name: /bob/ }).textContent).toContain("—");
     // Habits that suggest a rater is not looking are called out.
-    expect(within(table).getByText("17% 的分数在 1 秒内打出")).toBeTruthy();
+    expect(within(table).getByText("17% 的照片在 1 秒内打完")).toBeTruthy();
     expect(within(table).getByText("连续 23 张同分")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "导出" }).getAttribute("href")).toBe(
-      "/api/v1/modules/scoring/admin/batches/b1/export",
+    // Skipped files are counted by reason.
+    expect(screen.getByText(/导入时跳过/).textContent).toBe(
+      "导入时跳过 42 个文件：长边不足 2400 像素 40 个，格式不支持 2 个。",
     );
+    // A batch of 总体 alone has no tabs of 打分项.
+    expect(screen.queryByRole("group", { name: "按打分项看" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "结束批次" }));
     expect(await screen.findByRole("button", { name: "重新开放" })).toBeTruthy();
     expect(state).toBe("closed");
+  });
+
+  it("shows each 打分项's statistics and exports the chosen columns and rows", async () => {
+    const dimensions = dimensionsOf("overall", "composition");
+    server.use(
+      http.get("/api/v1/modules/scoring/admin/batches", ({ response }) =>
+        response(200).json({ items: [adminBatch({ dimensions })] }),
+      ),
+      http.get("/api/v1/modules/scoring/admin/batches/{batchId}/stats", ({ response }) =>
+        response(200).json({
+          items: [
+            raterStats({
+              dimensions: [dimensionStats(), dimensionStats({ dimension: "composition", mean: 3.4, longestRun: 18 })],
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/v1/modules/scoring/admin/batches/{batchId}/export/summary", ({ response }) =>
+        response(200).json({ scores: 120, skips: 4, superseded: 3, repeats: 6 }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:owner" access={{ admin: true, rater: false }} />);
+    await user.click(await screen.findByRole("button", { name: /风景第一批/ }));
+    const table = await screen.findByRole("table");
+    expect(within(table).getByRole("row", { name: /小艾/ }).textContent).toContain("2.90 ± 0.60");
+    await user.click(within(screen.getByRole("group", { name: "按打分项看" })).getByRole("button", { name: "构图" }));
+    expect(within(table).getByRole("row", { name: /小艾/ }).textContent).toContain("3.40 ± 0.60");
+    expect(within(table).getByText("构图连续 18 张同分")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "导出" }));
+    const dialog = await screen.findByRole("dialog", { name: "导出“风景第一批”" });
+    expect(await within(dialog).findByText("120")).toBeTruthy();
+    // Image and rater are in every row; the 打分项 and the defaults start chosen.
+    const columns = within(dialog).getByLabelText("导出的列");
+    expect(columns.textContent).toBe("image_idimage_pathraternicknameoverallcompositionduration_ssubmitted_at");
+    await user.click(within(dialog).getByRole("button", { name: "原图宽高" }));
+    await user.click(within(dialog).getByRole("button", { name: "JSON Lines" }));
+    // Rows of other kinds bring their kind along.
+    await user.click(within(dialog).getByRole("button", { name: "跳过与标记" }));
+    expect(within(dialog).getByText("124")).toBeTruthy();
+    const link = within(dialog).getByRole("link", { name: "导出" });
+    expect(link.getAttribute("href")).toBe(
+      "/api/v1/modules/scoring/admin/batches/b1/export?format=jsonl&fields=overall%2Ccomposition%2Cnickname%2Cduration%2Csubmitted_at%2Cimage_size%2Ckind&include=skips",
+    );
+    // jsdom cannot download; the page's own handling of the click is what counts.
+    link.addEventListener("click", (event) => event.preventDefault());
+    await user.click(link);
+    // The choice is kept for next time, beside the 打分项.
+    expect(JSON.parse(window.localStorage.getItem("a-nas.scoring.export") ?? "{}")).toEqual({
+      format: "jsonl",
+      include: ["skips"],
+      fields: ["nickname", "duration", "submitted_at", "image_size", "kind"],
+    });
   });
 
   it("chooses raters among the members", async () => {

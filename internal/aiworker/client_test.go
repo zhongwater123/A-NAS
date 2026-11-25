@@ -350,3 +350,63 @@ func TestATokenIsATokenAndItsLogProbability(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribingACardSendsEveryFrameInOrder(t *testing.T) {
+	var mu sync.Mutex
+	var received []string
+	var layout aiworker.Request
+	socket := aiworkertest.ServeFiles(t, func(request aiworker.Request, files []*os.File) *aiworker.Response {
+		if request.Op != aiworker.OpDescribeFrames {
+			return nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		layout, received = request, nil
+		for _, file := range files {
+			content, _ := io.ReadAll(file)
+			received = append(received, string(content))
+		}
+		switch received[0] {
+		case "past the context":
+			return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidRequest, Message: "too many"}}
+		case "rambling":
+			return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidResult, Message: "no schema"}}
+		}
+		return &aiworker.Response{OK: true, Model: "reader-1", Template: "montage-card/v1", Description: json.RawMessage(`{"summary":"雪山"}`)}
+	})
+	client := aiworker.Client{SocketPath: socket}
+	frames := func(contents ...string) []*os.File {
+		t.Helper()
+		var files []*os.File
+		for i, content := range contents {
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("key%d.jpg", i))
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = file.Close() })
+			files = append(files, file)
+		}
+		return files
+	}
+	card := photos.CardLayout{Offsets: []float64{0, 1.5, 3}, Groups: []int{1, 1, 2}, Duration: 4.25}
+	model, template, description, err := client.DescribeFrames(context.Background(), frames("一", "二", "三"), card)
+	if err != nil || model != "reader-1" || template != "montage-card/v1" || string(description) != `{"summary":"雪山"}` {
+		t.Fatalf("DescribeFrames() = %q, %q, %s, %v", model, template, description, err)
+	}
+	mu.Lock()
+	if !slices.Equal(received, []string{"一", "二", "三"}) || !slices.Equal(layout.Offsets, card.Offsets) ||
+		!slices.Equal(layout.Groups, card.Groups) || layout.Duration != card.Duration {
+		t.Fatalf("the Worker received %q with %+v; want every frame in order and the layout", received, layout)
+	}
+	mu.Unlock()
+	if _, _, _, err := client.DescribeFrames(context.Background(), frames("past the context", "b", "c"), card); !errors.Is(err, photos.ErrAIRejected) {
+		t.Fatalf("DescribeFrames() of an invalid request error = %v, want ErrAIRejected", err)
+	}
+	if _, _, _, err := client.DescribeFrames(context.Background(), frames("rambling", "b", "c"), card); !errors.Is(err, photos.ErrAIInvalidResult) {
+		t.Fatalf("DescribeFrames() of an answer past the schema error = %v, want ErrAIInvalidResult", err)
+	}
+}

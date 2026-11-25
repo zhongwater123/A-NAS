@@ -47,6 +47,69 @@ func TestAMessageCarriesItsDescriptor(t *testing.T) {
 	}
 }
 
+func TestAMessageCarriesSeveralDescriptorsInOrder(t *testing.T) {
+	t.Parallel()
+	left, right := pair(t)
+	dir := t.TempDir()
+	var files []*os.File
+	for _, name := range []string{"video", "song", "spare"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer CloseFile(file)
+		files = append(files, file)
+	}
+	if err := WriteFiles(left, note{Text: "two"}, files[:2], 1024); err != nil {
+		t.Fatal(err)
+	}
+	var got note
+	received, err := ReadFiles(right, &got, 1024, 2)
+	if err != nil || got.Text != "two" || len(received) != 2 {
+		t.Fatalf("ReadFiles() = %v, %+v, %v", received, got, err)
+	}
+	defer CloseFiles(received)
+	for i, want := range []string{"video", "song"} {
+		if data, err := io.ReadAll(received[i]); err != nil || string(data) != want {
+			t.Fatalf("descriptor %d reads %q, %v", i, data, err)
+		}
+	}
+
+	// More than the receiver takes is refused, and none of them is kept.
+	if err := WriteFiles(left, note{Text: "three"}, files, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if received, err := ReadFiles(right, &got, 1024, 2); !errors.Is(err, ErrTooManyFiles) || received != nil {
+		t.Fatalf("ReadFiles() of three descriptors = %v, %v", received, err)
+	}
+	// A refused message is still read to its end, so a sender that writes
+	// its body after the refusal is decided is not cut off, and the next
+	// message on the connection reads as sent.
+	if err := Write(left, note{Text: "after"}, nil, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := Read(right, &got, 1024); err != nil || file != nil || got.Text != "after" {
+		t.Fatalf("Read() after a refused message = %v, %+v, %v", file, got, err)
+	}
+	// Read keeps the first of several, as before. (A passed descriptor
+	// shares its offset: the two read above are at their end.)
+	if err := WriteFiles(left, note{Text: "first"}, []*os.File{files[2], files[0]}, 1024); err != nil {
+		t.Fatal(err)
+	}
+	file, err := Read(right, &got, 1024)
+	if err != nil || file == nil {
+		t.Fatalf("Read() = %v, %v", file, err)
+	}
+	defer CloseFile(file)
+	if data, _ := io.ReadAll(file); string(data) != "spare" {
+		t.Fatalf("Read() kept %q", data)
+	}
+}
+
 func TestMessagesOverTheLimitAreRefused(t *testing.T) {
 	t.Parallel()
 	left, right := pair(t)
@@ -80,8 +143,16 @@ func FuzzRead(f *testing.F) {
 			_, _ = left.Write(data)
 			_ = left.CloseWrite()
 		}()
-		for range 4 {
+		for i := range 4 {
 			var got note
+			if i%2 == 1 {
+				files, err := ReadFiles(right, &got, 64, 2)
+				CloseFiles(files)
+				if err != nil {
+					return
+				}
+				continue
+			}
 			file, err := Read(right, &got, 64)
 			CloseFile(file)
 			if err != nil {

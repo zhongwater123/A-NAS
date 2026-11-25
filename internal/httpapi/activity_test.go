@@ -48,6 +48,7 @@ type activityPage struct {
 			} `json:"owner"`
 		} `json:"space"`
 		Redacted bool `json:"redacted"`
+		System   bool `json:"system"`
 	} `json:"items"`
 	Next        string   `json:"next"`
 	Scope       string   `json:"scope"`
