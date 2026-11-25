@@ -2,6 +2,7 @@
 package webui
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 //go:embed all:dist
@@ -379,11 +381,16 @@ func companionAnimations(directory string) []string {
 // bundle's, and changes with each upgrade of that code.
 const thirdPartyLicenses = "assets/third-party-licenses.txt"
 
+// workspaceFrame is the helper script every shared page loads (ADR 0040,
+// web/vite.frame.config.ts). The workspace service writes this fixed name
+// into the pages it shows, so it carries no hash either.
+const workspaceFrame = "assets/workspace-frame.js"
+
 // assetCacheControl keeps the bundle's hashed files for good; the license
-// list is asked for again each time, so that a browser does not show the
-// notices of an earlier release.
+// list and the frame helper are asked for again each time, so that a
+// browser does not use an earlier release's.
 func assetCacheControl(name string) string {
-	if name == thirdPartyLicenses {
+	if name == thirdPartyLicenses || name == workspaceFrame {
 		return "no-cache"
 	}
 	return "public, max-age=31536000, immutable"
@@ -400,9 +407,18 @@ func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", assetCacheControl(name))
+	cacheControl := assetCacheControl(name)
+	w.Header().Set("Cache-Control", cacheControl)
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
+	}
+	if cacheControl == "no-cache" {
+		// Asked for again each time, an unchanged file costs a 304: every
+		// shared page a member opens loads the frame helper.
+		sum := sha256.Sum256(contents)
+		w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(contents))
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodGet {

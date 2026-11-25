@@ -11,10 +11,10 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "vite build && size-limit",
+    "build": "vite build && vite build --config vite.frame.config.ts && size-limit",
     "format": "biome check --write .",
     "generate": "make -C .. api",
-    "lint": "oxlint --deny-warnings src vite.config.ts && biome check ."
+    "lint": "oxlint --deny-warnings src vite.config.ts vite.frame.config.ts && biome check ."
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.23",

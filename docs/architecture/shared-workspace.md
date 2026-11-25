@@ -106,16 +106,16 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 辅助脚本：
 
 - 源码在 `web/src/workspace/frame/`，由单独的 Vite 配置构建成经典脚本（IIFE），输出 `internal/webui/dist/assets/workspace-frame.js`，在主构建之后运行，不清空目录、不写主构建的 manifest。模块脚本从不透明来源加载要走 CORS，所以不用模块。
-- `internal/webui` 照 `third-party-licenses.txt` 以 `no-cache` 提供这个固定名字；它是公开的静态文件，因为隔离框架发出的请求不带会话。
+- `internal/webui` 照 `third-party-licenses.txt` 以 `no-cache` 提供这个固定名字，另带内容的 ETag，没变时回 `304`；它是公开的静态文件，因为隔离框架发出的请求不带会话。截图库打进这个脚本里，页面不另外加载。
 - 截图用 modern-screenshot（产品已在用，4.7.0）。这个库为了取默认样式会在页面里建一个 `srcdoc` 子框架再去读它，在隔离页面里子框架是另一个不透明来源，读取失败。辅助脚本先建上下文，再把它的 `sandbox` 换成本文档里一个不加样式的 shadow 容器。还要：跳过页面里的 iframe；截图前把吸顶与固定定位的元素钉在当前位置；用页面的背景色铺底；画布不小于视口。整页画好再按需要裁剪。
 
 ## 隔离框架的消息
 
-格式只定义在 `web/src/workspace/frame/protocol.ts`，桌面与辅助脚本都从这里导入类型，两边的测试读同一组样例。桌面只接受 `event.source` 是这个框架、`event.origin` 是 `"null"` 的消息；辅助脚本只接受来自父窗口、来源是桌面的消息。
+格式只定义在 `web/src/workspace/frame/protocol.ts`，桌面与辅助脚本都从这里导入类型与校验，两边的测试读同一组样例（`frame/samples.json`）。桌面只接受 `event.source` 是这个框架、`event.origin` 是 `"null"` 的消息，并经 `readFromFrame` 丢掉格式不对的、截断过长的；辅助脚本只接受来自父窗口、来源是桌面（脚本地址的来源）的消息。桌面发给框架时目标来源只能写 `"*"`：不透明来源没有可写的值，消息里也没有机密。
 
 | 方向 | 消息 |
 |---|---|
-| 桌面 → 框架 | `anas:pick {on}`；`anas:capture {id, rect?}` |
+| 桌面 → 框架 | `anas:pick {on}`；`anas:clear`（去掉选中元素的框）；`anas:capture {id, rect?}` |
 | 框架 → 桌面 | `anas:ready {title, blocked[]}`；`anas:blocked {uri, directive}`；`anas:error {message}`；`anas:picked {at, generated, tag, text, dom, rect, style, rules}`；`anas:captured {id, image | error, drawMs}`；`anas:scrolled {y}` |
 
 ## 跨进程接缝

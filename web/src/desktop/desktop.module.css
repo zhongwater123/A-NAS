@@ -851,6 +851,10 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-montage {
   background: linear-gradient(155deg, #8f7bff, #4b2fd6);
 }
+/* 共享工作区: pages written together, on teal. */
+.icon-workspace {
+  background: linear-gradient(155deg, #43c6d8, #0e7f97);
+}
 /* Docker's own whale and blue (#2496ed). */
 .icon-docker {
   background: linear-gradient(155deg, #3aa8f5, #1d7fd6);

@@ -32,6 +32,7 @@ import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
 import { useWebSearch } from "../websearch/status";
+import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
@@ -227,6 +228,29 @@ export function Desktop({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [session.user.id]);
+  // 共享工作区 is read when the account signs in and when the page comes back
+  // into view, so a member an administrator just added finds it and one taken
+  // out loses it (ADR 0040). A failed read keeps what the desktop knew.
+  const [workspace, setWorkspace] = useState<WorkspaceAccess | null>(null);
+  useEffect(() => {
+    let controller = new AbortController();
+    const read = () => {
+      controller.abort();
+      controller = new AbortController();
+      workspaceAccess(controller.signal)
+        .then((access) => setWorkspace((current) => (current?.admin === access?.admin ? current : access)))
+        .catch(() => undefined);
+    };
+    read();
+    const visible = () => {
+      if (!document.hidden) read();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      controller.abort();
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [session.user.id]);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -245,6 +269,7 @@ export function Desktop({
       webSearchEnabled,
       scoring,
       montage,
+      workspace,
       open,
       intents,
       intentHandled,
@@ -260,6 +285,7 @@ export function Desktop({
       webSearchEnabled,
       scoring,
       montage,
+      workspace,
       open,
       intents,
       intentHandled,
