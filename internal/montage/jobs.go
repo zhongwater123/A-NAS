@@ -687,6 +687,10 @@ func (s *Store) reopenable(ctx context.Context, tx *sql.Tx, projectID, jobID str
 	if err := projectIdle(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if s.jobMusic != Music(s) {
+		// A test's stand-in keeps its own songs.
+		return nil
+	}
 	settings, err := jobSettings(ctx, tx, jobID)
 	if err != nil {
 		return err

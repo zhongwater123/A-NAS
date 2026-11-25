@@ -348,6 +348,32 @@ func TestAFailedPlanningIsPlannedAgainOnlyAsTheProjectsLatestJob(t *testing.T) {
 	}
 }
 
+// A failed job goes on with the song it was started with: once the project
+// has another and the first is let go, planning it again is refused.
+func TestAFailedPlanningIsPlannedAgainOnlyWithItsSong(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	put := env.ownSongs(t)
+	put("original")
+	job := env.generate(t, "generate:1")
+	fail := func() {
+		t.Helper()
+		env.store.Exec(t, "UPDATE jobs SET state = ?, wait_reason = ? WHERE id = ?", montage.JobFailed, montage.FailPlanning, job.ID)
+	}
+	fail()
+	if replanned, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil || replanned.State != montage.JobQueued {
+		t.Fatalf("Replan() with its song = %+v, %v", replanned, err)
+	}
+	fail()
+	put("replacement")
+	if err := env.store.ReclaimSongs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, montage.ErrNoSong) {
+		t.Fatalf("Replan() after its song was let go = %v", err)
+	}
+}
+
 // A conversation that stopped after its model called a montage tool may have
 // planned part of it: it is planned again on its own a minute later, with
 // what was taken kept (2026-11-25; until then the member decided, #514).
@@ -853,9 +879,11 @@ func TestNoticesTellWaitingFromPlanning(t *testing.T) {
 	if err := env.store.EndRound(ctx, "user:alice", claim.RoundID, "ok", montage.RoundComplete); err != nil {
 		t.Fatal(err)
 	}
-	env.settle(t, job.ID)
-	only(montage.NoticeNeeds, "")
-	// Ten minutes without a round and the job says VNAS has not taken it.
+	// The round ended without a plan: the job waits to be planned again.
+	env.waitForPlan(t, job.ID)
+	only(montage.NoticeWaiting, montage.DetailFailed(1))
+	// Planned again at once, it waits afresh; ten minutes without a round and
+	// the job says VNAS has not taken it.
 	if _, err := env.store.Replan(ctx, "user:alice", job.ID); err != nil {
 		t.Fatal(err)
 	}

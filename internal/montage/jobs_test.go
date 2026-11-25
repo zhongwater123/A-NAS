@@ -972,27 +972,35 @@ func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
 	}
 }
 
-func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
-	ctx := t.Context()
-	env := newJobEnv(t)
-	if err := env.store.Close(); err != nil {
+// ownSongs reopens the store with its own songs, decoded by a stand-in FFmpeg
+// worker, and returns how to give the project one.
+func (e *jobEnv) ownSongs(t *testing.T) func(name string) montage.SongDetail {
+	t.Helper()
+	if err := e.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := montage.Open(ctx, env.root, montage.Options{Grants: env.lib, Media: &songMedia{}, JobCompute: env.compute, Editing: env.editing, Planner: env.planner})
+	store, err := montage.Open(t.Context(), e.root, montage.Options{Grants: e.lib, Media: &songMedia{}, JobCompute: e.compute, Editing: e.editing, Planner: e.planner})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	env.store = store
-	put := func(name string) montage.SongDetail {
+	e.store = store
+	return func(name string) montage.SongDetail {
 		t.Helper()
-		song, err := store.PutSong(ctx, "user:alice", env.project.ID, montage.SongSource{Title: name},
+		song, err := store.PutSong(t.Context(), "user:alice", e.project.ID, montage.SongSource{Title: name},
 			strings.NewReader("song 200 "+name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return song
 	}
+}
+
+func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	put := env.ownSongs(t)
+	store := env.store
 	first := put("original")
 	job := env.generate(t, "first")
 	put("replacement")
