@@ -233,6 +233,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
+    expect(within(desktop).getByRole("button", { name: "打开待办" }).hasAttribute("disabled")).toBe(false);
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
     // The terminal moved into 设置 → 终端.
     for (const retired of [

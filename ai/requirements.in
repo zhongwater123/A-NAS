@@ -15,3 +15,12 @@ onnxruntime==1.31.0
 # Montage compute Worker. Keep these direct because it imports both.
 numpy==2.5.3
 pillow==13.0.0
+# The aesthetic scorer (docs/architecture/photo-ai.md#美学打分) and the
+# versions its bundle was tested with. PyPI's Linux build of PyTorch is the
+# CUDA one, which brings gigabytes of NVIDIA libraries: PyTorch's own index
+# has the CPU build, named by URL so that no other package comes from there.
+torch @ https://download.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl
+torchvision @ https://download.pytorch.org/whl/cpu/torchvision-0.29.1%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl
+transformers==5.20.2
+safetensors==0.8.0
+pydantic==2.13.4

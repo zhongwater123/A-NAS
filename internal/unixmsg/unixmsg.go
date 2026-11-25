@@ -161,6 +161,12 @@ func ReadBodyFiles(conn *net.UnixConn, limit, most int) ([]byte, []*os.File, err
 
 // readBody reads a message with room for room descriptors. The kernel may
 // fit a few more into the room's padding; callers check the count.
+//
+// A message whose descriptors the kernel dropped is still read to its end
+// before it is refused. The sender writes the body after the descriptors; a
+// receiver that answered and closed without reading it would fail that
+// write, and the sender would report the receiver gone instead of reading
+// the refusal.
 func readBody(conn *net.UnixConn, limit, room int) ([]byte, []*os.File, error) {
 	header := make([]byte, headerSize)
 	rights := make([]byte, syscall.CmsgSpace(room*4))
@@ -170,23 +176,23 @@ func readBody(conn *net.UnixConn, limit, room int) ([]byte, []*os.File, error) {
 		return nil, nil, err
 	}
 	files, err := receivedFiles(rights[:rightsCount])
-	if err == nil && flags&syscall.MSG_CTRUNC != 0 {
-		err = ErrTruncated
-	}
 	if err == nil && count < headerSize {
 		_, err = io.ReadFull(conn, header[count:])
 	}
+	var body []byte
+	if err == nil {
+		length := binary.BigEndian.Uint32(header)
+		if uint64(length) > uint64(limit) {
+			err = ErrTooLarge
+		} else {
+			body = make([]byte, length)
+			_, err = io.ReadFull(conn, body)
+		}
+	}
+	if err == nil && flags&syscall.MSG_CTRUNC != 0 {
+		err = ErrTruncated
+	}
 	if err != nil {
-		CloseFiles(files)
-		return nil, nil, err
-	}
-	length := binary.BigEndian.Uint32(header)
-	if uint64(length) > uint64(limit) {
-		CloseFiles(files)
-		return nil, nil, ErrTooLarge
-	}
-	body := make([]byte, length)
-	if _, err := io.ReadFull(conn, body); err != nil {
 		CloseFiles(files)
 		return nil, nil, err
 	}

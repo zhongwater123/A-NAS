@@ -65,6 +65,12 @@ if [[ "${1:-}" != --inside ]]; then
   rm -rf -- "$work"
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  # Exercise internal model packaging outside the signed repository.
+  scorer=$(bash "$repo/scripts/build-content-packages.sh" --stand-in --aesthetic-scorer-only "$work/scorer" "$repo/build")
+  dpkg-deb -x "$work/scorer/${scorer}_1_all.deb" "$work/scorer/files"
+  scorer_sha=$(jq -er .sha256 "$repo/deploy/models/qwen35-4b-aesthetic-scorer.json")
+  scorer_dir=$work/scorer/files/opt/a-nas/models/$scorer_sha
+  [[ -s "$scorer_dir/model/head.pt" && -s "$scorer_dir/licenses/Qwen3.5-4B-LICENSE.txt" ]]
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
   # The old package boundary predates a-nas-docker-policy. A previous package
   # made entirely by today's builder would otherwise mask its removal on a
@@ -198,7 +204,7 @@ next=$version+next
 # Each model role's manifest, as $ai/ROLE.json, for the checks below.
 ai=/tmp/ai-manifests
 install -d "$ai"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   cp "/src/deploy/models/${role##*:}.json" "$ai/${role%%:*}.json"
 done
 models_kept=$(for role in "${ai_roles[@]}"; do jq -r .sha256 "/src/deploy/models/${role##*:}.json"; done | sort -u | wc -l)
@@ -322,7 +328,18 @@ apt_install() {
     apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold \
       "a-nas=$1" "a-nas-host=$1" a-nas-docker-policy >>"/tmp/$2.log" 2>&1
 }
-installed_at=$(date '+%Y-%m-%d %H:%M:%S')
+# journal_mark: the cursor of the journal's last entry. What is read after it came
+# later; a time to the second (--since) also takes what came earlier in the
+# same second. export prints __CURSOR whatever --output-fields asks for. With
+# no cursor it fails: every read after an empty mark would fail, and a check
+# that a line is absent would pass without looking.
+journal_mark() {
+  local cursor
+  cursor=$(journalctl -n 1 -o export --output-fields=__CURSOR --no-pager | sed -n 's/^__CURSOR=//p')
+  [[ -n "$cursor" ]] || { echo "no journal cursor to mark" >&2; return 1; }
+  printf '%s\n' "$cursor"
+}
+installed_at=$(journal_mark)
 for release in "$previous" "$version"; do
   if ! apt_install "$release" "install-$release" || ! a-nas-check >"/tmp/check-$release.log" 2>&1; then
     tail -n 40 "/tmp/install-$release.log" "/tmp/check-$release.log"
@@ -438,8 +455,32 @@ running() {
   systemctl status --no-pager --lines=10 "$1"
   return 1
 }
+# journal_wait SECONDS MARK TEXT MATCH...: within SECONDS (0: one look), an
+# entry after MARK that MATCH selects (-u UNIT or -t IDENTIFIER) says TEXT.
+# Returns 1 when none does and 2 when the journal cannot be read. The log is
+# read whole before grep looks: piped into grep -q, journalctl dies of SIGPIPE
+# once grep stops at an early match, and pipefail reports the line missing.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_has() { journalctl -u "$1" --since "$2" -o cat --no-pager | grep -Fq "$3"; }
+journal_wait() {
+  local seconds=$1 mark=$2 text=$3 try log
+  shift 3
+  for ((try = 0; ; try++)); do
+    log=$(journalctl "$@" --after-cursor "$mark" -o cat --no-pager) || return 2
+    grep -qF -- "$text" <<<"$log" && return 0
+    ((try < seconds * 2)) || return 1
+    sleep 0.5
+  done
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_has() { journal_wait 0 "$2" "$3" -u "$1"; } # UNIT MARK TEXT: the unit logged TEXT after MARK
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_shows() { journal_wait 180 "$2" "$3" -u "$1"; } # UNIT MARK TEXT: within three minutes; the vector sync waits, as AI work does, while the device's other work is under pressure
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_lacks() { # UNIT MARK TEXT: the unit has not logged TEXT, and its journal could be read
+  local status=0
+  journal_has "$@" || status=$?
+  ((status == 1))
+}
 # smbd_listens_only_on_its_interfaces: within 30 s, smbd listens on the SMB
 # interface's address and on no wildcard address; otherwise prints where it
 # listens. smbd tells systemd it is ready before it opens its listening
@@ -504,7 +545,7 @@ check "the vector index's socket is on after the takeover" \
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 reinstall() {
   local since
-  since=$(date '+%Y-%m-%d %H:%M:%S')
+  since=$(journal_mark) || return 1
   if ! apt-get install -y --no-install-recommends --allow-downgrades --reinstall \
     "a-nas=${2:-$version}" "a-nas-host=${2:-$version}" >"/tmp/$1.log" 2>&1; then
     echo "  apt failed; the end of /tmp/$1.log:"
@@ -512,8 +553,7 @@ reinstall() {
     return 1
   fi
   for _ in $(seq 1 150); do
-    curl -fsS "$api/healthz" >/dev/null 2>&1 &&
-      journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
+    curl -fsS "$api/healthz" >/dev/null 2>&1 && journal_has anas-photos "$since" 'photo service ready' && return
     sleep 0.2
   done
   echo "  apt finished, but the services were not ready within 30 seconds:"
@@ -583,9 +623,8 @@ check "systemd accepts every installed A-NAS unit" \
 # restarts it, so that it listens only on the loopback and the SMB interface
 # (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md). Waiting
 # for that restart also keeps it from landing on the checks below.
-for _ in $(seq 1 60); do journal_has anas-host-agent "$installed_at" 'data volume reconciled' && break; sleep 1; done
 check "the Host Agent writes its Samba configuration once it serves" \
-  journal_has anas-host-agent "$installed_at" 'data volume reconciled'
+  journal_wait 60 "$installed_at" 'data volume reconciled' -u anas-host-agent
 check "smbd then listens only on the loopback and SMB interface's addresses" smbd_listens_only_on_its_interfaces
 
 # --- Every service runs under its production unit (issue #38).
@@ -998,13 +1037,12 @@ check "the local console reaches the terminal too" \
 check "a member's session gets no shell" terminal_refused "$lan" /tmp/lan.jar
 # The shell runs in a scope of its own, so what it logs is not the Host
 # Agent's, even under its name (issue #166).
-forged_at=$(date '+%Y-%m-%d %H:%M:%S')
+forged_at=$(journal_mark)
 scope_output=$(terminal "$lan" /tmp/owner-lan.jar $'echo "cgroup:$(cat /proc/self/cgroup)"\nlogger -t anas-host-agent "forged by a terminal"\nunshare --user true 2>/dev/null; echo "unshare:$?"\nexit 0\n' || true)
 check "the shell runs in a scope of its own" grep -Eqx 'cgroup:0::/(.*/)?anas-terminal-owner-[0-9]+\.scope' <<<"$scope_output"
 check "the shell cannot create namespaces" grep -qx 'unshare:[1-9][0-9]*' <<<"$scope_output"
-check "what a shell logs reaches the journal" \
-  bash -c "for _ in \$(seq 1 20); do journalctl -t anas-host-agent --since '$forged_at' -o cat --no-pager | grep -Fq 'forged by a terminal' && exit 0; sleep 0.2; done; exit 1"
-check "but not as the Host Agent's" fails journal_has anas-host-agent "$forged_at" 'forged by a terminal'
+check "what a shell logs reaches the journal" journal_wait 4 "$forged_at" 'forged by a terminal' -t anas-host-agent
+check "but not as the Host Agent's" journal_lacks anas-host-agent "$forged_at" 'forged by a terminal'
 check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
@@ -1066,9 +1104,9 @@ montage_unavailable() {
 }
 check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
 systemctl stop anas-montage
-readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
+readonly_at=$(journal_mark)
 systemctl restart anas-host-agent
-for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
+journal_wait 10 "$readonly_at" 'data-volume reconciliation failed' -u anas-host-agent || true
 check "restarting the Host Agent ends the scopes it started" \
   test -n "$scopes_before" -a -z "$(for scope in $scopes_before; do systemctl is-active --quiet "$scope" && echo "$scope"; done)"
 check "the Host Agent serves on a read-only data volume" systemctl is-active --quiet anas-host-agent
@@ -1082,11 +1120,11 @@ check "the Host Agent's log still reads in Settings" \
 check "the health check names the read-only data volume" \
   bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system' | jq -e '[.healthFindings[].code] | index(\"volume_read_only\")' >/dev/null"
 mount -o remount,rw "$data"
-writable_at=$(date '+%Y-%m-%d %H:%M:%S')
+writable_at=$(journal_mark)
 systemctl restart anas-host-agent
 systemctl start anas-photos anas-shares anas-family anas-montage
 check "once the volume is writable, the Host Agent reconciles it" \
-  bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
+  journal_wait 10 "$writable_at" 'data volume reconciled' -u anas-host-agent
 check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
@@ -1247,8 +1285,7 @@ png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2
 png += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 open(sys.argv[1], "wb").write(png)
 PY
-check "photo service becomes ready on its own" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos --since '$writable_at' -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
+check "photo service becomes ready on its own" journal_wait 30 "$writable_at" 'photo service ready' -u anas-photos
 library_of() { curl -fsS -b "$1" "$api/api/v1/photos/libraries" | jq -r --arg user "$2" '[.items[] | select(.kind == "private" and .ownerUserId == $user)][0].id'; }
 alice_user=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/session" | jq -r .user.id || true)
 alice_library=$(library_of /tmp/alice.jar "$alice_user" || true)
@@ -1598,6 +1635,8 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/aesthetic-scorer.bundle)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")" \
+  -a ! -e /usr/lib/a-nas/ai/aesthetic-scorer.bundle \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 # The OCR model comes in parts (scripts/split-model.sh), each from its own
 # content package, beside the first one the link names.
@@ -1628,8 +1667,14 @@ check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
   test "$(systemctl show -p CPUWeight --value anas.slice):$(systemctl show -p Slice --value anas-ai.slice)" = 10:anas.slice
-check "AI work yields to the pressure of the device's other work, not its own" \
-  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+ai_work_yields() { # the photo service logged, as it starts, how AI work yields; otherwise prints what it logged of AI work
+  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of" && return
+  echo "  what anas-photos logged of AI work:"
+  journalctl -u anas-photos.service -o cat --no-pager | grep -F 'AI work' | tail -n 10 | sed 's/^/  | /'
+  return 1
+}
+check "AI work yields to the pressure of the device's other work, not its own" ai_work_yields
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
 check "the Worker's memory is where the photo service's gate reads it" worker_memory_beside_photos
@@ -1773,28 +1818,17 @@ same_network_namespace() {
   [[ "$index" != 0 && "$proxy" != 0 && "$(readlink "/proc/$index/ns/net")" == "$(readlink "/proc/$proxy/ns/net")" &&
     "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
 }
-# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; the vector sync waits,
-  # as AI work does, while the device's other work is under pressure
-  for _ in $(seq 1 360); do
-    journal_has "$@" && return 0
-    sleep 0.5
-  done
-  return 1
-}
-# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_lacks() { ! journal_has "$@"; } # UNIT SINCE TEXT: the unit has not logged TEXT
 check "the installer enables the photo service's vector index socket" \
   systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
 check "the photo service builds its vector index from the Catalog" \
   journal_shows anas-photos.service "$installed_at" "photo vector index created"
 check "and brings the organised photo into it" \
   journal_shows anas-photos.service "$installed_at" "photo vector index synced"
-journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
+journalctl -u anas-photos.service --after-cursor "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
 # A restart clears what the service remembers of earlier searches: the last
 # check, which spaces checks ten minutes apart, and which reasons to read the
 # Catalog it has already logged.
-searched_at=$(date '+%Y-%m-%d %H:%M:%S')
+searched_at=$(journal_mark)
 systemctl restart anas-photos
 check "the photo service starts again" journal_shows anas-photos.service "$searched_at" "photo service ready"
 check "a search reads the vector index" semantic_search 猫
@@ -2438,12 +2472,11 @@ check "disabling ends the member's SMB session" smb_sessions_end carol
 check "the disabled member cannot open SMB" smb_refused NT_STATUS_ACCOUNT_DISABLED carol carol ls
 kill "$carol_client" 2>/dev/null || true
 # Every start synchronizes identities, the disabled member's SMB entry too.
-synced_at=$(date '+%Y-%m-%d %H:%M:%S')
+synced_at=$(journal_mark)
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "the Product Service's start synchronizes identities with a disabled SMB account" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-api --since '$synced_at' -o cat --no-pager |
-    grep -Fq 'identity synchronization succeeded' && exit 0; sleep 1; done; exit 1"
+  journal_wait 30 "$synced_at" 'identity synchronization succeeded' -u anas-api
 
 # --- Enabling the member again gives back her sign-in and SMB with the
 # password she had (docs/specs/account-enable-and-delete.md).
@@ -2499,11 +2532,10 @@ check "the new member gets a new UID" test "$(id -u carol)" != "$carol_uid"
 check "the new member's personal space starts empty" test ! -e /srv/a-nas/data/spaces/private/carol/carol.txt
 
 # --- Restarting the Host Agent keeps all of the above.
-restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
+restarted_at=$(journal_mark)
 systemctl restart anas-host-agent
 check "Host Agent proves the identity switch again after a restart" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-host-agent --since '$restarted_at' -o cat --no-pager |
-    grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
+  journal_wait 30 "$restarted_at" 'file broker identity switch verified' -u anas-host-agent
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "sharing recovers after the Host Agent restarts" shares_ready
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
@@ -3174,11 +3206,9 @@ fi
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops
 # serving from the lost store instead of following the path.
-lost_at=$(date '+%Y-%m-%d %H:%M:%S')
+lost_at=$(journal_mark)
 umount --lazy "$data"
-check "photo service notices the data volume is gone" \
-  bash -c "for _ in \$(seq 1 15); do journalctl -u anas-photos --since '$lost_at' -o cat --no-pager |
-    grep -Fq 'photo store lost' && exit 0; sleep 1; done; exit 1"
+check "photo service notices the data volume is gone" journal_wait 15 "$lost_at" 'photo store lost' -u anas-photos
 check "photos answer unavailable while the volume is gone" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/libraries")" = 503
 

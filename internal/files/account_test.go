@@ -2,8 +2,11 @@ package files_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
@@ -45,5 +48,49 @@ func TestRemovingADeletedAccountDeletesItsSnapshotsAndSchedule(t *testing.T) {
 	}
 	if err := f.files.RemoveAccount(ctx, f.member.ID, f.shared.ID); err == nil {
 		t.Fatal("the Shared space was removed with an account")
+	}
+}
+
+// removingLookup answers the scheduler's question about a space after doing
+// something first: here, removing the space's account.
+type removingLookup struct {
+	files.SpaceLookup
+	before func(spaceID string)
+}
+
+func (l removingLookup) Space(ctx context.Context, spaceID string) (accounts.Space, error) {
+	l.before(spaceID)
+	return l.SpaceLookup.Space(ctx, spaceID)
+}
+
+// The scheduler reads the schedules, then takes the due snapshots one space
+// after another. An account removed in between has no schedule any more: no
+// snapshot is taken of its space, which nothing would ever delete again.
+func TestAScheduleRemovedWithItsAccountTakesNoSnapshot(t *testing.T) {
+	f := newSnapshotFixture(t)
+	f.open()
+	ctx := context.Background()
+	f.upload(f.member, f.memberPrivate, "", "notes.txt", "alice")
+	f.setSchedule(f.member, f.memberPrivate, files.SnapshotScheduleSettings{Enabled: true, Frequency: files.FrequencyHourly, Time: "00:15", Keep: 2})
+	f.clock.Set(at(0, 11, 16))
+
+	removed := false
+	lookup := removingLookup{SpaceLookup: f.accounts, before: func(spaceID string) {
+		if spaceID != f.memberPrivate.ID || removed {
+			return
+		}
+		removed = true
+		if err := f.files.RemoveAccount(ctx, f.member.ID, f.memberPrivate.ID); err != nil {
+			t.Errorf("RemoveAccount() error = %v", err)
+		}
+	}}
+	if err := f.files.RunDueSnapshots(ctx, lookup, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("RunDueSnapshots() error = %v", err)
+	}
+	if !removed {
+		t.Fatal("the member's schedule was not due")
+	}
+	if snapshots, err := f.files.ListSnapshots(ctx, f.member, f.memberPrivate.ID); err != nil || len(snapshots) != 0 {
+		t.Fatalf("snapshots of the removed space = %+v, %v; want none", snapshots, err)
 	}
 }

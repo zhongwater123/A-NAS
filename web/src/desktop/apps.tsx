@@ -1,4 +1,4 @@
-import { Clapperboard, Settings, Share2 } from "lucide-react";
+import { Clapperboard, ListTodo, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -43,6 +43,7 @@ const ScoringPanel = lazyCode(() => import("../scoring/ScoringPanel").then((modu
 const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
 const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
 const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
+const TodosPanel = lazyCode(() => import("../todos/TodosPanel").then((module) => module.TodosPanel));
 const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 const WebSearchPanel = lazyCode(() => import("../websearch/WebSearchPanel").then((module) => module.WebSearchPanel));
 
@@ -54,11 +55,16 @@ export interface WindowIntentPayloads {
   photos: { assetId: string };
   // A baby's channel that photos from 相册 joined.
   family: { babyId: string };
+  // A to-do the desktop's reminder points at.
+  todos: { todoId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
   // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
   // cards that wait for the member.
   assistant: { sessionId?: string; title?: string; conversationId?: string };
+  // A row of a section to bring into view, as the search finds one: the companion's dot, the system health
+  // in 概览. The section itself is SettingsState's.
+  settings: { anchor: string };
 }
 // The intents waiting for their windows. Every request is a new object, so a
 // window sees a request for the place it already shows. The window hands back
@@ -109,7 +115,13 @@ export interface SettingsState {
 }
 export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
 
-function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "session" | "changeUser" | "logout">) {
+function SettingsWindow({
+  session,
+  changeUser,
+  logout,
+  intents,
+  intentHandled,
+}: Pick<WindowContext, "session" | "changeUser" | "logout" | "intents" | "intentHandled">) {
   const state = use(SettingsStateContext);
   if (!state) throw new Error("SettingsWindow outside the desktop");
   return (
@@ -118,6 +130,8 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
       host={state.host}
       section={state.section}
       onSectionChange={state.setSection}
+      intent={intents.settings}
+      onIntentHandled={(handled) => intentHandled("settings", handled)}
       storagePlan={state.storagePlan}
       onUserChange={changeUser}
       onLogout={logout}
@@ -203,8 +217,14 @@ const definitions = {
       keywords: ({ isAdmin }) =>
         `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash 网页搜索开关" : ""}`,
     },
-    render: ({ session, changeUser, logout }) => (
-      <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
+    render: ({ session, changeUser, logout, intents, intentHandled }) => (
+      <SettingsWindow
+        session={session}
+        changeUser={changeUser}
+        logout={logout}
+        intents={intents}
+        intentHandled={intentHandled}
+      />
     ),
   },
   store: {
@@ -314,6 +334,21 @@ const definitions = {
         onShowPhoto={(assetId) => open("photos", { assetId })}
         intent={intents.family}
         onIntentHandled={(handled) => intentHandled("family", handled)}
+      />
+    ),
+  },
+  todos: {
+    title: "待办",
+    icon: ListTodo,
+    tone: "todos",
+    // A narrow list; on a phone the window fills the page as every window does.
+    bounds: { x: 320, y: 64, width: 720, height: 640 },
+    launcher: { id: "todos", keywords: "待办 提醒 截止 到期 账单 缴费 续保 复查 证件 todo" },
+    render: ({ session, intents, intentHandled }) => (
+      <TodosPanel
+        userId={session.user.id}
+        intent={intents.todos}
+        onIntentHandled={(handled) => intentHandled("todos", handled)}
       />
     ),
   },

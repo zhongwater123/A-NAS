@@ -235,6 +235,9 @@ type montageFixture struct {
 	search  bool
 	vectors photos.VectorIndex
 	fell    *fallbacks
+	// release is the product release the store opens as; a restart with
+	// another one is an update.
+	release string
 }
 
 func newMontageFixture(t *testing.T) montageFixture {
@@ -250,7 +253,8 @@ func newMontageFixture(t *testing.T) montageFixture {
 // open opens the store, again after a restart.
 func (f *montageFixture) open(t *testing.T) {
 	t.Helper()
-	options := photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true, Vectors: f.vectors}
+	options := photos.Options{Now: f.clock.Now, Media: f.media, Compute: f.computeWorker(), DisableCapacityReserve: true, Vectors: f.vectors,
+		Release: f.release}
 	if f.search {
 		options.AI = f.embedder
 	}
