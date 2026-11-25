@@ -20,9 +20,10 @@ from unittest.mock import patch
 from anas_ai import protocol, providers, worker
 
 
-def call(path, request, image=None, images=None):
+def call(path, request, image=None, images=None, *, timeout=5):
     """Sends one request the way internal/aiworker does and returns the response."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(timeout)
         conn.connect(path)
         payload = json.dumps(request).encode()
         frame = struct.pack(">I", len(payload)) + payload
@@ -33,11 +34,17 @@ def call(path, request, image=None, images=None):
             conn.sendall(frame)
         header = b""
         while len(header) < 4:
-            header += conn.recv(4 - len(header))
+            part = conn.recv(4 - len(header))
+            if not part:
+                raise EOFError("Worker closed before the response header")
+            header += part
         (length,) = struct.unpack(">I", header)
         body = b""
         while len(body) < length:
-            body += conn.recv(length - len(body))
+            part = conn.recv(length - len(body))
+            if not part:
+                raise EOFError("Worker closed inside the response body")
+            body += part
         return json.loads(body)
 
 
