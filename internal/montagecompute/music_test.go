@@ -5,9 +5,11 @@ package montagecompute_test
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -37,12 +39,18 @@ func pythonWorker(t *testing.T, prelude string) string {
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	worker.Stderr = os.Stderr
+	// The Worker ends with the test binary, which a test timeout ends without cleanups.
+	worker.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := worker.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = worker.Process.Kill(); _ = worker.Wait() })
+	// The socket file appears when the Worker binds it, a moment before it
+	// listens: until then a connection is refused. The Worker drops the
+	// empty connection with a warning.
 	for deadline := time.Now().Add(20 * time.Second); ; {
-		if _, err := os.Stat(socket); err == nil {
+		if conn, err := net.Dial("unix", socket); err == nil {
+			_ = conn.Close()
 			break
 		}
 		if time.Now().After(deadline) {
