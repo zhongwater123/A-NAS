@@ -338,7 +338,10 @@ func (e *editing) Segment(ctx context.Context, _ *os.File, request ffmpegworker.
 	return io.NopCloser(strings.NewReader(fmt.Sprintf("segment %d+%d;", request.Offset, request.Frames))), nil
 }
 
-func (e *editing) Assemble(_ context.Context, video, _ *os.File, request ffmpegworker.AssembleRequest) (io.ReadCloser, error) {
+func (e *editing) Assemble(_ context.Context, video, song *os.File, request ffmpegworker.AssembleRequest) (io.ReadCloser, error) {
+	if err := ffmpegworker.ReadOnly(video, song); err != nil {
+		return nil, err
+	}
 	if _, err := io.ReadAll(video); err != nil {
 		return nil, err
 	}

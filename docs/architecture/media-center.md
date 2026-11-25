@@ -83,7 +83,7 @@ anas-api（a-nas）
 
 ## Worker 协议
 
-- 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/ffmpegworker/protocol.go)）。
+- 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/ffmpegworker/protocol.go)）。描述符都是输入，必须以只读访问模式打开：客户端在占用槽位、连接 Worker 之前用 [`ReadOnly`](../../internal/ffmpegworker/client.go) 检查，可写的直接拒绝（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）。所以调用方写完的临时文件（剪辑中心拼好的 TS、收到的歌曲）要重新以只读方式打开再交出；memfd 由 `unixmsg.WriteSealedFile` 交出只读描述符。
 - 通用操作有 `probe`、`frame`（时间点与宽度）、`image`（HEIF 预览宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位 FLAC；带 `pcm` 时严格校验字段并输出 32 位单声道或立体声浮点采样）。参数经校验后由 [`command.go`](../../internal/ffmpegworker/command.go) 生成。FFmpeg 通过标准输入上的 `fd:` 读取可寻址的描述符（需 FFmpeg 6.1 或更新版本），通过标准输出返回结果。`image` 使用独立的 libheif 命令。
 - 剪辑操作包括 `frames`、`segment`、`assemble`（[`edit.go`](../../internal/ffmpegworker/edit.go)，[剪辑中心实施方案](montage-center.md#ffmpeg-worker-的新操作)）。`frames` 按时刻列表或区间采样，每帧发一条消息，空消息之后发结果，结果里带每帧的时刻。区间是半开的 `[start, end)`：第 k 帧对应 `start + k/rate`，帧数是 end 之前这样的时刻个数（300 秒、每秒 2 帧正好 600 帧）。FFmpeg 从起点前一步读到终点后一步，所以同一时刻在哪个区间里取到的都是同一个源帧：前一段的终点等于后一段的起点时两段不重复；终点多一步时两段共享这一时刻的帧。需要模糊值时，将编码后的 JPEG 送进同一个 blurdetect 进程，黑帧的值为 `null`。`segment` 渲染 1920×1080、30 帧/秒、无声的 MPEG-TS，时间戳包含该段在成片中的偏移。`assemble` 接收拼好的 TS 与歌曲两个只读描述符，在 Worker 自有 memfd 生成 faststart MP4，验证视频帧数和 AAC 立体声后发回。
 - 剪辑请求拒绝未知字段，预检超限返回 `invalid_request`，运行中输出超限返回 `too_large`，转码超时或 blurdetect 运行失败返回 `failed`，缺少 blurdetect 滤镜返回 `unavailable`。`segment` 和 `assemble` 报出正文长度，正文提前结束算 `ErrInterrupted`。剪辑与 PCM 子进程以 nice 10 启动，取帧和片段渲染的解码、编码及滤镜各用至多 4 个线程。

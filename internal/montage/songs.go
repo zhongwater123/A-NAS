@@ -296,7 +296,7 @@ func validDigest(sha string) bool {
 }
 
 // receive writes body into songs/.incoming, at most MaxSongBytes, and
-// returns the file, open, with its digest.
+// returns the file, open read-only for FFmpeg (ADR 0017), with its digest.
 func (s *Store) receive(body io.Reader) (*os.File, string, error) {
 	dir := filepath.Join(s.songsRoot(), incomingDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -322,10 +322,12 @@ func (s *Store) receive(body io.Reader) (*os.File, string, error) {
 	if err := file.Sync(); err != nil {
 		return discard(err)
 	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
+	readOnly, err := os.Open(file.Name())
+	if err != nil {
 		return discard(err)
 	}
-	return file, hex.EncodeToString(digest.Sum(nil)), nil
+	_ = file.Close()
+	return readOnly, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 // probeSong checks that file is audio of a length the montage center takes,

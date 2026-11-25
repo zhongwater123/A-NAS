@@ -60,6 +60,9 @@ func (m *songMedia) Probe(_ context.Context, file *os.File) (ffmpegworker.Probe,
 	if m.down {
 		return ffmpegworker.Probe{}, fmt.Errorf("%w: connection refused", ffmpegworker.ErrUnavailable)
 	}
+	if err := ffmpegworker.ReadOnly(file); err != nil {
+		return ffmpegworker.Probe{}, err
+	}
 	fields := strings.Fields(readAllFrom(file))
 	if len(fields) < 2 || fields[0] != "song" {
 		return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "png_pipe"},
