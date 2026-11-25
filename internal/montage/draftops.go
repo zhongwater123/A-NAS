@@ -339,7 +339,7 @@ const shuffleFrom = 4
 
 // shuffle picks each unlocked shot again from the four beats most like its
 // picture's description, by seed: not one used in the film, not of the
-// card before it nor of the next shot's when that one stays, long enough, and not 竖 where the shot was not. A shot
+// card before it nor of the next shot's as it is, long enough, and not 竖 where the shot was not. A shot
 // whose description the plan left empty or too long to search for stays as
 // it is: the plan wrote it, not the member, so it is not their request that
 // is wrong.
@@ -397,9 +397,10 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 			before = cardOf(next.Shots[i-1].Beat)
 		}
 		var after string
-		if i+1 < len(next.Shots) && asks[i+1] < 0 {
-			// The next shot stays as it is, locked or with nothing to search
-			// for: this one is not of its card either.
+		if i+1 < len(next.Shots) {
+			// Nor of the next shot's card: that shot may stay as it is,
+			// locked, with nothing to search for, or finding nothing to pick
+			// (as reservedLater keeps its beat).
 			after = cardOf(next.Shots[i+1].Beat)
 		}
 		landscape := !src.portrait(shot.Beat)

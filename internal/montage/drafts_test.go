@@ -140,9 +140,11 @@ func (*editCompute) Likeness(_ context.Context, a, b []float32, dimensions int) 
 
 // editSearch finds, for any text, the windows listed in hits.
 type editSearch struct {
-	hits  []photos.WindowMatch
-	texts [][]string
-	err   error
+	hits []photos.WindowMatch
+	// byText are the hits of the texts that have their own.
+	byText map[string][]photos.WindowMatch
+	texts  [][]string
+	err    error
 }
 
 func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []string, _ int) ([][]photos.WindowMatch, error) {
@@ -154,8 +156,11 @@ func (s *editSearch) SearchWindows(_ context.Context, grantID string, texts []st
 		return nil, s.err
 	}
 	out := make([][]photos.WindowMatch, len(texts))
-	for i := range texts {
+	for i, text := range texts {
 		out[i] = s.hits
+		if hits, ok := s.byText[text]; ok {
+			out[i] = hits
+		}
 	}
 	return out, nil
 }
@@ -1036,10 +1041,9 @@ func TestThePreviewStaysWithinTheCard(t *testing.T) {
 	}
 }
 
-// A shot is not shuffled onto the card of the shot after it when that one
-// stays as it is because the plan gave its picture nothing to search for,
-// as it is not when that one is locked: two shots of one card in a row
-// look like no cut.
+// A shot is not shuffled onto the card of the shot after it, which may stay
+// as it is: locked, with nothing to search for, as here, or finding nothing
+// to pick. Two shots of one card in a row look like no cut.
 func TestAShuffleAvoidsTheCardOfAShotThatStays(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()
@@ -1084,5 +1088,39 @@ func TestAVersionWhoseJobWasRedoneSinceIsNotEdited(t *testing.T) {
 	}
 	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "开头换热闹点"); !errors.Is(err, ErrNotEditable) {
 		t.Fatalf("recutting it = %v", err)
+	}
+}
+
+// A shot that finds nothing to pick keeps its beat: the shot before it was
+// not shuffled onto that beat's card.
+func TestAShuffleAvoidsTheCardOfAShotThatFindsNothing(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	// Shot 2's picture finds c2/1; shot 3's finds its own c2/2 only.
+	env.search.byText = map[string][]photos.WindowMatch{}
+	for i := 11; i < 15; i++ {
+		env.search.byText["海边散步"] = append(env.search.byText["海边散步"], photos.WindowMatch{AssetID: videoA, Window: i, Score: 1})
+	}
+	for i := 15; i < 20; i++ {
+		env.search.byText["海浪"] = append(env.search.byText["海浪"], photos.WindowMatch{AssetID: videoA, Window: i, Score: 1})
+	}
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shots: c1/1 (locked), c1/3, c2/2, c3/2 (locked). Shot 2 could take
+	// c2/1; shot 3 then finds nothing but c2 and would stay c2/2 beside it.
+	for _, op := range []DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
+		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := int64(7)
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := beats(next); got[1] != "c1/3" || got[2] != "c2/2" {
+		t.Fatalf("shuffled = %v: shot 2 went onto the card of shot 3, which found nothing to pick", got)
 	}
 }
