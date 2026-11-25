@@ -248,7 +248,22 @@ func (src *editSource) partName(part int) string {
 	return ""
 }
 
+// asText keeps a spreadsheet from reading a cell as a formula: the plan's
+// names and notes are a model's words. A leading apostrophe shows the text
+// as it is.
+func asText(cell string) string {
+	if cell != "" && strings.ContainsRune("=+-@\t\r", rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
 func writeList(rows [][]string) ([]byte, error) {
+	for _, row := range rows {
+		for i, cell := range row {
+			row[i] = asText(cell)
+		}
+	}
 	var out bytes.Buffer
 	out.WriteString(byteOrderMark)
 	w := csv.NewWriter(&out)

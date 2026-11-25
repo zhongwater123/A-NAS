@@ -786,6 +786,20 @@ func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
 	}
 }
 
+// A shot list's cells are text to a spreadsheet: one that would read as a
+// formula is kept as it is written.
+func TestAShotListHoldsNoFormula(t *testing.T) {
+	row := []string{"1", "=HYPERLINK(\"x\")", "+1", "-2", "@a", "\tb", "海边", "", "0.50", "4.70", "1", "否"}
+	list, err := writeList([][]string{slices.Clone(row)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1", "'=HYPERLINK(\"x\")", "'+1", "'-2", "'@a", "'\tb", "海边", "", "0.50", "4.70", "1", "否"}
+	if rows := readList(t, list); len(rows) != 1 || !slices.Equal(rows[0], want) {
+		t.Fatalf("the list's rows = %q", rows)
+	}
+}
+
 // The fill's rows and a beat's likeness read the same vectors: for each
 // window the analysis lists, its dimensions as little-endian float32.
 func TestWindowVectorsAreReadAsTheLibraryKeepsThem(t *testing.T) {
