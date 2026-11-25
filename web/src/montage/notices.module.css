@@ -1,7 +1,7 @@
-/* 剪辑中心的桌面提示 (ui/DeskNotice), under the family hint's place, in the
-   desktop's accent. Kept apart from the window's styles, which load with it. */
+/* 剪辑中心的桌面提示 (ui/DeskNotice), in the desktop's stack of notices under
+   the status bar (desktop.module.css .notice-stack), in the desktop's accent.
+   Kept apart from the window's styles, which load with it. */
 .mn-notice {
-  --desk-notice-top: 196px;
   --desk-notice-mark: var(--color-accent);
   --desk-notice-link: var(--color-accent);
 }

@@ -1,14 +1,12 @@
-/* A feature's notice on the desktop, under the status bar (DeskNotice). The
-   feature's own class sets where it sits and its colours:
-   --desk-notice-top, --desk-notice-mark and --desk-notice-link. The paper and
+/* A feature's notice on the desktop (DeskNotice). The desktop places it, in
+   its stack of notices under the status bar (desktop.module.css
+   .notice-stack); the feature's own class sets its colours:
+   --desk-notice-mark, --desk-notice-link (also the action button's) and
+   --desk-notice-note (a line's short note, muted unless set). The paper and
    ink are the ones 家庭中心's hint has had since it was drawn. */
 @layer ui {
   .desk-notice {
-    position: absolute;
-    z-index: 77;
-    top: var(--desk-notice-top, 78px);
-    right: 22px;
-    width: min(340px, calc(100% - 140px));
+    pointer-events: auto;
   }
   .desk-notice-toast {
     position: relative;
@@ -54,11 +52,53 @@
     font-weight: 600;
     line-height: 1.45;
   }
+  /* A line kept to one line: the text gives way to its note. */
+  .desk-notice-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .desk-notice-row strong {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .desk-notice-row span {
+    flex: none;
+    color: var(--desk-notice-note, var(--color-muted));
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .desk-notice-more {
+    margin: 0;
+    color: #998b81;
+    font-size: 12px;
+  }
+  .desk-notice-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .desk-notice-action {
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    background: var(--desk-notice-link, var(--color-accent));
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
   .desk-notice-open {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    margin-top: 4px;
     padding: 0;
     border: 0;
     color: var(--desk-notice-link, var(--color-accent));
@@ -97,6 +137,11 @@
     from {
       opacity: 0;
       transform: translateY(-8px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .desk-notice-toast {
+      animation: none;
     }
   }
 }

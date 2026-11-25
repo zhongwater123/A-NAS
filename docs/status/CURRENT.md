@@ -49,4 +49,5 @@
 7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
 9. 剪辑中心：allin1 版权待议；二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的 R1–R6 实施（#596）。
-10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+10. 家庭待办：随下次发布部署到实验 NAS，再把验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
+11. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

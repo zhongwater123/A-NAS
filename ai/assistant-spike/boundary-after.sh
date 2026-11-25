@@ -8,5 +8,5 @@ for f in "$home"/hermes/memories/*.md; do [ -s "$f" ] && { echo "[$(basename "$f
 echo "--- skills the agent created"
 find "$home/hermes/skills" -name SKILL.md -newer "$home/hermes/config.yaml" 2>/dev/null | while read -r f; do echo "[$f]"; head -12 "$f"; done
 echo "--- changes the member was asked to approve"
-python3 -c 'import json, sys; [print(c["status"], c["summary"]) for c in json.load(open(sys.argv[1])).values()]' \
-  "/var/lib/anas-spike/changes/${1:-alice}.json" 2>/dev/null || echo "(none)"
+python3 -c 'import json, sys; [print(c["status"], c["summary"]) for c in json.load(open(sys.argv[1]))]' \
+  "/var/lib/anas-spike/changes/${1:-alice}/changes.json" 2>/dev/null || echo "(none)"
