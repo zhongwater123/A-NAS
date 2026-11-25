@@ -96,24 +96,23 @@ type Client struct {
 	client     atomic.Pointer[qdrant.Client]
 }
 
-// Option changes a client that New returns.
-type Option func(*Client)
-
-// IdleTimeout closes an unused connection after d instead of a minute, so
-// that the instance stops sooner, as the system test needs.
-func IdleTimeout(d time.Duration) Option {
-	return func(c *Client) { c.idle = d }
+// Options configures a Client; zero values take the defaults.
+type Options struct {
+	// Logger is slog.Default() when nil.
+	Logger *slog.Logger
+	// IdleTimeout is a minute when zero; the system test shortens it.
+	IdleTimeout time.Duration
 }
 
 // New returns a client for the instance behind socket. It does not connect
 // until the first request.
-func New(socket string, logger *slog.Logger, options ...Option) *Client {
-	if logger == nil {
-		logger = slog.Default()
+func New(socket string, options Options) *Client {
+	c := &Client{socket: socket, logger: options.Logger, idle: options.IdleTimeout}
+	if c.logger == nil {
+		c.logger = slog.Default()
 	}
-	c := &Client{socket: socket, logger: logger, idle: defaultIdleTimeout}
-	for _, option := range options {
-		option(c)
+	if c.idle <= 0 {
+		c.idle = defaultIdleTimeout
 	}
 	return c
 }

@@ -584,7 +584,7 @@ type windowIndex struct {
 func newWindowIndex(t *testing.T, f *montageFixture) windowIndex {
 	t.Helper()
 	instance := vectorindextest.Start(t)
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = client.Close() })
 	return windowIndex{f: f, index: &indexRecorder{Client: client}}
 }

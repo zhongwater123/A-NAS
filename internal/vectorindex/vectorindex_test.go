@@ -70,7 +70,7 @@ func TestPointIDIsAStableUUID(t *testing.T) {
 // connection, and a search without a scope finds nothing.
 func TestRequestsAreTyped(t *testing.T) {
 	ctx := context.Background()
-	client := vectorindex.New(filepath.Join(t.TempDir(), "missing.sock"), nil)
+	client := vectorindex.New(filepath.Join(t.TempDir(), "missing.sock"), vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	if hits, err := client.Search(ctx, "c", vectorindex.Query{Vector: []float32{1}, Scope: vectorindex.Scope{Field: "libraries"}, Limit: 10}); err != nil || hits != nil {
 		t.Errorf("Search without scope values = %v, %v; want nothing", hits, err)
@@ -108,7 +108,7 @@ func searchErrLimit(client *vectorindex.Client, limit int) error {
 func TestIndex(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 
 	if client.Warm() {
@@ -205,7 +205,7 @@ func TestIndex(t *testing.T) {
 func TestIdleConnectionCloses(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil, vectorindex.IdleTimeout(200*time.Millisecond))
+	client := vectorindex.New(instance.Socket, vectorindex.Options{IdleTimeout: 200 * time.Millisecond})
 	defer func() { _ = client.Close() }()
 
 	if _, err := client.Collections(ctx); err != nil {
@@ -231,7 +231,7 @@ func TestIdleConnectionCloses(t *testing.T) {
 func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil, vectorindex.IdleTimeout(400*time.Millisecond))
+	client := vectorindex.New(instance.Socket, vectorindex.Options{IdleTimeout: 400 * time.Millisecond})
 	defer func() { _ = client.Close() }()
 
 	if err := client.Prepare(ctx); err != nil {
@@ -318,7 +318,7 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 			held = append(held, conn)
 		}
 	}()
-	client := vectorindex.New(filepath.Join(dir, "hung.sock"), nil)
+	client := vectorindex.New(filepath.Join(dir, "hung.sock"), vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	started := time.Now()
 	if _, err := client.Collections(context.Background()); err == nil {
@@ -334,7 +334,7 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "windows", Dimensions: 3, Keywords: []string{"object", "libraries"}}); err != nil {
 		t.Fatal(err)
