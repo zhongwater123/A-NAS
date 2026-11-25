@@ -206,11 +206,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 	}
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
-	if c.AccountDeletionDelay != "" {
-		if c.DeletionDelay, err = time.ParseDuration(c.AccountDeletionDelay); err != nil || c.DeletionDelay <= 0 {
-			problem(errors.New("ANAS_ACCOUNT_DELETION_DELAY must be a positive duration such as 30s"))
-		}
-	}
+	c.DeletionDelay, err = envconfig.PositiveDuration("ANAS_ACCOUNT_DELETION_DELAY", c.AccountDeletionDelay)
+	problem(err)
 	switch {
 	case c.FakeStorage == "":
 	case live:
@@ -407,9 +404,7 @@ type photoServiceConfig struct {
 	QuietPeriod string        `env:"ANAS_PHOTOS_AI_QUIET_PERIOD"`
 	Quiet       time.Duration `env:"-"`
 	// VectorIdleTimeout shortens how long an unused connection to the vector
-	// index stays open, so that the system test sees the instance stop within
-	// seconds; products keep the minute, within which PrepareVectors keeps the
-	// connection open while the library is in use.
+	// index stays open, for the system test; products keep the default.
 	VectorIdleTimeout string        `env:"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT"`
 	VectorIdle        time.Duration `env:"-"`
 	Media             MediaConfig
@@ -428,15 +423,11 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 		"ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
 		"ANAS_FFMPEG_SOCKET":          &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
-	if c.QuietPeriod != "" {
-		if c.Quiet, err = time.ParseDuration(c.QuietPeriod); err != nil || c.Quiet <= 0 {
-			problems = append(problems, errors.New("ANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"))
-		}
+	if c.Quiet, err = envconfig.PositiveDuration("ANAS_PHOTOS_AI_QUIET_PERIOD", c.QuietPeriod); err != nil {
+		problems = append(problems, err)
 	}
-	if c.VectorIdleTimeout != "" {
-		if c.VectorIdle, err = time.ParseDuration(c.VectorIdleTimeout); err != nil || c.VectorIdle <= 0 {
-			problems = append(problems, errors.New("ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT must be a positive duration such as 5s"))
-		}
+	if c.VectorIdle, err = envconfig.PositiveDuration("ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT", c.VectorIdleTimeout); err != nil {
+		problems = append(problems, err)
 	}
 	if len(problems) > 0 {
 		return photoServiceConfig{}, errors.Join(problems...)

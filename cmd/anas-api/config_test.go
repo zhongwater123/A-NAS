@@ -268,7 +268,7 @@ func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
 	}{
 		{"photos", func(e map[string]string) error { _, err := loadPhotoServiceConfig(e); return err },
 			map[string]string{"ANAS_PHOTOS_ROOT": "photos", "ANAS_FFMPEG_SLOTS": "slots", "ANAS_PHOTOS_AI_QUIET_PERIOD": "soon"},
-			"ANAS_FFMPEG_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"},
+			"ANAS_FFMPEG_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 30s"},
 		{"shares", func(e map[string]string) error { _, err := loadShareServiceConfig(e); return err },
 			map[string]string{"ANAS_SHARES_ROOT": "shares", "ANAS_SHARE_SESSION_SOCKET": "sessions.sock"},
 			"ANAS_SHARES_ROOT must be an absolute path\nANAS_SHARE_SESSION_SOCKET must be an absolute path"},
