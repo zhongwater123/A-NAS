@@ -17,6 +17,7 @@ import {
   privateLibrary,
   sharedLibrary,
 } from "../test/handlers/photos";
+import { scrolls, sizedScrollers } from "../test/layout";
 import { apiError, formOf, http, pathOf, server } from "../test/server";
 import { PhotosPanel } from "./PhotosPanel";
 
@@ -82,12 +83,8 @@ class FakeUpload {
 }
 
 const alice = session({ id: "user:alice", username: "alice", role: "member" }, { csrfToken: "csrf-photo" });
-const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
-// jsdom lays nothing out; what scrolls, as the photo scroller does, gets a
-// window-sized view. virtual-core measures it by offset* before 3.19 and by
-// client* since.
-const scrollerSize = { offsetHeight: 800, offsetWidth: 1000, clientHeight: 800, clientWidth: 1000 };
-const scrolls = (element: Element) => element.isConnected && getComputedStyle(element).overflowY === "auto";
+// The photo scroller lays out only with some size.
+sizedScrollers();
 // scrollerOf is the element that scrolls element into view.
 function scrollerOf(element: Element): HTMLElement {
   let parent = element.parentElement;
@@ -97,37 +94,11 @@ function scrollerOf(element: Element): HTMLElement {
 }
 
 beforeEach(() => {
-  for (const [name, size] of Object.entries(scrollerSize))
-    Object.defineProperty(HTMLElement.prototype, name, {
-      configurable: true,
-      get() {
-        return this instanceof HTMLElement && scrolls(this) ? size : 0;
-      },
-    });
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {
-        /* no layout in jsdom */
-      }
-      unobserve() {
-        /* none */
-      }
-      disconnect() {
-        /* none */
-      }
-    },
-  );
   setSession(alice);
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  for (const name of ["offsetHeight", "offsetWidth"] as const)
-    Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
-  // client* are Element.prototype's; without HTMLElement's stubs they show again.
-  for (const name of ["clientHeight", "clientWidth"] as const) Reflect.deleteProperty(HTMLElement.prototype, name);
   window.localStorage.clear();
   FakeUpload.sent = [];
   setSession();
@@ -1395,6 +1366,9 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await openPhoto(user, "photo:receipt.jpg");
     const panel = await screen.findByRole("region", { name: "照片中的文字" });
+    // VNAS, reading the desktop for the member, skips the panel: it shows in
+    // full what an assistant knows only as handles.
+    expect(panel.getAttribute("data-vnas-private")).toBe("照片上读出的文字");
     expect(within(panel).getByText("小票")).toBeTruthy();
     expect(within(panel).getByText("机器识别")).toBeTruthy();
     expect(within(panel).getByText("某某超市")).toBeTruthy();
@@ -1520,7 +1494,7 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "超市{Enter}");
-    expect(await screen.findByRole("separator", { name: "照片中的文字包含“超市”" })).toBeTruthy();
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
     expect(resultOrder()).toEqual([
       "查看 photo:超市.jpg",
       "divider",
@@ -1552,7 +1526,7 @@ describe("PhotosPanel text in photos", () => {
     render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
     await screen.findByRole("button", { name: "查看 photo:home.jpg" });
     await user.type(screen.getByRole("searchbox", { name: "搜索照片" }), "小明 超市{Enter}");
-    expect(await screen.findByRole("separator", { name: "照片中的文字包含“超市”" })).toBeTruthy();
+    expect(await screen.findByRole("separator", { name: "照片中的文字匹配“超市”" })).toBeTruthy();
   });
 
   it("says how far local AI has read the text once the photos are organised", async () => {

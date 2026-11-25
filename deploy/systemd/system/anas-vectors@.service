@@ -8,7 +8,7 @@ Documentation=https://github.com/zhongwater123/A-NAS
 # exited for want of connections nothing needs it and it stops. It has no
 # [Install] section: a manual start without the proxy would stop at once.
 StopWhenUnneeded=yes
-AssertPathExists=/opt/a-nas/current/vectors/config.yaml
+AssertPathExists=/usr/lib/a-nas/vectors/config.yaml
 
 [Service]
 Type=simple
@@ -19,21 +19,21 @@ DynamicUser=true
 # The index on the system disk: derived, never backed up, deleted at will.
 StateDirectory=a-nas-vectors/%i
 StateDirectoryMode=0700
-# Qdrant writes relative paths unless told otherwise; the release directory
+# Qdrant writes relative paths unless told otherwise; the product's directory
 # is read-only, so a stray one fails instead of landing somewhere.
-WorkingDirectory=/opt/a-nas/current/vectors
+WorkingDirectory=/usr/lib/a-nas/vectors
 Environment=QDRANT__STORAGE__STORAGE_PATH=%S/a-nas-vectors/%i/storage
 Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%S/a-nas-vectors/%i/snapshots
 Environment=QDRANT__STORAGE__TEMP_PATH=%S/a-nas-vectors/%i/tmp
 Environment=QDRANT_INIT_FILE_PATH=%S/a-nas-vectors/%i/.qdrant-initialized
-# start.sh resolves the release once and execs its Qdrant, after emptying
+# start.sh resolves the product's Qdrant once and execs it, after emptying
 # storage that Qdrant cannot use: written by another minor release or a newer
 # one, or behind two failed starts in a row (a damaged segment that makes
 # Qdrant panic while loading). The owner rebuilds the index.
-ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current
+ExecStart=/usr/lib/a-nas/vectors/start.sh %S/a-nas-vectors/%i /usr/lib/a-nas
 # Started only once its gRPC port accepts, so the proxy never forwards to a
 # closed port; that also clears the count of failed starts.
-ExecStartPost=/opt/a-nas/current/vectors/wait-ready.sh 6334 %S/a-nas-vectors/%i
+ExecStartPost=/usr/lib/a-nas/vectors/wait-ready.sh 6334 %S/a-nas-vectors/%i
 TimeoutStartSec=90s
 TimeoutStopSec=20s
 UMask=0077

@@ -35,7 +35,7 @@ v1.0.1 把控制面状态持久化到用户配置目录下的新 `state` 子目�
 
 ## 修复与回归证据
 
-- 修复：[`anas-api.service`](../../deploy/systemd/user/anas-api.service)只放行 `%h/.config/a-nas/state`；[激活脚本](../../scripts/remote-activate-release.sh)以 `0700` 创建目录并显式设置 `ANAS_STATE_DIR`。
+- 修复：[`anas-api.service`](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/deploy/systemd/user/anas-api.service)只放行 `%h/.config/a-nas/state`；[激活脚本](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/remote-activate-release.sh)以 `0700` 创建目录并显式设置 `ANAS_STATE_DIR`。
 - 回归：`make ops-check` 固定检查目录创建、unit 白名单、ShellCheck 和 Bash 语法；远端原始复现由后续 RC 激活的相同 `/healthz` 门禁验证。
 - 恢复：执行 `systemctl --user reset-failed` 并重启回滚后的 API，`active` 与 `/healthz` 均恢复。
 

@@ -49,10 +49,11 @@ type Gate struct {
 	mu sync.Mutex
 	// pressed holds the resources over their limit at the last look, short
 	// whether memory was below the reserve, and waiting whether the models
-	// waited for memory to load.
+	// waited for memory to load, for each need asked about: a round asks for
+	// the photos' models and for the text reader, which takes more.
 	pressed map[string]bool
 	short   bool
-	waiting bool
+	waiting map[uint64]bool
 }
 
 // MemoryReserve is the memory AI work always leaves for the user's next
@@ -105,10 +106,40 @@ func (g *Gate) Use() (done func()) {
 // not otherwise; need is the memory the AI Worker's models take, 0 for work
 // that loads none (photos.Gate).
 func (g *Gate) Open(_ context.Context, need uint64) (bool, string) {
-	if g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
+	return g.check(need, false, false)
+}
+
+// Continue reports whether background AI work already running may go on,
+// and why not otherwise: it stops at once while someone uses the photo
+// library or memory is short, whatever the processor and the disk do, while
+// the device's other work waiting on those only holds the next item back
+// (photos.RunningGate).
+func (g *Gate) Continue(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, true, false)
+}
+
+// OpenForMember is Open for work a member waits for, such as the montage
+// center's analysis (photos.MemberGate): someone using the photo library
+// does not hold it back.
+func (g *Gate) OpenForMember(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, false, true)
+}
+
+// ContinueForMember is Continue for work a member waits for.
+func (g *Gate) ContinueForMember(_ context.Context, need uint64) (bool, string) {
+	return g.check(need, true, true)
+}
+
+// check is Open, or, while running, Continue; for a member's work it leaves
+// out whether someone uses the library.
+func (g *Gate) check(need uint64, running, member bool) (bool, string) {
+	if !member && (g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet) {
 		return false, "foreground"
 	}
 	for _, check := range pressureLimits {
+		if running && check.resource != "memory" {
+			continue
+		}
 		value, err := g.pressure(check.resource)
 		if err != nil {
 			// A kernel without pressure stall information leaves only
@@ -149,15 +180,20 @@ func (g *Gate) cannotLoad(free, need uint64) bool {
 	waiting := free < MemoryReserve+load
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if waiting != g.waiting && g.logger != nil {
+	if g.waiting == nil {
+		g.waiting = map[uint64]bool{}
+	}
+	// Each need has its own answer: memory enough for one and not for the
+	// other is not a change every time both are asked about.
+	if waiting != g.waiting[need] && g.logger != nil {
 		if waiting {
-			g.logger.Info("AI work waits for memory to load its models", "available_mib", free>>20,
+			g.logger.Info("AI work waits for memory to load its models", "need_mib", need>>20, "available_mib", free>>20,
 				"load_mib", load>>20, "reserve_mib", MemoryReserve>>20)
 		} else {
-			g.logger.Info("AI work has memory to load its models", "available_mib", free>>20, "load_mib", load>>20)
+			g.logger.Info("AI work has memory to load its models", "need_mib", need>>20, "available_mib", free>>20, "load_mib", load>>20)
 		}
 	}
-	g.waiting = waiting
+	g.waiting[need] = waiting
 	return waiting
 }
 

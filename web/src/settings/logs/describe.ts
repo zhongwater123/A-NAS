@@ -1,4 +1,5 @@
 import { calendarDate, calendarDays, relativeUnit } from "../../lib/time";
+import { byText, isProblemCode, problemText, versionLabel } from "../../systemupdate/texts";
 import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./api";
 
 // A sentence is plain text with emphasised names in it.
@@ -18,6 +19,7 @@ export const categoryInfo: Record<ActivityCategory | "other", { label: string; t
   storage: { label: "存储", tone: "storage" },
   photo: { label: "相册", tone: "photo" },
   family: { label: "家庭中心", tone: "account" },
+  system: { label: "系统", tone: "storage" },
   other: { label: "其他", tone: "other" },
 };
 
@@ -54,6 +56,10 @@ export function originLabel(detail?: string): string | undefined {
   if (via === "internet") return address ? `外网 · ${address}` : "外网";
   if (via === "loopback") return "本机回环（SSH 隧道或设备上的浏览器）";
   return undefined;
+}
+
+function handoverLabel(choice?: string): string {
+  return choice === "transfer" ? "转给管理员" : "一并删除";
 }
 
 const signInFailures: Record<string, string> = {
@@ -209,7 +215,79 @@ const familyActions: Record<string, string> = {
   "family.record_restored": "恢复了家庭记录",
   "family.comment_deleted": "删除了家庭留言",
   "family.vaccine_plan_changed": "修改了接种计划",
+  // 家庭待办 keeps its events with the family service's.
+  "family.todo_added": "新建了待办",
+  "family.todo_updated": "修改了待办",
+  "family.todo_done": "把待办标为已处理",
+  "family.todo_ignored": "忽略了待办",
+  "family.todo_reopened": "重新打开了待办",
+  "family.todo_snoozed": "推迟了待办",
 };
+
+// describeSystemUpdate: an administrator's request, such as
+// system.update.install, or an outcome the update service recorded, such as
+// system.update.result.updated, whose actor is the system and whose detail
+// says who started it.
+function describeSystemUpdate(action: string, actor: Part, raw?: string): Described {
+  let detail: Record<string, unknown> = {};
+  try {
+    const value: unknown = raw?.startsWith("{") ? JSON.parse(raw) : undefined;
+    if (value && typeof value === "object") detail = value as Record<string, unknown>;
+  } catch {
+    // An unreadable detail reads as an empty one.
+  }
+  const text = (key: string) => (typeof detail[key] === "string" ? detail[key] : "");
+  const version = name(versionLabel(text("version")));
+  const from = name(versionLabel(text("from")));
+  const code = text("problem");
+  const problem = isProblemCode(code) ? problemText({ code }) : "";
+  const meta = [problem, byText(text("by"))].filter(Boolean);
+  // The version an operation started from; the first install has none.
+  const fromParts = (verb: string): Part[] => (text("from") ? ["将 A-NAS 从", from, verb] : [`将 A-NAS ${verb}`]);
+  switch (action) {
+    case "download":
+      return { parts: [actor, "开始下载 A-NAS", version], meta: [] };
+    case "install":
+      return { parts: [actor, text("by") === "automatic" ? "请求安装 A-NAS" : "开始安装 A-NAS", version], meta: [] };
+    case "revert":
+      return { parts: [actor, "开始回到 A-NAS", version], meta: [] };
+    case "restart":
+      return {
+        parts: [actor, text("by") === "automatic" ? "请求重启设备以使用 A-NAS" : "重启了设备以使用 A-NAS", version],
+        meta: [],
+      };
+    case "settings":
+      return {
+        parts: [actor, "修改了系统更新设置"],
+        meta: [
+          detail.autoDownload === true ? "自动下载" : "不自动下载",
+          detail.autoInstall === true ? `自动安装 ${text("windowStart")}–${text("windowEnd")}` : "不自动安装",
+        ],
+      };
+    case "result.downloaded":
+      return { parts: [actor, "下载了 A-NAS", version], meta };
+    case "result.updated":
+      return { parts: [actor, ...fromParts("更新到"), version], meta, tone: "success" };
+    case "result.rolled-back":
+      return {
+        parts: [
+          actor,
+          "安装 A-NAS",
+          version,
+          ...(text("from") ? ["后检查没有通过，已回到", from] : ["后检查没有通过，已回到原版本"]),
+        ],
+        meta,
+        tone: "warning",
+      };
+    case "result.reverted":
+      return { parts: [actor, ...fromParts("回到"), version], meta };
+    case "result.check-failed":
+      return { parts: [actor, "检查系统更新失败"], meta, tone: "warning" };
+    case "result.failed":
+      return { parts: [actor, "安装 A-NAS", version, "没有完成"], meta, tone: "danger" };
+  }
+  return { parts: [actor, "执行了", name(`system.update.${action}`)], meta: [] };
+}
 
 // describeActivity turns an event into a sentence for the activity log.
 export function describeActivity(event: ActivityEvent, viewerId: string): Described {
@@ -223,6 +301,8 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       detail.expiresAt ? `${formatDateTime(detail.expiresAt)} 自动结束` : "",
     ].filter(Boolean);
   if (familyActions[event.action]) return { parts: [actor, familyActions[event.action]], meta: [] };
+  if (event.action.startsWith("system.update."))
+    return describeSystemUpdate(event.action.slice("system.update.".length), actor, event.detail);
   switch (event.action) {
     case "session.signed_in":
       return { parts: [actor, "登录了"], meta: [originLabel(event.detail)].filter(Boolean) as string[] };
@@ -242,6 +322,30 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [subject, "的 Linux 账号与系统中已有的账号冲突"], meta: ["需要按运行手册处理"], tone: "danger" };
     case "user.disabled":
       return { parts: [actor, "禁用了", subject, "的账号"], meta: [], tone: "warning" };
+    case "user.enabled":
+      return { parts: [actor, "重新启用了", subject, "的账号"], meta: [] };
+    // A deleted account is gone from the directory; the detail keeps its name.
+    case "user.deletion_scheduled":
+      return {
+        parts: [actor, "删除了账号", name(detail.username || "（未知）")],
+        meta: [
+          `个人空间${handoverLabel(detail.personalSpace)}`,
+          `私有图库${handoverLabel(detail.library)}`,
+          detail.dueAt ? `${formatDateTime(detail.dueAt)} 执行，此前可以撤销` : "到期执行，此前可以撤销",
+        ],
+        tone: "danger",
+      };
+    case "user.deletion_cancelled":
+      return { parts: [actor, "撤销了删除账号", name(detail.username || "（未知）")], meta: ["账号仍为禁用"] };
+    case "user.deleted":
+      return {
+        parts: ["账号", name(detail.username || "（未知）"), "已彻底删除"],
+        meta: [
+          detail.folder ? `文件转入“${detail.folder}”` : "",
+          detail.album ? `照片转入“${detail.album}”相册` : "",
+        ].filter(Boolean),
+        tone: "danger",
+      };
     case "user.credential_reset":
       return { parts: [actor, "重置了", subject, "的密码"], meta: ["对方下次登录时需要设置新密码"], tone: "warning" };
     case "user.password_changed":

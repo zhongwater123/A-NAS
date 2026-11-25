@@ -45,6 +45,11 @@ export interface CardHub {
   tryWalk(): boolean | string;
   /** 依据名点播。 */
   playByName: PlayByName;
+  /**
+   * A-NAS: a stage's clip to play once the clip a command asked for has ended, or null for none (the stage went
+   * idle, or its clip played).
+   */
+  deferStage(stage: { name: string; once: boolean } | null): void;
   /** 说一句。 */
   speak: Speak;
   /** 此刻是否在睡（含入睡/醒来两段过渡）：自动来源据此闭嘴，显式唤醒走菜单或点击。 */

@@ -77,6 +77,30 @@ func Classify(text string) Kind {
 	return Plain
 }
 
+// names are the words members call each document type by. A search for one
+// finds the photos read as that type whatever their text says: the front of
+// an ID card nowhere prints 身份证.
+var names = map[Kind][]string{
+	IDCardFront: {"身份证", "证件"},
+	IDCardBack:  {"身份证", "证件"},
+	BankCard:    {"银行卡", "储蓄卡", "借记卡", "信用卡"},
+	BankSlip:    {"回单", "转账凭证"},
+	Invoice:     {"发票"},
+	Receipt:     {"小票", "收据"},
+}
+
+// Document reports whether kind is one of the document types, which have
+// fields, and not plain text.
+func Document(kind Kind) bool {
+	return fieldsOf(kind) != nil
+}
+
+// Named reports whether a query, folded as search folds it (Fold), names
+// kind by one of the words members call it.
+func Named(kind Kind, folded string) bool {
+	return slices.ContainsFunc(names[kind], func(name string) bool { return strings.Contains(folded, name) })
+}
+
 // fieldsOf lists the fields of kind in the order the document shows them, or
 // nil for Plain.
 func fieldsOf(kind Kind) []string {

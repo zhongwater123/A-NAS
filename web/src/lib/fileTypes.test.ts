@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { fileTypeLabel, isTextPreviewable, isVideoFile } from "./fileTypes";
+import { fileCategory, fileTypeLabel, isTextPreviewable, isVideoFile } from "./fileTypes";
+
+describe("file categories", () => {
+  it("sort a file by its name, and name it the same way", () => {
+    expect(
+      ["a.HEIC", "b.mkv", "c.flac", "d.pdf", "e.xlsx", "f.md", "g.tar", "h.bin", "noext"].map(fileCategory),
+    ).toEqual(["image", "video", "audio", "pdf", "sheet", "document", "archive", "other", "other"]);
+    expect(fileTypeLabel("e.xlsx")).toBe("电子表格");
+    expect(fileTypeLabel("g.Zip")).toBe("ZIP 文件");
+    expect(fileTypeLabel("noext")).toBe("文件");
+  });
+});
 
 describe("video files", () => {
   it("are the types the server shows a frame of", () => {

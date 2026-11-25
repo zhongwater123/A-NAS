@@ -3,8 +3,9 @@
 # development machine: scripts/build-ai-runtime.sh (ADR 0016) and
 # scripts/build-search-runtime.sh (ADR 0030). Each runtime is a virtual
 # environment for Debian 13's Python 3, installed from wheels a lock pins by
-# hash and packed as a tarball named by its content; the root installer checks
-# it against the manifest written here and unpacks it under /opt/a-nas.
+# hash and packed as a tarball named by the ID scripts/lib/content.sh gives it;
+# its content package unpacks it under /opt/a-nas
+# (scripts/build-content-packages.sh).
 # Source this file; it defines functions only.
 
 # require_uv REPO: stop unless uv is the version ai/requirements-dev.txt pins.

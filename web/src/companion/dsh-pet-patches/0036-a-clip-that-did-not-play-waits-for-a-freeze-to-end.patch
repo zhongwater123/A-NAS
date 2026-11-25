@@ -1,0 +1,79 @@
+A clip that did not play waits for a freeze to end.
+
+The wait after a clip that did not play (patch 0031) fetched the clip again
+when it ended, before it looked whether the card was frozen. Under the page's
+pause that was a fetch and a decode while the member was away; under a lock
+alone the clip then showed and played, an automatic clip under the lock. A
+wait that ends while the card is frozen now does nothing and is held; it
+starts again when the freeze ends, so that a pet the resume leaves as it is
+(asleep) still goes on, while a clip the resume picks takes over from it.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+index 51ade6ec..0674509e 100644
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -134,6 +134,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+   /** A-NAS: the clips in a row that did not play, and the wait after the last of them (clipFailed). */
+   let failures = 0;
+   let failedWait: ReturnType<typeof setTimeout> | undefined;
++  /** A-NAS: the clip whose wait ended while the card was frozen, waited for again as the freeze ends. */
++  let heldFailure: PendingSwap | null = null;
+ 
+   const slotOf = (index: number): 'a' | 'b' => (index === 0 ? 'a' : 'b');
+   const elementOf = (index: number): HTMLVideoElement | null => (index === 0 ? deps.videoA() : deps.videoB());
+@@ -148,22 +150,34 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+    * (FAILED_CLIP_WAIT_MS) the chain fetches the clip once more, unless it was a command's, which is answered
+    * already; if that fails too, it goes on as if the clip had ended, from where the card is: the end held back
+    * while it loaded, a looping clip in front, or one that stopped. A clip in front that still plays goes on at
+-   * its own end. A later switch, a freeze or a drag leaves it to them.
++   * its own end. A later switch or a drag leaves it to them. A wait that ends while the card is frozen
++   * neither fetches nor goes on, which would be an automatic clip under a lock or a fetch while the page is
++   * paused; it starts again as the freeze ends (setFrozen), for whatever the card's resume does not replace.
+    */
+   const clipFailed = (swap: PendingSwap): void => {
+     if (pending?.gen === swap.gen) pending = null;
+     failures += 1;
++    waitAfterFailure(swap);
++  };
++
++  /** A-NAS: the wait after a clip that did not play (clipFailed); held while the card is frozen. */
++  const waitAfterFailure = (swap: PendingSwap): void => {
+     clearTimeout(failedWait);
++    heldFailure = null;
+     failedWait = setTimeout(
+       () => {
+         failedWait = undefined;
+         if (!mounted || gen !== swap.gen) return;
++        if (frozen) {
++          heldFailure = swap;
++          return;
++        }
+         if (swap.playbackId === null && !swap.retry) {
+           start(swap.anim, swap.once, null, true);
+           return;
+         }
+         const el = frontVideo();
+-        if ((el !== null && !el.paused && !el.loop) || frozen || deps.isDragging()) return;
++        if ((el !== null && !el.paused && !el.loop) || deps.isDragging()) return;
+         deps.onEnded(nextCue());
+       },
+       Math.min(FAILED_CLIP_WAIT_MS * 2 ** (failures - 1), FAILED_CLIP_WAIT_MAX_MS),
+@@ -211,6 +225,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     // A-NAS: a switch takes over from the wait after a clip that did not play.
+     clearTimeout(failedWait);
+     failedWait = undefined;
++    heldFailure = null;
+     const targetIndex = front === 0 ? 1 : 0;
+     const el = elementOf(targetIndex);
+     if (el === null) return;
+@@ -396,6 +411,10 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+         if (playing !== null) reportOnce(playing, 'cancelled', REASON_FROZEN);
+         return { kind: 'frozen' };
+       }
++      // A-NAS: the wait held by the freeze starts again; a clip the card's resume picks takes over from it.
++      const held = heldFailure;
++      heldFailure = null;
++      if (held !== null && gen === held.gen) waitAfterFailure(held);
+       return { kind: 'resumed' };
+     },
+     isFrozen: () => frozen,

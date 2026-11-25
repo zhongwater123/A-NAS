@@ -23,7 +23,8 @@ func (t textHits) holds(c candidate) bool { return t.libraries[c.libraryID] && t
 // textMatches finds the content objects whose text holds query, among the
 // photos listed to p in the libraries of scope that read text
 // (docs/architecture/photo-ocr.md#搜索): the whole text, and the fields as
-// the photo's text shows them, read and corrected. It compares regardless of
+// the photo's text shows them, read and corrected, and the document type it
+// was read as, by the words members call it (身份证, 发票). It compares regardless of
 // spaces, width and case, and a query mostly of digits also regardless of
 // hyphens, so that "6222 0200" finds 6222-0200-…. A query of one character
 // finds nothing, for nearly every text holds a common one. An assistant
@@ -112,7 +113,9 @@ func (s *Service) textMatches(ctx context.Context, p Principal, query string, sc
 				texts[i] = masker.mask(text)
 			}
 		}
-		if slices.ContainsFunc(texts, holds) {
+		// The type a photo was read as is found by its name too: no ID card
+		// prints 身份证 on its front. The type is no secret to an assistant.
+		if textread.Named(textread.Kind(reading.kind), needle) || slices.ContainsFunc(texts, holds) {
 			hits.objects[objectID] = true
 		}
 	}

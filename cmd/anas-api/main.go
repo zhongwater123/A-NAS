@@ -29,10 +29,13 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
@@ -46,13 +49,19 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/montage"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
+	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate"
+	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
@@ -83,6 +92,13 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "share-service" {
 		if err := runShareService(logger); err != nil {
 			logger.Error("A-NAS share service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == montageServiceCommand {
+		if err := runMontageService(logger); err != nil {
+			logger.Error("A-NAS montage service stopped", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -147,8 +163,9 @@ func runPhotoService(logger *slog.Logger) error {
 		Logger:              logger,
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
-		Photos:              photos.Options{Media: config.Media.client(), Release: version},
-		Vectors:             vectors,
+		Photos: photos.Options{Media: config.Media.client(), Release: version,
+			Compute: photoservice.MontageCompute(montagecompute.Client{SocketPath: config.ComputeSocket})},
+		Vectors: vectors,
 	})
 }
 
@@ -195,7 +212,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "storage.db", storageStore)
-	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
+	accountService := accounts.NewService(accountStore, operations, accounts.Options{DeletionDelay: config.DeletionDelay})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
 		return err
@@ -243,6 +260,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
+	var montageGrants montage.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -261,6 +279,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
+		montageGrants = photoservice.LocalGrants(photoService, sessions, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -331,21 +350,45 @@ func run(logger *slog.Logger) error {
 		appOptions.VolumeReady = func(ctx context.Context) error { return volumeGuard.Check(ctx, volumeRoot, false) }
 	}
 
-	shareAPI, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
+	shareAPI, removeShares, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
 	defer closeShares()
-	familyAPI, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
+	familyAPI, removeFamily, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
 	defer closeFamily()
+	var montageMedia montage.Media
+	if mediaWorker != nil {
+		montageMedia = mediaWorker
+	}
+	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, montageMedia, logger)
+	if err != nil {
+		return err
+	}
+	defer closeMontage()
 	// The assistants' companion tools call from the member's own UID; the
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
 	defer closeAtExit(logger, "account directory", uids)
-	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
+	moduleRegistry, closeModules, err := configuredModules(background, config, uids, logger)
+	if err != nil {
+		return err
+	}
+	defer closeModules()
+	assistantKey, err := configuredAssistantKey(config, operations)
+	if err != nil {
+		return err
+	}
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids, assistantKey)
+	hotspot, _ := operations.(phonehotspot.Switch)
+	if config.Mode == ModeFake {
+		hotspot = &phonehotspot.Memory{}
+	}
+	systemUpdate := systemupdateapi.New(configuredSystemUpdate(config, operations),
+		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
@@ -356,6 +399,9 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
+		Montage:      montageAPI,
+		PlanGrants:   planGrants(broker),
+		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
 		FilePreviews: previewService,
@@ -364,8 +410,11 @@ func run(logger *slog.Logger) error {
 		Assistant:    assistant,
 		// Signing in keeps the member's assistant running (ADR 0024).
 		AssistantKeeper: assistant,
+		AssistantKey:    assistantkeyapi.New(assistantKey, logger),
 		SystemLogs:      systemLogs,
 		WebSearch:       websearchapi.New(webSearch, websearch.NewRelease(config.WebSearch.Release), logger),
+		PhoneHotspot:    hotspot,
+		SystemUpdate:    systemUpdate,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -380,6 +429,11 @@ func run(logger *slog.Logger) error {
 	}
 	tasks.Go(func() error { syncIdentities(background, accountService.SyncIdentities, logger); return nil })
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
+	// Deleted accounts are removed once their 30 days are over
+	// (docs/specs/account-enable-and-delete.md).
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeMontage,
+		musicService, mediaService, transferService)
+	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
 	// snapshot that stopping interrupts is deleted again before the catalog
 	// closes.
@@ -387,6 +441,8 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { mediaService.Run(background); return nil })
 	// Its last flush of transfer progress lands before transfers.db closes.
 	tasks.Go(func() error { transferService.Run(background); return nil })
+	// Installs by itself in the window the administrator chose.
+	tasks.Go(func() error { systemUpdate.Run(background, 5*time.Minute); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
 			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil, photoservice.VectorCheckInterval)
@@ -447,7 +503,7 @@ func listen(config Config, handler http.Handler, logger *slog.Logger) ([]listeni
 
 // companionListener is the socket of the companion tools of members'
 // assistants (#412) when systemd hands it over, named "companion"
-// (ai/assistant-spike/anas-companion-assistant.socket). systemd holds it, so
+// (deploy/systemd/system/anas-companion-assistant.socket). systemd holds it, so
 // it outlives restarts of this service and the copies bound into running
 // sandboxes keep working. Without it those tools answer that no desktop is in
 // use.
@@ -650,6 +706,75 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 	return websearch.New(options), nil
 }
 
+// configuredAssistantKey reaches the AI assistant's model key in the Host Agent on a NAS
+// (ADR 0024); development remembers a key in memory.
+func configuredAssistantKey(config Config, operations productOperations) (assistantkey.Keeper, error) {
+	if !config.Live() {
+		return &assistantkey.Memory{}, nil
+	}
+	keeper, ok := operations.(assistantkey.Keeper)
+	if !ok {
+		return nil, errors.New("host agent client cannot keep the assistant's key")
+	}
+	return keeper, nil
+}
+
+// configuredSystemUpdate reaches the system update service through the Host
+// Agent on a NAS (docs/specs/system-update.md). Development has one in
+// memory with two development builds numbered as scripts/release-version.sh
+// numbers them, the newer waiting to be installed; ANAS_FAKE_UPDATE=image
+// makes it a device that runs the A-NAS image.
+func configuredSystemUpdate(config Config, operations productOperations) systemupdate.Updater {
+	if config.Live() {
+		updater, ok := operations.(systemupdate.Updater)
+		if !ok {
+			return nil
+		}
+		return updater
+	}
+	return systemupdate.NewMemory("1.0.1~rc.6+dev20261112.79+g83bb9db1c0de",
+		"1.0.1~rc.6+dev20261113.80+g4e842653a1b2", 4*time.Second, config.FakeUpdate == fakeUpdateImage)
+}
+
+// fakeUpdateImage is ANAS_FAKE_UPDATE's value for a device that runs the
+// A-NAS image.
+const fakeUpdateImage = "image"
+
+// updateWork names what an install waits for: a storage plan that runs or a
+// conversion of the data volume, and an app that installs or uninstalls.
+func updateWork(storageService *storage.Service, apps appstore.Store) systemupdateapi.Work {
+	return func(ctx context.Context) []string {
+		var waiting []string
+		storageBusy := false
+		for _, plan := range storageService.UnfinishedPlans() {
+			if plan.State == storage.PlanStateRunning {
+				storageBusy = true
+			}
+		}
+		if volumes, err := storageService.ListVolumes(ctx); err == nil {
+			for _, volume := range volumes {
+				if volume.Conversion != nil && volume.Conversion.State == datavolume.ConversionRunning {
+					storageBusy = true
+				}
+			}
+		}
+		if storageBusy {
+			waiting = append(waiting, "storage")
+		}
+		if apps != nil {
+			if statuses, err := apps.Apps(ctx); err == nil {
+				for _, app := range statuses {
+					if app.Job != nil && app.Job.State == appstore.JobRunning {
+						waiting = append(waiting, "apps")
+						break
+					}
+				}
+			}
+		}
+		return waiting
+	}
+}
+
 // configuredServices reaches the host through the Host Agent on a NAS, and
 // through simulated disks and storage in development, of the host that
 // ANAS_FAKE_STORAGE names.
@@ -662,16 +787,59 @@ func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, 
 	if err != nil {
 		return nil, "", nil, err
 	}
-	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, nil
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated, volume: config.DataMount}, nil
 }
 
-// developmentOperations stand in for the Host Agent in fake mode.
-type developmentOperations struct{ *simulatedStorage }
+// developmentOperations stand in for the Host Agent in fake mode. volume is
+// the development volume, whose folders are the spaces.
+type developmentOperations struct {
+	*simulatedStorage
+	volume string
+}
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
 }
 func (*developmentOperations) DisableCredential(context.Context, string) error { return nil }
+func (*developmentOperations) EnableCredential(context.Context, accounts.EnableRequest) error {
+	return nil
+}
+
+// RemoveAccount moves a deleted account's development space, a folder of the
+// development volume, into the administrator's without its trash, or deletes
+// it, as the Host Agent does with its subvolume: a later account of the same
+// name, whose space is the same folder, starts empty.
+func (o *developmentOperations) RemoveAccount(_ context.Context, removal accounts.AccountRemoval) (string, error) {
+	private := filepath.Join(o.volume, "spaces", "private")
+	source := filepath.Join(private, removal.Username)
+	if removal.TransferTo == "" {
+		return "", os.RemoveAll(source)
+	}
+	if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(filepath.Join(source, ".a-nas-trash")); err != nil {
+		return "", err
+	}
+	target := filepath.Join(private, removal.TransferTo)
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		return "", err
+	}
+	for n := 1; n < 1000; n++ {
+		folder := removal.Folder
+		if n > 1 {
+			folder = fmt.Sprintf("%s (%d)", removal.Folder, n)
+		}
+		if _, err := os.Lstat(filepath.Join(target, folder)); errors.Is(err, os.ErrNotExist) {
+			return folder, os.Rename(source, filepath.Join(target, folder))
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free name for %q", removal.Folder)
+}
 
 // Development volumes have no ACLs; viewing access is decided by the Policy.
 func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequest) error {
@@ -714,19 +882,23 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // directory it answers assistant_unavailable and the desktop keeps the
 // assistant as planned. On a NAS every connection to a member's instance goes
 // through the File Broker, the session gate (decision 10), which also
-// executes the assistant's changes; development dials the sockets directly
-// with their tokens and may name the spike's change broker. The account store
+// executes the assistant's changes and has a scheduled task run now;
+// development dials the sockets directly with their tokens, may name the
+// spike's change broker, and cannot run a task now. The account store
 // keeps the notices of the members' scheduled tasks, and uids names the member
 // behind a companion tool's call. Its background work ends with background.
 func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices,
-	uids assistantapi.AccountResolver) *assistantapi.Handler {
-	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Logger: logger, Context: background}
+	uids assistantapi.AccountResolver, key assistantkey.Keeper) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Key: key, Logger: logger, Context: background}
 	switch {
 	case config.SocketDir == "":
 	case broker != nil:
 		options.Connector = gatedAssistant{broker}
 	default:
 		options.Connector = assistantapi.NewSocketConnector(config.SocketDir, config.TokenDir)
+	}
+	if broker != nil && config.SocketDir != "" {
+		options.Tasks = roundTasks{broker}
 	}
 	switch {
 	case broker != nil:
@@ -775,6 +947,18 @@ func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 	return change, nil
 }
 
+// roundTasks has a member's scheduled task run now through the File Broker,
+// which checks the session itself and starts a round of the member's tasks.
+type roundTasks struct{ broker *filebroker.Client }
+
+func (t roundTasks) RunTask(ctx context.Context, task string) error {
+	err := t.broker.RunAssistantTask(ctx, task)
+	if errors.Is(err, files.ErrForbidden) {
+		return assistantapi.ErrSessionRejected
+	}
+	return err
+}
+
 // gatedAssistant reaches a member's assistant through the File Broker, which
 // checks the session itself and cuts the connection when it ends.
 type gatedAssistant struct{ broker *filebroker.Client }
@@ -794,4 +978,13 @@ func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool)
 		return nil, "", assistantapi.ErrSessionRejected
 	}
 	return conn, conn.Token, nil
+}
+
+// planGrants registers planning grants through the File Broker, where
+// there is one.
+func planGrants(broker *filebroker.Client) montageapi.PlanRegistrar {
+	if broker == nil {
+		return nil
+	}
+	return broker
 }

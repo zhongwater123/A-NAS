@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitetest"
 )
@@ -49,6 +50,46 @@ func TestScanStopsWhenReadingTheFoldersFails(t *testing.T) {
 				t.Fatalf("films after the failed scan = %+v, want both and the progress", movies.Items)
 			}
 		})
+	}
+}
+
+// A frame or subtitle written by work already under way when its video went
+// (its library or account deleted) is not left in the cache: the next prune
+// removes it. Those of videos still there, and a file being written, stay.
+func TestPruneCacheDropsFramesAndSubtitlesOfVideosThatAreGone(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.write(t, env.shared, "影视/家庭/VID_20080808_200000.mp4", "video")
+	env.library(t, env.admin, env.shared, LibraryMixed, "影视")
+	var kept string
+	if err := env.media.store.db.QueryRowContext(env.ctx, "SELECT id FROM videos").Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	subtitle := func(id string) string {
+		return filepath.Join(env.media.cacheDir, "subtitles", cacheName(id)+"-s0-20240501123456.vtt")
+	}
+	gone := "video:GONE"
+	stay := []string{env.media.framePath(kept), subtitle(kept), filepath.Join(env.media.cacheDir, "frames", ".tmp-123")}
+	crashed := filepath.Join(env.media.cacheDir, "subtitles", ".tmp-456")
+	removed := []string{env.media.framePath(gone), subtitle(gone), crashed}
+	for _, name := range append(stay, removed...) {
+		if err := os.WriteFile(name, []byte("cached"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A temporary file this old was left by a crash.
+	if old := time.Now().Add(-2 * time.Hour); os.Chtimes(crashed, old, old) != nil {
+		t.Fatal("could not age the temporary file")
+	}
+	env.media.pruneCache(env.ctx)
+	for _, name := range stay {
+		if _, err := os.Stat(name); err != nil {
+			t.Errorf("%s was pruned: %v", filepath.Base(name), err)
+		}
+	}
+	for _, name := range removed {
+		if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s of a video that is gone is still cached (%v)", filepath.Base(name), err)
+		}
 	}
 }
 

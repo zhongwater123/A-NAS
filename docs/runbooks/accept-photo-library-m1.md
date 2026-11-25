@@ -1,7 +1,7 @@
 # 验收相册 M1（切片 7 实机闸门）
 
 状态：draft（未在 Experimental NAS 执行）
-更新时间：2026-10-08
+更新时间：2026-11-11
 
 ## 目的
 
@@ -13,7 +13,7 @@
 - **目标**：
   - 主机名 `a-nas-dev`，使用前按 [SSH 运行手册](bootstrap-experimental-nas-ssh.md) 核对指纹。
   - 数据卷 UUID 与[当前状态](../status/CURRENT.md)记录一致，并已挂载到 `/srv/a-nas/data`。
-  - 运行中的 release 已按[启用相册服务](enable-photo-service.md)部署，且包含运行期数据卷监视（`grep -a 'photo store lost' /opt/a-nas/current/anas-api` 有输出）。
+  - 运行中的 release 已按[启用相册服务](enable-photo-service.md)部署，且包含运行期数据卷监视（`grep -a 'photo store lost' /usr/lib/a-nas/anas-api` 有输出）。
 - **真实磁盘写入**：
   - 测试照片写入 `photos` 子卷。
   - 断电可能丢失断电前几秒的写入；数据卷只含可丢弃的测试数据。

@@ -34,7 +34,7 @@ Host Agent 单元把文件系统保护设为 `ProtectSystem=strict`，代码却�
 
 ## 修复与回归证据
 
-- 修复：在 [`anas-host-agent.service`](../../deploy/systemd/user/anas-host-agent.service) 中增加 `RuntimeDirectory=a-nas` 和 `RuntimeDirectoryMode=0700`，保留其余沙箱限制。
+- 修复：在 [`anas-host-agent.service`](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/deploy/systemd/user/anas-host-agent.service) 中增加 `RuntimeDirectory=a-nas` 和 `RuntimeDirectoryMode=0700`，保留其余沙箱限制。
 - 静态检查：`systemd-analyze verify` 成功解析修复后的单元。
 - 实机验证：提交 `657fe3d` 以 `agent` 模式完成哈希核对和健康检查；API 与 Agent 均为 `active`。
 - 权限验证：`/run/user/1001/a-nas` 为 `0700`，`host-agent.sock` 为 `0600`，均属于 `anas-dev`。

@@ -1,6 +1,6 @@
 # 0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面
 
-状态：proposed（2026-11-05）；行为见[互联网访问规格](../specs/internet-access.md)，启用步骤见[启用互联网访问](../runbooks/enable-internet-access.md)。修订 [ADR 0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 中“只适用于可信内网”的范围：局域网入口不变，另加一个只走 HTTPS 的互联网入口。
+状态：proposed（2026-11-05）；2026-11-09 起暂缓，第一版只做家庭局域网内访问（[决定](../decisions/2026-11-09-home-network-first.md)）；行为见[互联网访问规格](../specs/internet-access.md)，启用步骤见[启用互联网访问](../runbooks/enable-internet-access.md)。修订 [ADR 0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md) 中“只适用于可信内网”的范围：局域网入口不变，另加一个只走 HTTPS 的互联网入口。
 
 设备所有者希望自己和成员在公司外用浏览器使用 A-NAS，以后还有手机 App。实验 NAS 在公司 NAT 之后：只有 DHCP 分配的内网地址 `172.18.45.48`，出网经多条线路、按目标换公网地址，没有公网 IPv6，外面没有能连进来的地址。公司机房有一台可用的 Ubuntu 24.04 虚拟机（下称边缘服务器），IT 可以给它映射一个公网 IP；它没有外网出口，只能经堡垒机与 MFA 登录，上面运行着 IT 的监控代理。2026-11-05 实测：NAS 到边缘服务器的 UDP 能直接到达，NAS 到它的 TCP 22 被网段间的访问控制拦下。
 
@@ -53,4 +53,4 @@
 - 规格：[互联网访问](../specs/internet-access.md)、[局域网 Web 访问](../specs/lan-web-access.md)、[Web 桌面终端](../specs/web-terminal.md)
 - ADR：[0012](0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)、[0013](0013-allocate-docker-networks-from-an-a-nas-address-pool.md)、[0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)、[0031](0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[启用互联网访问](../runbooks/enable-internet-access.md)
-- 代码：[`internal/webentry`](../../internal/webentry/webentry.go)、[`deploy/caddy/Caddyfile.internet`](../../deploy/caddy/Caddyfile.internet)、[`deploy/edge`](../../deploy/edge/setup-edge.sh)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)
+- 代码：[`internal/webentry`](../../internal/webentry/webentry.go)、[`deploy/caddy/Caddyfile.internet`](../../deploy/caddy/Caddyfile.internet)、[`deploy/edge`](../../deploy/edge/setup-edge.sh)、[系统服务安装器](https://github.com/zhongwater123/A-NAS/blob/083bb9dbc5d9/scripts/install-v1.0.1-system-services.sh)

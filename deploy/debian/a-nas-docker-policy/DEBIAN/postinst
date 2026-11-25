@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ "${1:-}" == configure && -d /run/systemd/system ]]; then
+  systemctl daemon-reload
+  # Also stop an unconfigured engine started before this policy was unpacked.
+  if ! /usr/lib/a-nas-docker-policy/check-address-pool && systemctl is-active --quiet docker.service docker.socket; then
+    systemctl stop docker.socket docker.service
+    ip link delete docker0 2>/dev/null || true
+  fi
+fi

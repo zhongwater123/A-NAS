@@ -1,0 +1,13 @@
+Package: a-nas-docker-policy
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: admin
+Priority: optional
+Depends: python3, systemd, iproute2
+Description: require the site's address pool before Docker starts
+ Docker's service and socket refuse to start until daemon.json supplies
+ both bip and default-address-pools (docs/adr/0013). This host policy has
+ its own package so rolling the product and a-nas-host back to a version
+ from before the policy existed leaves the protection installed, just as
+ it leaves Docker installed. It never starts or enables Docker.

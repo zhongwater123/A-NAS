@@ -350,7 +350,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/users/{userId}": {
+    "/api/v1/users/{userId}/disable": {
         parameters: {
             query?: never;
             header?: never;
@@ -359,9 +359,44 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
         /** @description Disable an account. Web sign-in ends first; if the Host Agent cannot disable SMB access or assistant units, the response retains the 503 smb_disable_pending code. Disabling again retries the host operations. */
-        delete: operations["disableUser"];
+        post: operations["disableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Enable a disabled account again with the password it had. Web sign-in comes back first; if the Host Agent cannot enable SMB access or the assistant, the response is 503 host_enable_pending and enabling again, or the next start's identity synchronization, finishes them. An account waiting to be deleted answers 409 deletion_pending. */
+        post: operations["enableUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{userId}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Delete a disabled member's account after 30 days, with the administrator's password again (403 reauthentication_failed). Until then nothing of it changes and the deletion can be cancelled. Its personal space and private photo library each go to the administrator or are deleted, as chosen. An account that is not disabled answers 409 account_not_disabled, one already waiting 409 deletion_pending. */
+        put: operations["scheduleUserDeletion"];
+        post?: never;
+        /** @description Keep an account that is waiting to be deleted; it stays disabled. Once its data is being removed it answers 409 deletion_started. */
+        delete: operations["cancelUserDeletion"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1007,6 +1042,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network/phone-hotspot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the phone hotspot state and its active connection details */
+        get: operations["getPhoneHotspot"];
+        /** Start or stop the phone hotspot on the dedicated Wi-Fi radio */
+        put: operations["updatePhoneHotspot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web-search/query": {
         parameters: {
             query?: never;
@@ -1094,6 +1147,66 @@ export interface paths {
         /** The archive of SearXNG's source this release was built from (AGPL-3.0) */
         get: operations["getWebSearchSource"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The system update service's state (设置 → 系统更新, docs/specs/system-update.md)
+         * @description Administrators only. The service runs as root apart from the Product Service, which an install restarts; the page reads this while an operation runs and again once the Product Service answers after an install. Outcomes the service recorded are written to the activity record as they are read.
+         */
+        get: operations["getSystemUpdate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/update/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check for, download, install, or go back from a version; restart into a new base image
+         * @description Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before and no restart waiting, restart a new base image that waits for it); update_waiting for install, revert and restart while a storage plan or conversion runs or an app installs or uninstalls.
+         */
+        post: operations["requestSystemUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/update/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Download by itself, install by itself, and the install window
+         * @description Administrators only, from the local desktop (docs/decisions/2026-11-12-system-update-defaults.md).
+         */
+        put: operations["updateSystemUpdateSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2038,6 +2151,772 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The to-dos the caller can see: every open one, by due date with those without one last, then those closed in the last 30 days, most recently closed first */
+        get: operations["listTodos"];
+        put?: never;
+        /** Add a to-do by hand; every to-do added by hand is shared with every active account */
+        post: operations["createTodo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active accounts a to-do can be given to, by username. Disabled accounts and those waiting to be deleted are left out; a to-do already theirs keeps them */
+        get: operations["listTodoOwners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What to remind the caller of now, by due date: each open to-do they can see that is due within 3 days, due today or overdue, once a stage until they acknowledge it. Snoozed ones and those without a due date are left out */
+        get: operations["listTodoReminders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that the caller acknowledged these reminders, for them alone. Only keys the caller's reminders list now are recorded; others are ignored, so a to-do closed meanwhile does not fail the request */
+        post: operations["acknowledgeTodoReminders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Replace a to-do's fields, clearing those left out; changed when someone saved after the given version. A new due date starts its reminders over */
+        patch: operations["updateTodo"];
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark a to-do done or ignored, recording who and when, or open it again, which clears the snooze and starts its reminders over. Setting the status it has changes nothing; this is not an edit and keeps the version */
+        put: operations["setTodoStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict */
+        put: operations["snoozeTodo"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        get: operations["getMontage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
+        get: operations["listMontageProjects"];
+        put?: never;
+        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        post: operations["createMontageProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found */
+        get: operations["getMontageProject"];
+        put?: never;
+        post?: never;
+        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
+        delete: operations["deleteMontageProject"];
+        options?: never;
+        head?: never;
+        /** Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with */
+        patch: operations["updateMontageProject"];
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
+        post: operations["addMontageProjectAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
+        post: operations["generateMontageFilm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found */
+        get: operations["getMontageJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome */
+        post: operations["cancelMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/drop-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
+        post: operations["dropMontageJobAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
+        post: operations["retryMontageJobAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
+        post: operations["retryMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/jobs/{jobId}/replan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
+        post: operations["replanMontageJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day */
+        get: operations["listMontageNotices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
+        get: operations["getMontageSong"];
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        put: operations["putMontageSong"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/song/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The montage center's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
+        get: operations["getMontageSongAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
+        get: operations["getMontageHero"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/hero/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The background film's poster (hero/hero.jpg); 404 without one. */
+        get: operations["getMontageHeroPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The removable modules installed on this device (ADR 0037); a window of a module not listed is not shown */
+        get: operations["listModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the caller administers photo scoring and whether an administrator chose them as a rater */
+        get: operations["getScoringMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The open batches for a rater, each with only the rater's own count of answers */
+        get: operations["listScoringBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A batch's reference photos with their scores, lowest first, for raters and administrators */
+        get: operations["listScoringAnchors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/anchors/{anchorId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The preview of a reference photo */
+        get: operations["getScoringAnchorImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rater's own latest twelve scores in the batch, oldest first, for the ruler; skips and marks are left out */
+        get: operations["listScoringRecent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/batches/{batchId}/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The photos the rater holds in the batch, oldest first, topped up to three; each is held for ten minutes */
+        post: operations["claimScoringPhotos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The preview behind one of the caller's own claims, answered or not */
+        get: operations["getScoringClaimImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The photo behind one of the caller's own claims at its full size, which the window shows at 100%
+         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+         */
+        get: operations["getScoringClaimFull"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims */
+        get: operations["getScoringClaimThumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/claims/{token}/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Answer a claim: a score, a skip or a mark. The same submission again is harmless; a new answer replaces only the rater's latest (rating_locked) */
+        put: operations["rateScoringPhoto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The folders in the Shared folder 照片打分 that can become a batch */
+        get: operations["listScoringSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/dimensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every 打分项 a batch can choose: the built-in ones, then the custom ones, oldest first */
+        get: operations["listScoringDimensions"];
+        put?: never;
+        /** Make a custom 打分项 that every batch from now on can choose; dimension_exists (409) when its name is taken */
+        post: operations["createScoringDimension"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every batch with its import progress and coverage, newest first */
+        get: operations["listScoringAdminBatches"];
+        put?: never;
+        /** Start importing a folder as a new batch */
+        post: operations["createScoringBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a batch nobody answered yet (batch_in_use otherwise) */
+        delete: operations["deleteScoringBatch"];
+        options?: never;
+        head?: never;
+        /** Rename a batch, change its guide, number of raters or, before its first answer, 打分项, or close and reopen it */
+        patch: operations["updateScoringBatch"];
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Each rater's counts, timing, spread, agreement with the others and consistency on repeated photos */
+        get: operations["getScoringStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A small JPEG, at most 320 px on its longer side, of the photo that stands for the batch: the first in its random order, anchors excluded */
+        get: operations["getScoringBatchCover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A zip of one table, ratings.csv or ratings.jsonl, with a row per answer (a photo and a rater), and manifest.json describing the batch, the rows and every column */
+        get: operations["exportScoringBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/batches/{batchId}/export/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many rows an export has: current scores, and those each include adds */
+        get: operations["getScoringExportSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/raters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every active account and whether it is a rater */
+        get: operations["listScoringRaters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/scoring/admin/raters/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose an active account as a rater */
+        put: operations["addScoringRater"];
+        post?: never;
+        /** Stop an account rating; its answers stay */
+        delete: operations["removeScoringRater"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/photos/libraries": {
         parameters: {
             query?: never;
@@ -2710,7 +3589,7 @@ export interface paths {
         };
         /**
          * The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo's text.
+         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo's text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.
          */
         get: operations["viewPhoto"];
         put?: never;
@@ -2794,6 +3673,26 @@ export interface paths {
          * @description For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
          */
         get: operations["listPhotoTextChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/text-handles/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The value a handle of the caller's AI assistant stands for
+         * @description An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+         */
+        get: operations["getPhotoTextHandle"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3961,6 +4860,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assistant-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether the household's DeepSeek key for VNAS is saved (设置 → VNAS, ADR 0024)
+         * @description Administrators only. The key itself is never answered: once saved it can be replaced or deleted, not read.
+         */
+        get: operations["getAssistantKey"];
+        /**
+         * Save or replace the DeepSeek key, which gives every member VNAS
+         * @description Administrators only. acknowledged must be true: the administrator confirms that members' conversations with VNAS, the file contents and photo information it reads to answer, and the photos and desktop screens it looks at go to DeepSeek's servers (400 acknowledgement_required). The Host Agent keeps the key encrypted on the device, where only the model gateway reads it, and prepares every active member's assistant; 400 invalid_key when it cannot be a DeepSeek key. Nothing logs the key.
+         */
+        put: operations["saveAssistantKey"];
+        post?: never;
+        /**
+         * Delete the DeepSeek key, which turns VNAS off for everyone
+         * @description Administrators only. Every member's assistant stops; their conversations, memory, scheduled tasks and files stay and come back when a key is saved again.
+         */
+        delete: operations["deleteAssistantKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assistant/ws": {
         parameters: {
             query?: never;
@@ -3970,7 +4897,7 @@ export interface paths {
         };
         /**
          * The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
+         * @description A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. A window becomes a conversation's browser with desktop.attach ({session_id}), which the product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it has. The companion tools' commands arrive as anas.companion events ({command_id, action, args}), and the commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is the conversation's browser and sent its prompt, and at no other; that window answers each once with companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has not answered is no longer waited for. The connection reaches the instance through the session gate (decision 10) and closes when the member's session ends.
          */
         get: operations["openAssistantGateway"];
         put?: never;
@@ -4006,7 +4933,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4030,7 +4957,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -4222,8 +5149,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs
-         * @description 200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification.
+         * Run a task now, in a round of the member's scheduled tasks like one that is due; a paused task is resumed
+         * @description 202 once the run was asked for; it starts within seconds and goes on. The run's end shows in the task and as an assistant_task notification. 409 task_running when it is already running, task_finished when the task has no more runs.
          */
         post: operations["runAssistantTask"];
         delete?: never;
@@ -4609,6 +5536,32 @@ export interface components {
             nickname?: string;
             /** @description Names the current avatar; absent when the user has none. See getAvatar. */
             avatarVersion?: string;
+            deletion?: components["schemas"]["Deletion"];
+        };
+        /** @description A disabled account an administrator asked to delete; only listUsers and scheduleUserDeletion show it. */
+        Deletion: {
+            /**
+             * Format: date-time
+             * @description When its data is removed for good.
+             */
+            dueAt: string;
+            personalSpace: components["schemas"]["DeletionChoice"];
+            library: components["schemas"]["DeletionChoice"];
+            /** @description Its data is being removed; the deletion can no longer be cancelled. */
+            started: boolean;
+            /** @description The last attempt to remove it failed; it is tried again. */
+            retrying?: boolean;
+        };
+        /**
+         * @description transfer: the administrator who deleted the account receives it; delete: it is deleted with the account.
+         * @enum {string}
+         */
+        DeletionChoice: "transfer" | "delete";
+        DeletionRequest: {
+            /** @description The administrator's own password. */
+            password: string;
+            personalSpace: components["schemas"]["DeletionChoice"];
+            library: components["schemas"]["DeletionChoice"];
         };
         Profile: {
             id: string;
@@ -4627,11 +5580,15 @@ export interface components {
         Notification: {
             id: string;
             /** @enum {string} */
-            kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task";
+            kind: "admin_viewing" | "admin_library_viewing" | "credential_reset" | "assistant_task" | "account_deleted";
             actorUsername: string;
             reason?: string;
             /** Format: date-time */
             expiresAt?: string;
+            /** @description account_deleted: the folder of the administrator's personal space that holds the deleted account's files. */
+            folder?: string;
+            /** @description account_deleted: the album of the administrator's private library that holds its photos. */
+            album?: string;
             /** @description The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown. */
             task?: {
                 taskId: string;
@@ -5082,7 +6039,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "system";
         ActivityAccount: {
             id: string;
             username: string;
@@ -5094,7 +6051,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "system" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -5124,7 +6081,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
@@ -5186,6 +6143,21 @@ export interface components {
             };
             /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
+        };
+        PhoneHotspotStatus: {
+            /** @enum {string} */
+            state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
+            /** @enum {string} */
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed";
+            /** @description Present when the hotspot is on. The response is not cacheable. */
+            connection?: {
+                ssid: string;
+                password: string;
+                url: string;
+            };
+        };
+        PhoneHotspotRequest: {
+            enabled: boolean;
         };
         /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
         WebSearchPausedEngine: {
@@ -5324,6 +6296,75 @@ export interface components {
             packages: components["schemas"]["WebSearchPackage"][];
             /** @description This release can hand out SearXNG's source (getWebSearchSource). */
             source: boolean;
+        };
+        /**
+         * @description Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check; on a device that runs the A-NAS image, the product switch or the write of a new base image); rolling-back; rolled-back (the check of the new version failed, or its base image its boot check); check-failed (the source could not be read or its signature was wrong); restart-pending (a new base image is written and a restart starts it).
+         * @enum {string}
+         */
+        SystemUpdatePhase: "up-to-date" | "available" | "downloading" | "ready" | "installing" | "rolling-back" | "rolled-back" | "check-failed" | "restart-pending";
+        SystemUpdateProblem: {
+            /** @enum {string} */
+            code: "unreachable" | "signature" | "disk_space" | "download" | "install" | "check" | "rollback" | "staging" | "not_installed" | "boot";
+            /** @description What apt, systemd-sysupdate or a-nas-check said; for disk_space, the bytes still missing. */
+            detail?: string;
+        };
+        SystemUpdateRecord: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "updated" | "rolled-back" | "reverted" | "check-failed" | "downloaded" | "failed";
+            version?: string;
+            from?: string;
+            /** @description The administrator who asked, or automatic. */
+            by: string;
+            problem?: components["schemas"]["SystemUpdateProblem"];
+        };
+        SystemUpdateSettings: {
+            autoDownload: boolean;
+            autoInstall: boolean;
+            /** @description Local time of day an automatic install may start from. */
+            windowStart: string;
+            /** @description Local time of day it may start until; before windowStart, the window runs past midnight. */
+            windowEnd: string;
+        };
+        SystemUpdateAction: {
+            /** @enum {string} */
+            action: "check" | "download" | "install" | "revert" | "restart";
+        };
+        SystemUpdateStatus: {
+            phase: components["schemas"]["SystemUpdatePhase"];
+            /** @description An operation is in progress. */
+            running: boolean;
+            /** @description The installed version of a-nas. */
+            current?: string;
+            /** @description The version before the last install that passed its check, which revert installs. */
+            previous?: string;
+            /** @description The newest version the source offers that is newer and was not rolled back or left. */
+            candidate?: string;
+            /**
+             * Format: int64
+             * @description What installing the candidate downloads; 0 for a pushed local source.
+             */
+            downloadBytes: number;
+            /** Format: int64 */
+            downloadedBytes: number;
+            /** @description The distributions the device follows, such as release and dev. */
+            suites: string[];
+            /** Format: date-time */
+            checkedAt?: string;
+            /** Format: date-time */
+            installedAt?: string;
+            /** @description The version an operation in progress installs, or that waits for a restart. */
+            target?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            problem?: components["schemas"]["SystemUpdateProblem"];
+            /** @description The last ten outcomes, newest first. */
+            records: components["schemas"]["SystemUpdateRecord"][];
+            settings: components["schemas"]["SystemUpdateSettings"];
+            /** @description What an install, revert or restart waits for now. */
+            waiting: ("storage" | "apps")[];
+            image?: components["schemas"]["SystemUpdateImage"];
         };
         Transfer: {
             id: string;
@@ -5806,6 +6847,286 @@ export interface components {
             vaccines: components["schemas"]["FamilyVaccineCatalog"];
             growthStandard: string;
         };
+        /**
+         * Format: date
+         * @description A calendar date without time of day or zone; today is the device's local date.
+         */
+        TodoDate: string;
+        /**
+         * @description What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one.
+         * @enum {string}
+         */
+        TodoCategory: "bill" | "medical" | "insurance" | "id_document" | "contract" | "other";
+        /**
+         * @description shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared.
+         * @enum {string}
+         */
+        TodoScope: "shared" | "private";
+        /** @enum {string} */
+        TodoStatus: "open" | "done" | "ignored";
+        /**
+         * @description soon: due within 3 days; today: due today; overdue: the due date has passed.
+         * @enum {string}
+         */
+        TodoStage: "soon" | "today" | "overdue";
+        Todo: {
+            id: string;
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+            /** @description Username of the owner when it was set, shown once the account is gone. */
+            ownerName?: string;
+            /** @description Amount in fen (分) of renminbi; there is no other currency. */
+            amountCents?: number;
+            scope: components["schemas"]["TodoScope"];
+            status: components["schemas"]["TodoStatus"];
+            /** @description The day reminders resume; the to-do is snoozed while today is before it. */
+            snoozedUntil?: components["schemas"]["TodoDate"];
+            /** @description Grows when the to-do is snoozed, opened again or given another due date, which starts its reminders over. */
+            remindRound: number;
+            /**
+             * @description Where it came from; manual: added by hand.
+             * @enum {string}
+             */
+            source: "manual";
+            /** @description Counts edits to the fields; changing the status or snoozing does not change it. */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Account ID of who added it. */
+            createdById: string;
+            /** @description Username of who added it, when they added it. */
+            createdByName: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /**
+             * Format: date-time
+             * @description Set while it is done or ignored.
+             */
+            closedAt?: string;
+            /** @description Account ID of who marked it done or ignored. */
+            closedById?: string;
+            /** @description Username of who marked it done or ignored, when they did. */
+            closedByName?: string;
+        };
+        TodoFields: {
+            /** @description Repeating a request with the same key returns the first to-do. */
+            requestKey?: string;
+            /** @description At most 10 characters, which a shared screen can show whole. */
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An active account's ID; absent means the whole family. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+        };
+        TodoEdit: {
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An account's ID; absent means the whole family. A new owner must be an active account. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+            /** @description The version the edit was made from. */
+            version: number;
+        };
+        /** @description An active account a to-do can be given to. */
+        TodoOwner: {
+            id: string;
+            username: string;
+        };
+        TodoReminder: {
+            /** @description Names this reminder to the caller; acknowledging it stops this stage until the reminders start over. */
+            key: string;
+            todoId: string;
+            stage: components["schemas"]["TodoStage"];
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due: components["schemas"]["TodoDate"];
+            scope: components["schemas"]["TodoScope"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+        };
+        ScoringMe: {
+            /** @description The caller is an A-NAS administrator and so administers photo scoring. */
+            admin: boolean;
+            /** @description An administrator chose the caller as a rater. */
+            rater: boolean;
+        };
+        /**
+         * @description How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
+         * @enum {string}
+         */
+        ScoringScale: "five" | "hundredths" | "tenths" | "whole" | "three";
+        ScoringRaterBatch: {
+            id: string;
+            name: string;
+            /** @description The administrator's scoring guide. */
+            rubric: string;
+            dimensions: components["schemas"]["ScoringDimensions"];
+            scale: components["schemas"]["ScoringScale"];
+            /** @description The window shows no scores to the rater, who scores by the place on the number line; the answers still have the scale's decimals. */
+            hideDecimals: boolean;
+            /** @description The caller's own answers in the batch, skips and marks included. */
+            rated: number;
+            /** @description No photo of the batch is left for the caller. */
+            finished: boolean;
+        };
+        ScoringAnchor: {
+            id: number;
+            /** @description The reference score, 0 to 5 with at most two decimals. */
+            score: number;
+            width: number;
+            height: number;
+        };
+        ScoringRecentScore: {
+            /** @description The claim the score answered; its thumbnail and preview are the rater's own. */
+            token: string;
+            /** @description The score of the batch's first 打分项. */
+            score: number;
+            scores: components["schemas"]["ScoringScores"];
+            /** @description The preview's width, for the thumbnail's proportions. */
+            width: number;
+            height: number;
+        };
+        ScoringClaim: {
+            /** @description All the rater learns about the photo; it is neither the content hash nor the file name. */
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description The preview's width; its longer side is at most 2048. */
+            width: number;
+            height: number;
+        };
+        ScoringClaims: {
+            items: components["schemas"]["ScoringClaim"][];
+            /** @description Nothing is held and nothing is left for the caller, or the batch is closed. */
+            finished: boolean;
+        };
+        ScoringSize: {
+            width: number;
+            height: number;
+        };
+        ScoringRatingInput: {
+            /** @description Chosen by the page for each answer; retrying the same answer sends the same value. */
+            submission: string;
+            /**
+             * @description skip: cannot judge; flag: something is wrong with the photo.
+             * @enum {string}
+             */
+            kind: "score" | "skip" | "flag";
+            /** @description Only with kind score: the batch's first 打分项, 0 to 5 with at most two decimals; more decimals, or a score that is not one of the batch's scale, are refused (validation_failed). */
+            score?: number;
+            /** @description Only with kind score: exactly the batch's 打分项 after the first (validation_failed otherwise). */
+            scores?: components["schemas"]["ScoringScores"];
+            /** @description How long the photo was looked at before the answer: from it appearing, without the time the page was hidden or the scoring guide open. */
+            viewMs: number;
+            viewport?: components["schemas"]["ScoringSize"];
+            display?: components["schemas"]["ScoringSize"];
+            pixelRatio?: number;
+        };
+        ScoringBatch: {
+            id: string;
+            name: string;
+            /** @description The folder in 照片打分 the batch was imported from. */
+            source: string;
+            /** @description How many raters each photo needs. */
+            required: number;
+            rubric: string;
+            dimensions: components["schemas"]["ScoringDimensions"];
+            scale: components["schemas"]["ScoringScale"];
+            /** @description Raters see no scores, only the place on the number line. */
+            hideDecimals: boolean;
+            /** @enum {string} */
+            state: "importing" | "open" | "closed";
+            /** Format: date-time */
+            createdAt: string;
+            import: {
+                /** @description Files found in the folder; 0 until it was scanned. */
+                files: number;
+                imported: number;
+                skipped: number;
+                /** @description The skipped files by reason, most first: too_small (a photo to score whose longer side is under 2400 pixels), unsupported_type, undecodable, too_large, unreadable, missing, not_a_file, anchor_name (an anchor without a score in its name). */
+                skippedBy: {
+                    /** @enum {string} */
+                    reason: "too_small" | "unsupported_type" | "undecodable" | "too_large" | "unreadable" | "missing" | "not_a_file" | "anchor_name";
+                    count: number;
+                }[];
+            };
+            /** @description Distinct photos to score, anchors excluded. */
+            photos: number;
+            anchors: number;
+            /** @description Photos with the required number of scores. */
+            complete: number;
+            /** @description Photos with some scores but not all. */
+            started: number;
+            /** @description Photos a rater marked as having a problem. */
+            flagged: number;
+            /** @description Answers of every kind; once there is one, the batch's 打分项, scale and hideDecimals can no longer change. */
+            answers: number;
+        };
+        ScoringBatchInput: {
+            name: string;
+            source: string;
+            required: number;
+            rubric: string;
+            dimensions: components["schemas"]["ScoringDimensionChoice"];
+            /** @description hundredths when left out. */
+            scale?: components["schemas"]["ScoringScale"];
+            /** @description Only with hundredths or tenths (validation_failed otherwise); false when left out. */
+            hideDecimals?: boolean;
+        };
+        ScoringBatchPatch: {
+            name?: string;
+            rubric?: string;
+            required?: number;
+            /** @description Refused with batch_in_use once the batch has an answer. */
+            dimensions?: components["schemas"]["ScoringDimensionChoice"];
+            /** @description Refused with batch_in_use once the batch has an answer. A scale without decimals turns hideDecimals off unless the patch sets it. */
+            scale?: components["schemas"]["ScoringScale"];
+            /** @description Refused with batch_in_use once the batch has an answer. */
+            hideDecimals?: boolean;
+            /** @enum {string} */
+            state?: "open" | "closed";
+        };
+        ScoringPerson: {
+            id: string;
+            /** @description Missing once the account is no longer active. */
+            username?: string;
+            nickname?: string;
+            avatarVersion?: string;
+        };
+        ScoringRaterEntry: {
+            id: string;
+            username: string;
+            nickname?: string;
+            avatarVersion?: string;
+            rater: boolean;
+        };
+        ScoringRaterStats: {
+            rater: components["schemas"]["ScoringPerson"];
+            /** @description The account is still active. */
+            active: boolean;
+            scores: number;
+            skips: number;
+            flags: number;
+            /** @description Answers to photos shown again to check consistency. */
+            repeats: number;
+            /** @description Over the scored photos, each with every 打分项. */
+            medianViewMs: number;
+            /** @description Share of scored photos answered within a second. */
+            fastShare: number;
+            /** Format: date-time */
+            lastAt: string;
+            /** @description One per 打分项 of the batch, in its order. */
+            dimensions: components["schemas"]["ScoringDimensionStats"][];
+        };
         PhotoLibrary: {
             id: string;
             /** @enum {string} */
@@ -5988,7 +7309,7 @@ export interface components {
             closest: number;
             /** @description How many results, counted over all pages, match the query by name or user tag; they come first. */
             names: number;
-            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
             texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
@@ -6062,6 +7383,17 @@ export interface components {
             };
             /** Format: date-time */
             at: string;
+        };
+        PhotoTextHandleValue: {
+            /** @description The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码. */
+            label: string;
+            /** @description What the handle stands for now: what the field holds, what was read for it, or the number as its digits. */
+            value: string;
+            /** @description True for a field's value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong. */
+            unchecked: boolean;
+            /** @description The photo the value was read from. */
+            assetId: string;
+            assetName: string;
         };
         PhotoSimilarResults: {
             items: components["schemas"]["PhotoAsset"][];
@@ -6649,14 +7981,20 @@ export interface components {
             version: number;
             /** @description Username of the account that filed the item. */
             createdBy: string;
+            /** @description The account's ID, which a later account never shares, unlike a deleted account's name. */
+            createdById: string;
             /** Format: date-time */
             createdAt: string;
             /** @description Username of the latest editor of the text or images. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
             resolved: boolean;
             resolvedBy?: string;
+            /** @description The account ID of who marked it handled; absent for marks recorded before IDs were. */
+            resolvedById?: string;
             /** Format: date-time */
             resolvedAt?: string;
             /** @description Replies under the item, oldest first. */
@@ -6670,10 +8008,14 @@ export interface components {
             version: number;
             /** @description Username of the account that wrote the comment. */
             createdBy: string;
+            /** @description The account's ID, which a later account never shares, unlike a deleted account's name. */
+            createdById: string;
             /** Format: date-time */
             createdAt: string;
             /** @description Username of the latest editor. */
             updatedBy?: string;
+            /** @description The latest editor's account ID; absent for edits recorded before IDs were. */
+            updatedById?: string;
             /** Format: date-time */
             updatedAt?: string;
         };
@@ -6686,6 +8028,26 @@ export interface components {
         AssistantStatus: {
             /** @description The member has an assistant instance. */
             available: boolean;
+            /**
+             * @description Why not, when it is known: no_key while no administrator has saved the DeepSeek key.
+             * @enum {string}
+             */
+            reason?: "no_key";
+        };
+        AssistantKeyState: {
+            /** @description A key is saved; every active member has VNAS. */
+            configured: boolean;
+            /**
+             * @description What systemd reports of the model gateway, which holds the key.
+             * @enum {string}
+             */
+            gateway: "running" | "starting" | "stopped" | "failed";
+        };
+        AssistantKeyRequest: {
+            /** @description The DeepSeek API key (printable ASCII, no spaces). */
+            key: string;
+            /** @description The administrator confirmed that what VNAS handles goes to DeepSeek; must be true. */
+            acknowledged: boolean;
         };
         AssistantSession: {
             id: string;
@@ -6837,7 +8199,7 @@ export interface components {
                 to?: string;
                 /** @description What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder). */
                 from?: string;
-                /** @description Bytes a copy copies; a folder's files together. */
+                /** @description Bytes a copy copies, a folder's files together, or a write leaves. */
                 size?: number;
                 /** @description A copy of a whole folder. */
                 folder?: boolean;
@@ -6845,8 +8207,22 @@ export interface components {
                 exists?: boolean;
                 /** @description Text of a written file when the card was made; absent when it is new or not text. */
                 before?: string;
-                /** @description Text the write leaves; absent when it is not text. */
+                /** @description Text the write leaves, at most its first 64 KiB; absent when it is not text. */
                 after?: string;
+                /** @description Bytes of the file a write replaces. */
+                beforeSize?: number;
+                /** @description after is only the start of what the write leaves: the member has not seen all of it. */
+                partial?: boolean;
+                /** @description What the write leaves is not text, so the card shows none of it. */
+                binary?: boolean;
+                /** @description before is only the start of the file the write replaces. */
+                beforePartial?: boolean;
+                /** @description The old file's preview is not UTF-8 text and is not displayed. */
+                beforeBinary?: boolean;
+                /** @description Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary. */
+                hiddenSize?: number;
+                /** @description Bytes of old content omitted from before. */
+                beforeHiddenSize?: number;
             }[];
         } & {
             [key: string]: unknown;
@@ -6915,6 +8291,13 @@ export interface components {
             /** Format: int64 */
             capacityBytes?: number;
         };
+        /** @description Set on a device that runs the A-NAS image (ADR 0034 decision 2). */
+        SystemUpdateImage: {
+            /** @description The base image the device runs, by its release's sequence on main. */
+            base: string;
+            /** @description Installing the candidate writes a new base image, which a restart starts. */
+            restart: boolean;
+        };
         /**
          * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
          * @enum {string}
@@ -6927,6 +8310,233 @@ export interface components {
         };
         FamilyAssetIDs: {
             assetIds: string[];
+        };
+        MontageProjectSummary: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
+            previewAssetIds?: string[];
+        };
+        MontageProjectPage: {
+            items: components["schemas"]["MontageProjectSummary"][];
+            next?: string;
+        };
+        /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
+        MontageRequestKey: string;
+        MontageAssetIDs: string[];
+        MontageProjectAsset: {
+            assetId: string;
+            /**
+             * @description unknown: the photo library did not answer this time.
+             * @enum {string}
+             */
+            status: "available" | "trashed" | "missing" | "unknown";
+            duration?: number;
+            /** Format: date-time */
+            takenAt?: string;
+            /** Format: date-time */
+            addedAt: string;
+        };
+        MontageVersion: {
+            /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
+            number: number;
+            /** @description The job that made it. */
+            jobId: string;
+            /** @description Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二. */
+            plan: number;
+            /** @description The film in the caller's photo library; play and download it there. */
+            filmAssetId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description The member deleted the film from the photo library. */
+            gone?: boolean;
+        };
+        MontageJobStep: {
+            /**
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @enum {string}
+             */
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
+            /**
+             * @description A step that stopped with the job shows the job's state.
+             * @enum {string}
+             */
+            state: "pending" | "running" | "done" | "queued" | "waiting" | "needs_input" | "failed" | "cancelled";
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageJob: {
+            id: string;
+            projectId: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
+            /** @description The step the job is at or stopped at. */
+            step?: string;
+            /**
+             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.
+             * @enum {string}
+             */
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            error?: string;
+            steps: components["schemas"]["MontageJobStep"][];
+            /** @description The videos missing, too long, or whose analysis failed. */
+            missingAssetIds?: string[];
+            /** @description The first 方案's film. */
+            version?: components["schemas"]["MontageVersion"];
+            /** @description Every 方案's film the job saved, in order. */
+            versions?: components["schemas"]["MontageVersion"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        MontageProject: {
+            id: string;
+            name: string;
+            assetCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            ask: string;
+            chronological: boolean;
+            assets: components["schemas"]["MontageProjectAsset"][];
+            /** @description The films saved, newest first. */
+            versions: components["schemas"]["MontageVersion"][];
+            /** @description The project's latest job, for the page to pick up where it was after a reload. */
+            job?: components["schemas"]["MontageJob"];
+        };
+        MontageNotice: {
+            /** @enum {string} */
+            kind: "waiting_for_planning" | "planning" | "needs_input" | "saved";
+            jobId: string;
+            projectId: string;
+            /** @description The project's name. */
+            project: string;
+            reason?: string;
+            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. */
+            detail?: string;
+            /** @description The film saved, for saved. */
+            filmAssetId?: string;
+            /** Format: date-time */
+            at: string;
+        };
+        MontageNotices: {
+            items: components["schemas"]["MontageNotice"][];
+        };
+        MontageSongSection: {
+            start: number;
+            end: number;
+            /**
+             * @description allin1's label.
+             * @enum {string}
+             */
+            label: "start" | "end" | "intro" | "outro" | "break" | "bridge" | "inst" | "solo" | "verse" | "chorus";
+        };
+        MontageSongPart: {
+            /** @description Seconds from the excerpt's start. */
+            start: number;
+            end: number;
+            /**
+             * @description The part's level in the film: quiet, middle or climax.
+             * @enum {string}
+             */
+            level: "安静" | "中等" | "高潮";
+            label: string;
+            /** @description allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it. */
+            allin1?: string;
+            /** @description The shots' slots, cut on the bar lines, in seconds from the excerpt's start. */
+            slots: number[][];
+        };
+        MontageSongSelection: {
+            tempo: number;
+            bar: number;
+            /** @description Its start and end in the song, in seconds. The film starts there and lasts as long. */
+            excerpt: number[];
+            seconds: number;
+            parts: components["schemas"]["MontageSongPart"][];
+            /** @description false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen. */
+            chorus: boolean;
+        };
+        MontageSong: {
+            id: string;
+            /** @description The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title. */
+            trackId?: string;
+            title: string;
+            duration: number;
+            /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */
+            transcode: boolean;
+            /** @enum {string} */
+            state: "analyzing" | "ready" | "unusable";
+            /**
+             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
+             * @enum {string}
+             */
+            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
+            /**
+             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
+             * @enum {string}
+             */
+            waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
+            tempo?: number;
+            beats?: number[];
+            downbeats?: number[];
+            sections?: components["schemas"]["MontageSongSection"][];
+            /** @description Where the eighth version's rule starts the excerpt: around the first chorus. */
+            defaultStart?: number;
+            selection?: components["schemas"]["MontageSongSelection"];
+        };
+        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
+        ScoringDimensionID: string;
+        ScoringDimension: {
+            id: components["schemas"]["ScoringDimensionID"];
+            /** @description The name raters see, such as 构图. */
+            name: string;
+            /** @description What raters look at; empty for sharpness, narrative and preference and for custom ones made without. */
+            description: string;
+            /** @description An administrator made it. */
+            custom: boolean;
+        };
+        /** @description A batch's 打分项 in the order raters score them, which is the order the administrator chose them in. */
+        ScoringDimensions: components["schemas"]["ScoringDimension"][];
+        /** @description Scores on a batch's 打分项 after the first, 0 to 5 with at most two decimals; the first stays in score. */
+        ScoringScores: {
+            [key: string]: number;
+        };
+        ScoringDimensionInput: {
+            /** @description 1 to 8 characters, unique among every 打分项. */
+            name: string;
+            /** @description Shown to raters; one line of at most 40 characters. */
+            description?: string;
+        };
+        /** @description The 打分项 to score, one at least, in the order raters score them; each is built in or made through /admin/dimensions. */
+        ScoringDimensionChoice: components["schemas"]["ScoringDimensionID"][];
+        ScoringDimensionStats: {
+            dimension: components["schemas"]["ScoringDimensionID"];
+            mean: number;
+            standardDeviation: number;
+            /** @description Correlation with the other raters' mean on the same photos; null below 20 such photos. */
+            agreement: number | null;
+            agreementPhotos: number;
+            /** @description Mean absolute difference between a repeat and the current score of that photo; null without repeats. */
+            repeatDifference: number | null;
+            /** @description Longest run of the same score in a row. */
+            longestRun: number;
+        };
+        /** @description A choice of columns beside image_id, image_path and rater, which every export has: image_size is image_width and image_height; each of the batch's 打分项 is its own column in points, by its ID, in the batch's order; duration is duration_s, the seconds spent on the photo (a current answer adds the time of the answer it replaced); kind is kind, repeat and superseded; links is rating_id, replaces and repeat_of; viewport and display are a width and a height each. */
+        ScoringExportField: string;
+        ScoringExportSummary: {
+            /** @description Current scores of photos handed out the first time: the rows of every export. */
+            scores: number;
+            /** @description Current skips and marks; rows with include skips. */
+            skips: number;
+            /** @description Answers a later one replaced; rows with include superseded. */
+            superseded: number;
+            /** @description Current answers to photos shown again; rows with include repeats. */
+            repeats: number;
         };
     };
     responses: {
@@ -7061,6 +8671,8 @@ export interface components {
         PhotoOccurrenceID: string;
         /** @description A field of the photo's document type, such as 合计 */
         PhotoTextField: string;
+        /** @description The letters after the dot of a handle, such as 6d48a8 */
+        PhotoTextHandle: string;
         MediaLibraryID: string;
         MediaVideoID: string;
         /** @description A video or show ID. */
@@ -7080,7 +8692,12 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
-        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+        TodoID: string;
+        ScoringBatchID: string;
+        ScoringAnchorID: number;
+        ScoringClaimToken: string;
+        ScoringAccountID: string;
+        /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
         AssistantTaskID: string;
@@ -7089,6 +8706,10 @@ export interface components {
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
         FamilyReactionName: components["schemas"]["FamilyReactionName"];
+        /** @description The `next` of the previous page. */
+        MontageCursor: string;
+        MontageProjectID: string;
+        MontageJobID: string;
     };
     requestBodies: never;
     headers: never;
@@ -7137,6 +8758,9 @@ export type CredentialInput = components['schemas']['CredentialInput'];
 export type NewUsername = components['schemas']['NewUsername'];
 export type NewPassword = components['schemas']['NewPassword'];
 export type User = components['schemas']['User'];
+export type Deletion = components['schemas']['Deletion'];
+export type DeletionChoice = components['schemas']['DeletionChoice'];
+export type DeletionRequest = components['schemas']['DeletionRequest'];
 export type Profile = components['schemas']['Profile'];
 export type ProfileChange = components['schemas']['ProfileChange'];
 export type PasswordChange = components['schemas']['PasswordChange'];
@@ -7181,6 +8805,8 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type PhoneHotspotStatus = components['schemas']['PhoneHotspotStatus'];
+export type PhoneHotspotRequest = components['schemas']['PhoneHotspotRequest'];
 export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
@@ -7191,6 +8817,12 @@ export type WebSearchUpdate = components['schemas']['WebSearchUpdate'];
 export type WebSearchFound = components['schemas']['WebSearchFound'];
 export type WebSearchPackage = components['schemas']['WebSearchPackage'];
 export type WebSearchLicense = components['schemas']['WebSearchLicense'];
+export type SystemUpdatePhase = components['schemas']['SystemUpdatePhase'];
+export type SystemUpdateProblem = components['schemas']['SystemUpdateProblem'];
+export type SystemUpdateRecord = components['schemas']['SystemUpdateRecord'];
+export type SystemUpdateSettings = components['schemas']['SystemUpdateSettings'];
+export type SystemUpdateAction = components['schemas']['SystemUpdateAction'];
+export type SystemUpdateStatus = components['schemas']['SystemUpdateStatus'];
 export type Transfer = components['schemas']['Transfer'];
 export type TransferLocation = components['schemas']['TransferLocation'];
 export type TransferFailure = components['schemas']['TransferFailure'];
@@ -7233,6 +8865,31 @@ export type FamilyVaccineSchedule = components['schemas']['FamilyVaccineSchedule
 export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
 export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
+export type TodoDate = components['schemas']['TodoDate'];
+export type TodoCategory = components['schemas']['TodoCategory'];
+export type TodoScope = components['schemas']['TodoScope'];
+export type TodoStatus = components['schemas']['TodoStatus'];
+export type TodoStage = components['schemas']['TodoStage'];
+export type Todo = components['schemas']['Todo'];
+export type TodoFields = components['schemas']['TodoFields'];
+export type TodoEdit = components['schemas']['TodoEdit'];
+export type TodoOwner = components['schemas']['TodoOwner'];
+export type TodoReminder = components['schemas']['TodoReminder'];
+export type ScoringMe = components['schemas']['ScoringMe'];
+export type ScoringScale = components['schemas']['ScoringScale'];
+export type ScoringRaterBatch = components['schemas']['ScoringRaterBatch'];
+export type ScoringAnchor = components['schemas']['ScoringAnchor'];
+export type ScoringRecentScore = components['schemas']['ScoringRecentScore'];
+export type ScoringClaim = components['schemas']['ScoringClaim'];
+export type ScoringClaims = components['schemas']['ScoringClaims'];
+export type ScoringSize = components['schemas']['ScoringSize'];
+export type ScoringRatingInput = components['schemas']['ScoringRatingInput'];
+export type ScoringBatch = components['schemas']['ScoringBatch'];
+export type ScoringBatchInput = components['schemas']['ScoringBatchInput'];
+export type ScoringBatchPatch = components['schemas']['ScoringBatchPatch'];
+export type ScoringPerson = components['schemas']['ScoringPerson'];
+export type ScoringRaterEntry = components['schemas']['ScoringRaterEntry'];
+export type ScoringRaterStats = components['schemas']['ScoringRaterStats'];
 export type PhotoLibrary = components['schemas']['PhotoLibrary'];
 export type PhotoDirectory = components['schemas']['PhotoDirectory'];
 export type PhotoAsset = components['schemas']['PhotoAsset'];
@@ -7248,6 +8905,7 @@ export type PhotoSearchResults = components['schemas']['PhotoSearchResults'];
 export type PhotoText = components['schemas']['PhotoText'];
 export type PhotoTextCorrectionRequest = components['schemas']['PhotoTextCorrectionRequest'];
 export type PhotoTextChange = components['schemas']['PhotoTextChange'];
+export type PhotoTextHandleValue = components['schemas']['PhotoTextHandleValue'];
 export type PhotoSimilarResults = components['schemas']['PhotoSimilarResults'];
 export type PhotoImageSearch = components['schemas']['PhotoImageSearch'];
 export type PhotoAiStatus = components['schemas']['PhotoAIStatus'];
@@ -7292,6 +8950,8 @@ export type FeedbackItem = components['schemas']['FeedbackItem'];
 export type FeedbackComment = components['schemas']['FeedbackComment'];
 export type FeedbackImage = components['schemas']['FeedbackImage'];
 export type AssistantStatus = components['schemas']['AssistantStatus'];
+export type AssistantKeyState = components['schemas']['AssistantKeyState'];
+export type AssistantKeyRequest = components['schemas']['AssistantKeyRequest'];
 export type AssistantSession = components['schemas']['AssistantSession'];
 export type AssistantTask = components['schemas']['AssistantTask'];
 export type AssistantTaskEnvelope = components['schemas']['AssistantTaskEnvelope'];
@@ -7310,9 +8970,34 @@ export type TaskManagerTemperature = components['schemas']['TaskManagerTemperatu
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
 export type MissingDisk = components['schemas']['MissingDisk'];
+export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type MontageProjectSummary = components['schemas']['MontageProjectSummary'];
+export type MontageProjectPage = components['schemas']['MontageProjectPage'];
+export type MontageRequestKey = components['schemas']['MontageRequestKey'];
+export type MontageAssetIDs = components['schemas']['MontageAssetIDs'];
+export type MontageProjectAsset = components['schemas']['MontageProjectAsset'];
+export type MontageVersion = components['schemas']['MontageVersion'];
+export type MontageJobStep = components['schemas']['MontageJobStep'];
+export type MontageJob = components['schemas']['MontageJob'];
+export type MontageProject = components['schemas']['MontageProject'];
+export type MontageNotice = components['schemas']['MontageNotice'];
+export type MontageNotices = components['schemas']['MontageNotices'];
+export type MontageSongSection = components['schemas']['MontageSongSection'];
+export type MontageSongPart = components['schemas']['MontageSongPart'];
+export type MontageSongSelection = components['schemas']['MontageSongSelection'];
+export type MontageSong = components['schemas']['MontageSong'];
+export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
+export type ScoringDimension = components['schemas']['ScoringDimension'];
+export type ScoringDimensions = components['schemas']['ScoringDimensions'];
+export type ScoringScores = components['schemas']['ScoringScores'];
+export type ScoringDimensionInput = components['schemas']['ScoringDimensionInput'];
+export type ScoringDimensionChoice = components['schemas']['ScoringDimensionChoice'];
+export type ScoringDimensionStats = components['schemas']['ScoringDimensionStats'];
+export type ScoringExportField = components['schemas']['ScoringExportField'];
+export type ScoringExportSummary = components['schemas']['ScoringExportSummary'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];
@@ -7341,6 +9026,7 @@ export type ParameterPhotoAlbumId = components['parameters']['PhotoAlbumID'];
 export type ParameterPhotoPersonId = components['parameters']['PhotoPersonID'];
 export type ParameterPhotoOccurrenceId = components['parameters']['PhotoOccurrenceID'];
 export type ParameterPhotoTextField = components['parameters']['PhotoTextField'];
+export type ParameterPhotoTextHandle = components['parameters']['PhotoTextHandle'];
 export type ParameterMediaLibraryId = components['parameters']['MediaLibraryID'];
 export type ParameterMediaVideoId = components['parameters']['MediaVideoID'];
 export type ParameterMediaTitleId = components['parameters']['MediaTitleID'];
@@ -7355,11 +9041,19 @@ export type ParameterFamilyBabyId = components['parameters']['FamilyBabyID'];
 export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID'];
 export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
 export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
+export type ParameterTodoId = components['parameters']['TodoID'];
+export type ParameterScoringBatchId = components['parameters']['ScoringBatchID'];
+export type ParameterScoringAnchorId = components['parameters']['ScoringAnchorID'];
+export type ParameterScoringClaimToken = components['parameters']['ScoringClaimToken'];
+export type ParameterScoringAccountId = components['parameters']['ScoringAccountID'];
 export type ParameterAssistantSessionId = components['parameters']['AssistantSessionID'];
 export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID'];
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
+export type ParameterMontageCursor = components['parameters']['MontageCursor'];
+export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
+export type ParameterMontageJobId = components['parameters']['MontageJobID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -8036,6 +9730,89 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    enableUser: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User enabled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    scheduleUserDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description The account with its deletion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    cancelUserDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                userId: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deletion cancelled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     resetUserCredential: {
@@ -9356,6 +11133,59 @@ export interface operations {
             503: components["responses"]["ProductError"];
         };
     };
+    getPhoneHotspot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hotspot status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updatePhoneHotspot: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotRequest"];
+            };
+        };
+        responses: {
+            /** @description Hotspot operation accepted or the service is unavailable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
     searchWeb: {
         parameters: {
             query?: never;
@@ -9480,6 +11310,90 @@ export interface operations {
             };
             401: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    getSystemUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    requestSystemUpdate: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemUpdateAction"];
+            };
+        };
+        responses: {
+            /** @description The service took the request */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateSystemUpdateSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemUpdateSettings"];
+            };
+        };
+        responses: {
+            /** @description The state with the new settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUpdateStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listTransfers: {
@@ -11389,6 +13303,1479 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
+    listTodos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To-dos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Todo"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoFields"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoOwners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoOwner"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoReminders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoReminder"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    acknowledgeTodoReminders: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    keys: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoEdit"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    setTodoStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["TodoStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    snoozeTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    days: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The montage center is on */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listMontageProjects: {
+        parameters: {
+            query?: {
+                /** @description The `next` of the previous page. */
+                cursor?: components["parameters"]["MontageCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the caller's projects */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProjectPage"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    /** @description Empty names the project by its videos' dates. */
+                    name?: string;
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project the same requestKey made before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            /** @description The new project */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    updateMontageProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    ask?: string;
+                    chronological?: boolean;
+                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
+                    songStart?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addMontageProjectAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    generateMontageFilm: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    cancelMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    dropMontageJobAssets: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    assetIds: components["schemas"]["MontageAssetIDs"];
+                };
+            };
+        };
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJobAnalysis: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    retryMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    replanMontageJob: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                jobId: components["parameters"]["MontageJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listMontageNotices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notices, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageNotices"];
+                };
+            };
+        };
+    };
+    getMontageSong: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The song */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    putMontageSong: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A track of GET /api/v1/music/tracks. */
+                    trackId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The song, being analysed or as analysed before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageSong"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageSongAudio: {
+        parameters: {
+            query?: {
+                /** @description Seconds to start a decoded song from; ignored for other songs. */
+                start?: number;
+            };
+            header?: {
+                Range?: string;
+            };
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHero: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The film */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            /** @description Part of the film */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the film. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageHeroPoster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The poster */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listModules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The installed modules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            id: string;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    getScoringMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringMe"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listScoringBatches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open batches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterBatch"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    listScoringAnchors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reference photos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringAnchor"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringAnchorImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+                anchorId: components["parameters"]["ScoringAnchorID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listScoringRecent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest scores */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRecentScore"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    claimScoringPhotos: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The held photos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringClaims"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringClaimImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringClaimFull: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo at full size */
+            200: {
+                headers: {
+                    /** @description The EXIF orientation, 1 to 8, to apply for display. */
+                    "X-Image-Orientation"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            410: components["responses"]["ProductError"];
+        };
+    };
+    getScoringClaimThumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    rateScoringPhoto: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                token: components["parameters"]["ScoringClaimToken"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringRatingInput"];
+            };
+        };
+        responses: {
+            /** @description How many photos of the batch the rater answered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        rated: number;
+                    };
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    listScoringSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The folders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            name: string;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listScoringDimensions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The 打分项 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringDimension"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    createScoringDimension: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringDimensionInput"];
+            };
+        };
+        responses: {
+            /** @description The new 打分项 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringDimension"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    listScoringAdminBatches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The batches */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringBatch"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    createScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringBatchInput"];
+            };
+        };
+        responses: {
+            /** @description The new batch */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringBatch"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    deleteScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    updateScoringBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringBatchPatch"];
+            };
+        };
+        responses: {
+            /** @description The batch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringBatch"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getScoringStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The raters' statistics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterStats"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getScoringBatchCover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    exportScoringBatch: {
+        parameters: {
+            query?: {
+                /** @description csv (UTF-8 with a byte order mark, for spreadsheets; the default) or jsonl. */
+                format?: "csv" | "jsonl";
+                /** @description Columns beside image_id, image_path and rater, comma-separated; a 打分项 the batch does not score is refused (validation_failed). */
+                fields?: components["schemas"]["ScoringExportField"][];
+                /** @description Rows beside current scores, comma-separated: skips (skips and marks), superseded (answers replaced later), repeats (answers to photos shown again). */
+                include?: ("skips" | "superseded" | "repeats")[];
+            };
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getScoringExportSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batchId: components["parameters"]["ScoringBatchID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringExportSummary"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listScoringRaters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ScoringRaterEntry"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    addScoringRater: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Chosen */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    removeScoringRater: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["ScoringAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
     listPhotoLibraries: {
         parameters: {
             query?: never;
@@ -13017,6 +16404,30 @@ export interface operations {
                 };
             };
             403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoTextHandle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The letters after the dot of a handle, such as 6d48a8 */
+                handle: components["parameters"]["PhotoTextHandle"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoTextHandleValue"];
+                };
+            };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
         };
@@ -15461,6 +18872,85 @@ export interface operations {
             503: components["responses"]["ProductError"];
         };
     };
+    getAssistantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key's state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    saveAssistantKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description The key's state after saving */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteAssistantKey: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key's state after deleting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyState"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
     openAssistantGateway: {
         parameters: {
             query?: never;
@@ -15514,7 +19004,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15540,7 +19030,7 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15577,7 +19067,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
+                /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes's gateway). */
                 sessionId: components["parameters"]["AssistantSessionID"];
             };
             cookie?: never;
@@ -15865,20 +19355,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run ended */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {boolean} */
-                        finished: true;
-                        task: components["schemas"]["AssistantTask"];
-                    };
-                };
-            };
-            /** @description The run started and goes on */
+            /** @description The run was asked for and goes on */
             202: {
                 headers: {
                     [name: string]: unknown;

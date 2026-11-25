@@ -1,0 +1,20 @@
+# The /usr slot first and the UKI last: a UKI appears in the ESP only after
+# its /usr partition carries the version label.
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=url-file
+Path=https://10.0.2.2:8443/os/
+MatchPattern=a-nas_@v.usr.raw.xz
+
+[Target]
+Type=partition
+# Not Path=auto: systemd-sysupdate 257 looks for the disk behind /usr, which
+# a merged system extension makes an overlayfs without one (fixed in 258).
+# a-nas-system-disk.service links the disk here.
+Path=/run/a-nas/system-disk
+MatchPattern=a-nas_@v
+MatchPartitionType=usr
+PartitionFlags=0
+ReadOnly=1

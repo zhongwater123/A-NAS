@@ -24,34 +24,7 @@ func openStore(path string) (*store, error) {
 	if err != nil {
 		return nil, err
 	}
-	const schema = `
-CREATE TABLE IF NOT EXISTS transfers (
-    id TEXT PRIMARY KEY,
-    owner_id TEXT NOT NULL,
-    direction TEXT NOT NULL CHECK (direction IN ('upload', 'download')),
-    kind TEXT NOT NULL CHECK (kind IN ('file', 'archive')),
-    name TEXT NOT NULL,
-    location TEXT NOT NULL,
-    entries TEXT NOT NULL DEFAULT '[]',
-    total_bytes INTEGER NOT NULL,
-    transferred_bytes INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL,
-    error_code TEXT NOT NULL DEFAULT '',
-    error_message TEXT NOT NULL DEFAULT '',
-    batch TEXT NOT NULL DEFAULT '',
-    relative_path TEXT NOT NULL DEFAULT '',
-    last_modified INTEGER NOT NULL DEFAULT 0,
-    entry_id TEXT NOT NULL DEFAULT '',
-    saved_name TEXT NOT NULL DEFAULT '',
-    replaced INTEGER NOT NULL DEFAULT 0,
-    skipped INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    finished_at TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS transfers_owner ON transfers(owner_id, created_at);
-`
-	if _, err := db.Exec(schema); err != nil {
+	if err := sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -220,3 +193,39 @@ func scanTransfer(row rowScanner) (Transfer, error) {
 }
 
 func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
+
+// databaseSchema is transfers.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "transfers.db",
+	Baseline: sqlitedb.Statements(baselineStatements),
+}
+
+const baselineStatements = `
+CREATE TABLE IF NOT EXISTS transfers (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('upload', 'download')),
+    kind TEXT NOT NULL CHECK (kind IN ('file', 'archive')),
+    name TEXT NOT NULL,
+    location TEXT NOT NULL,
+    entries TEXT NOT NULL DEFAULT '[]',
+    total_bytes INTEGER NOT NULL,
+    transferred_bytes INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL,
+    error_code TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    batch TEXT NOT NULL DEFAULT '',
+    relative_path TEXT NOT NULL DEFAULT '',
+    last_modified INTEGER NOT NULL DEFAULT 0,
+    entry_id TEXT NOT NULL DEFAULT '',
+    saved_name TEXT NOT NULL DEFAULT '',
+    replaced INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS transfers_owner ON transfers(owner_id, created_at);
+`

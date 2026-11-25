@@ -10,12 +10,21 @@ Run with the Hermes runtime's Python (it has `websockets`) in the system-test co
       Instead starts a turn in which the scripted model calls 提交更改 with JSON, confirms the
       card that comes back with the member's CSRF token, as the window does, and prints the
       assistant's answer.
+  gate_client.py URL COOKIE desktop
+      Instead attaches as the browser of a new conversation, as the window does before a
+      prompt, and plays the page for three turns in which the scripted model takes a step on
+      the desktop: a snapshot, a click and a look. Prints each command that reached it and
+      the assistant's answer to each turn.
 """
 import asyncio
+import base64
 import json
+import os
+import struct
 import sys
 import time
 import urllib.request
+import zlib
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
@@ -23,6 +32,17 @@ from websockets.exceptions import ConnectionClosed
 url, cookie = sys.argv[1], sys.argv[2]
 mode = sys.argv[3] if len(sys.argv) > 3 else "0"
 origin = url.replace("ws://", "http://").split("/api/")[0]
+
+
+def picture(width, height):
+    """A PNG of noise in base64: as large as a real picture of the desktop, which hardly compresses."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = b"".join(b"\x00" + os.urandom(width * 3) for _ in range(height))
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(rows, 1)) + chunk(b"IEND", b""))
+    return base64.b64encode(png).decode()
 
 
 def confirm(request_id, csrf):
@@ -72,6 +92,32 @@ async def main():
                 elif kind == "message.complete" and frame["params"].get("session_id") == sid:
                     print(f"answer: {payload.get('text')}")
                     return
+        if mode == "desktop":
+            created = await call("session.create", {"cols": 80})
+            sid = created["result"]["session_id"]
+            attached = await call("desktop.attach", {"session_id": sid})
+            print(f"attached {bool((attached.get('result') or {}).get('attached'))}")
+            # About 2 MiB of PNG, 2.8 MiB in base64: what a picture of a busy desktop weighs.
+            shot = picture(1000, 700)
+            page = {"snapshot": {"snapshot": '- window "文件管理"\n  - button "相册" [ref=e2]'},
+                    "click": {"clicked": "@e2", "element": 'button "相册"'},
+                    "look": {"mime_type": "image/png", "data": shot, "width": 1000, "height": 700}}
+            print(f"picture is {len(shot)} characters of base64")
+            for step in ('snapshot {}', 'click {"ref": "e2"}', 'look {}'):
+                await call("prompt.submit", {"session_id": sid, "text": f"CALL mcp__desktop__{step}"})
+                while True:
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 180))
+                    if frame.get("method") != "event":
+                        continue
+                    kind, payload = frame["params"].get("type"), frame["params"].get("payload") or {}
+                    if kind == "anas.desktop":
+                        print(f"command {payload.get('action')} {json.dumps(payload.get('args'), ensure_ascii=False)}")
+                        await call("desktop.result", {"session_id": sid, "command_id": payload["command_id"], "ok": True,
+                                                      "result": page.get(payload.get("action"), {})})
+                    elif kind == "message.complete" and frame["params"].get("session_id") == sid:
+                        print(f"answer: {(payload.get('text') or '').replace(chr(10), ' ')}")
+                        break
+            return
         refused = await call("shell.exec", {"command": "id"})
         print(f"shell.exec error {refused.get('error', {}).get('code')}")
         profile = await call("session.create", {"cols": 80, "profile": "evil"})

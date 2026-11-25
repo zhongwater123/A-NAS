@@ -60,6 +60,34 @@ type CredentialDocument struct {
 	Enabled        bool           `json:"enabled"`
 }
 
+// EnableCredentialPath and RemoveAccountPath take an EnableDocument and an
+// AccountRemovalDocument (accountid.CredentialEnabler, accountid.AccountRemover).
+const (
+	EnableCredentialPath = "/v1/accounts/enable"
+	RemoveAccountPath    = "/v1/accounts/remove"
+)
+
+type EnableDocument struct {
+	Username string `json:"username"`
+	SMB      bool   `json:"smb"`
+}
+
+// AccountRemovalDocument names a deleted account. The Host Agent reads the
+// rest of the removal from the control plane, never from the request.
+type AccountRemovalDocument struct {
+	UserID string `json:"userId"`
+}
+
+// AccountRemovalResult names the folder of the administrator's personal space
+// that holds the account's handed-over files; empty when none does.
+type AccountRemovalResult struct {
+	Folder string `json:"folder,omitempty"`
+}
+
+// NotDeletingCode answers a removal for an account whose deletion has not
+// started.
+const NotDeletingCode = "not_deleting"
+
 type IdentityDocument struct {
 	Username string         `json:"username"`
 	UID      int            `json:"uid"`

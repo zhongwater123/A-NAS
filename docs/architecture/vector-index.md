@@ -1,7 +1,7 @@
 # 向量索引技术设计
 
 状态：相册的向量同步进索引，排序也从索引读（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，accepted）；Experimental NAS 上同步与影子比对已运行，读路径的部署见[当前状态](../status/CURRENT.md)
-更新时间：2026-11-06
+更新时间：2026-11-11
 
 本页说明向量索引如何运行、交付、同步与验证。决定与权衡见 ADR 0028；相册的检索语义仍以[相册本地 AI](photo-ai.md#语义搜索)为准。
 
@@ -40,7 +40,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - 实例名就是所属服务的账号，例如 `anas-vectors@a-nas-photos.service`。单元里只用 `%i`：`%I` 会把 `-` 还原成 `/`。
 - 动态用户的名字默认取单元前缀，所有实例会共用一个 UID，所以显式写 `User=a-nas-vec-%i`（不超过 31 个字符）。
 - 实例在 `anas-vectors.slice` 里，它位于 `anas.slice` 之下：相册的 AI 门控只看 `system.slice` 与 `user.slice` 的压力，Qdrant 建索引不会因此关掉门控。
-- `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次当前 release，检查完存储后 `exec` 同一个 Qdrant，安装器切换 release 的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
+- `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次 `/usr/lib/a-nas/vectors/qdrant` 的链接，检查完存储后 `exec` 同一个 Qdrant，软件包升级换掉链接的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
   - **版本**：版本戳记录写入存储的 Qdrant 版本（`qdrant --version`）。版本相同或同一 minor 内的补丁升级，保留存储；换了 minor（单节点不能跳过 minor 版本），或比写入者更旧（降级），清空。
   - **启动失败**：连续两次启动失败也清空，例如段损坏让 Qdrant 加载时 panic（系统测试用损坏的集合配置验证）。每次启动先计为失败，`wait-ready.sh` 等到端口可连后清掉计数。
 - `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。
@@ -80,7 +80,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 - [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定官方 `qdrant-x86_64-unknown-linux-musl.tar.gz` 的版本、大小与 SHA-256。
 - 开发机与 CI 用 [`scripts/fetch-qdrant.sh`](../../scripts/fetch-qdrant.sh) 下载到 `build/qdrant/<sha256>/` 并核对，测试与评估都用这份二进制。
-- `deploy-dev.ps1` 只在 NAS 暂存区缺这份内容时上传。安装器先复制到自己的临时目录，再核对大小与哈希，解出二进制，放到 `/opt/a-nas/qdrant/<sha256>/qdrant`。release 的 `vectors/` 目录链接它，并带上清单、配置与两个脚本。
+- `make release` 取内容库 `qdrant/<sha256>/` 中的压缩包，核对大小与哈希后解出二进制，打成内容包，软件源中已有时不再构建（[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)）。内容包把它放到 `/opt/a-nas/qdrant/<sha256>/qdrant`；`a-nas` 包的 `/usr/lib/a-nas/vectors/` 链接它，并带上清单、配置与两个脚本。
 
 ## 客户端：`internal/vectorindex`
 
@@ -121,6 +121,19 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 目标模型变了；
   - 记录的集合不存在：实例被清空，或版本变化；
   - 名称中的随机部分与 Catalog 记录的不符：例如换了数据卷。
+
+### 剪辑中心的窗口集合
+
+剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
+- **名称**：`video_windows_v1_<分析身份的 SHA-256 前 8 位>_<随机 8 位>`；分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。payload 是 `object` 与 `libraries`，两者都建 keyword 索引；点的键是 `<object>#<窗口序号>`。不建 HNSW 图。
+- **集合的身份**：取最新写入的窗口的身份（`video_windows.created_at`，重算时覆盖写会刷新它），和图片按最新向量选模型一样。所以换模型后第一块写入，集合就换成新身份，不必等最后插入的那个视频重算。
+- **outbox**：Catalog migration 18 的 `window_outbox`，触发器建在 `video_windows` 的增删改，以及有窗口的对象的资产增删与图库、回收站变化上。不与 `vector_outbox` 共用：那张表的主键只有 `object_id`，同步只认 `images_*`。
+- **同步**：图片的 outbox 清空后，同一个循环再处理窗口的 outbox，每批 16 个视频。
+  - 分析还在排队或进行中的视频留在 outbox 里，做完再同步，一个视频的点只写一次，而不是每块都整段重写。
+  - 一个视频的点一起换：先按 `object` 过滤删除（`vectorindex.Client.DeleteMatching`，删除时 Catalog 里的窗口行可能已经没了），再从 Catalog 写入当前分析身份的窗口，每次至多 500 个点（约 1.5 MB），远低于 Qdrant 默认 32 MB 的请求上限；没有未进回收站的资产时只删除。
+  - 窗口集合的失败单独退避，不推迟图片的同步与对账。
+- **对账**：每天一次，与图片集合分开记时间。集合不在就新建并把全部有窗口的视频排队；集合在就逐点比对：点数、窗口序号与 `libraries` 与 Catalog 不符的视频重新排队，分析还在进行的视频跳过。Catalog 里没有窗口时删除集合。
+- **读者**：首版没有，剪辑中心从 Catalog 读窗口向量。所以它不受下文“换模型”中改为集合别名的约束；有了检索的读者再满足。
 
 ### 同步循环
 
@@ -240,6 +253,7 @@ Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
 | 所属服务 | 集合 | 内容 | 状态 |
 |---|---|---|---|
 | 相册（`a-nas-photos`） | `images_*` | 每个内容对象一个整图向量 | 同步；排序从索引读（2026-11-06） |
+| 相册（`a-nas-photos`） | `video_windows_v1_*` | 剪辑中心按项目请求的视频，每 2 秒一个窗口向量；向量在 Catalog，首版不参与检索，不建 HNSW | 计划中（[剪辑中心方案](montage-center.md#窗口向量)） |
 | 相册（`a-nas-photos`） | 视频分段 | 每个视频多个分段向量，按最佳片段打分 | 计划中（#207） |
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 

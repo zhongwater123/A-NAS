@@ -1,11 +1,9 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [Parameter(Mandatory = $true)]
+    # The NAS to copy the repository to over SSH, as the staging account
+    # anas-dev. Without it the repository is only written here.
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.-]*$')]
     [string]$NasHost,
-
-    [ValidateSet('fake', 'agent')]
-    [string]$Mode = 'fake',
 
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\a-nas-dev_ed25519'),
 
@@ -13,310 +11,96 @@ param(
 
     [string]$WslUser = 'anas-dev',
 
-    # Where the model that deploy\models\embeddinggemma-2-740m.json pins lives
-    # on this machine (docs/architecture/photo-ai.md).
-    [string]$ModelDirectory = 'D:\A-NAS-models\embeddinggemma-2-740m',
+    # The checkout in WSL that builds the release, at the same commit.
+    [string]$WslCheckout = '~/workspace/A-NAS',
 
-    # Where the object detector that deploy\models\dfine-m-obj365.json pins
-    # lives, as exported from the official weights
-    # (docs/research/photo-ai-object-detection.md).
-    [string]$DetectorDirectory = 'D:\A-NAS-models\dfine-obj365\official',
+    # The signed apt repository make release writes (docs/runbooks/deploy-a-nas-packages.md).
+    [string]$Repository = 'D:\A-NAS-releases\apt',
 
-    # Where the face models that deploy\models\yunet-2026may.json and the
-    # face embedder's manifest pin live (docs/architecture/photo-people.md).
-    [string]$FaceDetectorDirectory = 'D:\A-NAS-models\faces\yunet',
-    [string]$FaceEmbedderDirectory = 'D:\A-NAS-models\faces\auraface',
-
-    # Where the animal model that deploy\models\dinov2-small.json pins lives
-    # (docs/architecture/photo-people.md#宠物).
-    [string]$AnimalEmbedderDirectory = 'D:\A-NAS-models\pets\dinov2-small',
-
-    # Where the text reader's language model and vision encoder, which
-    # deploy\models\qwen3.5-4b-q4_k_m.json and qwen3.5-4b-mmproj-f16.json pin,
-    # live as converted by ai\eval\ocr_models.sh (docs/architecture/photo-ocr.md).
-    [string]$OcrDirectory = 'D:\A-NAS-models\ocr\qwen3.5-4b',
-
-    [switch]$StageOnly
+    # The release content store: the models, runtimes, Qdrant, llama.cpp and
+    # the assistant trial's Hermes runtime (scripts/build-content-packages.sh).
+    [string]$Content = 'D:\A-NAS-releases\content'
 )
+
+# Puts this commit's packages into the signed apt repository (ADR 0034):
+# make check and the system test unless they already passed for this commit's
+# packages, then make release. With -NasHost it copies the repository's new
+# and changed files to anas-dev@NAS:apps/a-nas/repository and prints the root
+# commands of the deploy runbook. It changes nothing that runs on the NAS.
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$target = "anas-dev@$NasHost"
+
+# A Windows path as WSL sees it, such as D:\A-NAS-releases -> /mnt/d/A-NAS-releases.
+function ConvertTo-WslPath([string]$Path) {
+    $full = [System.IO.Path]::GetFullPath($Path)
+    if ($full -notmatch '^([A-Za-z]):\\(.*)$') { throw "Not a drive path: $full" }
+    "/mnt/$($Matches[1].ToLowerInvariant())/$($Matches[2].Replace('\', '/'))"
+}
 
 Push-Location $repoRoot
 try {
     $gitSafeDirectory = "safe.directory=$($repoRoot.Replace('\', '/'))"
-    $versionOutput = & git -c $gitSafeDirectory rev-parse --short=12 HEAD
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Cannot determine the Git version.'
-    }
-    $version = ([string]$versionOutput).Trim()
-    if ($version -notmatch '^[0-9a-f]{7,12}$') {
-        throw 'Cannot determine the Git version.'
-    }
-    $productVersion = $version
-    $releaseTags = @(& git -c $gitSafeDirectory tag --points-at HEAD --sort=-version:refname --list 'v[0-9]*')
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Cannot inspect release tags.'
-    }
-    foreach ($releaseTag in $releaseTags) {
-        $candidate = ([string]$releaseTag).Trim()
-        if ($candidate -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
-            $productVersion = $candidate
-            break
-        }
-    }
+    $commit = ([string](& git -c $gitSafeDirectory rev-parse --short=12 HEAD)).Trim()
+    if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{12}$') { throw 'Cannot determine the commit.' }
     $changes = & git -c $gitSafeDirectory status --porcelain
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Cannot inspect the Git working tree.'
-    }
-    if ($changes) {
-        throw 'Deployment requires a clean, committed working tree.'
-    }
-    if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the Git working tree.' }
+    if ($changes) { throw 'A release is built from a commit: commit everything first.' }
+    if ($NasHost -and -not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity does not exist: $IdentityFile"
     }
+    New-Item -ItemType Directory -Path $Repository -Force | Out-Null
+    $wslRepository = ConvertTo-WslPath $Repository
+    $wslContent = ConvertTo-WslPath $Content
 
-    $action = if ($StageOnly) { 'stage for a root-managed system upgrade without touching running services' } else { "activate in $Mode mode, verify, and rollback on failure" }
-    $summary = "build commit $version as product $productVersion, deploy both binaries, local AI and local-console artifacts, then $action"
-    if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
-        Write-Host "Release: $version"
-        Write-Host "Product: $productVersion"
-        Write-Host "Target:  $target"
-        Write-Host "Mode:    $Mode"
-        Write-Host 'No build, network connection, or remote change was performed.'
-        return
-    }
+    $target = if ($NasHost) { "the repository $Repository and anas-dev@$NasHost" } else { "the repository $Repository" }
+    if (-not $PSCmdlet.ShouldProcess($target, "check, test and publish commit $commit")) { return }
 
-    $apiBinary = Join-Path $repoRoot 'build\anas-api'
-    $agentBinary = Join-Path $repoRoot 'build\anas-host-agent'
-    $validationManifest = Join-Path $repoRoot 'build\.validated-build'
-    $reuseValidation = $false
-    if ((Test-Path -LiteralPath $validationManifest -PathType Leaf) -and
-        (Test-Path -LiteralPath $apiBinary -PathType Leaf) -and
-        (Test-Path -LiteralPath $agentBinary -PathType Leaf)) {
-        $validation = @{}
-        foreach ($line in Get-Content -LiteralPath $validationManifest) {
-            $parts = $line -split '=', 2
-            if ($parts.Count -eq 2) { $validation[$parts[0]] = $parts[1] }
+    # The WSL checkout builds the commit; the gates run only when their records
+    # do not name its packages (scripts/release.sh).
+    $gate = @(
+        'set -e',
+        "cd $WslCheckout",
+        "test `"`$(git rev-parse --short=12 HEAD)`" = $commit || { echo 'check out $commit in $WslCheckout first' >&2; exit 2; }",
+        "make release REPO=$wslRepository CONTENT=$wslContent 2>/dev/null || {",
+        '  make check',
+        '  make system-test',
+        "  make release REPO=$wslRepository CONTENT=$wslContent",
+        '}'
+    ) -join "`n"
+    & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc $gate
+    if ($LASTEXITCODE -ne 0) { throw 'The gates or make release failed in WSL.' }
+
+    if ($NasHost) {
+        $remote = "anas-dev@$NasHost"
+        $sshOptions = @('-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-i', $IdentityFile)
+        # What the NAS holds, by path and size; pool files never change once
+        # published, so a file with the same path and size is not sent again.
+        $held = @{}
+        $listing = & ssh.exe @sshOptions $remote 'mkdir -p apps/a-nas/repository && cd apps/a-nas/repository && find . -type f -printf "%P %s\n"'
+        if ($LASTEXITCODE -ne 0) { throw "Cannot list the repository on $NasHost." }
+        foreach ($line in $listing) {
+            $parts = ([string]$line).Split(' ')
+            if ($parts.Count -eq 2) { $held[$parts[0]] = $parts[1] }
         }
-        $currentApiHash = (Get-FileHash -LiteralPath $apiBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-        $currentAgentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-        $reuseValidation =
-            $validation.commit -eq $version -and
-            $validation.product_version -eq $productVersion -and
-            $validation.api_sha256 -eq $currentApiHash -and
-            $validation.host_agent_sha256 -eq $currentAgentHash
-    }
-    if ($reuseValidation) {
-        Write-Host "Reusing full validation for $productVersion ($version)."
+        $root = (Resolve-Path -LiteralPath $Repository).Path
+        $sent = 0
+        foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
+            $relative = $file.FullName.Substring($root.Length + 1).Replace('\', '/')
+            if ($relative.StartsWith('.')) { continue }
+            if ($relative -notlike 'dists/*' -and $held[$relative] -eq [string]$file.Length) { continue }
+            $directory = [System.IO.Path]::GetDirectoryName($relative).Replace('\', '/')
+            & ssh.exe @sshOptions $remote "mkdir -p 'apps/a-nas/repository/$directory'"
+            if ($LASTEXITCODE -ne 0) { throw "Cannot create apps/a-nas/repository/$directory on $NasHost." }
+            & scp.exe @sshOptions $file.FullName "${remote}:apps/a-nas/repository/$relative"
+            if ($LASTEXITCODE -ne 0) { throw "Copy failed: $relative" }
+            $sent++
+        }
+        Write-Host "Copied $sent files to ${remote}:apps/a-nas/repository."
+        Write-Host 'As root on the NAS, follow docs/runbooks/deploy-a-nas-packages.md from step 3.'
     } else {
-        & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd ~/workspace/A-NAS && make check VERSION=$productVersion"
-        if ($LASTEXITCODE -ne 0) { throw 'WSL make check failed.' }
+        Write-Host "The repository is in $Repository; copy it to the NAS (docs/runbooks/deploy-a-nas-packages.md, step 2)."
     }
-
-    # Local AI is part of every release (ADR 0016). The models and the Python
-    # runtime travel once per content; the release carries their manifests.
-    # Each model has the role its release link is named after.
-    $modelManifestPath = Join-Path $repoRoot 'deploy\models\embeddinggemma-2-740m.json'
-    $detectorManifestPath = Join-Path $repoRoot 'deploy\models\dfine-m-obj365.json'
-    $faceDetectorManifestPath = Join-Path $repoRoot 'deploy\models\yunet-2026may.json'
-    $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\auraface-v1.json'
-    $animalEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\dinov2-small.json'
-    $ocrModelManifestPath = Join-Path $repoRoot 'deploy\models\qwen3.5-4b-q4_k_m.json'
-    $ocrMmprojManifestPath = Join-Path $repoRoot 'deploy\models\qwen3.5-4b-mmproj-f16.json'
-    $models = @(
-        @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
-        @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory },
-        @{ Manifest = $faceDetectorManifestPath; Directory = $FaceDetectorDirectory },
-        @{ Manifest = $faceEmbedderManifestPath; Directory = $FaceEmbedderDirectory },
-        @{ Manifest = $animalEmbedderManifestPath; Directory = $AnimalEmbedderDirectory },
-        @{ Manifest = $ocrModelManifestPath; Directory = $OcrDirectory },
-        @{ Manifest = $ocrMmprojManifestPath; Directory = $OcrDirectory }
-    )
-    foreach ($model in $models) {
-        $model.Pinned = Get-Content -LiteralPath $model.Manifest -Raw | ConvertFrom-Json
-        $model.Path = Join-Path $model.Directory $model.Pinned.file
-    }
-    $runtimeManifestPath = Join-Path $repoRoot 'build\ai-runtime.json'
-    if (-not (Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
-        throw 'Missing build\ai-runtime.json: run scripts/build-ai-runtime.sh in WSL first.'
-    }
-    $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
-    $runtimePath = Join-Path $repoRoot "build\ai-runtime\$($runtimeManifest.file)"
-    $contents = @($models | ForEach-Object { @{ Path = $_.Path; Sha = $_.Pinned.sha256 } }) + @(@{ Path = $runtimePath; Sha = $runtimeManifest.sha256 })
-    foreach ($content in $contents) {
-        if (-not (Test-Path -LiteralPath $content.Path -PathType Leaf)) {
-            throw "Missing local AI file: $($content.Path)"
-        }
-        if ((Get-FileHash -LiteralPath $content.Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $content.Sha) {
-            throw "Local AI file does not match its manifest: $($content.Path)"
-        }
-    }
-    # Web search's runtime travels the same way (ADR 0030).
-    $searchRuntimeManifestPath = Join-Path $repoRoot 'build\search-runtime.json'
-    if (-not (Test-Path -LiteralPath $searchRuntimeManifestPath -PathType Leaf)) {
-        throw 'Missing build\search-runtime.json: run scripts/build-search-runtime.sh in WSL first.'
-    }
-    $searchRuntimeManifest = Get-Content -LiteralPath $searchRuntimeManifestPath -Raw | ConvertFrom-Json
-    $searchRuntimePath = Join-Path $repoRoot "build\search-runtime\$($searchRuntimeManifest.file)"
-    if (-not (Test-Path -LiteralPath $searchRuntimePath -PathType Leaf)) {
-        throw "Missing the web search runtime: $searchRuntimePath"
-    }
-    if ((Get-FileHash -LiteralPath $searchRuntimePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $searchRuntimeManifest.sha256) {
-        throw "The web search runtime does not match its manifest: $searchRuntimePath"
-    }
-    # The vector index's Qdrant travels the same way (ADR 0028):
-    # scripts/fetch-qdrant.sh keeps the tarball its manifest pins.
-    $qdrantManifestPath = Join-Path $repoRoot 'deploy\qdrant\qdrant.json'
-    $qdrant = Get-Content -LiteralPath $qdrantManifestPath -Raw | ConvertFrom-Json
-    $qdrantPath = Join-Path $repoRoot "build\qdrant\$($qdrant.sha256)\$($qdrant.file)"
-    if (-not (Test-Path -LiteralPath $qdrantPath -PathType Leaf)) {
-        throw 'Missing the pinned Qdrant: run scripts/fetch-qdrant.sh in WSL first.'
-    }
-    if ((Get-FileHash -LiteralPath $qdrantPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $qdrant.sha256) {
-        throw "Qdrant does not match its manifest: $qdrantPath"
-    }
-    # So does the text reader's llama.cpp: scripts/fetch-llama.sh keeps the
-    # tarball its manifest pins.
-    $llamaManifestPath = Join-Path $repoRoot 'deploy\llama\llama.json'
-    $llama = Get-Content -LiteralPath $llamaManifestPath -Raw | ConvertFrom-Json
-    $llamaPath = Join-Path $repoRoot "build\llama\$($llama.sha256)\$($llama.file)"
-    if (-not (Test-Path -LiteralPath $llamaPath -PathType Leaf)) {
-        throw 'Missing the pinned llama.cpp: run scripts/fetch-llama.sh in WSL first.'
-    }
-    if ((Get-FileHash -LiteralPath $llamaPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $llama.sha256) {
-        throw "llama.cpp does not match its manifest: $llamaPath"
-    }
-    # The host packages the release needs (ADR 0031), which make check builds.
-    $hostPackage = Join-Path $repoRoot 'build\a-nas-host.deb'
-    $consolePackage = Join-Path $repoRoot 'build\a-nas-console.deb'
-    foreach ($package in @($hostPackage, $consolePackage)) {
-        if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "Missing ${package}: run make check first." }
-    }
-    $workerArchive = Join-Path $repoRoot 'build\ai-worker.tar'
-    & git -c $gitSafeDirectory archive --format=tar -o $workerArchive HEAD ai/anas_ai
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot archive the AI Worker.' }
-
-    $apiHash = (Get-FileHash -LiteralPath $apiBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-    $agentHash = (Get-FileHash -LiteralPath $agentBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-    $release = "apps/a-nas/releases/$version"
-    $sshOptions = @(
-        '-o', 'BatchMode=yes',
-        '-o', 'IdentitiesOnly=yes',
-        '-o', 'StrictHostKeyChecking=yes',
-        '-i', $IdentityFile
-    )
-
-    & ssh.exe @sshOptions $target "install -d -m 0750 ~/$release"
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot create the remote release directory.' }
-
-    # Uploads a file the NAS staging area does not hold yet and checks it there.
-    function Send-StagedContent([string]$Source, [string]$Directory, [string]$Name, [string]$Sha) {
-        $remote = "$Directory/$Name"
-        & ssh.exe @sshOptions $target "printf '%s  %s\n' $Sha ~/$remote | sha256sum --check --quiet - >/dev/null 2>&1"
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "The NAS already holds $Name."
-            return
-        }
-        & ssh.exe @sshOptions $target "install -d -m 0750 ~/$Directory"
-        if ($LASTEXITCODE -ne 0) { throw "Cannot create ~/$Directory on the NAS." }
-        & scp.exe @sshOptions $Source "${target}:$remote.incoming"
-        if ($LASTEXITCODE -ne 0) { throw "Upload failed: $Source" }
-        & ssh.exe @sshOptions $target "printf '%s  %s\n' $Sha ~/$remote.incoming | sha256sum --check --quiet - && mv -f ~/$remote.incoming ~/$remote"
-        if ($LASTEXITCODE -ne 0) { throw "The uploaded file does not match its manifest: $Name" }
-    }
-    foreach ($model in $models) {
-        Send-StagedContent $model.Path "apps/a-nas/models/$($model.Pinned.sha256)" $model.Pinned.file $model.Pinned.sha256
-    }
-    Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
-    Send-StagedContent $searchRuntimePath 'apps/a-nas/search-runtimes' $searchRuntimeManifest.file $searchRuntimeManifest.sha256
-    Send-StagedContent $qdrantPath "apps/a-nas/qdrant/$($qdrant.sha256)" $qdrant.file $qdrant.sha256
-    Send-StagedContent $llamaPath "apps/a-nas/llama/$($llama.sha256)" $llama.file $llama.sha256
-
-    $uploads = @(
-        @{ Source = $apiBinary; Destination = "${target}:$release/anas-api.incoming" },
-        @{ Source = $agentBinary; Destination = "${target}:$release/anas-host-agent.incoming" },
-        @{ Source = $hostPackage; Destination = "${target}:$release/a-nas-host.deb.incoming" },
-        @{ Source = $consolePackage; Destination = "${target}:$release/a-nas-console.deb.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\user\anas-api.service'); Destination = "${target}:$release/anas-api.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\user\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-api.service'); Destination = "${target}:$release/anas-api-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-photos.service'); Destination = "${target}:$release/anas-photos-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-shares.service'); Destination = "${target}:$release/anas-shares-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-family.service'); Destination = "${target}:$release/anas-family-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas.slice'); Destination = "${target}:$release/anas-system.slice.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.socket'); Destination = "${target}:$release/anas-ai-system.socket.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ai.service'); Destination = "${target}:$release/anas-ai-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ffmpeg.socket'); Destination = "${target}:$release/anas-ffmpeg-system.socket.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-ffmpeg@.service'); Destination = "${target}:$release/anas-ffmpeg-system@.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\system-anasffmpeg.slice'); Destination = "${target}:$release/anas-ffmpeg-system.slice.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors@.service'); Destination = "${target}:$release/anas-vectors-system@.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors-proxy@.socket'); Destination = "${target}:$release/anas-vectors-proxy-system@.socket.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors-proxy@.service'); Destination = "${target}:$release/anas-vectors-proxy-system@.service.incoming" },
-        @{ Source = $qdrantManifestPath; Destination = "${target}:$release/vectors-qdrant.json.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\config.yaml'); Destination = "${target}:$release/vectors-config.yaml.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors.slice'); Destination = "${target}:$release/anas-vectors-system.slice.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\start.sh'); Destination = "${target}:$release/vectors-start.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\wait-ready.sh'); Destination = "${target}:$release/vectors-wait-ready.sh.incoming" },
-        @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
-        @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
-        @{ Source = $detectorManifestPath; Destination = "${target}:$release/ai-detector.json.incoming" },
-        @{ Source = $faceDetectorManifestPath; Destination = "${target}:$release/ai-face-detector.json.incoming" },
-        @{ Source = $faceEmbedderManifestPath; Destination = "${target}:$release/ai-face-embedder.json.incoming" },
-        @{ Source = $animalEmbedderManifestPath; Destination = "${target}:$release/ai-animal-embedder.json.incoming" },
-        @{ Source = $ocrModelManifestPath; Destination = "${target}:$release/ai-ocr-model.json.incoming" },
-        @{ Source = $ocrMmprojManifestPath; Destination = "${target}:$release/ai-ocr-mmproj.json.incoming" },
-        @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
-        @{ Source = $llamaManifestPath; Destination = "${target}:$release/ai-llama.json.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search.service'); Destination = "${target}:$release/anas-search-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search-dns.service'); Destination = "${target}:$release/anas-search-dns-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search-dns.path'); Destination = "${target}:$release/anas-search-dns-system.path.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\sysusers.d\a-nas-search.conf'); Destination = "${target}:$release/a-nas-search.sysusers.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\search\settings.yml'); Destination = "${target}:$release/search-settings.yml.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\search\searxng.json'); Destination = "${target}:$release/search-searxng.json.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\search\allow-dns.sh'); Destination = "${target}:$release/search-allow-dns.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\search\anas_search.py'); Destination = "${target}:$release/search-anas_search.py.incoming" },
-        @{ Source = $searchRuntimeManifestPath; Destination = "${target}:$release/search-runtime.json.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\install-media-pool.sh'); Destination = "${target}:$release/install-media-pool.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\install-ffmpeg-units.sh'); Destination = "${target}:$release/install-ffmpeg-units.sh.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Destination = "${target}:$release/kiosk-launcher.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Destination = "${target}:$release/anas-kiosk@.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\pam\a-nas-kiosk'); Destination = "${target}:$release/a-nas-kiosk.pam.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\sysusers.d\a-nas-kiosk.conf'); Destination = "${target}:$release/a-nas-kiosk.sysusers.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\config\experimental-nas-kiosk.env'); Destination = "${target}:$release/kiosk.env.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile'); Destination = "${target}:$release/Caddyfile.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile.internet'); Destination = "${target}:$release/Caddyfile.internet.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\internetnas-internet.nft'); Destination = "${target}:$release/anas-internet.nft.incoming" },
-        @{ Source = (Join-Path $repoRoot 'deploy\systemd\systemnas-internet-firewall.service'); Destination = "${target}:$release/anas-internet-firewall-system.service.incoming" },
-        @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
-    )
-    foreach ($upload in $uploads) {
-        & scp.exe @sshOptions $upload.Source $upload.Destination
-        if ($LASTEXITCODE -ne 0) { throw "Upload failed: $($upload.Source)" }
-    }
-
-    $remoteAction = if ($StageOnly) { 'stage-only' } else { 'activate' }
-    $activateArguments = @($version, $apiHash, $agentHash, $Mode, $productVersion, $remoteAction)
-    $activate = "chmod 0700 ~/$release/activate.incoming && ~/$release/activate.incoming $($activateArguments -join ' ')"
-    & ssh.exe @sshOptions $target $activate
-    if ($LASTEXITCODE -ne 0) { throw 'Remote activation failed; inspect the user journal and release directory.' }
-
-    if ($StageOnly) {
-        Write-Host "A-NAS $productVersion ($version) is staged on $NasHost for root installation."
-    } else {
-        Write-Host "A-NAS $productVersion ($version) is active on $NasHost in $Mode mode."
-    }
-    Write-Host "API SHA-256:        $apiHash"
-    Write-Host "Host Agent SHA-256: $agentHash"
-    # Root checks these too before apt runs the packages' scripts (ADR 0031).
-    Write-Host "a-nas-host SHA-256:    $((Get-FileHash -LiteralPath $hostPackage -Algorithm SHA256).Hash.ToLowerInvariant())"
-    Write-Host "a-nas-console SHA-256: $((Get-FileHash -LiteralPath $consolePackage -Algorithm SHA256).Hash.ToLowerInvariant())"
 } finally {
     Pop-Location
 }

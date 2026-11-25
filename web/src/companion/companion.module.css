@@ -1,0 +1,144 @@
+/*
+ * What VNAS is doing, as a small sign beside the pet's head (petCard.tsx sets the attributes on its
+ * wrapper, which takes no box): an ellipsis while VNAS thinks, works or waits, a check after a turn
+ * that succeeded and a cross after one that failed. Drawn on dsh-pet's root, which drags, walks and
+ * flights move frame by frame, so the sign goes with the pet without a render; the root lets the
+ * pointer through, and so does the sign.
+ *
+ * Under dsh-pet's bubble, which shows VNAS's line for the whole turn: the bubble's bottom is 0.4545 of
+ * the pet's size above the root's bottom (bubble.ts: 100% − 0.108, the root being 9/16 of the size tall)
+ * and its tail reaches 0.017 below that, while a long line makes it wide enough to reach either side of
+ * the head. The sign's top, 0.33 + 1.5 × 0.065 = 0.4275, stays below both, beside the head, which the
+ * clips draw from about 0.44 down. Above the stage (positioned, after the pill in the root's order, so
+ * it would paint over the pill where the hair or an arm crosses it) and below the bubble (z-index 3).
+ */
+.layer[data-companion-work] :global(.dsh-pet-root)::before,
+.layer[data-companion-work] :global(.dsh-pet-root)::after {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.33);
+  height: 1.5em;
+  font:
+    700 calc(var(--dsh-pet-size, 240px) * 0.065) / 1.5em system-ui,
+    sans-serif;
+  pointer-events: none;
+}
+
+/* The pill, behind the head as the pet faces: to the right of it when it faces left. */
+.layer[data-companion-work] :global(.dsh-pet-root)::before {
+  content: "";
+  left: 60%;
+  width: 2.2em;
+  border-radius: 0.75em;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 28%);
+}
+
+.layer[data-companion-work] :global(.dsh-pet-root[data-facing="right"])::before {
+  left: calc(40% - 2.2em);
+}
+
+/* What the pill says, from its left edge. */
+.layer[data-companion-work] :global(.dsh-pet-root)::after {
+  left: calc(60% + 0.6em);
+  width: 1em;
+  overflow: hidden;
+  color: #3a4766;
+  white-space: nowrap;
+}
+
+.layer[data-companion-work] :global(.dsh-pet-root[data-facing="right"])::after {
+  left: calc(40% - 1.6em);
+}
+
+/* VNAS is at it: the ellipsis shows one, two, then three of its dots, by its width. */
+.layer:is(
+    [data-companion-work="thinking"],
+    [data-companion-work="working"],
+    [data-companion-work="result"],
+    [data-companion-work="waiting"]
+  )
+  :global(.dsh-pet-root)::after {
+  content: "…";
+  animation: companion-dots 1.2s steps(3, jump-none) infinite;
+}
+
+.layer[data-companion-work="success"] :global(.dsh-pet-root)::after {
+  content: "✓";
+  color: #1f8a4c;
+}
+
+.layer[data-companion-work="error"] :global(.dsh-pet-root)::after {
+  content: "✕";
+  color: #c23b3b;
+}
+
+/* Quiet, asleep at the member's asking: VNAS is busy, only a still dot says so. */
+.layer[data-companion-work="quiet"] :global(.dsh-pet-root)::after {
+  content: "•";
+  color: #3a4766;
+  animation: none;
+}
+
+/*
+ * The device is in critical trouble (health.ts): a still red dot at the companion's feet, on dsh-pet's
+ * stage, which moves with the pet as the root does and has its own pseudo-elements free. Below the
+ * clips' feet, which they draw from about 0.06 of the pet's size above the stage's bottom, and in front
+ * of them, so a leg or the tail does not hide it; the pointer goes through to the pet.
+ */
+.layer[data-companion-trouble] :global(.dsh-pet-stage)::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.02);
+  left: calc(50% + var(--dsh-pet-size, 240px) * 0.06);
+  width: calc(var(--dsh-pet-size, 240px) * 0.05);
+  height: calc(var(--dsh-pet-size, 240px) * 0.05);
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 92%),
+    0 1px 4px rgb(0 0 0 / 28%);
+  pointer-events: none;
+}
+
+/* Facing right, dsh-pet mirrors the clip (its video), not the stage: the feet, and the dot, are on the other side. */
+.layer[data-companion-trouble] :global(.dsh-pet-root[data-facing="right"] .dsh-pet-stage)::after {
+  left: calc(50% - var(--dsh-pet-size, 240px) * 0.11);
+}
+
+/*
+ * A line the companion says keeps its line breaks (a click's answer puts what to do on the second
+ * line; VNAS's lines may break too), which dsh-pet's bubble row would run together. At most 16 lines
+ * show, the rest end in an ellipsis: VNAS may send 200 characters, every one a line break, and the
+ * bubble has no height of its own to stop at, so it would grow over the whole desktop. 200 characters
+ * without a break take at most 15 lines (the bubble is about 14.7 characters wide, bubble.ts), so the
+ * cap cuts only breaks. Above dsh-pet's own row rule, whose display:flex it replaces.
+ */
+.layer :global(.dsh-pet-bubble .pet-bub-row) {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: pre-line;
+  -webkit-line-clamp: 16;
+  -webkit-box-orient: vertical;
+}
+
+/* The companion rests: so does the sign. */
+.layer[data-companion-rest] :global(.dsh-pet-root)::after {
+  animation-play-state: paused;
+}
+
+@keyframes companion-dots {
+  from {
+    width: 0.34em;
+  }
+  to {
+    width: 1em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer[data-companion-work] :global(.dsh-pet-root)::after {
+    animation: none;
+  }
+}

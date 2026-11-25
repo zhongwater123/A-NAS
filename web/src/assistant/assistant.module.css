@@ -1073,9 +1073,9 @@
 }
 .as-change header small {
   display: block;
-  margin-top: 2px;
-  color: var(--as-muted);
-  font-size: 12px;
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: inherit;
 }
 .as-change-mark {
   width: 30px;
@@ -1096,10 +1096,11 @@
 }
 .as-op-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--as-ink-2);
-  font-size: 12.5px;
+  font-size: inherit;
 }
 .as-op-title svg {
   width: 14px;
@@ -1107,25 +1108,53 @@
   color: var(--as-muted);
 }
 .as-op-title span {
+  flex: none;
   font-weight: 600;
   color: var(--as-ink);
 }
 .as-op-title small {
+  flex: none;
   margin-left: auto;
-  color: var(--as-muted);
-  font-size: 11.5px;
+  color: var(--color-muted);
+  font-size: inherit;
+  white-space: nowrap;
 }
 .as-op-note {
-  margin: 4px 0 0 21px;
-  color: var(--as-muted);
-  font-size: 12px;
+  margin: var(--space-1) 0 0 var(--space-5);
+  color: var(--color-muted);
+  font-size: inherit;
+}
+/* What a write puts there that the card does not show (#172). */
+.as-op-warn {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: var(--space-1) solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-danger-soft);
+  font-size: inherit;
+}
+.as-unseen {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-4) 0;
+  color: var(--as-ink-2);
+  font-size: inherit;
+  cursor: pointer;
+}
+.as-unseen input {
+  flex: none;
 }
 .as-op-title code {
-  padding: 1px 6px;
-  border-radius: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
   background: var(--as-bg);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: inherit;
+  overflow-wrap: anywhere;
 }
 .as-diff {
   max-height: 180px;
@@ -1452,6 +1481,72 @@
 }
 .as-photo-ref:disabled {
   cursor: default;
+}
+/* A sensitive number the assistant named by its handle: the number itself,
+   which the window asked the photo service for, with its copy and its photo. */
+.as-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  max-width: 100%;
+  padding: 0 2px 0 7px;
+  border: 1px solid var(--as-line-strong);
+  border-radius: 6px;
+  color: var(--as-ink);
+  background: var(--as-accent-soft);
+  line-height: 1.55;
+  vertical-align: baseline;
+}
+.as-handle.pending {
+  padding: 0 7px;
+  border-style: dashed;
+  color: var(--as-muted);
+  background: none;
+}
+.as-handle-value {
+  min-width: 0;
+  padding-right: 4px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+.as-handle-note {
+  flex: none;
+  margin-right: 3px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--as-ink-2);
+  background: var(--as-surface);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.as-handle button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--as-muted);
+  background: none;
+  cursor: pointer;
+}
+.as-handle button:hover,
+.as-handle button:focus-visible {
+  color: var(--as-ink);
+  background: var(--as-hover);
+}
+.as-handle button.copied {
+  color: var(--as-success);
+}
+.as-handle svg {
+  width: 13px;
+  height: 13px;
 }
 .as-outside-image {
   display: inline-flex;

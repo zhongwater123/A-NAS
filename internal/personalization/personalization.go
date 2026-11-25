@@ -39,21 +39,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	const schema = `
-CREATE TABLE IF NOT EXISTS local_display (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    sleep_after_minutes INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS wallpaper (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    style TEXT NOT NULL,
-    image BLOB,
-    version TEXT NOT NULL DEFAULT '',
-    width INTEGER NOT NULL DEFAULT 0,
-    height INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL DEFAULT ''
-);`
-	if _, err := db.Exec(schema); err != nil {
+	if err := sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -82,3 +68,26 @@ ON CONFLICT(id) DO UPDATE SET sleep_after_minutes = excluded.sleep_after_minutes
 	}
 	return display, nil
 }
+
+// databaseSchema is personalization.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "personalization.db",
+	Baseline: sqlitedb.Statements(baselineStatements),
+}
+
+const baselineStatements = `
+CREATE TABLE IF NOT EXISTS local_display (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    sleep_after_minutes INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wallpaper (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    style TEXT NOT NULL,
+    image BLOB,
+    version TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT ''
+);`

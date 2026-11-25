@@ -1,0 +1,63 @@
+{
+  "sources": {
+    "caddy": {
+      "uri": "https://dl.cloudsmith.io/public/caddy/stable/deb/debian",
+      "suite": "any-version",
+      "component": "main",
+      "fingerprint": "65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+    },
+    "docker": {
+      "uri": "https://download.docker.com/linux/debian",
+      "suite": "trixie",
+      "component": "stable",
+      "fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+    }
+  },
+  "packages": [
+    {
+      "name": "caddy",
+      "source": "caddy",
+      "version": "2.11.9",
+      "file": "pool/any-version/main/c/ca/caddy_2.11.9/caddy_2.11.9_linux_amd64.deb",
+      "sizeBytes": 18049414,
+      "sha256": "bbea4aeaadc86b233c168cc33bad9daa1cbce756dc08949b783b45398f8e65cb",
+      "depends": ""
+    },
+    {
+      "name": "containerd.io",
+      "source": "docker",
+      "version": "2.4.2-3~debian.13~trixie",
+      "file": "dists/trixie/pool/stable/amd64/containerd.io_2.4.2-3~debian.13~trixie_amd64.deb",
+      "sizeBytes": 23265728,
+      "sha256": "454998e47186869c1dae0858e9f167a68e47eba7df5794b7206cc845615aeeba",
+      "depends": "libc6 (>= 2.38), libseccomp2 (>= 2.6.0)"
+    },
+    {
+      "name": "docker-ce",
+      "source": "docker",
+      "version": "5:29.9.3-1~debian.13~trixie",
+      "file": "dists/trixie/pool/stable/amd64/docker-ce_29.9.3-1~debian.13~trixie_amd64.deb",
+      "sizeBytes": 24564080,
+      "sha256": "7ad5e9909874f635e438baa83a7033f1b5cb20d713a15eae73e930b82fb70cef",
+      "depends": "init-system-helpers (>= 1.54~), containerd.io (>= 2.1.5), docker-ce-cli, iptables, nftables, libc6 (>= 2.34), libsystemd0"
+    },
+    {
+      "name": "docker-ce-cli",
+      "source": "docker",
+      "version": "5:29.9.3-1~debian.13~trixie",
+      "file": "dists/trixie/pool/stable/amd64/docker-ce-cli_29.9.3-1~debian.13~trixie_amd64.deb",
+      "sizeBytes": 17579108,
+      "sha256": "d75fe7383c11d1399736f937b2146019f0b38801c96358664dd3c85ca97188f0",
+      "depends": "libc6 (>= 2.34)"
+    },
+    {
+      "name": "docker-compose-plugin",
+      "source": "docker",
+      "version": "5.7.1-1~debian.13~trixie",
+      "file": "dists/trixie/pool/stable/amd64/docker-compose-plugin_5.7.1-1~debian.13~trixie_amd64.deb",
+      "sizeBytes": 8483436,
+      "sha256": "61aeb9a6907b06f2cada43640c1ad5840e7678bfb5f33a24030a8ffb76c7b333",
+      "depends": ""
+    }
+  ]
+}

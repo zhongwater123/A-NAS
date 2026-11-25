@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -502,8 +502,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
-  /api/v1/users/{userId}:
-    delete:
+  /api/v1/users/{userId}/disable:
+    post:
       operationId: disableUser
       x-anas-posture: admin
       parameters:
@@ -518,6 +518,70 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/users/{userId}/enable:
+    post:
+      operationId: enableUser
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Enable a disabled account again with the password it had. Web sign-in comes back first; if the Host Agent cannot enable SMB access or the assistant, the response is 503 host_enable_pending and enabling again, or the next start's identity synchronization, finishes them. An account waiting to be deleted answers 409 deletion_pending.
+      responses:
+        '204':
+          description: User enabled
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/users/{userId}/deletion:
+    put:
+      operationId: scheduleUserDeletion
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Delete a disabled member's account after 30 days, with the administrator's password again (403 reauthentication_failed). Until then nothing of it changes and the deletion can be cancelled. Its personal space and private photo library each go to the administrator or are deleted, as chosen. An account that is not disabled answers 409 account_not_disabled, one already waiting 409 deletion_pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionRequest'
+      responses:
+        '200':
+          description: The account with its deletion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: cancelUserDeletion
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/CSRFToken'
+      description: Keep an account that is waiting to be deleted; it stays disabled. Once its data is being removed it answers 409 deletion_started.
+      responses:
+        '204':
+          description: Deletion cancelled
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
   /api/v1/users/{userId}/credential:
     patch:
@@ -1738,6 +1802,51 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/network/phone-hotspot:
+    get:
+      operationId: getPhoneHotspot
+      x-anas-posture: admin
+      summary: Read the phone hotspot state and its active connection details
+      responses:
+        '200':
+          description: Hotspot status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotStatus'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: updatePhoneHotspot
+      x-anas-posture: admin
+      summary: Start or stop the phone hotspot on the dedicated Wi-Fi radio
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneHotspotRequest'
+      responses:
+        '200':
+          description: Hotspot operation accepted or the service is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
@@ -1852,6 +1961,85 @@ paths:
         '401':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/system/update:
+    get:
+      operationId: getSystemUpdate
+      x-anas-posture: admin
+      summary: The system update service's state (设置 → 系统更新, docs/specs/system-update.md)
+      description: Administrators only. The service runs as root apart from the Product Service, which an install restarts; the page reads this while an operation runs and again once the Product Service answers after an install. Outcomes the service recorded are written to the activity record as they are read.
+      responses:
+        '200':
+          description: The state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/system/update/actions:
+    post:
+      operationId: requestSystemUpdate
+      x-anas-posture: admin
+      summary: Check for, download, install, or go back from a version; restart into a new base image
+      description: Administrators only, from the local desktop. The service carries the action out on its own (202). 409 update_busy while an operation runs; update_not_ready when the state has nothing for the action (install needs a version that is ready, revert a version before and no restart waiting, restart a new base image that waits for it); update_waiting for install, revert and restart while a storage plan or conversion runs or an app installs or uninstalls.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemUpdateAction'
+      responses:
+        '202':
+          description: The service took the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/system/update/settings:
+    put:
+      operationId: updateSystemUpdateSettings
+      x-anas-posture: admin
+      summary: Download by itself, install by itself, and the install window
+      description: Administrators only, from the local desktop (docs/decisions/2026-11-12-system-update-defaults.md).
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemUpdateSettings'
+      responses:
+        '200':
+          description: The state with the new settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemUpdateStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/transfers:
     get:
@@ -3545,6 +3733,1316 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/todos:
+    get:
+      operationId: listTodos
+      summary: 'The to-dos the caller can see: every open one, by due date with those without one last, then those closed in the last 30 days, most recently closed first'
+      responses:
+        '200':
+          description: To-dos
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Todo'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createTodo
+      summary: Add a to-do by hand; every to-do added by hand is shared with every active account
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoFields'
+      responses:
+        '201':
+          description: The to-do
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/owners:
+    get:
+      operationId: listTodoOwners
+      summary: The active accounts a to-do can be given to, by username. Disabled accounts and those waiting to be deleted are left out; a to-do already theirs keeps them
+      responses:
+        '200':
+          description: Accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TodoOwner'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/reminders:
+    get:
+      operationId: listTodoReminders
+      summary: 'What to remind the caller of now, by due date: each open to-do they can see that is due within 3 days, due today or overdue, once a stage until they acknowledge it. Snoozed ones and those without a due date are left out'
+      responses:
+        '200':
+          description: Reminders
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TodoReminder'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/reminders/seen:
+    post:
+      operationId: acknowledgeTodoReminders
+      summary: Record that the caller acknowledged these reminders, for them alone. Only keys the caller's reminders list now are recorded; others are ignored, so a to-do closed meanwhile does not fail the request
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - keys
+              properties:
+                keys:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 200
+                    pattern: '^todo:'
+      responses:
+        '204':
+          description: Recorded
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/{todoId}:
+    parameters:
+      - $ref: '#/components/parameters/TodoID'
+    patch:
+      operationId: updateTodo
+      summary: Replace a to-do's fields, clearing those left out; changed when someone saved after the given version. A new due date starts its reminders over
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoEdit'
+      responses:
+        '200':
+          description: The to-do
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/{todoId}/status:
+    put:
+      operationId: setTodoStatus
+      summary: Mark a to-do done or ignored, recording who and when, or open it again, which clears the snooze and starts its reminders over. Setting the status it has changes nothing; this is not an edit and keeps the version
+      parameters:
+        - $ref: '#/components/parameters/TodoID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - status
+              properties:
+                status:
+                  $ref: '#/components/schemas/TodoStatus'
+      responses:
+        '200':
+          description: The to-do
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/todos/{todoId}/snooze:
+    put:
+      operationId: snoozeTodo
+      summary: Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict
+      parameters:
+        - $ref: '#/components/parameters/TodoID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - days
+              properties:
+                days:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+      responses:
+        '200':
+          description: The to-do
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage:
+    get:
+      operationId: getMontage
+      summary: 'Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204'
+      responses:
+        '204':
+          description: The montage center is on
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects:
+    get:
+      operationId: listMontageProjects
+      summary: The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404
+      parameters:
+        - $ref: '#/components/parameters/MontageCursor'
+      responses:
+        '200':
+          description: A page of the caller's projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProjectPage'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createMontageProject
+      summary: Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - assetIds
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                name:
+                  type: string
+                  maxLength: 64
+                  description: Empty names the project by its videos' dates.
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The project the same requestKey made before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '201':
+          description: The new project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}:
+    get:
+      operationId: getMontageProject
+      summary: One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    patch:
+      operationId: updateMontageProject
+      summary: Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                ask:
+                  type: string
+                  maxLength: 200
+                chronological:
+                  type: boolean
+                songStart:
+                  type: number
+                  minimum: 0
+                  maximum: 480
+                  description: 'Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music''s end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt.'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteMontageProject
+      summary: Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/assets:
+    post:
+      operationId: addMontageProjectAssets
+      summary: Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+                - assetIds
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/generate:
+    post:
+      operationId: generateMontageFilm
+      summary: 'Start a job that makes a new version of the project''s film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller''s VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/MontageRequestKey'
+      responses:
+        '202':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}:
+    get:
+      operationId: getMontageJob
+      summary: 'One of the caller''s jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member''s job is not_found'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/cancel:
+    post:
+      operationId: cancelMontageJob
+      summary: 'Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/drop-assets:
+    post:
+      operationId: dropMontageJobAssets
+      summary: 'Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - assetIds
+              properties:
+                assetIds:
+                  $ref: '#/components/schemas/MontageAssetIDs'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/retry-analysis:
+    post:
+      operationId: retryMontageJobAnalysis
+      summary: 'Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/retry:
+    post:
+      operationId: retryMontageJob
+      summary: Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/jobs/{jobId}/replan:
+    post:
+      operationId: replanMontageJob
+      summary: 'Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing'
+      parameters:
+        - $ref: '#/components/parameters/MontageJobID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageJob'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/notices:
+    get:
+      operationId: listMontageNotices
+      summary: 'The desktop''s notices of the caller''s jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day'
+      responses:
+        '200':
+          description: The notices, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageNotices'
+  /api/v1/montage/projects/{projectId}/song:
+    put:
+      operationId: putMontageSong
+      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - trackId
+              properties:
+                trackId:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                  description: A track of GET /api/v1/music/tracks.
+      responses:
+        '200':
+          description: The song, being analysed or as analysed before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageSong'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    get:
+      operationId: getMontageSong
+      summary: 'The project''s song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404)'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+      responses:
+        '200':
+          description: The song
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MontageSong'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/projects/{projectId}/song/audio:
+    get:
+      operationId: getMontageSongAudio
+      description: 'The montage center''s copy of the project''s song, to listen to: with Range support when browsers play its format, otherwise (the song''s transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start.'
+      parameters:
+        - $ref: '#/components/parameters/MontageProjectID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+        - name: start
+          in: query
+          description: Seconds to start a decoded song from; ignored for other songs.
+          schema:
+            type: number
+            minimum: 0
+      responses:
+        '200':
+          description: Audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the song.
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/hero:
+    get:
+      operationId: getMontageHero
+      description: 'The device''s background film for the 剪辑中心 home page, as the 第八版 prototype''s hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member''s own videos.'
+      parameters:
+        - name: Range
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The film
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Part of the film
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the film.
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/montage/hero/poster:
+    get:
+      operationId: getMontageHeroPoster
+      description: The background film's poster (hero/hero.jpg); 404 without one.
+      responses:
+        '200':
+          description: The poster
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules:
+    get:
+      operationId: listModules
+      summary: The removable modules installed on this device (ADR 0037); a window of a module not listed is not shown
+      responses:
+        '200':
+          description: The installed modules
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - id
+                      properties:
+                        id:
+                          type: string
+                          pattern: ^[a-z][a-z0-9]{1,30}$
+  /api/v1/modules/scoring/me:
+    get:
+      operationId: getScoringMe
+      summary: Whether the caller administers photo scoring and whether an administrator chose them as a rater
+      responses:
+        '200':
+          description: The caller's roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringMe'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/batches:
+    get:
+      operationId: listScoringBatches
+      summary: The open batches for a rater, each with only the rater's own count of answers
+      responses:
+        '200':
+          description: The open batches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringRaterBatch'
+        '403':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/batches/{batchId}/anchors:
+    get:
+      operationId: listScoringAnchors
+      summary: A batch's reference photos with their scores, lowest first, for raters and administrators
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+      responses:
+        '200':
+          description: The reference photos
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringAnchor'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/batches/{batchId}/anchors/{anchorId}/image:
+    get:
+      operationId: getScoringAnchorImage
+      summary: The preview of a reference photo
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+        - $ref: '#/components/parameters/ScoringAnchorID'
+      responses:
+        '200':
+          description: The preview
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/batches/{batchId}/recent:
+    get:
+      operationId: listScoringRecent
+      summary: The rater's own latest twelve scores in the batch, oldest first, for the ruler; skips and marks are left out
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+      responses:
+        '200':
+          description: The latest scores
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    maxItems: 12
+                    items:
+                      $ref: '#/components/schemas/ScoringRecentScore'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/batches/{batchId}/claims:
+    post:
+      operationId: claimScoringPhotos
+      summary: The photos the rater holds in the batch, oldest first, topped up to three; each is held for ten minutes
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The held photos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringClaims'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/claims/{token}/image:
+    get:
+      operationId: getScoringClaimImage
+      summary: The preview behind one of the caller's own claims, answered or not
+      parameters:
+        - $ref: '#/components/parameters/ScoringClaimToken'
+      responses:
+        '200':
+          description: The preview
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/claims/{token}/full:
+    get:
+      operationId: getScoringClaimFull
+      summary: The photo behind one of the caller's own claims at its full size, which the window shows at 100%
+      description: Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+      parameters:
+        - $ref: '#/components/parameters/ScoringClaimToken'
+      responses:
+        '200':
+          description: The photo at full size
+          headers:
+            X-Image-Orientation:
+              description: The EXIF orientation, 1 to 8, to apply for display.
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 8
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '410':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/claims/{token}/thumbnail:
+    get:
+      operationId: getScoringClaimThumbnail
+      summary: A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims
+      parameters:
+        - $ref: '#/components/parameters/ScoringClaimToken'
+      responses:
+        '200':
+          description: The thumbnail
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/claims/{token}/rating:
+    put:
+      operationId: rateScoringPhoto
+      summary: 'Answer a claim: a score, a skip or a mark. The same submission again is harmless; a new answer replaces only the rater''s latest (rating_locked)'
+      parameters:
+        - $ref: '#/components/parameters/ScoringClaimToken'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringRatingInput'
+      responses:
+        '200':
+          description: How many photos of the batch the rater answered
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - rated
+                properties:
+                  rated:
+                    type: integer
+                    minimum: 0
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/sources:
+    get:
+      operationId: listScoringSources
+      summary: The folders in the Shared folder 照片打分 that can become a batch
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The folders
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - name
+                      properties:
+                        name:
+                          type: string
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/dimensions:
+    get:
+      operationId: listScoringDimensions
+      summary: 'Every 打分项 a batch can choose: the built-in ones, then the custom ones, oldest first'
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The 打分项
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringDimension'
+        '403':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createScoringDimension
+      summary: Make a custom 打分项 that every batch from now on can choose; dimension_exists (409) when its name is taken
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringDimensionInput'
+      responses:
+        '201':
+          description: The new 打分项
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringDimension'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches:
+    get:
+      operationId: listScoringAdminBatches
+      summary: Every batch with its import progress and coverage, newest first
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The batches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringBatch'
+        '403':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createScoringBatch
+      summary: Start importing a folder as a new batch
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringBatchInput'
+      responses:
+        '201':
+          description: The new batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringBatch'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches/{batchId}:
+    parameters:
+      - $ref: '#/components/parameters/ScoringBatchID'
+    patch:
+      operationId: updateScoringBatch
+      summary: Rename a batch, change its guide, number of raters or, before its first answer, 打分项, or close and reopen it
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringBatchPatch'
+      responses:
+        '200':
+          description: The batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringBatch'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteScoringBatch
+      summary: Delete a batch nobody answered yet (batch_in_use otherwise)
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches/{batchId}/stats:
+    get:
+      operationId: getScoringStats
+      summary: Each rater's counts, timing, spread, agreement with the others and consistency on repeated photos
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+      responses:
+        '200':
+          description: The raters' statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringRaterStats'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches/{batchId}/cover:
+    get:
+      operationId: getScoringBatchCover
+      summary: 'A small JPEG, at most 320 px on its longer side, of the photo that stands for the batch: the first in its random order, anchors excluded'
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+      responses:
+        '200':
+          description: The thumbnail
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches/{batchId}/export:
+    get:
+      operationId: exportScoringBatch
+      summary: A zip of one table, ratings.csv or ratings.jsonl, with a row per answer (a photo and a rater), and manifest.json describing the batch, the rows and every column
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+        - name: format
+          in: query
+          description: csv (UTF-8 with a byte order mark, for spreadsheets; the default) or jsonl.
+          schema:
+            type: string
+            enum:
+              - csv
+              - jsonl
+        - name: fields
+          in: query
+          style: form
+          explode: false
+          description: Columns beside image_id, image_path and rater, comma-separated; a 打分项 the batch does not score is refused (validation_failed).
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/ScoringExportField'
+        - name: include
+          in: query
+          style: form
+          explode: false
+          description: 'Rows beside current scores, comma-separated: skips (skips and marks), superseded (answers replaced later), repeats (answers to photos shown again).'
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              type: string
+              enum:
+                - skips
+                - superseded
+                - repeats
+      responses:
+        '200':
+          description: The export
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/batches/{batchId}/export/summary:
+    get:
+      operationId: getScoringExportSummary
+      summary: 'How many rows an export has: current scores, and those each include adds'
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/ScoringBatchID'
+      responses:
+        '200':
+          description: The counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringExportSummary'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/raters:
+    get:
+      operationId: listScoringRaters
+      summary: Every active account and whether it is a rater
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScoringRaterEntry'
+        '403':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/modules/scoring/admin/raters/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/ScoringAccountID'
+    put:
+      operationId: addScoringRater
+      summary: Choose an active account as a rater
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Chosen
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeScoringRater
+      summary: Stop an account rating; its answers stay
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Removed
+        '403':
+          $ref: '#/components/responses/ProductError'
   /api/v1/photos/libraries:
     get:
       operationId: listPhotoLibraries
@@ -4883,7 +6381,7 @@ paths:
     get:
       operationId: viewPhoto
       summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo''s text.'
+      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo read as a document (an ID card on either side, a bank card, a bank slip, an invoice, a receipt) or whose text holds a long number other than a mobile number (403 sensitive_photo): it reads the photo''s text, where each sensitive value is a handle. Nor of a photo that waits to be read or whose reading failed (403 unread_photo): what it shows is not known yet.'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -5034,6 +6532,22 @@ paths:
                       $ref: '#/components/schemas/PhotoTextChange'
         '403':
           $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/text-handles/{handle}:
+    get:
+      operationId: getPhotoTextHandle
+      summary: The value a handle of the caller's AI assistant stands for
+      description: An assistant knows a sensitive value of a photo's text only as a handle such as ⟦身份证号·6d48a8⟧ and writes the handle in its answer; the window the answer shows in asks here, with the member's own session, and shows the value in its place, so the value never passes the model. The handle must be the caller's own, of a photo the caller still sees in a library that reads text; anything else is not found. An assistant's own socket does not serve this.
+      parameters:
+        - $ref: '#/components/parameters/PhotoTextHandle'
+      responses:
+        '200':
+          description: The value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoTextHandleValue'
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
@@ -7166,11 +8680,80 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/assistant-key:
+    get:
+      operationId: getAssistantKey
+      x-anas-posture: admin
+      summary: Whether the household's DeepSeek key for VNAS is saved (设置 → VNAS, ADR 0024)
+      description: 'Administrators only. The key itself is never answered: once saved it can be replaced or deleted, not read.'
+      responses:
+        '200':
+          description: The key's state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantKeyState'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: saveAssistantKey
+      x-anas-posture: admin
+      summary: Save or replace the DeepSeek key, which gives every member VNAS
+      description: 'Administrators only. acknowledged must be true: the administrator confirms that members'' conversations with VNAS, the file contents and photo information it reads to answer, and the photos and desktop screens it looks at go to DeepSeek''s servers (400 acknowledgement_required). The Host Agent keeps the key encrypted on the device, where only the model gateway reads it, and prepares every active member''s assistant; 400 invalid_key when it cannot be a DeepSeek key. Nothing logs the key.'
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantKeyRequest'
+      responses:
+        '200':
+          description: The key's state after saving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantKeyState'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteAssistantKey
+      x-anas-posture: admin
+      summary: Delete the DeepSeek key, which turns VNAS off for everyone
+      description: Administrators only. Every member's assistant stops; their conversations, memory, scheduled tasks and files stay and come back when a key is saved again.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The key's state after deleting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantKeyState'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/assistant/ws:
     get:
       operationId: openAssistantGateway
       summary: The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
+      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. A window becomes a conversation''s browser with desktop.attach ({session_id}), which the product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it has. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}), and the commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has not answered is no longer waited for. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
       responses:
         '101':
           description: Switched to WebSocket
@@ -7525,30 +9108,13 @@ paths:
       - $ref: '#/components/parameters/AssistantTaskID'
     post:
       operationId: runAssistantTask
-      summary: Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs
-      description: 200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification.
+      summary: Run a task now, in a round of the member's scheduled tasks like one that is due; a paused task is resumed
+      description: 202 once the run was asked for; it starts within seconds and goes on. The run's end shows in the task and as an assistant_task notification. 409 task_running when it is already running, task_finished when the task has no more runs.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       responses:
-        '200':
-          description: The run ended
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required:
-                  - finished
-                  - task
-                properties:
-                  finished:
-                    type: boolean
-                    enum:
-                      - true
-                  task:
-                    $ref: '#/components/schemas/AssistantTask'
         '202':
-          description: The run started and goes on
+          description: The run was asked for and goes on
           content:
             application/json:
               schema:
@@ -7810,6 +9376,14 @@ components:
       description: A field of the photo's document type, such as 合计
       schema:
         type: string
+    PhotoTextHandle:
+      name: handle
+      in: path
+      required: true
+      description: The letters after the dot of a handle, such as 6d48a8
+      schema:
+        type: string
+        pattern: ^[0-9a-f]{6}$
     MediaLibraryID:
       name: libraryId
       in: path
@@ -7906,14 +9480,49 @@ components:
       description: The `next` of the previous page.
       schema:
         type: string
+    TodoID:
+      name: todoId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ScoringBatchID:
+      name: batchId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ScoringAnchorID:
+      name: anchorId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    ScoringClaimToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ScoringAccountID:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
     AssistantSessionID:
       name: sessionId
       in: path
       required: true
-      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>).'
+      description: 'A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>, or local-<sha256> for a run on Hermes''s gateway).'
       schema:
         type: string
-        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$
+        pattern: ^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6}|local-[0-9a-f]{64})$
     AssistantTaskID:
       name: taskId
       in: path
@@ -7944,6 +9553,27 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/FamilyReactionName'
+    MontageCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `next` of the previous page.
+      schema:
+        type: string
+    MontageProjectID:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    MontageJobID:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
   responses:
     ProductError:
       description: Product operation error.
@@ -8823,6 +10453,53 @@ components:
         avatarVersion:
           type: string
           description: Names the current avatar; absent when the user has none. See getAvatar.
+        deletion:
+          $ref: '#/components/schemas/Deletion'
+    Deletion:
+      type: object
+      additionalProperties: false
+      description: A disabled account an administrator asked to delete; only listUsers and scheduleUserDeletion show it.
+      required:
+        - dueAt
+        - personalSpace
+        - library
+        - started
+      properties:
+        dueAt:
+          type: string
+          format: date-time
+          description: When its data is removed for good.
+        personalSpace:
+          $ref: '#/components/schemas/DeletionChoice'
+        library:
+          $ref: '#/components/schemas/DeletionChoice'
+        started:
+          type: boolean
+          description: Its data is being removed; the deletion can no longer be cancelled.
+        retrying:
+          type: boolean
+          description: The last attempt to remove it failed; it is tried again.
+    DeletionChoice:
+      type: string
+      enum:
+        - transfer
+        - delete
+      description: 'transfer: the administrator who deleted the account receives it; delete: it is deleted with the account.'
+    DeletionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+        - personalSpace
+        - library
+      properties:
+        password:
+          type: string
+          description: The administrator's own password.
+        personalSpace:
+          $ref: '#/components/schemas/DeletionChoice'
+        library:
+          $ref: '#/components/schemas/DeletionChoice'
     Profile:
       type: object
       additionalProperties: false
@@ -8876,6 +10553,7 @@ components:
             - admin_library_viewing
             - credential_reset
             - assistant_task
+            - account_deleted
         actorUsername:
           type: string
         reason:
@@ -8883,6 +10561,12 @@ components:
         expiresAt:
           type: string
           format: date-time
+        folder:
+          type: string
+          description: 'account_deleted: the folder of the administrator''s personal space that holds the deleted account''s files.'
+        album:
+          type: string
+          description: 'account_deleted: the album of the administrator''s private library that holds its photos.'
         task:
           type: object
           description: 'The run an assistant_task notification tells of: one of the member''s scheduled tasks ran. At most one waits per task; a run that answered only Hermes''s silence marker is not shown.'
@@ -9855,6 +11539,7 @@ components:
         - storage
         - photo
         - family
+        - system
     ActivityAccount:
       type: object
       additionalProperties: false
@@ -9893,6 +11578,7 @@ components:
             - storage
             - photo
             - family
+            - system
             - other
         action:
           type: string
@@ -9962,6 +11648,7 @@ components:
         - photos
         - shares
         - family
+        - montage
         - containers
         - ai
         - media
@@ -10133,6 +11820,55 @@ components:
           description: The websites searches leave out after a block, the first to return first; sibling engines share a pause.
           items:
             $ref: '#/components/schemas/WebSearchPausedEngine'
+    PhoneHotspotStatus:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum:
+            - unavailable
+            - 'off'
+            - starting
+            - 'on'
+            - stopping
+            - failed
+        reason:
+          type: string
+          enum:
+            - dependencies_missing
+            - no_wired_uplink
+            - no_idle_radio
+            - ap_failed
+            - dhcp_failed
+            - web_unavailable
+            - tls_unavailable
+            - isolation_failed
+            - cleanup_failed
+            - service_failed
+        connection:
+          description: Present when the hotspot is on. The response is not cacheable.
+          type: object
+          required:
+            - ssid
+            - password
+            - url
+          properties:
+            ssid:
+              type: string
+            password:
+              type: string
+            url:
+              type: string
+    PhoneHotspotRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
     WebSearchPausedEngine:
       type: object
       additionalProperties: false
@@ -10437,6 +12173,175 @@ components:
         source:
           type: boolean
           description: This release can hand out SearXNG's source (getWebSearchSource).
+    SystemUpdatePhase:
+      type: string
+      description: 'Where an update stands: up-to-date; available (newer, to download from a network source); downloading; ready (on the device, a push or a download); installing (apt, then a-nas-check; on a device that runs the A-NAS image, the product switch or the write of a new base image); rolling-back; rolled-back (the check of the new version failed, or its base image its boot check); check-failed (the source could not be read or its signature was wrong); restart-pending (a new base image is written and a restart starts it).'
+      enum:
+        - up-to-date
+        - available
+        - downloading
+        - ready
+        - installing
+        - rolling-back
+        - rolled-back
+        - check-failed
+        - restart-pending
+    SystemUpdateProblem:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          enum:
+            - unreachable
+            - signature
+            - disk_space
+            - download
+            - install
+            - check
+            - rollback
+            - staging
+            - not_installed
+            - boot
+        detail:
+          type: string
+          description: What apt, systemd-sysupdate or a-nas-check said; for disk_space, the bytes still missing.
+    SystemUpdateRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - at
+        - kind
+        - by
+      properties:
+        at:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum:
+            - updated
+            - rolled-back
+            - reverted
+            - check-failed
+            - downloaded
+            - failed
+        version:
+          type: string
+        from:
+          type: string
+        by:
+          type: string
+          description: The administrator who asked, or automatic.
+        problem:
+          $ref: '#/components/schemas/SystemUpdateProblem'
+    SystemUpdateSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - autoDownload
+        - autoInstall
+        - windowStart
+        - windowEnd
+      properties:
+        autoDownload:
+          type: boolean
+        autoInstall:
+          type: boolean
+        windowStart:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          description: Local time of day an automatic install may start from.
+        windowEnd:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          description: Local time of day it may start until; before windowStart, the window runs past midnight.
+    SystemUpdateAction:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum:
+            - check
+            - download
+            - install
+            - revert
+            - restart
+    SystemUpdateStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - phase
+        - running
+        - downloadBytes
+        - downloadedBytes
+        - suites
+        - records
+        - settings
+        - waiting
+      properties:
+        phase:
+          $ref: '#/components/schemas/SystemUpdatePhase'
+        running:
+          type: boolean
+          description: An operation is in progress.
+        current:
+          type: string
+          description: The installed version of a-nas.
+        previous:
+          type: string
+          description: The version before the last install that passed its check, which revert installs.
+        candidate:
+          type: string
+          description: The newest version the source offers that is newer and was not rolled back or left.
+        downloadBytes:
+          type: integer
+          format: int64
+          description: What installing the candidate downloads; 0 for a pushed local source.
+        downloadedBytes:
+          type: integer
+          format: int64
+        suites:
+          type: array
+          items:
+            type: string
+          description: The distributions the device follows, such as release and dev.
+        checkedAt:
+          type: string
+          format: date-time
+        installedAt:
+          type: string
+          format: date-time
+        target:
+          type: string
+          description: The version an operation in progress installs, or that waits for a restart.
+        startedAt:
+          type: string
+          format: date-time
+        problem:
+          $ref: '#/components/schemas/SystemUpdateProblem'
+        records:
+          type: array
+          description: The last ten outcomes, newest first.
+          items:
+            $ref: '#/components/schemas/SystemUpdateRecord'
+        settings:
+          $ref: '#/components/schemas/SystemUpdateSettings'
+        waiting:
+          type: array
+          description: What an install, revert or restart waits for now.
+          items:
+            type: string
+            enum:
+              - storage
+              - apps
+        image:
+          $ref: '#/components/schemas/SystemUpdateImage'
     Transfer:
       type: object
       additionalProperties: false
@@ -11681,6 +13586,673 @@ components:
           $ref: '#/components/schemas/FamilyVaccineCatalog'
         growthStandard:
           type: string
+    TodoDate:
+      type: string
+      format: date
+      description: A calendar date without time of day or zone; today is the device's local date.
+    TodoCategory:
+      type: string
+      enum:
+        - bill
+        - medical
+        - insurance
+        - id_document
+        - contract
+        - other
+      description: What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one.
+    TodoScope:
+      type: string
+      enum:
+        - shared
+        - private
+      description: 'shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared.'
+    TodoStatus:
+      type: string
+      enum:
+        - open
+        - done
+        - ignored
+    TodoStage:
+      type: string
+      enum:
+        - soon
+        - today
+        - overdue
+      description: 'soon: due within 3 days; today: due today; overdue: the due date has passed.'
+    Todo:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - category
+        - scope
+        - status
+        - source
+        - remindRound
+        - version
+        - createdAt
+        - createdById
+        - createdByName
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 10
+        category:
+          $ref: '#/components/schemas/TodoCategory'
+        due:
+          $ref: '#/components/schemas/TodoDate'
+        ownerId:
+          type: string
+          description: Account ID of whom it is for; absent means the whole family.
+        ownerName:
+          type: string
+          description: Username of the owner when it was set, shown once the account is gone.
+        amountCents:
+          type: integer
+          minimum: 0
+          description: Amount in fen (分) of renminbi; there is no other currency.
+        scope:
+          $ref: '#/components/schemas/TodoScope'
+        status:
+          $ref: '#/components/schemas/TodoStatus'
+        snoozedUntil:
+          $ref: '#/components/schemas/TodoDate'
+          description: The day reminders resume; the to-do is snoozed while today is before it.
+        remindRound:
+          type: integer
+          minimum: 0
+          description: Grows when the to-do is snoozed, opened again or given another due date, which starts its reminders over.
+        source:
+          type: string
+          enum:
+            - manual
+          description: 'Where it came from; manual: added by hand.'
+        version:
+          type: integer
+          minimum: 1
+          description: Counts edits to the fields; changing the status or snoozing does not change it.
+        createdAt:
+          type: string
+          format: date-time
+        createdById:
+          type: string
+          description: Account ID of who added it.
+        createdByName:
+          type: string
+          description: Username of who added it, when they added it.
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          description: Set while it is done or ignored.
+        closedById:
+          type: string
+          description: Account ID of who marked it done or ignored.
+        closedByName:
+          type: string
+          description: Username of who marked it done or ignored, when they did.
+    TodoFields:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        requestKey:
+          type: string
+          maxLength: 128
+          description: Repeating a request with the same key returns the first to-do.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 10
+          description: At most 10 characters, which a shared screen can show whole.
+        category:
+          $ref: '#/components/schemas/TodoCategory'
+          description: other when absent.
+        due:
+          $ref: '#/components/schemas/TodoDate'
+        ownerId:
+          type: string
+          minLength: 1
+          description: An active account's ID; absent means the whole family.
+        amountCents:
+          type: integer
+          minimum: 0
+          description: Amount in fen (分) of renminbi.
+    TodoEdit:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - version
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 10
+        category:
+          $ref: '#/components/schemas/TodoCategory'
+          description: other when absent.
+        due:
+          $ref: '#/components/schemas/TodoDate'
+        ownerId:
+          type: string
+          minLength: 1
+          description: An account's ID; absent means the whole family. A new owner must be an active account.
+        amountCents:
+          type: integer
+          minimum: 0
+          description: Amount in fen (分) of renminbi.
+        version:
+          type: integer
+          minimum: 1
+          description: The version the edit was made from.
+    TodoOwner:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - username
+      description: An active account a to-do can be given to.
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+    TodoReminder:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - todoId
+        - stage
+        - title
+        - category
+        - due
+        - scope
+      properties:
+        key:
+          type: string
+          description: Names this reminder to the caller; acknowledging it stops this stage until the reminders start over.
+        todoId:
+          type: string
+        stage:
+          $ref: '#/components/schemas/TodoStage'
+        title:
+          type: string
+        category:
+          $ref: '#/components/schemas/TodoCategory'
+        due:
+          $ref: '#/components/schemas/TodoDate'
+        scope:
+          $ref: '#/components/schemas/TodoScope'
+        ownerId:
+          type: string
+          description: Account ID of whom it is for; absent means the whole family.
+    ScoringMe:
+      type: object
+      additionalProperties: false
+      required:
+        - admin
+        - rater
+      properties:
+        admin:
+          type: boolean
+          description: The caller is an A-NAS administrator and so administers photo scoring.
+        rater:
+          type: boolean
+          description: An administrator chose the caller as a rater.
+    ScoringScale:
+      type: string
+      enum:
+        - five
+        - hundredths
+        - tenths
+        - whole
+        - three
+      description: 'How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).'
+    ScoringRaterBatch:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - rubric
+        - dimensions
+        - scale
+        - hideDecimals
+        - rated
+        - finished
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        rubric:
+          type: string
+          description: The administrator's scoring guide.
+        dimensions:
+          $ref: '#/components/schemas/ScoringDimensions'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+        hideDecimals:
+          type: boolean
+          description: The window shows no scores to the rater, who scores by the place on the number line; the answers still have the scale's decimals.
+        rated:
+          type: integer
+          minimum: 0
+          description: The caller's own answers in the batch, skips and marks included.
+        finished:
+          type: boolean
+          description: No photo of the batch is left for the caller.
+    ScoringAnchor:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - score
+        - width
+        - height
+      properties:
+        id:
+          type: integer
+        score:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: The reference score, 0 to 5 with at most two decimals.
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+    ScoringRecentScore:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - score
+        - scores
+        - width
+        - height
+      properties:
+        token:
+          type: string
+          description: The claim the score answered; its thumbnail and preview are the rater's own.
+        score:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: The score of the batch's first 打分项.
+        scores:
+          $ref: '#/components/schemas/ScoringScores'
+        width:
+          type: integer
+          minimum: 1
+          description: The preview's width, for the thumbnail's proportions.
+        height:
+          type: integer
+          minimum: 1
+    ScoringClaim:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - expiresAt
+        - width
+        - height
+      properties:
+        token:
+          type: string
+          description: All the rater learns about the photo; it is neither the content hash nor the file name.
+        expiresAt:
+          type: string
+          format: date-time
+        width:
+          type: integer
+          minimum: 1
+          description: The preview's width; its longer side is at most 2048.
+        height:
+          type: integer
+          minimum: 1
+    ScoringClaims:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - finished
+      properties:
+        items:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/ScoringClaim'
+        finished:
+          type: boolean
+          description: Nothing is held and nothing is left for the caller, or the batch is closed.
+    ScoringSize:
+      type: object
+      additionalProperties: false
+      required:
+        - width
+        - height
+      properties:
+        width:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        height:
+          type: integer
+          minimum: 0
+          maximum: 100000
+    ScoringRatingInput:
+      type: object
+      additionalProperties: false
+      required:
+        - submission
+        - kind
+        - viewMs
+      properties:
+        submission:
+          type: string
+          pattern: ^[A-Za-z0-9-]{8,64}$
+          description: Chosen by the page for each answer; retrying the same answer sends the same value.
+        kind:
+          type: string
+          enum:
+            - score
+            - skip
+            - flag
+          description: 'skip: cannot judge; flag: something is wrong with the photo.'
+        score:
+          type: number
+          minimum: 0
+          maximum: 5
+          description: 'Only with kind score: the batch''s first 打分项, 0 to 5 with at most two decimals; more decimals, or a score that is not one of the batch''s scale, are refused (validation_failed).'
+        scores:
+          $ref: '#/components/schemas/ScoringScores'
+          description: 'Only with kind score: exactly the batch''s 打分项 after the first (validation_failed otherwise).'
+        viewMs:
+          type: integer
+          minimum: 0
+          description: 'How long the photo was looked at before the answer: from it appearing, without the time the page was hidden or the scoring guide open.'
+        viewport:
+          $ref: '#/components/schemas/ScoringSize'
+        display:
+          $ref: '#/components/schemas/ScoringSize'
+        pixelRatio:
+          type: number
+          minimum: 0
+          maximum: 16
+    ScoringBatch:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - source
+        - required
+        - rubric
+        - dimensions
+        - scale
+        - hideDecimals
+        - state
+        - createdAt
+        - import
+        - photos
+        - anchors
+        - complete
+        - started
+        - flagged
+        - answers
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        source:
+          type: string
+          description: The folder in 照片打分 the batch was imported from.
+        required:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: How many raters each photo needs.
+        rubric:
+          type: string
+        dimensions:
+          $ref: '#/components/schemas/ScoringDimensions'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+        hideDecimals:
+          type: boolean
+          description: Raters see no scores, only the place on the number line.
+        state:
+          type: string
+          enum:
+            - importing
+            - open
+            - closed
+        createdAt:
+          type: string
+          format: date-time
+        import:
+          type: object
+          additionalProperties: false
+          required:
+            - files
+            - imported
+            - skipped
+            - skippedBy
+          properties:
+            files:
+              type: integer
+              minimum: 0
+              description: Files found in the folder; 0 until it was scanned.
+            imported:
+              type: integer
+              minimum: 0
+            skipped:
+              type: integer
+              minimum: 0
+            skippedBy:
+              type: array
+              description: 'The skipped files by reason, most first: too_small (a photo to score whose longer side is under 2400 pixels), unsupported_type, undecodable, too_large, unreadable, missing, not_a_file, anchor_name (an anchor without a score in its name).'
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                  - reason
+                  - count
+                properties:
+                  reason:
+                    type: string
+                    enum:
+                      - too_small
+                      - unsupported_type
+                      - undecodable
+                      - too_large
+                      - unreadable
+                      - missing
+                      - not_a_file
+                      - anchor_name
+                  count:
+                    type: integer
+                    minimum: 1
+        photos:
+          type: integer
+          minimum: 0
+          description: Distinct photos to score, anchors excluded.
+        anchors:
+          type: integer
+          minimum: 0
+        complete:
+          type: integer
+          minimum: 0
+          description: Photos with the required number of scores.
+        started:
+          type: integer
+          minimum: 0
+          description: Photos with some scores but not all.
+        flagged:
+          type: integer
+          minimum: 0
+          description: Photos a rater marked as having a problem.
+        answers:
+          type: integer
+          minimum: 0
+          description: Answers of every kind; once there is one, the batch's 打分项, scale and hideDecimals can no longer change.
+    ScoringBatchInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - source
+        - required
+        - rubric
+        - dimensions
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        source:
+          type: string
+          minLength: 1
+        required:
+          type: integer
+          minimum: 1
+          maximum: 10
+        rubric:
+          type: string
+          maxLength: 2000
+        dimensions:
+          $ref: '#/components/schemas/ScoringDimensionChoice'
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+          description: hundredths when left out.
+        hideDecimals:
+          type: boolean
+          description: Only with hundredths or tenths (validation_failed otherwise); false when left out.
+    ScoringBatchPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        rubric:
+          type: string
+          maxLength: 2000
+        required:
+          type: integer
+          minimum: 1
+          maximum: 10
+        dimensions:
+          $ref: '#/components/schemas/ScoringDimensionChoice'
+          description: Refused with batch_in_use once the batch has an answer.
+        scale:
+          $ref: '#/components/schemas/ScoringScale'
+          description: Refused with batch_in_use once the batch has an answer. A scale without decimals turns hideDecimals off unless the patch sets it.
+        hideDecimals:
+          type: boolean
+          description: Refused with batch_in_use once the batch has an answer.
+        state:
+          type: string
+          enum:
+            - open
+            - closed
+    ScoringPerson:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+          description: Missing once the account is no longer active.
+        nickname:
+          type: string
+        avatarVersion:
+          type: string
+    ScoringRaterEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - username
+        - rater
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        nickname:
+          type: string
+        avatarVersion:
+          type: string
+        rater:
+          type: boolean
+    ScoringRaterStats:
+      type: object
+      additionalProperties: false
+      required:
+        - rater
+        - active
+        - scores
+        - skips
+        - flags
+        - repeats
+        - medianViewMs
+        - fastShare
+        - lastAt
+        - dimensions
+      properties:
+        rater:
+          $ref: '#/components/schemas/ScoringPerson'
+        active:
+          type: boolean
+          description: The account is still active.
+        scores:
+          type: integer
+          minimum: 0
+        skips:
+          type: integer
+          minimum: 0
+        flags:
+          type: integer
+          minimum: 0
+        repeats:
+          type: integer
+          minimum: 0
+          description: Answers to photos shown again to check consistency.
+        medianViewMs:
+          type: integer
+          minimum: 0
+          description: Over the scored photos, each with every 打分项.
+        fastShare:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Share of scored photos answered within a second.
+        lastAt:
+          type: string
+          format: date-time
+        dimensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoringDimensionStats'
+          description: One per 打分项 of the batch, in its order.
     PhotoLibrary:
       type: object
       additionalProperties: false
@@ -12135,7 +14707,7 @@ components:
         texts:
           type: integer
           minimum: 0
-          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
+          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A photo read as a document type also matches a query that names the type, such as 身份证 or 发票. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
         objects:
           type: object
           additionalProperties: false
@@ -12309,6 +14881,30 @@ components:
         at:
           type: string
           format: date-time
+    PhotoTextHandleValue:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - value
+        - unchecked
+        - assetId
+        - assetName
+      properties:
+        label:
+          type: string
+          description: 'The kind of value, as the handle names it: 身份证号, 卡号, 账号, 流水号, 手机号 or 号码.'
+        value:
+          type: string
+          description: 'What the handle stands for now: what the field holds, what was read for it, or the number as its digits.'
+        unchecked:
+          type: boolean
+          description: 'True for a field''s value that passed not every check and that no member confirmed or corrected: machine reading may have got it wrong.'
+        assetId:
+          type: string
+          description: The photo the value was read from.
+        assetName:
+          type: string
     PhotoSimilarResults:
       type: object
       additionalProperties: false
@@ -13899,6 +16495,7 @@ components:
         - images
         - version
         - createdBy
+        - createdById
         - createdAt
         - resolved
         - comments
@@ -13920,12 +16517,18 @@ components:
         createdBy:
           type: string
           description: Username of the account that filed the item.
+        createdById:
+          type: string
+          description: The account's ID, which a later account never shares, unlike a deleted account's name.
         createdAt:
           type: string
           format: date-time
         updatedBy:
           type: string
           description: Username of the latest editor of the text or images.
+        updatedById:
+          type: string
+          description: The latest editor's account ID; absent for edits recorded before IDs were.
         updatedAt:
           type: string
           format: date-time
@@ -13933,6 +16536,9 @@ components:
           type: boolean
         resolvedBy:
           type: string
+        resolvedById:
+          type: string
+          description: The account ID of who marked it handled; absent for marks recorded before IDs were.
         resolvedAt:
           type: string
           format: date-time
@@ -13950,6 +16556,7 @@ components:
         - images
         - version
         - createdBy
+        - createdById
         - createdAt
       properties:
         id:
@@ -13969,12 +16576,18 @@ components:
         createdBy:
           type: string
           description: Username of the account that wrote the comment.
+        createdById:
+          type: string
+          description: The account's ID, which a later account never shares, unlike a deleted account's name.
         createdAt:
           type: string
           format: date-time
         updatedBy:
           type: string
           description: Username of the latest editor.
+        updatedById:
+          type: string
+          description: The latest editor's account ID; absent for edits recorded before IDs were.
         updatedAt:
           type: string
           format: date-time
@@ -14008,6 +16621,44 @@ components:
         available:
           type: boolean
           description: The member has an assistant instance.
+        reason:
+          type: string
+          enum:
+            - no_key
+          description: 'Why not, when it is known: no_key while no administrator has saved the DeepSeek key.'
+    AssistantKeyState:
+      type: object
+      additionalProperties: false
+      required:
+        - configured
+        - gateway
+      properties:
+        configured:
+          type: boolean
+          description: A key is saved; every active member has VNAS.
+        gateway:
+          type: string
+          enum:
+            - running
+            - starting
+            - stopped
+            - failed
+          description: What systemd reports of the model gateway, which holds the key.
+    AssistantKeyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - acknowledged
+      properties:
+        key:
+          type: string
+          minLength: 16
+          maxLength: 512
+          description: The DeepSeek API key (printable ASCII, no spaces).
+        acknowledged:
+          type: boolean
+          description: The administrator confirmed that what VNAS handles goes to DeepSeek; must be true.
     AssistantSession:
       type: object
       additionalProperties: false
@@ -14349,7 +17000,7 @@ components:
                 description: 'What a copy copies: a file or folder the assistant reads (personal space, Shared, its own folder).'
               size:
                 type: integer
-                description: Bytes a copy copies; a folder's files together.
+                description: Bytes a copy copies, a folder's files together, or a write leaves.
               folder:
                 type: boolean
                 description: A copy of a whole folder.
@@ -14361,7 +17012,28 @@ components:
                 description: Text of a written file when the card was made; absent when it is new or not text.
               after:
                 type: string
-                description: Text the write leaves; absent when it is not text.
+                description: Text the write leaves, at most its first 64 KiB; absent when it is not text.
+              beforeSize:
+                type: integer
+                description: Bytes of the file a write replaces.
+              partial:
+                type: boolean
+                description: 'after is only the start of what the write leaves: the member has not seen all of it.'
+              binary:
+                type: boolean
+                description: What the write leaves is not text, so the card shows none of it.
+              beforePartial:
+                type: boolean
+                description: before is only the start of the file the write replaces.
+              beforeBinary:
+                type: boolean
+                description: The old file's preview is not UTF-8 text and is not displayed.
+              hiddenSize:
+                type: integer
+                description: Bytes of new content omitted from after, including any incomplete UTF-8 character at the preview boundary.
+              beforeHiddenSize:
+                type: integer
+                description: Bytes of old content omitted from before.
     SystemStorage:
       type: object
       description: Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable.
@@ -14533,6 +17205,20 @@ components:
           type: integer
           format: int64
           minimum: 0
+    SystemUpdateImage:
+      type: object
+      additionalProperties: false
+      description: Set on a device that runs the A-NAS image (ADR 0034 decision 2).
+      required:
+        - base
+        - restart
+      properties:
+        base:
+          type: string
+          description: The base image the device runs, by its release's sequence on main.
+        restart:
+          type: boolean
+          description: Installing the candidate writes a new base image, which a restart starts.
     FamilyReactionName:
       type: string
       enum:
@@ -14568,3 +17254,614 @@ components:
           maxItems: 500
           items:
             type: string
+    MontageProjectSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - assetCount
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        assetCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        previewAssetIds:
+          type: array
+          maxItems: 6
+          description: Up to six of its videos, spread over the order they were added, for thumbnails.
+          items:
+            type: string
+    MontageProjectPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageProjectSummary'
+        next:
+          type: string
+    MontageRequestKey:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[!-~]+$
+      description: 'Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict.'
+    MontageAssetIDs:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[!-~]+$
+    MontageProjectAsset:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - status
+        - addedAt
+      properties:
+        assetId:
+          type: string
+        status:
+          type: string
+          enum:
+            - available
+            - trashed
+            - missing
+            - unknown
+          description: 'unknown: the photo library did not answer this time.'
+        duration:
+          type: number
+          minimum: 0
+        takenAt:
+          type: string
+          format: date-time
+        addedAt:
+          type: string
+          format: date-time
+    MontageVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - number
+        - jobId
+        - plan
+        - filmAssetId
+        - createdAt
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          description: Counts from 1 within the project; the film is named "<project> v<number>.mp4".
+        jobId:
+          type: string
+          description: The job that made it.
+        plan:
+          type: integer
+          minimum: 1
+          description: 'Which of the job''s 方案 it is: a job makes two films to choose from, 方案一 and 方案二.'
+        filmAssetId:
+          type: string
+          description: The film in the caller's photo library; play and download it there.
+        createdAt:
+          type: string
+          format: date-time
+        gone:
+          type: boolean
+          description: The member deleted the film from the photo library.
+    MontageJobStep:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - state
+      properties:
+        name:
+          type: string
+          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2.'
+          enum:
+            - analysis
+            - catalog
+            - song
+            - pick
+            - shots
+            - fill
+            - render
+            - save
+            - pick-2
+            - shots-2
+            - fill-2
+            - render-2
+            - save-2
+        state:
+          type: string
+          enum:
+            - pending
+            - running
+            - done
+            - queued
+            - waiting
+            - needs_input
+            - failed
+            - cancelled
+          description: A step that stopped with the job shows the job's state.
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+    MontageJob:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - projectId
+        - state
+        - steps
+        - createdAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+        projectId:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+            - queued
+            - running
+            - waiting
+            - needs_input
+            - done
+            - failed
+            - cancelled
+        step:
+          type: string
+          description: The step the job is at or stopped at.
+        waitReason:
+          type: string
+          enum:
+            - analysis
+            - asset_trashed
+            - vnas
+            - asset_missing
+            - analysis_failed
+            - no_usable_footage
+            - music_invalid
+            - vnas_unknown
+            - plan_invalid
+            - plan_error
+            - storage_full
+            - photos_unavailable
+            - video_too_long
+            - model_unavailable
+          description: 'Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.'
+        error:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageJobStep'
+        missingAssetIds:
+          type: array
+          description: The videos missing, too long, or whose analysis failed.
+          items:
+            type: string
+        version:
+          $ref: '#/components/schemas/MontageVersion'
+          description: The first 方案's film.
+        versions:
+          type: array
+          description: Every 方案's film the job saved, in order.
+          items:
+            $ref: '#/components/schemas/MontageVersion'
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+    MontageProject:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - assetCount
+        - createdAt
+        - ask
+        - chronological
+        - assets
+        - versions
+      properties:
+        id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        assetCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        ask:
+          type: string
+        chronological:
+          type: boolean
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageProjectAsset'
+        versions:
+          type: array
+          description: The films saved, newest first.
+          items:
+            $ref: '#/components/schemas/MontageVersion'
+        job:
+          $ref: '#/components/schemas/MontageJob'
+          description: The project's latest job, for the page to pick up where it was after a reload.
+    MontageNotice:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - jobId
+        - projectId
+        - project
+        - at
+      properties:
+        kind:
+          type: string
+          enum:
+            - waiting_for_planning
+            - planning
+            - needs_input
+            - saved
+        jobId:
+          type: string
+        projectId:
+          type: string
+        project:
+          type: string
+          description: The project's name.
+        reason:
+          type: string
+        detail:
+          type: string
+          description: 'Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet.'
+        filmAssetId:
+          type: string
+          description: The film saved, for saved.
+        at:
+          type: string
+          format: date-time
+    MontageNotices:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageNotice'
+    MontageSongSection:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - label
+      properties:
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
+        label:
+          type: string
+          enum:
+            - start
+            - end
+            - intro
+            - outro
+            - break
+            - bridge
+            - inst
+            - solo
+            - verse
+            - chorus
+          description: allin1's label.
+    MontageSongPart:
+      type: object
+      additionalProperties: false
+      required:
+        - start
+        - end
+        - level
+        - label
+        - slots
+      properties:
+        start:
+          type: number
+          minimum: 0
+          description: Seconds from the excerpt's start.
+        end:
+          type: number
+          minimum: 0
+        level:
+          type: string
+          enum:
+            - 安静
+            - 中等
+            - 高潮
+          description: 'The part''s level in the film: quiet, middle or climax.'
+        label:
+          type: string
+        allin1:
+          type: string
+          description: 'allin1''s own label when the part was relabelled: a chorus quieter than the section after it is the build to it.'
+        slots:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+              minimum: 0
+          description: The shots' slots, cut on the bar lines, in seconds from the excerpt's start.
+    MontageSongSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - tempo
+        - bar
+        - excerpt
+        - seconds
+        - parts
+        - chorus
+      properties:
+        tempo:
+          type: number
+        bar:
+          type: number
+          minimum: 0
+        excerpt:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: number
+            minimum: 0
+          description: Its start and end in the song, in seconds. The film starts there and lasts as long.
+        seconds:
+          type: number
+          minimum: 0
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageSongPart'
+        chorus:
+          type: boolean
+          description: 'false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen.'
+    MontageSong:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - duration
+        - transcode
+        - state
+      properties:
+        id:
+          type: string
+          minLength: 1
+        trackId:
+          type: string
+          description: 'The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title.'
+        title:
+          type: string
+        duration:
+          type: number
+          minimum: 0
+        transcode:
+          type: boolean
+          description: 'Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range.'
+        state:
+          type: string
+          enum:
+            - analyzing
+            - ready
+            - unusable
+        reason:
+          type: string
+          enum:
+            - undecodable
+            - few_bars
+            - no_excerpt
+            - long_slot
+            - analysis_failed
+          description: 'Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.'
+        waiting:
+          type: string
+          enum:
+            - analyzer_unavailable
+            - compute_unavailable
+            - media_unavailable
+          description: What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
+        tempo:
+          type: number
+        beats:
+          type: array
+          items:
+            type: number
+            minimum: 0
+        downbeats:
+          type: array
+          items:
+            type: number
+            minimum: 0
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/MontageSongSection'
+        defaultStart:
+          type: number
+          minimum: 0
+          description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
+        selection:
+          $ref: '#/components/schemas/MontageSongSelection'
+    ScoringDimensionID:
+      type: string
+      pattern: ^(overall|composition|light_color|quality|emotion|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$
+      description: 'What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning.'
+    ScoringDimension:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - description
+        - custom
+      properties:
+        id:
+          $ref: '#/components/schemas/ScoringDimensionID'
+        name:
+          type: string
+          description: The name raters see, such as 构图.
+        description:
+          type: string
+          description: What raters look at; empty for sharpness, narrative and preference and for custom ones made without.
+        custom:
+          type: boolean
+          description: An administrator made it.
+    ScoringDimensions:
+      type: array
+      minItems: 1
+      maxItems: 8
+      items:
+        $ref: '#/components/schemas/ScoringDimension'
+      description: A batch's 打分项 in the order raters score them, which is the order the administrator chose them in.
+    ScoringScores:
+      type: object
+      propertyNames:
+        $ref: '#/components/schemas/ScoringDimensionID'
+      additionalProperties:
+        type: number
+        minimum: 0
+        maximum: 5
+      description: Scores on a batch's 打分项 after the first, 0 to 5 with at most two decimals; the first stays in score.
+    ScoringDimensionInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 8
+          description: 1 to 8 characters, unique among every 打分项.
+        description:
+          type: string
+          maxLength: 40
+          description: Shown to raters; one line of at most 40 characters.
+    ScoringDimensionChoice:
+      type: array
+      minItems: 1
+      maxItems: 8
+      uniqueItems: true
+      items:
+        $ref: '#/components/schemas/ScoringDimensionID'
+      description: The 打分项 to score, one at least, in the order raters score them; each is built in or made through /admin/dimensions.
+    ScoringDimensionStats:
+      type: object
+      additionalProperties: false
+      required:
+        - dimension
+        - mean
+        - standardDeviation
+        - agreement
+        - agreementPhotos
+        - repeatDifference
+        - longestRun
+      properties:
+        dimension:
+          $ref: '#/components/schemas/ScoringDimensionID'
+        mean:
+          type: number
+          minimum: 0
+          maximum: 5
+        standardDeviation:
+          type: number
+          minimum: 0
+        agreement:
+          type:
+            - number
+            - 'null'
+          minimum: -1
+          maximum: 1
+          description: Correlation with the other raters' mean on the same photos; null below 20 such photos.
+        agreementPhotos:
+          type: integer
+          minimum: 0
+        repeatDifference:
+          type:
+            - number
+            - 'null'
+          minimum: 0
+          description: Mean absolute difference between a repeat and the current score of that photo; null without repeats.
+        longestRun:
+          type: integer
+          minimum: 0
+          description: Longest run of the same score in a row.
+    ScoringExportField:
+      type: string
+      pattern: ^(nickname|rater_id|image_size|duration|submitted_at|kind|links|viewport|display|pixel_ratio|overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$
+      description: 'A choice of columns beside image_id, image_path and rater, which every export has: image_size is image_width and image_height; each of the batch''s 打分项 is its own column in points, by its ID, in the batch''s order; duration is duration_s, the seconds spent on the photo (a current answer adds the time of the answer it replaced); kind is kind, repeat and superseded; links is rating_id, replaces and repeat_of; viewport and display are a width and a height each.'
+    ScoringExportSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - scores
+        - skips
+        - superseded
+        - repeats
+      properties:
+        scores:
+          type: integer
+          minimum: 0
+          description: 'Current scores of photos handed out the first time: the rows of every export.'
+        skips:
+          type: integer
+          minimum: 0
+          description: Current skips and marks; rows with include skips.
+        superseded:
+          type: integer
+          minimum: 0
+          description: Answers a later one replaced; rows with include superseded.
+        repeats:
+          type: integer
+          minimum: 0
+          description: Current answers to photos shown again; rows with include repeats.

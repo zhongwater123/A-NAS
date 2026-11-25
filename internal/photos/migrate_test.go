@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb/sqlitedbtest"
 )
 
 // A Catalog written by the first schema keeps its rows and gains thumbnail
@@ -19,7 +22,7 @@ func TestMigrationFromFirstSchemaQueuesThumbnails(t *testing.T) {
 		t.Fatalf("open catalog: %v", err)
 	}
 	for _, statement := range []string{
-		migrations[0],
+		migrations[0].Up,
 		"PRAGMA user_version = 1",
 		"INSERT INTO libraries(id, kind, owner_user_id, created_at) VALUES('library:a', 'private', 'user:alice', '2026-10-01T00:00:00.000000000Z')",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('" + zeroObjectID + "', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -58,7 +61,7 @@ func TestMigrationQueuesVectorsForExistingThumbnails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	statements := append([]string{}, migrations[:3]...)
+	statements := upStatements(migrations[:3])
 	statements = append(statements,
 		"PRAGMA user_version = 3",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('"+zeroObjectID+"', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -90,7 +93,7 @@ func TestMigrationQueuesDetectionsAndFaceScansForExistingThumbnails(t *testing.T
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	statements := append([]string{}, migrations[:6]...)
+	statements := upStatements(migrations[:6])
 	statements = append(statements,
 		"PRAGMA user_version = 6",
 		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('"+zeroObjectID+"', 1, 'image/png', '2026-10-01T00:00:00.000000000Z')",
@@ -143,6 +146,68 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 	}
 }
 
+// undoMontageGrants is what a build before the montage center's grants does
+// with migration 17's stored Down when it opens the Catalog; the statements
+// that undo older migrations by hand come after it.
+var undoMontageGrants = []string{
+	migrations[21].Down,
+	"DELETE FROM schema_downgrades WHERE version = 22",
+	"DROP TABLE montage_films",
+	"DELETE FROM schema_downgrades WHERE version = 21",
+	"DROP TABLE video_card_descriptions",
+	"DELETE FROM schema_downgrades WHERE version = 20",
+	"DROP TABLE video_card_quality",
+	"DROP TABLE video_cards",
+	"DROP TABLE montage_card_results",
+	"DELETE FROM schema_downgrades WHERE version = 19",
+	"DROP TRIGGER assets_window_outbox_update",
+	"DROP TRIGGER assets_window_outbox_delete",
+	"DROP TRIGGER assets_window_outbox_insert",
+	"DROP TRIGGER video_windows_outbox_delete",
+	"DROP TRIGGER video_windows_outbox_update",
+	"DROP TRIGGER video_windows_outbox_insert",
+	"DROP TABLE window_outbox",
+	"DROP TABLE video_windows",
+	"DROP TABLE montage_objects",
+	"DELETE FROM schema_downgrades WHERE version = 18",
+	"DROP TABLE montage_grant_assets",
+	"DROP TABLE montage_grants",
+	"DELETE FROM schema_downgrades WHERE version = 17",
+	"PRAGMA user_version = 16",
+}
+
+// A build before the montage center's grants takes migration 17 back with
+// the Down the newer build stored, and a later build adds the tables again.
+func TestMontageGrantsMigrationGoesBackWithItsDown(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:16], WithoutDown: migrationsWithoutDown}
+	// The newer build's steps 17 to 20 go back with their stored Downs.
+	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
+		t.Fatalf("the older build's migration: %v", err)
+	}
+	var version, tables int
+	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 16 {
+		t.Fatalf("user_version after going back = %d, %v", version, err)
+	}
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'montage_%' OR name LIKE '%window%' OR name LIKE 'video_card%'").Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("grant tables left after going back = %d, %v", tables, err)
+	}
+	_ = service.Close()
+	service, err = Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	if _, err := service.db.ExecContext(ctx, "SELECT COUNT(*) FROM montage_grant_assets"); err != nil {
+		t.Fatalf("grant tables after migrating again: %v", err)
+	}
+}
+
 // undoTextCorrections are the statements of docs/architecture/photo-ocr.md#交付
 // that take the Catalog back to migration 15, before corrections belonged to
 // the content object.
@@ -171,7 +236,7 @@ func TestTextCorrectionsMigrationCanBeUndone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range undoTextCorrections {
+	for _, statement := range append(slices.Clone(undoMontageGrants), undoTextCorrections...) {
 		if _, err := service.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
@@ -208,7 +273,7 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range append(slices.Clone(undoTextCorrections),
+	for _, statement := range append(append(slices.Clone(undoMontageGrants), undoTextCorrections...),
 		// Migrations 16 and 15 first, as docs/architecture/photo-ocr.md#交付 says.
 		"DROP TABLE text_corrections",
 		"DROP TABLE texts",
@@ -263,4 +328,70 @@ func mustMkdir(t *testing.T, path string) string {
 		t.Fatalf("mkdir: %v", err)
 	}
 	return path
+}
+
+// upStatements are the Ups of steps, as a build with only them ran them.
+func upStatements(steps []sqlitedb.Step) []string {
+	statements := make([]string, 0, len(steps))
+	for _, step := range steps {
+		statements = append(statements, step.Up)
+	}
+	return statements
+}
+
+func TestCatalogMigrationsAfterThePackagedReleasesHaveDowns(t *testing.T) {
+	sqlitedbtest.CheckReversible(t, sqlitedb.Schema{Name: "the photo catalog", Steps: migrations, WithoutDown: migrationsWithoutDown},
+		func(path string) (*sql.DB, error) { return sqlitedb.Open(path, sqlitedb.Options{Durable: true}) })
+}
+
+// Migration 22 records the release that wrote each card description; its
+// Down drops the column and keeps the descriptions, and going forward
+// again leaves the release unrecorded.
+func TestDescriptionReleaseMigrationRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	for _, statement := range []string{
+		"INSERT INTO objects(id, size_bytes, media_type, created_at) VALUES('" + zeroObjectID + "', 1, 'video/mp4', '')",
+		"INSERT INTO video_card_descriptions(object_id, card, result, error, identity, written_release) VALUES('" + zeroObjectID + "', 1, NULL, 'too many frames', 'reader|quality=q', '1.0.0')",
+	} {
+		if _, err := service.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	state := func() (columns, rows int, release string) {
+		t.Helper()
+		if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('video_card_descriptions') WHERE name = 'written_release'").Scan(&columns); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM video_card_descriptions").Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if columns == 1 {
+			if err := service.db.QueryRowContext(ctx, "SELECT IFNULL(written_release, '') FROM video_card_descriptions").Scan(&release); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return columns, rows, release
+	}
+	if columns, rows, release := state(); columns != 1 || rows != 1 || release != "1.0.0" {
+		t.Fatalf("migrated: %d columns, %d rows, release %q", columns, rows, release)
+	}
+	older := sqlitedb.Schema{Name: "the photo catalog", Steps: migrations[:21], WithoutDown: migrationsWithoutDown}
+	if err := sqlitedb.Migrate(ctx, service.db, older); err != nil {
+		t.Fatalf("the older build's migration: %v", err)
+	}
+	if columns, rows, _ := state(); columns != 0 || rows != 1 {
+		t.Fatalf("after going back: %d columns, %d rows", columns, rows)
+	}
+	if err := migrate(ctx, service.db); err != nil {
+		t.Fatal(err)
+	}
+	if columns, rows, release := state(); columns != 1 || rows != 1 || release != "" {
+		t.Fatalf("after migrating again: %d columns, %d rows, release %q", columns, rows, release)
+	}
 }

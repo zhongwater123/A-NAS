@@ -1,0 +1,23 @@
+# What a system extension adds at boot. systemd 257 merges extensions after
+# the boot transaction is built and after systemd-sysusers has run, so an
+# extension's services do not start and its system users do not exist. This
+# creates the users, reloads and pulls the targets in again, as Flatcar's
+# ensure-sysext.service does. verify.sh enables it only after checking the
+# boot without it.
+[Unit]
+Description=Start what the system extensions add
+DefaultDependencies=no
+BindsTo=systemd-sysext.service
+After=systemd-sysext.service systemd-sysusers.service
+Before=sysinit.target systemd-tmpfiles-setup.service shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=systemd-sysusers
+ExecStart=systemctl daemon-reload
+ExecStart=systemctl restart --no-block sockets.target timers.target multi-user.target
+
+[Install]
+WantedBy=sysinit.target

@@ -1,20 +1,29 @@
-import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
+import { Clapperboard, ListTodo, Settings, Share2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
-import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
 import { appProject } from "../docker/model";
-import { FamilyGlyph } from "../family/FamilyGlyph";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
 import { displayName } from "../people/people";
 import { PhotosGlyph } from "../photos/PhotosGlyph";
+import type { ScoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
 import { lazyCode } from "../ui/lazyCode";
-import { WebSearchGlyph } from "../websearch/WebSearchGlyph";
+import {
+  AppCenterIcon,
+  BackupCenterIcon,
+  FamilyCenterIcon,
+  FileManagerIcon,
+  MusicIcon,
+  PhotoScoringIcon,
+  RecycleBinIcon,
+  TransferCenterIcon,
+  WebSearchIcon,
+} from "./AppIconArtwork";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
@@ -24,14 +33,17 @@ const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
+const MontagePanel = lazyCode(() => import("../montage/MontagePanel").then((module) => module.MontagePanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
 const MusicPanel = lazyCode(() => import("../music/MusicPanel").then((module) => module.MusicPanel));
 const PhotosPanel = lazyCode(() => import("../photos/PhotosPanel").then((module) => module.PhotosPanel));
+const ScoringPanel = lazyCode(() => import("../scoring/ScoringPanel").then((module) => module.ScoringPanel));
 const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
 const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
 const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
+const TodosPanel = lazyCode(() => import("../todos/TodosPanel").then((module) => module.TodosPanel));
 const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 const WebSearchPanel = lazyCode(() => import("../websearch/WebSearchPanel").then((module) => module.WebSearchPanel));
 
@@ -43,10 +55,16 @@ export interface WindowIntentPayloads {
   photos: { assetId: string };
   // A baby's channel that photos from 相册 joined.
   family: { babyId: string };
+  // A to-do the desktop's reminder points at.
+  todos: { todoId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
-  // A toast of a scheduled task opens its run in VNAS, or the tasks.
-  assistant: { sessionId?: string; title?: string };
+  // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
+  // cards that wait for the member.
+  assistant: { sessionId?: string; title?: string; conversationId?: string };
+  // A row of a section to bring into view, as the search finds one: the companion's dot, the system health
+  // in 概览. The section itself is SettingsState's.
+  settings: { anchor: string };
 }
 // The intents waiting for their windows. Every request is a new object, so a
 // window sees a request for the place it already shows. The window hands back
@@ -66,8 +84,16 @@ export interface WindowContext {
   isAdmin: boolean;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
+  // Without the administrator's DeepSeek key nobody has VNAS; its icon says so.
+  assistantNeedsKey: boolean;
+  openSettings: (section: SettingsSection) => void;
   // Web search shows only while an administrator leaves it on (ADR 0030).
   webSearchEnabled: boolean;
+  // 照片打分 shows only where its module is installed, to its administrators
+  // and the raters they chose (ADR 0037).
+  scoring: ScoringAccess;
+  // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
+  montage: boolean;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -84,10 +110,18 @@ export interface SettingsState {
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   storagePlan: StoragePlanFlow;
+  // assistantKeyChanged reads again whether this account has VNAS.
+  assistantKeyChanged: () => void;
 }
 export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
 
-function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "session" | "changeUser" | "logout">) {
+function SettingsWindow({
+  session,
+  changeUser,
+  logout,
+  intents,
+  intentHandled,
+}: Pick<WindowContext, "session" | "changeUser" | "logout" | "intents" | "intentHandled">) {
   const state = use(SettingsStateContext);
   if (!state) throw new Error("SettingsWindow outside the desktop");
   return (
@@ -96,9 +130,12 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
       host={state.host}
       section={state.section}
       onSectionChange={state.setSection}
+      intent={intents.settings}
+      onIntentHandled={(handled) => intentHandled("settings", handled)}
       storagePlan={state.storagePlan}
       onUserChange={changeUser}
       onLogout={logout}
+      onAssistantKeyChange={state.assistantKeyChanged}
     />
   );
 }
@@ -106,7 +143,7 @@ function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "se
 interface AppDefinition {
   title: string;
   icon: AppGlyph;
-  // The gradient behind the app's desktop and dock icons.
+  // The tile style used for the app's desktop, launcher and dock icons.
   tone: string;
   // Apps on a white tile (相册, VNAS) keep it in their window's title bar too.
   lightTitle?: boolean;
@@ -123,6 +160,9 @@ interface AppDefinition {
     adminOnly?: boolean;
     // An app that is not ready shows a disabled icon marked 规划中.
     ready?: (context: WindowContext) => boolean;
+    // An app that exists but cannot open now says why under its icon; settings is the
+    // Settings page that changes that, which the icon opens.
+    unavailable?: (context: WindowContext) => { note: string; settings?: SettingsSection } | undefined;
     // An app an administrator turned off has no icon at all.
     visible?: (context: WindowContext) => boolean;
   };
@@ -142,7 +182,7 @@ const definitions = {
   },
   files: {
     title: "文件管理",
-    icon: FolderClosed,
+    icon: FileManagerIcon,
     tone: "files",
     bounds: { x: 230, y: 70, width: 900, height: 620 },
     launcher: { id: "files", keywords: "文件 共享 上传 shared" },
@@ -160,7 +200,7 @@ const definitions = {
   },
   trash: {
     title: "回收站",
-    icon: Trash2,
+    icon: RecycleBinIcon,
     tone: "trash",
     bounds: { x: 260, y: 76, width: 920, height: 620 },
     launcher: { id: "trash", keywords: "删除 恢复" },
@@ -170,20 +210,26 @@ const definitions = {
     title: "设置",
     icon: Settings,
     tone: "settings",
-    bounds: { x: 300, y: 76, width: 920, height: 620 },
+    bounds: { x: 240, y: 56, width: 1020, height: 700 },
     launcher: {
       id: "settings",
       // The administrator terminal lives in Settings → 终端, so searching for it in the launcher finds 设置.
       keywords: ({ isAdmin }) =>
         `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash 网页搜索开关" : ""}`,
     },
-    render: ({ session, changeUser, logout }) => (
-      <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
+    render: ({ session, changeUser, logout, intents, intentHandled }) => (
+      <SettingsWindow
+        session={session}
+        changeUser={changeUser}
+        logout={logout}
+        intents={intents}
+        intentHandled={intentHandled}
+      />
     ),
   },
   store: {
     title: "应用中心",
-    icon: ShoppingBag,
+    icon: AppCenterIcon,
     tone: "store",
     bounds: { x: 300, y: 60, width: 940, height: 660 },
     launcher: { id: "store", keywords: "应用 安装 商店 app", adminOnly: true },
@@ -199,7 +245,7 @@ const definitions = {
   },
   transfers: {
     title: "传输中心",
-    icon: ArrowDownUp,
+    icon: TransferCenterIcon,
     tone: "download",
     bounds: { x: 270, y: 84, width: 900, height: 600 },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
@@ -210,7 +256,7 @@ const definitions = {
   },
   backup: {
     title: "备份中心",
-    icon: BackupCenterGlyph,
+    icon: BackupCenterIcon,
     tone: "backup",
     bounds: { x: 220, y: 52, width: 1080, height: 700 },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
@@ -258,7 +304,7 @@ const definitions = {
   },
   music: {
     title: "音乐",
-    icon: Music2,
+    icon: MusicIcon,
     tone: "music",
     bounds: { x: 240, y: 56, width: 1080, height: 700 },
     launcher: { id: "music", keywords: "歌曲 专辑 歌手 歌单 播放 music" },
@@ -266,7 +312,7 @@ const definitions = {
   },
   websearch: {
     title: "网页搜索",
-    icon: WebSearchGlyph,
+    icon: WebSearchIcon,
     tone: "websearch",
     bounds: { x: 240, y: 50, width: 1040, height: 700 },
     launcher: {
@@ -278,7 +324,7 @@ const definitions = {
   },
   family: {
     title: "家庭中心",
-    icon: FamilyGlyph,
+    icon: FamilyCenterIcon,
     tone: "family",
     bounds: { x: 200, y: 44, width: 1120, height: 730 },
     launcher: { id: "family", keywords: "家庭 宝宝 成长 疫苗 身高 体重 大事记 亲友 family baby" },
@@ -291,6 +337,45 @@ const definitions = {
       />
     ),
   },
+  todos: {
+    title: "待办",
+    icon: ListTodo,
+    tone: "todos",
+    // A narrow list; on a phone the window fills the page as every window does.
+    bounds: { x: 320, y: 64, width: 720, height: 640 },
+    launcher: { id: "todos", keywords: "待办 提醒 截止 到期 账单 缴费 续保 复查 证件 todo" },
+    render: ({ session, intents, intentHandled }) => (
+      <TodosPanel
+        userId={session.user.id}
+        intent={intents.todos}
+        onIntentHandled={(handled) => intentHandled("todos", handled)}
+      />
+    ),
+  },
+  montage: {
+    title: "剪辑中心",
+    icon: Clapperboard,
+    tone: "montage",
+    bounds: { x: 220, y: 48, width: 1080, height: 720 },
+    launcher: {
+      id: "montage",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
+      visible: ({ montage }) => montage,
+    },
+    render: ({ session }) => <MontagePanel userId={session.user.id} />,
+  },
+  scoring: {
+    title: "照片打分",
+    icon: PhotoScoringIcon,
+    tone: "scoring",
+    bounds: { x: 180, y: 40, width: 1180, height: 760 },
+    launcher: {
+      id: "scoring",
+      keywords: "打分 评分 美学 照片 风景 标注 score rating",
+      visible: ({ scoring }) => scoring.admin || scoring.rater,
+    },
+    render: ({ session, scoring }) => <ScoringPanel userId={session.user.id} access={scoring} />,
+  },
   assistant: {
     title: "VNAS",
     icon: AssistantGlyph,
@@ -300,7 +385,14 @@ const definitions = {
     launcher: {
       id: "ai",
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
-      ready: ({ assistantReady }) => assistantReady,
+      ready: ({ assistantReady, assistantNeedsKey }) => assistantReady || assistantNeedsKey,
+      // An administrator goes to where the key is set; a member cannot do anything about it.
+      unavailable: ({ assistantNeedsKey, isAdmin }) =>
+        !assistantNeedsKey
+          ? undefined
+          : isAdmin
+            ? { note: "未填写密钥", settings: "assistant" }
+            : { note: "需管理员设置" },
     },
     render: ({ session, open, intents, intentHandled }) => (
       <AssistantPanel
@@ -327,13 +419,31 @@ export function desktopApps(context: WindowContext, isOpen: (id: WindowID) => bo
       return [];
     if (launcher.ready && !launcher.ready(context))
       return [{ id: launcher.id, label: title, ariaLabel: `${title}，规划中`, tone, icon: <Icon />, disabled: true }];
+    const keywords = typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords;
+    const unavailable = launcher.unavailable?.(context);
+    if (unavailable) {
+      const { note, settings } = unavailable;
+      return [
+        {
+          id: launcher.id,
+          label: title,
+          ariaLabel: `${title}，${note}`,
+          keywords,
+          tone,
+          icon: <Icon />,
+          unavailable: true,
+          note,
+          onClick: settings ? () => context.openSettings(settings) : undefined,
+        },
+      ];
+    }
     return [
       {
         id: launcher.id,
         label: title,
         // A Latin name keeps a space after 打开, as in 打开 Docker.
         ariaLabel: `打开${/^[A-Za-z]/.test(title) ? " " : ""}${title}`,
-        keywords: typeof launcher.keywords === "function" ? launcher.keywords(context) : launcher.keywords,
+        keywords,
         tone,
         icon: <Icon />,
         active: isOpen(id),

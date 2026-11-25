@@ -26,6 +26,8 @@ export const WORK_STATUS_INDEX: Record<WorkStatusState, number> = {
 export interface WorkStatusSnapshot {
   state: WorkStatusState | null; // null = 空闲
   task: string | null; // 当前任务详情（todo/write 提供，可 null）
+  /** A-NAS: the clip the shown step asks for; null or missing = one of its stage's. */
+  anim?: string | null;
   /** 当前展示条目所属会话；空闲 / 外部槽 / 老版本宿主缺该字段时都不出现，气泡因此不可点。 */
   sessionId?: string | null;
 }
@@ -33,12 +35,13 @@ export interface WorkStatusSnapshot {
 /** 快照解析：档位不认识 → 归一成 null（空闲）；形状非法 → null，消费端跳过这一拍。 */
 export function toWorkStatus(raw: unknown): WorkStatusSnapshot | null {
   if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { state?: unknown; task?: unknown; sessionId?: unknown };
+  const r = raw as { state?: unknown; task?: unknown; anim?: unknown; sessionId?: unknown };
   const state: WorkStatusState | null =
     r.state === null || (typeof r.state === 'string' && (WORK_STATUS_STATES as readonly string[]).includes(r.state))
       ? (r.state as WorkStatusState | null)
       : null;
   const sessionId =
     typeof r.sessionId === 'string' && r.sessionId !== '' && r.sessionId !== 'unknown' ? r.sessionId : null;
-  return { state, task: typeof r.task === 'string' ? r.task : null, sessionId };
+  const anim = typeof r.anim === 'string' && r.anim !== '' ? r.anim : null;
+  return { state, task: typeof r.task === 'string' ? r.task : null, anim, sessionId };
 }

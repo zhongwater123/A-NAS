@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-11-09
+更新时间：2026-11-20
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -8,11 +8,11 @@
 
 ## 当前结论
 
-- **运行时**：每个成员一个 Hermes Agent 实例，固定上游提交 `0e427d788d25`（2026-10-13）加 3 个补丁，运行环境离线安装、自带 CPython 3.14。工具、MCP、回合内审批、记忆与技能、定时任务和 Hermes Desktop 的聊天层都用 Hermes 自带的，A-NAS 只补沙箱、确认与窗口（用户 2026-10-15、2026-10-20：用自带的，不另造）。
+- **运行时**：每个成员一个 Hermes Agent 实例，固定上游提交 `8fd9f70600f1`（2026-11-10 的 main；2026-11-11 之前是 2026-10-13 的 `0e427d788d25`）加 1 个补丁，运行环境离线安装、自带 CPython 3.14。工具、MCP、回合内审批、记忆与技能、定时任务和 Hermes Desktop 的聊天层都用 Hermes 自带的，A-NAS 只补沙箱、确认、窗口与操作桌面的工具（用户 2026-10-15、2026-10-20：用自带的，不另造；操作桌面在上游删除浏览器控制后改为 A-NAS 自己的 MCP 服务器，见“[升级到 2026-11-10 的上游](#2026-11-10-升级到上游-main-的尝试)”）。
 - **沙箱**：实例以成员本人的 UID 在 systemd 单元中运行，没有网络，模型经沙箱外的网关；个人空间与共享空间只读，只写助手目录；模型、工具与审批固定在 root 所有的 managed scope 中。写个人空间或 `Agent空间/<本人>` 只经 MCP 工具“提交更改”：Hermes 的回合内审批出卡片，本人确认后由文件代理以成员身份执行。危险命令、代码与提问也出卡片。
 - **通道**：实例运行 Hermes Desktop 的无界面后端 `hermes serve`，不用 API Server。产品服务经会话闸门（文件代理核对成员的在线会话）连到实例，按白名单逐帧转发；2026-10-20 起文件代理凭实例密钥经 Hermes 自带的密码登录取得访问令牌。实例从成员登录起常驻，全部会话结束约 45 秒后退出；定时任务由 A-NAS 的唤醒服务另起单元运行。
-- **验证范围**：以上都在开发机上验证（Docker 中的 Debian 13 与 systemd、真实安装器的系统测试、DeepSeek flash 与 v4-pro）。实验 NAS 上有试用（[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)），本页记下的 NAS 数据只有冷启动到监听 4.4 秒、多轮对话后约 400 MB、内存共 7.7 GB。还要在 NAS 上测：多个成员同时常驻的内存、数据卷开启 Btrfs simple quota 的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）、VNAS 看 WebOS 截图的整条链路。
-- **主要风险**：后台复盘会把共享空间里的诱导文字写进记忆（用户决定保留，成员在“记忆”页删除）；试用期间照片画面与 WebOS 截图发给云端模型，与 ADR 0016 冲突（用户决定只做可行性验证）；`GET /` 与 `host-serve.token` 可能还有令牌（读源码所得，未实测）；3 个补丁要随上游跟进；`tui` 平台说明让助手提到 `/help`。清单见“[未解决与待验证](#未解决与待验证)”。
+- **验证范围**：以上都在开发机上验证（Docker 中的 Debian 13 与 systemd、真实安装器的系统测试、DeepSeek flash 与 v4-pro）。实验 NAS 上有试用（[试用手册](../runbooks/enable-ai-assistant.md)），本页记下的 NAS 数据只有冷启动到监听 4.4 秒、多轮对话后约 400 MB、内存共 7.7 GB。还要在 NAS 上测：多个成员同时常驻的内存、数据卷开启 Btrfs simple quota 的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）、VNAS 看 WebOS 截图的整条链路。
+- **主要风险**：上游每月提交上万次、没有稳定版，会不留过渡期地删除功能；定时任务的一轮依赖 Hermes 的 gateway 与两处内部查询，每一轮多占约 400–600 MB（[决定记录](../decisions/2026-11-10-hermes-gateway-runtime.md)）；后台复盘会把共享空间里的诱导文字写进记忆（用户决定保留，成员在“记忆”页删除）；试用期间照片画面与 WebOS 截图发给云端模型，与 ADR 0016 冲突（用户决定只做可行性验证）；`GET /` 与 `host-serve.token` 可能还有令牌（读源码所得，未实测）；1 个补丁要随上游跟进；`tui` 平台说明让助手提到 `/help`。清单见“[未解决与待验证](#未解决与待验证)”。
 
 ## 上游事实
 
@@ -34,12 +34,11 @@
 
 ### 固定提交与补丁
 
-- 固定提交 `0e427d788d25`（2026-10-13，下文简写 `0e427d78`）。本页的源码路径与行号都以它为准，注明“main”的除外。
-- `run.sh build` 从固定提交导出源码，按文件名顺序对 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch) 中的补丁执行 `git apply`，记入运行环境的 `src/A-NAS-PATCHES`，构建日志列出打上的补丁。2026-10-21 带 0001–0003 重建的 `runtime.tar.gz` sha256 为 `f5567f29…`。
-- 0001：上游 PR NousResearch/hermes-agent#136632（issue #136623，2026-10-11），修后台复盘的工具白名单。main 在 2026-10-15（`450ad50`）仍有缺陷；2026-10-16 查看时 PR 仍开着（提交 `6e17391`）。它不需改动就能打在固定提交上，A-NAS 原样带上，连同上游的测试；上游合入后删掉。
-- [0002](../../ai/assistant-spike/hermes-patches/0002-browser-controller-session-lane.patch)：浏览器控制器的两处缺口，固定提交与 main `c5a3c0f8` 都有。
-- [0003](../../ai/assistant-spike/hermes-patches/0003-browser-vision-through-the-controller.patch)：`browser_vision` 经控制器向窗口要截图（2026-10-21）。
-- 升级 Hermes 时逐个对照新的上游重查三个补丁；新增的工具集或工具会让工具集核对失败。
+- 固定提交 `8fd9f70600f143b2d8e294f3848e0874377c206d`（2026-11-10 的 main，下文简写 `8fd9f706`），2026-11-11 从 `0e427d788d25`（2026-10-13，下文简写 `0e427d78`）前进而来。本页 2026-11-10 之前写下的源码路径与行号以 `0e427d78` 为准，注明“main”或其他提交的除外。带补丁 0001 的 `runtime.tar.gz` 为 139,306,833 字节，sha256 `ebdfff18…`。
+- `run.sh build` 从固定提交导出源码，按文件名顺序对 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch) 中的补丁执行 `git apply`，记入运行环境的 `src/A-NAS-PATCHES`，构建日志列出打上的补丁。2026-11-10 在 `0e427d78` 上只带 0001 重建的 `runtime.tar.gz` 为 132,370,270 字节，sha256 `8593bcc1…`（2026-10-21 带 0001–0003 时为 `f5567f29…`）。
+- 0001：上游 PR NousResearch/hermes-agent#136632（issue #136623，2026-10-11），修后台复盘的工具白名单。它不需改动就能打在 `0e427d78` 上；在 `8fd9f706` 上按新提交重做，只有 `hermes_cli/plugins.py` 里 import 的位置不同。A-NAS 带上它，连同上游的测试；上游合入后删掉。2026-11-10 PR 仍开着，缺陷在当天的 main 上还在。
+- 0002（浏览器控制器的两处缺口，2026-10-20）与 0003（`browser_vision` 经控制器向窗口要截图，2026-10-21）在 2026-11-10 删除：操作桌面不再经 Hermes 的浏览器控制，上游也已经删掉了它们修的代码。
+- 升级 Hermes 的步骤见“[以后怎么升级](#以后怎么升级)”；新增的工具集或工具会让工具集核对失败。
 
 ### Hermes 自带的界面（2026-10-14 查阅）
 
@@ -64,7 +63,7 @@
 
 ## 运行环境与沙箱
 
-复现环境：开发机 WSL2（内核 6.18、14 核）中的 Docker，Debian 13 容器 `anas-ai-dev:trixie` 构建运行环境，以 systemd 为 PID 1 的 `anas-systemd:trixie` 运行沙箱；脚本在 [`ai/assistant-spike`](../../ai/assistant-spike/run.sh)，按其中的顺序可以复现，不访问实验 NAS。模型多用按脚本回答的 OpenAI 兼容假模型（记录 Hermes 提供的工具，按指令发出工具调用）；真实模型经沙箱外的 [`gateway.py`](../../ai/assistant-spike/gateway.py) 转发到 DeepSeek，网关持有密钥，沙箱读不到。
+复现环境：开发机 WSL2（内核 6.18、14 核）中的 Docker，Debian 13 容器 `anas-ai-dev:trixie` 构建运行环境，以 systemd 为 PID 1 的 `anas-systemd:trixie` 运行沙箱；脚本在 [`ai/assistant-spike`](../../ai/assistant-spike/run.sh)，按其中的顺序可以复现，不访问实验 NAS。模型多用按脚本回答的 OpenAI 兼容假模型（记录 Hermes 提供的工具，按指令发出工具调用）；真实模型经沙箱外的 [`gateway.py`](../../ai/assistant/gateway.py) 转发到 DeepSeek，网关持有密钥，沙箱读不到。
 
 ### 运行环境
 
@@ -77,11 +76,11 @@
 
 ### 沙箱单元
 
-[`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)：
+[`anas-assistant@.service`](../../deploy/systemd/system/anas-assistant@.service)：
 
 - 成员的 UID 与 `a-nas-users` 组，能力为 0；ptrace、`setuid(0)` 与创建用户命名空间被拒绝。不设 `HERMES_DESKTOP`。
 - `PrivateNetwork`：没有外网与名字解析，连不到 Docker 主机；实例内的 `socat` 把 `127.0.0.1:18001` 转到绑定进来的网关套接字。
-- `PrivatePIDs`：只看到自己的进程。Hermes 做 1 号进程时提示不能回收孤儿进程，所以 `tini` 为 1 号进程，由 [`assistant-start.sh`](../../ai/assistant-spike/assistant-start.sh) 经 `serve_nondumpable.py` 启动 `hermes serve`（端口 9119）。命令行里因此没有 `hermes serve`，进入沙箱要用单元的 `MainPID`（`tini`）。systemd 提示 “Supervising process ... which is not our child”，但停止、闲置退出与崩溃都被正确识别。
+- `PrivatePIDs`：只看到自己的进程。Hermes 做 1 号进程时提示不能回收孤儿进程，所以 `tini` 为 1 号进程，由 [`assistant-start.sh`](../../ai/assistant/assistant-start.sh) 经 `serve_nondumpable.py` 启动 `hermes serve`（端口 9119）。命令行里因此没有 `hermes serve`，进入沙箱要用单元的 `MainPID`（`tini`）。systemd 提示 “Supervising process ... which is not our child”，但停止、闲置退出与崩溃都被正确识别。
 - 套接字激活：`anas-assistant-api@<账号>.socket` 监听 `/run/a-nas-assistant/<账号>.sock`（root `0600`，`RemoveOnStop=yes`，只有文件代理连接），触发的 `systemd-socket-proxyd` 以 `JoinsNamespaceOf=` 进入实例的网络命名空间，纯 TCP 转发到 `127.0.0.1:9119`，WebSocket 正常。
 - `--exit-idle-time=45s` 加 `StopWhenUnneeded=yes`：没有连接约 45 秒后实例停止，单元结果为 success；`kill -9` 主进程后约 1 秒进入 `failed`。`hermes serve` 收到 SIGTERM 时先把记录写进 `state.db`，再以状态 143 退出，所以设 `SuccessExitStatus=143`。
 - 挂载：本人个人空间、本人回收站、共享空间与他人的 Agent空间只读；`/srv` 为空；只有助手目录可写，`/etc/hermes` 与运行环境不可写。两处 `.a-nas-trash` 各挂一个空 tmpfs，只绑定本人的文件夹（原因见“[文件任务](#文件任务)”第 4 项）。另绑定相册服务的助手套接字与执行方的 `/run/a-nas/assistant-changes.sock`。
@@ -103,7 +102,7 @@
 
 managed scope（`/etc/hermes`，root 所有，沙箱中只读）优先于成员的配置：成员可写的 `~/.hermes/config.yaml` 启用终端、改模型地址、关闭审批后重启，工具与模型地址不变（2026-10-14）；2026-10-15 在 `serve` 上换成敌意配置（启用 `terminal`、`web`、`code_execution`、`vision`、`clarify`，清空关闭项，`coding_context: focus`，关闭审批，改模型地址）并把工作区做成 git 仓库，模型看到的仍只有允许的工具，请求仍发往 managed 的地址。Hermes 也拒绝 Agent 用文件工具写自己的配置，保存配置时去掉 managed 的键。
 
-[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)：
+[`managed-config.yaml`](../../ai/assistant/managed-config.yaml)：
 
 | 方面 | 键与取值 | 说明 |
 |---|---|---|
@@ -125,7 +124,7 @@ Hermes 只从成员自己的 `config.yaml` 读的几项，由 root 为每个成�
 - `browser.backend: "off"`（2026-10-20）：否则默认的 Browser Use CLI 模式带出 `browser_vault` 等工具。
 - `dashboard.basic_auth`（2026-10-20）：账号名与实例密钥的 scrypt 散列。
 
-系统技能经 `skills.external_dirs` 在每个对话中自动加载，root 所有、只读：[`anas-files`](../../ai/assistant-spike/skills/anas-files/SKILL.md)（目录、暂存与“提交更改”，按工具结果告诉用户，窗口里没有斜杠命令）、[`anas-member`](../../ai/assistant-spike/member-skill.md)（按成员生成：名字、发布位置与回收站；Hermes 技能只支持 `${HERMES_SKILL_DIR}`、`${HERMES_SESSION_ID}` 两个模板变量）、[`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md) 与 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)（2026-10-20）。
+系统技能经 `skills.external_dirs` 在每个对话中自动加载，root 所有、只读：[`anas-files`](../../ai/assistant/skills/anas-files/SKILL.md)（目录、暂存与“提交更改”，按工具结果告诉用户，窗口里没有斜杠命令）、[`anas-member`](../../ai/assistant/member-skill.md)（按成员生成：名字、发布位置与回收站；Hermes 技能只支持 `${HERMES_SKILL_DIR}`、`${HERMES_SESSION_ID}` 两个模板变量）、[`anas-scheduled-tasks`](../../ai/assistant/skills/anas-scheduled-tasks/SKILL.md) 与 [`anas-desktop`](../../ai/assistant/skills/anas-desktop/SKILL.md)（2026-10-20）。
 
 ## 真实安装器布局上的沙箱
 
@@ -317,7 +316,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `session.close` | 删除前关闭进程内的对话 | `session_id` | `D/app/session/hooks/use-session-actions/index.ts:754-757, 3212-3214` |
 | `approval.pending`、`approval.received` | 取回待审批、卡片已显示；产品服务自己回答，按 `request_id` 找回自己生成的卡片 | `session_id`；`request_id` | `D/store/prompts.ts:283`、`:256` |
 | `approval.respond` | 浏览器不直接调用：产品服务核对成员的点击后代为调用 | `session_id`、`request_id`（必填）、`choice`：“提交更改”卡片只有 `once`、`deny`，命令卡片另有 `session`（2026-10-16 起）；不带 `all` | Desktop 只对经 `approval.pending` 取回的审批用它（`D/store/prompts.ts:363-407`） |
-| `browser.controller.register`、`browser.controller.result`（2026-10-20 起） | 窗口注册为这段对话的浏览器，回答浏览器命令 | 只接受 `vnas-window` 控制器、`webos` 浏览器名与窗口实现的能力；一条结果至多 5 MiB（2026-10-21 起，原为 64 KiB） | 见“[让 VNAS 操作 WebOS](#让-vnas-操作-webos)” |
+| `desktop.attach`、`desktop.result`（2026-11-10 起，取代 2026-10-20 起转发给 Hermes 的 `browser.controller.register` 与 `browser.controller.result`） | 窗口登记为这段对话的浏览器，回答操作桌面的命令；产品服务自己回答，不转给 Hermes | `desktop.attach` 只接受 `session_id`，且是这个窗口打开过的对话；`desktop.result` 与 `companion.result` 同形，一条结果至多 5 MiB | A-NAS 自有，见“[升级到 2026-11-10 的上游](#2026-11-10-升级到上游-main-的尝试)” |
 | `companion.result`（2026-11-09 起） | 窗口回答产品服务转来的伙伴命令；产品服务自己回答，不转给 Hermes | `session_id`、`command_id`（32 位十六进制）、`ok`，以及 `result` 或 `error`（各为至多 4 KiB 的对象）；只接受命令发往的那条连接、仍未结算的命令，每条只收一次 | A-NAS 自有，见下文“产品服务的转发” |
 
 **服务端请求与应答帧**
@@ -342,7 +341,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `sessions.changed`、`session.reclaimed` | 刷新列表；后端收回了运行时会话，下次重新 `session.resume` |
 | `approval.cancelled`、`request.cancel` | 由产品服务处理（只认登记过的 id），窗口收到的是卡片的更新 |
 | `review.summary`（2026-10-16 起） | 后台复盘改了记忆或技能时的说明 |
-| `browser.controller.command`（2026-10-20 起） | 浏览器命令，只交给注册它的窗口，不转发给同一对话的其他窗口 |
+| `anas.desktop`、`anas.desktop.cancel`（2026-11-10 起，产品服务自己发；取代 Hermes 的 `browser.controller.command` 与 `browser.controller.cancel`） | 操作桌面的命令 `{command_id, action, args}` 与“不再等这条命令”，只交给这段对话的浏览器、也是发出本回合提示的那个窗口，窗口以 `desktop.result` 回答 |
 | `anas.companion`（2026-11-09 起，产品服务自己发） | 伙伴命令 `{command_id, action, args}`，只交给这段对话的浏览器、也是发出本回合提示的那个窗口，窗口以 `companion.result` 回答 |
 
 **REST**：聊天层（`D/lib/chat-messages`）解析的是 REST 的消息行（`display_content`、`display_metadata`、工具标签），所以列表、历史、改名与删除走 REST。产品服务带上实例凭据，不转发浏览器的任何头；每次请求一条经闸门的连接。
@@ -422,7 +421,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 产品服务的转发
 
-[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。伙伴工具（#412）是单独的 MCP 服务器 `companion`（[`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)），托管配置设为 `trust: full`，调用不经审批；它经伙伴套接字（`anas-companion-assistant.socket`，定时任务的沙箱里没有）调产品服务，产品服务按对端 UID 认出成员，凭 `tool.start` 把调用配对到对话，以 `anas.companion` 事件转给该对话的浏览器窗口（[`companion.go`](../../internal/assistantapi/companion.go)）；配对不上、没有窗口时如实回答“没有在用的桌面”。
+[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。伙伴工具（#412）是单独的 MCP 服务器 `companion`（[`anas_companion_mcp.py`](../../ai/assistant/anas_companion_mcp.py)），托管配置设为 `trust: full`，调用不经审批；它经伙伴套接字（`anas-companion-assistant.socket`，定时任务的沙箱里没有）调产品服务，产品服务按对端 UID 认出成员，凭 `tool.start` 把调用配对到对话，以 `anas.companion` 事件转给该对话的浏览器窗口（[`companion.go`](../../internal/assistantapi/companion.go)）；配对不上、没有窗口时如实回答“没有在用的桌面”。
 
 ### 窗口
 
@@ -479,15 +478,15 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 执行方
 
-spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替：产品套接字只有产品服务能连，沙箱中不可见；助手套接字按对端 UID（`SO_PEERCRED`）认账号，只能执行或查看。沙箱内的 [`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 只做转发，另有只读的 `recent_changes`；[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 扮演产品服务替成员应答。
+spike 中由 [`broker-spike`](../../ai/assistant-spike/broker-spike/main.go) 运行文件代理本身的执行方（2026-11-24 起；此前是 Python 写的替身 `change_broker.py`，跟不上文件代理的规则，例如不认 `copy`，真实模型的复制用例都要先被拒、再改用 `write` 重交）：产品套接字只有产品服务能连，沙箱中不可见，保留 spike 的 `?account=` 接口，转成文件代理自己的调用；助手套接字按对端 UID（`SO_PEERCRED`）认账号，只能执行或查看。沙箱内的 [`anas_mcp.py`](../../ai/assistant/anas_mcp.py) 只做转发，另有只读的 `recent_changes`；[`scenarios.py`](../../ai/assistant-spike/scenarios.py) 扮演产品服务替成员应答。
 
-正式实现 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 由文件代理运行（[`changes.go`](../../internal/filebroker/changes.go)）；`change_broker.py` 只留给没有文件代理的 spike 与本地原型。
+正式实现 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 由文件代理运行（[`changes.go`](../../internal/filebroker/changes.go)）；spike 与本地原型用 `broker-spike` 运行同一份代码，账号取自容器的 passwd 与 group，会话令牌就是账号名。
 
 - 产品一侧走 `file-broker.sock`：生成卡片、登记授权（批准、拒绝、作废）与查看都带成员的会话令牌，请求里没有账号参数，另一成员看不到也批准不了。
 - 助手一侧是 `/run/a-nas/assistant-changes.sock`，在成员进不去的 `/run/a-nas` 中，由单元绑定到沙箱里 MCP 服务器原来用的路径；按对端 UID 只认在用账号。接口与 spike 相同（`POST /apply`、`GET /recent`）。
 - 读写交给以成员身份运行的工作进程，用 Web 文件同一套 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)`，root 不打开成员一侧的任何路径。工作进程单独启动，用 Landlock 限制自己（[go-landlock](https://github.com/landlock-lsm/go-landlock) v0.10.1，Landlock 项目的官方库，在 cgo 的 Host Agent 中经 libpsx 作用于全部线程）：数据卷整体只读，只能写本人的个人空间（含回收站）、`Agent空间/<本人>` 与共享空间中本人的回收站；移进回收站是跨目录改名，要 refer 权限。不支持 Landlock ABI 3（Linux 6.2）时直接失败。实验 NAS 是 ABI 6，开发机与系统测试容器是 ABI 7。
 - 卡片的副本与状态在数据卷上的 `assistant/.changes/<账号>/`（root `0700`），产品服务碰不到，不能在成员确认后换掉副本。
-- 与 spike 的差异：目标是否变化看大小、inode 与修改时间（spike 算整个文件的 SHA-256；成员在 Web 上保存是换新文件，这几项都会变）；先写临时文件，再把旧版本移进回收站并改名到位；路径中以 `.a-nas-` 开头的名称（回收站、快照）不能作为目标；单个暂存文件上限 64 MiB。
+- 与当初的 spike 替身相比（替身已由 `broker-spike` 取代）：目标是否变化看大小、inode 与修改时间（替身算整个文件的 SHA-256；成员在 Web 上保存是换新文件，这几项都会变）；先写临时文件，再把旧版本移进回收站并改名到位；路径中以 `.a-nas-` 开头的名称（回收站、快照）不能作为目标；单个暂存文件上限 64 MiB。
 - 复制（2026-10-16）：经终端 `cp` 进暂存区再 `write` 受 64 MiB 上限，内容还要再复制一份。`copy` 操作直接从助手能读的地方（个人空间、共享空间、助手目录）复制文件或整个文件夹到个人空间或 `Agent空间/<本人>`：卡片写明来源、目标与大小（文件夹为总和）；执行时来源或目标与卡片不同就拒绝；以成员身份复制到目标旁的临时名，同名旧文件进回收站，再改名到位；文件夹不覆盖已有的文件夹。
 
 ### 测试结果
@@ -504,7 +503,7 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 | 新建文件夹再移动文件 | 一张卡片两项，按顺序执行 |
 | 成员配置写入 `trust: full`、`approvals.mode: off`、`timeout: 1`（[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh)） | 仍请求审批，等满 managed 的 20 秒 |
 
-执行层（[`approvals-broker.sh`](../../ai/assistant-spike/approvals-broker.sh)，不经 Hermes）15 项全部符合预期，2026-10-15 起针对文件代理（`EXECUTOR=host-agent`，另查只认会话所属的成员、副本目录 root `0700`）：卡片后改写暂存文件，执行的仍是卡片中的内容；授权只能用一次；没有授权或作废后不执行；助手套接字不能登记授权；bob 的助手用不了 alice 的授权；卡片后被改过的目标不被覆盖；`..`、指向别处的暂存链接、移动到已存在的文件在生成卡片前被拒；成员自己建的链接夹在路径中间（`系统 -> /etc`）时生成卡片被拒、什么都没读；卡片后把文件夹换成指向共享空间的链接，确认后也不会写过去。
+执行层（[`approvals-broker.sh`](../../ai/assistant-spike/approvals-broker.sh)，不经 Hermes）15 项全部符合预期，2026-10-15 起针对文件代理（`EXECUTOR=host-agent`，另查只认会话所属的成员、副本目录 root `0700`）：卡片后改写暂存文件，执行的仍是卡片中的内容；授权只能用一次；没有授权或作废后不执行；助手套接字不能登记授权；bob 的助手用不了 alice 的授权；卡片后被改过的目标不被覆盖；`..`、指向别处的暂存链接、移动到已存在的文件在生成卡片前被拒；成员自己建的链接夹在路径中间（`系统 -> /etc`）时生成卡片被拒、什么都没读；卡片后把文件夹换成指向共享空间的链接，确认后也不会写过去。2026-11-24 起 spike 也运行文件代理的执行方，这份脚本在 spike 与系统测试中测的都是产品代码，共 39 项，系统测试要求全部通过（条数从脚本中数出）。新增的 24 项由 [#517](https://github.com/zhongwater123/A-NAS/pull/517) 写成：复制 14 项，卡片显示来源与大小（文件夹标为文件夹，大小为其中文件之和），以成员身份复制，替换的旧文件进回收站；文件夹不覆盖已有的文件或文件夹，文件不覆盖文件夹；来源在可读范围外或是链接时生成卡片被拒；来源与这一批到它为止的更改（含它自己）路径重叠时被拒，例如把文件夹复制进它自己、先写进文件夹再复制它；文件夹里夹着链接、成员读不了的文件、卡片后被改过的来源，确认后都不复制，也不留下临时文件。校验 10 项，在看任何文件之前按大小与路径拒绝：超过 100 项操作被拒，100 项出一张卡片；说明与路径按文件代理的 JSON 计，恰好 64 KiB 出卡片、多 1 字节被拒，按 UTF-8 字节计（22000 个汉字超限）；回收站本身、`.a-nas-*` 文件夹中的写入与移动目标被拒；个人空间与 `Agent空间/<本人>` 之间的移动两个方向都被拒，直接执行时助手读到“先 copy 到新位置，再 delete 原来的”，个人空间之内的移动照常出卡片。
 
 发现的问题：最初的 broker 以 root 读取目标与暂存文件，`O_NOFOLLOW` 只管最后一段，卡片的“修改前”显示了 `/etc/shadow`，暂存副本也复制了它；执行虽以成员身份进行，却跟着中间的链接写进了共享空间根目录（spike 没有 Landlock）。由此改为以成员身份从数据卷逐级打开、不跟随任何链接。2026-10-14 的桩工具按解析后的路径判断，连成员自己的符号链接也删不掉；正式实现应以链接本身的路径判断，与 `openat2(RESOLVE_NO_SYMLINKS)` 一致。
 
@@ -559,7 +558,7 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 | clarify | `clarify` | 开 | 问题经问题卡片 |
 | vision、video | `vision_analyze`、`video_analyze` | 开，只用于测试 | 图片与画面发给模型（决定 7）；`video_analyze` 把整段视频作为 `video_url` 发出，DeepSeek 不收，会报错 |
 | cronjob | `cronjob_manage` | 开（2026-10-20） | 到点由 A-NAS 的唤醒服务运行；运行中不给 |
-| browser | 窗口实现的 `browser_snapshot`、`browser_click`、`browser_type`、`browser_press`、`browser_scroll`，与 `browser_vision`（2026-10-21） | 开（2026-10-20），只在窗口注册为控制器的会话中出现 | 操作成员浏览器里的 WebOS；没有 `browser_navigate` 与 `browser_back` |
+| browser | 2026-10-20 至 11-10：窗口实现的 `browser_snapshot`、`browser_click`、`browser_type`、`browser_press`、`browser_scroll`，与 `browser_vision`；上游 2026-10-23 之后只剩 `browser_exec`、`browser_cdp`、`browser_dialog`、`browser_vault` | 关（2026-11-10） | 上游删除了浏览器控制；剩下的经 DevTools 协议驱动 Hermes 自己的浏览器，沙箱里没有。操作成员的 WebOS 改用 A-NAS 的 `desktop` 服务器 |
 | web、search、x_search、tts、image_gen、video_gen、connections、a2a、browser-cdp、browser-use | 搜索、抓取、语音、生成、远程连接；Hermes 自己浏览器的 `browser_cdp`、`browser_dialog`、`browser_exec` 等 | 关 | 要网络，沙箱没有；另做（经网关按域名放行，还要搜索服务的密钥） |
 | computer_use、desktop_ui、project、onboarding、bot_room、kanban、catalog、discord、discord_admin、yuanbao、feishu_doc、feishu_drive、context_engine、coding | 桌面操作、Desktop 界面、消息平台等 | 关 | 要桌面或别处的账号；`catalog` 安装第三方插件与技能，即运行别人的代码 |
 
@@ -615,13 +614,13 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 
 ### 照片工具
 
-[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 的照片工具都标 `readOnlyHint`，经助手套接字调用相册现有的接口，不另写检索：
+[`anas_mcp.py`](../../ai/assistant/anas_mcp.py) 的照片工具都标 `readOnlyHint`，经助手套接字调用相册现有的接口，不另写检索：
 
 | 工具 | 相册接口 | 用途 |
 |---|---|---|
-| `search_photos(query, page)` | `GET /search` | 按画面内容（设备上的向量检索）、名称与本人的标签搜索；`closest` 标出最接近的一组 |
+| `search_photos(query, page)` | `GET /search`；2026-11-10 起对按名称或文字命中的照片并入 `GET /assets/{id}/text` | 按画面内容（设备上的向量检索）、名称、本人的标签与照片上的文字搜索；`closest` 标出最接近的一组 |
 | `browse_photos(month, album_id, tag, page)` | `…/timeline/months`、`…/timeline?month=`、`…/albums`、`/albums/{id}/assets`、`/tags`、`/tags/{name}/assets` | 不填参数时列出每月的照片数、相册与标签；按月、相册或标签列出 |
-| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置 |
+| `photo_details(photo_id)` | `GET /assets/{id}`；2026-10-20 起并入 `GET /assets/{id}/metadata`，2026-11-10 起并入 `GET /assets/{id}/text` | 名称、拍摄时间、图库、尺寸、标签与相册；EXIF 与拍摄位置；照片上读出的文字与字段 |
 | `similar_photos(photo_id, page)` | `GET /assets/{id}/similar` | 画面相似的照片 |
 | `look_at_photo(photo_id)`（2026-10-19） | `GET /assets/{id}/view` | 取出画面交给看图模型 |
 
@@ -630,7 +629,7 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 - 按月浏览翻完所有页（每个图库最多 2,000 张，超过时注明不完整）。相册连不上或回答的不是 JSON 时给模型一句“相册暂时连不上，请稍后再试”。AI Worker 不可用时只按名称与标签匹配，结果中注明。
 - 最初 4 个工具的定义合计约 1,860 字符，每次模型请求都带上（2026-10-15）。
 
-spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，18 张种子照片（alice 私有 13 张，含“2025 夏天 青岛”相册与“青岛”标签；bob 私有 2 张；共享 3 张）。
+spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/assistant-spike/photos-spike/main.go) 并以 `a-nas-photos` 运行：真实的 `photoservice.Run` 与助手套接字，按颜色区分画面的替身 AI Worker，20 张种子照片（alice 私有 15 张，含“2025 夏天 青岛”相册与“青岛”标签，2026-11-10 起含一张身份证的两面，替身 Worker 读出它们的文字，姓名与号码是编的；bob 私有 2 张；共享 3 张）。
 
 - [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)（2026-10-15 为 23 项，2026-10-20 为 27 项）：两个成员的助手各自只看到本人与共享的图库；拿着 bob 照片的编号也打不开；带会话令牌没有作用；缩略图与改名得到 `not_found`；沙箱里连不到相册服务的会话套接字和助手套接字的真实路径；宿主上成员自己的进程连不到真实路径，另一个成员进不了 alice 的 `/proc/<pid>/root`；对端是 root 时 503；相册服务重启后正在运行的助手照常读相册，服务停止时一次连接就把它拉起；只有 socket 单元停止时工具说“相册暂时连不上”，实例重启后恢复；本人照片的视图是 JPEG、元数据读得到，bob 的拿不到。
 - [`calls-photos.txt`](../../ai/assistant-spike/calls-photos.txt)（假模型）：照片工具都不请求审批，同一会话中的“提交更改”照常请求。
@@ -656,12 +655,29 @@ spike：`SPIKE_PHOTOS=1` 让 `run.sh sandbox` 编译 [`photos-spike`](../../ai/a
 - 做不到的（认人、看画面）与越权的都如实回答，没有编造人物或地点。
 - 模型会逐张调用 `photo_details` 找地点或人物（“室内”那一轮查了 13 张）。说明改为“只多出尺寸、标签与相册，没有地点、人物或画面内容，不要为找这些逐张查看”后：找海边照片从 12 次降到 6 次，“室内”从 16 次降到 9 次（逐张查看从 13 次降到 2 次），token 基本不变（5.5 万、5.7 万）。2026-10-20 起它带元数据，说明告诉模型拍摄位置在这里查。
 
+### 问证件上的号码（2026-11-10）
+
+起因是用户在实验 NAS 上的一次对话：相册里有一张身份证的两面，问 VNAS“我身份证号码是多少”，它翻了 11 次文件；提示“相册里面没有吗”后又用 5 次调用搜索、逐张取画面，国徽面的画面被交给云端看图模型，人像面被挡住，最后答不出号码。原因与改法见 [OCR 实施方案](../architecture/photo-ocr.md#助手的工具)。
+
+评测在 spike 里重放这段对话：种子图库加了身份证的两面（文件名不带含义，替身 Worker 读出文字），三句话在同一段对话里，deepseek-flash，改动前后各跑一次（[`scenarios-photos.txt`](../../ai/assistant-spike/scenarios-photos.txt) 末尾三行是同一组的常设用例）。“改动前”是主干 `c203b668` 加上这两张种子照片。
+
+| 请求 | 改动前 | 改动后 |
+|---|---|---|
+| 我身份证号码是多少 | 只翻文件，答不出；4 次调用，8.3 万 token，25 秒 | `search_photos("身份证")` 一次，回答里是号码的句柄，并带出国徽面的签发机关与有效期；1 次调用，4.2 万 token，12 秒 |
+| （接着）相册里面没有吗？ | 搜索、浏览、取 3 张画面（国徽面放行，人像面被挡）、2 次识图，答不出；8 次调用，9.5 万 token，18 秒 | 直接按已有结果回答两张照片各是什么；0 次调用，2.3 万 token，5 秒 |
+| （接着）身份证有效期到什么时候？ | 答不出：“相册把证件上的文字整张内容都拦住了” | 到 2040 年 1 月 1 日，出处是国徽面那张；0 次调用，2 秒 |
+
+- 改动后没有一次取画面：证件的画面没有发给云端。
+- 第一版说明下，模型在搜索后又查了一次 `photo_details`，还向成员解释“⟦身份证号·…⟧ 是占位，窗口会显示成数字”。在说明里加上“结果里带着 fields 的照片不必再查”和“不要解释句柄”后，这两样都没有再出现。表中是加上之后的结果。
+- 每种情况只跑了一次，模型的回答有随机性；数字说明量级，不是稳定的均值。
+- 替身 Worker 的照片是纯色图，改动前的识图什么也看不出；实验 NAS 上那次，云端模型从国徽面读出了签发机关与有效期。
+
 ### 接入相册服务
 
 2026-10-19 之前照片工具只在 spike 中接上，NAS 上没有 `/run/a-nas-photos-assistant`，助手一问照片就是“相册暂时连不上”。
 
-- 助手套接字由 socket 单元 [`anas-photos-assistant.socket`](../../ai/assistant-spike/anas-photos-assistant.socket) 持有（`FileDescriptorName=assistant`，`SocketMode=0666`，目录 `0700`，只有 root 能进），相册服务经套接字激活接收（[`photoservice.go`](../../internal/photoservice/photoservice.go) 用 go-systemd 的 `activation`，单元中 `Sockets=`），跨服务重启不变；服务刚启动、存储还没打开时回答 `photos_unavailable`。没有 socket 单元时服务自己创建，但那样服务重启后正在运行的实例连接被拒，要等实例重启（2026-10-15 实测）。产品的 `anas-photos.service` 因此要配这样一个 socket 单元；只有停止或重装它本身，才要重启正在运行的助手实例。spike 也分为 socket 与 service 两个单元（[`setup.sh`](../../ai/assistant-spike/setup.sh)）。
-- [`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 把需要打开的设置写成 systemd drop-in：Host Agent 的会话闸门与 `ANAS_PHOTO_ASSISTANT_LOOKUP=1`；产品服务的会话闸门；相册服务用 socket 单元交来的套接字。试用的 `install`、`update` 与系统测试都用它。用 drop-in 是因为正式部署每次都重写 `/etc/a-nas/*.env`，写在那里的闸门设置每次都要重加；`update` 删掉旧的那一行。
+- 助手套接字由 socket 单元 [`anas-photos-assistant.socket`](../../deploy/systemd/system/anas-photos-assistant.socket) 持有（`FileDescriptorName=assistant`，`SocketMode=0666`，目录 `0700`，只有 root 能进），相册服务经套接字激活接收（[`photoservice.go`](../../internal/photoservice/photoservice.go) 用 go-systemd 的 `activation`，单元中 `Sockets=`），跨服务重启不变；服务刚启动、存储还没打开时回答 `photos_unavailable`。没有 socket 单元时服务自己创建，但那样服务重启后正在运行的实例连接被拒，要等实例重启（2026-10-15 实测）。产品的 `anas-photos.service` 因此要配这样一个 socket 单元；只有停止或重装它本身，才要重启正在运行的助手实例。spike 也分为 socket 与 service 两个单元（[`setup.sh`](../../ai/assistant-spike/setup.sh)）。
+- `product-settings.sh`（已删除，见 Git 历史） 把需要打开的设置写成 systemd drop-in：Host Agent 的会话闸门与 `ANAS_PHOTO_ASSISTANT_LOOKUP=1`；产品服务的会话闸门；相册服务用 socket 单元交来的套接字。试用的 `install`、`update` 与系统测试都用它。用 drop-in 是因为正式部署每次都重写 `/etc/a-nas/*.env`，写在那里的闸门设置每次都要重加；`update` 删掉旧的那一行。
 - 坑：systemd 拒绝在服务已运行时启动交给它的套接字（“Socket service … already active, refusing”），要先停相册服务、启动套接字、再启动服务。
 - 系统测试（真实安装器与相册服务）：在 alice 的沙箱中经绑定进来的套接字列出她的私有与共享图库，搜到她上传的照片，改名被拒；`search_photos`（假模型）返回这张照片。试用预演：`install`、`update`、`remove` 与在 `c6f6993` 的旧试用上 `update`；`smoke alice photo` 从沙箱里搜到照片；`update` 后环境文件里不再有闸门那一行，`remove` 后 drop-in 与套接字都不在，相册服务照常运行。
 
@@ -687,7 +703,7 @@ Hermes 把 MCP 结果中的图片存进 `$HERMES_HOME/cache/images/`，是否把
 
 - 相册服务的 `View` 把可见照片画成最长边 1600 像素、方向摆正的 JPEG（质量 85），从像素重新编码，不带原图的元数据（包括地点）；视频没有视图（`no_view`）。路由 `GET /assets/{id}/view` 加进助手套接字白名单，原图与缩略图仍不开放。1600 是因为 Hermes 嵌入图片的上限是最长边 1568 像素（`_EMBED_MAX_DIMENSION`），各家模型也把更大的图缩到这个尺寸。
 - `look_at_photo` 的说明要求只在成员要看画面时用、一次一张，并用 `vision_analyze` 读结果中的路径；其余照片工具的说明改为“要看画面用 look_at_photo”。窗口把照片工具显示为“搜索照片”“取出照片画面”等，`vision_analyze` 显示它问模型的问题。
-- 缓存：消息网关每小时把媒体缓存清到一天以内（`gateway/run.py` 的 `_housekeeping_media_caches`），`hermes serve` 不做，看过的照片会一直占着助手目录。每周闲时整理之后由 [`media-cache.py`](../../ai/assistant-spike/media-cache.py) 用 Hermes 的 `cleanup_image_cache` 清掉一天以前的图片。
+- 缓存：消息网关每小时把媒体缓存清到一天以内（`gateway/run.py` 的 `_housekeeping_media_caches`），`hermes serve` 不做，看过的照片会一直占着助手目录。每周闲时整理之后由 [`media-cache.py`](../../ai/assistant/media-cache.py) 用 Hermes 的 `cleanup_image_cache` 清掉一天以前的图片。
 - 真实模型（DeepSeek flash）：“找海边的照片，看看画面里实际有什么”依次调用 `search_photos`、`look_at_photo`、`vision_analyze`，如实说种子照片是一整块蓝色（种子就是纯色图）；放入两张画出来的钓鱼图后，准确描述了两张（“木质栈桥伸进水面，一个人以剪影站在码头边举竿，橙色太阳低垂”；“绿色水面、远山，没有人，只有一条灰色的鱼和一条斜下来的钓线”），还看出是插画。一轮里看了 6 张，每看一张多一次识图请求。
 - 验证：Go 中视图是方向摆正、缩到 800×1600、不含 EXIF 的 JPEG，共享图库能看、他人私有的拿不到、原图仍被拒（`internal/photos/view_test.go`），套接字给出视图、缩略图与原图仍 404；`photos-socket.sh` 25 项，`curator.sh` 7 项，探针 42 项。
 
@@ -866,7 +882,7 @@ E1–E6 用 DeepSeek flash（[`review-scenarios.sh`](../../ai/assistant-spike/re
 
 **A-NAS 的做法**：
 
-- 唤醒：root 的 [`anas-assistant-cron-waker.service`](../../ai/assistant-spike/anas-assistant-cron-waker.service)（[`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)）每 30 秒读各成员的任务表（不跟随链接，限 4 MiB），有任务到期且没在跑就启动 `anas-assistant-cron@<账号>.service`。它由 `anas-assistant@.service` 生成：同一沙箱与网关通道，`ANAS_ASSISTANT_CHANNEL=cron` 让 `assistant-start.sh` 运行 `hermes cron tick`；没有实例凭据与套接字，最长 1 小时。实例在不在运行都一样，并存时由 Hermes 的文件锁协调；成员不登录时照常运行。
+- 唤醒：root 的 [`anas-assistant-cron-waker.service`](../../deploy/systemd/system/anas-assistant-cron-waker.service)（[`cron-waker.py`](../../ai/assistant/cron-waker.py)）每 30 秒读各成员的任务表（不跟随链接，限 4 MiB），有任务到期且没在跑就启动 `anas-assistant-cron@<账号>.service`。它由 `anas-assistant@.service` 生成：同一沙箱与网关通道，`ANAS_ASSISTANT_CHANNEL=cron` 让 `assistant-start.sh` 运行 `hermes cron tick`；没有实例凭据与套接字，最长 1 小时。实例在不在运行都一样，并存时由 Hermes 的文件锁协调；成员不登录时照常运行。
 - 策略：managed scope 开启 `cronjob`，`platform_toolsets.cron` 去掉 `clarify` 与 `cronjob`，写明 `approvals.cron_mode: deny`。
 - 产品服务（[`tasks.go`](../../internal/assistantapi/tasks.go)）：`/api/v1/assistant/tasks` 列出任务与运行，不转出 `hermes_home`、模型、投递目标与运行的系统提示；任务编号只接受 Hermes 的 12 位十六进制（Hermes 也按名称找任务）。立即运行等 3 秒，没跑完就答“已开始”；暂停、继续；删除时先删运行（任务不在了，运行在窗口里就没有地方显示）。不建也不改任务。会话编号的白名单加上运行的编号，运行可以像对话一样打开与继续。
 - 告知（[`tasknotices.go`](../../internal/assistantapi/tasknotices.go)）：成员登录期间每分钟查一次任务；最近一次运行比成员听说过的新，就取对话与回答开头记成账号通知 `assistant_task`。每个任务至多一条未读，新的替换旧的，删掉的任务的通知随之清掉（[`assistanttasks.go`](../../internal/accounts/assistanttasks.go)）。只回答静默标记的运行记为已读，规则与 Hermes 的 `is_autonomous_silence_response` 相同（`gateway/response_filters.py`），也不覆盖未读的上一条。离线时的运行在下次登录后告知。
@@ -882,6 +898,8 @@ E1–E6 用 DeepSeek flash（[`review-scenarios.sh`](../../ai/assistant-spike/re
 
 ## 让 VNAS 操作 WebOS
 
+2026-11-10 起，本节“Hermes 的浏览器控制”与补丁 0002、0003 记的是被取代的做法：上游在 10-23 删除了这套协议，操作桌面改经 A-NAS 自己的 `desktop` 服务器（见“[升级到 2026-11-10 的上游](#2026-11-10-升级到上游-main-的尝试)”）。窗口里读页面、点击、输入、确认写入与画页面的做法没有变，下面“策略与窗口”之后的内容仍然成立，其中的“注册”现在是向产品服务登记。
+
 2026-10-20：用户问 Hermes 的 computer use 能不能操作 WebOS，后来说成员让 VNAS 操作 WebOS 就是允许它操作，目标是不重复造轮子、规范开发；只拦破坏性的一步。2026-10-21 按 [#160](https://github.com/zhongwater123/A-NAS/issues/160) 改为只问破坏与泄露类的写入（见“[多窗口与写入确认](#多窗口与写入确认)”）。
 
 ### Hermes 的浏览器控制
@@ -895,7 +913,7 @@ E1–E6 用 DeepSeek flash（[`review-scenarios.sh`](../../ai/assistant-spike/re
 ### 策略与窗口
 
 - managed scope 开启 `browser` 与 `browser.extension_control.enabled`；成员的 `config.yaml` 写 `browser.backend: "off"`；`browser_cdp`、`browser_dialog`、`browser_exec` 由仍关着的 `browser-cdp`、`browser-use` 去掉。窗口只声明它实现的能力，没有 `browser_navigate` 与 `browser_back`。
-- 系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)：这些工具操作的是成员的桌面、怎么看与点、改文件仍优先“提交更改”、页面文字是数据、在桌面上操作用的是成员自己的权限。
+- 系统技能 [`anas-desktop`](../../ai/assistant/skills/anas-desktop/SKILL.md)：这些工具操作的是成员的桌面、怎么看与点、改文件仍优先“提交更改”、页面文字是数据、在桌面上操作用的是成员自己的权限。
 - 网关只放行 `vnas-window` 控制器、`webos` 浏览器名与窗口的能力；命令只交给注册它的窗口。窗口（[`webosControl.ts`](../../web/src/assistant/webosControl.ts)）每次发出提示前都注册（新对话的第一轮工具在提交时组装）；产品服务记下每段对话的浏览器连接，回合进行中拒绝别的连接注册，连接离开时只注销它仍是浏览器的对话，之后的回合没有浏览器工具，而不是每条命令都等 30 秒。
 - 快照用 [`dom-accessibility-api`](https://github.com/eps1lon/dom-accessibility-api)（Testing Library 用的角色与可访问名称计算，0.7.1，无依赖）把页面读成窗口、标题与带 `[ref=eN]` 的控件，不含 VNAS 窗口与密码。点击依次派发指针与鼠标事件再 `click()`；输入用原型上的 value setter 与 input/change 事件（React 才收得到）；按键不落到 VNAS 的输入框；被点的控件闪一下黑框。
 
@@ -932,13 +950,171 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 ### 验证
 
 - Go：网关只放行窗口这一种控制器，命令只到注册的窗口，窗口离开即注销（`TestTheWindowIsTheBrowserOfItsOwnSessionOnly`）；4 MiB 的截图结果送到实例、更大的被拒（`TestTheWindowAnswersWithAScreenshotOfItsPage`）。Web（`webosControl.test.ts`，2026-10-20 为 8 项）：快照、按编号点击与输入、确认、按键不落到 VNAS；截图不含 VNAS、是 PNG、标注的编号就是点击用的编号、被盖住的控件不标。
-- spike（带 0002 重建，2026-10-20）：探针 39 项；[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh) 8 项（旧令牌被拒、没有窗口的会话没有浏览器工具、别的连接注册不了、模型只拿到窗口的五种工具、命令往返且被包成不可信内容）；`cron.sh` 8 项；`serve-terminal.sh` 14 项。
+- spike（带 0002 重建，2026-10-20）：探针 39 项；`browser-control.sh`（2026-11-10 删除）8 项（旧令牌被拒、没有窗口的会话没有浏览器工具、别的连接注册不了、模型只拿到窗口的五种工具、命令往返且被包成不可信内容）；`cron.sh` 8 项；`serve-terminal.sh` 14 项。
 - 0003（2026-10-21）：补丁自带的测试 8 项（去掉补丁时都失败），Hermes 自己的浏览器路由测试照常通过；带 0003 重建后探针 39 项、`browser-control.sh` 11 项通过：`browser_vision` 向窗口要截图，图片交给看图模型，分析回到这一轮。
 - 真实浏览器（本地假数据 WebOS，1440×900，开着文件管理）：一次截图约 2 秒，PNG 的 base64 约 1.5 MB；页面刚载入后的第一次约 16 秒（要内联壁纸与字体）。真实模型看 WebOS 截图、经产品服务与会话闸门的整条链路，要在实验 NAS 上验收。
 
+## 2026-11-10 升级到上游 main 的尝试
+
+用户想参照 OpenAI 的 Dot 把 VNAS 做成常驻的个人智能体，问 Hermes 支持到什么程度，随后决定前进固定提交。用户的理由：升级要是能在长期减轻开发负担就值得做；同步上游能迫使 A-NAS 与 Hermes 解耦，并跟上它的进度。
+
+结果：操作桌面已经与 Hermes 解耦（下面“操作桌面改经 A-NAS 的 MCP 服务器”）。2026-11-10 固定提交没有前进：在上游当天的 main `8fd9f706` 上，对话、确认卡片、操作桌面、照片、记忆、后台复盘与登录都通过，定时任务不再运行。怎么越过去用户在 2026-11-11 定了（[决定记录](../decisions/2026-11-10-hermes-gateway-runtime.md)），做法先在沙箱里验证（下面“2026-11-11 在沙箱里验证 gateway”），当天实现，固定提交前进到 `8fd9f706`（“2026-11-11 实现”）；验证时还发现对话的改名与删除在新提交上也要改，一起改了。
+
+### 上游四周里变了什么
+
+对着 `0e427d78`（2026-10-13）与 `8fd9f706`（2026-11-10）的源码与文档比较（`git diff`，文档在 `website/docs`）：
+
+- 规模：13,109 次提交；去掉测试、文档、Desktop 与终端界面后仍有 4,151 个文件变化。`pyproject.toml` 的版本仍是 `0.0.0`，最新的标签 `v2026.9.24` 比 `0e427d78` 还早，所以没有可以改用的稳定版，只能继续按提交固定。
+- 合入了统一的 gateway 运行时（2026-10-16 的 main 上已经有，即 `0e427d78` 之后三天内）：代理任务只在常驻的 gateway 进程里执行。`hermes cron tick` 成了“无头”的一轮，没有就绪的 gateway 就跳过代理任务，只有不经代理的脚本任务照跑（`cron/scheduler_gateway_gate.py`；上游文档的 cron 页写明 tick 需要 gateway 在运行，并且从不启动它）。发现 gateway 时要求 Hermes 主目录归当前用户所有（`hermes_cli/gateway_runtime_discovery.py` 的 `_private_node`）；A-NAS 的主目录归 root、用 ACL 授给成员，实测任务记下 `Skipped: the gateway is inaccessible (unsafe_control_path)`。
+- 删除了浏览器扩展控制（2026-10-23，提交 `b87977ca`）：`browser.controller.*` 接口、`browser.extension_control` 配置和 `browser_snapshot`、`browser_click`、`browser_type`、`browser_press`、`browser_scroll`、`browser_vision` 这些工具。上游文档写明协议已移除，浏览器只剩 `browser_exec`：模型写 Python，经 Chrome DevTools 协议（CDP）驱动 Hermes 自己启动的 Chromium、云端浏览器，或一个带调试端口启动的浏览器。VNAS 操作 WebOS 建在被删的协议上（2026-10-20），距上游删除只有三天。
+- `yuanbao` 工具集移出核心，成了插件；工具集没有新增。
+- 文档里新增的能力：远程配置（由配置服务下发、可锁定键）、插件可用的公开接口清单、按任务选择模型或 profile 的子任务路由插件、跨 profile 的群聊房间、定时任务的每任务时区与停止正在跑的一次、重启后恢复未完成的运行、群聊里限定谁能批准（`approvals.approvers`）、MCP 服务器声明花费上限。
+- 不是升级才有的：`/goal`、心跳、Bot Screen（`tools/bot_desktop`）、看板与 Bot 模式在 `0e427d78` 里已经有，A-NAS 一直关着。
+- 没有变、A-NAS 的做法要留着的：`hermes serve` 仍只在 `HERMES_DESKTOP=1` 时调度定时任务；`cronjob` 仍回“gateway 没有运行”的警告；后台复盘的工具白名单缺陷还在（`hermes_cli/plugins.py` 仍用 `threading.local()`），上游 PR #136632 仍开着、还停在 10-11 的提交，已经打不上 main。
+- A-NAS 用到的内部名字都还在：`hermes_cli.main.main`、`plugins.dashboard_auth.basic.hash_password`、`/auth/password-login`、`hermes cron tick`、`hermes curator run`、`cleanup_image_cache`，工具集核对用的 `toolsets`、`model_tools._select_tool_names`、`discover_builtin_tools` 与 `discover_plugins`；白名单里的方法与事件除 `browser.controller.*` 外都还在。
+
+### 为什么不用 CDP
+
+- 连不上：浏览器必须带调试端口启动，Hermes 还要连得到那个端口。成员用的是自己手机、电脑与电视上的浏览器，沙箱也没有网络。
+- 权限太大：`browser_exec` 的辅助函数里有在页面中执行任意 JavaScript 的 `js()` 和原始的 `cdp()`。A-NAS 的写入确认设在页面里（`apiFetch` 与 `uploadForm`），前提是模型只能用几种固定的命令操作页面、不能在页面里运行代码。
+- 它适合另一种功能：助手在 NAS 上用自己的浏览器（Dot 的“自己的电脑”）。那样成员在自己的屏幕上看不到操作，“帮我打开相册”也不再是打开成员面前的相册。
+
+### 操作桌面改经 A-NAS 的 MCP 服务器
+
+窗口里的做法不变（[`webosControl.ts`](../../web/src/assistant/webosControl.ts)：读控件、按编号操作、写入确认、画页面），换的只是命令怎么到窗口，走虚拟伙伴已经在用的那条路：
+
+- 沙箱里多一个 stdio MCP 服务器 [`anas_desktop_mcp.py`](../../ai/assistant/anas_desktop_mcp.py)，工具是 `snapshot`、`click`、`type`、`press`、`scroll` 与 `look`，模型看到的名字是 `mcp__desktop__*`。它与伙伴的服务器共用 [`anas_window_call.py`](../../ai/assistant/anas_window_call.py)，经同一个套接字把调用交给产品服务（路由 `/desktop/call`）。
+- 产品服务把伙伴的通道改成能承载两类窗口工具（[`companion.go`](../../internal/assistantapi/companion.go) 的 `windowTools`，桌面一类在 [`desktop.go`](../../internal/assistantapi/desktop.go)）。配对、只发给发出本回合提示的窗口、回合结束即取消都沿用伙伴的；桌面一类自己的是：等窗口 30 秒（伙伴 15 秒），一条结果至多 5 MiB（伙伴 4 KiB），每分钟 120 步（伙伴 20 条命令，分开计），以及命令不再等待时告诉窗口（`anas.desktop.cancel`），好让确认卡片收起。这条消息总在命令之后到窗口：命令还在发送途中就结束的，等它发完再告诉；还没发出就结束的，命令和消息都不发。否则窗口会先收到取消，再去执行一条没人等的命令。`press` 的键名写 `Space`，也接受空格字符本身。
+- 窗口不再向 Hermes 注册为浏览器，而是向产品服务登记（`desktop.attach`），只能登记它打开过的对话；“回合进行中别的窗口不能接手”由产品服务自己判断。Hermes 这一侧不再知道有窗口。
+- 看画面：`look` 把窗口画的 PNG 作为图片返回，Hermes 把它存成文件并在结果里给出 `MEDIA:` 路径（`agent.image_input_mode: text`），助手再调用 `vision_analyze`。与 `look_at_photo` 是同一条路，取代补丁 0003。
+- `desktop` 服务器是 `trust: full`，与 `companion` 一样每个键都写出；`platform_toolsets` 的 `cli` 与 `api_server` 有它，`cron` 没有。Hermes 的 `browser` 工具集列入关闭清单，`browser.extension_control` 与成员配置里的 `browser.backend` 去掉。
+- 与以前的差别：操作桌面的工具不再只在有窗口的对话里出现。没有窗口时调用得到“没有在用的桌面”，系统技能 [`anas-desktop`](../../ai/assistant/skills/anas-desktop/SKILL.md) 告诉模型怎么对成员说。工具结果仍被 Hermes 包成“不可信的内容”。
+- 代价是内存：每个 MCP 服务器是一个 Python 进程，常驻约 80 MB。开发机上脚本化模型两轮对话之后，实例的 cgroup 内存 484 MB、峰值 517 MB，其中 `serve` 293 MB，`anas`、`companion`、`desktop` 三个服务器 92、83、83 MB。把伙伴与桌面合进一个进程能省下一个，但工具名随服务器名而定，要改伙伴已经上线的工具名，这次没有做。
+
+验证（开发机，固定提交 `0e427d78` 带补丁 0001 重建的运行环境，132,370,270 字节，sha256 `8593bcc1…`）：
+
+- Go：`internal/assistantapi` 的测试通过，操作桌面的在 [`desktop_test.go`](../../internal/assistantapi/desktop_test.go)（只到登记的窗口、回合中不能换窗口、画面与超限的结果、没做的一步带原因、不再等待时告诉窗口、没有窗口、参数与限额）。
+- Python：两个 MCP 服务器的单元测试 22 项，其中要 MCP SDK 的 3 项在系统测试里用运行环境自带的 SDK 运行。
+- Web：类型检查通过，助手与伙伴的 228 个测试通过。
+- spike 沙箱（脚本化模型）：探针 39 项通过；[`desktop-control.sh`](../../ai/assistant-spike/desktop-control.sh) 5 项通过：旧令牌被拒，模型拿到 `desktop` 的六个工具而没有 Hermes 自己的浏览器工具，一步不经 Hermes 的审批就开始，没有窗口时回答“没有在用的桌面”。
+- 系统测试（真实安装器、产品服务、会话闸门与沙箱）：570 项全部通过。模型的 `snapshot`、`click` 与 `look` 经沙箱里的 `desktop` 服务器与产品服务到达登记过的窗口，窗口读到的页面回到这一轮；`look` 的画面（2.8 MiB 的 base64）作为图片文件回来。
+- 没有验证的：真实浏览器里的 VNAS 窗口与真实模型走完整条链路。窗口这一侧只有单元测试，系统测试里的窗口是脚本。部署后在实验 NAS 上复测“帮我打开相册”和看桌面画面。
+
+### 在 `8fd9f706` 上试到哪里
+
+升级要改的四处都做了一遍并验证过，没有合入：`run.sh` 的提交；补丁 0001 按新提交重做，只有 `hermes_cli/plugins.py` 里 import 的位置不同；managed scope 的关闭清单去掉已不存在的 `yuanbao`；聊天层重新复制（23 个文件，增 2,838 行、删 428 行），`hydration.ts` 多引用了 Desktop 组件 `directive-text` 里的函数 `formatRefValue`，要为它加第五个替身。运行环境压缩包 139,304,188 字节，sha256 `3b8253c7…`，CPython 仍是 3.14.8。
+
+- 沙箱（脚本化模型）：探针 39 项通过，含工具集核对；`desktop-control.sh` 5 项、`serve-terminal.sh` 14 项、`approvals-managed.sh` 3 项、`review-whitelist.sh` 15 项、`curator.sh` 7 项通过。上游文档说本地会话里成员打字发起的回合不再对 `execute_code` 整段审批，`serve` 下实测危险命令与代码仍然等批准。`serve-surface.sh`、`serve-managed.sh`、`memory-skills.sh` 等只打印结果的脚本跑完了，没有逐条对照旧提交的输出。
+- Web：类型检查通过，助手与伙伴的 228 个测试通过。
+- 系统测试（真实安装器、产品服务、会话闸门与沙箱）：567 项通过，3 项失败，都是定时任务：到点没有运行，任务列表里没有运行结果，登录后没有通知。唤醒服务照常每 30 秒启动定时单元，`hermes cron tick` 约 2 秒后正常退出，任务被跳过。同一套代码在 `0e427d78` 上全部通过。
+- 内存与冷启动没有实质变化：同样两轮之后 486 MB、峰值 519 MB，`serve` 321 MB；冷启动加两轮都是 10.9 秒。
+
+### 2026-11-11 在沙箱里验证 gateway
+
+用户倾向“到点时在定时单元里运行 gateway”，并提出照上游的要求让 Hermes 主目录归成员本人所有。在 spike 的沙箱里用 `8fd9f706` 的运行环境与脚本化模型验证，任务是“每 1 分钟在助手目录里写一个文件”，定时单元由手工启动（沙箱里没有 Host Agent，唤醒服务跑不了）。
+
+上游检查的原文在 `hermes_cli/gateway_runtime_discovery.py`（`_private_node`、`home_mode_unsafe`）：主目录的属主要是运行 gateway 的用户；别的用户不可写；组位可写并且带访问 ACL 时判为不安全，因为 ACL 的掩码显示成组位。A-NAS 的 `root:root` 加 `user:<账号>:rwx` 两条都不满足，所以只改属主不够。
+
+| 主目录 `hermes/` | 定时单元里运行 | 结果 |
+| --- | --- | --- |
+| `root:root`，带 ACL（现在的布局） | `hermes cron tick` | 跳过：`the gateway is inaccessible (unsafe_control_path)` |
+| `<账号>:<账号>`、0700、不带 ACL | `hermes cron tick` | 跳过：`the gateway is not running` |
+| `<账号>:<账号>`、0700、不带 ACL | gateway，再 `hermes cron tick` | 任务运行，文件由成员写出，记为 `ok` |
+
+- 启动与交接：gateway（`hermes gateway run --quiet`）在没有网络的沙箱里约 8 秒就绪。`hermes cron tick` 把到期的任务交给它，约 2 秒后返回，不等任务结束。任务在单独的工作进程里执行；沙箱里没有用户级 systemd，上游按文档降级为不带 cgroup 隔离的子进程。gateway 自己的调度器在就绪后约 5 秒也会触发到期的任务，不运行 `tick` 也行。
+- 收尾：任务还在执行时停掉 gateway，这次运行被记为出错（worker exited … without writing a durable terminal state），下一轮才对账为完成。等到 `hermes cron list` 里没有 `Execution: running` 再运行 `hermes gateway stop`，gateway 以 0 退出，任务记为 `ok`。上游的 `--idle-exit` 用不上：还有可运行的定时任务就不算空闲，在 systemd 下也不启用。
+- gateway 开了什么：回环地址上的一个随机端口（会话接口，在单元私有的网络命名空间里，外面连不到），主目录里的 `gateway.sock` 与 `state/gateway.loop-tick.*.sock`；停下后主目录里留着 `gateway.lock`、`gateway_state.json` 与 `gateway-starts.log`。沙箱里同一个 UID 的进程都连得到 `gateway.sock`。
+- 内存：定时单元在 gateway 就绪时约 410 MB（gateway 227 MB，它启动的三个 MCP 服务器各约 80 MB，其中 `companion` 与 `desktop` 在没有窗口的定时任务里用不上），一轮的峰值 460–610 MB。`0e427d78` 上定时单元自己执行任务时的内存这次没有量。
+- 成员在线时，实例与定时单元各有自己的网络命名空间：对话、读历史、列任务都正常，任务也跑完；对话的改名与删除返回 503 `owner_unreachable`。实例在主目录里发现 `gateway.sock`，把会话的写操作转给这个拥有者，而 gateway 的会话接口在另一个命名空间里。让定时单元与实例互相 `JoinsNamespaceOf`（[API 桥](../../deploy/systemd/system/anas-assistant-api@.service)已经这样加入实例的命名空间）之后，“成员先在线、任务后到期”和“任务先运行、成员后登录”两种顺序下，改名、删除、对话与任务都成功。共用命名空间后两个单元的模型桥（socat 监听 18001）会抢端口；试验里两边都在端口空出时重新监听，正式实现要定下由谁持有这座桥。
+- 主目录归成员后多出的能力：在沙箱里对它 `chmod 0777`、`setfacl -m u:bob:rwx` 成功（以前是 Operation not permitted），`chown` 仍然失败。上一层 `assistant/<账号>` 归 root、成员只有穿过的权限，所以 bob 列目录、读 `state.db`、往里写文件仍被拒绝。只读绑定的 `config.yaml`、`.env`、`SOUL.md`、`active_profile`、`hooks/`、`plugins/` 与 `profiles/`，改名、覆盖、删除得到 `Device or resource busy`，往里写得到 `Read-only file system`。
+- 归成员的布局上，探针 39 项通过；`desktop-control.sh`、`serve-terminal.sh` 14 项、`review-whitelist.sh` 15 项、`curator.sh` 7 项通过；`memory-skills.sh` 与 `serve-managed.sh` 跑完。
+- 与 gateway 无关的发现：在 `8fd9f706` 上，对话的改名（`PATCH /api/sessions/<id>`）与删除（`DELETE`）要带写入凭据 `request_id` 与 `expected_revision`，删除还要 `expected_generation`；后两个的值在会话列表每行的 `runtime_revision`、`runtime_generation` 里。产品服务只发 `title`，得到 409 `client_upgrade_required`，带上凭据后成功，主目录归谁都一样。系统测试没有覆盖对话的改名与删除，所以 2026-11-10 的失败项里没有它。
+- 没有验证的：真实安装器的布局上 Host Agent 的对账会不会把属主改回 root；唤醒服务与系统测试；运行很久的任务；实例在任务中途停下时模型桥的交接。
+
+### 2026-11-11 实现
+
+用户看过上面的结果后说开始实现。固定提交前进到 `8fd9f706`，连同 2026-11-10 已经做好的四处（`run.sh` 的提交、补丁 0001、managed scope、聊天层）。
+
+- 主目录：[`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh) 的 `member_home` 把 `assistant/<账号>/hermes` 建成或改成成员所有、0700、不带 ACL，只动这一层目录。它的上一层归 root、成员只能穿过，名字换不成链接，所以按路径改它是安全的。Host Agent 还不管理助手目录，没有对账会把它改回去。已装的试用由 `nas-trial.sh update` 改属主。
+- 一轮定时任务：[`cron_round.py`](../../ai/assistant/cron_round.py) 启动 gateway，等它就绪（至多 180 秒），运行 `hermes cron tick`，等到期的任务被接手（有任务在执行，或任务表里它的下次与上次运行时间变了，至多 90 秒），再等到连续 5 秒没有任务在执行，然后 `hermes gateway stop`，并核实 gateway 进程确实退出。Hermes 在还有任务运行时拒绝停，所以中途到期的任务先跑完；三次都没停掉或一轮满 55 分钟后用 `--yes` 停。`hermes cron tick` 与每次 `hermes gateway stop` 限时 120 秒：不返回的 `tick` 让这一轮记为失败，不返回的停止算作拒绝；没有哪次停止被 Hermes 接受时，这一轮自己结束 gateway（先 SIGTERM，120 秒后 SIGKILL）。主目录已经有别人的 gateway 在服务时（API Server 通道的实例），这一轮只交任务，不启动也不停止 gateway。这些分支由 [`test_cron_round.py`](../../ai/tests/test_cron_round.py) 覆盖（PR #462 的评审补上）。“gateway 是否就绪”“有没有任务在执行”取自上游内部的 `discover_gateway_endpoint` 与 `live_executions`，不解析命令的输出：升级后它们改了名，这一轮直接失败。
+- 唤醒服务的退让：一轮现在要启动 gateway（约 400–600 MB、十几秒到两分钟），不再是 2 秒的 `tick`，所以 [`cron-waker.py`](../../ai/assistant/cron-waker.py) 记下每一轮是为哪些到期任务启动的（任务编号加到期时刻的摘要，记在单元的 `RuntimeDirectory` 里，只有 root 能读写）。一轮结束后这些任务一个都没变，下一轮推迟 2 分钟，之后每次加倍，最长 1 小时；有任务新到期，或其中一个的到期时刻变了，就立即启动并重新计数。记录读不了或写不了时不退让，任务照常运行。由 [`test_cron_waker.py`](../../ai/tests/test_cron_waker.py) 覆盖。
+- 网络：新单元 [`anas-assistant-net@.service`](../../deploy/systemd/system/anas-assistant-net@.service) 持有一个成员的私有网络命名空间与唯一的模型桥（socat 监听 18001）。实例、定时任务、闲时整理、探针与接口桥都 `JoinsNamespaceOf` 它，实例一类还 `Requires` 它；没有单元需要它时它自己停。这取代了沙箱试验里“两边各自重试监听”的做法，实例停在任务中途时桥不会断。停用成员时 Host Agent 把它和其余助手单元一起屏蔽并停止（[`assistant.go`](../../internal/hostops/linux/assistant.go)），不等它自己停。
+- 对话的写入凭据：产品服务在改名、删除对话前向 Hermes 取 `mutation-snapshot`，带上 `request_id`、`expected_revision` 与 `expected_generation`；遇到 409 用新的计数再试一次（[`sessionwrite.go`](../../internal/assistantapi/sessionwrite.go)）。清除全部对话与删除任务的运行走同一条路。
+- 任务运行的编号：gateway 上一次运行的对话编号是 `local-<sha256>`，不再是 `cron_<任务>_<时间>`。产品服务原先把它当成无效编号：运行的通知里没有回答的内容，删除任务时也不删它的运行。编号的格式（产品服务与接口契约）加上了这一种。这是第一次系统测试里唯一的失败项查出来的。
+- 系统测试新增：Hermes 主目录归成员、0700、不带 ACL；经产品服务改名、删除对话；网络单元在没有单元需要它之后以 `inactive` 结束。
+
+验证（开发机，合入当天主干之后的代码，运行环境 `ebdfff18…`）：
+
+- 完整门禁 `make check-steps` 通过（Go 78 个包）。之后只改了网络单元的一行、系统测试脚本的一项与文档，重跑了系统测试、`make ops-check` 与 `make docs-check`。
+- 系统测试 575 项通过、0 项失败，包括 2026-11-10 失败的三项：任务到点运行、任务列表带运行结果、登录后收到带回答内容的通知。
+- 从旧版升级的预演（spike 沙箱）：在 `0e427d78` 上建 6 段对话（其中一段改过名）、一条记忆和一个每分钟的任务，按 `nas-trial.sh update` 的步骤换上新脚本与新运行环境。主目录从 `root:root`、带 ACL 变成成员所有、0700、不带 ACL；探针 39 项通过；原有对话的编号、标题与消息数没有变，能读、能接着聊、能带凭据改名与删除；记忆还在；升级前建的任务到点运行并记为 `ok`（一轮 21 秒，内存峰值 579 MB）。
+- 预演查出网络单元每次停下都被记为失败：socat 收到 SIGTERM 后以 143 退出。加了 `SuccessExitStatus=143`，系统测试补了上面那一项。
+- 没有验证的：真实浏览器里的 VNAS 窗口与真实模型；实验 NAS 上一轮定时任务的内存与耗时；运行很久的任务；`nas-trial.sh update` 本身没有在容器里整体预演，预演的是它执行的那几步。
+
+### 2026-11-12 “立即运行”改到定时单元
+
+评审 PR #462 时发现，“立即运行”在 `8fd9f706` 上会在成员的实例里拉起一个常驻的 gateway（[#469](https://github.com/zhongwater123/A-NAS/issues/469)）。上面的升级只为到点运行安排了定时单元，手动运行仍然调用实例的 `POST /api/cron/jobs/<id>/trigger`。
+
+在 spike 沙箱里量到的（脚本化模型，直接调 Hermes 的接口）：
+
+| 操作 | 结果 |
+| --- | --- |
+| 新启动的实例上 `POST …/trigger`（3 次，每次都是新实例） | HTTP 200，11–12.5 秒；模型被调用 1 次，任务却记为 `error`：`Cron admission missing: the owner never admitted this fire` |
+| 之后查看实例单元 | 多出 `hermes gateway run --quiet --idle-exit`（约 290 MB）和它的三个 MCP 服务器；实例 187 → 631 MB，5 分钟后仍在 |
+| gateway 在的时候再 `POST …/trigger` | 0.5 秒，`ok` |
+| gateway 在的时候让一个任务到期，不启动定时单元 | 任务在实例里运行，定时单元一直是 `inactive` |
+| 一个要跑 100 秒的任务在实例里运行时停掉实例 | 命令随实例被杀；下一轮定时单元把它记为 `error: interrupted`，不补跑 |
+| 对话里模型调用 `cronjob_manage` 的 `run` | 同样在实例里拉起 gateway（实例 884 MB），同样记为 `error` |
+
+原因：上游在这条路上自己启动 gateway（`fire_due` → `run_canonical_job` → `connect_gateway()` → `ensure_gateway_runtime(home, idle_exit=True)`）。`--idle-exit` 在成员还有可运行的任务时不算空闲。上游没有“不许启动 gateway”的开关。
+
+做法是让手动运行与到点运行走同一条路，实例里永远不出现 gateway：
+
+- 上游有现成的“排到下一次调度”：`cron.jobs.trigger_job` 把任务标成现在到期，记下被盖掉的那次正常调度并在运行后恢复，暂停的任务随之恢复定时。它只改任务表，不需要 gateway。`hermes serve` 没有接口能调用它，所以由定时单元这一轮在沙箱里以成员身份调用。
+- 请求怎么进沙箱：产品服务的“立即运行”先向实例查这个任务（不存在、正在运行、已经结束的不受理），再请文件代理（[`assistant_run.go`](../../internal/filebroker/rootbroker/assistant_run.go)，新操作 `assistant_run`）。文件代理核对成员的在线会话，在 `/run/a-nas/assistant-runs/<账号>/` 里放一个以任务编号命名的空文件（只有 root 能进，每个成员至多 32 个），然后启动成员的定时单元。
+- 定时单元开始前以 root 把等着的请求整个改名到 `/run/anas-assistant-run-now/<账号>`（[`run-requests.sh`](../../ai/assistant/run-requests.sh)，成员只能列出，不能改），结束后删掉。[`cron_round.py`](../../ai/assistant/cron_round.py) 一开始读这个目录，对每个任务编号调用 `trigger_job`，然后照常启动 gateway、交任务、等结束、停 gateway。
+- 一轮正在运行时来的请求留在等待的目录里，由唤醒服务在这一轮结束后启动下一轮（[`cron-waker.py`](../../ai/assistant/cron-waker.py)），不受“没变的任务推迟”的限制。
+- 实例拒绝启动 gateway：[`serve_nondumpable.py`](../../ai/assistant/serve_nondumpable.py) 在启动 `hermes serve` 前把上游的 `spawn_unmanaged_gateway` 换成直接拒绝。产品服务已经不走那条路，这是给模型的 `cronjob_manage run` 兜底的：它不再拉起 gateway，任务不运行，并被记一次 `error`（`Gateway inaccessible: anas_instance_runs_no_gateway`）。系统技能 `anas-scheduled-tasks` 告诉模型不要用 `run`，请成员去点“立即运行”。
+- 接口：`POST /api/v1/assistant/tasks/{id}/run` 只回答 202（已开始），不再有“几秒内跑完就回答 200”；新增 409 `task_finished`。
+
+验证（开发机，运行环境 `ebdfff18…`）：
+
+- 沙箱（[`run-now.sh`](../../ai/assistant-spike/run-now.sh)，请求由脚本照文件代理的写法放进去）：成员不在线时任务在一轮里运行并记为 `ok`，原定的下一次运行时间不变，实例没有被启动；暂停的任务运行后恢复定时；成员在线时实例里没有 gateway，内存不变（约 180 MB）；不是这个成员的任务编号被跳过；模型的 `cronjob_manage run` 不再在实例里留下 gateway。
+- Go 与 Python 的单元测试见[规格](../specs/ai-assistant.md#验收证据)。
+- 系统测试（真实安装器、产品服务、会话闸门与沙箱，合入 #466 之后从软件包安装）：590 项通过、0 项失败。新增 5 项：她暂停任务；点“立即运行”得到“已开始”；任务在定时单元的一轮里运行并恢复定时；她的实例在运行而里面没有 gateway；这一轮取走了请求、没有留下。
+
+没有解决的：模型在对话里不能替成员立即运行任务，只能请成员去点。要让它能做，需要给它一个把任务排进下一轮的工具，并决定这个工具要不要成员确认。
+
+### 以后怎么升级
+
+A-NAS 依赖 Hermes 的面，按稳定程度排：
+
+1. MCP（`anas`、`companion`、`desktop` 三个服务器）与 OpenAI 兼容的模型网关：标准接口。新功能优先接在这里。
+2. managed scope 的键与工具集名字：工具集核对（[`toolsets-check.py`](../../ai/assistant-spike/toolsets-check.py)）在升级后新增、改名或删除工具集时失败。
+3. `hermes curator run`、任务表 `cron/jobs.json` 的格式，以及定时任务的一轮（[`cron_round.py`](../../ai/assistant/cron_round.py)）：`hermes gateway run`、`hermes cron tick`、`hermes gateway stop`，加两处上游内部的查询，`hermes_cli.gateway_runtime.discover_gateway_endpoint`（gateway 是否就绪）与 `cron.executions.live_executions`（有没有任务在执行）；“立即运行”另用 `cron.jobs.trigger_job`（排到下一次调度），实例的启动脚本另用 `hermes_cli.gateway_runtime_start.spawn_unmanaged_gateway`（换成拒绝，名字没了实例就起不来）。2026-11-10 的升级卡在这里；内部查询改了名，这一轮会直接失败，系统测试的定时任务一节随之失败。
+4. `hermes serve` 的 JSON-RPC 与 REST 中白名单放行的部分，以及 Hermes 自己的登录：这是 Desktop 的后端，上游按自己的需要改，没有兼容承诺。
+   - 剪辑中心的规划（[规划会话](../architecture/montage-planning-session.md)，2026-11-20 起）还依赖：
+     - 环境变量 `HERMES_TUI_TOOLSETS`（`tui_gateway/agent_factory.py` 的 `_load_enabled_toolsets`）：规划进程是同一沙箱与主目录里的第二个 `hermes serve`（端口 9120，`anas-assistant-plan@.service`），设 `montage,memory,skills`，整个进程只给模型剪辑、记忆与技能工具。`montage` 要在成员配置的 `mcp_servers` 里且启用（`read_raw_config`），否则被当作未知名字丢掉，模型拿不到剪辑工具；
+     - 两个 `serve` 进程同时读写同一主目录的记忆、技能与 `state.db`；
+     - `skills.creation_nudge_interval`（`agent/agent_init.py`）：规划进程的策略设 1，每次规划后跑后台复盘；复盘在会话结束时被取消（`cancel_background_review_for_live_turn`），客户端断开约 20 秒后会话被回收，所以规划发起方连到 `review.summary` 事件或 150 秒；
+     - JSON-RPC 的 `client.capabilities`、`session.create`（返回 `stored_session_id`）、`session.title`、`prompt.submit`、`session.interrupt`，事件 `gateway.ready`、`tool.start`、`message.complete`（`status`）、`review.summary`，以及服务器发来的 `approval` 请求（答 `{"choice": "deny"}`）；
+     - 规划进程里的对话出现在成员平时实例的 `/api/sessions` 里。
+
+     带真实运行环境的系统测试走一次规划链路，逐项核对：模型拿到的工具正好是剪辑的 4 个与 `memory`、`skill_manage`、`skill_view`、`skills_list`，对话带标题留在历史里，复盘写出技能。上面任一项改了名，这一节随之失败。
+5. 复制进前端的 Desktop 聊天层。
+6. 带着的补丁。
+
+步骤：
+
+1. 改 [`run.sh`](../../ai/assistant-spike/run.sh) 里的提交，`run.sh build`；补丁打不上时先重做补丁。
+2. `run.sh sandbox`：探针里的工具集核对列出要进允许或关闭清单的工具集；再跑 `desktop-control.sh`、`serve-terminal.sh`、`review-whitelist.sh`、`curator.sh`、`memory-skills.sh`、`serve-surface.sh`、`run-now.sh`。`cron.sh` 在 spike 的沙箱里跑不了：唤醒服务要向 Host Agent 核实账号，那里没有，定时任务由系统测试验证。
+3. 用新提交的检出运行 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)，再跑 Web 的类型检查与测试；指向不存在模块的 import 说明要加替身。
+4. `make check`，以及带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 的系统测试：它经真实的产品服务、会话闸门与沙箱走一遍对话、确认卡片、操作桌面、定时任务与登录。它不覆盖对话的改名与删除，这两项要另外试。
+5. 读上游两个提交之间 `website/docs` 的差别，重点是 security、cron、mcp 与 api-server 几页。
+
 ## 真实模型（DeepSeek）
 
-本节是 2026-10-14 在 API Server 通道上的结果。那时“提交更改”由 [`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 的桩代替：它按产品规则校验目标、记录提交，但不执行。系统技能 `anas-files` 与 `anas-member` 在每个对话中自动加载。审批、照片、定时任务与 WebOS 的真实模型结果见各自章节。
+本节是 2026-10-14 在 API Server 通道上的结果。那时“提交更改”由 [`anas_mcp.py`](../../ai/assistant/anas_mcp.py) 的桩代替：它按产品规则校验目标、记录提交，但不执行。系统技能 `anas-files` 与 `anas-member` 在每个对话中自动加载。审批、照片、定时任务与 WebOS 的真实模型结果见各自章节。
 
 ### 文件任务
 
@@ -1035,7 +1211,9 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 - 后台复盘把共享空间里的诱导文字写进记忆与技能（E3、E5）；用户 2026-10-15 决定保留复盘，成员在“记忆”页删除。
 - 试用期间照片画面（`look_at_photo`）与 WebOS 截图经 `vision_analyze` 发给 DeepSeek，与 ADR 0016 的承诺冲突；以后接入本地算力。`agent.image_input_mode` 一旦不是 `text`，像素还会经 `tool.complete` 发给窗口、写进失败时的转储文件。
 - 令牌的另外两处：`GET /` 页面与锁目录中的 `host-serve.token`（见“[实例凭据](#实例凭据)”）。
-- 补丁 0001–0003 要随上游跟进；升级 Hermes 时重跑工具集核对。
+- 补丁 0001 要随上游跟进；升级步骤见“[以后怎么升级](#以后怎么升级)”。
+- 定时任务的一轮启动全部三个 MCP 服务器，其中 `companion` 与 `desktop` 用不上，约 160 MB；一轮的内存还没有在实验 NAS 上量过。
+- 实例的内存：三个 MCP 服务器之后，脚本化模型两轮对话就到 484 MB，离 640 MiB 的回收线比以前近；要在实验 NAS 上用真实模型多轮复测。
 - 参数摘要来自脱敏的显示副本，含像密钥的字符串时更改不执行；拒绝、超时与停止对模型是同一句话（见“[仍要注意](#仍要注意)”）。
 - 执行方新建的文件夹中被替换的文件，Web 回收站恢复时回到空间根目录。
 - 助手的请求会推迟相册的后台 AI 任务（`gate.Touch`），相册服务没有按 UID 的并发上限。
@@ -1084,7 +1262,7 @@ DeepSeek flash，开发机预览（产品服务 + spike 沙箱），2026-10-20�
 
 - 决定：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[AI 助手](../specs/ai-assistant.md)
-- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../ai/assistant-spike/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、定时任务的 [`cron.sh`](../../ai/assistant-spike/cron.sh) 与 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)、浏览器控制的 [`browser-control.sh`](../../ai/assistant-spike/browser-control.sh) 与 Hermes 登录的 [`hermes_login.py`](../../ai/assistant-spike/hermes_login.py)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
+- Spike 脚本：[`ai/assistant-spike`](../../ai/assistant-spike/run.sh)（沙箱单元 [`anas-assistant@.service`](../../deploy/systemd/system/anas-assistant@.service)、探针 [`probe.sh`](../../ai/assistant-spike/probe.sh)、`hermes serve` 的客户端 [`serve_client.py`](../../ai/assistant-spike/serve_client.py)、回合内审批的 [`broker-spike`](../../ai/assistant-spike/broker-spike/main.go) 与 [`scenarios.py`](../../ai/assistant-spike/scenarios.py)、记忆与复盘的 [`memory-skills.sh`](../../ai/assistant-spike/memory-skills.sh)、[`review.sh`](../../ai/assistant-spike/review.sh) 与 [`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、闲时整理的 [`curator.sh`](../../ai/assistant-spike/curator.sh)、定时任务的 [`cron.sh`](../../ai/assistant-spike/cron.sh) 与 [`cron-waker.py`](../../ai/assistant/cron-waker.py)、操作桌面的 [`desktop-control.sh`](../../ai/assistant-spike/desktop-control.sh) 与 Hermes 登录的 [`hermes_login.py`](../../ai/assistant-spike/hermes_login.py)、带给 Hermes 的补丁 [`hermes-patches/`](../../ai/assistant-spike/hermes-patches/0001-upstream-136632-thread-tool-whitelist.patch)、原型用的 [`vendor-hermes-ui.py`](../../ai/assistant-spike/vendor-hermes-ui.py)）
 - Issue：[#109](https://github.com/zhongwater123/A-NAS/issues/109)（本页“沙箱中以 `hermes serve` 代替 API Server”）、[#110](https://github.com/zhongwater123/A-NAS/issues/110)（“`hermes serve` 的接口面与产品服务白名单”）、[#111](https://github.com/zhongwater123/A-NAS/issues/111)（“回合内审批”）、[#113](https://github.com/zhongwater123/A-NAS/issues/113)（“相册只读访问”）、[#115](https://github.com/zhongwater123/A-NAS/issues/115)（“真实安装器布局上的沙箱”）
 - 原型：[`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[`internal/assistantapi`](../../internal/assistantapi/handler.go)
 - 参照：[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（离线运行环境）、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)（身份与 ACL）、[存储与文件架构](../architecture/storage-and-files.md)、[系统测试](../../scripts/system-test.sh)与其中助手一节 [`ai/assistant-spike/system-test.sh`](../../ai/assistant-spike/system-test.sh)、Host Agent 的替身 [`assistant-layout.sh`](../../ai/assistant-spike/assistant-layout.sh)

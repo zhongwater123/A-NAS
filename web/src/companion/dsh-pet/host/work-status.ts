@@ -132,6 +132,8 @@ export function currentTaskFromTodo(event: {
 export interface WorkStatusSnapshot {
   state: HostWorkStatusState | null; // null = 尚无会话活动（空闲）
   task: string | null; // 当前任务详情（todo/write 提供，可 null）
+  /** A-NAS: the clip the shown step asks for; null = one of its stage's. */
+  anim: string | null;
   /** 当前展示条目所属会话；空闲或外部槽（`api`）时为 null，客户端据此决定气泡能不能点。 */
   sessionId: string | null;
   ts: number; // 最近一次变化的时间戳（轮询侧据此检测变化）
@@ -145,6 +147,8 @@ export interface SessionWorkEntry {
   seq: number;
   /** 任务详情文案；null = 该会话没有清单。 */
   task: string | null;
+  /** A-NAS: the clip this session's step asks for; null = one of its stage's. */
+  anim: string | null;
   /** 该条目所属会话；`pickDisplayed` 只遍历 values，所以带着它才能知道展示的是哪一条。 */
   sessionId: string;
 }
@@ -192,7 +196,7 @@ export class WorkStatusStore {
 
   constructor() {
     this.sessions = new Map();
-    this.snap = { state: null, task: null, sessionId: null, ts: 0 };
+    this.snap = { state: null, task: null, anim: null, sessionId: null, ts: 0 };
   }
 
   /** 该会话当前是否有活动条目（决定 todo/write 是否还值得更新它的文案）。 */
@@ -214,7 +218,7 @@ export class WorkStatusStore {
   setState(sessionId: string, state: HostWorkStatusState, seq = 0): boolean {
     const prev = this.sessions.get(sessionId);
     if (prev?.state === state && prev.seq >= seq) return false;
-    this.sessions.set(sessionId, { state, seq, task: prev?.task ?? null, sessionId });
+    this.sessions.set(sessionId, { state, seq, task: prev?.task ?? null, anim: prev?.anim ?? null, sessionId });
     this.refresh();
     return true;
   }
@@ -224,6 +228,18 @@ export class WorkStatusStore {
     const prev = this.sessions.get(sessionId);
     if (!prev || prev.task === task) return false;
     this.sessions.set(sessionId, { ...prev, task });
+    this.refresh();
+    return true;
+  }
+
+  /**
+   * A-NAS: writes the session's task and the clip its step asks for together (null clears either), so
+   * that a step's line and clip change in one snapshot; a session without an entry is left alone.
+   */
+  setDetail(sessionId: string, detail: { task: string | null; anim: string | null }): boolean {
+    const prev = this.sessions.get(sessionId);
+    if (!prev || (prev.task === detail.task && prev.anim === detail.anim)) return false;
+    this.sessions.set(sessionId, { ...prev, task: detail.task, anim: detail.anim });
     this.refresh();
     return true;
   }
@@ -245,10 +261,18 @@ export class WorkStatusStore {
     const best = pickDisplayed(this.sessions.values());
     const nextState = best?.state ?? null;
     const nextTask = best?.task ?? null;
+    const nextAnim = best?.anim ?? null;
     const nextSession = best?.sessionId ?? null;
-    if (nextState === this.snap.state && nextTask === this.snap.task && nextSession === this.snap.sessionId) return;
+    if (
+      nextState === this.snap.state &&
+      nextTask === this.snap.task &&
+      nextAnim === this.snap.anim &&
+      nextSession === this.snap.sessionId
+    )
+      return;
     this.snap.state = nextState;
     this.snap.task = nextTask;
+    this.snap.anim = nextAnim;
     this.snap.sessionId = nextSession;
     this.snap.ts = Date.now();
   }

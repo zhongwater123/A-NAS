@@ -1,6 +1,6 @@
 # Managed by A-NAS.
-# The LAN Web entry (ADR 0012) and the internet entry (ADR 0032). The
-# installer writes this file instead of Caddyfile when
+# The LAN Web entry (ADR 0012) and the internet entry (ADR 0032).
+# anas-site.service writes this file instead of Caddyfile when
 # /etc/a-nas/internet.env exists, filling in the @...@ values from it; the
 # LAN site below is Caddyfile's.
 #

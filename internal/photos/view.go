@@ -36,10 +36,8 @@ func (s *Service) View(ctx context.Context, p Principal, assetID string) (Conten
 	if p.Assistant {
 		// An assistant knows a sensitive value only as a handle; a view would
 		// show its model the value itself (docs/architecture/photo-ocr.md).
-		if sensitive, err := s.showsSensitiveValue(ctx, record.objectID); err != nil {
+		if err := s.assistantMayLook(ctx, record.objectID); err != nil {
 			return Content{}, err
-		} else if sensitive {
-			return Content{}, ErrSensitivePhoto
 		}
 	}
 	original, err := s.openObject(record.objectID)

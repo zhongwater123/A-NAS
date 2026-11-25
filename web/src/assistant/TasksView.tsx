@@ -88,14 +88,9 @@ export function TasksView({
   const run = (task: AssistantTask) =>
     act(async () => {
       replace({ ...task, running: true });
-      const result = await runTask(task.id);
-      if (result.finished && result.task) {
-        replace(result.task);
-        setNotice(`“${task.name}”运行完成`);
-      } else {
-        setNotice(`“${task.name}”已开始运行，完成后会通知你`);
-        void load();
-      }
+      await runTask(task.id);
+      setNotice(`“${task.name}”已开始运行，完成后会通知你`);
+      void load();
     });
   const pause = (task: AssistantTask) => act(async () => replace(await pauseTask(task.id)));
   const resume = (task: AssistantTask) => act(async () => replace(await resumeTask(task.id)));

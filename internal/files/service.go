@@ -159,6 +159,19 @@ func openSQLite(driverName, path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
+	return sqlitedb.Migrate(ctx, s.db, databaseSchema)
+}
+
+// databaseSchema is files.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "files.db",
+	Baseline: func(ctx context.Context, db *sql.DB) error { return (&Store{db: db}).baseline(ctx) },
+}
+
+// baseline is the structure the store made before it had steps.
+func (s *Store) baseline(ctx context.Context) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS entries (
     id TEXT PRIMARY KEY,
@@ -971,7 +984,9 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 		} else if found && twin.Kind == EntryKindFile {
 			existing = twin.Name
 		}
-		if replaced, err = s.trashForReplacement(ctx, actor, item.SpaceID, root, targetParentID, filepath.Join(parent, existing)); err != nil {
+		// Nothing happens between the user's answer and this move, so the
+		// file under the name now is the one to replace.
+		if replaced, err = s.trashForReplacement(ctx, actor, item.SpaceID, root, targetParentID, filepath.Join(parent, existing), nil); err != nil {
 			return Restored{}, err
 		}
 	}

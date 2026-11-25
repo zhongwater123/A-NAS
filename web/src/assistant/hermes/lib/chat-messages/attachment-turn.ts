@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 import type { ChatMessage } from '.'
 import { chatMessageText } from './parts'
 

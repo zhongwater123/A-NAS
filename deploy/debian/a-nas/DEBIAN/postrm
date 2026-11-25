@@ -1,0 +1,10 @@
+#!/bin/bash
+# postrm of a-nas (ADR 0034). The databases, /etc/a-nas and the data volume
+# stay, also on purge: they hold the family's data and this machine's
+# settings.
+set -euo pipefail
+
+if [[ "${1:-}" == remove && -d /run/systemd/system ]]; then
+  systemctl daemon-reload || true
+fi
+exit 0

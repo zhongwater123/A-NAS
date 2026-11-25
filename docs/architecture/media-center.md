@@ -78,14 +78,16 @@ anas-api（a-nas）
 - 转换后的流是分片 MP4（`frag_keyframe+empty_moov+default_base_moof`），不能随机访问。播放器在拖动时用新的 `start` 重新请求，并把该起点加到 `<video>` 的时钟上；进度、字幕与进度条都使用这个绝对时间。
 - 直接播放出错时，播放器自动改为转码一次。
 - 转换流最多同时 2 路（`Options.MaxStreams`，默认 `mediaplay.Conversions`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。相册服务在自己的进程中另有 2 路，两者合计最多 4 路，都还要经过媒体 Worker 的共享槽位（见下文“准入与失败”）。
-- 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
+- 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。删除媒体库或账号时一并删除其视频的截图与字幕缓存；删除时仍在进行的截取或转换之后才写入的，由每 15 分钟一次的缓存清理删掉（视频已不在目录中的截图与字幕，[`process.go`](../../internal/media/process.go) 的 `pruneCache`）。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
 - 进度每 10 秒、暂停与关闭时保存；不足 30 秒不记位置，达到 90% 记为已看并清除位置。
 
 ## Worker 协议
 
 - 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/ffmpegworker/protocol.go)）。
-- 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/ffmpegworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
-- 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
+- 通用操作有 `probe`、`frame`（时间点与宽度）、`image`（HEIF 预览宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位 FLAC；带 `pcm` 时严格校验字段并输出 32 位单声道或立体声浮点采样）。参数经校验后由 [`command.go`](../../internal/ffmpegworker/command.go) 生成。FFmpeg 通过标准输入上的 `fd:` 读取可寻址的描述符（需 FFmpeg 6.1 或更新版本），通过标准输出返回结果。`image` 使用独立的 libheif 命令。
+- 剪辑操作包括 `frames`、`segment`、`assemble`（[`edit.go`](../../internal/ffmpegworker/edit.go)，[剪辑中心实施方案](montage-center.md#ffmpeg-worker-的新操作)）。`frames` 按时刻列表或区间采样，每帧发一条消息，空消息之后发结果，结果里带每帧的时刻。区间是半开的 `[start, end)`：第 k 帧对应 `start + k/rate`，帧数是 end 之前这样的时刻个数（300 秒、每秒 2 帧正好 600 帧）。FFmpeg 从起点前一步读到终点后一步，所以同一时刻在哪个区间里取到的都是同一个源帧：前一段的终点等于后一段的起点时两段不重复；终点多一步时两段共享这一时刻的帧。需要模糊值时，将编码后的 JPEG 送进同一个 blurdetect 进程，黑帧的值为 `null`。`segment` 渲染 1920×1080、30 帧/秒、无声的 MPEG-TS，时间戳包含该段在成片中的偏移。`assemble` 接收拼好的 TS 与歌曲两个只读描述符，在 Worker 自有 memfd 生成 faststart MP4，验证视频帧数和 AAC 立体声后发回。
+- 剪辑请求拒绝未知字段，预检超限返回 `invalid_request`，运行中输出超限返回 `too_large`，转码超时或 blurdetect 运行失败返回 `failed`，缺少 blurdetect 滤镜返回 `unavailable`。`segment` 和 `assemble` 报出正文长度，正文提前结束算 `ErrInterrupted`。剪辑与 PCM 子进程以 nice 10 启动，取帧和片段渲染的解码、编码及滤镜各用至多 4 个线程。
+- 有限输出的操作限制大小与运行时间，剪辑操作的时限也限制套接字写入。`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即结束 FFmpeg。
 - 客户端在请求中带 `ack`，Worker 读到请求与描述符后先回一帧 `accepted`，再开始工作并回复结果。没有 `ack` 的请求（旧客户端）直接得到结果，新客户端遇到旧 Worker 也把第一帧当作结果，所以部署时新旧进程短暂混用不会出错。
 
 ## 准入与失败
@@ -94,16 +96,16 @@ anas-api（a-nas）
 
 产品服务（影视中心、音乐、文件预览）、相册服务与分享服务共用同一个 FFmpeg Worker。原先各自限流、互不知道对方，超过 `MaxConnections=8` 的连接被 systemd 接受后立即关闭，调用方读到 EOF 便当作 Worker 不在，后台任务因此永久失败（[#168](https://github.com/zhongwater123/A-NAS/issues/168)，[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 
-- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/ffmpegworker/admission.go)）。槽位是 `/run/a-nas-ffmpeg/slots/0`…`7` 八个文件，由安装器的 tmpfiles 条目创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务都通过主组或 systemd 单元的 `SupplementaryGroups` 获得 `a-nas-photos` 组身份，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
-- **优先级**：交互请求（预览、海报、导入时的探测、字幕、实况照片的动态片段）可用全部 8 个；流（视频转换、音乐解码）最多 6 个，始终给交互留 2 个；后台工作（相册缩略图与 AI 输入、影视中心的探测与截图、音乐扫描）最多 2 个。每种优先级取自己范围内编号最高的空槽，把低编号留给其他优先级。后台请求一直等到有空槽或服务停止，不会因为忙而失败；交互等 20 秒、流等 5 秒，仍没有空槽时返回 `ErrBusy`（也是 `ErrUnavailable`，界面照旧提示稍后再试）。本进程放开的槽位立即唤醒等待者，其他进程放开的由轮询发现（交互 50 ms、流 100 ms、后台 1 秒）。调用方用 `WithPriority` 标记后台工作；`stream` 与 `audio` 默认是流，其余默认是交互。
+- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/ffmpegworker/admission.go)）。槽位是 `/run/a-nas-ffmpeg/slots/0`…`7` 八个文件，由 `a-nas` 软件包的 tmpfiles 条目（[`deploy/tmpfiles.d/a-nas.conf`](../../deploy/tmpfiles.d/a-nas.conf)）创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务都通过主组或 systemd 单元的 `SupplementaryGroups` 获得 `a-nas-photos` 组身份，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
+- **优先级**：交互请求（预览、海报、导入时的探测、字幕、实况照片的动态片段）可用全部 8 个；流（视频转换、音乐解码）最多 6 个，始终给交互留 2 个；后台工作（相册缩略图与 AI 输入、影视中心的探测与截图、音乐扫描）最多 2 个。每种优先级取自己范围内编号最高的空槽，把低编号留给其他优先级。后台请求一直等到有空槽或服务停止，不会因为忙而失败；交互等 20 秒、流等 5 秒，仍没有空槽时返回 `ErrBusy`（也是 `ErrUnavailable`，界面照旧提示稍后再试）。本进程放开的槽位立即唤醒等待者，其他进程放开的由轮询发现（交互 50 ms、流 100 ms、后台 1 秒）。调用方用 `WithPriority` 标记后台工作；`stream` 与 `audio` 默认是流，剪辑的 `frames`、`segment`、`assemble` 与 `audio` 的浮点采样默认是后台，其余默认是交互。
 - **时限从取得槽位起算**：调用方用 `WithTimeout` 给出的时限不包括排队时间，例如 HEIC 解码与视频帧 30 秒、导入时的探测 15 秒、动态片段 45 秒。原先相册的 30 秒包括等待自己仅有的 2 个解码位，而播放中的实况照片整段占着其中一个，前台播放会让后台任务超时。
 - **连接上限与内存**：`anas-ffmpeg.socket` 的 `MaxConnections=16` 高于槽位数，多出的部分留给调用方已放开槽位、仍在退出的 Worker，正常情况下 systemd 不再丢弃连接。所有 Worker 实例在 [`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice) 中共用 `MemoryMax=3G`（每个实例仍为 2G），超出时内核先回收、再结束这个 slice 中的 Worker，而不是设备上的其他进程；slice 位于 `system.slice` 之下而不是后台的 `anas.slice`，因为播放有人在看，`CPUWeight=50`、`IOWeight=50` 让它在争用时让出 CPU 与磁盘。权重只在同级之间比较，所以写在 slice 上，而不是彼此同级的实例上。
 - **失败分类**：Worker 回 `accepted` 之前的失败（连不上、被 systemd 丢弃、没有对应的解码器、等不到槽位）是 `ErrUnavailable`，同一请求稍后可能成功；之后连接断开是 `ErrInterrupted`（也是 `ErrUnavailable`），表示 Worker 接下了输入却停了，例如解码器耗尽内存，可能与输入有关；Worker 回答超时等无法完成是 `ErrFailed`；读不了文件是 `ErrUnreadable`。后台工作按此决定是否计入尝试：相册遵循与 AI Worker 相同的规则，见[相册的后台任务](photo-library.md#后台任务与资源隔离)；影视中心与音乐没有尝试次数，`ErrUnavailable`（包括中途停止）的文件留到下一轮，影视中心每分钟一轮，音乐在下次扫描，可读出的错误才记为失败。
 
 ## 关联
 
-- 改名升级与回滚：[Worker 单元安装器](../../scripts/install-ffmpeg-units.sh)、[回滚手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。安装器先停止使用方和旧 Worker，再更换单元、套接字、准入目录与环境变量；旧 release 仍使用 `anas-media` 布局。维护会中断当前播放，完成后重新播放。
+- 改名升级与回滚：安装器时期由 `scripts/install-ffmpeg-units.sh`（已删除）先停止使用方和旧 Worker，再更换单元、套接字、准入目录与环境变量；更早的 release 使用 `anas-media` 布局。软件包的各个版本都只带 `anas-ffmpeg` 的单元，第一次接管安装器时把 `anas-media` 的旧单元移到 `/var/backups/a-nas/installer-layout/`；回滚见[回滚手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。维护会中断当前播放，完成后重新播放。
 - [影视中心规格](../specs/media-center.md)、[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[存储与文件架构](storage-and-files.md)
 - 代码：[`internal/media`](../../internal/media)、[`internal/mediaplay`](../../internal/mediaplay)、[`internal/ffmpegworker`](../../internal/ffmpegworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
-- 部署：[`anas-ffmpeg.socket`](../../deploy/systemd/system/anas-ffmpeg.socket)、[`anas-ffmpeg@.service`](../../deploy/systemd/system/anas-ffmpeg@.service)、[`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 部署：[`anas-ffmpeg.socket`](../../deploy/systemd/system/anas-ffmpeg.socket)、[`anas-ffmpeg@.service`](../../deploy/systemd/system/anas-ffmpeg@.service)、[`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice)、[软件包](../../scripts/build-packages.sh)、[系统测试](../../scripts/system-test.sh)
 - 调查：[FFmpeg Worker 的共享预算与后台任务的永久失败](../investigations/2026-10-21-media-worker-shared-budget.md)

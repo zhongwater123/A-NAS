@@ -5,18 +5,18 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// migrations are applied in order and recorded in PRAGMA user_version. The
-// Catalog lives on the data volume and is restored from backups taken by older
-// builds, so an applied migration is never edited; add a new one instead.
-var migrations = []string{
-	`
+// migrations are applied in order and recorded in PRAGMA user_version
+// (sqlitedb.Migrate). The Catalog lives on the data volume and is restored
+// from backups taken by older builds, so an applied migration is never edited;
+// add a new one, with the Down that undoes it (ADR 0034).
+var migrations = []sqlitedb.Step{
+	{Up: `
 CREATE TABLE libraries (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('private', 'shared')),
@@ -73,11 +73,11 @@ CREATE TABLE audit_events (
     occurred_at TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
-`,
+`},
 	// 2: header metadata, capture-time ordering, derived files and the
 	// durable media job queue. Objects imported before this migration keep
 	// unknown metadata but still get thumbnails.
-	`
+	{Up: `
 ALTER TABLE objects ADD COLUMN width INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE objects ADD COLUMN height INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE objects ADD COLUMN orientation INTEGER NOT NULL DEFAULT 1;
@@ -111,15 +111,15 @@ CREATE INDEX jobs_ready ON jobs(state, not_before);
 
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT id, 'thumbnail/v1', 'pending', created_at, created_at FROM objects;
-`,
+`},
 	// 3: the owner's username, which cross-member duplicate hints show.
-	`
+	{Up: `
 ALTER TABLE libraries ADD COLUMN owner_name TEXT NOT NULL DEFAULT '';
-`,
+`},
 	// 4: image vectors from the AI Worker, one per content object and
 	// derivation, with the model that produced them. Originals that already
 	// have thumbnails are queued for a vector.
-	`
+	{Up: `
 CREATE TABLE embeddings (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
     derivation TEXT NOT NULL,
@@ -132,10 +132,10 @@ CREATE TABLE embeddings (
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'embedding/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
-`,
+`},
 	// 5: text vectors the AI Worker made for label texts, per model, so
 	// labels survive a restart without the Worker.
-	`
+	{Up: `
 CREATE TABLE query_vectors (
     model TEXT NOT NULL,
     text TEXT NOT NULL,
@@ -143,11 +143,11 @@ CREATE TABLE query_vectors (
     created_at TEXT NOT NULL,
     PRIMARY KEY (model, text)
 );
-`,
+`},
 	// 6: user metadata. Albums group photo assets of their own library;
 	// user tags and AI corrections belong to one photo asset. All of it is
 	// user data, kept apart from derived results and never rebuilt.
-	`
+	{Up: `
 CREATE TABLE albums (
     id TEXT PRIMARY KEY,
     library_id TEXT NOT NULL REFERENCES libraries(id),
@@ -183,12 +183,12 @@ CREATE TABLE ai_tag_corrections (
     PRIMARY KEY (asset_id, label_id)
 );
 CREATE INDEX ai_tag_corrections_by_label ON ai_tag_corrections(label_id);
-`,
+`},
 	// 7: the objects the detector found in each content object
 	// (docs/architecture/photo-objects.md), with the model that found them;
 	// an empty list means the detector found nothing. Originals that already
 	// have thumbnails are queued for detection.
-	`
+	{Up: `
 CREATE TABLE detections (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
     derivation TEXT NOT NULL,
@@ -201,17 +201,17 @@ CREATE TABLE detections (
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'objects/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
-`,
-	`ALTER TABLE assets ADD COLUMN motion_object_id TEXT REFERENCES objects(id);
+`},
+	{Up: `ALTER TABLE assets ADD COLUMN motion_object_id TEXT REFERENCES objects(id);
 ALTER TABLE assets ADD COLUMN motion_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE assets ADD COLUMN motion_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE assets ADD COLUMN motion_duration REAL NOT NULL DEFAULT 0;
-CREATE INDEX assets_by_motion ON assets(motion_object_id);`,
+CREATE INDEX assets_by_motion ON assets(motion_object_id);`},
 	// A still's Apple Live Photo identifier, so that its MOV can follow in a
 	// later upload: NULL while unread (objects imported before this
 	// migration), '' when the still has none.
-	`ALTER TABLE objects ADD COLUMN live_id TEXT;
-CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AND live_id <> '';`,
+	{Up: `ALTER TABLE objects ADD COLUMN live_id TEXT;
+CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AND live_id <> '';`},
 	// 10: people and pets (docs/architecture/photo-people.md). A scan
 	// records that the face models, or the animal model, looked at a content
 	// object; each face or pet they found is an occurrence, derived data
@@ -223,7 +223,7 @@ CREATE INDEX objects_by_live_id ON objects(live_id) WHERE live_id IS NOT NULL AN
 	// member did, or it moved over from a face found by earlier models and
 	// waits to be checked against the new ones. Originals that already have
 	// thumbnails are queued.
-	`
+	{Up: `
 CREATE TABLE scans (
     object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
     derivation TEXT NOT NULL,
@@ -283,26 +283,26 @@ CREATE INDEX occurrence_rejections_by_occurrence ON occurrence_rejections(occurr
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, 'faces/v1', 'pending', created_at, created_at FROM derived_files WHERE derivation = 'thumbnail/v1'
 ON CONFLICT(object_id, derivation) DO NOTHING;
-`,
+`},
 	// 11: whether a library recognises people and pets; on by default
 	// (docs/architecture/photo-people.md#关闭与清除).
-	`ALTER TABLE libraries ADD COLUMN people INTEGER NOT NULL DEFAULT 1;`,
+	{Up: `ALTER TABLE libraries ADD COLUMN people INTEGER NOT NULL DEFAULT 1;`},
 	// 12: pet scans told only dogs apart; cats are pets too now. Without
 	// their scans, every photo with a cat or a dog is scanned again when the
 	// service first sees the animal model; the dogs found keep what members
 	// decided, by the place they were found in.
-	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
+	{Up: `DELETE FROM scans WHERE derivation = 'pets/v1';`},
 	// 13: videos (docs/specs/photo-video.md). A content object that is a
 	// video original keeps how long it plays and what the FFmpeg Worker read
 	// from it, so the timeline and the decision how a browser plays it need
 	// no decoder. Videos take no part in local AI.
-	`
+	{Up: `
 CREATE TABLE videos (
     object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
     duration REAL NOT NULL,
     info TEXT NOT NULL
 );
-`,
+`},
 	// 14: the vector index's outbox (docs/architecture/vector-index.md). Every
 	// change to an object's image vector, or to which libraries hold it,
 	// queues the object in the same transaction; the sync loop brings the
@@ -312,7 +312,7 @@ CREATE TABLE videos (
 	// vector through the embeddings trigger as well. The triggers upsert
 	// rather than INSERT OR REPLACE: an upsert that fires them, as storing a
 	// vector does, makes their own conflict handling abort.
-	`
+	{Up: `
 CREATE TABLE vector_outbox (
     object_id TEXT PRIMARY KEY,
     version INTEGER NOT NULL DEFAULT 1
@@ -357,7 +357,7 @@ BEGIN
     INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
     ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
 END;
-`,
+`},
 	// 15: the text read from photos (docs/architecture/photo-ocr.md). A
 	// reading is derived, one per content object that copies share: its
 	// document type, its whole text and how that ended (finish: stop, or
@@ -365,7 +365,7 @@ END;
 	// checks as JSON. What members correct is user data per library and
 	// object; it stays when the library turns reading off and when a new
 	// model reads again. Each library can turn reading off, as with people.
-	`
+	{Up: `
 ALTER TABLE libraries ADD COLUMN texts INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE texts (
@@ -388,7 +388,7 @@ CREATE TABLE text_corrections (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (library_id, object_id, field)
 );
-`,
+`},
 	// 16: corrections belong to the content object, whichever library a
 	// member corrected it in, and the last one stands (ADR 0033). Each change
 	// is kept, with who made it from which library: the library is kept by
@@ -396,7 +396,7 @@ CREATE TABLE text_corrections (
 	// per-library corrections of 15, so the table is made anew. The handles
 	// a member's assistant gets for sensitive values stand for one value of
 	// one photo for that member.
-	`
+	{Up: `
 DROP TABLE text_corrections;
 
 CREATE TABLE text_corrections (
@@ -431,8 +431,189 @@ CREATE TABLE text_handles (
     created_at TEXT NOT NULL,
     UNIQUE (account, asset_id, key)
 );
-`,
+`},
+	// 17: project grants of the montage center (ADR 0038 decision 3). A
+	// member registers a project's videos while present; the montage center
+	// then reaches them under the grant, and the Policy decides again on
+	// every use. A grant is one per (owner, project); an asset leaves it when
+	// it is purged. A revoked grant lets go of its assets and keeps only its
+	// row, marked, until the owner's account is removed.
+	{Up: `
+CREATE TABLE montage_grants (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    UNIQUE (owner_user_id, project_id)
+);
+
+CREATE TABLE montage_grant_assets (
+    grant_id TEXT NOT NULL REFERENCES montage_grants(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (grant_id, asset_id)
+);
+CREATE INDEX montage_grant_assets_by_asset ON montage_grant_assets(asset_id);
+`, Down: `
+DROP TABLE montage_grant_assets;
+DROP TABLE montage_grants;
+`},
+	// 18: the montage center's analysis of the videos its grants asked for
+	// (ADR 0038 decision 4), starting with the window vectors
+	// (montage-windows/v1). Results follow the content object; the vectors
+	// stay here, the record, and reach the vector index through their own
+	// outbox, as the image vectors do (ADR 0028 decision 1).
+	// montage_objects says, per object, which analysis a grant asked for
+	// and since when no grant has referred to it.
+	{Up: `
+CREATE TABLE montage_objects (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    requested_at TEXT NOT NULL,
+    unreferenced_since TEXT
+);
+
+CREATE TABLE video_windows (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    flat INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    identity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, idx)
+);
+CREATE INDEX video_windows_by_created ON video_windows(created_at);
+
+CREATE TABLE window_outbox (
+    object_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TRIGGER video_windows_outbox_insert AFTER INSERT ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_update AFTER UPDATE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER video_windows_outbox_delete AFTER DELETE ON video_windows BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_insert AFTER INSERT ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_delete AFTER DELETE ON assets
+WHEN EXISTS (SELECT 1 FROM video_windows WHERE object_id = OLD.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_window_outbox_update AFTER UPDATE OF trashed_at, library_id ON assets
+WHEN (OLD.trashed_at IS NOT NEW.trashed_at OR OLD.library_id IS NOT NEW.library_id)
+  AND EXISTS (SELECT 1 FROM video_windows WHERE object_id = NEW.object_id)
+BEGIN
+    INSERT INTO window_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+`, Down: `
+DROP TRIGGER assets_window_outbox_update;
+DROP TRIGGER assets_window_outbox_delete;
+DROP TRIGGER assets_window_outbox_insert;
+DROP TRIGGER video_windows_outbox_delete;
+DROP TRIGGER video_windows_outbox_update;
+DROP TRIGGER video_windows_outbox_insert;
+DROP TABLE window_outbox;
+DROP TABLE video_windows;
+DROP TABLE montage_objects;
+DELETE FROM jobs WHERE derivation LIKE 'montage-%';
+DELETE FROM vector_index_state WHERE name = 'windows';
+`},
+	// 19: the montage analysis's cards and their quality
+	// (montage-cards/v1, montage-quality/v1), cut and measured by the
+	// montage compute Worker from the windows; per content object, like the
+	// windows.
+	{Up: `
+CREATE TABLE montage_card_results (
+    object_id TEXT PRIMARY KEY REFERENCES montage_objects(object_id) ON DELETE CASCADE,
+    cards_identity TEXT NOT NULL,
+    quality_identity TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE video_cards (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    keyframes TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+
+CREATE TABLE video_card_quality (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_quality;
+DROP TABLE video_cards;
+DROP TABLE montage_card_results;
+DELETE FROM jobs WHERE derivation IN ('montage-cards/v1', 'montage-quality/v1');
+`},
+	// 20: the montage center's card descriptions (montage-describe/v1). A
+	// card the reader could not describe keeps its error and no result.
+	// millis is how long the description took, for the NAS's measurements.
+	{Up: `
+CREATE TABLE video_card_descriptions (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    card INTEGER NOT NULL,
+    result TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL,
+    millis INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (object_id, card)
+);
+`, Down: `
+DROP TABLE video_card_descriptions;
+DELETE FROM jobs WHERE derivation = 'montage-describe/v1';
+`},
+	// 21: the films the montage center saved (ADR 0038): one per
+	// (owner, version key), written with the film's asset, so that a save
+	// cut short and tried again never makes a second film.
+	{Up: `
+CREATE TABLE montage_films (
+    owner_user_id TEXT NOT NULL,
+    version_key TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_user_id, version_key)
+);
+`, Down: `
+DROP TABLE montage_films;
+`},
+	// 22: the release that wrote each card description. A description that
+	// failed under another release is tried again (staleFailure); those
+	// written before this step have none, so the first release with it
+	// tries the failures it found once.
+	{Up: `
+ALTER TABLE video_card_descriptions ADD COLUMN written_release TEXT;
+`, Down: `
+ALTER TABLE video_card_descriptions DROP COLUMN written_release;
+`},
 }
+
+// migrationsWithoutDown counts the migrations released before migrations had
+// Downs (ADR 0034).
+const migrationsWithoutDown = 16
 
 func openCatalog(path string) (*sql.DB, error) {
 	db, err := sqlitedb.Open(path, sqlitedb.Options{Durable: true})
@@ -447,31 +628,7 @@ func openCatalog(path string) (*sql.DB, error) {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
-	var version int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("read photo catalog version: %w", err)
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("photo catalog version %d is newer than this build supports (%d)", version, len(migrations))
-	}
-	for next := version; next < len(migrations); next++ {
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, migrations[next]); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("apply photo catalog migration %d: %w", next+1, err)
-		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", next+1)); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return sqlitedb.Migrate(ctx, db, sqlitedb.Schema{Name: "the photo catalog", Steps: migrations, WithoutDown: migrationsWithoutDown})
 }
 
 // timeLayout is how stored timestamps are read (sqlitedb.TimeLayout).
@@ -749,13 +906,5 @@ func (s *Service) directoryByID(ctx context.Context, q queryer, directoryID stri
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, fn)
 }

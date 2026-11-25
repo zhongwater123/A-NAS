@@ -36,6 +36,19 @@ func openSQLite(driverName, path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
+	return sqlitedb.Migrate(ctx, s.db, databaseSchema)
+}
+
+// databaseSchema is media.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "media.db",
+	Baseline: func(ctx context.Context, db *sql.DB) error { return (&Store{db: db}).baseline(ctx) },
+}
+
+// baseline is the structure the store made before it had steps.
+func (s *Store) baseline(ctx context.Context) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS libraries (
     id TEXT PRIMARY KEY,

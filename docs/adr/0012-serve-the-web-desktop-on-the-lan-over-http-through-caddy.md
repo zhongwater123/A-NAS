@@ -11,7 +11,7 @@
 3. **开放全部功能**：局域网浏览器与本地控制台使用同一 Web UI、同一产品 API 和同一组账号权限，包括管理员的账号、存储、Docker、应用中心和启用后的终端。
 4. **Host 校验**：应用中心、Docker 的写请求与终端原先只接受回环 Host，现在接受 `localhost`、回环地址和任意 IP 字面量。DHCP 换址不需要改配置；DNS 重绑定页面的 Host 是攻击者的域名，仍被拒绝。按域名访问需要以后扩展允许列表。
 5. **会话**：局域网登录为 12 小时会话。不过期的本机会话只授予没有转发头的直接回环连接，经 Caddy 的请求永远拿不到。
-6. **可选能力**：系统服务安装器只在 `caddy` 已安装时校验并写入 A-NAS 的 Caddyfile、启用服务，首次覆盖前备份原文件。应用中心的安装策略本来就拒绝 1024 以下的端口，应用不会占用 80。
+6. **可选能力**：系统服务安装器只在 `caddy` 已安装时校验并写入 A-NAS 的 Caddyfile、启用服务，首次覆盖前备份原文件。应用中心的安装策略本来就拒绝 1024 以下的端口，应用不会占用 80。2026-11-12 起 Caddy 是 `a-nas-host` 的依赖（[ADR 0015](0015-take-docker-and-caddy-from-their-upstream-repositories.md)），入口随软件包默认开放；`anas-site.service` 写入配置但不启动 Caddy，管理员以 `systemctl disable --now caddy` 关闭入口。
 7. **应用网页与桌面同站，会话 Cookie 单独无用**（2026-10-21，[issue #161](https://github.com/zhongwater123/A-NAS/issues/161)）：已安装应用在同一地址的其他端口提供网页（[应用中心规格](../specs/app-center.md#打开与管理已安装应用)）。Cookie 不区分端口，SameSite 也不区分，打开应用时浏览器会把桌面会话 Cookie 发给应用，应用页面也能嵌入桌面。明文 HTTP 下没有只发往一个端口的 Cookie，按 IP 访问也没有另一个主机名，所以不靠站点隔离，而是：
    - 会话绑定登录时的客户端：经 Caddy 登录的只接受同一 `X-Forwarded-For` 地址（IPv6 为同一 /64）的请求，直接回环登录的（含本机会话）只接受没有转发头的回环连接。应用拿到 Cookie 后只能经 Caddy 重放，来源是容器地址；它也连不到只监听回环的产品服务。
    - 桌面页面返回 `X-Frame-Options: DENY` 与包含 `frame-ancestors 'none'` 的 CSP，接口返回 `X-Frame-Options: SAMEORIGIN`（桌面自己嵌入 PDF 预览）。CSP 的 `img-src` 只允许本机地址、`data:` 与 `blob:`，模型回答中的外部图片不会让成员的浏览器连外（[ADR 0024](0024-run-a-sandboxed-hermes-agent-per-member.md)）。

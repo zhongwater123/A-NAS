@@ -1,0 +1,82 @@
+No fetchState.
+
+fetchState fetched the host's GET /state for dsh-pet's page (client/pet/multi.ts,
+not vendored). In A-NAS the page keeps the state store itself and petCard.tsx
+reads it, so nothing called it; it goes, with normLeaf, which only it used,
+and the import of ROUTE_PATH, which only it read.
+
+diff --git a/shared/state.ts b/shared/state.ts
+index 9a3dd545..a95a3fe1 100644
+--- a/shared/state.ts
++++ b/shared/state.ts
+@@ -7,7 +7,6 @@
+  * @module dsh-pet/src/shared/state
+  */
+ import { toWorkStatus, type WorkStatusSnapshot } from './work-status';
+-import { ROUTE_PATH } from './constants';
+ 
+ /** 一个叶子：计数器 + 载荷；data 为 null 表示还没有数据，消费端跳过。 */
+ export interface StateLeaf {
+@@ -31,60 +30,8 @@ export interface StateChange {
+   leaf: StateLeaf;
+ }
+ 
+-/** 叶子规范化：形状不对（非对象或 counter 非数字）→ null，不让脏数据进渲染层。 */
+-function normLeaf(value: unknown): StateLeaf | null {
+-  if (!value || typeof value !== 'object') return null;
+-  const leaf = value as { counter?: unknown; data?: unknown };
+-  if (typeof leaf.counter !== 'number' || !Number.isFinite(leaf.counter)) return null;
+-  return { counter: leaf.counter, data: leaf.data ?? null };
+-}
+-
+-/** 拉一次 /state；失败、HTTP 非 2xx 或形状不对都返回 null（轮询侧静默重试）。
+- *  wait 传了就带 ?since=&timeout= 走长轮询：宿主在版本没变时挂起，直到任意叶子被写过或超时；
+- *  不传则立刻返回全量。 */
+-export async function fetchState(
+-  baseUrl = ROUTE_PATH + '/state',
+-  wait?: { since: number; timeoutMs: number },
+-): Promise<PollState | null> {
+-  try {
+-    const url = wait ? `${baseUrl}?since=${wait.since}&timeout=${wait.timeoutMs}` : baseUrl;
+-    const res = await fetch(url, { cache: 'no-store' });
+-    if (!res.ok) return null;
+-    const raw = (await res.json().catch(() => null)) as {
+-      ok?: unknown;
+-      counter?: unknown;
+-      sections?: unknown;
+-      pets?: unknown;
+-    } | null;
+-    // 业务失败也是 200：`ok:false` 的体不是快照，按失败处理（否则会被当成「空状态」成功一次）
+-    if (!raw || typeof raw !== 'object' || raw.ok === false) return null;
+-    const sections: Record<string, StateLeaf> = {};
+-    const rawSections =
+-      raw.sections && typeof raw.sections === 'object' ? (raw.sections as Record<string, unknown>) : {};
+-    for (const [name, value] of Object.entries(rawSections)) {
+-      const leaf = normLeaf(value);
+-      if (leaf) sections[name] = leaf;
+-    }
+-    const pets: Record<string, Record<string, StateLeaf>> = {};
+-    const rawPets = raw.pets && typeof raw.pets === 'object' ? (raw.pets as Record<string, unknown>) : {};
+-    for (const [petId, entry] of Object.entries(rawPets)) {
+-      if (!entry || typeof entry !== 'object') continue;
+-      const leaves: Record<string, StateLeaf> = {};
+-      for (const [name, value] of Object.entries(entry as Record<string, unknown>)) {
+-        const leaf = normLeaf(value);
+-        if (leaf) leaves[name] = leaf;
+-      }
+-      pets[petId] = leaves;
+-    }
+-    return {
+-      counter: typeof raw.counter === 'number' && Number.isFinite(raw.counter) ? raw.counter : undefined,
+-      sections,
+-      pets,
+-    };
+-  } catch {
+-    return null;
+-  }
+-}
++// A-NAS: fetchState, which polled the host's GET /state, and normLeaf, which only it used, are gone: the page keeps
++// the state store itself (workStatus.ts companionState) and petCard.tsx reads it, so nothing here fetches.
+ 
+ /** 遍历 S 的所有叶子（sections 在前、pets 在后）。 */
+ function* walkLeaves(s: PollState): Generator<[string, StateLeaf]> {

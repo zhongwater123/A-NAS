@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate"
 )
 
 const requestTimeout = 3 * time.Second
@@ -186,6 +187,19 @@ func (c *Client) DisableCredential(ctx context.Context, username string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/accounts/credential/"+url.PathEscape(username), nil, nil)
 }
 
+func (c *Client) EnableCredential(ctx context.Context, request accountid.EnableRequest) error {
+	return c.doJSON(ctx, c.operationClient, http.MethodPost, wire.EnableCredentialPath,
+		wire.EnableDocument{Username: request.Username, SMB: request.SMB}, nil)
+}
+
+// RemoveAccount sends only removal.UserID: the Host Agent reads what to
+// remove, and whom to hand it to, from the control plane.
+func (c *Client) RemoveAccount(ctx context.Context, removal accountid.AccountRemoval) (string, error) {
+	var result wire.AccountRemovalResult
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, wire.RemoveAccountPath, wire.AccountRemovalDocument{UserID: removal.UserID}, &result)
+	return result.Folder, err
+}
+
 func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/snapshots", wire.SnapshotDocument{SpaceID: spaceID, SnapshotID: snapshotID}, nil)
 }
@@ -341,6 +355,12 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == wire.SnapshotNotFoundCode {
 			return filesystem.ErrNotFound
 		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == wire.UpdateBusyCode {
+			return systemupdate.ErrBusy
+		}
+		if response.StatusCode == http.StatusConflict && failure.Error.Code == wire.NotDeletingCode {
+			return accountid.ErrNotDeleting
+		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
 	if responseBody == nil || response.StatusCode == http.StatusNoContent {
@@ -361,6 +381,10 @@ var _ datavolume.VolumeExecutor = (*Client)(nil)
 var _ accountid.CredentialProvisioner = (*Client)(nil)
 
 var _ accountid.IdentitySynchronizer = (*Client)(nil)
+
+var _ accountid.CredentialEnabler = (*Client)(nil)
+
+var _ accountid.AccountRemover = (*Client)(nil)
 
 var _ accountid.ViewingProvisioner = (*Client)(nil)
 

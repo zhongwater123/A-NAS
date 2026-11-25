@@ -25,6 +25,9 @@ export type WindowAction =
   | { type: "show-desktop" }
   | { type: "restore"; ids: WindowID[] };
 
+// A maximized window fills the page less these margins, which keep the system rail and the dock clear.
+export const MAXIMIZED_INSET = { left: 88, top: 12, right: 12, bottom: 90 };
+
 // closedWindow is an app's window before it is first opened.
 export function closedWindow(id: WindowID, bounds: Pick<WindowModel, "x" | "y" | "width" | "height">): WindowModel {
   return { id, open: false, minimized: false, maximized: false, ...bounds, z: 0, opened: 0 };

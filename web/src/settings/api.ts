@@ -1,5 +1,5 @@
 import { call, client } from "../api/client";
-import type { HealthFinding, StoragePlan, ViewingGrant, VolumeLayout } from "../api.generated";
+import type { DeletionChoice, HealthFinding, StoragePlan, ViewingGrant, VolumeLayout } from "../api.generated";
 
 export type HealthFindingCode = HealthFinding["code"];
 export type ViewingScope = ViewingGrant["scope"];
@@ -12,7 +12,23 @@ export const createMember = (username: string, password: string) =>
 export const resetMember = (userId: string, password: string) =>
   call(client.PATCH("/api/v1/users/{userId}/credential", { params: { path: { userId } }, body: { password } }));
 export const disableMember = (userId: string) =>
-  call(client.DELETE("/api/v1/users/{userId}", { params: { path: { userId } } }));
+  call(client.POST("/api/v1/users/{userId}/disable", { params: { path: { userId } } }));
+export const enableMember = (userId: string) =>
+  call(client.POST("/api/v1/users/{userId}/enable", { params: { path: { userId } } }));
+export const scheduleDeletion = (
+  userId: string,
+  password: string,
+  personalSpace: DeletionChoice,
+  library: DeletionChoice,
+) =>
+  call(
+    client.PUT("/api/v1/users/{userId}/deletion", {
+      params: { path: { userId } },
+      body: { password, personalSpace, library },
+    }),
+  );
+export const cancelDeletion = (userId: string) =>
+  call(client.DELETE("/api/v1/users/{userId}/deletion", { params: { path: { userId } } }));
 export const startViewing = (userId: string, password: string, reason: string, scope: ViewingScope = "space") =>
   call(
     client.POST("/api/v1/users/{userId}/viewing", { params: { path: { userId } }, body: { password, reason, scope } }),

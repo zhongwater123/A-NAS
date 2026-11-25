@@ -50,6 +50,17 @@ export interface CardAnimationInput {
   petId: string;
   /** A-NAS: whether the page has paused the card now. */
   paused?: () => boolean;
+  /** A-NAS: whether a command was answered before its clip showed. */
+  settled?: (playbackId: string) => boolean;
+}
+
+/** A-NAS: a switch the card's state asked the chain for: the state, and the chain that made it. */
+interface SwitchMade {
+  chain: OwnAnimation;
+  anim: string;
+  once: boolean;
+  seq: number;
+  cuePlayback: string | null;
 }
 
 /**
@@ -87,17 +98,37 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
       isDragging: () => live.current.drag.isActive(),
       initiallyFrozen: input.lock?.locked === true && input.lock.expiresAt > Date.now(),
       ...(input.paused === undefined ? {} : { paused: input.paused }),
+      ...(input.settled === undefined ? {} : { settled: input.settled }),
     });
     const ownAnim = ownAnimRef.current;
     live.current.ownAnim = ownAnim;
 
     const { anim, cuePlayback, once, seq } = card.state;
 
+    // A-NAS: the switch the effect below last made.
+    const switched = useRef<SwitchMade | null>(null);
+
     // 状态驱动播放。
     useEffect(() => {
       // A-NAS: a chain disposed by StrictMode's rehearsal unmount (below) cannot play; the next render
       // builds another one and plays on that.
       if (ownAnimRef.current !== ownAnim) return;
+      // A-NAS: taking a command's playback id (clearCuePlayback) runs this effect once more for the same
+      // clip, which dsh-pet left to the chain's check for a switch still loading it. A clip that showed
+      // before that render (fetched and decoded first) was then fetched again and its command answered
+      // cancelled. That run asks for nothing new and is skipped; a replay of the same clip bumps seq.
+      const last = switched.current;
+      switched.current = { chain: ownAnim, anim, once, seq, cuePlayback };
+      if (
+        cuePlayback === null &&
+        last !== null &&
+        last.cuePlayback !== null &&
+        last.chain === ownAnim &&
+        last.anim === anim &&
+        last.once === once &&
+        last.seq === seq
+      )
+        return;
       ownAnim.switchTo(anim, once, cuePlayback);
       // eslint-disable-next-line react-hooks/exhaustive-deps -- 依赖由 anim/once/seq/cuePlayback 的换源身份决定；ownAnim 是稳定引用，补它没有意义
     }, [anim, once, seq, cuePlayback]);

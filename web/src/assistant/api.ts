@@ -14,6 +14,7 @@ export type {
   AssistantStatus,
   AssistantTask,
   AssistantTaskRun,
+  PhotoTextHandleValue as TextHandleValue,
 } from "../api.generated";
 /** Something the assistant asked the member in a running turn, waiting for or given an answer. */
 export type Approval = AssistantApproval;
@@ -36,6 +37,11 @@ const request = (requestId: string) => ({ params: { path: { requestId } } });
 const task = (taskId: string) => ({ params: { path: { taskId } } });
 
 export const assistantStatus = () => call(client.GET("/api/v1/assistant/status"));
+// The number a handle in an answer stands for (docs/architecture/photo-ocr.md):
+// the photo service gives it to the member's own session, never to the
+// assistant, which knows the number only by this handle.
+export const getTextHandle = (handle: string) =>
+  call(client.GET("/api/v1/photos/text-handles/{handle}", { params: { path: { handle } } }));
 export const listSessions = async () => (await call(client.GET("/api/v1/assistant/sessions"))).sessions;
 export const renameSession = (sessionId: string, title: string) =>
   call(client.PATCH("/api/v1/assistant/sessions/{sessionId}", { ...session(sessionId), body: { title } }));
@@ -79,7 +85,7 @@ export const pauseTask = async (taskId: string) =>
   (await call(client.POST("/api/v1/assistant/tasks/{taskId}/pause", task(taskId)))).task;
 export const resumeTask = async (taskId: string) =>
   (await call(client.POST("/api/v1/assistant/tasks/{taskId}/resume", task(taskId)))).task;
-/** Runs a task now; finished is false when it goes on after the answer. */
+/** Asks for a task to run now; it goes on after the answer, and its end comes as a notice. */
 export const runTask = (taskId: string) => call(client.POST("/api/v1/assistant/tasks/{taskId}/run", task(taskId)));
 export const deleteTask = (taskId: string) => call(client.DELETE("/api/v1/assistant/tasks/{taskId}", task(taskId)));
 
@@ -123,6 +129,8 @@ export function failureText(reason: unknown): string {
       return "这个定时任务已经不在了";
     case "task_running":
       return "这个任务正在运行，等它完成再试";
+    case "task_finished":
+      return "这个任务已经结束，不会再运行";
   }
   return errorText(reason);
 }

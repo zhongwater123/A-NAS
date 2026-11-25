@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 /**
  * A `/skill` invocation expands into a model-facing message that embeds the
  * whole skill body. That payload is for the agent — the UI shows the

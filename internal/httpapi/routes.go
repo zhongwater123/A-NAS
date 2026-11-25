@@ -20,8 +20,11 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspotapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storageapi"
@@ -57,6 +60,8 @@ func (h *productHandler) table() []apiroute.Route {
 
 		{Method: get, Pattern: "/api/v1/terminal", Posture: admin, Handler: h.handleTerminal},
 		{Method: get, Pattern: "/api/v1/terminal/session", Posture: admin, Handler: h.handleTerminal},
+
+		{Method: get, Pattern: modules.PathPrefix, Posture: session, Handler: serve(modules.List(h.Modules))},
 	}
 	logger := h.Logger
 	// The task manager needs a reader that also observes tasks, as the Host
@@ -70,6 +75,7 @@ func (h *productHandler) table() []apiroute.Route {
 		filepreviewapi.New(h.FilePreviews, logger),
 		personalizationapi.New(h.Personalization, h.pictures, logger),
 		musicapi.New(h.Music, logger),
+		phonehotspotapi.New(h.PhoneHotspot, logger),
 		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(), Logger: logger}),
 		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),
 		taskmanagerapi.New(tasks, string(h.DataSource), logger),
@@ -78,6 +84,18 @@ func (h *productHandler) table() []apiroute.Route {
 	}
 	if h.WebSearch != nil {
 		routes = append(routes, h.WebSearch.Routes()...)
+	}
+	if h.SystemUpdate != nil {
+		routes = append(routes, h.SystemUpdate.Routes()...)
+	}
+	if h.AssistantKey != nil {
+		routes = append(routes, h.AssistantKey.Routes()...)
+	}
+	if h.Montage != nil {
+		// The desktop shows 剪辑中心 while this answers. The switch is the
+		// Product Service's, so the montage service is not asked.
+		routes = append(routes, apiroute.Route{Method: get, Pattern: montageapi.PathPrefix, Posture: session,
+			Handler: func(w http.ResponseWriter, _ *http.Request, _ accounts.Session) { w.WriteHeader(http.StatusNoContent) }})
 	}
 	return append(routes, h.mounts()...)
 }
@@ -103,7 +121,28 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares), sharesapi.Endpoints())
 	}
 	if h.Family != nil {
-		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		// The family service also keeps the family's to-dos, which every
+		// account uses, member or not.
+		for _, prefix := range []string{familyapi.PathPrefix, familyapi.TodosPrefix} {
+			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		}
+	}
+	if h.Montage != nil {
+		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.ProductEndpoints())
+		// The requests that may lead to planning register a planning grant
+		// first (docs/architecture/montage-center.md, 规划授权).
+		for _, endpoint := range montageapi.PlanningRoutes {
+			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
+				Handler: montageapi.RegisterPlan(h.PlanGrants, h.Montage, h.Logger)})
+		}
+		// Choosing a song copies it from the member's music library here
+		// first (docs/specs/montage-center.md, 配乐).
+		var tracks montageapi.Tracks
+		if h.Music != nil {
+			tracks = h.Music
+		}
+		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
+			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
@@ -120,6 +159,13 @@ func (h *productHandler) mounts() []apiroute.Route {
 	if h.Transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
 			mount(prefix, apiroute.Session, withUser(h.Transfers), transfersapi.Endpoints())
+		}
+	}
+	// A module confirms the session itself, like the photo service, so it
+	// gets only the token.
+	for _, module := range h.Modules {
+		for _, part := range module.Mounts {
+			mount(part.Prefix, part.Posture, serve(module.Handler), part.Endpoints)
 		}
 	}
 	return routes

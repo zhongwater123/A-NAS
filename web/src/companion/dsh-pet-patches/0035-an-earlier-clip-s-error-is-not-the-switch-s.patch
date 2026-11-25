@@ -1,0 +1,41 @@
+An earlier clip's error does not fail the switch that took its video over.
+
+A switch whose clip goes into the video an earlier switch is still loading
+(the earlier clip not yet decoded) listened for that video's error from the
+start. onReady already skips the earlier clip's first frame (patch 0027), but
+the error handler did not: when the earlier clip did not decode, the newer
+switch was answered failed/decode-error and dropped, and its own clip was
+thrown away when it arrived. The handler now ignores an error while the video
+still holds a clip this switch did not put there.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+index bc520bc9..51ade6ec 100644
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -219,9 +219,15 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+     el.autoplay = true;
+     el.playsInline = true;
+     el.onended = nextOnce ? (event: Event) => deps.onEnded(handleEnded(event)) : null;
++    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
++    // one an earlier switch to the same element put in.
++    let ownUrl: string | null = null;
+     // 元素级解码失败只补一条回执，不改播放控制；换源时与 onended 一起清掉。
+-    // A-NAS: and the chain goes on without the clip, still loading or in front (clipFailed).
++    // A-NAS: and the chain goes on without the clip, still loading or in front (clipFailed). An error of the
++    // clip an earlier switch put in the element, still loading when this switch took the element over, is not
++    // this switch's: its own clip goes in once fetched, as onReady skips the earlier clip's first frame.
+     el.onerror = () => {
++      if (pending?.gen === swapGen && el.src !== ownUrl) return;
+       if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_DECODE);
+       if (pending?.gen === swapGen || (gen === swapGen && el.classList.contains('is-front'))) clipFailed(swap);
+     };
+@@ -234,9 +240,6 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       ext: thumbExt(),
+       assetVersion: cfg.assetVersion,
+     });
+-    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
+-    // one an earlier switch to the same element put in.
+-    let ownUrl: string | null = null;
+     loader.load(assetUrl, {
+       onObjectUrl: (objectUrl) => {
+         if (!mounted) {

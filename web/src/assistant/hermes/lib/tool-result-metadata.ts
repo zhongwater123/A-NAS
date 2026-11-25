@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 /** Gateway display hints are not the tool's result. Keep them off the raw
  * payload so summaries cannot overwrite evidence, including false/null/"". */
 export interface ToolResultMetadata {

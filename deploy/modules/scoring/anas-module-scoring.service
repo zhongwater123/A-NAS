@@ -1,0 +1,48 @@
+[Unit]
+Description=A-NAS photo scoring module
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/photo-scoring.md
+Requires=anas-module-scoring.socket
+After=anas-module-scoring.socket anas-host-agent.service local-fs.target
+# Restarts until the data volume is there; never gives up.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=a-nas-scoring
+Group=a-nas-scoring
+# The Host Agent's session lookup for modules, and read access to the Shared
+# space; the bind mounts below make that access one folder, read-only.
+SupplementaryGroups=a-nas-module-sessions a-nas-users
+ExecStart=/opt/a-nas/modules/scoring/anas-scoring
+Environment=ANAS_SCORING_STORE=/srv/a-nas/data/module-scoring
+Environment=ANAS_SCORING_PHOTOS=/srv/a-nas/data/spaces/shared/照片打分
+Environment=ANAS_MODULE_SESSION_SOCKET=/run/a-nas-module-sessions/sessions.sock
+UMask=0077
+# A store missing because the data volume mounted after the unit started
+# ends the process; the restart gets the mount.
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+# The data volume is hidden but for the module's store and the folder it
+# scores; "-" leaves a bind out while the volume is not mounted.
+TemporaryFileSystem=/srv:ro
+BindPaths=-/srv/a-nas/data/module-scoring
+BindReadOnlyPaths=-/srv/a-nas/data/spaces/shared/照片打分
+MemoryMax=768M
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

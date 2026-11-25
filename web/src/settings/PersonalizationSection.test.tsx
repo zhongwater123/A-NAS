@@ -61,7 +61,7 @@ describe("Settings → 个性化", () => {
     render(<PersonalizationSection />);
     const choices = screen.getByRole("radiogroup", { name: "息屏时间" });
     expect(await within(choices).findByRole("radio", { name: "30 分钟", checked: true })).toBeTruthy();
-    expect(screen.getByText(/登录页没有屏保，33 分钟后直接变黑/)).toBeTruthy();
+    expect(screen.getByRole("figure", { name: "3 分钟后播放屏保，33 分钟后黑屏" })).toBeTruthy();
 
     await user.click(within(choices).getByRole("radio", { name: "10 分钟" }));
     expect(await within(choices).findByRole("radio", { name: "10 分钟", checked: true })).toBeTruthy();
@@ -69,7 +69,7 @@ describe("Settings → 个性化", () => {
     expect(sent.displays[0]).toEqual({ body: { sleepAfterMinutes: 10 }, csrf: signedIn.csrfToken });
 
     await user.click(within(choices).getByRole("radio", { name: "从不" }));
-    expect(await screen.findByText("屏保会一直播放，登录页一直亮着。")).toBeTruthy();
+    expect(await screen.findByRole("figure", { name: "3 分钟后播放屏保，不黑屏" })).toBeTruthy();
     expect(screen.queryByText("黑屏")).toBeNull();
   });
 
@@ -104,7 +104,6 @@ describe("Settings → 个性化", () => {
 
     await user.click(within(styles).getByRole("radio", { name: "平铺" }));
     expect(await within(styles).findByRole("radio", { name: "平铺", checked: true })).toBeTruthy();
-    expect(screen.getByText("按图片原始大小重复铺满桌面")).toBeTruthy();
     expect(screen.getByRole("img", { name: "当前桌面壁纸的预览" }).style.backgroundRepeat).toBe("repeat");
     expect(sent.styles).toEqual([{ style: "tile" }]);
   });

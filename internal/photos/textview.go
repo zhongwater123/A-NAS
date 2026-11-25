@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,9 +28,14 @@ import (
 // characters.
 var ErrInvalidText = errors.New("invalid text correction")
 
-// ErrSensitivePhoto refuses an assistant the view of a photo whose text holds
-// a sensitive value.
-var ErrSensitivePhoto = errors.New("the photo shows a sensitive value")
+// ErrSensitivePhoto refuses an assistant the view of a photo read as a
+// document (an ID card, a bank card, a bank slip, an invoice, a receipt) or
+// whose text holds a sensitive value.
+var ErrSensitivePhoto = errors.New("the photo is a document or shows a sensitive value")
+
+// ErrUnreadPhoto refuses an assistant the view of a photo that waits to be
+// read, or whose reading failed: what it shows is not known yet.
+var ErrUnreadPhoto = errors.New("the photo's text is not read yet")
 
 // MaxCorrectionRunes bounds a corrected field's value.
 const MaxCorrectionRunes = 200
@@ -170,27 +176,43 @@ func (s *Service) photoText(ctx context.Context, p Principal, record assetRecord
 	return text, nil
 }
 
-// showsSensitiveValue reports whether the text read from an object holds a
-// sensitive value: what a sensitive field holds or was read as, or a number
-// by textread.Numbers' rules in the whole text or any other field, except a
-// mobile number, which a screenshot often shows and the user lets an
-// assistant look at (2026-11-06). A photo not read yet holds none.
-func (s *Service) showsSensitiveValue(ctx context.Context, objectID string) (bool, error) {
+// assistantMayLook says whether an assistant gets the view of an object, by
+// what was read from it (docs/decisions/2026-11-10-assistant-view-of-documents.md).
+// The view goes to the assistant's model, in the cloud for now, so the photo
+// service refuses it whenever the picture may show what the assistant knows
+// only as a handle, or not at all:
+//
+//   - ErrSensitivePhoto for a photo read as a document, whichever side and
+//     whatever its fields hold: the back of an ID card has no number and is an
+//     ID card all the same. Also for any other photo whose text holds a number
+//     by textread.Numbers' rules, except a mobile number, which a screenshot
+//     often shows and the user lets an assistant look at (2026-11-06).
+//   - ErrUnreadPhoto for a photo routed to be read and not read yet, or whose
+//     reading failed: until it is read, nobody knows what it shows. Reading a
+//     photo takes minutes, and an ID card just added would be handed out whole
+//     meanwhile.
+//
+// A photo the route does not send to be read, and one in libraries with
+// reading off, has no reading and no job: the assistant may look.
+func (s *Service) assistantMayLook(ctx context.Context, objectID string) error {
 	reading, found, err := s.storedReading(ctx, s.db, objectID)
-	if err != nil || !found {
-		return false, err
+	if err != nil {
+		return err
 	}
-	values := []string{reading.text}
-	for _, name := range textread.FieldNames(textread.Kind(reading.kind)) {
-		read, corrected := reading.fields[name], reading.corrections[name].value
-		if _, sensitive := textread.Sensitive(name); sensitive && (read != "" || corrected != "") {
-			return true, nil
+	if !found {
+		status, err := s.textStatus(ctx, objectID)
+		if err != nil || status == TextNone {
+			return err
 		}
-		values = append(values, read, corrected)
+		return ErrUnreadPhoto
 	}
-	return slices.ContainsFunc(values, func(value string) bool {
-		return slices.ContainsFunc(textread.Numbers(value), func(number textread.Number) bool { return number.Label != "手机号" })
-	}), nil
+	if textread.Document(textread.Kind(reading.kind)) {
+		return ErrSensitivePhoto
+	}
+	if slices.ContainsFunc(textread.Numbers(reading.text), func(number textread.Number) bool { return number.Label != "手机号" }) {
+		return ErrSensitivePhoto
+	}
+	return nil
 }
 
 // textState says where reading an asset's text stands, for its details, so
@@ -419,29 +441,104 @@ WHERE ch.object_id = ? ORDER BY ch.id DESC`, record.objectID)
 func (s *Service) maskForAssistant(ctx context.Context, p Principal, record assetRecord, text PhotoText) (PhotoText, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var handleErr error
-		masker := newTextMasker(text.Fields, func(key, label string) string {
+		maskText(&text, func(key, label string) string {
 			named, err := s.textHandle(ctx, tx, p, record.ID, key, label)
 			handleErr = errors.Join(handleErr, err)
 			return named
 		})
-		text.Text = masker.mask(text.Text)
-		for i, field := range text.Fields {
-			masked := &text.Fields[i]
-			if !field.Sensitive {
-				masked.Value, masked.Read = masker.mask(field.Value), masker.mask(field.Read)
-				continue
-			}
-			label, _ := textread.Sensitive(field.Name)
-			if field.Value != "" {
-				masked.Value = masker.replace(fieldKey(field.Name), label)
-			}
-			if field.Read != "" {
-				masked.Read = masker.replace(readKey(field), label)
-			}
-		}
 		return handleErr
 	})
 	return text, err
+}
+
+// maskText replaces every sensitive value of text, in place, with what
+// replace returns for its key, and returns the masker, which then knows the
+// value each key stood for.
+func maskText(text *PhotoText, replace func(key, label string) string) *textMasker {
+	masker := newTextMasker(text.Fields, replace)
+	text.Text = masker.mask(text.Text)
+	for i, field := range text.Fields {
+		masked := &text.Fields[i]
+		if !field.Sensitive {
+			masked.Value, masked.Read = masker.mask(field.Value), masker.mask(field.Read)
+			continue
+		}
+		label, _ := textread.Sensitive(field.Name)
+		if field.Value != "" {
+			masked.Value = masker.replace(fieldKey(field.Name), label)
+		}
+		if field.Read != "" {
+			masked.Read = masker.replace(readKey(field), label)
+		}
+	}
+	return masker
+}
+
+// TextHandleValue is what a handle stands for, for the member whose
+// assistant got it.
+type TextHandleValue struct {
+	// Label names the kind of value, as the handle does: 身份证号, 卡号.
+	Label string `json:"label"`
+	Value string `json:"value"`
+	// Unchecked says the value is a field's that passed not every check and
+	// that no member confirmed or corrected: machine reading may have got it
+	// wrong.
+	Unchecked bool `json:"unchecked"`
+	// AssetID and AssetName are the photo the value was read from.
+	AssetID   string `json:"assetId"`
+	AssetName string `json:"assetName"`
+}
+
+var textHandlePattern = regexp.MustCompile(`^[0-9a-f]{6}$`)
+
+// TextHandle returns the value a handle of p's assistant stands for
+// (docs/architecture/photo-ocr.md#ai-助手能用看不到具体的值). Only the
+// member gets it, never an assistant: the window the assistant answers in
+// asks with the member's own session and shows the value in place of the
+// handle, so the value reaches the member without passing the model.
+//
+// The handle must be p's own, and p must still see the photo, in a library
+// that reads text. The value is what the handle's key names now: what the
+// field holds, what was read for it, or the photo's nth number. Anything else
+// is not found, and says no more than that.
+func (s *Service) TextHandle(ctx context.Context, p Principal, handle string) (TextHandleValue, error) {
+	if p.Assistant || !textHandlePattern.MatchString(handle) {
+		return TextHandleValue{}, ErrNotFound
+	}
+	var assetID, key string
+	err := s.db.QueryRowContext(ctx, "SELECT asset_id, key FROM text_handles WHERE handle = ? AND account = ?",
+		handle, p.UserID).Scan(&assetID, &key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TextHandleValue{}, ErrNotFound
+	}
+	if err != nil {
+		return TextHandleValue{}, err
+	}
+	record, err := s.visibleAsset(ctx, s.db, p, assetID)
+	if err != nil {
+		return TextHandleValue{}, err
+	}
+	text, err := s.photoText(ctx, p, record)
+	if err != nil {
+		return TextHandleValue{}, err
+	}
+	if text.Status != TextRead {
+		return TextHandleValue{}, ErrNotFound
+	}
+	unchecked := false
+	if name, isField := strings.CutPrefix(key, "field:"); isField {
+		unchecked = slices.ContainsFunc(text.Fields, func(field TextField) bool { return field.Name == name && !field.Passed })
+	}
+	// The same pass that made the handles, so that a number's order is the
+	// one its key was given by. What replaces a value keeps its neighbours
+	// apart as a handle does: digits left side by side would read as a number
+	// the assistant's pass never found.
+	masker := maskText(&text, func(string, string) string { return "⟦⟧" })
+	label, value, ok := masker.valueOf(key)
+	if !ok {
+		return TextHandleValue{}, ErrNotFound
+	}
+	return TextHandleValue{Label: label, Value: value, Unchecked: unchecked, AssetID: record.ID, AssetName: record.Name}, nil
 }
 
 // fieldKey keys the handle for what a sensitive field holds, and readKey
@@ -466,9 +563,30 @@ type sensitiveValue struct{ key, label, value string }
 // number is keyed by its order, not by a digest, so that nothing kept beside
 // a handle tells the number.
 type textMasker struct {
-	values  []sensitiveValue
+	values []sensitiveValue
+	// numbers gives each number found its order, from 1; found lists them in
+	// that order.
 	numbers map[string]int
+	found   []textread.Number
 	replace func(key, label string) string
+}
+
+// valueOf is the value a key stood for in what the masker has masked: a
+// field's, or the nth number as its digits.
+func (m *textMasker) valueOf(key string) (label, value string, ok bool) {
+	if order, isNumber := strings.CutPrefix(key, "number:"); isNumber {
+		n, err := strconv.Atoi(order)
+		if err != nil || n < 1 || n > len(m.found) {
+			return "", "", false
+		}
+		return m.found[n-1].Label, m.found[n-1].Digits, true
+	}
+	for _, known := range m.values {
+		if known.key == key && known.value != "" {
+			return known.label, known.value, true
+		}
+	}
+	return "", "", false
 }
 
 // newTextMasker masks the values of fields' sensitive ones.
@@ -495,6 +613,7 @@ func (m *textMasker) mask(text string) string {
 		if !ok {
 			order = len(m.numbers) + 1
 			m.numbers[number.Digits] = order
+			m.found = append(m.found, number)
 		}
 		return m.replace("number:"+strconv.Itoa(order), number.Label)
 	})

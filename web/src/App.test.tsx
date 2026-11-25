@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import type { AppShortcut, Transfer } from "./api.generated";
+import { focusedWindow } from "./desktop/focusedWindow";
+import { resetSystemUpdate } from "./systemupdate/status";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
 import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
@@ -140,6 +142,7 @@ beforeEach(() => {
 afterEach(() => {
   transferStore.reset();
   resetWebSearch();
+  resetSystemUpdate();
   tus.uploads.length = 0;
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -230,6 +233,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
+    expect(within(desktop).getByRole("button", { name: "打开待办" }).hasAttribute("disabled")).toBe(false);
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
     // The terminal moved into 设置 → 终端.
     for (const retired of [
@@ -259,6 +263,62 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
     await user.click(screen.getByRole("button", { name: "恢复设置" }));
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
+  });
+
+  it("tells what floats above the windows which window is on top, as windows open, move, change and go", async () => {
+    serveDesktop();
+    serveWindows();
+    const user = userEvent.setup();
+    const capture = Object.getOwnPropertyDescriptor(Element.prototype, "setPointerCapture");
+    // jsdom captures no pointer, which a window's title bar and handle take.
+    Object.defineProperty(Element.prototype, "setPointerCapture", { configurable: true, value: vi.fn() });
+    try {
+      render(<App />);
+      const desktop = await screen.findByRole("region", { name: "桌面应用" });
+      const onTop = () => focusedWindow()?.id ?? null;
+      expect(onTop()).toBeNull();
+      await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+      expect(onTop()).toBe("settings");
+      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+      expect(onTop()).toBe("trash");
+      // Brought to the front by a press.
+      const settings = screen.getByRole("dialog", { name: "设置" });
+      fireEvent.pointerDown(settings);
+      expect(onTop()).toBe("settings");
+      // Moved and resized: once the pointer lets go.
+      const at = { ...focusedWindow() };
+      const pointer = { button: 0, pointerId: 1, pointerType: "mouse" };
+      const titleBar = settings.firstElementChild as HTMLElement;
+      fireEvent.pointerDown(titleBar, { ...pointer, clientX: 400, clientY: 80 });
+      fireEvent.pointerMove(titleBar, { ...pointer, clientX: 500, clientY: 120 });
+      expect(focusedWindow()?.x).toBe(at.x);
+      fireEvent.pointerUp(titleBar, { ...pointer, clientX: 500, clientY: 120 });
+      expect(focusedWindow()).toMatchObject({ x: (at.x ?? 0) + 100, y: (at.y ?? 0) + 40 });
+      const handle = settings.lastElementChild as HTMLElement;
+      fireEvent.pointerDown(handle, { ...pointer, clientX: 900, clientY: 700 });
+      fireEvent.pointerMove(handle, { ...pointer, clientX: 950, clientY: 720 });
+      fireEvent.pointerUp(handle, { ...pointer, clientX: 950, clientY: 720 });
+      expect(focusedWindow()).toMatchObject({ width: (at.width ?? 0) + 50, height: (at.height ?? 0) + 20 });
+      await user.click(within(settings).getByRole("button", { name: "最大化设置" }));
+      expect(focusedWindow()?.maximized).toBe(true);
+      await user.click(within(settings).getByRole("button", { name: "还原设置" }));
+      expect(focusedWindow()?.maximized).toBe(false);
+      // Minimized, the one under it is on top; closed, none.
+      await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
+      expect(onTop()).toBe("trash");
+      await user.click(
+        within(screen.getByRole("dialog", { name: "回收站" })).getByRole("button", { name: "关闭回收站" }),
+      );
+      expect(onTop()).toBeNull();
+      // 显示桌面 puts every window away.
+      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+      expect(onTop()).toBe("trash");
+      await user.click(screen.getByRole("button", { name: "显示桌面" }));
+      expect(onTop()).toBeNull();
+    } finally {
+      if (capture) Object.defineProperty(Element.prototype, "setPointerCapture", capture);
+      else delete (Element.prototype as Partial<Element>).setPointerCapture;
+    }
   });
 
   it("maximizes a window above the dock and restores it", async () => {
@@ -362,7 +422,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       return screen.getByRole("dialog", { name: "设置" });
     };
     let settings = await openAccount();
-    await user.click(await within(settings).findByRole("button", { name: "修改密码…" }));
+    await user.click(await within(settings).findByRole("button", { name: /^密码/ }));
     await user.type(within(settings).getByLabelText("当前密码"), "correct horse battery staple");
 
     const statusBar = screen.getByRole("banner", { name: "设备状态" });
@@ -371,7 +431,7 @@ describe("A-NAS v1.0.1 desktop", () => {
 
     settings = await openAccount();
     expect(within(settings).queryByRole("form", { name: "修改密码" })).toBeNull();
-    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
+    expect(within(settings).getByRole("button", { name: /^密码/ })).toBeTruthy();
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {
@@ -685,6 +745,65 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByRole("button", { name: "打开网页搜索" })).not.toBeInTheDocument();
   });
 
+  it("shows 照片打分 only where its module is installed, to the accounts it lets in", async () => {
+    serveDesktop({ scoring: { admin: false, rater: true } });
+    serveWindows();
+    const { unmount } = render(<App />);
+    expect((await screen.findAllByRole("button", { name: "打开照片打分" })).length).toBeGreaterThan(0);
+    unmount();
+
+    serveDesktop({ scoring: { admin: false, rater: false } });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
+  });
+
+  it("shows 剪辑中心 only while the device turns it on, and opens its empty project list", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
+    await user.click(icons[0]);
+    expect(await screen.findByText("还没有项目")).toBeInTheDocument();
+    unmount();
+
+    serveDesktop({ montage: false });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+  });
+
+  it("asks again whether 剪辑中心 is on when the page comes back into view", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    // The first read fails as on a network error, which the contract does not describe.
+    let failed = false;
+    server.use(
+      http.untyped.get(
+        `${window.location.origin}/api/v1/montage`,
+        () => {
+          failed = true;
+          return HttpResponse.error();
+        },
+        { once: true },
+      ),
+    );
+    const shown = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    try {
+      render(<App />);
+      await waitFor(() => expect(failed).toBe(true));
+      await screen.findAllByRole("button", { name: "打开相册" });
+      expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((await screen.findAllByRole("button", { name: "打开剪辑中心" })).length).toBeGreaterThan(0);
+    } finally {
+      shown.mockRestore();
+    }
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     serveDesktop();
     serveWindows();
@@ -946,7 +1065,7 @@ describe("Settings on the desktop", () => {
     expect((await within(settings).findByRole("button", { name: "我的账号" })).getAttribute("aria-current")).toBe(
       "page",
     );
-    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
+    expect(within(settings).getByRole("button", { name: /^密码/ })).toBeTruthy();
   });
 
   it("lets a member choose a nickname that the desktop shows instead of the account name", async () => {
@@ -956,7 +1075,7 @@ describe("Settings on the desktop", () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: "账号（alice）" })).toBeTruthy();
     const settings = await openSettingsOn(user, "我的账号");
-    await user.click(within(settings).getByRole("button", { name: "设置昵称…" }));
+    await user.click(within(settings).getByRole("button", { name: /^昵称/ }));
     const form = within(settings).getByRole("form", { name: "修改昵称" });
     await user.type(within(form).getByLabelText("昵称"), "小爱");
     await user.click(within(form).getByRole("button", { name: "保存昵称" }));
@@ -1008,7 +1127,7 @@ describe("Settings on the desktop", () => {
       "/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef",
     );
 
-    await user.click(within(settings).getByRole("button", { name: "移除" }));
+    await user.click(within(settings).getByRole("button", { name: "移除头像" }));
     expect(await within(settings).findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.querySelector("img")).toBeNull();
     expect(account.textContent).toContain("A");
@@ -1203,6 +1322,28 @@ describe("ADR 0008 account safeguards", () => {
     await user.click(within(notice).getByRole("button", { name: "知道了" }));
     expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull();
     await waitFor(() => expect(acknowledged).toEqual(["notification:1"]));
+  });
+
+  it("tells the administrator where a deleted account's files and photos went", async () => {
+    serveDesktop({
+      notifications: [
+        {
+          id: "notification:3",
+          kind: "account_deleted",
+          actorUsername: "carol",
+          folder: "carol 的文件",
+          album: "carol 的照片",
+          createdAt: "2026-12-16T10:00:00Z",
+        },
+      ],
+    });
+    render(<App />);
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(
+      within(notice).getByText(
+        /账号 carol 已于 .* 删除。文件在你个人空间的“carol 的文件”文件夹，照片在你私有图库的“carol 的照片”相册。/,
+      ),
+    ).toBeTruthy();
   });
 
   it("tells the owner when an administrator viewed the private photo library", async () => {

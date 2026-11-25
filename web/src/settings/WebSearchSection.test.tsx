@@ -6,8 +6,11 @@ import { setSession } from "../api/client";
 import { session } from "../test/fixtures";
 import { type WebSearchOptions, webSearchHandlers, webSearchStatus } from "../test/handlers/websearch";
 import { server } from "../test/server";
+import { fixToday } from "../test/today";
 import { resetWebSearch } from "../websearch/status";
 import { WebSearchSection } from "./WebSearchSection";
+
+fixToday();
 
 function serve(options: WebSearchOptions = {}) {
   const webSearch = webSearchHandlers(options);
@@ -57,9 +60,6 @@ describe("Settings → 网页搜索", () => {
     render(<WebSearchSection />);
     expect(await screen.findByText("百度")).toBeInTheDocument();
     expect(screen.getByText("要求验证码，今天 23:30 恢复")).toBeInTheDocument();
-    expect(
-      screen.getByText("网站拦截后暂停 1 小时，恢复后再次被拦则加倍，最长 1 天；同一网站的各类搜索一起暂停。"),
-    ).toBeInTheDocument();
   });
 
   it("says when no website is paused", async () => {

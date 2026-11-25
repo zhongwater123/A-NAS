@@ -1,0 +1,19 @@
+[Unit]
+Description=A-NAS settings of this machine
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/runbooks/deploy-a-nas-packages.md
+# Applies /etc/a-nas/site.conf and /etc/a-nas/internet.env where other
+# programs read their own configuration (ADR 0034): the LAN and internet
+# entries' Caddy site, the internet entry's tunnel, the fan sensor drivers,
+# and the secrets made once. a-nas-generator writes the systemd drop-ins.
+# It runs at every boot and after each install, so the result never depends
+# on a package script; a-nas-check reports a failure.
+After=local-fs.target
+Before=anas-api.service anas-search.service caddy.service anas-internet-firewall.service wg-quick@wg-anas.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/a-nas/site/apply
+
+[Install]
+WantedBy=multi-user.target

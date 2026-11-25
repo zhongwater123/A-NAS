@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# a-nas-check: is the installed A-NAS working (ADR 0034)? It changes nothing.
+# Each check prints PASS or FAIL with what to do; the exit status is 1 when
+# any failed. Run it after an upgrade or rollback: a release that fails it is
+# rolled back (docs/runbooks/deploy-a-nas-packages.md). A service that
+# restarted a moment ago gets up to 30 s to answer.
+#
+# Usage (as root): a-nas-check [--failed FILE]
+#   --failed FILE   also writes the name of each check that failed to FILE,
+#                   one per line: the image's boot health check compares them
+#                   with those that failed before an update
+#                   (/usr/lib/a-nas-image/health in deploy/image).
+set -uo pipefail
+
+failed_file=
+if [[ "${1:-}" == --failed && -n "${2:-}" && $# -eq 2 ]]; then
+  failed_file=$2
+elif (($# > 0)); then
+  echo "usage: a-nas-check [--failed FILE]" >&2
+  exit 2
+fi
+if [[ $EUID -ne 0 ]]; then
+  echo "run as root: the Host Agent's capabilities and journal are root's" >&2
+  exit 1
+fi
+failed=()
+pass() { echo "PASS $*"; }
+# fail NAME MESSAGE...: NAME names the check for --failed.
+fail() {
+  failed+=("$1")
+  shift
+  echo "FAIL $*"
+}
+
+# The product and the Debian packages it runs on are one release (ADR 0031).
+# On a machine that apt installs, dpkg says which.
+package_versions() {
+  local product host console
+  product=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas 2>/dev/null)
+  host=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-host 2>/dev/null)
+  # a-nas's postinst runs this check while dpkg still calls a-nas half-configured.
+  if [[ "${DPKG_MAINTSCRIPT_PACKAGE:-}" == a-nas && "$product" == half-configured\ * ]]; then
+    product="installed ${product#half-configured }"
+  fi
+  if [[ "$product" == installed\ * && "$host" == "$product" ]]; then
+    pass "a-nas and a-nas-host ${product#installed }"
+  else
+    fail versions "a-nas is '${product:-missing}' and a-nas-host '${host:-missing}': install both at one version"
+  fi
+  # A local console's a-nas-console declares what its screen needs from Debian
+  # for the same release; apt changes it only when the command names it. In the
+  # middle of one apt run it may be unpacked and not yet configured.
+  console=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' a-nas-console 2>/dev/null)
+  case "${console%% *}" in
+    '' | not-installed | config-files) ;;
+    *)
+      if [[ "${console#* }" == "${product#* }" ]]; then
+        pass "a-nas-console ${console#* }"
+      else
+        fail console "a-nas-console is '$console', not a-nas's version: apt-get install --no-install-recommends --allow-downgrades a-nas-console=${product#* }"
+      fi
+      ;;
+  esac
+}
+# On a device that runs the A-NAS image (ADR 0034 decision 2) the product is
+# a system extension over the image's /usr, and dpkg's records on the
+# persistent root stay as the first image left them: the image's and the
+# extension's release files say which. A product and the base it runs on may
+# come from different releases; A_NAS_HOST_ID, in both, names what the
+# product needs from the base (scripts/build-image.sh).
+image_versions() {
+  local base host product needs release=/usr/lib/extension-release.d/extension-release.a-nas-product
+  # shellcheck disable=SC1091 # the image's own release file
+  { read -r base; read -r host; } < <(. /usr/lib/os-release && printf '%s\n' "${IMAGE_VERSION:-}" "${A_NAS_HOST_ID:-}")
+  if [[ ! -f "$release" ]]; then
+    fail product "the A-NAS image $base has no product merged: see systemd-sysext status and journalctl -u systemd-sysext"
+    return
+  fi
+  # shellcheck disable=SC1090 # the extension's release file
+  { read -r product; read -r needs; } < <(. "$release" && printf '%s\n' "${A_NAS_VERSION:-}" "${A_NAS_HOST_ID:-}")
+  if [[ -n "$needs" && "$needs" == "$host" ]]; then
+    pass "a-nas ${product:-of unknown version} on the A-NAS image $base"
+  else
+    fail base "a-nas ${product:-of unknown version} needs another A-NAS image than $base: update the base, or go back to the product before (docs/runbooks/build-device-image.md)"
+  fi
+}
+# shellcheck disable=SC1091 # mkosi quotes the values; read the file as systemd does
+if [[ "$(. /usr/lib/os-release 2>/dev/null && echo "${IMAGE_ID:-}")" == a-nas ]]; then
+  image_versions
+else
+  package_versions
+fi
+
+# Accounts that own data keep fixed IDs (ADR 0011); the others cannot log in.
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003; do
+  name=${account%%:*} id=${account#*:}
+  if [[ "$(id -u "$name" 2>/dev/null):$(id -g "$name" 2>/dev/null)" == "$id:$id" ]]; then
+    pass "$name is $id:$id"
+  else
+    fail "account:$name" "$name is not $id:$id; A-NAS never adopts an account it did not create: rename the other account"
+  fi
+done
+for name in a-nas-kiosk a-nas-search anas-container; do
+  if [[ "$(getent passwd "$name" | cut -d: -f6-7)" == /nonexistent:/usr/sbin/nologin ]]; then
+    pass "$name cannot log in"
+  else
+    fail "nologin:$name" "$name is missing or has a home or shell A-NAS did not give it"
+  fi
+done
+
+# A unit of the same name in /etc, as an installation before the packages
+# wrote them, overrides the package's.
+leftovers=
+while read -r unit; do
+  [[ -e "/etc/systemd/system/${unit##*/}" ]] && leftovers+="${unit##*/} "
+done < <(dpkg-query --listfiles a-nas 2>/dev/null | grep -E '^/usr/lib/systemd/system/[^/]+\.(service|socket|slice|path)$')
+if [[ -z "$leftovers" ]]; then
+  pass "no unit in /etc/systemd/system overrides the package's"
+else
+  fail unit-overrides "these units in /etc/systemd/system override the package's: $leftovers"
+fi
+
+if grep -Eq '^ANAS_SMB_INTERFACE=[A-Za-z0-9_.:-]+$' /etc/a-nas/site.conf 2>/dev/null; then
+  pass "site.conf names the SMB interface"
+else
+  fail site-conf "set ANAS_SMB_INTERFACE in /etc/a-nas/site.conf, then run a-nas-site"
+fi
+if systemctl is-active --quiet anas-site.service; then
+  pass "anas-site.service applied this machine's settings"
+else
+  fail anas-site "anas-site.service failed; see journalctl -u anas-site"
+fi
+
+for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service \
+  anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-montage-compute.socket anas-montage-assistant.socket \
+  anas-vectors-proxy@a-nas-photos.socket smbd.service; do
+  # A unit that is starting or restarting, as smbd does when the Host Agent
+  # writes Samba's configuration, gets time to finish.
+  for _ in $(seq 1 30); do
+    case "$(systemctl is-active "$unit")" in activating | reloading | deactivating) sleep 1 ;; *) break ;; esac
+  done
+  if systemctl is-active --quiet "$unit"; then
+    pass "$unit is active"
+  else
+    fail "unit:$unit" "$unit is $(systemctl is-active "$unit"); see journalctl -u $unit"
+  fi
+done
+# Stopped is a valid state for web search: the administrator turns it off.
+echo "INFO web search: $(systemctl is-active anas-search.service)"
+# So it is for the parts that their runbooks turn on or off.
+echo "INFO LAN Web entry (Caddy): $(systemctl is-active caddy.service)"
+if /usr/lib/a-nas-docker-policy/check-address-pool >/dev/null 2>&1; then
+  echo "INFO App Center: Docker $(systemctl is-active docker.service), container agent $(systemctl is-active anas-container-agent.service)"
+else
+  echo "INFO App Center: Docker waits for bip and default-address-pools in /etc/docker/daemon.json (docs/runbooks/install-container-agent.md)"
+fi
+if [[ -e /etc/a-nas/internet.env ]]; then
+  echo "INFO internet entry: on (/etc/a-nas/internet.env)"
+else
+  echo "INFO internet entry: off"
+fi
+# VNAS runs while the administrator's model key is saved, and with it the montage center's
+# planner, which hands the planning to members' planning instances.
+if [[ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]]; then
+  if systemctl is-active --quiet anas-montage-planner.service; then
+    pass "anas-montage-planner.service is active"
+  else
+    fail unit:anas-montage-planner.service \
+      "anas-montage-planner.service is $(systemctl is-active anas-montage-planner.service); see journalctl -u anas-montage-planner"
+  fi
+else
+  echo "INFO VNAS and the montage center's planner: off without the model key"
+fi
+
+# A store on the data volume that its service opened before opens again. A
+# service whose database does not open, as when a rollback finds no reverse
+# step for a newer release's change, waits with its unit active; the last of
+# its "ready" and "unavailable" lines since it started tells.
+if mountpoint -q /srv/a-nas/data; then
+  for store in 'anas-photos photos/catalog.db photo' 'anas-shares shares/catalog.db member-share' \
+    'anas-family family/family.db family' 'anas-montage montage/montage.db montage'; do
+    read -r unit database name <<<"$store"
+    if [[ ! -f "/srv/a-nas/data/$database" ]]; then
+      echo "INFO $unit: no $database yet"
+      continue
+    fi
+    since=$(systemctl show -p ActiveEnterTimestamp --value "$unit.service")
+    state=
+    for _ in $(seq 1 30); do
+      state=$(journalctl -u "$unit.service" --since "${since:-today}" -o cat --no-pager 2>/dev/null |
+        grep -Eo "$name (service ready|store unavailable|store lost)" | tail -n 1)
+      [[ "$state" == "$name service ready" ]] && break
+      sleep 1
+    done
+    if [[ "$state" == "$name service ready" ]]; then
+      pass "$unit serves /srv/a-nas/data/$database"
+    else
+      fail "store:$unit" "$unit has not opened /srv/a-nas/data/$database (${state:-no ready line}); see journalctl -u $unit. After a rollback, restore the copy taken before the upgrade (docs/runbooks/deploy-a-nas-packages.md)"
+    fi
+  done
+else
+  echo "INFO the data volume is not mounted: the stores on it were not checked"
+fi
+
+# Web files and the terminal run as the signed-in user, so the Host Agent must
+# keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at
+# startup (issue #38).
+since=$(systemctl show -p ActiveEnterTimestamp --value anas-host-agent.service)
+identity_switch=
+for _ in $(seq 1 30); do
+  identity_switch=$(journalctl -u anas-host-agent.service --since "${since:-today}" -o cat --no-pager 2>/dev/null |
+    grep -Eo 'file broker (identity switch verified|cannot switch to user identities)' | tail -n 1)
+  [[ -n "$identity_switch" ]] && break
+  sleep 1
+done
+pid=$(systemctl show -p MainPID --value anas-host-agent.service)
+cap_eff=$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
+if [[ "$identity_switch" == "file broker identity switch verified" && -n "$cap_eff" ]] && (((16#$cap_eff >> 6 & 3) == 3)); then
+  pass "the Host Agent starts file workers as users"
+else
+  fail file-workers "the Host Agent cannot start file workers as users (CapEff=${cap_eff:-unknown}; ${identity_switch:-no identity probe result}): roll back this release"
+fi
+
+if python3 -I - <<'PY'; then
+import json
+import time
+import urllib.request
+
+for _ in range(30):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=3) as response:
+            if response.status == 200 and json.load(response).get("status") == "ok":
+                raise SystemExit(0)
+    except (OSError, ValueError):
+        pass
+    time.sleep(1)
+raise SystemExit(1)
+PY
+  pass "the Product Service answers /healthz"
+else
+  fail healthz "the Product Service does not answer http://127.0.0.1:8080/healthz; see journalctl -u anas-api"
+fi
+
+if [[ -n "$failed_file" ]]; then
+  if ((${#failed[@]} > 0)); then printf '%s\n' "${failed[@]}"; fi >"$failed_file"
+fi
+if ((${#failed[@]} > 0)); then
+  echo "a-nas-check: ${#failed[@]} checks failed"
+  exit 1
+fi
+echo "a-nas-check: all checks passed"

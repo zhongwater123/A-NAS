@@ -2,6 +2,7 @@ package family
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"math"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb/sqlitedbtest"
 )
 
 // fakePhotos is the photo service as a test arranges it: which photos exist,
@@ -734,4 +738,10 @@ func TestMembersReactWithOneTap(t *testing.T) {
 	wantErr(t, f.store.DeleteRecord(ctx, grandma, record.ID), nil)
 	_, err = f.store.React(ctx, dad, record.ID, "heart", true)
 	wantErr(t, err, ErrNotFound)
+}
+
+func TestMigrationsAfterThePackagedReleasesHaveDowns(t *testing.T) {
+	sqlitedbtest.CheckReversible(t, databaseSchema, func(path string) (*sql.DB, error) {
+		return sqlitedb.Open(path, sqlitedb.Options{Durable: true})
+	})
 }

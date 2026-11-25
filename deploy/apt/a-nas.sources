@@ -1,0 +1,9 @@
+# /etc/apt/sources.list.d/a-nas.sources: the A-NAS repository (ADR 0034,
+# docs/runbooks/deploy-a-nas-packages.md). URIs names where the repository is:
+# a directory copied to this machine, as here, or an HTTPS address. A device
+# follows release; a test machine follows release and dev.
+Types: deb
+URIs: file:/var/local/a-nas-repository
+Suites: release
+Components: main
+Signed-By: /usr/share/keyrings/a-nas-archive-keyring.pgp

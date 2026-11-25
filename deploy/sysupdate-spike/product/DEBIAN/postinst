@@ -1,0 +1,8 @@
+#!/bin/sh
+# What a Debian package usually does on install. A system extension never
+# runs maintainer scripts.
+set -e
+if [ "$1" = configure ]; then
+	adduser --system --group --no-create-home a-nas-demo-postinst || true
+	systemctl enable a-nas-demo.service || true
+fi

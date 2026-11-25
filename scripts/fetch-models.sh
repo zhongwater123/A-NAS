@@ -6,8 +6,8 @@
 # sha256-<its SHA-256> there. A file of 2 GiB or more, which GitHub refuses as
 # one asset, is split into <file>.part-NN, joined in order. Every file is
 # checked against its manifest's size and SHA-256 before it takes its place
-# in DIR, in the directories that deploy-dev.ps1's defaults and
-# scripts/system-test.sh expect (layout below). A file already in place that
+# in DIR, in the directories listed below (layout), from which the
+# release content store is filled (scripts/build-content-packages.sh). A file already in place that
 # passes the check is kept. An interrupted download keeps the parts it
 # finished in DIR/.incoming/<sha256>/; a file that fails the check is
 # removed, and the next run downloads it again.
@@ -19,8 +19,8 @@
 # Usage: scripts/fetch-models.sh DIR [MANIFEST...]
 #        scripts/fetch-models.sh --publish DIR MANIFEST...
 # DIR is D:\A-NAS-models (/mnt/d/A-NAS-models in WSL) on Windows and
-# ~/A-NAS-models on macOS. Without MANIFEST every manifest in deploy/models
-# is fetched. Both forms need jq and gh signed in to an account that can read
+# ~/A-NAS-models on macOS. Without MANIFEST, fetch all except the internal evaluation scorer.
+# Pass its manifest explicitly to fetch it. Both forms need jq and gh signed in to an account that can read
 # (for --publish, write) the repository; ANAS_ASSETS_REPO names another one.
 set -euo pipefail
 
@@ -42,7 +42,9 @@ mkdir -p -- "$1"
 root=$(cd -- "$1" && pwd)
 shift
 if [[ $# -eq 0 ]]; then
-  set -- "$repo"/deploy/models/*.json
+  for manifest in "$repo"/deploy/models/*.json; do
+    [[ ${manifest##*/} == qwen35-4b-aesthetic-scorer.json ]] || set -- "$@" "$manifest"
+  done
 fi
 
 # layout NAME: the directory under DIR that holds the model NAME.
@@ -55,6 +57,9 @@ layout() {
     auraface-v1) echo faces/auraface ;;
     dinov2-small) echo pets/dinov2-small ;;
     qwen3.5-4b-q4_k_m | qwen3.5-4b-mmproj-f16) echo ocr/qwen3.5-4b ;;
+    qwen35-4b-aesthetic-scorer) echo aesthetic/qwen35-4b-aesthetic-scorer ;;
+    allin1-harmonix-all) echo montage-music/allin1 ;;
+    htdemucs) echo montage-music/htdemucs ;;
     *) return 1 ;;
   esac
 }

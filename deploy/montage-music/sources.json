@@ -1,0 +1,26 @@
+{
+  "note": "Packages of the music runtime with no wheel for Debian 13's Python 3.13: scripts/build-montage-music-runtime.sh checks each source against its SHA-256 and builds the wheel in the builder image (docs/architecture/montage-music.md, 运行环境).",
+  "packages": [
+    {
+      "name": "natten",
+      "version": "0.17.1",
+      "source": "https://files.pythonhosted.org/packages/06/64/c5a2773705d2cd09284d03368ac4a8fc85fb9da02514fc3aefa43692a775/natten-0.17.1.tar.gz",
+      "file": "natten-0.17.1.tar.gz",
+      "sizeBytes": 10848470,
+      "sha256": "a2142722faa41fa3ae6d22e91ed527b2a6da5c4fe09a006f36d68edccaf9c643",
+      "license": "MIT",
+      "why": "The release the development machine's allin1 environment runs, with the neighbourhood-attention ops allin1 1.1.0 calls (natten.functional.natten1dqkrpb and the like); its CPU kernels are compiled against the runtime's PyTorch. 0.17.5 asks CUDA for its device at import and fails on a processor-only PyTorch."
+    },
+    {
+      "name": "madmom",
+      "version": "0.17.dev0",
+      "commit": "27f032e8947204902c675e5e341a3faf5dc86dae",
+      "source": "https://github.com/CPJKU/madmom/archive/27f032e8947204902c675e5e341a3faf5dc86dae.tar.gz",
+      "file": "madmom-27f032e8947204902c675e5e341a3faf5dc86dae.tar.gz",
+      "sizeBytes": 2469298,
+      "sha256": "9ed8d684642891cb51b78231ee6226143f5d45aee5dcfc3ba7cfeb7c97ab8900",
+      "license": "BSD-2-Clause for the code. The model and data files (CC BY-NC-SA 4.0) are the git submodule madmom/models, which GitHub's archive leaves out; the build writes an empty madmom/models/__init__.py in its place, so the runtime holds none of them. allin1 uses madmom's spectrogram processors and DBN, which load no model file.",
+      "why": "The release on PyPI (0.16.1) does not build on Python 3.13; this is the commit the development machine's allin1 environment runs."
+    }
+  ]
+}

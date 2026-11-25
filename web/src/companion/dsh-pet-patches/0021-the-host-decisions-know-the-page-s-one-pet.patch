@@ -49,7 +49,8 @@ diff --git a/host/pet-config.ts b/host/pet-config.ts
 new file mode 100644
 --- /dev/null
 +++ b/host/pet-config.ts
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,44 @@
++// A-NAS: not in PC2005-cloud/dsh-pet; added to its copy at 10f6c868b811 by dsh-pet-patches/0021 (MIT, see LICENSE).
 +// A-NAS: what host/config.ts gives the decision layers (./anim, ./motion-cue, ./broadcast), for the page.
 +/**
 + * dsh-pet's host reads its pets and their animations from configuration files on disk (host/config/read.ts,

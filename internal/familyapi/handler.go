@@ -1,4 +1,5 @@
-// Package familyapi exposes 家庭中心 under /api/v1/family. It does not
+// Package familyapi exposes 家庭中心 under /api/v1/family and 家庭待办 under
+// /api/v1/todos, both kept by the family store. It does not
 // authenticate: the family service, or the Product Service in development,
 // wraps it so that every request carries the signed-in user and the session
 // token (accounts.WithUser, accounts.WithSessionToken), and writes have
@@ -25,8 +26,12 @@ import (
 
 const PathPrefix = "/api/v1/family"
 
+// TodosPrefix is where the family's to-dos are served. They are not family
+// center content: every active account uses them, member or not.
+const TodosPrefix = "/api/v1/todos"
+
 // maxJSONBytes bounds a JSON request: a record names at most
-// family.MaxPhotos photo IDs besides its text.
+// family.MaxPhotos photo IDs besides its text. To-dos share the bound.
 const maxJSONBytes = 256 << 10
 
 type handler struct {
@@ -92,14 +97,21 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 		method, path, _ := strings.Cut(pattern, " ")
 		h.mux.HandleFunc(method+" "+PathPrefix+path, h.withActor(serve))
 	}
-	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
-		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-	})
+	for pattern, serve := range h.todoRoutes() {
+		method, path, _ := strings.Cut(pattern, " ")
+		h.mux.HandleFunc(method+" "+TodosPrefix+path, h.withActor(serve))
+	}
+	for _, prefix := range []string{PathPrefix, TodosPrefix} {
+		h.mux.HandleFunc(prefix+"/", func(w http.ResponseWriter, _ *http.Request) {
+			httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+		})
+	}
 	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.withActor(h.activity))
 	return h
 }
 
-// Endpoints are the operations the family API serves under PathPrefix.
+// Endpoints are the operations the family API serves under PathPrefix and
+// TodosPrefix.
 func Endpoints() []apiroute.Endpoint {
 	return New(nil, nil, nil).(*handler).mux.Endpoints()
 }

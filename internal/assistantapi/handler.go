@@ -29,6 +29,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/assistantkey"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -58,10 +59,16 @@ type Options struct {
 	// Notices keeps the notices of scheduled tasks' runs; without it the
 	// member is not told of them.
 	Notices TaskNotices
+	// Tasks has a scheduled task run now; without it the window's "run now"
+	// answers that it is not available.
+	Tasks TaskRunner
 	// Accounts names the member whose assistant called on the companion
 	// socket, from the caller's UID; without it no call is taken.
 	Accounts AccountResolver
-	Logger   *slog.Logger
+	// Key tells the status why a member has no assistant: without the
+	// administrator's model key nobody has one.
+	Key    KeyState
+	Logger *slog.Logger
 	// Context ends what the API runs in the background: the instances kept
 	// for signed-in members, the watch over their scheduled tasks, and the
 	// gateway connections. Wait returns once the first two stopped. Without
@@ -176,13 +183,25 @@ func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, stri
 	}
 }
 
-func (h *Handler) status(w http.ResponseWriter, _ *http.Request, account string) {
+// KeyState reads whether the administrator saved the assistant's model key.
+type KeyState interface {
+	AssistantKey(ctx context.Context) (assistantkey.State, error)
+}
+
+func (h *Handler) status(w http.ResponseWriter, r *http.Request, account string) {
 	available := true
 	if h.options.SocketDir != "" {
 		_, err := os.Stat(filepath.Join(h.options.SocketDir, account+".sock"))
 		available = err == nil
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"available": available})
+	status := map[string]any{"available": available}
+	// The desktop tells a member whose device has no key that the administrator sets one.
+	if !available && h.options.Key != nil {
+		if key, err := h.options.Key.AssistantKey(r.Context()); err == nil && !key.Configured {
+			status["reason"] = "no_key"
+		}
+	}
+	httpjson.Write(w, http.StatusOK, status)
 }
 
 // session is what the desktop needs of a stored Hermes session.
@@ -268,11 +287,10 @@ func (h *Handler) renameSession(w http.ResponseWriter, r *http.Request, account 
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_title", "a title has 1 to 100 characters")
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"title": title})
 	var updated struct {
 		Title string `json:"title"`
 	}
-	if !h.call(w, r, account, http.MethodPatch, "/api/sessions/"+id, payload, &updated) {
+	if !h.writeCall(w, r, account, http.MethodPatch, id, map[string]any{"title": title}, &updated) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"id": id, "title": updated.Title})
@@ -283,7 +301,7 @@ func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request, account 
 	if !ok {
 		return
 	}
-	if h.call(w, r, account, http.MethodDelete, "/api/sessions/"+id, nil, nil) {
+	if h.writeCall(w, r, account, http.MethodDelete, id, nil, nil) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -380,6 +398,20 @@ func (h *Handler) call(w http.ResponseWriter, r *http.Request, account, method, 
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
 	status, data, err := h.rest(ctx, account, method, path, body)
+	return h.answered(w, account, status, data, err, into)
+}
+
+// writeCall is call for a write to a stored conversation, behind Hermes's
+// fence (writeSession).
+func (h *Handler) writeCall(w http.ResponseWriter, r *http.Request, account, method, id string, fields map[string]any, into any) bool {
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+	status, data, err := h.writeSession(ctx, account, method, id, fields)
+	return h.answered(w, account, status, data, err, into)
+}
+
+// answered writes our error for an instance's failure, or decodes its answer.
+func (h *Handler) answered(w http.ResponseWriter, account string, status int, data []byte, err error, into any) bool {
 	if err != nil {
 		h.unavailable(w, account, err)
 		return false

@@ -18,12 +18,24 @@ const activityEvents = ["pointerdown", "pointermove", "keydown", "wheel", "touch
 type Phase = "awake" | "saver" | "asleep";
 
 let covered = false;
+const dismissedListeners = new Set<() => void>();
 
 // localConsoleCovered tells whether either cover is up over the page: nobody
 // sees what the companion would do then, so VNAS hears that it is paused
 // (companion/commands.ts).
 export function localConsoleCovered(): boolean {
   return covered;
+}
+
+// onLocalConsoleDismissed calls listener with each input that takes either
+// cover away. That input stops here, and a wheel or a pointer move has no
+// release that reaches the page after it, so the page would not know the
+// member is back until the next input (companion/petCard.tsx).
+export function onLocalConsoleDismissed(listener: () => void): () => void {
+  dismissedListeners.add(listener);
+  return () => {
+    dismissedListeners.delete(listener);
+  };
 }
 
 export function isLocalConsole(search = window.location.search): boolean {
@@ -174,6 +186,7 @@ export function LocalConsoleScreenSaver({
         event.stopPropagation();
         event.stopImmediatePropagation();
         setPhase("awake");
+        for (const listener of dismissedListeners) listener();
       }
       schedule();
     };

@@ -5,11 +5,14 @@
 # under objects/ by its SHA-256, a pool is a directory of hard links to them
 # named as its manifest lists, and "current" names the pool the Product Service
 # reads. The companion pool dsh-pet's pinned commit ships is named in
-# web/src/companion/dsh-pet/README.md.
+# web/src/companion/dsh-pet/README.md, and pinned below.
 #
 #   install-media-pool.sh screensavers|companion POOL_ID [STAGING]
 #       Installs the pool scripts/remote-stage-media-pool.sh staged, or
-#       switches back to a pool that is already installed.
+#       switches back to a pool that is already installed. A companion pool
+#       must be the one this release's code plays (companion_pool).
+#   install-media-pool.sh companion --unpinned POOL_ID [STAGING]
+#       The same with another companion pool, such as a stand-in for a test.
 #   install-media-pool.sh screensavers --import DIRECTORY
 #       Adopts the screen saver pool an installer before issue #49 left in
 #       DIRECTORY.
@@ -20,12 +23,22 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 usage() {
-  echo "usage: $0 screensavers|companion POOL_ID [STAGING] | screensavers --import DIRECTORY" >&2
+  echo "usage: $0 screensavers|companion POOL_ID [STAGING] | companion --unpinned POOL_ID [STAGING] | screensavers --import DIRECTORY" >&2
   exit 2
 }
-[[ $# -ge 2 && $# -le 3 ]] || usage
+# The companion pool this release's code plays: the first 16 hexadecimal digits
+# of the SHA-256 of web/src/companion/dsh-pet/animations.sha256, which
+# scripts/check-dsh-pet-vendor.sh (make check-steps) keeps equal.
+companion_pool=36492963e4112f55
+[[ $# -ge 2 ]] || usage
 kind=$1
 shift
+unpinned=false
+if [[ $kind == companion && $1 == --unpinned ]]; then
+  unpinned=true
+  shift
+fi
+[[ $# -ge 1 && $# -le 2 ]] || usage
 # What sets the kinds apart: where the pool lives, how its objects and names
 # look, how many files it may list, and how large one may be.
 case $kind in
@@ -80,6 +93,10 @@ else
   pool=$1
   staging=${2:-/home/anas-dev/apps/a-nas/$kind}
   [[ $pool =~ ^[0-9a-f]{16}$ ]] || usage
+  if [[ $kind == companion && $unpinned == false && $pool != "$companion_pool" ]]; then
+    echo "pool $pool is not the companion pool this release plays, $companion_pool: install that one, or pass --unpinned" >&2
+    exit 2
+  fi
   if [[ ! -d $store/pools/$pool ]]; then
     [[ -e $staging/pools/$pool.sums ]] || { echo "pool $pool is neither installed nor staged in $staging" >&2; exit 2; }
     # Check a private copy: the staging account can change its own files.

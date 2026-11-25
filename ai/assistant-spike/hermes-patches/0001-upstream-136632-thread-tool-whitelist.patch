@@ -1,19 +1,21 @@
 From: liuhao1024 (NousResearch/hermes-agent#136632, 6e1739121af4)
 Subject: [PATCH] fix(plugins): enforce the thread tool whitelist on tool-dispatch workers
 
-Upstream's open fix for NousResearch/hermes-agent#136623, unchanged: the
-background review's and side questions' tool whitelist lived in a
-threading.local(), but every tool runs on a worker thread that
-propagate_context_to_thread starts with the caller's ContextVars only, so the
-review could call every tool the main agent has. The fix mirrors the whitelist
-in a ContextVar. It applies to the pinned 0e427d78; drop this file once Hermes
-is upgraded past the fix's merge.
+Upstream's open fix for NousResearch/hermes-agent#136623: the background
+review's and side questions' tool whitelist lived in a threading.local(), but
+every tool runs on a worker thread that propagate_context_to_thread starts
+with the caller's ContextVars only, so the review could call every tool the
+main agent has. The fix mirrors the whitelist in a ContextVar. The pull
+request still stands on its commit of 2026-10-11 and no longer applies to
+main: this is the same change on the pinned 8fd9f706, where only the place of
+the import in hermes_cli/plugins.py differs. Drop this file once Hermes is
+upgraded past the fix's merge.
 ---
 diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
-index a652179cd4a7a..c32d28f87ab85 100644
+index e2204a72..b1703f7e 100644
 --- a/hermes_cli/plugins.py
 +++ b/hermes_cli/plugins.py
-@@ -64,6 +64,11 @@
+@@ -64,6 +64,11 @@ from hermes_cli.plugins_state import (
      PluginState, _locked_plugin_state, _nested_plugin_mapping, _nested_plugin_value,
      _plugin_relative_segments, _plugin_settings_entry, save_plugin_setting,
  )
@@ -22,10 +24,10 @@ index a652179cd4a7a..c32d28f87ab85 100644
 +    set_thread_tool_whitelist,
 +    thread_tool_whitelist_block_message,
 +)
+ # PluginContext lives in plugins_context.py; this facade stays its public import path.
+ from hermes_cli.plugins_context import PluginContext, _UNSET, _ignore_after_abandoned_load
  
- 
- def get_bundled_plugins_dir() -> Path:
-@@ -1945,9 +1950,6 @@ def fire_pre_command_hook(
+@@ -1092,9 +1097,6 @@ def fire_pre_command_hook(
          logger.debug("pre_command hook dispatch failed (non-fatal): %s", exc)
  
  
@@ -35,7 +37,7 @@ index a652179cd4a7a..c32d28f87ab85 100644
  @dataclass(frozen=True)
  class _PreToolCallDirective:
      action: Optional[str] = None
-@@ -1956,18 +1958,6 @@ class _PreToolCallDirective:
+@@ -1103,18 +1105,6 @@ class _PreToolCallDirective:
      modified_args: Optional[dict[str, Any]] = None
  
  
@@ -54,7 +56,7 @@ index a652179cd4a7a..c32d28f87ab85 100644
  def _get_pre_tool_call_directive_details(
      tool_name: str, args: Optional[dict[str, Any]], task_id: str = "", session_id: str = "",
      tool_call_id: str = "", turn_id: str = "", api_request_id: str = "",
-@@ -1979,10 +1969,9 @@ def _get_pre_tool_call_directive_details(
+@@ -1126,10 +1116,9 @@ def _get_pre_tool_call_directive_details(
      ``block`` > ``approve`` > none, not registration order: any plugin's valid veto wins over an
      earlier plugin's request for human confirmation (#87420); among approves the first valid one
      wins. Irrelevant returns are ignored."""
@@ -70,7 +72,7 @@ index a652179cd4a7a..c32d28f87ab85 100644
          "pre_tool_call", tool_name=tool_name, args=args if isinstance(args, dict) else {},
 diff --git a/hermes_cli/plugins_thread_whitelist.py b/hermes_cli/plugins_thread_whitelist.py
 new file mode 100644
-index 0000000000000..ca303cbe85062
+index 00000000..ca303cbe
 --- /dev/null
 +++ b/hermes_cli/plugins_thread_whitelist.py
 @@ -0,0 +1,58 @@
@@ -133,10 +135,10 @@ index 0000000000000..ca303cbe85062
 +        return (fmt or "Tool '{tool_name}' denied").format(tool_name=tool_name)
 +    return None
 diff --git a/tests/hermes_cli/test_plugins.py b/tests/hermes_cli/test_plugins.py
-index 57fb3ec607354..21da1456c9972 100644
+index 520caf48..8ba27e02 100644
 --- a/tests/hermes_cli/test_plugins.py
 +++ b/tests/hermes_cli/test_plugins.py
-@@ -2000,77 +2000,6 @@ def capture(hook_name, **kwargs):
+@@ -2000,77 +2000,6 @@ class TestGetPreVerifyContinueMessage:
          assert seen["changed_paths"] == ["a.py"]
  
  
@@ -216,7 +218,7 @@ index 57fb3ec607354..21da1456c9972 100644
  
 diff --git a/tests/hermes_cli/test_plugins_tool_whitelist.py b/tests/hermes_cli/test_plugins_tool_whitelist.py
 new file mode 100644
-index 0000000000000..7a0145174b53f
+index 00000000..7a014517
 --- /dev/null
 +++ b/tests/hermes_cli/test_plugins_tool_whitelist.py
 @@ -0,0 +1,115 @@

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -23,13 +24,18 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+	"github.com/zhongwater123/A-NAS/internal/modulemanifest"
 	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/systemdscope"
 	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
+	"github.com/zhongwater123/A-NAS/internal/systemupdate/updater"
 )
 
 var version = "dev"
+
+// updateArgument runs one system update instead of the agent.
+const updateArgument = "update"
 
 func main() {
 	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
@@ -42,6 +48,14 @@ func main() {
 	if len(os.Args) >= 4 && os.Args[1] == rootbroker.ShellGateArgument {
 		if err := rootbroker.RunShellGate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS terminal:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// One run of anas-update.service (docs/specs/system-update.md).
+	if len(os.Args) == 2 && os.Args[1] == updateArgument {
+		if err := updater.Main(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, "A-NAS system update:", err)
 			os.Exit(1)
 		}
 		return
@@ -73,26 +87,42 @@ type config struct {
 	StateDir     string `env:"ANAS_STATE_DIR" envDefault:"/var/lib/a-nas"`
 	// FileBrokerSocket defaults to the socket beside the Host Agent's.
 	FileBrokerSocket string `env:"ANAS_FILE_BROKER_SOCKET"`
-	// The AI assistant is not shipped yet (ADR 0024): off unless its
-	// sockets are named. With it come the session gate and the executor of
-	// its changes, which keeps the copies the members' cards show beside
-	// the assistant directories (by default assistant/.changes on the data
-	// volume), where only root may read them.
+	// The AI assistant (ADR 0024) is on where its sockets are named, as the
+	// unit does; development runs without it. With it come the session gate and
+	// the executor of its changes, which keeps the copies the members' cards
+	// show beside the assistant directories (by default assistant/.changes on
+	// the data volume), where only root may read them. The instance secrets
+	// are the Host Agent's own, written where the executor prepares a member's
+	// assistant (Executor.AssistantTokenDir), so they have no setting; nor
+	// have the members' planning grants for the montage center, which the
+	// File Broker keeps beside them (Executor.AssistantPlanDir).
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
-	AssistantTokens        string `env:"ANAS_ASSISTANT_TOKEN_DIR" envDefault:"/etc/a-nas-assistant/tokens"`
 	AssistantChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET" envDefault:"/run/a-nas/assistant-changes.sock"`
+	// The scheduled tasks members asked to run now wait here for a round of
+	// their cron unit (ai/assistant/run-requests.sh reads the same place).
+	AssistantRuns string `env:"ANAS_ASSISTANT_RUN_DIR" envDefault:"/run/a-nas/assistant-runs"`
 	// Without the photo service's group the photo service is not installed
 	// and its session lookup is off; the default is the service's user.
 	PhotoSessionGroup  string `env:"ANAS_PHOTO_SESSION_GROUP"`
 	PhotoSessionSocket string `env:"ANAS_PHOTO_SESSION_SOCKET" envDefault:"/run/a-nas-sessions/photos.sock"`
 	// PhotoAssistantLookup=1 looks accounts up by UID for the photo
-	// service's socket for members' AI assistants, which is not shipped yet.
+	// service's socket for members' AI assistants, as the unit sets it.
 	PhotoAssistantLookup string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
 	ShareSessionGroup    string `env:"ANAS_SHARE_SESSION_GROUP"`
 	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
 	FamilySessionGroup   string `env:"ANAS_FAMILY_SESSION_GROUP"`
 	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
+	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
+	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	// MontageAssistantLookup=1 looks accounts up by UID for the montage
+	// center's socket for planning, as the unit sets it.
+	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
+	// Removable modules (ADR 0037): their manifests name the stores to
+	// keep, and their units grant the group of their session lookup.
+	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`
+	ModuleSessionGroup  string `env:"ANAS_MODULE_SESSION_GROUP" envDefault:"a-nas-module-sessions"`
+	ModuleSessionSocket string `env:"ANAS_MODULE_SESSION_SOCKET" envDefault:"/run/a-nas-module-sessions/sessions.sock"`
 }
 
 func loadConfig(environment map[string]string) (config, error) {
@@ -110,7 +140,7 @@ func loadConfig(environment map[string]string) (config, error) {
 		c.AssistantChanges = filepath.Join(c.DataMount, "assistant", ".changes")
 	}
 	if c.AssistantSockets == "" {
-		c.AssistantChanges = ""
+		c.AssistantChanges, c.AssistantRuns = "", ""
 	}
 	if c.PhotoSessionGroup == "" {
 		c.PhotoSessionGroup = accountid.PhotoServiceUser
@@ -120,6 +150,9 @@ func loadConfig(environment map[string]string) (config, error) {
 	}
 	if c.FamilySessionGroup == "" {
 		c.FamilySessionGroup = accountid.FamilyServiceUser
+	}
+	if c.MontageSessionGroup == "" {
+		c.MontageSessionGroup = accountid.MontageServiceUser
 	}
 	return c, nil
 }
@@ -162,8 +195,8 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, ReconcileFailed: reconcileFailed.Load,
-		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped,
+		SystemLogs: journal.New(), WebSearch: executor, PhoneHotspot: executor, SystemUpdate: executor, AssistantKey: executor, ReconcileFailed: reconcileFailed.Load,
+		RestoringRedundancy: executor.RestoringRedundancy, SpreadStopped: executor.SpreadStopped, Deletions: sessions,
 	}, logger)
 	mux := http.NewServeMux()
 	mux.Handle("/", operations)
@@ -186,11 +219,19 @@ func run(logger *slog.Logger) error {
 		defer placer.Close()
 		scopes = placer
 	}
+	// Planning grants are registered only where the assistant is on.
+	assistantPlans := ""
+	if config.AssistantSockets != "" {
+		assistantPlans = executor.AssistantPlanDir()
+	}
 	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
-		AssistantTokens:  config.AssistantTokens,
+		AssistantTokens:  executor.AssistantTokenDir(),
 		AssistantChanges: assistantChanges,
+		AssistantRuns:    config.AssistantRuns,
+		AssistantPlans:   assistantPlans,
+		AssistantOn:      executor.AssistantOn,
 		Accounts:         sessions,
 		Scopes:           scopes,
 	})
@@ -232,20 +273,32 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopSessionLookup()
-	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, logger)
+	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, false, logger)
 	if err != nil {
 		return err
 	}
 	defer stopShareLookup()
-	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, logger)
+	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, false, logger)
 	if err != nil {
 		return err
 	}
 	defer stopFamilyLookup()
+	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions,
+		config.MontageAssistantLookup == "1", logger)
+	if err != nil {
+		return err
+	}
+	defer stopMontageLookup()
+	stopModuleLookup, err := serveServiceSessionLookup("module", config.ModuleSessionGroup, config.ModuleSessionSocket, sessions, false, logger)
+	if err != nil {
+		return err
+	}
+	defer stopModuleLookup()
 	// Serving waits for nothing on the data volume: one that cannot be
 	// reconciled, or a long walk over a large space, leaves Web files, the
 	// terminal and the logs working (#166).
-	go keepDataVolume(ctx, executor, &reconcileFailed, logger)
+	go keepDataVolume(ctx, executor, config.ModuleManifests, &reconcileFailed, logger)
+	go keepNewModuleStores(ctx, executor, config.ModuleManifests, logger)
 	go keepViewing(ctx, executor, logger)
 	serveError := make(chan error, 1)
 	go func() {
@@ -342,7 +395,7 @@ func serveSessionLookup(config config, sessions *sessiondir.Directory, logger *s
 // such as a volume Btrfs turned read-only, is logged and reported in the host
 // state through failed, and the next round reconciles everything again; the
 // Host Agent keeps serving either way.
-func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed *atomic.Bool, logger *slog.Logger) {
+func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, moduleManifests string, failed *atomic.Bool, logger *slog.Logger) {
 	if changed, err := executor.EnsureMountUnit(ctx); err != nil {
 		logger.ErrorContext(ctx, "data-volume mount unit update failed", "error", err)
 	} else if changed {
@@ -369,6 +422,12 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed
 		failed.Store(err != nil)
 		logRepairs(logger, repaired)
 		ensureManagedStores(ctx, executor, logger)
+		ensureModuleStores(ctx, executor, moduleManifests, logger, nil)
+		// A member whose assistant was prepared while the volume was not mounted gets its
+		// folders once it is (ADR 0024).
+		if err := executor.PrepareAssistants(ctx); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "members' assistants not prepared on the data volume", "error", err)
+		}
 		continueConversion(ctx, executor, logger)
 		restoreRedundancy(ctx, executor, logger)
 	}
@@ -423,11 +482,65 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "family store repair failed", "error", familyErr)
 	}
 	logRepairs(logger, familyRepairs)
+	montageRepairs, montageErr := executor.EnsureMontageStore(ctx)
+	if montageErr != nil {
+		logger.ErrorContext(ctx, "montage store repair failed", "error", montageErr)
+	}
+	logRepairs(logger, montageRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
 	}
 	logRepairs(logger, repaired)
+}
+
+// ensureModuleStores keeps the store of each installed removable module
+// (ADR 0037). With ensured, it skips modules already in it and adds those
+// it ensured, so that a new manifest gets its store soon without repeating
+// the work for the others; nil ensures every module.
+func ensureModuleStores(ctx context.Context, executor *linuxhostops.Executor, dir string, logger *slog.Logger, ensured map[string]bool) {
+	manifests, err := modulemanifest.Read(dir)
+	if err != nil {
+		logger.ErrorContext(ctx, "reading module manifests failed", "error", err)
+	}
+	// A module removed since is forgotten, so that installing it again
+	// makes its store again.
+	for id := range ensured {
+		if !slices.ContainsFunc(manifests, func(manifest modulemanifest.Manifest) bool { return manifest.ID == id }) {
+			delete(ensured, id)
+		}
+	}
+	for _, manifest := range manifests {
+		if ensured != nil && ensured[manifest.ID] {
+			continue
+		}
+		ready, repaired, err := executor.EnsureModuleStore(ctx, manifest)
+		if err != nil {
+			logger.ErrorContext(ctx, "module store repair failed", "module", manifest.ID, "error", err)
+			continue
+		}
+		logRepairs(logger, repaired)
+		if ensured != nil && ready {
+			ensured[manifest.ID] = true
+		}
+	}
+}
+
+// keepNewModuleStores gives a module installed while the Host Agent runs
+// its store within 30 seconds, so that its install script need not wait for
+// the 15-minute round of keepDataVolume.
+func keepNewModuleStores(ctx context.Context, executor *linuxhostops.Executor, dir string, logger *slog.Logger) {
+	ensured := map[string]bool{}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ensureModuleStores(ctx, executor, dir, logger, ensured)
+		}
+	}
 }
 
 // keepViewing revokes Administrative Viewing Mode grants on time: those that
@@ -527,7 +640,7 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 // own identity, such as the share or family service, on socket, which only
 // that service's group reaches. Each service has its own directory, for
 // listen hands the directory to the group.
-func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
+func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, byUID bool, logger *slog.Logger) (func(), error) {
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info(service + " service is not installed; lookup is off")
 		return func() {}, nil
@@ -536,7 +649,13 @@ func serveServiceSessionLookup(service, group, socket string, sessions *sessiond
 	if err != nil {
 		return nil, err
 	}
-	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, nil, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	// Only a service that serves members' assistants by their UID may ask
+	// whose a UID is.
+	var accountsByUID sessionlookup.AccountResolver
+	if byUID {
+		accountsByUID = sessions
+	}
+	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, accountsByUID, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error(service+" session lookup stopped", "error", err)

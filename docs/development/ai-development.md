@@ -1,6 +1,6 @@
 # AI 开发与评估
 
-更新时间：2026-11-04
+更新时间：2026-11-25
 
 本文记录相册 AI 的模型拉取、模型测试、运行环境打包、数据集与评估命令。以下路径示例以开发机 B 为准；macOS 的模型位置和导出限制见[开发机 C](environments/macos.md)。普通门禁与服务隔离检查见[测试与验证](testing.md)，实验 NAS 上启用 AI 使用[运行手册](../runbooks/enable-photo-ai.md)。
 
@@ -12,7 +12,7 @@
 scripts/fetch-models.sh /mnt/d/A-NAS-models     # Windows 在 WSL 中运行；macOS 用 ~/A-NAS-models
 ```
 
-脚本需要 jq 和已登录 GitHub 的 gh，账号要能读这个仓库（请仓库所有者加为协作者）。文件放进 `deploy-dev.ps1` 默认目录与系统测试使用的结构，逐个核对清单中的大小与 SHA-256；已就位且校验通过的文件跳过。只拉部分模型时，在目录后列出它们的清单。2 GiB 以上的文件超过 GitHub 单个附件的上限，按 1 GiB 分段存放，下载后拼回；中断后重跑，已下完的分段不再下载。2026-11-04 共 8 个文件，约 4.4 GB。
+脚本需要 jq 和已登录 GitHub 的 gh，账号要能读这个仓库（请仓库所有者加为协作者）。文件放进脚本里 `layout` 给出的目录（下面的模型测试与评估命令用的就是这些目录），逐个核对清单中的大小与 SHA-256；已就位且校验通过的文件跳过。只拉部分模型时，在目录后列出它们的清单。2 GiB 以上的文件超过 GitHub 单个附件的上限，按 1 GiB 分段存放，下载后拼回；中断后重跑，已下完的分段不再下载。2026-11-04 共 8 个文件，约 4.4 GB。发布与真实模型的系统测试用的内容库按哈希存放模型（`models/<SHA-256>/<文件名>`，见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)），与这里的目录不同。
 
 新增或更换模型时，按清单在本机放好文件，再上传：
 
@@ -21,6 +21,31 @@ scripts/fetch-models.sh --publish /mnt/d/A-NAS-models deploy/models/<名称>.jso
 ```
 
 上传前同样核对哈希。新模型的目录先加进脚本里的 `layout`。仓库开启了不可变 Release，发布后不能改动，换文件就是新的 SHA-256 和新的 Release。上传中断会留下草稿 Release，在 GitHub 上删除后重跑。
+
+## 模型交付
+
+新增或更换模型时，提交者在 PR 中链接 `deploy/models/` 下的清单，由清单记录来源、版本、文件大小、SHA-256 和允许的分发范围。自行转换权重时固定转换代码的版本，引入新运行时时说明现有运行时缺少哪项能力。开发服务器上的工作目录可以供评审临时读取。交给发版人员时，提供能按清单重取的 `A-NAS-assets` Release。
+
+从空目录用 `scripts/fetch-models.sh DIR MANIFEST` 重新拉取，确认大小与哈希通过，再用产品实际的加载器处理一个最小输入。PR 中留下命令、结果及仍待实机验证的项目。进入常规发行版的模型还要说明内容包及安装验证入口。`A-NAS-dist` 用于分发已构建的签名软件源，常规发布渠道见[部署手册](../runbooks/deploy-a-nas-packages.md)。
+
+例如，美学打分模型只供内部验收。先激活按 [AI 依赖锁](../../ai/requirements.txt)安装的 Python 环境，再从仓库根目录运行以下命令。下载脚本按[打分器清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)校验 tar 包。解包后，测试从 `ANAS_AI_SCORER` 指向的目录读取 `MANIFEST.json` 和权重。
+
+```bash
+(
+  set -eu
+  model_root=$(mktemp -d)
+  manifest=deploy/models/qwen35-4b-aesthetic-scorer.json
+  scripts/fetch-models.sh "$model_root" "$manifest"
+  download_dir="$model_root/aesthetic/qwen35-4b-aesthetic-scorer"
+  tar -xf "$download_dir/$(jq -er '.file' "$manifest")" -C "$download_dir"
+  export ANAS_AI_SCORER="$download_dir/$(jq -er '.directory' "$manifest")"
+  test -f "$ANAS_AI_SCORER/MANIFEST.json"
+  cd ai
+  python -m unittest discover -v -s tests -p test_scorer_model.py
+)
+```
+
+测试输出应显示真实打分用例执行并通过。独立模型包的构建与分发范围见[美学打分](../architecture/photo-ai.md#美学打分)。
 
 ## 模型测试与运行环境
 
@@ -34,7 +59,7 @@ docker run --rm --cpuset-cpus=0-3 -v "$PWD:/src:ro" -w /src/ai \
   -e PYTHONDONTWRITEBYTECODE=1 anas-ai-dev:trixie /opt/anas-ai/bin/python -m unittest discover -s tests -t .
 ```
 
-发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中用 uv 按 [`ai/requirements.txt`](../../ai/requirements.txt) 的哈希安装 wheel，再运行 `pip check`，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `deploy-dev.ps1` 读取的 `build/ai-runtime.json`。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变。锁文件由 `ai/requirements.in` 生成：改了它之后，或要升级某个包时，运行 `scripts/build-ai-runtime.sh --lock [--upgrade-package 包名]`，它用 `uv pip compile` 重新解析运行环境与开发工具的两个锁文件。两者都需要 `ai/requirements-dev.txt` 固定版本的 uv 与 jq，都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB；2026-10-13 加入 ONNX Runtime 后为 `3eca142df9a765c2`，压缩后 189 MB，解开约 542 MB。
+发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中用 uv 按 [`ai/requirements.txt`](../../ai/requirements.txt) 的哈希安装 wheel，再运行 `pip check`，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `build/ai-runtime.json`。发布前把压缩包放进内容库的 `ai-runtimes/`，`make release` 把它打成内容包。缺少压缩包时，见[恢复内容库中的运行环境](../runbooks/deploy-a-nas-packages.md#恢复内容库中的运行环境)。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变。锁文件由 `ai/requirements.in` 生成：改了它之后，或要升级某个包时，运行 `scripts/build-ai-runtime.sh --lock [--upgrade-package 包名]`，它用 `uv pip compile` 重新解析运行环境与开发工具的两个锁文件。两者都需要 `ai/requirements-dev.txt` 固定版本的 uv 与 jq，都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB；2026-10-13 加入 ONNX Runtime 后为 `3eca142df9a765c2`，压缩后 189 MB，解开约 542 MB。
 
 ## 数据集与评估
 

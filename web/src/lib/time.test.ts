@@ -5,10 +5,51 @@ import {
   calendarDays,
   calendarLabel,
   calendarMoment,
+  dateOnly,
+  dayLabel,
+  daysUntil,
+  dueText,
   formatClock,
   formatDate,
+  isoDate,
   relativeTime,
+  untilNextDay,
 } from "./time";
+
+describe("due dates", () => {
+  const now = new Date(2026, 10, 17, 9, 30);
+  it("say how far off they are", () => {
+    expect(dueText("2026-11-20", now)).toBe("还有 3 天");
+    expect(dueText("2026-11-18", now)).toBe("还有 1 天");
+    expect(dueText("2026-11-17", now)).toBe("今天截止");
+    expect(dueText("2026-11-16", now)).toBe("已过期 1 天");
+  });
+  it("count calendar days across the year's end", () => {
+    expect(dueText("2027-01-02", new Date(2026, 11, 31, 23, 50))).toBe("还有 2 天");
+    expect(dueText("2026-12-29", new Date(2027, 0, 1, 0, 5))).toBe("已过期 3 天");
+  });
+  it("label a day, with the year only when it is not this year's", () => {
+    expect(dayLabel("2026-11-20", now)).toBe("11月20日");
+    expect(dayLabel("2027-01-02", now)).toBe("2027年1月2日");
+  });
+});
+
+describe("date-only values", () => {
+  it("read as the local calendar day, not midnight UTC", () => {
+    const date = dateOnly("2026-03-01");
+    expect([date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()]).toEqual([2026, 2, 1, 0]);
+    expect(isoDate(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+  it("count calendar days from now, whatever the hour", () => {
+    expect(daysUntil("2026-01-02", new Date(2026, 0, 1, 23, 59))).toBe(1);
+    expect(daysUntil("2026-01-01", new Date(2026, 0, 1, 0, 1))).toBe(0);
+    expect(daysUntil("2025-12-30", new Date(2026, 0, 1, 12))).toBe(-2);
+  });
+  it("tell how long until just after the next midnight", () => {
+    expect(untilNextDay(new Date(2026, 0, 1, 23, 59), 60_000)).toBe(120_000);
+    expect(untilNextDay(new Date(2026, 0, 1, 0, 0), 0)).toBe(86_400_000);
+  });
+});
 
 describe("shared local time formatting", () => {
   const now = new Date(2026, 0, 1, 0, 5);

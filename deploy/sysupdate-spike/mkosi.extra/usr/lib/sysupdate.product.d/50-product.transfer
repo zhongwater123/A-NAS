@@ -1,0 +1,13 @@
+# The product layer as a system extension: versions are kept outside the
+# directories systemd-sysext scans, and only the current one is linked in.
+[Source]
+Type=url-file
+Path=https://10.0.2.2:8443/product/
+MatchPattern=a-nas-product_@v.raw
+
+[Target]
+Type=regular-file
+Path=/var/lib/a-nas-sysext
+MatchPattern=a-nas-product_@v.raw
+CurrentSymlink=/var/lib/extensions/a-nas-product.raw
+InstancesMax=2

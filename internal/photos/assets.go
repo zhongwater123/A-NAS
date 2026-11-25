@@ -23,6 +23,9 @@ type ImportRequest struct {
 	Content       io.Reader
 	MotionContent io.Reader
 	MotionName    string
+	// recorded runs in the transaction that creates the asset, so that what
+	// it records commits with the asset or not at all (SaveFilm).
+	recorded func(ctx context.Context, tx *sql.Tx, assetID string) error
 }
 
 // Import persists one original, a photo or a video, and creates its photo
@@ -86,7 +89,7 @@ func (s *Service) importTarget(ctx context.Context, p Principal, request ImportR
 	if err != nil {
 		return "", library{}, err
 	}
-	if !canAdd(p, lib) {
+	if !canImport(p, lib) {
 		return "", library{}, ErrForbidden
 	}
 	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {
@@ -195,6 +198,11 @@ func (s *Service) importStaged(ctx context.Context, p Principal, lib library, na
 		}
 		if err := s.enqueueTextReading(ctx, tx, staged.id); err != nil {
 			return err
+		}
+		if request.recorded != nil {
+			if err := request.recorded(ctx, tx, assetID); err != nil {
+				return err
+			}
 		}
 		record, err := s.assetByID(ctx, tx, assetID)
 		if err != nil {
@@ -713,9 +721,9 @@ func (s *Service) ExpireTrash(ctx context.Context) (int, error) {
 // unlinked.
 func (s *Service) purge(ctx context.Context, actorID, action string, records []assetRecord) (int, error) {
 	var purged int
-	var orphaned []string
-	derived := make(map[string][]string)
+	var unused unusedObjects
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var objects []string
 		for _, record := range records {
 			result, err := tx.ExecContext(ctx, "DELETE FROM assets WHERE id = ? AND trashed_at IS NOT NULL", record.ID)
 			if err != nil {
@@ -730,43 +738,71 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 				continue
 			}
 			purged++
-			for _, objectID := range []string{record.objectID, record.motionObjectID} {
-				if objectID == "" {
-					continue
-				}
-				var referenced bool
-				if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE object_id = ? OR motion_object_id = ?)", objectID, objectID).Scan(&referenced); err != nil {
-					return err
-				}
-				if !referenced {
-					derivations, err := derivationsOf(ctx, tx, objectID)
-					if err != nil {
-						return err
-					}
-					if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", objectID); err != nil {
-						return err
-					}
-					orphaned = append(orphaned, objectID)
-					derived[objectID] = derivations
-				}
-			}
+			objects = append(objects, record.objectID, record.motionObjectID)
 			if err := s.audit(ctx, tx, actorID, action, record.ID, record.Name); err != nil {
 				return err
 			}
 		}
-		return nil
+		var err error
+		unused, err = forgetUnusedObjects(ctx, tx, objects)
+		return err
 	})
 	if err != nil {
 		return 0, err
 	}
-	s.detected.forget(orphaned)
-	// A file left behind by a failure here has no Catalog row; Reconcile
-	// removes it.
-	var removeErr error
-	for _, id := range orphaned {
-		removeErr = errors.Join(removeErr, s.removeObject(id), s.removeDerived(id, derived[id]))
+	return purged, s.removeObjectFiles(unused)
+}
+
+// unusedObjects are content objects whose catalog rows a transaction deleted
+// because no asset used them any more, with their derived files.
+type unusedObjects struct {
+	ids     []string
+	derived map[string][]string
+}
+
+// forgetUnusedObjects deletes, among objectIDs, the catalog rows of the
+// objects no asset uses any more. Their files go with removeObjectFiles once
+// the transaction commits. The caller holds commitMu, so no import can
+// decide to reuse an object between its last reference disappearing and its
+// file being unlinked.
+func forgetUnusedObjects(ctx context.Context, tx *sql.Tx, objectIDs []string) (unusedObjects, error) {
+	unused := unusedObjects{derived: make(map[string][]string)}
+	checked := make(map[string]bool, len(objectIDs))
+	for _, objectID := range objectIDs {
+		if objectID == "" || checked[objectID] {
+			continue
+		}
+		checked[objectID] = true
+		var referenced bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM assets WHERE object_id = ? OR motion_object_id = ?)", objectID, objectID).Scan(&referenced); err != nil {
+			return unusedObjects{}, err
+		}
+		if referenced {
+			continue
+		}
+		derivations, err := derivationsOf(ctx, tx, objectID)
+		if err != nil {
+			return unusedObjects{}, err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM objects WHERE id = ?", objectID); err != nil {
+			return unusedObjects{}, err
+		}
+		unused.ids = append(unused.ids, objectID)
+		unused.derived[objectID] = derivations
 	}
-	return purged, removeErr
+	return unused, nil
+}
+
+// removeObjectFiles removes the files of objects forgetUnusedObjects took out
+// of the catalog. A file left behind by a failure here has no catalog row;
+// Reconcile removes it.
+func (s *Service) removeObjectFiles(unused unusedObjects) error {
+	s.detected.forget(unused.ids)
+	var removeErr error
+	for _, id := range unused.ids {
+		removeErr = errors.Join(removeErr, s.removeObject(id), s.removeDerived(id, unused.derived[id]))
+	}
+	return removeErr
 }
 
 func derivationsOf(ctx context.Context, q queryer, objectID string) ([]string, error) {

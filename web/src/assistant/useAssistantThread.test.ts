@@ -14,13 +14,15 @@ const rows = [
     role: "assistant",
     content: "",
     timestamp: 1_760_000_011,
-    tool_calls: [{ id: "call_00_b", type: "function", function: { name: "browser_click", arguments: '{"ref":"e2"}' } }],
+    tool_calls: [
+      { id: "call_00_b", type: "function", function: { name: "mcp__desktop__click", arguments: '{"ref":"e2"}' } },
+    ],
   },
   {
     id: 15,
     role: "tool",
     tool_call_id: "call_00_b",
-    tool_name: "browser_click",
+    tool_name: "mcp__desktop__click",
     content: "ok",
     timestamp: 1_760_000_012,
   },

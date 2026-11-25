@@ -57,7 +57,9 @@ export function Notice({ tone = "warning", children }: { tone?: "warning" | "dan
 }
 
 // Dialog is a modal sheet over the backup center or the trash. Escape and the
-// close button call onClose unless the dialog is busy.
+// close button call onClose unless the dialog is busy. A dialog without an
+// icon has no mark beside its title; className, on the backdrop, lets a
+// window's own stylesheet tell the dialog apart.
 export function Dialog({
   title,
   icon,
@@ -68,9 +70,10 @@ export function Dialog({
   children,
   footer,
   label,
+  className = "",
 }: {
   title: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   tone?: "accent" | "danger";
   busy?: boolean;
   wide?: boolean;
@@ -78,6 +81,7 @@ export function Dialog({
   children: ReactNode;
   footer: ReactNode;
   label?: string;
+  className?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -89,7 +93,7 @@ export function Dialog({
   }, []);
   return (
     <div
-      className={workspaceStyles.bkBackdrop}
+      className={`${workspaceStyles.bkBackdrop} ${className}`}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
@@ -112,9 +116,11 @@ export function Dialog({
         }}
       >
         <header>
-          <span className={`${workspaceStyles.bkDialogIcon} ${workspaceStyles[tone] ?? ""}`} aria-hidden="true">
-            {icon}
-          </span>
+          {icon && (
+            <span className={`${workspaceStyles.bkDialogIcon} ${workspaceStyles[tone] ?? ""}`} aria-hidden="true">
+              {icon}
+            </span>
+          )}
           <h3>{title}</h3>
           <button
             type="button"
@@ -140,7 +146,9 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
-export function useToasts() {
+// className, on the toasts' container, lets a window's own stylesheet tell
+// them apart.
+export function useToasts(className = "") {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const next = useRef(0);
   const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
@@ -154,7 +162,7 @@ export function useToasts() {
     [dismiss],
   );
   const element = (
-    <div className={workspaceStyles.bkToasts} aria-live="polite">
+    <div className={`${workspaceStyles.bkToasts} ${className}`} aria-live="polite">
       {toasts.map((item) => (
         <div
           key={item.id}

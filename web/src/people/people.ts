@@ -72,9 +72,11 @@ export function usePeople(): People {
   );
 }
 
-// person completes what a record knows about an account with its profile.
+// person completes what a record knows about an account with its profile. A
+// record that names its account's ID never falls back to the name: a deleted
+// account's name may belong to a newer account.
 export function person(people: People, known: Person): Person {
-  const profile = (known.id && people.byId(known.id)) || people.byUsername(known.username);
+  const profile = known.id ? people.byId(known.id) : people.byUsername(known.username);
   return profile ? { ...known, ...profile } : known;
 }
 
@@ -92,4 +94,11 @@ export function fullName(who: { username: string; nickname?: string }): string {
 // nameOf resolves a username from a record to the name to show.
 export function nameOf(people: People, username: string): string {
   return displayName(people.byUsername(username) ?? { username });
+}
+
+// nameOfAccount resolves who a record names to the name to show: by account
+// ID when the record has one, so a deleted account's name taken by a newer
+// account does not bring that account's nickname.
+export function nameOfAccount(people: People, id: string | undefined, username: string): string {
+  return displayName(person(people, { id, username }));
 }

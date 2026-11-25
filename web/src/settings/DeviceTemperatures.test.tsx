@@ -25,7 +25,6 @@ it("lists the CPU, the GPU and every disk with its reading", () => {
   expect(within(disk).getByRole("meter").getAttribute("aria-valuetext")).toBe("31 °C");
   expect(screen.queryByText("偏高")).toBeNull();
   expect(row("风扇 1").textContent).toContain("1,912RPM");
-  expect(screen.getByText("机械硬盘和 SATA 固态硬盘的温度每 10 分钟更新一次，硬盘待机时不会被唤醒。")).toBeTruthy();
 });
 
 it("says when a fan that turned has stopped", () => {

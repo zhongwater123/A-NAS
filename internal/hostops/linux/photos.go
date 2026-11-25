@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/modulemanifest"
 )
 
 // The photo service owns the data volume's photos subvolume alone
@@ -121,6 +122,45 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 		}
 	}
 	return !created, nil
+}
+
+// EnsureModuleStore keeps a removable module's store, module-<id> at the top
+// of the data volume, for the account its manifest names (ADR 0037). It
+// never removes a store: removing a module leaves its data until an
+// administrator deletes it by the module's runbook. ready reports that the
+// store exists now; it does not while the data volume is offline or before
+// the module's account exists.
+func (e *Executor) EnsureModuleStore(ctx context.Context, manifest modulemanifest.Manifest) (ready bool, repaired []string, err error) {
+	if !modulemanifest.ValidID(manifest.ID) || manifest.UID < modulemanifest.FirstUID || manifest.UID > modulemanifest.LastUID {
+		return false, nil, fmt.Errorf("invalid module manifest %q", manifest.ID)
+	}
+	if !e.dataVolumeReady() {
+		return false, nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	store := filepath.Join(e.mountPoint, modulemanifest.StoreName(manifest.ID))
+	drifted, err := e.ensureOwnedStore(ctx, modulemanifest.StoreName(manifest.ID), modulemanifest.Account(manifest.ID), manifest.UID)
+	if drifted {
+		repaired = []string{store}
+	}
+	_, statErr := os.Lstat(store)
+	return err == nil && statErr == nil, repaired, err
+}
+
+// EnsureMontageStore owns the montage center's projects, plans and jobs
+// (ADR 0038), outside member spaces, like the family store.
+func (e *Executor) EnsureMontageStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensureOwnedStore(ctx, "montage", accountid.MontageServiceUser, accountid.MontageServiceUID)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, "montage")}, err
+	}
+	return nil, err
 }
 
 // EnsureFamilyStore owns the family center's records and recordings

@@ -13,10 +13,10 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 | `styles/` | 全局样式：`index.css` 声明层顺序并引入其余文件；`tokens.css` 是[令牌](#令牌)；`base.css` 是重置；`utilities.css` 是各窗口共用、尚未做成 `ui/` 组件的几个类 |
 | `api/` | `client.ts`：生成客户端的封装，包括请求、`APIError`、CSRF、写入闸门与带进度的上传；`errorMessages.ts`：错误码到文案的表（[规格](../specs/web-errors-and-time.md)） |
 | `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts`，样式在 `desktop.module.css`（开机画面与根错误边界的兜底页也用它） |
-| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
+| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`、`todos`（家庭待办，另有外壳上的待办提醒）、`scoring`（可移除模块照片打分，模块未安装时不显示）；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
 | 领域目录 | 不是窗口的领域：`auth`（登录与会话，登录画面的样式在 `auth.module.css`）、`people`（各账号的名字与头像）、`boot`（开机画面） |
-| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
-| `lib/` | 不依赖 React 与接口的函数：容量与时间格式化、文件名与类型、剪贴板、读取拖入的文件 |
+| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、家庭中心与待办共用的表单对话框（`modal`，挂到调用方给出的容器里）、列表行末的“更多操作”菜单（`RowMenu`）、各功能留在桌面上的提示（`DeskNotice`，桌面把它们上下排开）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
+| `lib/` | 不依赖 React 与接口的函数：容量、时间、纯日期与人民币金额的格式化，文件名与类型、剪贴板、读取拖入的文件、只在窗口的滚动区内滚到某一项（`scroll`） |
 | `test/` | 测试基础设施：按领域的请求处理器、测试数据与渲染帮助函数 |
 | `assets/` | 静态图片 |
 
@@ -47,6 +47,18 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
   - 窗口之外的桌面部件（快捷栏、图标、状态栏、程序坞、通知与提示）与开机画面各有边界，出错时只有它自己消失；
   - 根边界兜底；`createRoot` 的 `onUncaughtError` 处理连兜底页都显示不了的情况。
 
+## 界面设计与文案
+
+维护者对界面的要求，来自历次改版中接受与否决的设计（2026-10 至 2026-11）：
+
+- **一次到位：** 新界面或改版从第一版起就有统一的视觉体系（字号层级、间距、颜色令牌、图标）、按任务设计的交互（破坏性操作用向导，行菜单与窗口内对话框代替成排的按钮或 `window.prompt`）和真实的空、加载与出错状态；交付前在 Fake 预览里截图检查。沿用旧面板的小字号与描边按钮去做结构合并，不算完成。
+- **风格：** 内容优先，一个强调色，清晰的字号层级。渐变横幅、彩色药丸标签、按类型着色的标签、白底阴影卡片堆叠被否决过，读起来像 SaaS 模板。
+- **文案只写事实与操作：** 不用口癖、比喻、口号和抒情的空状态；空状态一行字加操作。标题下不加说明行；解释规则或实现的文字不放在界面上，写进代码注释与规格。保留的是状态、数据、操作后果，以及不可逆磁盘操作的警告和规格要求的提示。
+- **少让用户做选择：** 没有风险时不加确认步骤，也不让用户理解额外的选项，例如回收站一键恢复，只有同名冲突才弹窗。
+- **维护者批评的元素直接删掉：** 不保留为兜底或空状态；想保留其中一部分时先问。
+- **具体要求附带笼统的风格评价（如“AI 味”）时，** 先只做具体的修改；更大的改版先提出来，再动手。
+- **`.desktop-shell` 的尺寸与横向溢出**（最小宽度 760px，overflow hidden）是为本地 DIY 屏幕定的：布局问题改单个窗口，不动它。
+
 ## 样式
 
 ### 方案
@@ -63,7 +75,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
   - 功能的模块不进任何层，因此总是覆盖 `ui/` 与全局样式，结果与样式表的加载顺序无关；
   - 例外：带 `!important` 的声明按相反的层顺序比较，不要用它覆盖 `ui/` 的规则。
 - **不跨功能借用：** 两个功能需要同样的外观时，把部件与样式移进 `ui/`，不要导入另一个功能的样式文件。功能要调整 `ui/` 部件时，传 `className` 或设置部件读取的 CSS 变量，不要在自己的模块里选择部件的类。
-- **检查：** 改动样式或懒加载后，在 Fake 预览栈中逐窗口核对外观（[fake-preview](../../.claude/skills/fake-preview/SKILL.md)）。
+- **检查：** 改动样式或懒加载后，在 Fake 预览栈中逐窗口核对外观（[fake-preview](../../.agents/skills/fake-preview/SKILL.md)）。
 
 ### 令牌
 
@@ -97,6 +109,8 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 - 容量：`lib/bytes.ts`（[容量单位](../specs/size-units.md)）。
 - 时间：`lib/time.ts`，基于 `Intl`。
+- 纯日期（只有 `YYYY-MM-DD`、没有时刻的值，如截止日、出生日）：也在 `lib/time.ts`，按本地日历日解析与计算相差几天。不要写 `new Date("YYYY-MM-DD")`，它按 UTC 零点解析，与本地零点差几个小时，算相差天数时可能差一天。
+- 金额：只有人民币，接口按分传；`lib/money.ts` 用 `Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" })` 显示。
 - 错误文案：`api/errorMessages.ts`（[规格](../specs/web-errors-and-time.md)）。
 - 不在功能中另写格式化函数。
 

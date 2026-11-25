@@ -112,12 +112,12 @@ type liveSession struct {
 	// message.complete: the turn's companion calls are no longer sent.
 	stopping bool
 	owner    *upstream
-	// browser is the connection whose window registered last as the
-	// session's browser (Hermes's browser control).
+	// browser is the connection whose window attached last as the session's
+	// browser (desktop.go).
 	browser *upstream
 	// prompter is the connection whose window sent the prompt of the turn
 	// under way, and nextPrompter the one whose prompt Hermes queued for the
-	// next turn; the companion's commands go to the prompter's window only
+	// next turn; the window tools' commands go to the prompter's window only
 	// while it is also the browser (companion.go).
 	prompter, nextPrompter *upstream
 	// companion are the calls of companion tools the turn started that no

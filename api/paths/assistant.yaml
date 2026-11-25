@@ -18,11 +18,15 @@
       session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602.
       client.capabilities, approval.pending and approval.received are answered by the product service itself:
       requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an
-      AssistantApproval. The companion tools' commands arrive as anas.companion events ({command_id, action, args})
-      at the window that is the conversation's browser and sent its prompt, and at no other; that window answers
-      each once with companion.result ({session_id, command_id, ok, result or error}), which the product service
-      also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when
-      the member's session ends.
+      AssistantApproval. A window becomes a conversation's browser with desktop.attach ({session_id}), which the
+      product service answers itself, before each prompt it sends; while a turn runs its browser stays the window it
+      has. The companion tools' commands arrive as anas.companion events ({command_id, action, args}), and the
+      commands of the tools that operate the desktop as anas.desktop events of the same shape, at the window that is
+      the conversation's browser and sent its prompt, and at no other; that window answers each once with
+      companion.result or desktop.result ({session_id, command_id, ok, result or error}), which the product service
+      also answers itself. An anas.desktop.cancel event ({command_id}) tells the window that a desktop command it has
+      not answered is no longer waited for. The connection reaches the instance through the session gate
+      (decision 10) and closes when the member's session ends.
     responses:
       "101": { description: Switched to WebSocket }
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -171,12 +175,11 @@
   parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
   post:
     operationId: runAssistantTask
-    summary: "Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs"
-    description: "200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification."
+    summary: "Run a task now, in a round of the member's scheduled tasks like one that is due; a paused task is resumed"
+    description: "202 once the run was asked for; it starts within seconds and goes on. The run's end shows in the task and as an assistant_task notification. 409 task_running when it is already running, task_finished when the task has no more runs."
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
-      "200": { description: The run ended, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished, task], properties: { finished: { type: boolean, enum: [true] }, task: { $ref: "../components/assistant.yaml#/schemas/AssistantTask" } } } } } }
-      "202": { description: The run started and goes on, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished], properties: { finished: { type: boolean, enum: [false] } } } } } }
+      "202": { description: The run was asked for and goes on, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished], properties: { finished: { type: boolean, enum: [false] } } } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -254,4 +257,47 @@
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant-key:
+  get:
+    operationId: getAssistantKey
+    x-anas-posture: admin
+    summary: "Whether the household's DeepSeek key for VNAS is saved (设置 → VNAS, ADR 0024)"
+    description: "Administrators only. The key itself is never answered: once saved it can be replaced or deleted, not read."
+    responses:
+      "200": { description: The key's state, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: saveAssistantKey
+    x-anas-posture: admin
+    summary: Save or replace the DeepSeek key, which gives every member VNAS
+    description: >-
+      Administrators only. acknowledged must be true: the administrator confirms that members' conversations with VNAS,
+      the file contents and photo information it reads to answer, and the photos and desktop screens it looks at go to
+      DeepSeek's servers (400 acknowledgement_required). The Host Agent keeps the key encrypted on the device, where only
+      the model gateway reads it, and prepares every active member's assistant; 400 invalid_key when it cannot be a
+      DeepSeek key. Nothing logs the key.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyRequest" } } } }
+    responses:
+      "200": { description: The key's state after saving, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteAssistantKey
+    x-anas-posture: admin
+    summary: Delete the DeepSeek key, which turns VNAS off for everyone
+    description: >-
+      Administrators only. Every member's assistant stops; their conversations, memory, scheduled tasks and files stay
+      and come back when a key is saved again.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The key's state after deleting, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }

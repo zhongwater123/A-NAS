@@ -1,0 +1,4 @@
+# The persistent root keeps this file across /usr updates.
+PARTLABEL=esp /efi vfat umask=0077 0 2
+# The data volume (user data) is a disk of its own.
+LABEL=anas-data /srv/a-nas ext4 defaults,nofail,x-systemd.device-timeout=10s 0 2

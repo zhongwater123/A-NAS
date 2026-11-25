@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/modulemanifest"
 )
 
 // photosRunner answers getent for the photo service account and creates
@@ -23,7 +24,7 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 		return nil, err
 	}
 	switch {
-	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser || args[1] == accountid.FamilyServiceUser) && r.passwd != "":
+	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser || args[1] == accountid.FamilyServiceUser || args[1] == "a-nas-scoring") && r.passwd != "":
 		return []byte(r.passwd + "\n"), nil
 	case name == "getent":
 		return nil, notFound{}
@@ -178,5 +179,38 @@ func TestFamilyStoreUsesItsOwnFixedIdentity(t *testing.T) {
 	runner.passwd = "a-nas-family:x:998:998::/nonexistent:/usr/sbin/nologin"
 	if _, err := executor.ensureOwnedStore(context.Background(), "family", accountid.FamilyServiceUser, accountid.FamilyServiceUID); !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("unexpected identity accepted: %v", err)
+	}
+}
+
+func TestModuleStoreUsesItsManifestIdentityAndNeverLeavesTheRange(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &photosRunner{passwd: "a-nas-scoring:x:31100:31100::/nonexistent:/usr/sbin/nologin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	drifted, err := executor.ensureOwnedStore(context.Background(), modulemanifest.StoreName("scoring"), modulemanifest.Account("scoring"), 31100)
+	if err != nil || drifted {
+		t.Fatalf("new module store: %v, %v", drifted, err)
+	}
+	root := filepath.Join(mountPoint, "module-scoring")
+	for _, command := range []spacePermissionCommand{
+		{name: "btrfs", args: []string{"subvolume", "create", root}},
+		{name: "chown", args: []string{"31100:31100", root}},
+		{name: "chmod", args: []string{"0700", root}},
+		{name: "setfacl", args: []string{"--modify", "user:a-nas-scoring:--x", mountPoint}},
+	} {
+		if !runner.ran(command) {
+			t.Errorf("missing %s %v", command.name, command.args)
+		}
+	}
+	for _, manifest := range []modulemanifest.Manifest{
+		{ID: "scoring", UID: 31002},
+		{ID: "scoring", UID: 31200},
+		{ID: "../photos", UID: 31100},
+	} {
+		if _, _, err := executor.EnsureModuleStore(context.Background(), manifest); err == nil {
+			t.Errorf("manifest %+v accepted", manifest)
+		}
 	}
 }

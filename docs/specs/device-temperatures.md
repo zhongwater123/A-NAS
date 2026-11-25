@@ -1,7 +1,7 @@
 # 设备温度与风扇
 
 状态：implemented
-更新时间：2026-10-30
+更新时间：2026-11-11
 
 ## 目标
 
@@ -29,7 +29,7 @@
 ## 风扇转速
 
 - 来源：主板传感器芯片（Super I/O）的 hwmon `fan<N>_input`，每次读取。显卡驱动（amdgpu、radeon、nouveau、i915、xe）的风扇属于显卡，不列出。
-- 驱动：Linux 不会自动加载这类芯片的驱动。安装器加载内核自带的 `nct6775` 与 `it87`，没有对应芯片的主板上它们找不到设备而加载失败；找到芯片的写入 `/etc/modules-load.d/a-nas-sensors.conf`，开机自动加载。不使用强制参数；加载只读取芯片，不改变任何风扇设置。实验 NAS 的精粤 B760I GAMING 用 Nuvoton NCT6798D，由 `nct6775` 驱动（2026-10-29 以 root 探测确认，两个接口有风扇，另五个未接）。
+- 驱动：Linux 不会自动加载这类芯片的驱动。`anas-site.service` 每次开机与安装后加载内核自带的 `nct6775` 与 `it87`，没有对应芯片的主板上它们找不到设备而加载失败，不影响其他步骤。不使用强制参数；加载只读取芯片，不改变任何风扇设置。实验 NAS 的精粤 B760I GAMING 用 Nuvoton NCT6798D，由 `nct6775` 驱动（2026-10-29 以 root 探测确认，两个接口有风扇，另五个未接）。
 - 列出哪些：接口没接风扇和风扇停转时读数都是 0。Host Agent 只列出现在在转或启动以来转过的接口；转过而现在为 0 的标为“已停转”。Host Agent 重启后，重启前已停的风扇不再列出。
 - 名称：芯片给接口命名时用它的名称，否则为“风扇 N”，N 是芯片的接口编号。多数芯片不命名，所以看不出哪个是 CPU 风扇。
 
@@ -94,11 +94,11 @@
 - `internal/hoststate/agent/rootagent/volume_test.go` 的 `TestClientReadsTheThermalState`：温度与风扇经 Host Agent 套接字往返，拒绝 400 °C 和有转速的“已停转”。
 - `internal/httpapi` 的接口与 OpenAPI 契约测试：`thermal`、`temperatureHotCelsius` 与任务管理器字段符合契约。
 - `web/src/settings/DeviceTemperatures.test.tsx` 与 `TaskManagerSection.test.tsx`：概览各行、偏高与停转标记、核显、缺失原因，以及任务管理器的温度与风扇分区和 CPU 温度曲线。
-- 实机：部署后确认 `/etc/modules-load.d/a-nas-sensors.conf` 含 `nct6775`、`/sys/class/hwmon` 下有 `nct6798`，并对照 `temp*_input`、`fan*_input` 与 `smartctl -A`，确认概览与任务管理器的读数一致。
+- 实机：部署后确认 `lsmod` 列出 `nct6775`、`/sys/class/hwmon` 下有 `nct6798`，并对照 `temp*_input`、`fan*_input` 与 `smartctl -A`，确认概览与任务管理器的读数一致。
 
 ## 关联
 
 - 规格：[任务管理器](task-manager.md)、[系统健康](system-health.md)、[设置](settings.md)、[基础存储与共享](basic-storage-and-sharing.md)
 - ADR：[ADR 0004](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
-- 代码：[`internal/hoststate/linux/thermal.go`](../../internal/hoststate/linux/thermal.go)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[`internal/hoststate/state.go`](../../internal/hoststate/state.go)、[`internal/hoststate/assess.go`](../../internal/hoststate/assess.go)、[`web/src/settings/Temperature.tsx`](../../web/src/settings/Temperature.tsx)、[`web/src/settings/DeviceTemperatures.tsx`](../../web/src/settings/DeviceTemperatures.tsx)、[`web/src/settings/taskmanager/TaskManagerSection.tsx`](../../web/src/settings/taskmanager/TaskManagerSection.tsx)
+- 代码：[`internal/hoststate/linux/thermal.go`](../../internal/hoststate/linux/thermal.go)、[`anas-site.service`](../../deploy/site/apply.sh)、[`internal/hoststate/state.go`](../../internal/hoststate/state.go)、[`internal/hoststate/assess.go`](../../internal/hoststate/assess.go)、[`web/src/settings/Temperature.tsx`](../../web/src/settings/Temperature.tsx)、[`web/src/settings/DeviceTemperatures.tsx`](../../web/src/settings/DeviceTemperatures.tsx)、[`web/src/settings/taskmanager/TaskManagerSection.tsx`](../../web/src/settings/taskmanager/TaskManagerSection.tsx)
 - 测试：[`internal/hoststate/linux/thermal_test.go`](../../internal/hoststate/linux/thermal_test.go)、[`internal/hoststate/assess_test.go`](../../internal/hoststate/assess_test.go)

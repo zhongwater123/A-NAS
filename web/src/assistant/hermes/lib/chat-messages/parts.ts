@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 import { mediaDisplayLabel, mediaMarkdownHref } from '../media'
 
 import type { ChatMessage, ChatMessagePart } from './types'
@@ -312,6 +312,20 @@ export function partsText(parts: ChatMessagePart[]): string {
     .filter((part): part is Extract<ChatMessagePart, { type: 'text' }> => part.type === 'text')
     .map(part => part.text)
     .join('')
+}
+
+/** The bubble's last non-empty text part, trimmed. A hydrated tool-call turn
+ *  folds several messages into one bubble; this is the newest of them. */
+export function lastTextPartText(message: ChatMessage): string {
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    const part = message.parts[index]
+
+    if (part.type === 'text' && part.text.trim()) {
+      return part.text.trim()
+    }
+  }
+
+  return ''
 }
 
 export function chatMessageText(message: ChatMessage): string {

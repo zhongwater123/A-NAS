@@ -25,7 +25,7 @@ func OpenSQLite(path string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{db: db}
-	if _, err := db.Exec(schema); err != nil {
+	if err := sqlitedb.Migrate(context.Background(), db, databaseSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -33,6 +33,14 @@ func OpenSQLite(path string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// databaseSchema is music.db's (sqlitedb.Migrate). Its baseline is the
+// structure from before steps; a change is a new step with the Down that undoes
+// it (ADR 0034).
+var databaseSchema = sqlitedb.Schema{
+	Name:     "music.db",
+	Baseline: sqlitedb.Statements(schema),
+}
 
 const schema = `
 CREATE TABLE IF NOT EXISTS tracks (

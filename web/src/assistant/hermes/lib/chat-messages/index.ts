@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 export { sameAttachmentTurn } from './attachment-turn'
 export { toChatMessages } from './hydration'
 export {
@@ -10,6 +10,7 @@ export {
   completeOpenTimelineParts,
   dedupeRepeatedTextInParts,
   finalizeInterruptedMessages,
+  lastTextPartText,
   mergeFinalAssistantText,
   normalizeWs,
   partsText,
@@ -21,18 +22,25 @@ export {
 export type { UnspokenTurnSpeech } from './parts'
 export {
   branchGroupForUser,
+  isLocalSystemNotice,
   preserveLocalAssistantErrors,
   preserveLocalSystemNotices,
   spliceOlderPreservedRows
 } from './reconciliation'
 export {
+  concatPartsByToolCall,
+  hasUnresolvedToolCall,
+  isRedeliveredToolEvent,
+  markQueuedPromptStarted,
   QUESTION_CARD_TOOLS,
+  queuedPromptAwaitsNextTurn,
   restorePendingBlockingToolCall,
   restorePendingClarifyToolCall,
   sealOpenToolParts,
   settlePendingClarifyToolCall,
   stripPendingClarifyProjectionForCache,
   toolCallOwnerMessageId,
+  toolEventOwnerMessageId,
   upsertToolPart,
   withUniqueToolCallIdsWithinMessage
 } from './tool-parts'

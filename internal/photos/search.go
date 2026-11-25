@@ -91,8 +91,9 @@ type SearchPage struct {
 	// Names counts the results, over all pages, whose name or user tags hold
 	// the query; they come first.
 	Names int
-	// Texts counts the results, over all pages, whose text holds the query;
-	// they follow the name and user tag matches.
+	// Texts counts the results, over all pages, whose text holds the query
+	// or whose document type the query names; they follow the name and user
+	// tag matches.
 	Texts int
 	// Objects is set when the query is about things the detector finds
 	// reliably.

@@ -14,6 +14,8 @@ export type EndedCue =
   | { kind: 'ignore' }
   | { kind: 'work-rotate'; anim: string }
   | { kind: 'work-replay' }
+  // A-NAS: a step's own clip has played once: it holds its last frame until it plays again.
+  | { kind: 'work-hold' }
   | { kind: 'event-done' }
   | { kind: 'turn' }
   | { kind: 'interaction-done' }
@@ -30,6 +32,10 @@ export interface EndedInput {
   current: string;
   /** 当前工作状态；`undefined` 表示还没收到过。 */
   workState: string | null | undefined;
+  /** A-NAS: the clip the current step asks for; null or missing = one of its stage's. */
+  workAnim?: string | null;
+  /** A-NAS: whether a step's own clip holds its last frame at its end rather than play on. */
+  holdSteps?: boolean;
 }
 
 /** 工作状态是否处在「非终态」：终态（success / error）与空闲都不续播档位动画。 */
@@ -44,6 +50,10 @@ const isWorkActive = (state: string | null | undefined): boolean =>
  */
 export function decideEndedCue(input: EndedInput): EndedCue {
   const { animations, current, workState } = input;
+  // A-NAS: a step's own clip, which need not be in the stage's pool, plays on while the stage lasts;
+  // otherwise it would end as a random clip and the random chain would drop the stage.
+  if (isWorkActive(workState) && input.workAnim != null && current === input.workAnim)
+    return input.holdSteps === true ? { kind: 'work-hold' } : { kind: 'work-replay' };
   const isEvent = isEventAnim(animations.events, current);
   if (isEvent && isWorkActive(workState)) {
     // 多候选档位播完轮换到下一候选，长时间状态不单段重复。

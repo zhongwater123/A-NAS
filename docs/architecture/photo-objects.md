@@ -1,7 +1,7 @@
 # 相册物体检测与混合检索（切片 18）实施方案
 
 状态：accepted（2026-10-13 用户确认）；全部 10 步已实现（[#83](https://github.com/zhongwater123/A-NAS/pull/83)）。阈值文件按官方导出的模型生成，结果见[研究](../research/photo-ai-object-detection.md#官方导出与产品规则2026-10-13)
-更新时间：2026-10-28
+更新时间：2026-11-11
 
 本文把[相册技术设计](photo-library.md)的切片 18 细化为可实现的方案：后台为每张照片检测物体，文搜图把检测结果与照片向量融合，以物体词为主的查询如实说出“检测到”或“没有检测到”，并新增以图搜图。依据见[物体检测与混合检索研究](../research/photo-ai-object-detection.md)；方案复用 M2 的 Worker、持久任务、空闲门控与内置交付（[相册本地 AI](photo-ai.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
@@ -32,7 +32,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
   └  搜索：名称/用户标签 → “检测到”分段 → 融合排序；以图搜图
 ```
 
-一个 Worker 进程装两个 Provider：两个进程要重复加载 Python 与 numpy，单元、套接字、沙箱、安装器与系统测试也都要各做一份；一个进程由相册服务统一调度，资源用量只有一处可控。人脸方案（[#64](https://github.com/zhongwater123/A-NAS/pull/64)）也放在同一个 Worker。
+一个 Worker 进程装两个 Provider：两个进程要重复加载 Python 与 numpy，单元、套接字、沙箱、打包与系统测试也都要各做一份；一个进程由相册服务统一调度，资源用量只有一处可控。人脸方案（[#64](https://github.com/zhongwater123/A-NAS/pull/64)）也放在同一个 Worker。
 
 ## Worker
 
@@ -113,7 +113,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
 
 `CPUQuota=200%` 与“每次只让一个模型族常驻”来自[相册技术设计](photo-library.md)的初始预算，文档写明是“安全起点，不是实机结论”，内置 AI 时原样写进了单元，此后没有复核。用户原则（2026-10-13）：闲时有多少资源就用多少，始终保留余量，用户有突发请求时正确释放。“空闲 5 分钟后开始”出自规格，与“闲时”一致，保留。
 
-- **CPU**：去掉固定的 `CPUQuota=200%`。推理线程数取可用逻辑核数减 2（i3-12100 为 6），留出一个物理核给突发请求；Worker 启动时从 `sched_getaffinity` 读取核数，MediaPipe 的线程数不可配置时如实记录。安装器按 `nproc` 写入 `anas-ai.service.d/cpu-reserve.conf`，以 `CPUQuota=(N−2)×100%`（至少 100%）兜底。
+- **CPU**：去掉固定的 `CPUQuota=200%`。推理线程数取可用逻辑核数减 2（i3-12100 为 6），留出一个物理核给突发请求；Worker 启动时从 `sched_getaffinity` 读取核数，MediaPipe 的线程数不可配置时如实记录。`a-nas-generator` 按 `nproc` 在 `/run/systemd/generator/anas-ai.service.d/a-nas-reserve.conf` 中写入 `CPUQuota=(N−2)×100%`（至少 100%）兜底。
   - **低权重放在 `anas.slice`**（`CPUWeight=10`、`IOWeight=10`）：cgroup 只在兄弟之间比较权重，所以要放在与 `system.slice`、`user.slice` 平级的这一层，争用时设备上的其他工作先拿到核。最初写在 Worker 自己的单元里，那里它没有兄弟，实机首次运行时没有起作用。
   - `IOWeight` 只在 BFQ 或 `io.cost` 下生效，实验 NAS 数据盘用的 `mq-deadline` 下不起作用。
   - ONNX Runtime 的空闲线程不自旋。开发机上对照一个类似控制台的负载，自旋让每张的 CPU 时间和该负载等核的时间都多出数倍，检测本身也更慢（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。
@@ -133,7 +133,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
     - 从没问过时只按余量判断。这一轮的 `info` 若报告了新的总需要、门控又因内存拒绝（`memory_for_models`、`memory_low` 或 `memory_pressure`），就让刚启动的 Worker 立即退出，不让它闲置 10 分钟占着内存（[#365](https://github.com/zhongwater123/A-NAS/issues/365)）。
   - **释放**：MemAvailable 低于 1 GiB 或 PSI memory 超过阈值时，门控以 `memory_low` 或 `memory_pressure` 关闭并请求卸载全部模型，Worker 随即直接退出，不逐个析构模型（[调查](../investigations/2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)），之后的搜索重新加载、多等几秒。
   - **前台不受限**：搜索、以图搜图等有人在等的请求照常加载所需模型，不经过加载前判断。
-  - **上限只防失控**：单元不再有 `MemoryHigh` 与固定的 `MemoryMax`。安装器按本机内存写入 `anas-ai.service.d/memory-reserve.conf`，`MemoryMax` 为总内存减 2.5 GiB、至少 1 GiB（实验 NAS 7.7 GiB，约 5.0 GiB）。`MemorySwapMax=0`：模型不换出，换出后推理极慢且磁盘持续繁忙；`OOMScoreAdjust=500`：内存真的耗尽时，内核先结束 Worker。
+  - **上限只防失控**：单元不再有 `MemoryHigh` 与固定的 `MemoryMax`。`a-nas-generator` 按本机内存在同一个 `a-nas-reserve.conf` 中写入 `MemoryMax`，为总内存减 2.5 GiB、至少 1 GiB（实验 NAS 7.7 GiB，约 5.0 GiB）。`MemorySwapMax=0`：模型不换出，换出后推理极慢且磁盘持续繁忙；`OOMScoreAdjust=500`：内存真的耗尽时，内核先结束 Worker。
   - **`memoryBytes` 的测法**：[`ai/eval/worker_memory.py`](../../ai/eval/worker_memory.py) 每次在一个新容器（新 cgroup）里运行，模型文件已在页缓存中，XNNPack 缓存保留，与设备上相同；它按扫描的顺序逐个触发模型，记下 cgroup 内存峰值的增量。清单取实测最大值加约 5%，向上取整到 16 MiB。开发机 14 个逻辑核、推理 12 个线程，NAS 只有 6 个线程，实机应更低。2026-10-28 的结果：
 
     | 模型 | 增量（cgroup） | 清单 |
@@ -152,8 +152,8 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
 
 - **模型清单** `deploy/models/dfine-m-obj365.json`：来源、revision、文件、大小、SHA-256，并存档许可证全文与作者对 Objects365 权重的声明。
 - **运行环境**：`ai/requirements.txt`（当时为 `requirements.lock`）加 `onnxruntime==1.31.0` 与 `protobuf`（wheel 约 24 MB），在 `--no-deps` 下核实没有其他依赖；运行环境 ID 随之变化。
-- **按角色泛化**：安装器、`remote-activate-release.sh`、`deploy-dev.ps1` 与系统测试从“一个模型”改为按角色处理（`model` 为 litertlm，`detector` 为 onnx，release 中链接为 `ai/detector.onnx` 与 `ai/detector.json`），以后人脸模型只需再加一个角色。
-- **系统测试**：替身检测器文件；模型条目数 1→2、升级检查 2→3；篡改的检测器被拒绝；用替身完成一次检测；沙箱探针照常通过；核对单元的资源限制与安装器写入的 drop-in。为了在测试中看到照片整理完成，相册服务读取 `ANAS_PHOTOS_AI_QUIET_PERIOD`（如 `2s`）缩短空闲期，系统测试经 drop-in 设置，产品不设置。真实模型的运行由 `ANAS_AI_DETECTOR` 指定检测器文件。
+- **按角色泛化**：打包（[`scripts/lib/content.sh`](../../scripts/lib/content.sh) 的 `ai_roles`）与系统测试从“一个模型”改为按角色处理（`model` 为 litertlm，`detector` 为 onnx，`/usr/lib/a-nas/` 中链接为 `ai/detector.onnx` 与 `ai/detector.json`），以后人脸模型只需再加一个角色。
+- **系统测试**：替身检测器文件；模型条目数 1→2、升级检查 2→3；篡改的检测器被拒绝；用替身完成一次检测；沙箱探针照常通过；核对单元的资源限制与 `a-nas-generator` 写入的 drop-in。为了在测试中看到照片整理完成，相册服务读取 `ANAS_PHOTOS_AI_QUIET_PERIOD`（如 `2s`）缩短空闲期，系统测试经 drop-in 设置，产品不设置。真实模型的运行由 `ANAS_SYSTEM_TEST_CONTENT` 指定内容库。
 
 ## 步骤
 

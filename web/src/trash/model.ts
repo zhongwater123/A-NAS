@@ -1,9 +1,16 @@
 import { errorText } from "../api/errorMessages";
 import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatDay } from "../backup/format";
+import { calendarDays } from "../lib/time";
 import type { RestoreConflict } from "./api";
 
-export type TrashSort = "deleted" | "expiry";
+export type TrashSort = "deleted" | "expiry" | "size";
+
+export const sortLabels: Record<TrashSort, string> = {
+  deleted: "最近删除",
+  expiry: "即将清理",
+  size: "占用空间",
+};
 
 const day = 86_400_000;
 
@@ -43,11 +50,22 @@ export function restoredName(name: string, kind: TrashItem["kind"], attempt = 1)
   return `${name.slice(0, dot)}${suffix}${name.slice(dot)}`;
 }
 
+// splitName parts a file's name before its extension, so a long name can be
+// cut short and still show what kind of file it is.
+export function splitName(name: string, kind: TrashItem["kind"]): { stem: string; extension: string } {
+  const dot = name.lastIndexOf(".");
+  if (kind === "directory" || dot <= 0 || name.length - dot > 8) return { stem: name, extension: "" };
+  return { stem: name.slice(0, dot), extension: name.slice(dot) };
+}
+
 export function sortItems(items: TrashItem[], sort: TrashSort): TrashItem[] {
+  const newest = (left: TrashItem, right: TrashItem) => Date.parse(right.deletedAt) - Date.parse(left.deletedAt);
   return [...items].sort((left, right) =>
     sort === "expiry"
       ? Date.parse(left.purgeAt) - Date.parse(right.purgeAt)
-      : Date.parse(right.deletedAt) - Date.parse(left.deletedAt),
+      : sort === "size"
+        ? right.sizeBytes - left.sizeBytes || newest(left, right)
+        : newest(left, right),
   );
 }
 
@@ -58,8 +76,10 @@ export interface TrashGroup {
 }
 
 // groupItems groups sorted items by the day they were deleted, or, sorted
-// by expiry, into those that go within a week and the rest.
+// by expiry, into those that go within a week and the rest. Sorted by size
+// they are one group without a name.
 export function groupItems(items: TrashItem[], sort: TrashSort, now = new Date()): TrashGroup[] {
+  if (sort === "size") return items.length ? [{ key: "size", label: "", items }] : [];
   const groups: TrashGroup[] = [];
   for (const item of items) {
     const key =
@@ -79,9 +99,52 @@ export function groupItems(items: TrashItem[], sort: TrashSort, now = new Date()
   return groups;
 }
 
-// matches filters by space and by a part of the name, ignoring case.
-export function matches(item: TrashItem, spaceId: string, query: string): boolean {
+// purgeOffset counts the calendar days from today to the day an item is
+// deleted for good; an item already due counts as today's.
+export function purgeOffset(item: Pick<TrashItem, "purgeAt">, now: Date | number = Date.now()): number {
+  return Math.max(0, calendarDays(item.purgeAt, now));
+}
+
+export interface PurgeDay {
+  offset: number;
+  date: Date;
+  count: number;
+  bytes: number;
+  tone: ExpiryTone;
+}
+
+const scheduleDays = 30;
+const scheduleLimit = 90;
+
+const urgency: ExpiryTone[] = ["calm", "soon", "urgent"];
+
+// purgeSchedule is what the recycle bin deletes on each of the coming days,
+// from today to the last day anything is due and for at least 30 days. A
+// day is as urgent as the most urgent of its items.
+export function purgeSchedule(items: TrashItem[], now = new Date()): PurgeDay[] {
+  const offsets = items.map((item) => Math.min(purgeOffset(item, now), scheduleLimit));
+  const days: PurgeDay[] = Array.from({ length: Math.max(scheduleDays, ...offsets) + 1 }, (_, offset) => ({
+    offset,
+    date: new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset),
+    count: 0,
+    bytes: 0,
+    tone: "calm",
+  }));
+  for (const [index, item] of items.entries()) {
+    const day = days[offsets[index]];
+    const tone = expiryOf(item, now.getTime()).tone;
+    day.count += 1;
+    day.bytes += item.sizeBytes;
+    if (urgency.indexOf(tone) > urgency.indexOf(day.tone)) day.tone = tone;
+  }
+  return days;
+}
+
+// matches filters by space, by a part of the name, ignoring case, and by the
+// day the item is deleted for good.
+export function matches(item: TrashItem, spaceId: string, query: string, purgeDay?: number, now = new Date()): boolean {
   if (spaceId && item.spaceId !== spaceId) return false;
+  if (purgeDay !== undefined && Math.min(purgeOffset(item, now), scheduleLimit) !== purgeDay) return false;
   const needle = query.trim().toLocaleLowerCase("zh-CN");
   return !needle || item.name.toLocaleLowerCase("zh-CN").includes(needle);
 }

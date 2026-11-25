@@ -1,0 +1,39 @@
+#!/bin/bash
+# What the verification's versions differ in. mkosi runs this after the
+# packages are installed, with the image at $BUILDROOT.
+set -euo pipefail
+root=$BUILDROOT
+units=$root/usr/lib/systemd/system
+printf 'ANAS_VERSION=%s\nANAS_VARIANT=%s\n' "$IMAGE_VERSION" "${ANAS_VARIANT:-good}" > "$root/usr/lib/a-nas/build-info"
+chmod 0755 "$root/usr/lib/a-nas/health-check.sh"
+# Units are enabled by symlinks in /usr: /etc is on the persistent root and
+# stays as the first version left it.
+mkdir -p "$units/boot-complete.target.requires" "$units/multi-user.target.wants" "$units/sysinit.target.wants"
+ln -sf ../a-nas-health.service "$units/boot-complete.target.requires/"
+ln -sf ../systemd-networkd.service "$units/multi-user.target.wants/"
+ln -sf ../systemd-sysext.service "$units/sysinit.target.wants/"
+ln -sf ../a-nas-system-disk.service "$units/sysinit.target.wants/"
+# Version 2 and later add a system user and two units, one enabled from /usr
+# and one from /etc, to see which of them an updated device picks up.
+if (( IMAGE_VERSION >= 2 )); then
+	printf 'u a-nas-v2 - "added in version 2" /nonexistent /usr/sbin/nologin\n' > "$root/usr/lib/sysusers.d/a-nas-v2.conf"
+	for where in usr etc; do
+		cat > "$units/a-nas-v2-$where.service" <<EOF
+[Unit]
+Description=Enabled from /$where in version 2
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	done
+	ln -sf ../a-nas-v2-usr.service "$units/multi-user.target.wants/"
+	mkdir -p "$root/etc/systemd/system/multi-user.target.wants"
+	ln -sf /usr/lib/systemd/system/a-nas-v2-etc.service "$root/etc/systemd/system/multi-user.target.wants/"
+fi
+# The test CA that signs the update server's certificate (verify.sh).
+mkosi-chroot update-ca-certificates >/dev/null

@@ -1,11 +1,11 @@
 # 启用向量索引
 
 状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步；第 5 步在读路径切换前做过影子比对，切换后的核对待部署后执行）
-更新时间：2026-11-06
+更新时间：2026-11-11
 
 ## 目的
 
-第一次在 Experimental NAS 上安装带向量索引的 release（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[技术设计](../architecture/vector-index.md)）。之后的升级按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)进行即可。
+第一次在 Experimental NAS 上安装带向量索引的 release（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[技术设计](../architecture/vector-index.md)）。之后的升级按[部署 A-NAS 软件包](deploy-a-nas-packages.md)进行即可。
 
 成功后：
 
@@ -28,23 +28,22 @@
   - 内存：实例运行时，系统测试中空集合约 75 MB。单元的 `MemoryHigh=512M`、`MemoryMax=768M`。
   - 首次同步会把 Catalog 中的全部向量写入索引，只在相册空闲、门控允许时进行。
 - **停止条件**（出现任一项立即停止）：
-  - 安装器以退出码 2（缺少向量索引文件或 Qdrant 清单无效）、3（缺少 `systemd-socket-proxyd`）或 4（暂存的 Qdrant 与清单不符）结束。
+  - apt 报告依赖无法满足、签名或哈希错误，或 `a-nas-check` 有 `FAIL`。
   - 相册空闲以后，`journalctl -u anas-photos -b` 反复出现 `photo vector index sync failed`。
   - 实例因内存超限被杀（日志出现 `oom-kill`）。
   - `photo vector index check` 的 `overlap*` 低于 1，或反复出现 `photo search reads the Catalog's vectors` 且 `reason` 为 `the vector index failed`。
 
 ## 步骤
 
-1. 在开发机暂存。
-   - 命令（WSL）：`scripts/fetch-qdrant.sh`。
-   - 命令（Windows）：`scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。
-   - 预期：Qdrant 压缩包上传一次，此后的暂存输出 “The NAS already holds qdrant-x86_64-unknown-linux-musl.tar.gz.”。
-   - 完成标准：暂存 release 中有 `vectors/qdrant.json`、`vectors/config.yaml`、`vectors/start.sh`、`vectors/wait-ready.sh`，`vectors/qdrant.tar.gz` 链接到 `apps/a-nas/qdrant/<sha256>/`；暂存脚本已核对哈希。
-2. 以 root 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对二进制哈希并运行安装器。
+1. 在开发机发布。
+   - 命令（WSL）：`scripts/fetch-qdrant.sh`，把 `build/qdrant/<sha256>/` 中的压缩包放进内容库的 `qdrant/<sha256>/`（[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)），再按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 1 步发布。
+   - 预期：`make release` 核对压缩包的大小与 SHA-256，只取出二进制打成 Qdrant 的内容包；此后软件源中已有它，不再构建。
+   - 完成标准：`make release` 输出版本、签名密钥的指纹与 `a-nas-archive-keyring` 的 SHA-256。
+2. 以 root 按[部署 A-NAS 软件包](deploy-a-nas-packages.md)第 2–6 步安装。
    - 预期：
-     - 安装器把压缩包复制到自己的临时目录，核对大小与 SHA-256，只取出二进制放到 `/opt/a-nas/qdrant/<sha256>/qdrant`；
-     - 安装三个单元与 `anas-vectors.slice`，启用 `anas-vectors-proxy@a-nas-photos.socket`。
-   - 完成标准：安装器正常结束，状态输出中这个套接字是 `active (listening)`。
+     - Qdrant 的内容包把二进制放到 `/opt/a-nas/qdrant/<sha256>/qdrant`，`/usr/lib/a-nas/vectors/` 带有清单、配置、`start.sh` 与 `wait-ready.sh`，并链接到这个二进制；
+     - `a-nas` 带有三个单元与 `anas-vectors.slice`，启用 `anas-vectors-proxy@a-nas-photos.socket`。
+   - 完成标准：`a-nas-check` 全部 `PASS`，其中有 `anas-vectors-proxy@a-nas-photos.socket is active`。
 3. 核对套接字与实例。
    - 命令：`stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock`。
    - 预期：`600 a-nas-photos a-nas-photos`。
@@ -121,4 +120,4 @@
 - 规格：[相册规格](../specs/photo-library.md)
 - ADR：[0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 技术设计：[向量索引](../architecture/vector-index.md)
-- 代码：[单元](../../deploy/systemd/system/anas-vectors@.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[同步](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[核对](../../internal/photos/vectorcheck.go)
+- 代码：[单元](../../deploy/systemd/system/anas-vectors@.service)、[软件包](../../scripts/build-packages.sh)、[内容包](../../scripts/build-content-packages.sh)、[同步](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[核对](../../internal/photos/vectorcheck.go)

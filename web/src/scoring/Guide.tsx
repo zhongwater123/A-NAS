@@ -1,0 +1,225 @@
+import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { Spinner } from "../ui/workspace";
+import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
+import { formatScore, isLevels, overall, snapScore } from "./model";
+import styles from "./scoring.module.css";
+
+// How to pick a score on each scale, and the keys that move it.
+function Picking({ scale, hidden, dimensions }: Pick<ScoringRaterBatch, "scale" | "dimensions"> & { hidden: boolean }) {
+  if (scale === "five") {
+    return (
+      <>
+        <li>在下方点选一档：1 很差、2 较差、3 一般、4 好、5 很好，没有小数</li>
+        {dimensions.some((dimension) => dimension.id === "emotion") && (
+          <li>情绪的五档不是好坏：1 很平静、2 安静、3 中间、4 有张力、5 激烈</li>
+        )}
+        <li>
+          <kbd>1</kbd>–<kbd>5</kbd> 直接选档，<kbd>←</kbd> <kbd>→</kbd> 换一档
+        </li>
+      </>
+    );
+  }
+  if (scale === "three") {
+    return (
+      <>
+        <li>在下方点选一档：差、中、好</li>
+        {dimensions.some((dimension) => dimension.id === "emotion") && (
+          <li>情绪的三档不是好坏：1 平静、3 中间、5 激烈</li>
+        )}
+        <li>
+          <kbd>1</kbd> 差，<kbd>3</kbd> 中，<kbd>5</kbd> 好，<kbd>←</kbd> <kbd>→</kbd> 换一档
+        </li>
+      </>
+    );
+  }
+  if (hidden) {
+    return (
+      <>
+        <li>在下方的数轴上按位置拖动或点选，不显示分数</li>
+        <li>
+          <kbd>←</kbd> <kbd>→</kbd> 移动
+          {scale === "hundredths" && (
+            <>
+              ，按住 <kbd>Shift</kbd> 细调
+            </>
+          )}
+          ，<kbd>0</kbd>–<kbd>5</kbd> 跳到整数处
+        </li>
+      </>
+    );
+  }
+  if (scale === "whole") {
+    return (
+      <>
+        <li>在下方的数轴上点选 0 到 5 的整数分，也可以直接输入</li>
+        <li>
+          <kbd>←</kbd> <kbd>→</kbd> 每次 1 分，<kbd>0</kbd>–<kbd>5</kbd> 直接选分
+        </li>
+      </>
+    );
+  }
+  const tenths = scale === "tenths";
+  return (
+    <>
+      <li>在下方的数轴上拖动或点选 0 到 5 分，也可以直接输入，最多{tenths ? "一" : "两"}位小数</li>
+      <li>
+        <kbd>←</kbd> <kbd>→</kbd> 每次 0.1
+        {!tenths && (
+          <>
+            ，按住 <kbd>Shift</kbd> 每次 0.01
+          </>
+        )}
+        ，<kbd>0</kbd>–<kbd>5</kbd> 跳到整数分
+      </li>
+    </>
+  );
+}
+
+// GuideContent is what raters see before scoring a batch and whenever they
+// look again: the administrator's scoring guide, the batch's 打分项, how to
+// score on the batch's scale, and the reference photos, lowest score first,
+// each with its score as the scale writes it, or none while the batch hides
+// scores from raters.
+export function GuideContent({
+  batch,
+}: {
+  batch: Pick<ScoringRaterBatch, "id" | "rubric" | "dimensions" | "scale" | "hideDecimals">;
+}) {
+  const several = batch.dimensions.length > 1;
+  const { scale, hideDecimals: hidden } = batch;
+  const levels = isLevels(scale);
+  const release = levels ? "点选一档后松开" : "在数轴上点选或拖动后松开";
+  const anchorScore = (score: number) => {
+    const shown = formatScore(snapScore(Math.round(score * 100), scale), scale, batch.dimensions[0].id);
+    return levels ? shown : `${shown} 分`;
+  };
+  // A batch of 总体 alone has nothing to list.
+  const named = several || batch.dimensions[0].id !== overall;
+  const [anchors, setAnchors] = useState<ScoringAnchor[]>();
+  const [failure, setFailure] = useState("");
+  useEffect(() => {
+    let live = true;
+    listAnchors(batch.id)
+      .then((items) => live && setAnchors(items))
+      .catch((caught: unknown) => live && setFailure(scoringError(caught)));
+    return () => {
+      live = false;
+    };
+  }, [batch.id]);
+  return (
+    <div className={styles.scGuide}>
+      <section>
+        <h3>打分标准</h3>
+        {batch.rubric ? (
+          <p className={styles.scRubric}>{batch.rubric}</p>
+        ) : (
+          <p className={styles.scMuted}>管理员没有写打分标准。</p>
+        )}
+      </section>
+      {named && (
+        <section>
+          <h3>打分项</h3>
+          <ol className={styles.scGuideItems}>
+            {batch.dimensions.map((dimension, index) => (
+              <li key={dimension.id}>
+                <span>{index + 1}</span>
+                <b>{dimension.name}</b>
+                {dimension.description && <span>{dimension.description}</span>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      <section>
+        <h3>怎样打分</h3>
+        <ul className={styles.scKeys}>
+          <Picking scale={scale} hidden={hidden} dimensions={batch.dimensions} />
+          {several ? (
+            <>
+              <li>
+                {release}，自动进入下一项，最后一项松开后进入下一张；用键盘时按 <kbd>Enter</kbd>
+              </li>
+              <li>
+                <kbd>↑</kbd> <kbd>↓</kbd> 或点上方的项回到已打的项
+              </li>
+            </>
+          ) : (
+            <li>
+              {release}，或按 <kbd>Enter</kbd>，提交并进入下一张
+            </li>
+          )}
+          <li>
+            每张照片开始时没有分数；
+            {levels
+              ? "淡黄色的点标出上一张选的档"
+              : hidden
+                ? "数轴上淡黄色的点是上一张的位置"
+                : "数轴上淡黄色的点是上一张的分数"}
+          </li>
+          <li>
+            单击照片看原图 100%，移动鼠标换位置，右下角小窗显示看的是哪一块，再单击返回；按住 <kbd>Z</kbd> 也可以
+          </li>
+          <li>
+            照片两侧的箭头或 <kbd>[</kbd> <kbd>]</kbd> 切换上一张、下一张；这一张打完才能到下一张，只能回到上一张
+          </li>
+          <li>
+            {levels ? "上方" : "数轴上方"}是你最近打过分的 12 张照片；鼠标停在一张上，它会并排放到正在打分的照片旁边
+          </li>
+          <li>
+            <kbd>S</kbd> 无法判断，<kbd>X</kbd> 图片有问题，都不计分
+          </li>
+          <li>
+            <kbd>⌫</kbd> 撤销一步：回到上一项，在第一项时回到上一张的最后一项
+          </li>
+          <li>
+            <kbd>F</kbd> 全屏，<kbd>?</kbd> 再看打分标准
+          </li>
+        </ul>
+      </section>
+      <section>
+        <h3>参考照片</h3>
+        {failure && <p className={styles.scMuted}>{failure}</p>}
+        {!anchors && !failure && <Spinner small />}
+        {anchors?.length === 0 && <p className={styles.scMuted}>这个批次没有参考照片。</p>}
+        {anchors && anchors.length > 0 && hidden && <p className={styles.scMuted}>按参考分从低到高排列。</p>}
+        {anchors && anchors.length > 0 && (
+          <ul className={styles.scAnchors}>
+            {anchors.map((anchor) => (
+              <li key={anchor.id}>
+                <img
+                  src={anchorImageURL(batch.id, anchor.id)}
+                  alt={hidden ? "参考照片" : `${anchorScore(anchor.score)}的参考照片`}
+                  loading="lazy"
+                />
+                {!hidden && <span>{anchorScore(anchor.score)}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// Guide shows GuideContent over the stage; Escape or the button closes it.
+export function Guide({ batch, onClose }: { batch: ScoringRaterBatch; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    close.current?.focus();
+  }, []);
+  return (
+    <div className={styles.scOverlay} role="dialog" aria-modal="true" aria-label="打分标准">
+      <div className={styles.scGuideSheet}>
+        <header>
+          <h2>{batch.name}</h2>
+          <button ref={close} type="button" className={styles.scIconButton} aria-label="关闭" onClick={onClose}>
+            <X />
+          </button>
+        </header>
+        <GuideContent batch={batch} />
+      </div>
+    </div>
+  );
+}

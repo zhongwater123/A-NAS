@@ -28,13 +28,13 @@ root=$(dirname "$(readlink -f "$0")")
 threads=${THREADS:-6}
 count=${COUNT:-12}
 models=${MODELS:-glm-ocr qwen3.5-2b}
-python=/opt/a-nas/current/ai/runtime/bin/python
+python=/usr/lib/a-nas/ai/runtime/bin/python
 flags=$(printf '%s' "${ANAS_OCR_SERVER_ARGS:-}" | tr -s ' -' '-')
 out="$root/runs/t$threads$flags"
 mkdir -p "$out"
 export ANAS_OCR_MODELS="$root/models" ANAS_OCR_DATA="$root/data" ANAS_OCR_RUNS="$out" ANAS_OCR_LLAMA="$root/llama"
 # eval.ocr takes its loop check from the Worker's anas_ai, as installed.
-export LD_LIBRARY_PATH="$root/llama" PYTHONPATH=/opt/a-nas/current/ai PYTHONDONTWRITEBYTECODE=1
+export LD_LIBRARY_PATH="$root/llama" PYTHONPATH=/usr/lib/a-nas/ai PYTHONDONTWRITEBYTECODE=1
 echo 1000 > /proc/self/oom_score_adj
 cd "$root/ai" || exit 1
 

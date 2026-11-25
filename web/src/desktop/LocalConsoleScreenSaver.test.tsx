@@ -10,6 +10,7 @@ import {
   loadScreenSaverVideos,
   localConsoleCovered,
   localConsoleScreenSaverIdleMs,
+  onLocalConsoleDismissed,
   selectScreenSaverVideo,
 } from "./LocalConsoleScreenSaver";
 
@@ -245,6 +246,36 @@ describe("local console screen saver", () => {
     expect(asleep()).toBeNull();
     act(() => vi.advanceTimersByTime(1));
     expect(asleep()).toBeTruthy();
+  });
+
+  it.each([
+    ["a wheel", () => fireEvent.wheel(window)],
+    ["a pointer move", () => fireEvent.pointerMove(window)],
+    ["a key", () => fireEvent.keyDown(window, { key: "a" })],
+  ])("tells the page that %s took it away, though the input goes no further", async (_, input) => {
+    render(
+      <LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} random={() => 0} />,
+    );
+    await act(async () => undefined);
+    const dismissed = vi.fn();
+    const stop = onLocalConsoleDismissed(dismissed);
+    const page = vi.fn();
+    for (const kind of ["wheel", "pointermove", "keydown"]) window.addEventListener(kind, page);
+    try {
+      await idle();
+      expect(saver()).not.toBeNull();
+      act(() => void input());
+      expect(saver()).toBeNull();
+      expect(dismissed).toHaveBeenCalledTimes(1);
+      expect(page).not.toHaveBeenCalled();
+      // Input on the page that is not covered is the page's.
+      act(() => void input());
+      expect(dismissed).toHaveBeenCalledTimes(1);
+      expect(page).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+      for (const kind of ["wheel", "pointermove", "keydown"]) window.removeEventListener(kind, page);
+    }
   });
 
   it("ignores a setting that arrives after the idle period ended", async () => {

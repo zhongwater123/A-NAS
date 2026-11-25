@@ -15,9 +15,13 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/modules"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
+	"github.com/zhongwater123/A-NAS/internal/scoringapi"
+	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
 	"github.com/zhongwater123/A-NAS/internal/websearch"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -62,9 +66,12 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 	product := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
-		Shares: unreached, Family: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
-		WebSearch: websearchapi.New(nil, websearch.Release{}, nil),
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Shares: unreached, Family: unreached, Montage: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
+		Modules:      []modules.Module{{ID: scoringapi.ID, Mounts: scoringapi.Mounts(), Handler: unreached}},
+		WebSearch:    websearchapi.New(nil, websearch.Release{}, nil),
+		SystemUpdate: systemupdateapi.New(nil, nil, nil, nil),
+		AssistantKey: assistantkeyapi.New(nil, nil),
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return product, owner, member
 }

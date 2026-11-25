@@ -18,7 +18,7 @@ type Release struct {
 	dir string
 }
 
-// NewRelease reads the release's search directory, /opt/a-nas/current/search
+// NewRelease reads the product's search directory, /usr/lib/a-nas/search
 // on the NAS.
 func NewRelease(dir string) Release { return Release{dir: dir} }
 

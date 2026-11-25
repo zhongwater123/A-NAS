@@ -6,7 +6,7 @@ import { CodeMissing } from "../ui/lazyCode";
 import { apps } from "./apps";
 import styles from "./desktop.module.css";
 import { WINDOW_ID } from "./windowSnapshot";
-import { WindowAction, WindowModel } from "./windows";
+import { MAXIMIZED_INSET, WindowAction, WindowModel } from "./windows";
 
 export function AppWindow({
   model,
@@ -89,7 +89,7 @@ export function AppWindow({
   // The dock floats over the bottom of the desktop whenever a window is open,
   // so a maximized window ends above it and keeps its bottom controls reachable.
   const style = model.maximized
-    ? { left: 88, top: 12, right: 12, bottom: 90, zIndex: model.z }
+    ? { ...MAXIMIZED_INSET, zIndex: model.z }
     : {
         left: model.x,
         top: model.y,

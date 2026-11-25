@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """Read-only check of photo OCR on the experimental NAS (step 6 acceptance).
 
-Opens the photo catalog read-only and prints counts only: no text, names or
-values read from photos. Run as root; writes /var/tmp/a-nas-ocr-check.txt.
+Run as the photo service account. Print aggregate statistics to stdout.
 """
 
 import collections
-import contextlib
 import datetime
 import itertools
 import json
-import os
 import re
 import sqlite3
 import statistics
 import sys
+from pathlib import Path
 
 CATALOG = sys.argv[1] if len(sys.argv) > 1 else "/srv/a-nas/data/photos/catalog.db"
-# Where the read-only SSH account can read it; the end says how it is created.
-OUT = sys.argv[2] if len(sys.argv) > 2 else "/var/tmp/a-nas-ocr-check.txt"  # noqa: S108
 AI_SLICE = "/sys/fs/cgroup/anas.slice/anas-ai.slice"
 # Asset names that say a photo is a screenshot; only their count is printed.
 SCREENSHOT = re.compile(r"screenshot|screen[ _]shot|截屏|截图|屏幕快照|snipaste", re.I)
@@ -39,11 +35,11 @@ def share(part, whole):
     return f"{part}/{whole} ({100 * part / whole:.1f}%)" if whole else f"{part}/0"
 
 
-db = sqlite3.connect(f"file:{CATALOG}?mode=ro", uri=True)
+db = sqlite3.connect(f"{Path(CATALOG).resolve().as_uri()}?mode=ro", uri=True)
 q = db.execute
+q("BEGIN")
 
 say("photo OCR check", datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
-say("catalog", CATALOG)
 
 say("\n== libraries (kind, reads text, people)")
 for kind, texts, people in q("SELECT kind, texts, people FROM libraries ORDER BY kind"):
@@ -86,7 +82,7 @@ for (error, attempts), count in failures.most_common():
 backlog = collections.Counter(
     row[0] for row in q("SELECT derivation FROM jobs WHERE derivation <> 'ocr/v1' AND state <> 'failed'")
 )
-say("  other queues waiting before reading text:", dict(backlog) or "none")
+say("  other unfinished jobs by derivation:", dict(backlog) or "none")
 
 say("\n== which photos were sent (by media type; screenshots by file name)")
 for media_type, count in collections.Counter(v["type"] for v in photos.values()).most_common():
@@ -133,7 +129,9 @@ say(
     q("SELECT COUNT(*) FROM text_changes").fetchone()[0],
 )
 
-say("\n== time between readings finishing (gaps under 15 min, i.e. while reading)")
+db.close()
+
+say("\n== time between stored OCR results (positive gaps under 15 min; includes idle time)")
 times = sorted(when(r[6]) for r in readings)
 gaps = [(b - a).total_seconds() for a, b in itertools.pairwise(times) if 0 < (b - a).total_seconds() < 900]
 if gaps:
@@ -155,11 +153,4 @@ try:
 except OSError as error:
     say("  unreadable:", error)
 
-report = "\n".join(lines) + "\n"
-# /var/tmp is writable by everyone, so root writes a fresh file: never one
-# already there, nor a link someone left in its place.
-with contextlib.suppress(FileNotFoundError):
-    os.unlink(OUT)
-with os.fdopen(os.open(OUT, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644), "w") as out:
-    out.write(report)
-print(report)
+print("\n".join(lines))

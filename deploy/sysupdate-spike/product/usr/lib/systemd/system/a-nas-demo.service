@@ -1,0 +1,10 @@
+[Unit]
+Description=A-NAS demo product service
+
+[Service]
+User=a-nas-demo
+StateDirectory=a-nas-demo
+ExecStart=/usr/lib/a-nas-demo/run.sh
+
+[Install]
+WantedBy=multi-user.target

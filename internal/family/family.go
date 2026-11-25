@@ -4,6 +4,11 @@
 // recordings on the data volume. Photos and videos stay in the shared photo
 // library: a channel stores only their asset IDs and asks Photos, as the
 // person reading, which of them that person can still see.
+//
+// The same store keeps 家庭待办 (docs/specs/family-todos.md). To-dos are not
+// family-center content: they are authorized as shared, for every active
+// account whether or not it joined the family, or as one account's own,
+// never by membership or guardianship.
 package family
 
 import (
@@ -19,6 +24,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-sqlite3"
+
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -129,8 +135,11 @@ func Open(directory string, options Options) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-// migrations run in order; user_version records how many have run.
-var migrations = []string{`
+// migrations run in order; user_version records how many have run
+// (sqlitedb.Migrate). Add a new one, with the Down that undoes it (ADR 0034);
+// the first three were released before migrations had Downs
+// (databaseSchema).
+var migrations = []sqlitedb.Step{{Up: `
 CREATE TABLE family (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     created_at TEXT NOT NULL,
@@ -239,7 +248,7 @@ CREATE TABLE audit_events (
     detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX audit_events_actor ON audit_events(actor_user_id, occurred_at DESC, id DESC);
-`, `
+`}, {Up: `
 CREATE TABLE reactions (
     record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     account_id TEXT NOT NULL,
@@ -247,41 +256,45 @@ CREATE TABLE reactions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (record_id, account_id, reaction)
 );
-`, activity.IndexStatement}
+`}, {Up: activity.IndexStatement}, {Up: `
+CREATE TABLE todos (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    due_on TEXT,
+    owner_id TEXT NOT NULL DEFAULT '',
+    owner_name TEXT NOT NULL DEFAULT '',
+    amount_cents INTEGER,
+    viewer_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    snoozed_until TEXT,
+    remind_round INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by TEXT NOT NULL,
+    created_by_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    closed_at TEXT,
+    closed_by TEXT,
+    closed_by_name TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    request_key TEXT
+);
+CREATE INDEX todos_visible ON todos(viewer_id, status, due_on);
+CREATE UNIQUE INDEX todos_request ON todos(created_by, request_key) WHERE request_key IS NOT NULL;
+`, Down: `
+DROP TABLE todos;
+DELETE FROM hints_seen WHERE hint_key LIKE 'todo:%';
+`}}
 
 func (s *Store) migrate(ctx context.Context) error {
-	var version int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return err
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("family.db is version %d, newer than this program (%d)", version, len(migrations))
-	}
-	for ; version < len(migrations); version++ {
-		err := s.inTx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, migrations[version]); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version+1))
-			return err
-		})
-		if err != nil {
-			return fmt.Errorf("migrate family.db to version %d: %w", version+1, err)
-		}
-	}
-	return nil
+	return sqlitedb.Migrate(ctx, s.db, databaseSchema)
 }
 
+var databaseSchema = sqlitedb.Schema{Name: "family.db", Steps: migrations, WithoutDown: 3}
+
 func (s *Store) inTx(ctx context.Context, apply func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := apply(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.WithTx(ctx, s.db, apply)
 }
 
 type queryer interface {
@@ -310,9 +323,15 @@ func parseOptionalTime(value sql.NullString) *time.Time {
 // audit records an action in the family's audit trail, which the activity
 // log reads like every module's audit_events table.
 func (s *Store) audit(ctx context.Context, q queryer, actor Actor, action, resourceID, detail string) error {
+	return s.auditAs(ctx, q, actor, "family", action, resourceID, detail)
+}
+
+// auditAs records an action on a resource of another type than the family
+// center's, such as a to-do.
+func (s *Store) auditAs(ctx context.Context, q queryer, actor Actor, resourceType, action, resourceID, detail string) error {
 	_, err := q.ExecContext(ctx,
 		"INSERT INTO audit_events(id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?, ?, ?, ?, ?, ?, ?)",
-		newID("audit"), actor.AccountID, action, "family", resourceID, formatTime(s.now()), detail)
+		newID("audit"), actor.AccountID, action, resourceType, resourceID, formatTime(s.now()), detail)
 	return err
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
@@ -143,9 +144,16 @@ func Run(parent context.Context, config Config) error {
 	var current atomic.Pointer[http.Handler]
 	unavailable := sharesapi.New(nil, config.Logger, config.Sessions.ActiveProfiles)
 	current.Store(&unavailable)
-	server := &http.Server{Handler: authenticate(config.Sessions, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*current.Load()).ServeHTTP(w, r) })), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20}
-	served := make(chan error, 1)
-	go func() { served <- server.Serve(listener) }()
+	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*current.Load()).ServeHTTP(w, r) })
+	// A deleted account's shares are removed on the Product Service's
+	// request, which carries no session; what to do comes from the Host
+	// Agent (accountremoval).
+	routes := http.NewServeMux()
+	routes.Handle(accountremoval.Path, served)
+	routes.Handle("/", authenticate(config.Sessions, config.Logger, served))
+	server := &http.Server{Handler: routes, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
@@ -157,7 +165,7 @@ func Run(parent context.Context, config Config) error {
 	}()
 	select {
 	case <-parent.Done():
-	case err = <-served:
+	case err = <-serveErr:
 		return err
 	}
 	shutdown, stop := context.WithTimeout(context.Background(), shutdownGrace)
@@ -244,13 +252,21 @@ func openStore(ctx context.Context, config Config) (*openedStore, error) {
 func supervise(ctx context.Context, config Config, serve func(http.Handler), unavailable http.Handler) {
 	ticker := time.NewTicker(config.RetryInterval)
 	defer ticker.Stop()
+	// The first failure is a warning, as a store that does not open, such as
+	// a catalog from a newer release, keeps this unit active (a-nas-check).
+	warned := false
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		store, err := openStore(ctx, config)
 		if err != nil {
-			config.Logger.DebugContext(ctx, "waiting for member-share store or bridge", "error", err)
+			if !warned {
+				config.Logger.WarnContext(ctx, "member-share store unavailable; waiting", "error", err)
+				warned = true
+			} else {
+				config.Logger.DebugContext(ctx, "waiting for member-share store or bridge", "error", err)
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -264,7 +280,10 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 		failed := make(chan error, 1)
 		var retired atomic.Bool
 		next := sharesapi.NewWithPreview(store.Store, config.Logger, config.Sessions.ActiveProfiles, config.Media)
-		serve(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remove := func(ctx context.Context, deletion accounts.AccountDeletion) (accountremoval.Result, error) {
+			return accountremoval.Result{}, store.RemoveAccount(ctx, deletion.UserID)
+		}
+		serve(accountremoval.Route(deletionLookup(config.Sessions), remove, config.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if retired.Load() {
 				unavailable.ServeHTTP(w, r)
 				return
@@ -284,13 +303,14 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 				return
 			}
 			next.ServeHTTP(w, r)
-		}))
+		})))
 		interrupt := func(reason string) {
 			retired.Store(true)
 			serve(unavailable)
 			_ = store.Interrupt(reason)
 		}
 		config.Logger.Info("member-share service ready")
+		warned = false
 		for {
 			select {
 			case <-ctx.Done():
@@ -307,6 +327,20 @@ func supervise(ctx context.Context, config Config, serve func(http.Handler), una
 			}
 		}
 	}
+}
+
+// deletionLookup asks the Host Agent about account deletions through the
+// session lookup, which can.
+func deletionLookup(sessions SessionResolver) accountremoval.Lookup {
+	lookup, ok := sessions.(interface {
+		AccountDeletion(context.Context, string) (accounts.AccountDeletion, error)
+	})
+	if !ok {
+		return func(context.Context, string) (accounts.AccountDeletion, error) {
+			return accounts.AccountDeletion{}, errors.New("account deletions cannot be looked up")
+		}
+	}
+	return lookup.AccountDeletion
 }
 
 // Domain operations check the pinned root identity before every content write;

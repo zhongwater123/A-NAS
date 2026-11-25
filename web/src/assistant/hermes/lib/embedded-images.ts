@@ -1,4 +1,4 @@
-// Vendored from NousResearch/hermes-agent 0e427d788d25 (MIT, see LICENSE).
+// Vendored from NousResearch/hermes-agent 8fd9f70600f1 (MIT, see LICENSE).
 const DATA_URL_RE = /^data:([\w./+-]+);base64,(.*)$/i
 const DATA_IMAGE_PREFIX = 'data:image/'
 const BASE64_MARKER = ';base64,'

@@ -1,55 +1,47 @@
-import {
-  ArchiveRestore,
-  Check,
-  CircleAlert,
-  CopyPlus,
-  FolderOpen,
-  HardDrive,
-  MapPin,
-  Minus,
-  RefreshCw,
-  Replace,
-  RotateCcw,
-  Search,
-  Trash2,
-  UsersRound,
-  X,
-} from "lucide-react";
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownWideNarrow, Check, ChevronDown, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ContextMenu, DropdownMenu, Tooltip } from "radix-ui";
+import { type KeyboardEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
 import type { RestoredEntry, Space, TrashItem } from "../api.generated";
-import { formatClock, formatDateTime } from "../backup/format";
+import { formatShortDay } from "../backup/format";
 import { listEntries, listSpaces } from "../files/api";
 import { formatBytes } from "../lib/bytes";
-import { fileTypeLabel } from "../lib/fileTypes";
 import type { TransferLocation } from "../transfers/api";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../ui/workspace";
+import { useToasts } from "../ui/workspace";
 import workspaceStyles from "../ui/workspace.module.css";
 import { listTrash, purgeTrash, type RestoreConflict, restoreTrash } from "./api";
+import { ConflictDialog, PurgeDialog, TakenDialog } from "./dialogs";
 import {
   type BatchOutcome,
-  type ExpiryTone,
   emptyOutcome,
   expiryOf,
   groupItems,
   locationOf,
   matches,
   messageOf,
-  restoredName,
+  purgeSchedule,
   restoredText,
   restoreSummary,
   sortItems,
+  sortLabels,
   spaceName,
   type TrashSort,
 } from "./model";
+import { PurgeStrip } from "./PurgeStrip";
+import { Checkbox, TrashRow } from "./TrashRow";
 import styles from "./trash.module.css";
 
-// TrashPanel lists what the signed-in account deleted, grouped by the day
-// it was deleted: where each item goes back to, what it is and holds, and
-// how long it stays before the recycle bin deletes it for good
-// (docs/specs/basic-storage-and-sharing.md). Items can be restored or
-// deleted one by one or as a selection.
+const isCode = (caught: unknown, code: string) => caught instanceof APIError && caught.code === code;
+const typing = (target: EventTarget) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+
+// TrashPanel lists what the signed-in account deleted: how much the recycle
+// bin holds and when it lets go of it, then the items, each with where it
+// goes back to, its size, when it was deleted and how long it stays
+// (docs/specs/basic-storage-and-sharing.md). One click restores an item to
+// where it came from; a selection is restored or deleted from the bar that
+// rises at the bottom.
 export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: TransferLocation) => void }) {
   const [items, setItems] = useState<TrashItem[]>();
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -58,15 +50,23 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const [sort, setSort] = useState<TrashSort>("deleted");
   const [query, setQuery] = useState("");
   const [spaceFilter, setSpaceFilter] = useState("");
+  const [purgeDay, setPurgeDay] = useState<number>();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [restoring, setRestoring] = useState<TrashItem>();
+  // restoring are the items a single click is putting back right now.
+  const [restoring, setRestoring] = useState<ReadonlySet<string>>(new Set());
+  // taken is the item whose name was found taken where it goes back.
+  const [taken, setTaken] = useState<TrashItem>();
   const [purging, setPurging] = useState<{ items: TrashItem[]; everything: boolean }>();
   // conflicts are the items of a selection whose name was taken where they
   // go back, waiting for the user to say what to do with them.
   const [conflicts, setConflicts] = useState<{ items: TrashItem[]; outcome: BatchOutcome }>();
   const [progress, setProgress] = useState<{ label: string; done: number; total: number }>();
-  const { toast, element: toasts } = useToasts();
+  // menuItem is the item the right-click menu was opened on.
+  const [menuItem, setMenuItem] = useState<TrashItem>();
+  const { toast, element: toasts } = useToasts(styles.trToasts);
   const root = useRef<HTMLDivElement>(null);
+  // anchor is the item last picked, where a Shift-click's range starts.
+  const anchor = useRef("");
   // Buttons are disabled while a batch runs, which drops focus to the page;
   // the panel takes it back so Escape and Tab keep working.
   const refocus = () => {
@@ -106,34 +106,51 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
 
   const all = useMemo(() => items ?? [], [items]);
   const spaceOf = useCallback((item: TrashItem) => spaces.find((space) => space.id === item.spaceId), [spaces]);
+  const schedule = useMemo(() => purgeSchedule(all), [all]);
+  // A day whose items are all gone no longer filters.
+  const day = purgeDay !== undefined && schedule[purgeDay]?.count ? purgeDay : undefined;
   const visible = useMemo(
     () =>
       sortItems(
-        all.filter((item) => matches(item, spaceFilter, query)),
+        all.filter((item) => matches(item, spaceFilter, query, day)),
         sort,
       ),
-    [all, spaceFilter, query, sort],
+    [all, spaceFilter, query, day, sort],
   );
   const groups = useMemo(() => groupItems(visible, sort), [visible, sort]);
-  const total = all.reduce((sum, item) => sum + item.sizeBytes, 0);
+  const [total, unit] = formatBytes(all.reduce((sum, item) => sum + item.sizeBytes, 0)).split(" ");
   const soon = all.filter((item) => expiryOf(item).tone !== "calm").length;
   const trashSpaces = spaces.filter((space) => all.some((item) => item.spaceId === space.id));
   const chosen = visible.filter((item) => selected.has(item.id));
   const allChosen = visible.length > 0 && chosen.length === visible.length;
   const busy = Boolean(progress);
+  const filtered = Boolean(query.trim() || spaceFilter || day !== undefined);
 
   const forget = (gone: TrashItem[]) => {
     const ids = new Set(gone.map((item) => item.id));
     setItems((current) => current?.filter((item) => !ids.has(item.id)));
     setSelected((current) => new Set([...current].filter((id) => !ids.has(id))));
   };
-  const toggle = (item: TrashItem) =>
+  // toggle picks or drops an item; with Shift, it picks every item from the
+  // one picked last to this one.
+  const toggle = (item: TrashItem, range = false) => {
+    const from = visible.findIndex((candidate) => candidate.id === anchor.current);
+    const to = visible.indexOf(item);
+    anchor.current = item.id;
     setSelected((current) => {
       const next = new Set(current);
-      if (!next.delete(item.id)) next.add(item.id);
+      if (range && from >= 0)
+        for (const between of visible.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(between.id);
+      else if (!next.delete(item.id)) next.add(item.id);
       return next;
     });
-  const toggleAll = () => setSelected(allChosen ? new Set() : new Set(visible.map((item) => item.id)));
+  };
+  const chooseAll = () => setSelected(new Set(visible.map((item) => item.id)));
+  const clearFilters = () => {
+    setQuery("");
+    setSpaceFilter("");
+    setPurgeDay(undefined);
+  };
 
   // The restored item's folder is found by name, as the file manager knows
   // folders by ID.
@@ -154,11 +171,39 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     onShowInFiles({ spaceId: space.id, spaceKind: space.kind, folders: trail });
   };
 
+  const restoredOne = (item: TrashItem, restored: RestoredEntry, asked: string, choice: RestoreConflict) => {
+    const location = locationOf(item, spaceOf(item));
+    forget([item]);
+    // A replaced file went to the recycle bin and is listed from now on.
+    if (restored.replaced) void refresh();
+    toast(restoredText(restored, asked, location.text, choice), "success", {
+      label: "在文件管理中显示",
+      run: () => void showInFiles(spaceOf(item), location.folders),
+    });
+  };
+
+  // restoreOne puts an item back where it came from at once; only a name
+  // taken there asks what to do.
+  const restoreOne = async (item: TrashItem) => {
+    setRestoring((current) => new Set(current).add(item.id));
+    try {
+      restoredOne(item, await restoreTrash(item.id, item.name, "ask"), item.name, "ask");
+    } catch (caught) {
+      if (isCode(caught, "name_conflict")) setTaken(item);
+      else {
+        if (isCode(caught, "not_found")) forget([item]);
+        toast(messageOf(caught), "error");
+      }
+    } finally {
+      setRestoring((current) => new Set([...current].filter((id) => id !== item.id)));
+    }
+  };
+
   // restoreBatch puts each item back where it came from, under its own name.
   // With "ask", the items whose name is taken there are returned for the
   // user to decide; a folder is never replaced and keeps both instead.
   const restoreBatch = async (batch: TrashItem[], choice: RestoreConflict, outcome: BatchOutcome) => {
-    const taken: TrashItem[] = [];
+    const conflicting: TrashItem[] = [];
     for (const [index, item] of batch.entries()) {
       setProgress({ label: "正在恢复", done: index, total: batch.length });
       try {
@@ -171,15 +216,15 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
         if (restored.replaced) outcome.replaced += 1;
         else if (restored.name !== item.name) outcome.renamed += 1;
       } catch (caught) {
-        if (choice === "ask" && caught instanceof APIError && caught.code === "name_conflict") taken.push(item);
-        else if (caught instanceof APIError && caught.code === "not_found") outcome.gone.push(item);
+        if (choice === "ask" && isCode(caught, "name_conflict")) conflicting.push(item);
+        else if (isCode(caught, "not_found")) outcome.gone.push(item);
         else outcome.failed.push(messageOf(caught));
       }
     }
     setProgress(undefined);
     refocus();
     forget([...outcome.done, ...outcome.gone]);
-    return taken;
+    return conflicting;
   };
 
   const finishBatch = (outcome: BatchOutcome) => {
@@ -190,20 +235,20 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     toast(summary.text, summary.tone);
   };
 
-  const restoreChosen = async () => {
+  const restoreItems = async (batch: TrashItem[]) => {
     const outcome = emptyOutcome();
-    const taken = await restoreBatch(chosen, "ask", outcome);
-    if (taken.length) setConflicts({ items: taken, outcome });
+    const conflicting = await restoreBatch(batch, "ask", outcome);
+    if (conflicting.length) setConflicts({ items: conflicting, outcome });
     else finishBatch(outcome);
   };
 
   const resolveConflicts = async (choice: RestoreConflict | "skip") => {
     if (!conflicts) return;
-    const { items: taken, outcome } = conflicts;
+    const { items: conflicting, outcome } = conflicts;
     refocusAfterConflicts.current = true;
     setConflicts(undefined);
-    if (choice === "skip") outcome.skipped.push(...taken);
-    else await restoreBatch(taken, choice, outcome);
+    if (choice === "skip") outcome.skipped.push(...conflicting);
+    else await restoreBatch(conflicting, choice, outcome);
     finishBatch(outcome);
   };
 
@@ -216,7 +261,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
         await purgeTrash(item.id);
         removed.push(item);
       } catch (caught) {
-        if (caught instanceof APIError && caught.code === "not_found") removed.push(item);
+        if (isCode(caught, "not_found")) removed.push(item);
         else {
           failure = messageOf(caught);
           break;
@@ -232,90 +277,325 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   };
 
   const keyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape" && selected.size && !restoring && !purging && !conflicts && !busy)
-      setSelected(new Set());
+    if (taken || purging || conflicts || busy || typing(event.target)) return;
+    if (event.key === "Escape" && selected.size) setSelected(new Set());
+    else if (event.key === "a" && (event.ctrlKey || event.metaKey) && visible.length) {
+      event.preventDefault();
+      chooseAll();
+    } else if (event.key === "Delete" && chosen.length) setPurging({ items: chosen, everything: false });
   };
 
+  // The menu acts on the whole selection when it opens on one of its items.
+  const openMenu = (event: MouseEvent) => {
+    const id = (event.target as HTMLElement).closest<HTMLElement>("[data-item]")?.dataset.item;
+    setMenuItem(visible.find((item) => item.id === id));
+  };
+  const menuItems = menuItem && selected.has(menuItem.id) && chosen.length > 1 ? chosen : menuItem ? [menuItem] : [];
+  const menuOrigin = menuItem && !menuItem.originalGone ? menuItem : undefined;
+
+  const selecting = chosen.length > 0 || busy;
   return (
-    <div ref={root} className={`${workspaceStyles.bkApp} ${styles.trApp}`} tabIndex={-1} onKeyDown={keyDown}>
-      <header className={styles.trHead}>
-        <span className={styles.trMark} aria-hidden="true">
-          <Trash2 />
-        </span>
-        <div className={styles.trTitle}>
-          <h2>回收站</h2>
-        </div>
-        <div className={styles.trHeadActions}>
-          <button
-            type="button"
-            className={workspaceStyles.bkIconButton}
-            aria-label="刷新"
-            title="刷新"
-            disabled={loading || busy}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw className={loading ? styles.trSpin : ""} />
-          </button>
-          <button
-            type="button"
-            className={`${workspaceStyles.bkSecondary} ${workspaceStyles.danger} ${workspaceStyles.small}`}
-            disabled={!all.length || busy}
-            onClick={() => setPurging({ items: all, everything: true })}
-          >
-            <Trash2 />
-            清空回收站
-          </button>
-        </div>
-      </header>
+    <Tooltip.Provider delayDuration={120} skipDelayDuration={300}>
+      <div
+        ref={root}
+        className={`${workspaceStyles.bkApp} ${styles.trApp}`}
+        data-selecting={selecting || undefined}
+        tabIndex={-1}
+        onKeyDown={keyDown}
+      >
+        <div className={styles.trScroll}>
+          {all.length > 0 && (
+            <header className={styles.trSummary}>
+              <div className={styles.trTotal} aria-label="回收站概况">
+                <strong>
+                  {total}
+                  {unit && <small> {unit}</small>}
+                </strong>
+                <p>
+                  <span>{all.length} 项</span>
+                  {soon > 0 && (
+                    <button type="button" onClick={() => setSort("expiry")}>
+                      {soon} 项将在 7 天内清理
+                    </button>
+                  )}
+                </p>
+              </div>
+              <PurgeStrip days={schedule} selected={day} onSelect={setPurgeDay} />
+            </header>
+          )}
 
-      {all.length > 0 && (
-        <div className={styles.trStats} aria-label="回收站概况">
-          <div>
-            <span>项目</span>
-            <strong>{all.length}</strong>
-          </div>
-          <div>
-            <span>占用空间</span>
-            <strong>{formatBytes(total)}</strong>
-          </div>
-          <div className={soon ? styles.soon : ""}>
-            <span>7 天内清理</span>
-            <strong>{soon}</strong>
-          </div>
-        </div>
-      )}
+          <section className={styles.trSheet} aria-label={items ? "回收站项目" : undefined}>
+            {items === undefined ? (
+              error ? (
+                <div className={styles.trEmpty} role="alert">
+                  <strong>无法读取回收站</strong>
+                  <p>{error}</p>
+                  <button
+                    type="button"
+                    className={`${styles.trBtn} ${styles.outline}`}
+                    disabled={loading}
+                    onClick={() => void refresh()}
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <Skeleton />
+              )
+            ) : (
+              <>
+                <div className={styles.trBar}>
+                  {visible.length > 0 && (
+                    <Checkbox
+                      checked={allChosen}
+                      mixed={chosen.length > 0 && !allChosen}
+                      disabled={busy}
+                      label={allChosen ? "取消全选" : "全选"}
+                      onChange={() => (allChosen ? setSelected(new Set()) : chooseAll())}
+                    />
+                  )}
+                  {trashSpaces.length > 1 && (
+                    <div className={styles.trTabs} role="radiogroup" aria-label="空间">
+                      <button type="button" role="radio" aria-checked={!spaceFilter} onClick={() => setSpaceFilter("")}>
+                        全部
+                        <span aria-hidden="true">{all.length}</span>
+                      </button>
+                      {trashSpaces.map((space) => (
+                        <button
+                          key={space.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={spaceFilter === space.id}
+                          onClick={() => setSpaceFilter(space.id)}
+                        >
+                          {spaceName(space)}
+                          <span aria-hidden="true">{all.filter((item) => item.spaceId === space.id).length}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {day !== undefined && (
+                    <button
+                      type="button"
+                      className={styles.trChip}
+                      title="取消筛选"
+                      onClick={() => setPurgeDay(undefined)}
+                    >
+                      {formatShortDay(schedule[day].date)}清理
+                      <X />
+                    </button>
+                  )}
+                  <span className={styles.trGap} />
+                  {all.length > 0 && (
+                    <>
+                      <label className={styles.trSearch}>
+                        <Search />
+                        <input
+                          type="search"
+                          placeholder="搜索"
+                          aria-label="搜索回收站"
+                          value={query}
+                          onChange={(event) => setQuery(event.target.value)}
+                        />
+                      </label>
+                      <DropdownMenu.Root modal={false}>
+                        <DropdownMenu.Trigger className={`${styles.trBtn} ${styles.quiet}`} aria-label="排序">
+                          <ArrowDownWideNarrow />
+                          <span>{sortLabels[sort]}</span>
+                          <ChevronDown className={styles.trCaret} />
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content
+                            className={`${styles.trFloat} ${styles.trMenu}`}
+                            align="end"
+                            sideOffset={6}
+                          >
+                            <DropdownMenu.RadioGroup
+                              value={sort}
+                              onValueChange={(value) => setSort(value as TrashSort)}
+                            >
+                              {(Object.keys(sortLabels) as TrashSort[]).map((key) => (
+                                <DropdownMenu.RadioItem key={key} value={key} className={styles.trMenuItem}>
+                                  {sortLabels[key]}
+                                  <DropdownMenu.ItemIndicator>
+                                    <Check />
+                                  </DropdownMenu.ItemIndicator>
+                                </DropdownMenu.RadioItem>
+                              ))}
+                            </DropdownMenu.RadioGroup>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className={`${styles.trBtn} ${styles.quiet} ${styles.icon}`}
+                    aria-label="刷新"
+                    title="刷新"
+                    disabled={loading || busy}
+                    onClick={() => void refresh()}
+                  >
+                    <RefreshCw className={loading ? styles.trSpin : ""} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.trBtn} ${styles.quiet} ${styles.risky}`}
+                    disabled={!all.length || busy}
+                    onClick={() => setPurging({ items: all, everything: true })}
+                  >
+                    清空回收站
+                  </button>
+                </div>
 
-      {error && (
-        <div className={styles.trNotice}>
-          <Notice tone="danger">{error}</Notice>
-        </div>
-      )}
+                {error && (
+                  <p className={styles.trError} role="alert">
+                    {error}
+                  </p>
+                )}
 
-      {items === undefined ? (
-        !error && (
-          <div className={styles.trLoading}>
-            <Spinner />
-            正在读取回收站…
-          </div>
-        )
-      ) : all.length === 0 ? (
-        <EmptyState icon={<Trash2 />} title="回收站是空的">
-          在文件管理或通过 SMB 删除的文件和文件夹会先放到这里，到期前随时可以恢复到原来的位置。
-        </EmptyState>
-      ) : (
-        <section className={styles.trCard} aria-label="回收站项目">
-          {chosen.length > 0 || busy ? (
-            <div className={`${styles.trToolbar} ${styles.selecting}`} role="toolbar" aria-label="所选项目的操作">
-              {busy && progress ? (
-                <span className={styles.trProgress} role="status">
-                  <Spinner small />
-                  {progress.label} {progress.done + 1}/{progress.total}…
-                </span>
+                {all.length === 0 ? (
+                  <div className={styles.trEmpty}>
+                    <EmptyBin />
+                    <strong>回收站是空的</strong>
+                    <p>删除的文件和文件夹会先放在这里，到期前可以恢复。</p>
+                  </div>
+                ) : visible.length === 0 ? (
+                  <div className={styles.trEmpty}>
+                    <strong>没有匹配的项目</strong>
+                    <button type="button" className={`${styles.trBtn} ${styles.outline}`} onClick={clearFilters}>
+                      清除筛选
+                    </button>
+                  </div>
+                ) : (
+                  <ContextMenu.Root modal={false}>
+                    <ContextMenu.Trigger asChild disabled={busy}>
+                      <div className={styles.trList} onContextMenuCapture={openMenu}>
+                        {groups.map((group) => (
+                          <section key={group.key} className={styles.trGroup} aria-label={group.label || undefined}>
+                            {group.label && (
+                              <h3>
+                                {group.label}
+                                <span>{group.items.length} 项</span>
+                              </h3>
+                            )}
+                            <ul>
+                              <AnimatePresence initial={false}>
+                                {group.items.map((item) => (
+                                  <TrashRow
+                                    key={item.id}
+                                    item={item}
+                                    space={spaceOf(item)}
+                                    timeOnly={sort === "deleted"}
+                                    selected={selected.has(item.id)}
+                                    restoring={restoring.has(item.id)}
+                                    disabled={busy}
+                                    onToggle={(range) => toggle(item, range)}
+                                    onRestore={() => void restoreOne(item)}
+                                    onPurge={() => setPurging({ items: [item], everything: false })}
+                                    onOpenOrigin={() =>
+                                      void showInFiles(spaceOf(item), locationOf(item, spaceOf(item)).folders)
+                                    }
+                                  />
+                                ))}
+                              </AnimatePresence>
+                            </ul>
+                          </section>
+                        ))}
+                        {filtered && (
+                          <p className={styles.trListEnd}>
+                            显示 {visible.length} / {all.length} 项
+                            <button type="button" onClick={clearFilters}>
+                              清除筛选
+                            </button>
+                          </p>
+                        )}
+                      </div>
+                    </ContextMenu.Trigger>
+                    <ContextMenu.Portal>
+                      <ContextMenu.Content className={`${styles.trFloat} ${styles.trMenu}`}>
+                        {menuItem ? (
+                          <>
+                            <ContextMenu.Item
+                              className={styles.trMenuItem}
+                              onSelect={() =>
+                                menuItems.length > 1 ? void restoreItems(menuItems) : void restoreOne(menuItem)
+                              }
+                            >
+                              {menuItems.length > 1 ? `恢复 ${menuItems.length} 项` : "恢复"}
+                            </ContextMenu.Item>
+                            {menuItems.length === 1 && (
+                              <>
+                                <ContextMenu.Item
+                                  className={styles.trMenuItem}
+                                  disabled={!menuOrigin}
+                                  onSelect={() =>
+                                    menuOrigin &&
+                                    void showInFiles(
+                                      spaceOf(menuOrigin),
+                                      locationOf(menuOrigin, spaceOf(menuOrigin)).folders,
+                                    )
+                                  }
+                                >
+                                  打开原位置
+                                </ContextMenu.Item>
+                                <ContextMenu.Item className={styles.trMenuItem} onSelect={() => toggle(menuItem)}>
+                                  {selected.has(menuItem.id) ? "取消选择" : "选择"}
+                                </ContextMenu.Item>
+                              </>
+                            )}
+                            <ContextMenu.Separator className={styles.trMenuLine} />
+                            <ContextMenu.Item
+                              className={`${styles.trMenuItem} ${styles.risky}`}
+                              onSelect={() => setPurging({ items: menuItems, everything: false })}
+                            >
+                              {menuItems.length > 1 ? `永久删除 ${menuItems.length} 项` : "永久删除"}
+                            </ContextMenu.Item>
+                          </>
+                        ) : (
+                          <>
+                            <ContextMenu.Item className={styles.trMenuItem} onSelect={chooseAll}>
+                              全选
+                            </ContextMenu.Item>
+                            <ContextMenu.Item className={styles.trMenuItem} onSelect={() => void refresh()}>
+                              刷新
+                            </ContextMenu.Item>
+                          </>
+                        )}
+                      </ContextMenu.Content>
+                    </ContextMenu.Portal>
+                  </ContextMenu.Root>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+
+        <AnimatePresence>
+          {selecting && (
+            <motion.div
+              className={styles.trIsland}
+              role="toolbar"
+              aria-label="所选项目的操作"
+              style={{ x: "-50%" }}
+              initial={{ y: 28, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 28, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 520, damping: 38 }}
+            >
+              {progress ? (
+                <>
+                  <span className={styles.trProgress} role="status">
+                    <span className={styles.trSpinner} aria-hidden="true" />
+                    {progress.label} {progress.done + 1}/{progress.total}…
+                  </span>
+                  <i style={{ width: `${((progress.done + 1) / progress.total) * 100}%` }} />
+                </>
               ) : (
                 <>
                   <button
                     type="button"
-                    className={workspaceStyles.bkIconButton}
+                    className={styles.icon}
                     aria-label="取消选择"
                     title="取消选择 (Esc)"
                     onClick={() => setSelected(new Set())}
@@ -323,21 +603,15 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                     <X />
                   </button>
                   <strong>已选 {chosen.length} 项</strong>
-                  <span className={styles.trToolbarMeta}>
-                    共 {formatBytes(chosen.reduce((sum, item) => sum + item.sizeBytes, 0))}
-                  </span>
-                  <span className={styles.trToolbarGap} />
-                  <button
-                    type="button"
-                    className={`${workspaceStyles.bkPrimary} ${workspaceStyles.small}`}
-                    onClick={() => void restoreChosen()}
-                  >
+                  <span>{formatBytes(chosen.reduce((sum, item) => sum + item.sizeBytes, 0))}</span>
+                  <hr />
+                  <button type="button" className={styles.solid} onClick={() => void restoreItems(chosen)}>
                     <RotateCcw />
                     恢复
                   </button>
                   <button
                     type="button"
-                    className={`${workspaceStyles.bkSecondary} ${workspaceStyles.danger} ${workspaceStyles.small}`}
+                    className={styles.risky}
                     onClick={() => setPurging({ items: chosen, everything: false })}
                   >
                     <Trash2 />
@@ -345,649 +619,72 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                   </button>
                 </>
               )}
-            </div>
-          ) : (
-            <div className={styles.trToolbar}>
-              <label className={styles.trSearch}>
-                <Search />
-                <input
-                  type="search"
-                  placeholder="搜索名称"
-                  aria-label="搜索回收站"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
-              {trashSpaces.length > 1 && (
-                <div
-                  className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`}
-                  role="radiogroup"
-                  aria-label="空间"
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={!spaceFilter}
-                    className={!spaceFilter ? workspaceStyles.active : ""}
-                    onClick={() => setSpaceFilter("")}
-                  >
-                    全部
-                  </button>
-                  {trashSpaces.map((space) => (
-                    <button
-                      key={space.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={spaceFilter === space.id}
-                      className={spaceFilter === space.id ? workspaceStyles.active : ""}
-                      onClick={() => setSpaceFilter(space.id)}
-                    >
-                      {space.kind === "shared" ? <UsersRound /> : <HardDrive />}
-                      {spaceName(space)}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <span className={styles.trToolbarGap} />
-              <div
-                className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`}
-                role="radiogroup"
-                aria-label="排序"
-              >
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={sort === "deleted"}
-                  className={sort === "deleted" ? workspaceStyles.active : ""}
-                  onClick={() => setSort("deleted")}
-                >
-                  最近删除
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={sort === "expiry"}
-                  className={sort === "expiry" ? workspaceStyles.active : ""}
-                  onClick={() => setSort("expiry")}
-                >
-                  即将清理
-                </button>
-              </div>
-            </div>
+            </motion.div>
           )}
+        </AnimatePresence>
 
-          {visible.length === 0 ? (
-            <div className={styles.trNoMatch}>
-              <Search />
-              <strong>没有匹配的项目</strong>
-              <button
-                type="button"
-                className={workspaceStyles.bkLink}
-                onClick={() => {
-                  setQuery("");
-                  setSpaceFilter("");
-                }}
-              >
-                清除筛选
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className={styles.trColumns}>
-                <Checkbox
-                  checked={allChosen}
-                  mixed={chosen.length > 0 && !allChosen}
-                  disabled={busy}
-                  label={allChosen ? "取消全选" : "全选"}
-                  onChange={toggleAll}
-                />
-                <span>名称</span>
-                <span className="tr-col-origin">原位置</span>
-                <span className={styles.trColSize}>大小</span>
-                <span className="tr-col-time">删除时间</span>
-                <span className="tr-col-expiry">剩余</span>
-                <span />
-              </div>
-              <div className={styles.trGroups}>
-                {groups.map((group) => (
-                  <section key={group.key} className={styles.trGroup} aria-label={group.label}>
-                    <h3>
-                      {group.label}
-                      <span>{group.items.length} 项</span>
-                    </h3>
-                    <ul>
-                      {group.items.map((item) => (
-                        <TrashRow
-                          key={item.id}
-                          item={item}
-                          space={spaceOf(item)}
-                          timeOnly={sort === "deleted"}
-                          selected={selected.has(item.id)}
-                          disabled={busy}
-                          onToggle={() => toggle(item)}
-                          onRestore={() => setRestoring(item)}
-                          onPurge={() => setPurging({ items: [item], everything: false })}
-                          onOpenOrigin={() => void showInFiles(spaceOf(item), locationOf(item, spaceOf(item)).folders)}
-                        />
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
-      )}
+        {taken && (
+          <TakenDialog
+            item={taken}
+            location={locationOf(taken, spaceOf(taken)).text}
+            onClose={() => setTaken(undefined)}
+            onGone={(message) => {
+              setTaken(undefined);
+              forget([taken]);
+              toast(message, "error");
+            }}
+            onRestored={(restored, asked, choice) => {
+              setTaken(undefined);
+              restoredOne(taken, restored, asked, choice);
+            }}
+          />
+        )}
+        {conflicts && (
+          <ConflictDialog
+            items={conflicts.items}
+            locate={(item) => locationOf(item, spaceOf(item)).text}
+            onChoose={(choice) => void resolveConflicts(choice)}
+          />
+        )}
+        {purging && (
+          <PurgeDialog
+            items={purging.items}
+            everything={purging.everything}
+            busy={busy}
+            onClose={() => setPurging(undefined)}
+            onConfirm={() => void purgeItems(purging.items)}
+          />
+        )}
+        {toasts}
+      </div>
+    </Tooltip.Provider>
+  );
+}
 
-      {restoring && (
-        <RestoreDialog
-          item={restoring}
-          space={spaceOf(restoring)}
-          onClose={() => setRestoring(undefined)}
-          onGone={(message) => {
-            setRestoring(undefined);
-            forget([restoring]);
-            toast(message, "error");
-          }}
-          onRestored={(restored, text, location) => {
-            const item = restoring;
-            setRestoring(undefined);
-            forget([item]);
-            if (restored.replaced) void refresh();
-            toast(text, "success", {
-              label: "在文件管理中显示",
-              run: () => void showInFiles(spaceOf(item), location.folders),
-            });
-          }}
-        />
-      )}
-      {conflicts && (
-        <ConflictDialog
-          items={conflicts.items}
-          locate={(item) => locationOf(item, spaceOf(item)).text}
-          onChoose={(choice) => void resolveConflicts(choice)}
-        />
-      )}
-      {purging && (
-        <PurgeDialog
-          items={purging.items}
-          everything={purging.everything}
-          busy={busy}
-          onClose={() => setPurging(undefined)}
-          onConfirm={() => void purgeItems(purging.items)}
-        />
-      )}
-      {toasts}
+// Skeleton stands in for the list while the recycle bin is read.
+function Skeleton() {
+  return (
+    <div className={styles.trSkeleton} role="status" aria-label="正在读取回收站">
+      {["a", "b", "c", "d", "e", "f"].map((row) => (
+        <div key={row}>
+          <i />
+          <span>
+            <i />
+            <i />
+          </span>
+          <i />
+        </div>
+      ))}
     </div>
   );
 }
 
-function Checkbox({
-  checked,
-  mixed,
-  disabled,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  mixed?: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: () => void;
-}) {
+function EmptyBin() {
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={mixed ? "mixed" : checked}
-      aria-label={label}
-      disabled={disabled}
-      className={`${styles.trCheck}${checked ? ` ${styles.on}` : ""}${mixed ? ` ${styles.mixed}` : ""}`}
-      onClick={onChange}
-    >
-      {mixed ? <Minus strokeWidth={3} /> : <Check strokeWidth={3} />}
-    </button>
-  );
-}
-
-function TrashRow({
-  item,
-  space,
-  timeOnly,
-  selected,
-  disabled,
-  onToggle,
-  onRestore,
-  onPurge,
-  onOpenOrigin,
-}: {
-  item: TrashItem;
-  space?: Space;
-  timeOnly: boolean;
-  selected: boolean;
-  disabled: boolean;
-  onToggle: () => void;
-  onRestore: () => void;
-  onPurge: () => void;
-  onOpenOrigin: () => void;
-}) {
-  const expiry = expiryOf(item);
-  const path = [spaceName(space), ...(item.originalPath ? item.originalPath.split("/") : [])].join(" / ");
-  const SpaceIcon = space?.kind === "shared" ? UsersRound : HardDrive;
-  return (
-    <li className={`${styles.trRow}${selected ? ` ${styles.selected}` : ""}`}>
-      <Checkbox checked={selected} disabled={disabled} label={`选择 ${item.name}`} onChange={onToggle} />
-      <div className={styles.trName}>
-        <EntryIcon kind={item.kind} />
-        <div>
-          <strong title={item.name}>{item.name}</strong>
-          <small>{item.kind === "directory" ? "文件夹" : fileTypeLabel(item.name)}</small>
-        </div>
-      </div>
-      <div className={styles.trCells}>
-        <div className={styles.trOrigin}>
-          {item.originalGone ? (
-            <span
-              className={`${styles.trOriginPath} ${styles.gone}`}
-              title={`${path}\n原文件夹已不在，恢复时放回${spaceName(space)}的根目录`}
-            >
-              <SpaceIcon />
-              <span>{path}</span>
-              <em>已不在</em>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className={styles.trOriginPath}
-              title={`${path}\n点击在文件管理中打开`}
-              aria-label={`在文件管理中打开 ${path}`}
-              onClick={onOpenOrigin}
-            >
-              <SpaceIcon />
-              <span>{path}</span>
-              <FolderOpen className={styles.trOriginOpen} />
-            </button>
-          )}
-        </div>
-        {item.kind === "directory" && item.sizeBytes === 0 ? (
-          <span className={`${styles.trSize} ${styles.unknown}`} title="文件夹中没有已统计的文件">
-            —
-          </span>
-        ) : (
-          <span className={styles.trSize}>{formatBytes(item.sizeBytes)}</span>
-        )}
-        <span className={styles.trTime} title={`删除于 ${formatDateTime(item.deletedAt)}`}>
-          <span className={styles.trLabel}>删除于 </span>
-          {timeOnly ? formatClock(item.deletedAt) : formatDateTime(item.deletedAt)}
-        </span>
-        <span
-          className={`${styles.trExpiry} ${styles[expiry.tone] ?? ""}`}
-          title={`将于 ${formatDateTime(item.purgeAt)} 永久删除`}
-        >
-          <ExpiryRing left={expiry.left} tone={expiry.tone} />
-          <span>
-            <span className={styles.trLabel}>剩余 </span>
-            {expiry.short}
-          </span>
-        </span>
-      </div>
-      <div className={styles.trActions}>
-        <button
-          type="button"
-          className={`${styles.bkRestoreButton} ${workspaceStyles.bkRestoreButton}`}
-          aria-label={`恢复 ${item.name}`}
-          disabled={disabled}
-          onClick={onRestore}
-        >
-          <RotateCcw />
-          恢复
-        </button>
-        <button
-          type="button"
-          className={`${workspaceStyles.bkIconButton} ${styles.trPurge}`}
-          aria-label={`永久删除 ${item.name}`}
-          title="永久删除"
-          disabled={disabled}
-          onClick={onPurge}
-        >
-          <Trash2 />
-        </button>
-      </div>
-    </li>
-  );
-}
-
-// ExpiryRing shows how much of an item's time in the bin is left.
-function ExpiryRing({ left, tone }: { left: number; tone: ExpiryTone }) {
-  const radius = 6.5;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <svg className={`${styles.trRing} ${styles[tone] ?? ""}`} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r={radius} />
-      <circle
-        cx="8"
-        cy="8"
-        r={radius}
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - Math.max(left, 0.04))}
-      />
+    <svg className={styles.trEmptyArt} viewBox="0 0 96 96" aria-hidden="true">
+      <path d="M30 34h36l-2.6 38.2a6 6 0 0 1-6 5.8H38.6a6 6 0 0 1-6-5.8z" />
+      <path d="M24 34h48M40 34v-5a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v5M42 46v20M54 46v20" />
+      <path d="M74 14v8M70 18h8M18 52v6M15 55h6" />
     </svg>
-  );
-}
-
-function RestoreDialog({
-  item,
-  space,
-  onClose,
-  onRestored,
-  onGone,
-}: {
-  item: TrashItem;
-  space?: Space;
-  onClose: () => void;
-  onRestored: (restored: RestoredEntry, text: string, location: { text: string; folders: string[] }) => void;
-  onGone: (message: string) => void;
-}) {
-  const location = locationOf(item, space);
-  const [name, setName] = useState(item.name);
-  const [busy, setBusy] = useState<RestoreConflict>();
-  const [error, setError] = useState("");
-  // taken is the name found taken where the item goes back.
-  const [taken, setTaken] = useState("");
-  const choices = useRef<HTMLDivElement>(null);
-  // The name field leaves with the choices' arrival; focus goes to them.
-  useEffect(() => {
-    if (taken) choices.current?.querySelector<HTMLElement>("button")?.focus();
-  }, [taken]);
-
-  const restore = async (choice: RestoreConflict, event?: FormEvent) => {
-    event?.preventDefault();
-    const finalName = name.trim();
-    if (!finalName || busy) return;
-    setBusy(choice);
-    setError("");
-    try {
-      const restored = await restoreTrash(item.id, finalName, choice);
-      onRestored(restored, restoredText(restored, finalName, location.text, choice), location);
-    } catch (caught) {
-      if (caught instanceof APIError && caught.code === "not_found") {
-        onGone(messageOf(caught));
-        return;
-      }
-      if (caught instanceof APIError && caught.code === "name_conflict") setTaken(finalName);
-      else setError(messageOf(caught));
-    } finally {
-      setBusy(undefined);
-    }
-  };
-
-  const file = item.kind === "file";
-  return (
-    <Dialog
-      title={`恢复${file ? "文件" : "文件夹"}`}
-      icon={<ArchiveRestore />}
-      busy={Boolean(busy)}
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className={workspaceStyles.bkSecondary} disabled={Boolean(busy)} onClick={onClose}>
-            取消
-          </button>
-          {!taken && (
-            <button
-              type="submit"
-              form="tr-restore-form"
-              className={workspaceStyles.bkPrimary}
-              disabled={Boolean(busy) || !name.trim()}
-            >
-              {busy ? (
-                <>
-                  <Spinner small />
-                  正在恢复…
-                </>
-              ) : (
-                "恢复"
-              )}
-            </button>
-          )}
-        </>
-      }
-    >
-      <form id="tr-restore-form" className="bk-restore" onSubmit={(event) => void restore("ask", event)}>
-        <div className={workspaceStyles.bkRestoreSource}>
-          <EntryIcon kind={item.kind} />
-          <div>
-            <strong>{item.name}</strong>
-            <small>
-              删除于 {formatDateTime(item.deletedAt)} · {contentOf(item)}
-            </small>
-          </div>
-        </div>
-
-        <div className={workspaceStyles.bkField}>
-          <span className={workspaceStyles.bkFieldLabel}>恢复到</span>
-          <div className={workspaceStyles.bkLocation}>
-            <MapPin />
-            <span className={workspaceStyles.bkLocationPath} title={location.text}>
-              {location.text}
-            </span>
-            {!item.originalGone && (
-              <span className={`${workspaceStyles.bkBadge} ${workspaceStyles.neutral}`}>原位置</span>
-            )}
-          </div>
-          {item.originalGone && (
-            <small className={workspaceStyles.bkFieldHint}>
-              {item.originalPath ? `原文件夹“${item.originalPath}”已不在，` : "原文件夹已不在，"}将恢复到
-              {spaceName(space)}的根目录。
-            </small>
-          )}
-        </div>
-
-        {taken ? (
-          <section className={styles.trConflict} role="group" aria-label="同名项目">
-            <div className={styles.trConflictHead}>
-              <CircleAlert />
-              <p>
-                <strong>这里已有“{taken}”</strong>
-                <span>选择怎么恢复；不会覆盖任何文件。</span>
-              </p>
-            </div>
-            <div ref={choices} className={styles.trChoices}>
-              <button
-                type="button"
-                className={styles.trChoice}
-                disabled={Boolean(busy)}
-                onClick={() => void restore("rename")}
-              >
-                <span className={styles.trChoiceIcon}>{busy === "rename" ? <Spinner small /> : <CopyPlus />}</span>
-                <span className={styles.trChoiceText}>
-                  <strong>保留两者</strong>
-                  <small>改用新名称放在旁边，如“{restoredName(taken, item.kind)}”</small>
-                </span>
-              </button>
-              {file && (
-                <button
-                  type="button"
-                  className={`${styles.trChoice} ${styles.warning} ${workspaceStyles.warning}`}
-                  disabled={Boolean(busy)}
-                  onClick={() => void restore("replace")}
-                >
-                  <span className={styles.trChoiceIcon}>{busy === "replace" ? <Spinner small /> : <Replace />}</span>
-                  <span className={styles.trChoiceText}>
-                    <strong>替换</strong>
-                    <small>现有的“{taken}”移到回收站，之后仍可恢复</small>
-                  </span>
-                </button>
-              )}
-            </div>
-            {!file && <p className={styles.trConflictNote}>文件夹不会被替换或合并。</p>}
-            <button
-              type="button"
-              className={`${workspaceStyles.bkLink} ${styles.trConflictRename}`}
-              disabled={Boolean(busy)}
-              onClick={() => {
-                setTaken("");
-                setName(restoredName(taken, item.kind));
-              }}
-            >
-              自己起个名称
-            </button>
-          </section>
-        ) : (
-          <>
-            <label className={workspaceStyles.bkField}>
-              <span className={workspaceStyles.bkFieldLabel}>名称</span>
-              <input
-                data-autofocus
-                value={name}
-                disabled={Boolean(busy)}
-                aria-label="恢复后的名称"
-                onChange={(event) => {
-                  setName(event.target.value);
-                  setError("");
-                }}
-              />
-            </label>
-            {error && (
-              <div className={workspaceStyles.bkInlineError} role="alert">
-                <span>{error}</span>
-              </div>
-            )}
-            <p className={workspaceStyles.bkFine}>
-              {file ? "" : "文件夹里的全部内容会一起恢复。"}恢复不会覆盖已有的文件；那里已有同名项目时，可以选择保留两者
-              {file ? "或替换" : ""}。
-            </p>
-          </>
-        )}
-      </form>
-    </Dialog>
-  );
-}
-
-// ConflictDialog asks once what to do with every item of a selection whose
-// name is taken where it goes back.
-function ConflictDialog({
-  items,
-  locate,
-  onChoose,
-}: {
-  items: TrashItem[];
-  locate: (item: TrashItem) => string;
-  onChoose: (choice: RestoreConflict | "skip") => void;
-}) {
-  const files = items.filter((item) => item.kind === "file").length;
-  const shown = items.slice(0, 5);
-  return (
-    <Dialog
-      title={
-        items.length === 1 ? `“${items[0].name}”的原位置已有同名项目` : `${items.length} 个项目的原位置已有同名项目`
-      }
-      icon={<CopyPlus />}
-      label="同名项目"
-      onClose={() => onChoose("skip")}
-      footer={
-        <>
-          <button type="button" className={workspaceStyles.bkSecondary} onClick={() => onChoose("skip")}>
-            跳过
-          </button>
-          {files > 0 && (
-            <button
-              type="button"
-              className={`${workspaceStyles.bkSecondary} ${styles.trReplace}`}
-              onClick={() => onChoose("replace")}
-            >
-              <Replace />
-              替换
-            </button>
-          )}
-          <button type="button" className={workspaceStyles.bkPrimary} onClick={() => onChoose("rename")}>
-            <CopyPlus />
-            保留两者
-          </button>
-        </>
-      }
-    >
-      <p className={workspaceStyles.bkDialogText}>
-        保留两者时，恢复的项目改用“名称 (恢复)”这样的新名称放在旁边。
-        {files > 0
-          ? `替换时，现有的同名文件移到回收站${files < items.length ? "；文件夹不会被替换，仍然保留两者" : ""}。`
-          : "文件夹不会被替换或合并。"}
-        跳过的项目留在回收站中。
-      </p>
-      <ul className={styles.trConflictList}>
-        {shown.map((item) => (
-          <li key={item.id}>
-            <EntryIcon kind={item.kind} />
-            <span>
-              <strong title={item.name}>{item.name}</strong>
-              <small title={locate(item)}>{locate(item)}</small>
-            </span>
-          </li>
-        ))}
-      </ul>
-      {items.length > shown.length && (
-        <p className={workspaceStyles.bkFine}>以及另外 {items.length - shown.length} 项</p>
-      )}
-    </Dialog>
-  );
-}
-
-// contentOf says what an item is and holds; a folder of empty files or one
-// not yet indexed has no size worth showing.
-function contentOf(item: TrashItem): string {
-  if (item.kind === "directory") return item.sizeBytes > 0 ? `文件夹 · ${formatBytes(item.sizeBytes)}` : "文件夹";
-  return `${fileTypeLabel(item.name)} · ${formatBytes(item.sizeBytes)}`;
-}
-
-function PurgeDialog({
-  items,
-  everything,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  items: TrashItem[];
-  everything: boolean;
-  busy: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  const size = formatBytes(items.reduce((sum, item) => sum + item.sizeBytes, 0));
-  const single = items.length === 1 ? items[0] : undefined;
-  return (
-    <Dialog
-      title={everything ? "清空回收站？" : "永久删除？"}
-      icon={<Trash2 />}
-      tone="danger"
-      busy={busy}
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className={workspaceStyles.bkSecondary} disabled={busy} onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className={workspaceStyles.bkDanger} disabled={busy} onClick={onConfirm}>
-            {busy ? (
-              <>
-                <Spinner small />
-                正在删除…
-              </>
-            ) : everything ? (
-              "清空回收站"
-            ) : (
-              "永久删除"
-            )}
-          </button>
-        </>
-      }
-    >
-      <p className={workspaceStyles.bkDialogText}>
-        {everything
-          ? `回收站中的全部 ${items.length} 个项目（共 ${size}）将被立即删除，无法再恢复。`
-          : single
-            ? `“${single.name}”${single.kind === "directory" ? "及其中的全部内容" : ""}将被立即删除，无法再恢复。`
-            : `所选的 ${items.length} 个项目（共 ${size}）将被立即删除，无法再恢复。`}
-      </p>
-    </Dialog>
   );
 }

@@ -1,8 +1,13 @@
 package photos_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"slices"
 	"testing"
 
@@ -51,6 +56,39 @@ func TestSimilarPhotosAreClosestByImageAndShareObjects(t *testing.T) {
 	}
 	if !slices.Equal(paged, got) {
 		t.Fatalf("paged %v, want %v", paged, got)
+	}
+}
+
+// blockPNG is a grey picture with a red block at (x, y). Wherever the block
+// is, colorEmbedder gives it the same vector; colorDetector finds a phone only
+// when the block covers the centre.
+func blockPNG(grey uint8, x, y int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 48, 48))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{R: grey, G: grey, B: grey, A: 0xff}), image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(x, y, x+16, y+16), image.NewUniform(color.RGBA{R: 0xff, A: 0xff}), image.Point{}, draw.Src)
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, img); err != nil {
+		panic(err)
+	}
+	return buffer.Bytes()
+}
+
+// The photos here differ from the source in what is detected, not in colour:
+// the one with the same object comes first although another is closer by
+// image alone.
+func TestSimilarPhotosThatShareObjectsComeBeforeCloserOnesThatDoNot(t *testing.T) {
+	service, worker := objectSearchService(t, "detector-1")
+	private, _ := libraries(t, service, alice)
+	source := importPhoto(t, service, alice, private.ID, "", "phone.png", blockPNG(100, 16, 16))
+	// The same colours with the block in a corner: no phone.
+	importPhoto(t, service, alice, private.ID, "", "same colours.png", blockPNG(100, 0, 0))
+	// A phone again, on a darker grey: a little further by image.
+	importPhoto(t, service, alice, private.ID, "", "phone on darker grey.png", blockPNG(80, 16, 16))
+	index(t, service, worker)
+
+	got := names(similar(t, service, alice, source.ID, photos.SimilarRequest{}).Assets)
+	if !slices.Equal(got, []string{"phone on darker grey.png", "same colours.png"}) {
+		t.Fatalf("similar = %v; want the photo with a phone before the one with only the same colours", got)
 	}
 }
 

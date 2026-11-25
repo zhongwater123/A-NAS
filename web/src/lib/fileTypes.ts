@@ -1,14 +1,34 @@
 // What a file is, judged by its name: a label for lists and whether the
 // browser can show it in place.
 
+export type FileCategory = "image" | "video" | "audio" | "pdf" | "sheet" | "document" | "archive" | "other";
+
+// fileCategory sorts a file into the kinds a list tells apart by icon.
+export function fileCategory(name: string): FileCategory {
+  const extension = (name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "") ?? "";
+  if (isPreviewableImage(name)) return "image";
+  if (isVideoFile(name)) return "video";
+  if (["mp3", "flac", "wav", "m4a", "aac"].includes(extension)) return "audio";
+  if (extension === "pdf") return "pdf";
+  if (["xls", "xlsx", "csv"].includes(extension)) return "sheet";
+  if (["doc", "docx", "txt", "md"].includes(extension)) return "document";
+  if (["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz"].includes(extension)) return "archive";
+  return "other";
+}
+
+const categoryLabels: Partial<Record<FileCategory, string>> = {
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  pdf: "PDF 文档",
+  sheet: "电子表格",
+  document: "文档",
+};
+
 export function fileTypeLabel(name: string): string {
-  const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase("en-US") : "";
-  if (isPreviewableImage(name)) return "图片";
-  if (isVideoFile(name)) return "视频";
-  if (["mp3", "flac", "wav", "m4a", "aac"].includes(extension ?? "")) return "音频";
-  if (extension === "pdf") return "PDF 文档";
-  if (["xls", "xlsx", "csv"].includes(extension ?? "")) return "电子表格";
-  if (["doc", "docx", "txt", "md"].includes(extension ?? "")) return "文档";
+  const label = categoryLabels[fileCategory(name)];
+  if (label) return label;
+  const extension = name.includes(".") ? name.split(".").pop() : "";
   return extension ? `${extension.toLocaleUpperCase("en-US")} 文件` : "文件";
 }
 
