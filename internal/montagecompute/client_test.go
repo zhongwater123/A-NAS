@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
@@ -209,5 +210,45 @@ func TestACallTheCallerGaveUpOnIsNotAFailureOfTheWorker(t *testing.T) {
 		only(t, "a cancelled call", err, nil)
 	case <-time.After(10 * time.Second):
 		t.Fatal("a cancelled call went on waiting for the Worker")
+	}
+}
+
+// A member waits for Likeness (deleting a shot of a draft), so each failure
+// is one the request's handler answers: a Worker that is away, or from
+// before the operation existed, is waited for (503 compute_unavailable),
+// not an error of the montage center's own.
+func TestLikenessFailsAsARequestAMemberWaitsOn(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "compute")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	vector := []float32{1, 0, 0, 1}
+	for _, c := range []struct {
+		name   string
+		client montagecompute.Client
+		want   error
+	}{
+		{"no Worker", montagecompute.Client{SocketPath: filepath.Join(dir, "none.sock")}, montage.ErrWorkerUnavailable},
+		{"a Worker from before the operation", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "unknown operation 'likeness'"}}`)), montage.ErrWorkerUnavailable},
+		{"a Worker that refuses the vectors", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "a and b differ in dimension"}}`)), montage.ErrWorkerRefused},
+		{"a Worker that ends without answering", standIn(t, hungUp), montage.ErrWorkerFailed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := c.client.Likeness(ctx, vector, vector, 2)
+			for _, kind := range []error{montage.ErrWorkerUnavailable, montage.ErrWorkerRefused, montage.ErrWorkerFailed} {
+				if errors.Is(err, kind) != errors.Is(c.want, kind) {
+					t.Fatalf("Likeness() = %v, want only %v", err, c.want)
+				}
+			}
+		})
+	}
+	// Vectors that are not rows of the dimension are refused before any call.
+	if _, err := (montagecompute.Client{SocketPath: filepath.Join(dir, "none.sock")}).Likeness(ctx, vector[:3], vector, 2); !errors.Is(err, montage.ErrWorkerRefused) {
+		t.Fatalf("Likeness() of a row cut short = %v", err)
+	}
+	if alike, err := standIn(t, replying(`{"ok": true, "likeness": 0.5}`)).Likeness(ctx, vector, vector, 2); err != nil || alike != 0.5 {
+		t.Fatalf("Likeness() = %v, %v", alike, err)
 	}
 }

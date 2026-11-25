@@ -158,6 +158,12 @@ func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user account
 		h.fail(w, r, err)
 		return
 	}
+	h.serveSong(w, r, audio)
+}
+
+// serveSong sends a song's copy with Range support when browsers play its
+// format, or decoded to FLAC from start.
+func (h *handler) serveSong(w http.ResponseWriter, r *http.Request, audio montage.SongAudio) {
 	defer func() { _ = audio.File.Close() }()
 	if audio.ContentType != "" {
 		w.Header().Set("Content-Type", audio.ContentType)

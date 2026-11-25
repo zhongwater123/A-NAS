@@ -132,11 +132,9 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (round
 // cards, the excerpt and the member's settings.
 func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error) {
 	input := PlanInput{JobID: jobID}
-	var settings, catalogJSON, songJSON string
-	if err := s.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&settings); err != nil {
-		return PlanInput{}, err
-	}
-	if err := json.Unmarshal([]byte(settings), &input.Settings); err != nil {
+	var catalogJSON, songJSON string
+	var err error
+	if input.Settings, err = jobSettings(ctx, s.db, jobID); err != nil {
 		return PlanInput{}, err
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",
@@ -183,13 +181,20 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 	if err != nil {
 		return PlanBrief{}, err
 	}
-	brief, err = s.jobCompute.PlanBrief(ctx, PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
-		Chronological: in.Settings.Chronological, Picked: in.Picked})
+	request := PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
+		Chronological: in.Settings.Chronological, Picked: in.Picked}
+	if recut := in.Settings.Recut; recut != nil {
+		request.Change = recut.Change
+		if request.Base, err = alignBase(recut.Base, recut.Cards, in.Cards); err != nil {
+			return PlanBrief{}, err
+		}
+	}
+	brief, err = s.jobCompute.PlanBrief(ctx, request)
 	if err != nil {
 		return PlanBrief{}, err
 	}
-	if brief.Template != PlanTemplate {
-		return PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, PlanTemplate)
+	if want := templateOf(in.Settings); brief.Template != want {
+		return PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, want)
 	}
 	encoded, err := json.Marshal(brief)
 	if err != nil {
@@ -323,7 +328,7 @@ func (s *Store) Brief(ctx context.Context, owner, jobID, token, step string) (an
 // Only a round still standing when the answer is written has it kept: one
 // that ended meanwhile, or whose job changed its inputs or was planned
 // again, is told the round is over and its answer is dropped. Three refusals
-// in a row and the member is asked.
+// in a row end the round (refuse).
 func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, answer json.RawMessage) (ToolAnswer, error) {
 	call, over, err := s.roundFor(ctx, owner, jobID, token)
 	if err != nil {
@@ -354,13 +359,6 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	}
 	if _, kept, err := s.planAnswer(ctx, s.db, jobID, step, key); err != nil || kept {
 		return toolAnswer(taken), err
-	}
-	var rejections int
-	if err := s.db.QueryRowContext(ctx, "SELECT plan_rejections FROM jobs WHERE id = ?", jobID).Scan(&rejections); err != nil {
-		return ToolAnswer{}, err
-	}
-	if rejections >= maxPlanRejections {
-		return toolAnswer(ToolRoundOver), nil
 	}
 	if reasons := checkAnswer(brief.Schema, answer, step); len(reasons) > 0 {
 		return s.refuse(ctx, owner, jobID, token, reasons)
@@ -406,28 +404,37 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	return toolAnswer(taken), nil
 }
 
-// refuse counts a refused answer; the third in a row is the last this
-// round may give. As a good answer is kept, a refusal counts only for a
-// round still standing when it is written, in the same transaction: checking
-// the answer may have waited for the compute Worker, and a round that ended
-// meanwhile, or whose job was planned again, must not count against the
-// planning that follows it. Such a round is told it is over.
+// refuse counts a refused answer; the third in a row ends the round, which
+// counts as one tried, and the job plans again in a round of its own
+// (awaitPlan) with the count started over. As a good answer is kept, a
+// refusal counts only for a round still standing when it is written, in the
+// same transaction: checking the answer may have waited for the compute
+// Worker, and a round that ended meanwhile, or whose job was planned again,
+// must not count against the planning that follows it. Such a round is told
+// it is over.
 func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons []string) (ToolAnswer, error) {
 	var late *ToolAnswer
 	var rejections int
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		if _, late, err = s.standing(ctx, tx, owner, jobID, token); err != nil || late != nil {
+		call, over, err := s.standing(ctx, tx, owner, jobID, token)
+		if err != nil || over != nil {
+			late = over
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
 			jobID).Scan(&rejections); err != nil {
 			return err
 		}
-		if rejections >= maxPlanRejections {
-			return s.dueNow(ctx, tx, jobID)
+		if rejections < maxPlanRejections {
+			return nil
 		}
-		return nil
+		if _, err := tx.ExecContext(ctx, endRound+" WHERE id = ?", sqlitedb.FormatTime(s.now()), "答案连续 3 次不合格", call.roundID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
+			return err
+		}
+		return s.dueNow(ctx, tx, jobID)
 	})
 	if err != nil {
 		return ToolAnswer{}, err
