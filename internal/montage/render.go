@@ -114,6 +114,11 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		if err != nil {
 			return nil, nil, 0, jobGrantError(err, []string{video.AssetID})
 		}
+		if analysis.ObjectID == video.ObjectID && analysis.Windows != photos.AnalysisDone {
+			// Its windows are being made again: wait for them, as the
+			// analysis step waits for windows not done yet.
+			return nil, nil, 0, &stepWait{reason: WaitAnalysis, delay: waitPoll}
+		}
 		changed := analysis.Identity != video.Identity || analysis.Dimensions != video.Dimensions
 		if run.kind == KindEdit && analysis.ObjectID == video.ObjectID && changed {
 			// The version was cut with windows the library has analysed

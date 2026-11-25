@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -702,11 +702,22 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draf
 	return s.readDraft(ctx, owner, id, src)
 }
 
-// checkAnalysis answers ErrAnalysisChanged when the photo library's windows
-// of a video the version's cards come from are not those the version was cut
-// with: another model or dimensions, or none now. A video the library no
-// longer has, or holds as other content, is left to the steps that use it.
+// checkAnalysis answers ErrAnalysisChanged when the photo library analysed
+// a video the version's cards come from again (analysedAgain).
 func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
+	again, err := s.analysedAgain(ctx, src)
+	if err == nil && again {
+		return ErrAnalysisChanged
+	}
+	return err
+}
+
+// analysedAgain reports whether the photo library's windows of a video the
+// version's cards come from are not those the version was cut with: another
+// model or dimensions. Windows not done now are being made, not yet another
+// model: the edit job waits for them (fillRows). A video the library can no
+// longer read, or holds as other content, is left to the steps that use it.
+func (s *Store) analysedAgain(ctx context.Context, src *editSource) (bool, error) {
 	checked := map[string]bool{}
 	for _, id := range src.catalog {
 		video := src.cards[id].Video
@@ -716,17 +727,18 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 		}
 		checked[video] = true
 		now, _, err := s.grants.Analysis(ctx, src.grantID, video)
-		if code := photosapi.GrantErrorCode(err); code == photosapi.GrantAssetNotFound {
+		if assetGone(err) {
 			continue
 		}
 		if err != nil {
-			return grantError(err)
+			return false, grantError(err)
 		}
-		if now.ObjectID == was.ObjectID && (now.Identity != was.Identity || now.Dimensions != was.Dimensions) {
-			return ErrAnalysisChanged
+		if now.ObjectID == was.ObjectID && now.Windows == photos.AnalysisDone &&
+			(now.Identity != was.Identity || now.Dimensions != was.Dimensions) {
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // keptDraft is a draft as it is kept: the state it stands at, with its

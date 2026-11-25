@@ -209,6 +209,33 @@ func TestAnEditWaitsForAVideoInTheTrash(t *testing.T) {
 	}
 }
 
+// A save whose video's windows are being made again waits for them, as a
+// generate job does, rather than failing as if the model had changed.
+func TestAnEditWaitsForWindowsBeingMade(t *testing.T) {
+	env := newEditEnv(t)
+	ctx := t.Context()
+	draft, err := env.store.VersionDraft(ctx, editOwner, env.version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.grants.making = map[string]bool{videoA: true}
+	job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.runJobs(t)
+	waiting, err := env.store.Job(ctx, editOwner, job.ID)
+	if err != nil || waiting.State != JobWaiting || waiting.WaitReason != WaitAnalysis {
+		t.Fatalf("an edit while the windows are made = %+v, %v", waiting, err)
+	}
+	env.grants.making = nil
+	env.store.Exec(t, "UPDATE jobs SET not_before = '2000-01-01T00:00:00Z' WHERE id = ?", job.ID)
+	env.runJobs(t)
+	if done, err := env.store.Job(ctx, editOwner, job.ID); err != nil || done.State != JobDone {
+		t.Fatalf("the edit once the windows were made = %+v, %v", done, err)
+	}
+}
+
 func TestAVersionKeepsTheSongItWasMadeWith(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()

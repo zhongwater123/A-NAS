@@ -51,8 +51,10 @@ type editGrants struct {
 	// version key.
 	trashed map[string]bool
 	films   map[string]string
-	// gone are the videos the photo library no longer has.
-	gone map[string]bool
+	// gone are the videos the photo library no longer has; ungrantable
+	// those it no longer lets the grant have; making those whose windows
+	// are being made again.
+	gone, ungrantable, making map[string]bool
 }
 
 func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error) {
@@ -62,6 +64,12 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 	g.analysed = append(g.analysed, assetID)
 	if g.gone[assetID] {
 		return photos.GrantAnalysis{}, nil, &photosapi.GrantError{Code: photosapi.GrantAssetNotFound, Message: "the asset is not available"}
+	}
+	if g.ungrantable[assetID] {
+		return photos.GrantAnalysis{}, nil, &photosapi.GrantError{Code: photosapi.GrantAssetsRefused, Message: "an asset cannot be granted"}
+	}
+	if g.making[assetID] {
+		return photos.GrantAnalysis{ObjectID: "object:" + assetID, Windows: photos.AnalysisQueued}, nil, nil
 	}
 	var list []photos.Window
 	var raw []byte
@@ -75,7 +83,7 @@ func (g *editGrants) Analysis(_ context.Context, grantID, assetID string) (photo
 			raw = binary.LittleEndian.AppendUint32(raw, math.Float32bits(value))
 		}
 	}
-	return photos.GrantAnalysis{ObjectID: "object:" + assetID, Identity: g.identity, Dimensions: 4, List: list}, raw, nil
+	return photos.GrantAnalysis{ObjectID: "object:" + assetID, Windows: photos.AnalysisDone, Identity: g.identity, Dimensions: 4, List: list}, raw, nil
 }
 
 func (g *editGrants) Lookup(_ context.Context, _ string, ids []string) ([]photos.GrantedAsset, error) {
@@ -768,6 +776,13 @@ func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
 	env.grants.identity = ""
 	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
 		t.Fatalf("the draft with the windows it was cut with = %v", err)
+	}
+	// Windows being made again are not yet another model, and a video the
+	// library no longer lets the grant read is left to the steps using it.
+	env.grants.making = map[string]bool{videoA: true}
+	env.grants.ungrantable = map[string]bool{videoB: true}
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); err != nil {
+		t.Fatalf("the draft while the windows are made and a video cannot be read = %v", err)
 	}
 }
 
