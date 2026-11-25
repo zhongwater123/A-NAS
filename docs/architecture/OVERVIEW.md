@@ -24,6 +24,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family、/api/v1/todos 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；家庭中心与家庭待办；以读者会话向相册服务查询频道照片；ADR 0029）
   ├── /api/v1/montage 转发 ──► 剪辑服务（a-nas-montage，独占数据卷 montage 子卷；`ANAS_MONTAGE_ENABLED` 打开前不挂载；ADR 0038）
+  ├── /api/v1/workspace 转发 ──► 共享工作区服务（a-nas-workspace，独占数据卷 workspace 子卷；共享页面在不透明来源的沙箱框架里展示；ADR 0040）
+  │        └── /api/v1/workspace/mcp ◄── 成员电脑上的 agent 凭 Agent令牌（agent 姿态；服务自己向 Host Agent 确认令牌）
   ├── /api/v1/modules/<id> 转发 ──► 可移除模块（自己的脚本安装与移除；独占 module-<id> 子卷；如照片打分 a-nas-scoring；ADR 0037）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
@@ -42,7 +44,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
                     ├── File Broker ──► 按用户运行的文件 Worker（登录者 UID）
                     │        ├── 助手连接：核对会话后以 root 连接本人的实例套接字并交回，会话失效即切断（ADR 0024）
                     │        └── 助手更改的执行方：凭会话生成卡片与登记授权；助手套接字上按对端 UID 执行，Landlock 限制写入位置
-                    ├── 会话与账号查询（供相册和分享服务确认身份，或助手套接字对端 UID 的账号）
+                    ├── 会话与账号查询（供相册和分享服务确认身份，或助手套接字对端 UID 的账号；共享工作区的查询另能解析 Agent令牌）
                     └── 按模块清单维护模块存储，并为模块提供会话查询（ADR 0037）
 
 Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内核 POSIX ACL → 个人空间或 Shared → Btrfs 数据卷
@@ -67,10 +69,10 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；唯一例外是管理员的 Web 终端，Shell 在该管理员本人的 Linux 账号（UID 20100–29999）下运行，从不以 root 运行；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
 4. 磁盘和文件使用稳定资源 ID；临时路径和 `/dev/sdX` 不是身份。
 5. 修改宿主机状态的操作遵循“规划、确认、执行”三阶段。
-6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）；家庭中心的记录与录音由家庭服务按家人、家长与作者授权，频道里的照片仍由相册 Policy 授权；家庭待办由家庭服务按共享（所有有效账号）与本人授权，不看家人关系（[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
+6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）；家庭中心的记录与录音由家庭服务按家人、家长与作者授权，频道里的照片仍由相册 Policy 授权；家庭待办由家庭服务按共享（所有有效账号）与本人授权，不看家人关系（[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)）；共享页面由共享工作区服务按管理员选定的成员授权，成员的 agent 只凭 Agent令牌、只能访问共享工作区（[ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
-9. 本地控制台、隧道、局域网与互联网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。互联网只经 HTTPS 进入，到达产品服务专用的回环端口，请求按到达的端口而不是请求头认定来自互联网（[`internal/webentry`](../../internal/webentry/webentry.go)）。外网会话只在互联网入口有效、不按地址绑定，不签发本机会话，不打开终端（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）。
+9. 本地控制台、隧道、局域网与互联网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。互联网只经 HTTPS 进入，到达产品服务专用的回环端口，请求按到达的端口而不是请求头认定来自互联网（[`internal/webentry`](../../internal/webentry/webentry.go)）。外网会话只在互联网入口有效、不按地址绑定，不签发本机会话，不打开终端（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）。Agent令牌不是会话：它不绑定客户端，只在 `agent` 姿态的路由上有效，带 `Origin` 头的请求一律拒绝（[ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)）。
 10. 受管图库以稳定照片资产 ID 表达用户可见身份；内容对象路径和内容哈希不成为公共文件身份。
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
@@ -90,7 +92,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 产品 API 按领域拆包（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）：
 
 - 领域逻辑在 `internal/<domain>`，不依赖 HTTP；它的 HTTP 接口在 `internal/<domain>api`，负责解析请求、调用领域服务，并把领域错误映射为状态码与错误码。别的接口也要回答这个领域的错误时，复用该包导出的 `WriteError`，例如 `filesapi.WriteError` 与 `accountsapi.WriteError`。
-- `<domain>api` 用 `Routes()` 返回 [`apiroute.Route`](../../internal/apiroute/apiroute.go) 列表，每项包含方法、路径、姿态与处理函数。姿态有四种：`public`、`session`、`mutation`、`admin`。
+- `<domain>api` 用 `Routes()` 返回 [`apiroute.Route`](../../internal/apiroute/apiroute.go) 列表，每项包含方法、路径、姿态与处理函数。姿态有五种：`public`、`session`、`mutation`、`admin` 与 `agent`。`agent` 只用于成员电脑上的编码 agent（[ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)）：不认 Cookie、不要 CSRF 令牌，只认 `Authorization: Bearer` 的 Agent令牌，拒绝带 `Origin` 或 `Sec-Fetch-Site` 头的请求，失败的尝试按登录失败限流；令牌经转发的内部请求头交给服务，服务自己向 Host Agent 再确认。OpenAPI 中这类操作用 `bearerAuth` 方案并标 `x-anas-posture: agent`。
 - 产品服务（[`internal/httpapi`](../../internal/httpapi/routes.go)）把各包的路由与自己的合成一张表，在处理函数之前统一检查姿态：
   - 本客户端的会话 Cookie；
   - 管理员重置密码后，先要求改密；
@@ -160,6 +162,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/modules` / `internal/modulemanifest` | 可移除模块的通用部分：产品服务按模块登记表转发并判断是否已安装，模块端确认会话与检查存储；`modulemanifest` 只用标准库，供 Host Agent 读清单（[ADR 0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)） | 单元测试与系统测试覆盖 |
 | `internal/storeservice` | 以自己身份运行、记录存在数据卷上自己子卷的服务的通用生命周期：监听套接字，向 Host Agent 确认会话，数据卷可用时提供服务、不可用时回答各自的 `*_unavailable`，撤下存储前等进行中的请求结束；服务自己的定期维护（剪辑中心与相册授权对账、重试撤销）与请求和存储检查并行，撤下存储前先停下它；剪辑服务（`internal/montageservice`，ADR 0038）用它，相册、分享与家庭服务仍各有一份自己的 | 单元测试与系统测试覆盖 |
 | `internal/scoring` / `internal/scoringapi` / `cmd/anas-scoring` | 照片打分模块：批次、领取、盲评的回答、统计与导出，独立进程与账号（[技术设计](photo-scoring.md)） | 单元、接口与系统测试覆盖；实验 NAS 待安装 |
+| `internal/workspace` / `internal/workspaceapi` / `internal/workspacemcp` / `internal/workspaceservice` | 共享工作区（ADR 0040）：`workspace.db` 里的共享页面、页面版本、可使用的成员与一次性传输地址；送出页面时给元素标注源码位置并按 CSP 沙箱返回；按原文替换的片段修改；浏览器接口与 MCP 工具；以 `storeservice` 运行，认证钩子认会话、Agent令牌与一次性地址。Agent令牌在 `control.db` 的 `agent_tokens`，由 `internal/sessiondir` 只读解析。隔离页面里的辅助脚本在 `web/src/workspace/frame`，单独构建为经典脚本 | 见[技术设计](shared-workspace.md) |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单、评论与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
 | `internal/personalization` | “设置 → 个性化”的设备级设置：系统盘上 `personalization.db` 中全体账号共用的桌面壁纸（图片经转正、缩到 3840 px 并重新编码为 JPEG）与样式，以及本机屏幕的息屏时长 | 已实现，单元测试覆盖；`internal/personalizationapi` 提供 `/api/v1/wallpaper`（已登录读取）与 `/api/v1/local-display`（读取无需登录），修改仅管理员，见[个性化规格](../specs/personalization.md) |
 | `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，`internal/activityapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
@@ -197,6 +200,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册人物与宠物实施方案](photo-people.md)
 - [相册照片中的文字（OCR）实施方案](photo-ocr.md)（proposed）
 - [剪辑中心首版实施方案](montage-center.md)（accepted）、[规划会话](montage-planning-session.md)、[配乐](montage-music.md)与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)
+- [共享工作区技术设计](shared-workspace.md)与 [ADR 0040](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)
 - [向量索引技术设计](vector-index.md)与 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - [存储与文件架构](storage-and-files.md)
 - [Web 桌面结构与约定](web-desktop.md)
