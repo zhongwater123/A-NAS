@@ -668,7 +668,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		// from that would leave the video's cards out, or find no footage
 		// at all; the next round's lookup decides again.
 		if !allDone(analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described) {
-			s.logger.WarnContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
+			s.logger.InfoContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
 				"windows", analysis.Windows, "cards", analysis.Cards, "quality", analysis.Quality, "descriptions", analysis.Described)
 			return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 		}
