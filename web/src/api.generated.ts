@@ -2562,7 +2562,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
+        /** Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_VIDEOCUT_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204 */
         get: operations["getVideoCut"];
         put?: never;
         post?: never;
@@ -2579,7 +2579,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404 */
+        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404 */
         get: operations["listVideoCutProjects"];
         put?: never;
         /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */

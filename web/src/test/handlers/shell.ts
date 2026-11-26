@@ -36,7 +36,7 @@ export interface ShellOptions {
   webSearch?: WebSearchStatus;
   // Photo scoring is installed only when a test says what the account may do.
   scoring?: Pick<ScoringMe, "admin" | "rater">;
-  // 剪辑中心 is off, as on a device without ANAS_MONTAGE_ENABLED, unless a test turns it on.
+  // 剪辑中心 is off, as on a device without ANAS_VIDEOCUT_ENABLED, unless a test turns it on.
   montage?: boolean;
   // 共享工作区 is hidden, as for a member no administrator added, unless a test says otherwise.
   workspace?: { admin: boolean };

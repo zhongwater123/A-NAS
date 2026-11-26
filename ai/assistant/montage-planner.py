@@ -39,16 +39,16 @@ import sys
 import time
 from datetime import datetime
 
-MARKERS = os.environ.get("ANAS_MONTAGE_PLAN_MARKERS", "/run/a-nas-montage/plans")
+MARKERS = os.environ.get("ANAS_VIDEOCUT_PLAN_MARKERS", "/run/a-nas-montage/plans")
 GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas-host/assistant/plans")
 TOKENS = os.environ.get("ANAS_ASSISTANT_TOKEN_DIR", "/var/lib/a-nas-host/assistant/tokens")
-STATE = os.environ.get("ANAS_MONTAGE_PLANNER_STATE", "/var/lib/anas-montage-planner/state.json")
-MONTAGE = os.environ.get("ANAS_MONTAGE_ASSISTANT_SOCKET", "/run/a-nas-montage-assistant/assistant.sock")
+STATE = os.environ.get("ANAS_VIDEOCUT_PLANNER_STATE", "/var/lib/anas-montage-planner/state.json")
+MONTAGE = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-montage-assistant/assistant.sock")
 PLAN_SOCKETS = os.environ.get("ANAS_ASSISTANT_PLAN_SOCKETS", "/run/a-nas-assistant-plan")
 MODEL = os.environ.get("ANAS_ASSISTANT_MODEL_SOCKET", "/run/anas-assistant-gw/model.sock")
 HOST_SOCKET = os.environ.get("ANAS_HOST_AGENT_SOCKET", "/run/a-nas/host-agent.sock")
-PROMPTS = os.environ.get("ANAS_MONTAGE_PROMPTS", "/usr/lib/a-nas/assistant/montage-prompts")
-INTERVAL = int(os.environ.get("ANAS_MONTAGE_PLANNER_INTERVAL", "15"))
+PROMPTS = os.environ.get("ANAS_VIDEOCUT_PROMPTS", "/usr/lib/a-nas/assistant/montage-prompts")
+INTERVAL = int(os.environ.get("ANAS_VIDEOCUT_PLANNER_INTERVAL", "15"))
 
 ACCOUNT = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 # The montage center's round and job ids are a prefix and crypto/rand.Text (26 base32 letters), its tokens 16 random

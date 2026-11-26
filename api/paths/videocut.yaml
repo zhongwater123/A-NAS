@@ -1,14 +1,14 @@
 /api/v1/videocut:
   get:
     operationId: getVideoCut
-    summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
+    summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_VIDEOCUT_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
     responses:
       "204": { description: The montage center is on }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects:
   get:
     operationId: listVideoCutProjects
-    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404"
+    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404"
     parameters: [{ $ref: "../components/videocut.yaml#/parameters/VideoCutCursor" }]
     responses:
       "200": { description: A page of the caller's projects, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProjectPage" } } } }

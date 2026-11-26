@@ -19,8 +19,8 @@ Environment=ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock
 Environment=ANAS_SHARE_SESSION_GROUP=a-nas-shares
 Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock
 Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family
-Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
-Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage
+Environment=ANAS_VIDEOCUT_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-montage
 # The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 Environment=ANAS_WORKSPACE_SESSION_SOCKET=/run/a-nas-workspace-sessions/workspace.sock
 Environment=ANAS_WORKSPACE_SESSION_GROUP=a-nas-workspace
@@ -30,7 +30,7 @@ Environment=ANAS_DATA_MOUNT=/srv/a-nas/data
 Environment=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
 Environment=ANAS_PHOTO_ASSISTANT_LOOKUP=1
 # The montage center's socket for planning knows members by UID too.
-Environment=ANAS_MONTAGE_ASSISTANT_LOOKUP=1
+Environment=ANAS_VIDEOCUT_ASSISTANT_LOOKUP=1
 # This machine's settings, such as ANAS_SMB_INTERFACE (ADR 0034).
 EnvironmentFile=-/etc/a-nas/site.conf
 ExecStart=/usr/lib/a-nas/anas-host-agent

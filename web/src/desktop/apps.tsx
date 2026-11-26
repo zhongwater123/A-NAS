@@ -94,7 +94,7 @@ export interface WindowContext {
   // 照片打分 shows only where its module is installed, to its administrators
   // and the raters they chose (ADR 0037).
   scoring: ScoringAccess;
-  // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
+  // 剪辑中心 shows only while the device turns it on (ANAS_VIDEOCUT_ENABLED, ADR 0038).
   montage: boolean;
   // 共享工作区 shows to administrators and the members they added (ADR 0040); null to everyone else.
   workspace: WorkspaceAccess | null;

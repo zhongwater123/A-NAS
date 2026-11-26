@@ -22,12 +22,12 @@ import (
 // before it can reply. Keeping the listening descriptor across processes
 // reproduces systemd socket activation on each scheduler retry.
 func TestPersistentJobRetriesKilledComputeProcess(t *testing.T) {
-	python := os.Getenv("ANAS_MONTAGE_PYTHON")
+	python := os.Getenv("ANAS_VIDEOCUT_PYTHON")
 	if python == "" {
 		python = "python3"
 	}
 	if output, err := exec.Command(python, "-c", "import numpy, PIL").CombinedOutput(); err != nil {
-		if os.Getenv("ANAS_MONTAGE_PYTHON") != "" {
+		if os.Getenv("ANAS_VIDEOCUT_PYTHON") != "" {
 			t.Fatalf("configured Worker Python: %v: %s", err, output)
 		}
 		t.Skip("requires the montage Worker Python with NumPy and Pillow")

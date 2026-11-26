@@ -113,14 +113,14 @@ type config struct {
 	ShareSessionSocket    string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
 	FamilySessionGroup    string `env:"ANAS_FAMILY_SESSION_GROUP"`
 	FamilySessionSocket   string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
-	VideoCutSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
-	VideoCutSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	VideoCutSessionGroup  string `env:"ANAS_VIDEOCUT_SESSION_GROUP"`
+	VideoCutSessionSocket string `env:"ANAS_VIDEOCUT_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
 	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
 	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
 	// VideoCutAssistantLookup=1 looks accounts up by UID for the montage
 	// center's socket for planning, as the unit sets it.
-	VideoCutAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
+	VideoCutAssistantLookup string `env:"ANAS_VIDEOCUT_ASSISTANT_LOOKUP"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
 	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`

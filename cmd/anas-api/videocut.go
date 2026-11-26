@@ -62,7 +62,7 @@ func planner(answers string) app.Planner {
 	return external.FixedPlanner{Dir: answers}
 }
 
-// configuredVideoCut returns the montage API, nil while ANAS_MONTAGE_ENABLED
+// configuredVideoCut returns the montage API, nil while ANAS_VIDEOCUT_ENABLED
 // is off: then /api/v1/videocut is not mounted and the desktop shows no
 // entry. A NAS forwards it to the montage service; development serves it in
 // this process from a directory on the development volume, with the grants

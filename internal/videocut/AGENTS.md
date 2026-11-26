@@ -7,4 +7,4 @@
 - **每一步可重跑：** 步骤按 `input_key` 复用，键只取任务快照；改了算法就升 `steps.go` 的版本常量。存回有栅栏，已存的方案是定局。`montage.db` 的迁移步骤都带 `Down`（[ADR 0034](../../docs/adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md) 决定 1）。
 - **接缝两边读同一份样例：** 各写各的测试会各自通过而接不上（[跨进程契约](../../docs/development/testing.md#跨进程契约)、[调查](../../docs/investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。更新途中的旧版 Worker 会回答不认识新操作，按“在等它”处理；每个等待都写明在等什么（[跨组件的功能](../../CONTRIBUTING.md#跨组件的功能)）。
 - **默认规则成套改：** 规格“本稿补充的默认规则”里的时限、轮数与上限，连同规格、技术设计一起改，并在[决定记录](../../docs/decisions/2026-11-17-montage-center-default-rules.md)补一行。
-- **验证：** `make check`、`make race-test`；改 `ai/anas_videocut/algo/` 在开发机设 `ANAS_MONTAGE_SAMPLES` 跑 `python -m eval.videocut_golden`；改规划链路，交部署前带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑系统测试。
+- **验证：** `make check`、`make race-test`；改 `ai/anas_videocut/algo/` 在开发机设 `ANAS_VIDEOCUT_SAMPLES` 跑 `python -m eval.videocut_golden`；改规划链路，交部署前带 `ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 跑系统测试。

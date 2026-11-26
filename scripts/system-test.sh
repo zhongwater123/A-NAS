@@ -1066,7 +1066,7 @@ check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
 # --- Montage center (ADR 0038): its own identity and store, and off until
-# ANAS_MONTAGE_ENABLED turns it on: then the Product Service forwards
+# ANAS_VIDEOCUT_ENABLED turns it on: then the Product Service forwards
 # /api/v1/videocut and the montage service confirms the session itself.
 check "montage store belongs to the montage service alone" \
   test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-montage"
@@ -1075,7 +1075,7 @@ check "the montage socket is the service's, for the Product Service's group" \
   test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
 check "the montage center is not served while its switch is off" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut"):$(status_of -b /tmp/alice.jar "$api/api/v1/videocut/projects")" = 404:404
-printf 'Environment=ANAS_MONTAGE_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
+printf 'Environment=ANAS_VIDEOCUT_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
 systemctl daemon-reload
 systemctl restart anas-api
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done

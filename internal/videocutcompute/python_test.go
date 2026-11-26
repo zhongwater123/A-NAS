@@ -22,10 +22,10 @@ import (
 
 // The Go client and the Python Worker in ai/anas_videocut must agree on
 // framing, arrays in memfds and answers. The Worker needs NumPy and Pillow,
-// which the AI runtime has: ANAS_MONTAGE_PYTHON names its python, or the
+// which the AI runtime has: ANAS_VIDEOCUT_PYTHON names its python, or the
 // test looks for one on PATH that imports them.
 func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
-	configured := os.Getenv("ANAS_MONTAGE_PYTHON")
+	configured := os.Getenv("ANAS_VIDEOCUT_PYTHON")
 	python := configured
 	if python == "" {
 		python = "python3"
@@ -34,7 +34,7 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 		if configured != "" {
 			t.Fatalf("%s must import NumPy and Pillow: %v\n%s", python, err, output)
 		}
-		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_MONTAGE_PYTHON)", python)
+		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_VIDEOCUT_PYTHON)", python)
 	}
 	dir, err := os.MkdirTemp("", "compute")
 	if err != nil {

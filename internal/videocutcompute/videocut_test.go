@@ -26,12 +26,12 @@ import (
 // module imported as worker); or skips without the AI runtime's python.
 func startWorker(t *testing.T, prelude string) videocutcompute.Client {
 	t.Helper()
-	python := os.Getenv("ANAS_MONTAGE_PYTHON")
+	python := os.Getenv("ANAS_VIDEOCUT_PYTHON")
 	if python == "" {
 		python = "python3"
 	}
 	if err := exec.Command(python, "-c", "import numpy, PIL").Run(); err != nil {
-		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_MONTAGE_PYTHON)", python)
+		t.Skipf("%s cannot import NumPy and Pillow: the AI runtime's python can (ANAS_VIDEOCUT_PYTHON)", python)
 	}
 	dir, err := os.MkdirTemp("", "compute")
 	if err != nil {

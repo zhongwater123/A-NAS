@@ -250,7 +250,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
 	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
-	grep -Fqx 'Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
 	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-workspace' deploy/systemd/system/anas-workspace.service

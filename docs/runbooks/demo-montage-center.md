@@ -49,7 +49,7 @@
 6. **NAS（root）：只在这台设备上打开剪辑中心**。
    ```bash
    install -d -m 0755 /etc/systemd/system/anas-api.service.d
-   printf '[Service]\nEnvironment=ANAS_MONTAGE_ENABLED=1\n' > /etc/systemd/system/anas-api.service.d/montage-demo.conf
+   printf '[Service]\nEnvironment=ANAS_VIDEOCUT_ENABLED=1\n' > /etc/systemd/system/anas-api.service.d/montage-demo.conf
    systemctl daemon-reload
    systemctl restart anas-api
    ```

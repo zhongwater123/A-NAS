@@ -188,7 +188,7 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         env:
           ANAS_QDRANT_REQUIRED: "1"
-          ANAS_MONTAGE_PYTHON: python3
+          ANAS_VIDEOCUT_PYTHON: python3
           GH_TOKEN: ${{ github.token }}
         run: make check CHECK_FLAGS=
 
@@ -236,7 +236,7 @@ jobs:
       - name: Run the Go tests with the race detector
         env:
           ANAS_QDRANT_REQUIRED: "1"
-          ANAS_MONTAGE_PYTHON: python3
+          ANAS_VIDEOCUT_PYTHON: python3
         run: make race-test
 
   system:

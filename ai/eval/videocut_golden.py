@@ -2,7 +2,7 @@
 
 The prototype's results come from real footage and stay out of the repository
 (docs/architecture/montage-center.md, 剪辑计算 Worker, 样本). Point
-ANAS_MONTAGE_SAMPLES at the folder that holds cache/ and 剪辑对比/ (on
+ANAS_VIDEOCUT_SAMPLES at the folder that holds cache/ and 剪辑对比/ (on
 development machine C, ~/A-NAS-datasets) and run, in the AI runtime:
 
     python -m eval.videocut_golden
@@ -206,9 +206,9 @@ def quality_case(root, key, index, hashed):
 
 
 def main():
-    root = os.environ.get("ANAS_MONTAGE_SAMPLES")
+    root = os.environ.get("ANAS_VIDEOCUT_SAMPLES")
     if not root:
-        sys.exit("set ANAS_MONTAGE_SAMPLES to the folder with cache/ and 剪辑对比/")
+        sys.exit("set ANAS_VIDEOCUT_SAMPLES to the folder with cache/ and 剪辑对比/")
     root = Path(root).expanduser()
     failed = False
     hashed = set()

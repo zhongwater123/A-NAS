@@ -13,9 +13,9 @@ Group=a-nas-montage
 # API and the AI worker, as for the family service (ADR 0038, consequences).
 SupplementaryGroups=a-nas-photos
 ExecStart=/usr/lib/a-nas/anas-api montage-service
-Environment=ANAS_MONTAGE_ROOT=/srv/a-nas/data/montage
-Environment=ANAS_MONTAGE_SOCKET=/run/a-nas-montage/montage.sock
-Environment=ANAS_MONTAGE_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_VIDEOCUT_ROOT=/srv/a-nas/data/montage
+Environment=ANAS_VIDEOCUT_SOCKET=/run/a-nas-montage/montage.sock
+Environment=ANAS_VIDEOCUT_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
 Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
 # Members' planning instances plan with VNAS through a socket systemd holds
 # (anas-montage-assistant.socket), which root's planner also claims rounds on;
