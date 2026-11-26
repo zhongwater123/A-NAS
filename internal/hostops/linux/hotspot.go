@@ -129,6 +129,7 @@ func (e *Executor) SavePhoneHotspotSettings(_ context.Context, change phonehotsp
 	if err := profile.Apply(change); err != nil {
 		return phonehotspot.Settings{}, err
 	}
+	//nolint:gosec // G117: this password is written only to the Host Agent's root-only state file, mode 0600.
 	data, err := json.Marshal(profile)
 	if err != nil {
 		return phonehotspot.Settings{}, err
