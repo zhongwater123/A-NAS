@@ -24,7 +24,7 @@ type ProjectRow struct {
 
 // Project is owner's project id, in whatever state; sql.ErrNoRows when
 // owner has none.
-func (c *Conn) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
+func (c *conn) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
 	var row ProjectRow
 	var created string
 	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
@@ -252,7 +252,7 @@ type ProjectSong struct {
 
 // ProjectSong is owner's projectID's state and song; sql.ErrNoRows when
 // owner has no such project.
-func (c *Conn) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
+func (c *conn) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
 	var song ProjectSong
 	var state string
 	err := c.q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,

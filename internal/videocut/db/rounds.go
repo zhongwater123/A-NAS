@@ -36,7 +36,7 @@ type RoundStanding struct {
 
 // RoundStanding is owner's round for jobID with token, as it stands now;
 // sql.ErrNoRows when there is none.
-func (c *Conn) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
+func (c *conn) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
 	var r RoundStanding
 	err := c.q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
 		(SELECT input_key FROM steps WHERE job_id = j.id AND name = 'pick')
@@ -118,7 +118,7 @@ func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error
 // EndRounds ends, at at with outcome, jobID's rounds in progress, whatever
 // they plan for (endRound). Their conversations stay in the member's VNAS
 // history; what they hand back from now on is not kept.
-func (c *Conn) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
+func (c *conn) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
 	_, err := c.q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
 	return err
 }

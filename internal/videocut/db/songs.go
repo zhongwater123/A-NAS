@@ -126,7 +126,7 @@ func (tx *Tx) CopySongAnalysis(ctx context.Context, id string) error {
 }
 
 // ForgetUnusedSongs forgets owner's song rows nothing needs (unusedSongs).
-func (c *Conn) ForgetUnusedSongs(ctx context.Context, owner string) error {
+func (c *conn) ForgetUnusedSongs(ctx context.Context, owner string) error {
 	_, err := c.q.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ? AND "+unusedSongs, owner)
 	return err
 }
@@ -160,7 +160,7 @@ type SongRow struct {
 }
 
 // Song is song row id; sql.ErrNoRows when there is none.
-func (c *Conn) Song(ctx context.Context, id string) (SongRow, error) {
+func (c *conn) Song(ctx context.Context, id string) (SongRow, error) {
 	var row SongRow
 	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
 		duration, analysis_json, loudness FROM songs WHERE id = ?`, id).

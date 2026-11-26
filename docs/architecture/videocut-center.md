@@ -130,7 +130,7 @@ internal/videocut/
 ├── protocol/        HTTP 接口；助手套接字：监听、按对端 UID 认成员、上面的规划接口
 ├── app/             用例，一件事一个文件，也包括后台出片任务；ports.go 定义外部能力的接口
 ├── domain/          数据类型、修改稿操作的规则、共用的错误
-├── db/              自己的数据库：Update(ctx, func(*db.Tx) error)，每类数据的读写是 db.Tx 上的方法
+├── db/              自己的数据库：Update(ctx, func(*db.Tx) error)，每类数据的读写是 db.DB、db.Tx 上的方法，两者都用的只写一次
 └── external/        实现 app/ports.go 的接口：相册、FFmpeg、计算工人、配乐工人、规划记号
 internal/videocutcompute/   计算工人的客户端与消息类型
 ```

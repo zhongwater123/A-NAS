@@ -12,7 +12,7 @@ import (
 
 // QueueRevocation records that grantID is to be revoked, due at at;
 // nothing when it is queued already.
-func (c *Conn) QueueRevocation(ctx context.Context, grantID string, at time.Time) error {
+func (c *conn) QueueRevocation(ctx context.Context, grantID string, at time.Time) error {
 	_, err := c.q.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
 		grantID, sqlitedb.FormatTime(at))
 	return err

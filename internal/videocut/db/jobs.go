@@ -64,7 +64,7 @@ func (d *DB) JobPlanning(ctx context.Context, jobID string) (owner string, epoch
 }
 
 // UnwantRound records that jobID wants no round.
-func (c *Conn) UnwantRound(ctx context.Context, jobID string) error {
+func (c *conn) UnwantRound(ctx context.Context, jobID string) error {
 	_, err := c.q.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID)
 	return err
 }
@@ -107,7 +107,7 @@ func (tx *Tx) NewPlanEpoch(ctx context.Context, jobID string) error {
 }
 
 // CancelRequested reports whether jobID is being cancelled.
-func (c *Conn) CancelRequested(ctx context.Context, jobID string) (bool, error) {
+func (c *conn) CancelRequested(ctx context.Context, jobID string) (bool, error) {
 	var cancelled bool
 	err := c.q.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
 	return cancelled, err
@@ -307,7 +307,7 @@ func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revisi
 
 // KeyedJob is owner's job started with requestKey: its id, its kind and
 // what column holds for it; sql.ErrNoRows when there is none.
-func (c *Conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+func (c *conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
 	err = c.q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
 		Scan(&id, &kind, &subject)
 	return id, kind, subject, err
@@ -342,7 +342,7 @@ func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
 }
 
 // JobSettings are jobID's settings as it was started with them, encoded.
-func (c *Conn) JobSettings(ctx context.Context, jobID string) (string, error) {
+func (c *conn) JobSettings(ctx context.Context, jobID string) (string, error) {
 	var encoded string
 	err := c.q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
 	return encoded, err
@@ -388,10 +388,11 @@ func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Tim
 }
 
 // Requeue puts owner's jobID back in the queue, due and changed at at,
-// when it is in one of states and not being
-// cancelled; false when it is not (or that is unknown).
+// when it is in one of states and not being cancelled; false when it is not
+// (or that is unknown).
 func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, at time.Time, states ...string) (bool, error) {
-	args := []any{sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID, owner}
+	now := sqlitedb.FormatTime(at)
+	args := []any{now, now, jobID, owner}
 	for _, state := range states {
 		args = append(args, state)
 	}
@@ -405,7 +406,7 @@ func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, at time.Time, st
 }
 
 // LatestJob is projectID's job made last; sql.ErrNoRows when it has none.
-func (c *Conn) LatestJob(ctx context.Context, projectID string) (string, error) {
+func (c *conn) LatestJob(ctx context.Context, projectID string) (string, error) {
 	var latest string
 	err := c.q.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
 	return latest, err

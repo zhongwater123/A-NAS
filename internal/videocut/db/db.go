@@ -17,7 +17,7 @@ import (
 // DB is the open database. Its reads and writes are its methods, one file
 // for each kind of record; app writes no SQL of its own (#665).
 type DB struct {
-	Conn
+	conn
 	db *sql.DB
 }
 
@@ -45,13 +45,13 @@ func (d *DB) SQLForTests() *sql.DB { return d.db }
 
 // Tx is one transaction: reads and writes that stand or fall together.
 type Tx struct {
-	Conn
+	conn
 	tx *sql.Tx
 }
 
-// Conn holds the reads and writes that app makes both on the database and
+// conn holds the reads and writes that app makes both on the database and
 // inside a transaction: DB and Tx each have its methods.
-type Conn struct{ q queryer }
+type conn struct{ q queryer }
 
 // queryer is the database or one transaction in it (DB.db, Tx.tx).
 type queryer interface {
