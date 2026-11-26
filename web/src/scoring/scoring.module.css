@@ -397,26 +397,7 @@
   font-weight: 600;
 }
 
-/* The guide: before the first photo, and over the stage. */
-.sc-calibration {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  width: 100%;
-  overflow: auto;
-  padding: 28px 36px;
-}
-.sc-calibration-foot {
-  position: sticky;
-  bottom: -28px;
-  display: flex;
-  justify-content: flex-end;
-  margin: 0 -36px -28px;
-  padding: 14px 36px;
-  border-top: 1px solid var(--sc-line);
-  background: rgba(21, 21, 21, 0.92);
-  backdrop-filter: blur(8px);
-}
+/* The guide over the stage. */
 .sc-guide {
   display: flex;
   flex-direction: column;
@@ -745,11 +726,71 @@
 .sc-guide-sheet > header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
 }
 .sc-guide-sheet h2 {
+  flex: 1;
   font-size: 18px;
   font-weight: 650;
+}
+
+/* The guide on the practice photo: a bubble beside what it is about, and a
+   ring around that. Both sit under the sheets over the stage. */
+.sc-coach {
+  position: absolute;
+  z-index: 12;
+  inset-block-end: 24px;
+  inset-inline-start: 50%;
+  width: min(300px, calc(100% - 24px));
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: #222;
+  box-shadow:
+    inset 0 0 0 1px var(--sc-accent-line),
+    0 24px 60px rgba(0, 0, 0, 0.6);
+  color: var(--sc-ink);
+  font-size: 14px;
+  line-height: 1.6;
+  transform: translateX(-50%);
+  user-select: text;
+  animation: sc-fade 0.2s var(--sc-ease);
+}
+.sc-coach.placed {
+  inset-block-end: auto;
+  transform: none;
+}
+.sc-coach p {
+  margin: 0;
+}
+.sc-coach footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sc-coach footer span {
+  margin-inline-end: auto;
+  color: var(--sc-ink-3);
+  font: 500 11px / 1 var(--sc-mono);
+}
+.sc-coach footer button {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.sc-coach-ring {
+  position: absolute;
+  z-index: 11;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 2px var(--sc-accent),
+    0 0 0 8px var(--sc-accent-soft);
+  pointer-events: none;
+  transition:
+    left 0.2s var(--sc-ease),
+    top 0.2s var(--sc-ease),
+    width 0.2s var(--sc-ease),
+    height 0.2s var(--sc-ease);
 }
 .sc-rest {
   display: flex;

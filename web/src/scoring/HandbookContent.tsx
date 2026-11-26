@@ -1,4 +1,3 @@
-import { ChevronLeft } from "lucide-react";
 import { useState } from "react";
 
 import type { ScoringRaterBatch } from "./api";
@@ -106,19 +105,10 @@ function Dimension({ guide, name, levels }: { guide: DimensionGuide; name: strin
   );
 }
 
-// Tutorial is the scoring handbook, read through before every visit to a
-// batch like terms to accept: the general rules, then each of the batch's
-// 打分项 with photos to try. 完成 starts scoring at any point, so it also
-// skips the rest.
-export function Tutorial({
-  batch,
-  onBack,
-  onDone,
-}: {
-  batch: Pick<ScoringRaterBatch, "name" | "dimensions" | "scale">;
-  onBack: () => void;
-  onDone: () => void;
-}) {
+// HandbookContent is the scoring handbook as the scoring guide's sheet
+// shows it, under the batch's own guide: the general rules, then each of the
+// batch's 打分项 with photos to try.
+export function HandbookContent({ batch }: { batch: Pick<ScoringRaterBatch, "dimensions" | "scale"> }) {
   const ids = batch.dimensions.map((dimension) => dimension.id);
   const three = batch.scale === "three";
   const levels = three ? [1, 3, 5] : [1, 2, 3, 4, 5];
@@ -131,78 +121,63 @@ export function Tutorial({
   });
   const others = batch.dimensions.filter((dimension) => !dimensionGuides.some((guide) => guide.id === dimension.id));
   return (
-    <div className={styles.scCalibration}>
-      <header className={styles.scPageHead}>
-        <button type="button" className={styles.scBack} onClick={onBack}>
-          <ChevronLeft />
-          批次
-        </button>
-        <h2>打分前看一遍</h2>
-        <span className={styles.scMuted}>{batch.name}</span>
-      </header>
-      <div className={`${styles.scGuide} ${styles.scTutorial}`}>
+    <div className={`${styles.scGuide} ${styles.scTutorial}`}>
+      <section>
+        <h3>准备工作</h3>
+        <ul className={styles.scKeys}>
+          {preparation.map((text) => (
+            <li key={text}>{text}</li>
+          ))}
+        </ul>
+      </section>
+      <section>
+        <h3>每张照片</h3>
+        <ol className={styles.scTutorialSteps}>
+          {steps(ids).map((text) => (
+            <li key={text}>{text}</li>
+          ))}
+        </ol>
+      </section>
+      <section>
+        <h3>总原则</h3>
+        <dl className={styles.scRules}>
+          {shown.map((rule) => (
+            <div key={rule.title}>
+              <dt>{rule.title}</dt>
+              <dd>{(three && rule.three) || rule.text}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+      {explained.map(({ guide, name }) => (
+        <Dimension key={guide.id} guide={guide} name={name} levels={levels} />
+      ))}
+      {others.length > 0 && (
         <section>
-          <h3>准备工作</h3>
-          <ul className={styles.scKeys}>
-            {preparation.map((text) => (
-              <li key={text}>{text}</li>
+          <h3>其他打分项</h3>
+          <ul className={styles.scGuideItems}>
+            {others.map((dimension) => (
+              <li key={dimension.id}>
+                <span />
+                <b>{dimension.name}</b>
+                <span>{dimension.description || "按批次的打分标准打"}</span>
+              </li>
             ))}
           </ul>
         </section>
-        <section>
-          <h3>每张照片</h3>
-          <ol className={styles.scTutorialSteps}>
-            {steps(ids).map((text) => (
-              <li key={text}>{text}</li>
-            ))}
-          </ol>
-        </section>
-        <section>
-          <h3>总原则</h3>
-          <dl className={styles.scRules}>
-            {shown.map((rule) => (
-              <div key={rule.title}>
-                <dt>{rule.title}</dt>
-                <dd>{(three && rule.three) || rule.text}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-        {explained.map(({ guide, name }) => (
-          <Dimension key={guide.id} guide={guide} name={name} levels={levels} />
-        ))}
-        {others.length > 0 && (
-          <section>
-            <h3>其他打分项</h3>
-            <ul className={styles.scGuideItems}>
-              {others.map((dimension) => (
-                <li key={dimension.id}>
-                  <span />
-                  <b>{dimension.name}</b>
-                  <span>{dimension.description || "按批次的打分标准打"}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        <section>
-          <h3>遇到这些怎么办</h3>
-          <dl className={styles.scRules}>
-            {specialCases.map(([situation, action]) => (
-              <div key={situation}>
-                <dt>{situation}</dt>
-                <dd>{action}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className={styles.scMuted}>{skipping}</p>
-        </section>
-      </div>
-      <footer className={styles.scCalibrationFoot}>
-        <button type="button" className={styles.scPrimary} onClick={onDone}>
-          完成
-        </button>
-      </footer>
+      )}
+      <section>
+        <h3>遇到这些怎么办</h3>
+        <dl className={styles.scRules}>
+          {specialCases.map(([situation, action]) => (
+            <div key={situation}>
+              <dt>{situation}</dt>
+              <dd>{action}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className={styles.scMuted}>{skipping}</p>
+      </section>
     </div>
   );
 }

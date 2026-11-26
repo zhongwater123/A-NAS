@@ -30,6 +30,9 @@ import qualityHigh from "./tutorial/quality-5.jpg";
 export interface Example {
   level: 1 | 3 | 5;
   image: string;
+  // The image's own size, which the stage fits the photo by.
+  width: number;
+  height: number;
   alt: string;
   why: string;
 }
@@ -148,9 +151,16 @@ export const dimensionGuides: DimensionGuide[] = [
       "废片：没有内容、像误拍，或整张糊得看不清",
     ],
     examples: [
-      { level: 3, image: overallMid, alt: "树下的旧房子", why: "普通，没有特别的亮点" },
-      { level: 5, image: overallHigh, alt: "雪山和湖面倒影", why: "山、湖、云层次分明，想多看" },
-      { level: 1, image: overallLow, alt: "灰蒙蒙的城市", why: "灰蒙蒙，看不出想拍什么" },
+      { level: 3, image: overallMid, width: 560, height: 420, alt: "树下的旧房子", why: "普通，没有特别的亮点" },
+      {
+        level: 5,
+        image: overallHigh,
+        width: 560,
+        height: 394,
+        alt: "雪山和湖面倒影",
+        why: "山、湖、云层次分明，想多看",
+      },
+      { level: 1, image: overallLow, width: 560, height: 315, alt: "灰蒙蒙的城市", why: "灰蒙蒙，看不出想拍什么" },
     ],
     pitfallsTitle: "容易打错",
     pitfalls: [
@@ -185,9 +195,30 @@ export const dimensionGuides: DimensionGuide[] = [
       "明显歪斜，主体被切掉，画面杂乱",
     ],
     examples: [
-      { level: 5, image: compositionHigh, alt: "雪山和前景水洼", why: "前景水洼把视线引向远山" },
-      { level: 1, image: compositionLow, alt: "倾斜的桥梁阴影", why: "画面倾斜，不知道看哪里" },
-      { level: 3, image: compositionMid, alt: "水边的房子", why: "端正，但主体和背景混在一起" },
+      {
+        level: 5,
+        image: compositionHigh,
+        width: 560,
+        height: 372,
+        alt: "雪山和前景水洼",
+        why: "前景水洼把视线引向远山",
+      },
+      {
+        level: 1,
+        image: compositionLow,
+        width: 560,
+        height: 323,
+        alt: "倾斜的桥梁阴影",
+        why: "画面倾斜，不知道看哪里",
+      },
+      {
+        level: 3,
+        image: compositionMid,
+        width: 560,
+        height: 348,
+        alt: "水边的房子",
+        why: "端正，但主体和背景混在一起",
+      },
     ],
     pitfallsTitle: "容易打错",
     pitfalls: [
@@ -219,9 +250,9 @@ export const dimensionGuides: DimensionGuide[] = [
       "严重过曝或欠曝，颜色怪异",
     ],
     examples: [
-      { level: 1, image: lightLow, alt: "发灰的山和水", why: "发灰发白，没有明暗" },
-      { level: 5, image: lightHigh, alt: "海上的日落光芒", why: "云隙光和暖色，明暗出彩" },
-      { level: 3, image: lightMid, alt: "正常日光下的农场", why: "曝光正常，光线平平" },
+      { level: 1, image: lightLow, width: 560, height: 386, alt: "发灰的山和水", why: "发灰发白，没有明暗" },
+      { level: 5, image: lightHigh, width: 560, height: 481, alt: "海上的日落光芒", why: "云隙光和暖色，明暗出彩" },
+      { level: 3, image: lightMid, width: 560, height: 425, alt: "正常日光下的农场", why: "曝光正常，光线平平" },
     ],
     pitfallsTitle: "容易打错",
     pitfalls: [
@@ -246,9 +277,9 @@ export const dimensionGuides: DimensionGuide[] = [
       "整张糊，看不清",
     ],
     examples: [
-      { level: 3, image: qualityMid, alt: "湖和远山", why: "远处偏软，但内容清楚" },
-      { level: 1, image: qualityLow, alt: "模糊的山坡", why: "整张糊，前景拖影" },
-      { level: 5, image: qualityHigh, alt: "岩壁和溪流", why: "岩壁、树木的细节都清楚" },
+      { level: 3, image: qualityMid, width: 560, height: 292, alt: "湖和远山", why: "远处偏软，但内容清楚" },
+      { level: 1, image: qualityLow, width: 560, height: 374, alt: "模糊的山坡", why: "整张糊，前景拖影" },
+      { level: 5, image: qualityHigh, width: 560, height: 379, alt: "岩壁和溪流", why: "岩壁、树木的细节都清楚" },
     ],
     pitfallsTitle: "这些不扣画质",
     pitfalls: [
@@ -280,9 +311,23 @@ export const dimensionGuides: DimensionGuide[] = [
       "非常平静，几乎凝固：静水倒影、雾中空林、雪后旷野",
     ],
     examples: [
-      { level: 5, image: emotionHigh, alt: "乌云下浪打礁石", why: "乌云压顶，浪打礁石，让人紧张" },
-      { level: 3, image: emotionMid, alt: "晴天的绿色草坡", why: "晴天的草坡，平常的感觉" },
-      { level: 1, image: emotionLow, alt: "雾中树林倒映在静水里", why: "雾中树林倒映在静水里，几乎凝固" },
+      {
+        level: 5,
+        image: emotionHigh,
+        width: 560,
+        height: 336,
+        alt: "乌云下浪打礁石",
+        why: "乌云压顶，浪打礁石，让人紧张",
+      },
+      { level: 3, image: emotionMid, width: 560, height: 522, alt: "晴天的绿色草坡", why: "晴天的草坡，平常的感觉" },
+      {
+        level: 1,
+        image: emotionLow,
+        width: 470,
+        height: 720,
+        alt: "雾中树林倒映在静水里",
+        why: "雾中树林倒映在静水里，几乎凝固",
+      },
     ],
     pitfallsTitle: "容易打错",
     pitfalls: [

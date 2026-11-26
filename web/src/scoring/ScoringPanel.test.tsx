@@ -31,11 +31,15 @@ afterEach(() => {
 });
 
 const shownPhoto = () => screen.findByRole("img", { name: "要打分的照片" });
-// Opens the batch on its card and closes the tutorial it shows first.
+// Opens the batch on its card and skips the guide on the practice photo
+// that its first visit shows.
 async function openBatch(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "开始打分" }));
-  await user.click(await screen.findByRole("button", { name: "完成" }));
+  await screen.findByRole("img", { name: /要打分的照片|练习用的照片/ });
+  const skip = screen.queryByRole("button", { name: "跳过引导" });
+  if (skip) await user.click(skip);
 }
+const bubble = () => screen.queryByRole("region", { name: "新手引导" });
 // The stage's count sets its number apart from the words around it.
 const counted = (text: string) => (_: string, element: Element | null) =>
   element?.matches("[aria-live]") === true && element.textContent === text;
@@ -55,7 +59,7 @@ function serveAccess(admin: boolean, rater: boolean) {
 describe("ScoringPanel for a rater", () => {
   beforeEach(() => serveAccess(false, true));
 
-  it("shows the guide first, then scores with the keys and changes the last score", async () => {
+  it("scores with the keys and changes the last score", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}` });
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2", "t3", "t4"]);
     server.use(...handlers);
@@ -63,9 +67,6 @@ describe("ScoringPanel for a rater", () => {
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
 
     await openBatch(user);
-    expect(screen.getByText("看构图与光线")).toBeTruthy();
-    expect(await screen.findByText("4.50 分")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "开始打分" }));
 
     const first = await shownPhoto();
     expect(first.getAttribute("src")).toContain("/claims/t1/image");
@@ -134,17 +135,16 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[3].body.score).toBeUndefined();
   });
 
-  it("opens a batch it has seen the guide of on the photos, and says when the batch is done", async () => {
+  it("opens a batch whose guide was seen on the photos, and says when the batch is done", async () => {
     const batch = raterBatch({ id: "b-done", rated: 5 });
-    window.localStorage.setItem("a-nas.scoring.guide.user:alice.b-done", "1");
+    window.localStorage.setItem("a-nas.scoring.coach.user:alice.b-done", "1");
     const { handlers } = raterHandlers(batch, ["only"]);
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "继续打分" }));
-    // The tutorial comes first on every visit; the guide only the first time.
-    await user.click(await screen.findByRole("button", { name: "完成" }));
     await shownPhoto();
+    expect(bubble()).toBeNull();
     await user.keyboard("3");
     await user.click(screen.getByRole("button", { name: /确定/ }));
     expect(await screen.findByText("这个批次你已经打完了")).toBeTruthy();
@@ -156,7 +156,7 @@ describe("ScoringPanel for a rater", () => {
       id: `b-${Math.random()}`,
       dimensions: dimensionsOf("overall", "composition", "sharpness"),
     });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2", "t3"]);
     server.use(...handlers);
     const user = userEvent.setup();
@@ -248,7 +248,7 @@ describe("ScoringPanel for a rater", () => {
 
   it("names the 打分项 of a batch that starts with a custom one and answers it first", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, dimensions: dimensionsOf("custom_1", "overall") });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
     const user = userEvent.setup();
@@ -265,75 +265,111 @@ describe("ScoringPanel for a rater", () => {
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 3, scores: { overall: 4 } } });
   });
 
-  it("shows the handbook's tutorial each time a batch opens, with photos to try, and 完成 skips it", async () => {
+  it("walks a rater through a practice photo the first time a batch opens, sending nothing", async () => {
     const batch = raterBatch({
       id: `b-${Math.random()}`,
       scale: "five",
-      dimensions: dimensionsOf("overall", "sharpness"),
+      dimensions: dimensionsOf("overall", "composition", "emotion"),
     });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
-    const { handlers } = raterHandlers(batch, ["t1", "t2"]);
+    const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
-    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
-    // The rules of a five-level batch, without the one about a 打分项 it lacks.
-    expect(screen.getByText("只打整数")).toBeTruthy();
-    expect(screen.queryByText("情绪是描述")).toBeNull();
-    // 总体 as the handbook explains it, under the batch's name; 清晰度 has
-    // no section of its own.
-    expect(screen.getByRole("heading", { name: /总体/ })).toBeTruthy();
-    expect(screen.getByText("这张照片整体拍得好不好，有没有让人想多看一会儿的感觉？")).toBeTruthy();
-    expect(screen.getByText("清晰度")).toBeTruthy();
-    // A try: the handbook's level shows only once the rater picked one.
-    const first = screen.getAllByRole("group", { name: "这张照片的总体你打几分" })[0];
-    expect(screen.queryByText("手册 3 分")).toBeNull();
-    await user.click(within(first).getByRole("button", { name: "4" }));
-    expect(screen.getByText("手册 3 分")).toBeTruthy();
-    expect(screen.getByText("差 1 分")).toBeTruthy();
-    await user.click(screen.getAllByRole("button", { name: "先试着打一个分，或直接看答案" })[0]);
-    expect(screen.getByText("手册 5 分")).toBeTruthy();
-    // Back to the batches, and the tutorial shows again on the next visit.
-    await user.click(screen.getByRole("button", { name: "批次" }));
+    await screen.findByRole("img", { name: "练习用的照片" });
+    const said = () => bubble()?.querySelector("p")?.textContent;
+    expect(said()).toBe("这一张是练习，不计分。先看整张 3–5 秒，凭第一感觉打总体。");
+    expect(within(bubble() as HTMLElement).getByText("1 / 8")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(said()).toBe("这里是现在要打的项和它的说明。每项只看它自己的那一方面。");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    // Picking waits for the rater to pick.
+    expect(said()).toBe("试着打一下：点一档，或按 1–5。只打整数。");
+    expect(screen.queryByRole("button", { name: "下一步" })).toBeNull();
+    await user.keyboard("4");
+    expect(said()).toMatch(/^你打了 4 分。手册给这张 3 分：.+差 1 分。$/);
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(said()).toBe("看不出来按 S，图片有问题按 X：这张就跳过，不计分。");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(said()).toMatch(/“打分标准”/);
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(said()).toBe("按 Enter 或点“下一项”。拿不准就按 ← → 调一档。");
+    // Enter moves on, and the guide is quiet until 情绪.
+    await user.keyboard("{Enter}");
+    expect(bubble()).toBeNull();
+    await user.keyboard("3{Enter}");
+    expect(said()).toBe("情绪不分好坏，只看感觉：1 平静，5 激烈。");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(bubble()).toBeNull();
+    await user.keyboard("2{Enter}");
+    // The practice photo's answer goes nowhere; the photos to score follow.
+    expect(await screen.findByText("练习结束，这一张不计分。下面是要打分的照片。")).toBeTruthy();
+    expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
+    expect(screen.getByText(counted("已打 0 张"))).toBeTruthy();
+    await user.click(within(bubble() as HTMLElement).getByRole("button", { name: "开始打分" }));
+    expect(bubble()).toBeNull();
+    expect(answered).toHaveLength(0);
+    expect(window.localStorage.getItem(`a-nas.scoring.coach.user:alice.${batch.id}`)).toBe("1");
+    // The next visit opens on the photos.
+    await user.click(screen.getByRole("button", { name: `返回批次（${batch.name}）` }));
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
-    expect(screen.getByRole("heading", { name: "打分前看一遍" })).toBeTruthy();
-    expect(screen.queryByText("手册 3 分")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "完成" }));
     await shownPhoto();
+    expect(bubble()).toBeNull();
   });
 
-  it("fits the tutorial to a batch of three levels that scores 构图 before 总体", async () => {
+  it("skips the guide, and shows it again from the scoring guide with the handbook, keeping the photo", async () => {
     const batch = raterBatch({
       id: `b-${Math.random()}`,
       scale: "three",
       dimensions: dimensionsOf("composition", "overall"),
     });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
-    const { handlers } = raterHandlers(batch, ["t1"]);
+    const { handlers, answered } = raterHandlers(batch, ["t1"]);
     server.use(...handlers);
     const user = userEvent.setup();
     render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
-    // The batch's own order, not the handbook's 总体 first.
-    expect(screen.getByText("按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。")).toBeTruthy();
-    expect(screen.queryByText(/凭第一感觉打“总体”/)).toBeNull();
-    // Three levels have no 2 or 4, in the rules or the tries.
-    expect(screen.queryByText("只打整数")).toBeNull();
+    await screen.findByRole("img", { name: "练习用的照片" });
+    expect(bubble()?.textContent).toContain("这一张是练习，不计分。先看整张，再按顺序逐项打。");
+    await user.click(screen.getByRole("button", { name: "跳过引导" }));
+    expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
+    expect(window.localStorage.getItem(`a-nas.scoring.coach.user:alice.${batch.id}`)).toBe("1");
+    await user.keyboard("5");
+
+    // The scoring guide has the batch's own guide and then the handbook,
+    // fitted to three levels: no 2 or 4, in the rules or the tries.
+    await user.click(screen.getByRole("button", { name: "打分标准" }));
+    const sheet = screen.getByRole("dialog", { name: "打分标准" });
+    expect(within(sheet).getByText("看构图与光线")).toBeTruthy();
+    expect(within(sheet).queryByText("只打整数")).toBeNull();
     expect(
-      screen.getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。"),
+      within(sheet).getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。"),
     ).toBeTruthy();
-    const first = screen.getAllByRole("group", { name: "这张照片的构图你打几分" })[0];
+    const tried = within(sheet).getAllByRole("group", { name: "这张照片的构图你打几分" })[0];
     expect(
-      within(first)
+      within(tried)
         .getAllByRole("button")
         .map((button) => button.textContent),
     ).toEqual(["1", "3", "5"]);
+    await user.click(within(tried).getByRole("button", { name: "5" }));
+    expect(within(sheet).getByText(/^手册 \d 分$/)).toBeTruthy();
+
+    // 重新看引导 goes back to the practice photo, and skipping it again
+    // comes back to the photo with its score.
+    await user.click(within(sheet).getByRole("button", { name: "重新看引导" }));
+    await screen.findByRole("img", { name: "练习用的照片" });
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(bubble()?.textContent).toContain("试着打一下：点一档，或按 1、3、5。");
+    await user.click(screen.getByRole("button", { name: "跳过引导" }));
+    await shownPhoto();
+    await user.keyboard("{Enter}3{Enter}");
+    await waitFor(() => expect(answered).toHaveLength(1));
+    expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 5, scores: { overall: 3 } } });
   });
 
   it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "three" });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
     const user = userEvent.setup();
@@ -357,7 +393,7 @@ describe("ScoringPanel for a rater", () => {
 
   it("scores a batch of five levels with 1 to 5 and the arrows from 3, showing the level", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "five" });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
     const user = userEvent.setup();
@@ -383,7 +419,7 @@ describe("ScoringPanel for a rater", () => {
 
   it("keeps every score from a rater of a batch that hides them, and answers in its tenths", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}`, scale: "tenths", hideDecimals: true });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
     const user = userEvent.setup();
@@ -402,7 +438,7 @@ describe("ScoringPanel for a rater", () => {
 
   it("shows the photo at 100% on a click or while Z is held, in every batch", async () => {
     const batch = raterBatch({ id: `b-${Math.random()}` });
-    window.localStorage.setItem(`a-nas.scoring.guide.user:alice.${batch.id}`, "1");
+    window.localStorage.setItem(`a-nas.scoring.coach.user:alice.${batch.id}`, "1");
     const { handlers } = raterHandlers(batch, ["t1", "t2"]);
     let gone = false;
     // Handlers are tried in order: this one first, falling through until the original is gone.
