@@ -126,8 +126,8 @@ anas-photos
 internal/videocut/
 ├── AGENTS.md        局部规则
 ├── videocut.go      组件的 main：读配置、开数据库、接上外部能力、启动后台出片与各个监听；cmd/anas-api 只调它的 Run
-├── assistant.go     VNAS 规划用的助手套接字：按对端 UID 认成员
-├── protocol/        HTTP 接口，以及助手套接字上的规划接口
+├── assistant.go     把开着的 Store 接到助手套接字上（组装的一部分）
+├── protocol/        HTTP 接口；助手套接字：监听、按对端 UID 认成员、上面的规划接口
 ├── app/             用例，一件事一个文件，也包括后台出片任务；ports.go 定义外部能力的接口
 ├── domain/          数据类型、修改稿操作的规则、共用的错误
 ├── db/              自己的数据库：Update(ctx, func(*db.Tx) error)，每类数据的读写是 db.Tx 上的方法
@@ -135,8 +135,8 @@ internal/videocut/
 internal/videocutcompute/   计算工人的客户端与消息类型
 ```
 
-- 2026-11-26 [#670](https://github.com/zhongwater123/A-NAS/issues/670) 搬完家：`app/` 仍是原来的整个 `internal/montage`，`domain/`、`db/`、`external/` 在 [#665](https://github.com/zhongwater123/A-NAS/issues/665) 里从它拆出。
-- `protocol` → `app` → `domain`、`db`；`external` 实现 `app` 定义的接口（谁用接口谁定义，测 `app` 时直接放替身）；`db`、`external` 不引用 `app`、`protocol`；`domain` 不引用其他层；只有 `videocut.go` 认识各层的具体实现。`ports.go` 签名里出现的类型都放在 `domain` 或协议类型包里。
+- 2026-11-26 [#670](https://github.com/zhongwater123/A-NAS/issues/670) 搬完家，[#665](https://github.com/zhongwater123/A-NAS/issues/665) 从 `app/` 拆出 `domain/`、`db/`、`external/`：`app` 不再写 SQL，`db.DB`、`db.Tx` 不把 `*sql.DB`、`*sql.Tx` 交出去（测试另有 `SQLForTests`）。修改稿操作的规则（`editSource` 一组）还在 `app`。
+- `protocol` → `app` → `domain`、`db`；`external` 实现 `app` 定义的接口（谁用接口谁定义，测 `app` 时直接放替身）；`db`、`external` 不引用 `app`、`protocol`；`domain` 不引用其他层；只有 `videocut.go` 认识各层的具体实现，`app` 对外部能力的接口检查（如计算工人的客户端是 `app.Compute`）也放在那里，因为 `external` 不能引用 `app`。`ports.go` 签名里出现的类型都放在 `domain` 或协议类型包里。
 - 事务跨 `app`/`db`：`app` 在 `db.Update` 的回调里按业务顺序调 `db.Tx` 的方法、做判断，自己不写 SQL；修改稿“读修订号、核对、写一步、加修订号”仍由 `app` 主导。`db` 不抽成接口，测试用临时 SQLite。
 - 错误到 HTTP 状态码的对应只在 `protocol` 写一处。
 - `internal/videocutcompute` 留在 `internal/videocut/` 外面，因为相册服务也用它切卡片、算画质。它和 Python 工人之间的消息类型、常量与错误（`PlanBrief`、`FillRequest`、`MusicRequest`、`ErrWorkerRefused` 等）定义在它里面，它不引用 `internal/videocut/...`，相册经它不会依赖剪辑中心。

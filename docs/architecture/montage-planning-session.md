@@ -74,11 +74,11 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 
 - **规划链路的系统测试**（带真实运行环境时，`ai/assistant-spike/system-test.sh`）：真实的 Hermes、规划进程与入口、剪辑服务、规划发起方；脚本化模型（`fake_model.py` 的规划模式：读 brief，交 Schema 允许的最小答案）扮演 VNAS 调四个剪辑工具、交两个方案；检查答案收下、任务越过规划步骤、对话带标题留在历史里、复盘写出技能、模型只拿到规定的工具；第一次模型调用长于 2 分钟。规划之前的步骤要系统测试没装的模型（相册的视频分析、allin1 的配乐分析），所以测试在剪辑服务停着时给任务写进一份 4 张卡片的目录、给歌写进分析（`montage-plan-seed.py`），之后的键与 brief 都由任务自己算，brief 的数据与 Schema 由计算 Worker 的替身写；产品没有为测试开任何入口。用真实内容（`ANAS_SYSTEM_TEST_AI=real`）时这一节跳过：真实的计算 Worker 不认这些卡片。
 - **契约测试**：Go 与 Python 共用的样例（领取、简报、答案、填槽请求、选段）。还没有做。
-- 单元测试：规划发起方（`ai/tests/test_videocut_planner.py`，假的剪辑套接字、登录与 JSON-RPC）、剪辑服务的 root 对端与账号头（`internal/videocut/assistant_test.go`）、重试与等待说明（`internal/videocut/app/planning_test.go`），规划发起方认得剪辑中心生成的编号（`internal/videocut/app/planner_ids_test.go`）。
+- 单元测试：规划发起方（`ai/tests/test_videocut_planner.py`，假的剪辑套接字、登录与 JSON-RPC）、剪辑服务的 root 对端与账号头（`internal/videocut/protocol/socket_test.go`）、重试与等待说明（`internal/videocut/app/planning_test.go`），规划发起方认得剪辑中心生成的编号（`internal/videocut/app/planner_ids_test.go`）。
 
 ## 关联
 
 - 决定：[2026-11-20 剪辑规划交给 VNAS 的方式](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）
 - 验证脚本：开发机实测用的 spike 沙箱（`ai/assistant-spike/run.sh`），规划进程与四项检查写进系统测试
-- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/assistant.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-montage-planner.service`
+- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/protocol/socket.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-montage-planner.service`

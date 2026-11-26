@@ -63,7 +63,7 @@ type Config struct {
 	// center when systemd does not hold it; PlanMarkers is the directory of
 	// planning markers the planner reads
 	// (docs/architecture/montage-planning-session.md).
-	Accounts        AccountResolver
+	Accounts        protocol.AccountResolver
 	AssistantSocket string
 	PlanMarkers     string
 	Logger          *slog.Logger
@@ -124,7 +124,7 @@ func Run(ctx context.Context, config Config) error {
 	// socket, where their UID says who they are, and so does root's planner,
 	// naming the member. It answers with the store that is open, and
 	// unavailable while none is.
-	assistant := &assistantGate{}
+	assistant := &protocol.AssistantGate{}
 	stopAssistant, err := listenAssistant(ctx, config, assistant)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func Run(ctx context.Context, config Config) error {
 			if err := store.StartWorkers(ctx); err != nil {
 				return nil, errors.Join(err, store.Close())
 			}
-			assistant.serve(protocol.Assistant(store, config.Logger))
+			assistant.Serve(protocol.Assistant(store, config.Logger))
 			return &servedStore{Store: store, assistant: assistant}, nil
 		},
 		API:            func(store *servedStore) http.Handler { return protocol.New(store.Store, config.Logger) },
