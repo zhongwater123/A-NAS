@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -335,4 +336,200 @@ func (tx *Tx) FinishJob(ctx context.Context, jobID string, at time.Time) error {
 func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revision int, err error) {
 	err = d.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
 	return draftID, revision, err
+}
+
+// --- the member's requests and reads ---
+
+// KeyedJob is owner's job started with requestKey: its id, its kind and
+// what column holds for it; sql.ErrNoRows when there is none.
+func (d *DB) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+	return keyedJob(ctx, d, owner, requestKey, column)
+}
+
+// KeyedJob is DB.KeyedJob inside the transaction.
+func (tx *Tx) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+	return keyedJob(ctx, tx, owner, requestKey, column)
+}
+
+func keyedJob(ctx context.Context, q queryer, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+	err = q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+		Scan(&id, &kind, &subject)
+	return id, kind, subject, err
+}
+
+// ProjectJobActive reports whether a job of projectID has not ended.
+func (tx *Tx) ProjectJobActive(ctx context.Context, projectID string) (bool, error) {
+	var active bool
+	err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+ActiveStateQuery+")", projectID).Scan(&active)
+	return active, err
+}
+
+// NewJob is a job to queue, its settings encoded: an edit names the
+// version it came from, its draft and the draft's revision; a recut the
+// version.
+type NewJob struct {
+	ID, Owner, ProjectID, RequestKey, Settings string
+	Plans                                      int
+	Kind                                       string
+	SourceVersion, Draft                       sql.NullString
+	DraftRevision                              sql.NullInt64
+}
+
+// AddJob queues job, made and due at at.
+func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
+	now := sqlitedb.FormatTime(at)
+	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
+			created_at, updated_at, kind, source_version_id, draft_id, draft_revision)
+		VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Owner, job.ProjectID, job.RequestKey, job.Settings, job.Plans, now, now, now, job.Kind, job.SourceVersion, job.Draft, job.DraftRevision)
+	return err
+}
+
+// JobSettings are jobID's settings as it was started with them, encoded.
+func (d *DB) JobSettings(ctx context.Context, jobID string) (string, error) {
+	return jobSettings(ctx, d, jobID)
+}
+
+// JobSettings is DB.JobSettings inside the transaction.
+func (tx *Tx) JobSettings(ctx context.Context, jobID string) (string, error) {
+	return jobSettings(ctx, tx, jobID)
+}
+
+func jobSettings(ctx context.Context, q queryer, jobID string) (string, error) {
+	var encoded string
+	err := q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
+	return encoded, err
+}
+
+// JobRow is a job as its page reads it; the times as kept.
+type JobRow struct {
+	ID, ProjectID, Kind, State string
+	Step, WaitReason, Error    sql.NullString
+	Created                    string
+	Finished                   sql.NullString
+	Plans                      int
+}
+
+// Job is owner's job jobID; sql.ErrNoRows when owner has none.
+func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
+	var job JobRow
+	err := d.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
+		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
+		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &job.Step, &job.WaitReason, &job.Error, &job.Created, &job.Finished, &job.Plans)
+	return job, err
+}
+
+// JobMissing is the videos jobID found missing, encoded (not valid when
+// none).
+func (d *DB) JobMissing(ctx context.Context, jobID string) (sql.NullString, error) {
+	var raw sql.NullString
+	err := d.QueryRowContext(ctx, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw)
+	return raw, err
+}
+
+// RequestCancel asks, at at, that owner's jobID stop: a job not running
+// is cancelled at once. It says the job's state after; sql.ErrNoRows when
+// owner has no such job in progress that is not saving.
+func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Time) (string, error) {
+	now := sqlitedb.FormatTime(at)
+	var state string
+	err := d.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
+		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
+		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
+		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+ActiveStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
+	return state, err
+}
+
+// Requeue puts owner's jobID back in the queue, due at notBefore and
+// changed at updated, when it is in one of states and not being
+// cancelled; false when it is not (or that is unknown).
+func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, notBefore, updated time.Time, states ...string) (bool, error) {
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
+	args := []any{sqlitedb.FormatTime(notBefore), sqlitedb.FormatTime(updated), jobID, owner}
+	for _, state := range states {
+		args = append(args, state)
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
+		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
+	if err != nil {
+		return false, err
+	}
+	changed, _ := result.RowsAffected()
+	return changed > 0, nil
+}
+
+// LatestJob is projectID's job made last; sql.ErrNoRows when it has none.
+func (d *DB) LatestJob(ctx context.Context, projectID string) (string, error) {
+	return latestJob(ctx, d, projectID)
+}
+
+// LatestJob is DB.LatestJob inside the transaction.
+func (tx *Tx) LatestJob(ctx context.Context, projectID string) (string, error) {
+	return latestJob(ctx, tx, projectID)
+}
+
+func latestJob(ctx context.Context, q queryer, projectID string) (string, error) {
+	var latest string
+	err := q.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
+	return latest, err
+}
+
+// NoticeRow is one of a member's jobs as the notices read it: its
+// project, state, wait reason and error, when it last changed (as kept),
+// its first 方案's film ("" when none) and whether a round of its epoch is
+// in progress.
+type NoticeRow struct {
+	JobID, ProjectID, Project, State, Reason, Detail, At, FilmID string
+	Planning                                                     bool
+}
+
+// Notices are owner's jobs that wait for VNAS (their wait reason
+// waitVNAS), need the member, or were done or failed since since, the
+// latest changed first.
+func (d *DB) Notices(ctx context.Context, owner, waitVNAS string, since time.Time) ([]NoticeRow, error) {
+	rows, err := d.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
+		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
+		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
+		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
+		  OR (j.state IN ('done', 'failed') AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, waitVNAS, sqlitedb.FormatTime(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var notices []NoticeRow
+	for rows.Next() {
+		var n NoticeRow
+		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &n.State, &n.Reason, &n.Detail, &n.At, &n.FilmID, &n.Planning); err != nil {
+			return nil, err
+		}
+		notices = append(notices, n)
+	}
+	return notices, rows.Err()
+}
+
+// ProjectJobIDs are the jobs of projectID.
+func (tx *Tx) ProjectJobIDs(ctx context.Context, projectID string) ([]string, error) {
+	return jobIDs(ctx, tx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
+}
+
+// OwnerJobIDs are the jobs of owner.
+func (tx *Tx) OwnerJobIDs(ctx context.Context, owner string) ([]string, error) {
+	return jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", owner)
+}
+
+func jobIDs(ctx context.Context, q queryer, query, id string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, query, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

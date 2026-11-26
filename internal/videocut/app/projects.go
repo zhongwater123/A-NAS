@@ -118,6 +118,8 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (db.Pr
 
 // queryer is the database or one transaction in it (db.DB, db.Tx).
 type queryer interface {
+	JobSettings(ctx context.Context, jobID string) (string, error)
+	KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error)
 	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
 	Project(ctx context.Context, owner, id string) (db.ProjectRow, error)
 	ProjectSong(ctx context.Context, owner, projectID string) (string, db.ProjectSong, error)
@@ -459,8 +461,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 			detail.ChosenVersionID, detail.ChosenFilmAssetID = version.ID, version.FilmAssetID
 		}
 	}
-	var latest string
-	switch err := s.db.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest); {
+	switch latest, err := s.db.LatestJob(ctx, projectID); {
 	case err == nil:
 		job, err := s.Job(ctx, owner, latest)
 		if err != nil {
@@ -593,7 +594,7 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		}
 		grantID = row.GrantID
 		// The jobs go with the project; a running one is stopped below.
-		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE project_id = ?", projectID); err != nil {
+		if jobs, err = tx.ProjectJobIDs(ctx, projectID); err != nil {
 			return err
 		}
 		if grantID.Valid {
@@ -622,23 +623,6 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		s.revokeSoon(grantID.String)
 	}
 	return nil
-}
-
-func jobIDs(ctx context.Context, q queryer, query, id string) ([]string, error) {
-	rows, err := q.QueryContext(ctx, query, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // queueRevocation records that grantID is to be revoked, due now.
@@ -819,7 +803,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	defer unlock()
 	var jobs []string
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
-		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", userID); err != nil {
+		if jobs, err = tx.OwnerJobIDs(ctx, userID); err != nil {
 			return err
 		}
 		if err := tx.DeleteOwnerProjects(ctx, userID); err != nil {

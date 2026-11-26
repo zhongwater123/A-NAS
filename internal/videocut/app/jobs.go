@@ -7,11 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
@@ -154,10 +152,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 // subject (the project generated, the draft saved, the version recut, which
 // column holds), is another request's, ErrConflict.
 func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, subject string) (string, error) {
-	var id, priorKind string
-	var prior sql.NullString
-	err := q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
-		Scan(&id, &priorKind, &prior)
+	id, priorKind, prior, err := q.KeyedJob(ctx, owner, requestKey, column)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", nil
@@ -172,8 +167,8 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, s
 // projectIdle answers ErrJobActive while a job of the project has not
 // ended: a project has one job in progress at a time, of any kind.
 func projectIdle(ctx context.Context, tx *db.Tx, projectID string) error {
-	var active bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+db.ActiveStateQuery+")", projectID).Scan(&active); err != nil {
+	active, err := tx.ProjectJobActive(ctx, projectID)
+	if err != nil {
 		return err
 	}
 	if active {
@@ -198,18 +193,16 @@ func (s *Store) queueJob(ctx context.Context, tx *db.Tx, job newJob) (string, er
 	if err != nil {
 		return "", err
 	}
-	id, now := newID("job"), sqlitedb.FormatTime(s.now())
-	_, err = tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
-			created_at, updated_at, kind, source_version_id, draft_id, draft_revision)
-		VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
-		id, job.owner, job.projectID, job.requestKey, string(encoded), job.plans, now, now, now, job.kind, job.sourceVersion, job.draft, job.draftRevision)
+	id, now := newID("job"), s.now()
+	err = tx.AddJob(ctx, db.NewJob{ID: id, Owner: job.owner, ProjectID: job.projectID, RequestKey: job.requestKey, Settings: string(encoded),
+		Plans: job.plans, Kind: job.kind, SourceVersion: job.sourceVersion, Draft: job.draft, DraftRevision: job.draftRevision}, now)
 	return id, err
 }
 
 // jobSettings are a job's settings as it was started with them.
 func jobSettings(ctx context.Context, q queryer, jobID string) (domain.JobSettings, error) {
-	var encoded string
-	if err := q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded); err != nil {
+	encoded, err := q.JobSettings(ctx, jobID)
+	if err != nil {
 		return domain.JobSettings{}, err
 	}
 	var settings domain.JobSettings
@@ -242,14 +235,9 @@ func (s *Store) settingsOf(ctx context.Context, q queryer, row db.ProjectRow) (d
 
 // Job returns owner's job.
 func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error) {
-	var job domain.Job
-	var step, reason, message sql.NullString
-	var created string
-	var finished sql.NullString
-	var plans int
-	err := s.db.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
-		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
-		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &step, &reason, &message, &created, &finished, &plans)
+	row, err := s.db.Job(ctx, owner, jobID)
+	job := domain.Job{ID: row.ID, ProjectID: row.ProjectID, Kind: row.Kind, State: row.State}
+	step, reason, message, created, finished, plans := row.Step, row.WaitReason, row.Error, row.Created, row.Finished, row.Plans
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Job{}, domain.ErrNotFound
 	}
@@ -309,8 +297,8 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 }
 
 func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
-	var raw sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw); err != nil || !raw.Valid {
+	raw, err := s.db.JobMissing(ctx, jobID)
+	if err != nil || !raw.Valid {
 		return nil, err
 	}
 	var missing []string
@@ -338,12 +326,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 		return domain.Job{}, err
 	}
 	defer unlock()
-	now := sqlitedb.FormatTime(s.now())
-	var state string
-	err = s.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
-		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
-		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
-		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+db.ActiveStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
+	state, err := s.db.RequestCancel(ctx, owner, jobID, s.now())
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.Job(ctx, owner, jobID); err != nil {
 			return domain.Job{}, err
@@ -375,17 +358,11 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 // queue. It no longer wants a round: a round is claimed only for a job that
 // came to planning and waits there (awaitPlan).
 func (s *Store) resume(ctx context.Context, tx *db.Tx, owner, jobID string, states ...string) error {
-	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
-	args := []any{sqlitedb.FormatTime(s.now()), sqlitedb.FormatTime(s.now()), jobID, owner}
-	for _, state := range states {
-		args = append(args, state)
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
-		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
+	requeued, err := tx.Requeue(ctx, owner, jobID, s.now(), s.now(), states...)
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
+	if !requeued {
 		return domain.ErrJobState
 	}
 	return nil
@@ -551,9 +528,8 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (domain.Job, er
 // and the song it was started with is still kept, which ending it may have
 // let go (releaseSong) when the project has another since.
 func (s *Store) reopenable(ctx context.Context, tx *db.Tx, projectID, jobID string) error {
-	var latest string
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).
-		Scan(&latest); err != nil {
+	latest, err := tx.LatestJob(ctx, projectID)
+	if err != nil {
 		return err
 	}
 	if latest != jobID {
@@ -594,24 +570,14 @@ const noticeWindow = 24 * time.Hour
 // while a round of its epoch is claimed or started: it waits for VNAS all
 // the while, so its own state does not tell.
 func (s *Store) Notices(ctx context.Context, owner string) ([]domain.Notice, error) {
-	since := sqlitedb.FormatTime(s.now().Add(-noticeWindow))
-	rows, err := s.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
-		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
-		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
-		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
-		  OR (j.state IN ('done', 'failed') AND j.finished_at >= ?)) ORDER BY j.updated_at DESC`, owner, WaitVNAS, since)
+	kept, err := s.db.Notices(ctx, owner, WaitVNAS, s.now().Add(-noticeWindow))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	notices := []domain.Notice{}
-	for rows.Next() {
-		var n domain.Notice
-		var state, detail, at string
-		var planning bool
-		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &state, &n.Reason, &detail, &at, &n.FilmID, &planning); err != nil {
-			return nil, err
-		}
+	for _, row := range kept {
+		n := domain.Notice{JobID: row.JobID, ProjectID: row.ProjectID, Project: row.Project, Reason: row.Reason, FilmID: row.FilmID}
+		state, detail, at, planning := row.State, row.Detail, row.At, row.Planning
 		switch {
 		case state == JobDone:
 			n.Kind = NoticeSaved
@@ -629,7 +595,7 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]domain.Notice, err
 		}
 		notices = append(notices, n)
 	}
-	return notices, rows.Err()
+	return notices, nil
 }
 
 // runsJobs reports whether the store has what jobs work with.
