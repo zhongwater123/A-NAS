@@ -84,7 +84,7 @@ type Store struct {
 // DefaultPlans is how many 方案 a job makes unless Options says otherwise:
 // two films to choose from (docs/specs/montage-center.md, 两个方案). MaxPlans
 // is the most a store can be asked for: the contract names the steps of two
-// (api/components/montage.yaml, MontageJobStep).
+// (api/components/videocut.yaml, VideoCutJobStep).
 const (
 	DefaultPlans = 2
 	MaxPlans     = 2

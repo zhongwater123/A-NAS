@@ -803,7 +803,7 @@ func TestASongBrowsersCannotPlayIsDecodedToFLAC(t *testing.T) {
 	}
 }
 
-func TestATitleIsCutToWhatTheMontageCenterKeeps(t *testing.T) {
+func TestATitleIsCutToWhatVideoCutKeeps(t *testing.T) {
 	long := strings.Repeat("长", 1500)
 	if got := app.SongTitle("  " + long + " "); got != strings.Repeat("长", 200) {
 		t.Fatalf("SongTitle() kept %d runes", len([]rune(got)))
