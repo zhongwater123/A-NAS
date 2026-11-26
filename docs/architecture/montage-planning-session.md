@@ -42,7 +42,7 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 
 - 一轮就是一次对话：`rounds.run_ref` 记对话编号，成员的 VNAS 历史里能找到它。
 - 剪辑工具与答案校验不变（`/v1/tools/*`，按 `jobId` 与 token）。
-- 一轮的时限按[原来的规则](../../internal/montage/planning.go)：领取后 5 分钟没开始就作废；开始后距最后一次调用工具 20 分钟、或开始后 65 分钟仍没结束，就结束。
+- 一轮的时限按[原来的规则](../../internal/videocut/app/planning.go)：领取后 5 分钟没开始就作废；开始后距最后一次调用工具 20 分钟、或开始后 65 分钟仍没结束，就结束。
 
 ### 4. 重试
 
@@ -61,7 +61,7 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 
 这里有两种轮数：**授权的轮数**由规划发起方按成员的授权数（7 天 5 轮，几个任务共用），保护成员不在场时调用云端模型的次数；**任务试过的轮数**由剪辑中心按任务、规划轮次与输入数（`maxPlanRounds`，3 轮），决定什么时候不再自动重来。2026-11-25 之前停在 `vnas_unknown`、`plan_invalid`、`plan_error` 的任务，成员点“重新规划”照旧接着规划；之后不再有任务停在这三个原因。
 
-试过的轮数由剪辑中心按任务的轮次算（`rounds` 的状态与 `failure`，`internal/montage/planning.go` 的 `awaitPlan`）：结束了的一轮、或开始前规划出错的一轮算试过，连不上的不算。重试的等待（`retryWait`）只看成员最近一次登记授权与剪辑服务这次启动之后结束的轮次：成员一做会登记授权的操作（开始、重新规划、去掉素材、重试分析、重剪），或装了新版本（服务重启），等待就清掉，任务一分钟内再要一轮；试过的轮数不因此清零。任务页写明在等什么、几分钟后再试：“VNAS 正在规划”“VNAS 暂时连不上，N 分钟后再试”“规划没有完成，1 分钟后自动重来”。
+试过的轮数由剪辑中心按任务的轮次算（`rounds` 的状态与 `failure`，`internal/videocut/app/planning.go` 的 `awaitPlan`）：结束了的一轮、或开始前规划出错的一轮算试过，连不上的不算。重试的等待（`retryWait`）只看成员最近一次登记授权与剪辑服务这次启动之后结束的轮次：成员一做会登记授权的操作（开始、重新规划、去掉素材、重试分析、重剪），或装了新版本（服务重启），等待就清掉，任务一分钟内再要一轮；试过的轮数不因此清零。任务页写明在等什么、几分钟后再试：“VNAS 正在规划”“VNAS 暂时连不上，N 分钟后再试”“规划没有完成，1 分钟后自动重来”。
 
 ## 学习
 
@@ -74,11 +74,11 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 
 - **规划链路的系统测试**（带真实运行环境时，`ai/assistant-spike/system-test.sh`）：真实的 Hermes、规划进程与入口、剪辑服务、规划发起方；脚本化模型（`fake_model.py` 的规划模式：读 brief，交 Schema 允许的最小答案）扮演 VNAS 调四个剪辑工具、交两个方案；检查答案收下、任务越过规划步骤、对话带标题留在历史里、复盘写出技能、模型只拿到规定的工具；第一次模型调用长于 2 分钟。规划之前的步骤要系统测试没装的模型（相册的视频分析、allin1 的配乐分析），所以测试在剪辑服务停着时给任务写进一份 4 张卡片的目录、给歌写进分析（`montage-plan-seed.py`），之后的键与 brief 都由任务自己算，brief 的数据与 Schema 由计算 Worker 的替身写；产品没有为测试开任何入口。用真实内容（`ANAS_SYSTEM_TEST_AI=real`）时这一节跳过：真实的计算 Worker 不认这些卡片。
 - **契约测试**：Go 与 Python 共用的样例（领取、简报、答案、填槽请求、选段）。还没有做。
-- 单元测试：规划发起方（`ai/tests/test_montage_planner.py`，假的剪辑套接字、登录与 JSON-RPC）、剪辑服务的 root 对端与账号头（`internal/montageservice/assistant_test.go`）、重试与等待说明（`internal/montage/planning_test.go`），规划发起方认得剪辑中心生成的编号（`internal/montage/planner_ids_test.go`）。
+- 单元测试：规划发起方（`ai/tests/test_montage_planner.py`，假的剪辑套接字、登录与 JSON-RPC）、剪辑服务的 root 对端与账号头（`internal/videocut/assistant_test.go`）、重试与等待说明（`internal/videocut/app/planning_test.go`），规划发起方认得剪辑中心生成的编号（`internal/videocut/app/planner_ids_test.go`）。
 
 ## 关联
 
 - 决定：[2026-11-20 剪辑规划交给 VNAS 的方式](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）
 - 验证脚本：开发机实测用的 spike 沙箱（`ai/assistant-spike/run.sh`），规划进程与四项检查写进系统测试
-- 代码：`internal/montage/planning.go`、`internal/montageapi/assistant.go`、`internal/montageservice/assistant.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-montage-planner.service`
+- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/assistant.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-montage-planner.service`

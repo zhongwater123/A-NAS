@@ -1453,7 +1453,7 @@ def template(request):
 
 
 def with_body(request, fds):
-    """The request with the fields of its "body" array, a sealed file of JSON (internal/montagecompute)."""
+    """The request with the fields of its "body" array, a sealed file of JSON (internal/videocutcompute)."""
     fields = {}
     for spec, fd in zip(request.get("arrays", []), fds):
         if spec.get("name") == "body":

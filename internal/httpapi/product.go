@@ -21,13 +21,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/modules"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -72,7 +72,7 @@ type ProductDependencies struct {
 	Workspace http.Handler
 	// PlanGrants registers the member's planning grant for the montage
 	// center's background planning (the File Broker); nil goes on without.
-	PlanGrants montageapi.PlanRegistrar
+	PlanGrants protocol.PlanRegistrar
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
 	// its mounts and finds the caller behind the session token itself.

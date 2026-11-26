@@ -20,10 +20,10 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
-	"github.com/zhongwater123/A-NAS/internal/montage"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 )
 
 // grantSessions adds the accounts in use to the sessions the tests know.
@@ -510,7 +510,7 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 		}
 	}
 	// The montage center's edit of a film reads the same windows through it.
-	hits, err := montage.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
+	hits, err := app.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
 	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (photos.WindowMatch{AssetID: videoID, Window: 5, Score: 10}) {
 		t.Fatalf("montage search = %+v, %v", hits, err)
 	}
@@ -541,7 +541,7 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantModelMismatch {
 		t.Fatalf("SearchWindows() of another model's windows = %v", err)
 	}
-	if _, err := (montage.GrantSearch{Grants: client}).SearchWindows(ctx, grants[0], []string{"sea"}, 4); !errors.Is(err, montage.ErrSearchModel) {
+	if _, err := (app.GrantSearch{Grants: client}).SearchWindows(ctx, grants[0], []string{"sea"}, 4); !errors.Is(err, app.ErrSearchModel) {
 		t.Fatalf("montage search of another model's windows = %v", err)
 	}
 }

@@ -21,11 +21,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/montage"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // shortVideos reads every file as a short video.
@@ -78,16 +79,16 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Jobs are queued and polled here; no job runs.
-	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
-		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
-			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
+	montageStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"),
+		app.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
+			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: app.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = montageStore.Close() })
 	// Whether the switch is on is the Product Service's answer alone.
 	served := 0
-	api := montageapi.New(montageStore, logger)
+	api := protocol.New(montageStore, logger)
 	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		served++
 		api.ServeHTTP(w, r)
@@ -142,7 +143,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		}
 	}
 
-	var project montage.ProjectDetail
+	var project app.ProjectDetail
 	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects",
 		`{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusCreated).Body, &project)
 	owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusOK)
@@ -152,10 +153,10 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, path+"/assets", `{"requestKey":"k3","assetIds":["`+videos[1]+`"]}`, nil, http.StatusOK)
 	owner.do(http.MethodPatch, path, `{"name":"海边一日","chronological":false}`, nil, http.StatusOK)
 	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &project)
-	if project.Name != "海边一日" || project.Chronological || project.AssetCount != 2 || project.Assets[1].Status != montage.AssetAvailable {
+	if project.Name != "海边一日" || project.Chronological || project.AssetCount != 2 || project.Assets[1].Status != app.AssetAvailable {
 		t.Fatalf("project = %+v", project)
 	}
-	var page montage.ProjectPage
+	var page app.ProjectPage
 	decode(t, owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK).Body, &page)
 	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
 		t.Fatalf("projects = %+v", page)
@@ -164,14 +165,14 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
 		t.Fatalf("generate without a song: %s", response.Body.String())
 	}
-	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, montage.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
+	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, app.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
 		t.Fatal(err)
 	}
 
 	// A film: 202 and the job to poll; one job at a time.
-	var job montage.Job
+	var job app.Job
 	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
-	if job.State != montage.JobQueued || len(job.Steps) != 3+5*montage.DefaultPlans {
+	if job.State != app.JobQueued || len(job.Steps) != 3+5*app.DefaultPlans {
 		t.Fatalf("job = %+v", job)
 	}
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)
@@ -203,7 +204,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)
 	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
-	var withJob montage.ProjectDetail
+	var withJob app.ProjectDetail
 	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &withJob)
 	if withJob.Job == nil || withJob.Job.ID != job.ID {
 		t.Fatalf("the project's job = %+v", withJob.Job)
@@ -211,7 +212,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
 	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
 	var notices struct {
-		Items []montage.Notice `json:"items"`
+		Items []app.Notice `json:"items"`
 	}
 	decode(t, owner.do(http.MethodGet, "/api/v1/montage/notices", "", nil, http.StatusOK).Body, &notices)
 	if len(notices.Items) != 0 {
@@ -219,7 +220,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	}
 	bob.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusNotFound)
 	decode(t, owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusOK).Body, &job)
-	if job.State != montage.JobCancelled {
+	if job.State != app.JobCancelled {
 		t.Fatalf("cancelled job = %+v", job)
 	}
 	owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusConflict)
@@ -280,26 +281,26 @@ func (g *planGrants) RegisterAssistantPlan(ctx context.Context) (string, error) 
 // idleCompute lets jobs be queued; no job runs in this test.
 type idleCompute struct{}
 
-func (idleCompute) Catalog(context.Context, montage.CatalogRequest) ([]string, error) {
+func (idleCompute) Catalog(context.Context, videocutcompute.CatalogRequest) ([]string, error) {
 	return nil, errors.New("no job runs here")
 }
 
-func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (montage.FillAnswer, error) {
-	return montage.FillAnswer{}, errors.New("no job runs here")
+func (idleCompute) Fill(context.Context, videocutcompute.FillRequest, []float32, int) (videocutcompute.FillAnswer, error) {
+	return videocutcompute.FillAnswer{}, errors.New("no job runs here")
 }
 
 func (idleCompute) Likeness(context.Context, []float32, []float32, int) (float64, error) {
 	return 0, errors.New("no job runs here")
 }
 
-func (idleCompute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {
-	return montage.PlanBrief{}, errors.New("no job runs here")
+func (idleCompute) PlanBrief(context.Context, videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error) {
+	return videocutcompute.PlanBrief{}, errors.New("no job runs here")
 }
 
 func (idleCompute) ShotsAnswer(context.Context, json.RawMessage, json.RawMessage, []int) (json.RawMessage, error) {
 	return nil, errors.New("no job runs here")
 }
 
-func (idleCompute) Clear(context.Context, montage.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
+func (idleCompute) Clear(context.Context, videocutcompute.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
 	return [2]float64{}, errors.New("no job runs here")
 }
