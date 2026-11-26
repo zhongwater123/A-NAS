@@ -59,7 +59,7 @@ func planner(answers string) app.Planner {
 	if answers == "" {
 		return nil
 	}
-	return app.FixedPlanner{Dir: answers}
+	return external.FixedPlanner{Dir: answers}
 }
 
 // configuredMontage returns the montage API, nil while ANAS_MONTAGE_ENABLED

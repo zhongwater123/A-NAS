@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -224,7 +225,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	for i := 10; i < 15; i++ {
 		env.grants.windows[videoA][i] = 1
 	}
-	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: &editCompute{}, Editing: env.frames, Planner: FixedPlanner{},
+	store, err := Open(ctx, t.TempDir(), Options{Grants: env.grants, JobCompute: &editCompute{}, Editing: env.frames, Planner: external.FixedPlanner{},
 		Now: func() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)

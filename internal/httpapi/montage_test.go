@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -82,7 +83,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"),
 		app.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
-			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: app.FixedPlanner{}})
+			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: external.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
