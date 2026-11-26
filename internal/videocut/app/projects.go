@@ -137,6 +137,7 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (proje
 // queryer is the database or one transaction in it (db.DB, db.Tx).
 type queryer interface {
 	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
+	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -715,9 +716,7 @@ func jobIDs(ctx context.Context, q queryer, query, id string) ([]string, error) 
 
 // queueRevocation records that grantID is to be revoked, due now.
 func (s *Store) queueRevocation(ctx context.Context, q queryer, grantID string) error {
-	_, err := q.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
-		grantID, sqlitedb.FormatTime(s.now()))
-	return err
+	return q.QueueRevocation(ctx, grantID, s.now())
 }
 
 // revokeSoon revokes a queued grant in the background.
@@ -730,29 +729,15 @@ func (s *Store) revokeSoon(grantID string) {
 func (s *Store) revoke(ctx context.Context, grantID string) {
 	if err := s.grants.Revoke(ctx, grantID); err != nil {
 		s.logger.WarnContext(ctx, "revoking a photo grant failed; trying again later", "grant", grantID, "error", err)
-		_, _ = s.db.ExecContext(ctx, `UPDATE revocations SET attempts = attempts + 1,
-			next_try = ? WHERE grant_id = ?`, sqlitedb.FormatTime(s.now().Add(UpkeepInterval)), grantID)
+		_ = s.db.PostponeRevocation(ctx, grantID, s.now().Add(UpkeepInterval))
 		return
 	}
-	_, _ = s.db.ExecContext(ctx, "DELETE FROM revocations WHERE grant_id = ?", grantID)
+	_ = s.db.DeleteRevocation(ctx, grantID)
 }
 
 // dueRevocations lists the grants whose revocation is due.
 func (s *Store) dueRevocations(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT grant_id FROM revocations WHERE next_try <= ? ORDER BY next_try", sqlitedb.FormatTime(s.now()))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var due []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		due = append(due, id)
-	}
-	return due, rows.Err()
+	return s.db.DueRevocations(ctx, s.now())
 }
 
 // RetryRevocations revokes the grants whose revocation is due: those the
