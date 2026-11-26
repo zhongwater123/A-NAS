@@ -125,7 +125,7 @@ anas-photos
 ```text
 internal/videocut/
 ├── AGENTS.md        局部规则
-├── videocut.go      组件的 main：读配置、开数据库、接上外部能力、启动后台出片与各个监听；cmd/anas-api 只调它的 Run
+├── videocut.go      组件的 main：读配置、开数据库、接上外部能力、启动后台出片与各个监听；cmd/anas-api 只调它的 Run，开发模式在产品服务进程里跑，调 Local（两者共用 Workers 的组装）
 ├── assistant.go     把开着的 Store 接到助手套接字上（组装的一部分）
 ├── protocol/        HTTP 接口；助手套接字：监听、按对端 UID 认成员、上面的规划接口
 ├── app/             用例，一件事一个文件，也包括后台出片任务；ports.go 定义外部能力的接口
@@ -146,7 +146,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 类别 | 包 | 谁能引用 |
 |---|---|---|
 | 协议类型包 | `internal/photosapi`、`internal/videocutcompute` | `domain`、`db`、`app` |
-| FFmpeg 工人 | `internal/ffmpegworker`：客户端在 `cmd/anas-api` 建好传进 `videocut.Run`，经 `app.Editing`、`app.Media` 交给 `app` | 只有 `app`；它直接用 `Client`、`Local` 这一点 depguard 拦不住，由评审核对 |
+| FFmpeg 工人 | `internal/ffmpegworker`：客户端在 `cmd/anas-api` 建好传进 `videocut.Run`（开发模式是 `videocut.Local`），经 `app.Editing`、`app.Media` 交给 `app` | 只有 `app`；它直接用 `Client`、`Local` 这一点 depguard 拦不住，由评审核对 |
 | 基础库 | `internal/sqlitedb`、`internal/atomicfile`、`internal/keylock`、`internal/capacity` | `db`、`app` |
 | 相册实现包 | `internal/photos`：剪辑用到它的值类型（`Grant`、`WindowMatch` 等） | 按文件放行，清单在 `.golangci.yml`；值类型挪进 `photosapi` 后删掉 |
 | 其他模块 | 以上之外的 `internal/...` | `domain`、`db`、`app` 都不能用 |

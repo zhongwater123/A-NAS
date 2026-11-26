@@ -33,6 +33,45 @@ var (
 	_ app.MusicAnalyzer = external.MusicWorker{}
 )
 
+// Grants and Media are what the Product Service hands VideoCut: the photo
+// library's project grants, and the FFmpeg Worker that decodes, probes and
+// renders (app.Editing too when it is one).
+type (
+	Grants = app.Grants
+	Media  = app.Media
+)
+
+// Workers are what VideoCut works with besides the photo library, the same
+// in the service and in development. MusicSocket reaches the music
+// analysis Worker and ComputeSocket the compute Worker: while either is
+// empty, songs wait for it. PlanAnswers names a directory of fixed plans
+// that stand in for planning (external.FixedPlanner); without it the
+// store has no planner of its own.
+type Workers struct {
+	Media                      Media
+	MusicSocket, ComputeSocket string
+	PlanAnswers                string
+}
+
+// options are the store's options with w: Run and Local open the store
+// with them.
+func (w Workers) options(grants Grants, markers app.Markers, logger *slog.Logger) app.Options {
+	editing, _ := w.Media.(app.Editing)
+	options := app.Options{Grants: grants, Media: w.Media, Editing: editing, WindowSearch: WindowSearchOf(grants),
+		Markers: markers, Logger: logger}
+	if w.MusicSocket != "" {
+		options.Music = external.MusicWorker{Socket: w.MusicSocket}
+	}
+	if w.ComputeSocket != "" {
+		client := videocutcompute.Client{SocketPath: w.ComputeSocket}
+		options.Compute, options.JobCompute = client, client
+	}
+	if w.PlanAnswers != "" {
+		options.Planner = external.FixedPlanner{Dir: w.PlanAnswers}
+	}
+	return options
+}
+
 // WindowSearchOf is the grants' own search of windows by text, for editing
 // a film (#596), when they have one: the photo library's answers as the
 // VideoCut's errors (external.GrantSearch).
@@ -48,16 +87,10 @@ type Config struct {
 	SocketPath string
 	Sessions   storeservice.SessionResolver
 	// Grants reaches the photo library's project grants.
-	Grants app.Grants
-	// Media, Music and Compute decode, analyse and cut the songs
-	// (app.Options); JobCompute, Editing and Planner are what jobs work
-	// with besides them. Without a planner the service makes no film.
-	Media      app.Media
-	Music      app.MusicAnalyzer
-	Compute    app.MusicComputer
-	JobCompute app.Compute
-	Editing    app.Editing
-	Planner    app.Planner
+	Grants Grants
+	// Workers decode, analyse and cut the songs and work the jobs.
+	// Without a planner the service makes no film.
+	Workers
 	// Accounts names the account behind a member's UID; AssistantSocket is
 	// where members' planning instances and root's planner reach VideoCut
 	// when systemd does not hold it; PlanMarkers is the directory of
@@ -134,9 +167,7 @@ func Run(ctx context.Context, config Config) error {
 		Name: "videocut", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: protocol.Unavailable,
 		Open: func(ctx context.Context, root string) (*servedStore, error) {
-			store, err := app.Open(ctx, root, app.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute,
-				JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, WindowSearch: WindowSearchOf(config.Grants),
-				Markers: markers, Logger: config.Logger})
+			store, err := app.Open(ctx, root, config.options(config.Grants, markers, config.Logger))
 			if err != nil {
 				return nil, err
 			}
@@ -152,6 +183,43 @@ func Run(ctx context.Context, config Config) error {
 		UpkeepInterval: app.UpkeepInterval,
 		CheckStore:     config.CheckStore, RetryInterval: config.RetryInterval, Logger: config.Logger,
 	})
+}
+
+// LocalConfig is VideoCut in development (Local): the photo library's
+// grants in the Product Service's process, the Workers, and Serve, which
+// mounts the API.
+type LocalConfig struct {
+	Grants Grants
+	Workers
+	Serve  bool
+	Logger *slog.Logger
+}
+
+// Local runs VideoCut in the Product Service's process, as development
+// does, with its store in root, kept as the service keeps it
+// (app.Store.Upkeep). It returns the API, nil unless config.Serve, which
+// also starts the jobs and the song analysis (app.Store.StartWorkers); a
+// removal of deleted accounts, which runs either way; and a function that
+// stops the store. The API's requests carry the headers the service's
+// socket would. Development leaves no planning markers.
+func Local(ctx context.Context, root string, config LocalConfig) (http.Handler, func(context.Context, string) error, func(), error) {
+	store, err := app.Open(ctx, root, config.options(config.Grants, nil, config.Logger))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	stopUpkeep := storeservice.Every(ctx, app.UpkeepInterval, store.Upkeep)
+	closeStore := func() {
+		stopUpkeep()
+		_ = store.Close()
+	}
+	if !config.Serve {
+		return nil, store.RemoveAccount, closeStore, nil
+	}
+	if err := store.StartWorkers(ctx); err != nil {
+		closeStore()
+		return nil, nil, nil, err
+	}
+	return serviceproxy.Local(protocol.New(store, config.Logger)), store.RemoveAccount, closeStore, nil
 }
 
 // RemoveAccount forgets a deleted account's projects.

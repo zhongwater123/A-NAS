@@ -13,14 +13,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
-	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
-	"github.com/zhongwater123/A-NAS/internal/storeservice"
 	"github.com/zhongwater123/A-NAS/internal/videocut"
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
-	"github.com/zhongwater123/A-NAS/internal/videocut/external"
-	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
-	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 const videoCutServiceCommand = "videocut-service"
@@ -36,16 +30,14 @@ func runVideoCutService(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return videocut.Run(ctx, videocut.Config{
-		Root:       config.Root,
-		SocketPath: config.Socket,
-		Sessions:   sessionlookup.NewClient(config.SessionSocket),
-		Grants:     photosapi.GrantClient(config.GrantSocket),
-		Media:      config.Media.client(),
-		Music:      external.MusicWorker{Socket: config.MusicSocket},
-		Compute:    videocutcompute.Client{SocketPath: config.ComputeSocket},
-		JobCompute: videocutcompute.Client{SocketPath: config.ComputeSocket},
-		Editing:    config.Media.client(),
-		Planner:    planner(config.PlanAnswers),
+		Root:          config.Root,
+		SocketPath:    config.Socket,
+		Sessions:      sessionlookup.NewClient(config.SessionSocket),
+		Grants:        photosapi.GrantClient(config.GrantSocket),
+		Media:         config.Media.client(),
+		MusicSocket:   config.MusicSocket,
+		ComputeSocket: config.ComputeSocket,
+		PlanAnswers:   config.PlanAnswers,
 		// The member's VNAS plans on VideoCut's assistant socket.
 		Accounts:        sessionlookup.NewClient(config.SessionSocket),
 		AssistantSocket: config.AssistantSocket,
@@ -54,23 +46,14 @@ func runVideoCutService(logger *slog.Logger) error {
 	})
 }
 
-// planner is the stand-in planner when PlanAnswers names one.
-func planner(answers string) app.Planner {
-	if answers == "" {
-		return nil
-	}
-	return external.FixedPlanner{Dir: answers}
-}
-
 // configuredVideoCut returns the VideoCut API, nil while ANAS_VIDEOCUT_ENABLED
 // is off: then /api/v1/videocut is not mounted and the desktop shows no
 // entry. A NAS forwards it to the VideoCut service; development serves it in
 // this process from a directory on the development volume, with the grants
-// of the photo library in this process, and keeps the store as the service
-// does (app.Store.Upkeep). Deleted accounts leave the VideoCut store
-// whatever the switch: the service runs either way, and rows from a time it
-// was on must not stay.
-func configuredVideoCut(ctx context.Context, config Config, grants app.Grants, media app.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
+// of the photo library in this process (videocut.Local). Deleted accounts
+// leave the VideoCut store whatever the switch: the service runs either
+// way, and rows from a time it was on must not stay.
+func configuredVideoCut(ctx context.Context, config Config, grants videocut.Grants, media videocut.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
 			_, err := accountremoval.Request(ctx, config.VideoCutSocket, userID)
@@ -87,32 +70,6 @@ func configuredVideoCut(ctx context.Context, config Config, grants app.Grants, m
 	}
 	// Development has no music analysis or compute Worker of its own unless
 	// their sockets are given; songs wait for them.
-	editing, _ := media.(app.Editing)
-	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.VideoCutPlanAnswers),
-		WindowSearch: videocut.WindowSearchOf(grants), Logger: logger}
-	if config.VideoCutMusicSocket != "" {
-		options.Music = external.MusicWorker{Socket: config.VideoCutMusicSocket}
-	}
-	if config.VideoCutComputeSocket != "" {
-		client := videocutcompute.Client{SocketPath: config.VideoCutComputeSocket}
-		options.Compute, options.JobCompute = client, client
-	}
-	store, err := app.Open(ctx, root, options)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	stopUpkeep := storeservice.Every(ctx, app.UpkeepInterval, store.Upkeep)
-	closeStore := func() {
-		stopUpkeep()
-		_ = store.Close()
-	}
-	if !config.VideoCutEnabled {
-		return nil, store.RemoveAccount, closeStore, nil
-	}
-	if err := store.StartWorkers(ctx); err != nil {
-		closeStore()
-		return nil, nil, nil, err
-	}
-	// The headers the service gets are those the socket would carry.
-	return serviceproxy.Local(protocol.New(store, logger)), store.RemoveAccount, closeStore, nil
+	return videocut.Local(ctx, root, videocut.LocalConfig{Grants: grants, Media: media, MusicSocket: config.VideoCutMusicSocket,
+		ComputeSocket: config.VideoCutComputeSocket, PlanAnswers: config.VideoCutPlanAnswers, Serve: config.VideoCutEnabled, Logger: logger})
 }

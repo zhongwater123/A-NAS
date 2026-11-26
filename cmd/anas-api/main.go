@@ -63,7 +63,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
@@ -267,7 +267,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
-	var videoCutGrants app.Grants
+	var videoCutGrants videocut.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -367,7 +367,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	var videoCutMedia app.Media
+	var videoCutMedia videocut.Media
 	if mediaWorker != nil {
 		videoCutMedia = mediaWorker
 	}
