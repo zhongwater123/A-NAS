@@ -2,10 +2,12 @@ import { CircleAlert, RefreshCw } from "lucide-react";
 import { type FormEvent, useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { useBabies } from "../family/useBabies";
+import { touchScreen } from "../lib/touch";
 import { useDialogs, useToasts } from "../ui/feedback";
+import { usePhoneLayout } from "../ui/usePhoneLayout";
 import { useStoredState } from "../ui/useStoredState";
 import { ActionDialogs } from "./ActionDialogs";
-import type { PhotoAsset } from "./api";
+import type { PhotoAsset, PhotoLibrary } from "./api";
 import { Empty } from "./Collections";
 import type { GridProps } from "./grid";
 import { clampRowHeight, defaultRowHeight } from "./layout";
@@ -13,7 +15,7 @@ import { libraryOf, ownLibrary, placeLibrary, placeViewing } from "./model";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { PlaceView } from "./PlaceView";
 import styles from "./photos.module.css";
-import { Sidebar } from "./Sidebar";
+import { PlacesBar, Sidebar } from "./Sidebar";
 import { Slideshow } from "./Slideshow";
 import { Subbar } from "./Subbar";
 import { SourceBadge, searchLibraries } from "./scope";
@@ -43,13 +45,16 @@ interface Props {
 }
 
 const narrowWidth = 720;
+// Phone width: the toolbar takes two rows, the search box the second.
+const compactWidth = 520;
 
 // PhotosPanel is the photos window: libraries and albums on the side, photos
 // filling the rest, a viewer over everything. The photo service decides
 // every permission; the panel only leaves out what it would refuse.
 export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled, onOpenFamily }: Props) {
   const [rowHeight, setRowHeight] = useStoredState("a-nas.photos.rowHeight", defaultRowHeight);
-  const [info, setInfo] = useStoredState("a-nas.photos.info", true);
+  // A phone has no room beside the photo: the information starts hidden there.
+  const [info, setInfo] = useStoredState("a-nas.photos.info", !touchScreen());
   const [docked, setDocked] = useStoredState("a-nas.photos.sidebar", true);
   const [drawer, setDrawer] = useState(false);
   const [viewAssets, setViewAssets] = useState<PhotoAsset[]>([]);
@@ -91,7 +96,9 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
 
   const mine = ownLibrary(caller);
   const narrow = width < narrowWidth;
-  const sidebarOpen = narrow ? drawer : docked;
+  // On a phone the sidebar gives way to a row of places under the toolbar.
+  const phone = usePhoneLayout();
+  const sidebarOpen = !phone && (narrow ? drawer : docked);
 
   const ai = useAIStatus();
   const babies = useBabies();
@@ -313,10 +320,20 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
     pickSearchImage,
   };
 
+  // Another library opens at the same kind of place where it has one.
+  const switchLibrary = (library: PhotoLibrary) =>
+    setPlace(
+      place.kind === "albums"
+        ? { kind: "albums", libraryId: library.id }
+        : place.kind === "trash" && !library.viewing
+          ? { kind: "trash", libraryId: library.id }
+          : { kind: "timeline", libraryId: library.id },
+    );
+
   return (
     <div
       ref={root}
-      className={`${styles.phApp}${sidebarOpen ? " nav-open" : ""}${narrow ? ` ${styles.narrow}` : ""}${selection.selected.size ? ` ${styles.selecting}` : ""}${dragging ? ` ${styles.dragging}` : ""}`}
+      className={`${styles.phApp}${sidebarOpen ? " nav-open" : ""}${narrow ? ` ${styles.narrow}` : ""}${width < compactWidth ? ` ${styles.compact}` : ""}${phone ? ` ${styles.phone}` : ""}${selection.selected.size ? ` ${styles.selecting}` : ""}${dragging ? ` ${styles.dragging}` : ""}`}
       tabIndex={-1}
       onKeyDown={keyDown}
       // Another member's library under a viewing grant is beyond what VNAS may
@@ -333,21 +350,13 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           count={place.kind === "timeline" ? count : undefined}
           ai={ai}
           onPlace={setPlace}
-          onLibrary={(library) =>
-            setPlace(
-              place.kind === "albums"
-                ? { kind: "albums", libraryId: library.id }
-                : place.kind === "trash" && !library.viewing
-                  ? { kind: "trash", libraryId: library.id }
-                  : { kind: "timeline", libraryId: library.id },
-            )
-          }
+          onLibrary={switchLibrary}
           onCreateAlbum={() => void newAlbum()}
           onDropOnAlbum={dropOnAlbum}
           onDropOnLibrary={dropOnLibrary}
         />
       )}
-      {narrow && drawer && <div className={styles.phScrim} onClick={() => setDrawer(false)} />}
+      {sidebarOpen && narrow && <div className={styles.phScrim} onClick={() => setDrawer(false)} />}
 
       <main className={styles.phMain} aria-label={title.text}>
         <Toolbar
@@ -358,7 +367,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           selection={selection}
           actions={actions}
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
+          onToggleSidebar={phone ? undefined : () => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
           setPlace={setPlace}
           rowHeight={rowHeight}
           setRowHeight={setRowHeight}
@@ -369,6 +378,16 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           viewingLibrary={viewingLibrary}
           {...searchBox}
         >
+          {phone && !selection.selected.size && (
+            <PlacesBar
+              caller={caller}
+              library={sideLibrary}
+              place={place}
+              onPlace={setPlace}
+              onLibrary={switchLibrary}
+              onDropOnLibrary={dropOnLibrary}
+            />
+          )}
           <Subbar
             place={place}
             caller={caller}

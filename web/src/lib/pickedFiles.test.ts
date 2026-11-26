@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { pickedFromDrop } from "./pickedFiles";
+import { chooseFiles, pickedFromDrop } from "./pickedFiles";
 
 // The file system entries a browser gives for a drop; a folder reads its
 // contents in the pieces given.
@@ -51,5 +51,25 @@ describe("pickedFromDrop", () => {
   it("takes the plain file list when the drop has no items", async () => {
     const picked = await pickedFromDrop(drop([], [text("a.txt")]));
     expect(picked).toEqual([{ file: expect.objectContaining({ name: "a.txt" }), directories: [] }]);
+  });
+});
+
+describe("choosing files", () => {
+  it("keeps the input in the page while the picker is open and removes it after", () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    const chosen = vi.fn();
+    chooseFiles({ accept: "image/*" }, chosen);
+    const first = document.querySelector<HTMLInputElement>("body > input[type=file]")!;
+    expect(first.hidden).toBe(true);
+    // A browser that never said the first pick was cancelled: the next pick removes it.
+    chooseFiles({ accept: "image/*", multiple: true }, chosen);
+    expect(document.querySelectorAll("body > input[type=file]")).toHaveLength(1);
+    const second = document.querySelector<HTMLInputElement>("body > input[type=file]")!;
+    Object.defineProperty(second, "files", { value: [new File(["x"], "a.jpg", { type: "image/jpeg" })] });
+    second.dispatchEvent(new Event("change"));
+    expect(chosen).toHaveBeenCalledWith([expect.objectContaining({ name: "a.jpg" })]);
+    expect(document.querySelector("body > input[type=file]")).toBeNull();
+    expect(click).toHaveBeenCalledTimes(2);
+    click.mockRestore();
   });
 });

@@ -195,6 +195,65 @@ export function Sidebar({
   );
 }
 
+// PlacesBar is the sidebar's navigation as one row under a phone's toolbar:
+// the libraries as a switch, then the library's places as tabs. Albums open
+// on their own page, where a new one is made; the AI card stays on a computer.
+export function PlacesBar({
+  caller,
+  library,
+  place,
+  onPlace,
+  onLibrary,
+  onDropOnLibrary,
+}: Pick<Props, "caller" | "library" | "place" | "onPlace" | "onLibrary" | "onDropOnLibrary">) {
+  const libraryId = library?.id ?? "";
+  const readOnly = Boolean(library?.viewing);
+  const viewing = readOnly ? libraryId : "";
+  const at = (kind: Place["kind"]) =>
+    place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
+  const tabs: Array<{ label: string; on: boolean; place: Place }> = [
+    { label: "图库", on: at("timeline"), place: { kind: "timeline", libraryId } },
+    { label: "相册", on: at("albums") || place.kind === "album", place: { kind: "albums", libraryId } },
+    {
+      label: "AI 聚合",
+      on: place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image",
+      place: { kind: "search", viewing, query: "" },
+    },
+    ...(readOnly ? [] : [{ label: "回收站", on: at("trash"), place: { kind: "trash", libraryId } as Place }]),
+  ];
+  return (
+    <nav className={styles.phPlaces} aria-label="相册导航">
+      {caller.libraries.length > 1 && (
+        <div className={styles.phLibraries} role="tablist" aria-label="图库">
+          {caller.libraries.map((item) => (
+            <LibraryTab
+              key={item.id}
+              caller={caller}
+              library={item}
+              active={item.id === libraryId}
+              onSelect={() => onLibrary(item)}
+              onDrop={(ids) => onDropOnLibrary(item, ids)}
+            />
+          ))}
+        </div>
+      )}
+      <div className={styles.phPlaceTabs}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.label}
+            type="button"
+            className={tab.on ? styles.active : ""}
+            aria-current={tab.on ? "page" : undefined}
+            onClick={() => onPlace(tab.place)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
 function LibraryTab({
   caller,
   library,

@@ -111,6 +111,8 @@ export function Viewer({
   const [livePlaying, setLivePlaying] = useState(false);
   const [liveError, setLiveError] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // Where a one-finger swipe across the photo began.
+  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
@@ -400,7 +402,29 @@ export function Viewer({
           </div>
         </header>
 
-        <div ref={stage} className={`${styles.phViewerStage}${video ? ` ${styles.video}` : ""}`}>
+        <div
+          ref={stage}
+          className={`${styles.phViewerStage}${video ? ` ${styles.video}` : ""}`}
+          // A finger swiped sideways steps to the next or previous photo, as
+          // in a phone's gallery; a zoomed photo pans instead, and the
+          // video's controls keep their own drags.
+          onTouchStart={(event) => {
+            const target = event.target as HTMLElement;
+            swipe.current =
+              event.touches.length === 1 && !zoomed && !target.closest("button, input, [role=slider]")
+                ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+                : undefined;
+          }}
+          onTouchEnd={(event) => {
+            const start = swipe.current;
+            swipe.current = undefined;
+            const end = event.changedTouches[0];
+            if (!start || !end || zoomed) return;
+            const dx = end.clientX - start.x;
+            const dy = end.clientY - start.y;
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
+          }}
+        >
           {video ? (
             <VideoPlayer
               key={asset.id}
