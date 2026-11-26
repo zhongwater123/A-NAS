@@ -58,10 +58,10 @@ func shortVideo(seed byte) []byte {
 	return b
 }
 
-// TestMontageCenterKeepsToTheContract drives 剪辑中心 through the Product
+// TestVideoCutCenterKeepsToTheContract drives 剪辑中心 through the Product
 // Service as development runs it, with the photo library's grants in the
 // same process, and with its switch off.
-func TestMontageCenterKeepsToTheContract(t *testing.T) {
+func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	dir := t.TempDir()
 	controlDB := filepath.Join(dir, "control.db")
 	store, err := accounts.OpenSQLite(controlDB)
@@ -81,16 +81,16 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Jobs are queued and polled here; no job runs.
-	montageStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"),
+	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"),
 		app.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
 			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: external.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = montageStore.Close() })
+	t.Cleanup(func() { _ = videoCutStore.Close() })
 	// Whether the switch is on is the Product Service's answer alone.
 	served := 0
-	api := protocol.New(montageStore, logger)
+	api := protocol.New(videoCutStore, logger)
 	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		served++
 		api.ServeHTTP(w, r)
@@ -100,7 +100,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users,
 		// The headers the montage center gets are those its socket would carry.
-		Montage: serviceproxy.Local(counted), PlanGrants: grants, Logger: logger,
+		VideoCut: serviceproxy.Local(counted), PlanGrants: grants, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
@@ -167,7 +167,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
 		t.Fatalf("generate without a song: %s", response.Body.String())
 	}
-	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, domain.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
+	if _, err := videoCutStore.PutSong(t.Context(), principal.UserID, project.ID, domain.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
 		t.Fatal(err)
 	}
 

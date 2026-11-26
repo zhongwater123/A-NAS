@@ -71,7 +71,7 @@ func TestAStoreSearchesWithThePhotoLibrarysGrants(t *testing.T) {
 	}
 }
 
-func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
+func TestTheLibrarysRefusalsAreTheVideoCutCentersErrors(t *testing.T) {
 	for _, c := range []struct {
 		code string
 		want error

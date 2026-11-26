@@ -62,9 +62,9 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
-	// Montage serves /api/v1/montage, 剪辑中心, like Family; nil while its
+	// VideoCut serves /api/v1/montage, 剪辑中心, like Family; nil while its
 	// switch is off (ADR 0038).
-	Montage http.Handler
+	VideoCut http.Handler
 	// Workspace serves /api/v1/workspace, 共享工作区 (ADR 0040): the desktop's
 	// pages behind the session, the agents' MCP endpoint behind the agent
 	// posture, and one-time transfer links. On a NAS the workspace service

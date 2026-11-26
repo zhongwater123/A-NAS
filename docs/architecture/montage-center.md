@@ -204,7 +204,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 包脚本 | preinst 检查 UID 31003 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `montage service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
-| anas-api | `cmd/anas-api/montage.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
+| anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
 | Host Agent | 会话查询、`EnsureMontageStore` 与卷上的调用、身份常量 |
 | 路由 | `httpapi/product.go`、`routes.go` |
 | 日志 | 服务端白名单、`api/components/logs.yaml` 的枚举、网页的日志列表、[日志规格](../specs/logs.md) |

@@ -107,24 +107,24 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "montage"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	montageStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"), app.Options{
+	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"), app.Options{
 		Grants: photoservice.LocalGrants(photoService, sessionDirectory(t, controlDB), nil, logger),
 		Media:  songMedia{}, Music: songStructure{}, Compute: songExcerpt{}, Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = montageStore.Close() })
+	t.Cleanup(func() { _ = videoCutStore.Close() })
 	// What reaches the montage center: the header only the Product Service sets.
 	var seen []string
-	api := protocol.New(montageStore, logger)
+	api := protocol.New(videoCutStore, logger)
 	recorded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Method+" "+r.Header.Get(protocol.SongHeader))
 		api.ServeHTTP(w, r)
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Files: fileService,
-		Music: library, Montage: serviceproxy.Local(recorded), Logger: logger,
+		Music: library, VideoCut: serviceproxy.Local(recorded), Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
@@ -221,7 +221,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatalf("audio = %q as %q", partial.Body.String(), partial.Header().Get("Content-Type"))
 	}
 	owner.do(http.MethodPatch, path, `{"songStart":12}`, nil, http.StatusConflict)
-	if err := montageStore.AnalyzeWaiting(t.Context()); err != nil {
+	if err := videoCutStore.AnalyzeWaiting(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	decode(t, owner.do(http.MethodGet, path+"/song", "", nil, http.StatusOK).Body, &song)

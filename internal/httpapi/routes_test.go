@@ -66,7 +66,7 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 	product := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
-		Shares: unreached, Family: unreached, Montage: unreached, Workspace: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
+		Shares: unreached, Family: unreached, VideoCut: unreached, Workspace: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		Modules:      []modules.Module{{ID: scoringapi.ID, Mounts: scoringapi.Mounts(), Handler: unreached}},
 		WebSearch:    websearchapi.New(nil, websearch.Release{}, nil),
 		SystemUpdate: systemupdateapi.New(nil, nil, nil, nil),

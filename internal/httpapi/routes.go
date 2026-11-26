@@ -94,7 +94,7 @@ func (h *productHandler) table() []apiroute.Route {
 	if h.AssistantKey != nil {
 		routes = append(routes, h.AssistantKey.Routes()...)
 	}
-	if h.Montage != nil {
+	if h.VideoCut != nil {
 		// The desktop shows 剪辑中心 while this answers. The switch is the
 		// Product Service's, so the montage service is not asked.
 		routes = append(routes, apiroute.Route{Method: get, Pattern: protocol.PathPrefix, Posture: session,
@@ -130,13 +130,13 @@ func (h *productHandler) mounts() []apiroute.Route {
 			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 		}
 	}
-	if h.Montage != nil {
-		mount(protocol.PathPrefix, apiroute.Session, withUser(h.Montage), protocol.ProductEndpoints())
+	if h.VideoCut != nil {
+		mount(protocol.PathPrefix, apiroute.Session, withUser(h.VideoCut), protocol.ProductEndpoints())
 		// The requests that may lead to planning register a planning grant
 		// first (docs/architecture/montage-center.md, 规划授权).
 		for _, endpoint := range protocol.PlanningRoutes {
 			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
-				Handler: protocol.RegisterPlan(h.PlanGrants, h.Montage, h.Logger)})
+				Handler: protocol.RegisterPlan(h.PlanGrants, h.VideoCut, h.Logger)})
 		}
 		// Choosing a song copies it from the member's music library here
 		// first (docs/specs/montage-center.md, 配乐).
@@ -145,7 +145,7 @@ func (h *productHandler) mounts() []apiroute.Route {
 			tracks = h.Music
 		}
 		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: protocol.SongPath, Posture: apiroute.Mutation,
-			Handler: protocol.CopySong(tracks, h.Montage, h.Logger)})
+			Handler: protocol.CopySong(tracks, h.VideoCut, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())

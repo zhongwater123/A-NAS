@@ -65,7 +65,7 @@ func startWorker(t *testing.T, prelude string) videocutcompute.Client {
 // The montage service's calls (app.Compute) against the Worker: the
 // case is ai/tests/test_videocut_worker.py's tiny_case, one picture of two
 // two-second slots from a card of two beats.
-func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
+func TestTheVideoCutServicesCallsReachTheWorker(t *testing.T) {
 	client := startWorker(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
