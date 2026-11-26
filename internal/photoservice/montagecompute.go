@@ -42,7 +42,7 @@ func (w computeWorker) Cards(ctx context.Context, windows []photos.CardWindow, v
 	}
 	out := make([]photos.ComputedCard, len(cards))
 	for i, card := range cards {
-		out[i] = photos.ComputedCard{Start: card.Start, End: card.End, Times: card.Times}
+		out[i] = photos.ComputedCard{Start: card.Start, End: card.End, Times: card.Times, Groups: card.Groups}
 	}
 	return out, nil
 }

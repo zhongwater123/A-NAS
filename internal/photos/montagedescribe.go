@@ -27,7 +27,7 @@ const (
 	describeDerivation = "montage-describe/v1"
 	// describeTemplate is the prompt the Worker describes with; an answer
 	// under another is a Worker that changed.
-	describeTemplate = "montage-card/v1"
+	describeTemplate = "montage-card/v2"
 	// describeIdentitySuffix is what a description is besides the reader
 	// and the cards: the template and its genre, the key frames (512 wide,
 	// FFmpeg quality 3, the prototype's stills) and the version of the
@@ -149,13 +149,14 @@ type describeCard struct {
 	card           int
 	startMs, endMs int
 	keyframes      []int
+	groups         []int
 	identity       string
 }
 
 // nextDescription reads only the next eligible card's keyframes. A second
 // matching row tells the runner to keep the job for another round.
 func (s *Service) nextDescription(ctx context.Context, object, reader string) (*describeCard, bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes, q.identity
+	rows, err := s.db.QueryContext(ctx, `SELECT c.card, c.start_ms, c.end_ms, c.keyframes, c.beats, q.identity
 		FROM video_cards c JOIN video_card_quality q USING (object_id, card)
 		JOIN montage_card_results m ON m.object_id = c.object_id AND m.cards_identity = c.identity AND m.quality_identity = q.identity
 		LEFT JOIN video_card_descriptions d ON d.object_id = c.object_id AND d.card = c.card
@@ -169,8 +170,8 @@ func (s *Service) nextDescription(ctx context.Context, object, reader string) (*
 		return nil, false, rows.Err()
 	}
 	var card describeCard
-	var keyframes string
-	if err := rows.Scan(&card.card, &card.startMs, &card.endMs, &keyframes, &card.identity); err != nil {
+	var keyframes, beats string
+	if err := rows.Scan(&card.card, &card.startMs, &card.endMs, &keyframes, &beats, &card.identity); err != nil {
 		return nil, false, err
 	}
 	var seconds []float64
@@ -180,18 +181,33 @@ func (s *Service) nextDescription(ctx context.Context, object, reader string) (*
 	for _, at := range seconds {
 		card.keyframes = append(card.keyframes, int(math.Round(at*1000)))
 	}
+	if beats != "" {
+		if err := json.Unmarshal([]byte(beats), &card.groups); err != nil {
+			return nil, false, fmt.Errorf("card %d of %s: beats: %w", card.card, object, err)
+		}
+	}
 	more := rows.Next()
 	return &card, more, rows.Err()
 }
 
 // cardLayout places a card's key frames, at instants in milliseconds from
-// the video's start, for the Worker as the prototype does: each frame a
-// beat of its own.
+// the video's start, for the Worker, each in the beat its cards gave it
+// (alike neighbours share one, #676). Groups that do not count the beats
+// from 1 in order, one a keyframe, leave each frame a beat of its own, as
+// the prototype did.
 func cardLayout(card describeCard, instants []int) CardLayout {
 	layout := CardLayout{Duration: float64(card.endMs-card.startMs) / 1000}
+	grouped := len(card.groups) == len(instants) && len(instants) > 0 && card.groups[0] == 1
+	for i := 1; grouped && i < len(card.groups); i++ {
+		grouped = card.groups[i]-card.groups[i-1] == 0 || card.groups[i]-card.groups[i-1] == 1
+	}
 	for i, at := range instants {
 		layout.Offsets = append(layout.Offsets, float64(max(0, at-card.startMs))/1000)
-		layout.Groups = append(layout.Groups, i+1)
+		if grouped {
+			layout.Groups = append(layout.Groups, card.groups[i])
+		} else {
+			layout.Groups = append(layout.Groups, i+1)
+		}
 	}
 	return layout
 }

@@ -609,6 +609,14 @@ ALTER TABLE video_card_descriptions ADD COLUMN written_release TEXT;
 `, Down: `
 ALTER TABLE video_card_descriptions DROP COLUMN written_release;
 `},
+	// 23: each card's beats (#676): the beat of each keyframe as JSON,
+	// alike neighbours sharing one. Cards cut before it have none and are
+	// cut again under the new cards identity.
+	{Up: `
+ALTER TABLE video_cards ADD COLUMN beats TEXT NOT NULL DEFAULT '';
+`, Down: `
+ALTER TABLE video_cards DROP COLUMN beats;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

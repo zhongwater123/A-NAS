@@ -13,11 +13,11 @@ class DescribeTest(unittest.TestCase):
         self.assertTrue(text.startswith("下面 3 张图按时间先后取自同一段视频（共 6 秒）"))
         self.assertIn("what 要写明是字幕、文字或黑屏。" + describe.NO_NUMBERS + "\n这类素材是「旅行 vlog」", text)
         self.assertEqual(text.count(describe.NO_NUMBERS), 1)
-        self.assertIn("第 1 组：第 1 张；第 2 组：第 2 张；第 3 组：第 3 张", text)
+        self.assertIn("共 3 张，已经按画面分成 3 个节拍，按时间先后排列：第 1 个节拍：第 1 张；第 2 个节拍：第 2 张；第 3 个节拍：第 3 张", text)
         self.assertIn("process：写完 beats 再写", text)
-        self.assertEqual(content[1:], [("text", "第 1 张（第 1 组，第 0 秒）"), ("image", 0),
-                                       ("text", "第 2 张（第 2 组，第 2 秒）"), ("image", 1),
-                                       ("text", "第 3 张（第 3 组，第 4 秒）"), ("image", 2)])
+        self.assertEqual(content[1:], [("text", "第 1 张（第 1 个节拍，第 0 秒）"), ("image", 0),
+                                       ("text", "第 2 张（第 2 个节拍，第 2 秒）"), ("image", 1),
+                                       ("text", "第 3 张（第 3 个节拍，第 4 秒）"), ("image", 2)])
         self.assertEqual(spans, [[1], [2], [3]])
         self.assertEqual(list(schema["properties"]), ["camera", "beats", "process", "summary", "scene"])
         self.assertEqual(schema["required"], ["camera", "beats", "process", "summary", "scene"])
@@ -26,7 +26,7 @@ class DescribeTest(unittest.TestCase):
 
     def test_grouped_frames_share_a_beat(self):
         content, schema, spans = describe.request([0, 1, 2, 3], [1, 1, 2, 2], 4)
-        self.assertIn("第 1 组：第 1–2 张；第 2 组：第 3–4 张", content[0][1])
+        self.assertIn("共 4 张，已经按画面分成 2 个节拍，按时间先后排列：第 1 个节拍：第 1–2 张；第 2 个节拍：第 3–4 张", content[0][1])
         self.assertEqual(spans, [[1, 2], [3, 4]])
         self.assertEqual(schema["properties"]["beats"]["maxItems"], 2)
 

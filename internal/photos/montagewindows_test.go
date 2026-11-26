@@ -190,7 +190,7 @@ func (c *fakeCompute) Cards(ctx context.Context, windows []photos.CardWindow, _ 
 	half := len(windows) / 2
 	card := func(from, to int) photos.ComputedCard {
 		start, end := windows[from].Start, windows[to-1].End
-		return photos.ComputedCard{Start: start, End: end, Times: []float64{start + 1, (start + end) / 2, end - 1}}
+		return photos.ComputedCard{Start: start, End: end, Times: []float64{start + 1, (start + end) / 2, end - 1}, Groups: []int{1, 1, 2}}
 	}
 	return []photos.ComputedCard{card(0, half), card(half, len(windows))}, nil
 }

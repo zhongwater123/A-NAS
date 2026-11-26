@@ -185,7 +185,8 @@ type Window struct {
 }
 
 // Card is a card the Worker cut: its bounds in seconds, how many windows it
-// spans, the instants of its keyframes and the windows they came from.
+// spans, the instants of its keyframes, the windows they came from and the
+// beat of each keyframe, counted from 1 (alike neighbours share one).
 type Card struct {
 	ID      string    `json:"id"`
 	Start   float64   `json:"start"`
@@ -193,6 +194,7 @@ type Card struct {
 	Windows int       `json:"windows"`
 	Times   []float64 `json:"times"`
 	Keys    []int     `json:"keys"`
+	Groups  []int     `json:"groups"`
 }
 
 // Cards cuts one video's cards from its windows' vectors (dimensions each)

@@ -198,7 +198,7 @@ class LlamaReaderTest(unittest.TestCase):
         # Each key frame follows its label, in order.
         images = [part["image_url"]["url"] for part in parts if part["type"] == "image_url"]
         self.assertEqual(images, ["data:image/jpeg;base64," + base64.b64encode(frame).decode() for frame in frames])
-        self.assertEqual(parts[1]["text"], "第 1 张（第 1 组，第 0 秒）")
+        self.assertEqual(parts[1]["text"], "第 1 张（第 1 个节拍，第 0 秒）")
         self.assertEqual((body["temperature"], body["repeat_penalty"], body["max_tokens"], body["cache_prompt"]),
                          (0.2, 1.1, 1800, True))
         self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}})
@@ -221,13 +221,13 @@ class LlamaReaderTest(unittest.TestCase):
         return answer, body, parts, sent
 
     def test_a_card_with_more_key_frames_than_fit_is_described_from_some_of_them(self):
-        # A video filmed upright: about 485 tokens a key frame beside the
-        # prompts' 620, so 11 leave the answer its 1,800 of the 8,192.
+        # A video filmed upright: about 487 tokens a key frame beside the
+        # prompts' 680, so 11 leave the answer its 1,800 of the 8,192.
         answer, body, parts, sent = self.described(14, (512, 910), 11)
         kept = [0, 1, 3, 4, 5, 7, 8, 9, 10, 12, 13]
         self.assertEqual(sent, kept)
         self.assertTrue(parts[0]["text"].startswith("下面 11 张图按时间先后取自同一段视频（共 28 秒）"))
-        self.assertEqual(parts[-2]["text"], "第 11 张（第 11 组，第 26 秒）")
+        self.assertEqual(parts[-2]["text"], "第 11 张（第 11 个节拍，第 26 秒）")
         beats = body["response_format"]["json_schema"]["schema"]["properties"]["beats"]
         self.assertEqual((beats["minItems"], beats["maxItems"], body["max_tokens"]), (11, 11, 1800))
         # Each beat names its key frame among the card's fourteen.
