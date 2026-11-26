@@ -153,6 +153,8 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 另外，`internal/videocutcompute` 与 `internal/photoservice` 不引用 `internal/videocut/...`。
 
+规则在 `.golangci.yml` 的 `videocut-domain`、`videocut-db`、`videocut-app`、`videocut-app-photos`、`videocut-outer`、`videocut-users`，随 `make check` 的 `go-lint` 运行；测试文件不受约束（`app` 的测试会用 `external` 的替身）。`internal/photos` 放行的是 `app` 的 `draftops.go`、`editing.go`、`editjobs.go`、`ports.go`、`projects.go`、`render.go`、`steps.go`；拆层后 `domain` 已不引用它。
+
 **网页**：只有 `api/` 调后端，类型来自生成的 `api.generated.ts`；`lib/` 引用 `api/` 只能是 `import type`，也不引用 React（Oxlint 的 `no-restricted-imports`）。页面现在还直接引用 `api/`，“页面层不直接调接口”的检查等新界面把调用挪进 `app/` 后再加。
 
 **算法（Python）**：`algo/` 只引用标准库、NumPy 和自己，`ops/` 不引用 `worker.py`，由 `ai/tests/test_videocut_layers.py` 检查。
