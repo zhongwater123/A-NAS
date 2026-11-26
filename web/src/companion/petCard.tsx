@@ -21,7 +21,7 @@
 // waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
 // (companion.module.css). The character's credit is in Settings → 概览 (credit.ts), not on
 // the companion.
-import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
 import {
@@ -106,6 +106,9 @@ const IDLE_MS = 60_000;
  */
 const ACTIVITY = ["pointerdown", "pointerup", "pointermove", "keydown", "keyup", "wheel", "touchstart"] as const;
 const POSITION_KEY = "a-nas.companion.position";
+// How long after a long press opened the menu the click of the same press, when the finger lifts, is not a
+// click of its own. The next press starts afresh; this only bounds a click that comes without one.
+const MENU_CLICK_MS = 10_000;
 const WAVE = "点击回应-元气挥手";
 /**
  * Above the windows (72) and the status bar (70); below the rail and notices (80), menus, the shelf and the
@@ -1003,13 +1006,18 @@ function Card({
     if (!layer) return;
     const onPet = (event: Event) => event.target instanceof Element && event.target.closest(".dsh-pet-hit") !== null;
     let pressed: { x: number; y: number } | null = null;
+    // A touch long press opens the menu (dsh-pet sends it as contextmenu), and a browser may still send the
+    // click when the finger lifts: that press asked for the menu, not to talk.
+    let menuAt = -Infinity;
     const press = (event: PointerEvent) => {
       pressed = onPet(event) ? { x: event.clientX, y: event.clientY } : null;
+      menuAt = -Infinity;
     };
     const click = (event: MouseEvent) => {
       if (!onPet(event)) return;
       const from = pressed;
       pressed = null;
+      if (performance.now() - menuAt < MENU_CLICK_MS) return;
       // The click that ends a drag is the card's, which tells it from a click.
       if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) > DRAG_THRESHOLD) return;
       if (ask.current()) event.stopPropagation();
@@ -1037,6 +1045,7 @@ function Card({
       const box = (event.target as Element).getBoundingClientRect();
       // From the keyboard the menu key gives no place: the menu opens at the companion.
       const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.top };
+      menuAt = performance.now();
       setMenu(at);
     };
     layer.addEventListener("pointerdown", press, true);
@@ -1078,9 +1087,10 @@ function Card({
         <CompanionMenu
           at={menu}
           quiet={mode === "quiet"}
-          onChoose={(next) => {
+          onChoose={(next, back) => {
             setMenu(null);
             if (next) setCompanionMode(next);
+            if (back) clipSpeed.current?.querySelector<HTMLElement>(".dsh-pet-hit")?.focus();
           }}
         />
       )}
@@ -1100,16 +1110,23 @@ function CompanionMenu({
 }: {
   at: { x: number; y: number };
   quiet: boolean;
-  onChoose: (mode: CompanionMode | null) => void;
+  /** back: closed from the menu itself (a choice or Esc), so focus goes back to the companion. */
+  onChoose: (mode: CompanionMode | null, back: boolean) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  // The card renders again with every clip and status; the menu takes focus once, when it opens, not then.
+  const choose = useEffectEvent((mode: CompanionMode | null, back: boolean) => onChoose(mode, back));
   useEffect(() => {
     box.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     const away = (event: PointerEvent) => {
-      if (!(event.target instanceof Node && box.current?.contains(event.target))) onChoose(null);
+      if (!(event.target instanceof Node && box.current?.contains(event.target))) choose(null, false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onChoose(null);
+      if (event.key !== "Escape") return;
+      // Not also the companion's own Esc, which would make her quiet.
+      event.preventDefault();
+      event.stopPropagation();
+      choose(null, true);
     };
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", key, true);
@@ -1117,7 +1134,7 @@ function CompanionMenu({
       document.removeEventListener("pointerdown", away, true);
       document.removeEventListener("keydown", key, true);
     };
-  }, [onChoose]);
+  }, []);
   // Within the page: it opens up and to the left of where it was asked for when there is no room.
   const style = {
     left: Math.max(8, Math.min(at.x, window.innerWidth - 180)),
@@ -1125,10 +1142,10 @@ function CompanionMenu({
   };
   return (
     <div ref={box} role="menu" aria-label="大肥鱼" className={styles.menu} style={style}>
-      <button type="button" role="menuitem" onClick={() => onChoose(quiet ? "normal" : "quiet")}>
+      <button type="button" role="menuitem" onClick={() => onChoose(quiet ? "normal" : "quiet", true)}>
         {quiet ? "叫醒她" : "让她安静"}
       </button>
-      <button type="button" role="menuitem" onClick={() => onChoose("hidden")}>
+      <button type="button" role="menuitem" onClick={() => onChoose("hidden", true)}>
         隐藏伙伴
       </button>
       <small>隐藏后在 设置 → 概览 里打开</small>

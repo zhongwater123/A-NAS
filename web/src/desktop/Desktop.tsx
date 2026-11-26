@@ -167,14 +167,20 @@ export function Desktop({
   );
   // The companion asked to talk (companion/petCard.tsx): the VNAS window, small, beside the companion, at
   // the latest conversation. A VNAS window already in view only comes to the front, as it is. Opened small,
-  // it gets its own size and place back once it is closed, so VNAS opens as ever from the launcher.
-  const chatOpened = useRef(false);
+  // it gets back the size, place and maximizing it had before once it is closed, so VNAS opens as ever from
+  // the launcher.
+  const chatOpened = useRef<{ x: number; y: number; width: number; height: number; maximized: boolean } | null>(null);
   const openChat = useCallback(
     (beside: DOMRect | null) => {
       const vnas = windows.find((window) => window.id === "assistant");
       if (vnas?.open && !vnas.minimized) {
         open("assistant");
         return;
+      }
+      // Opened small once already and not yet closed: what it had before that stays what it gets back.
+      if (vnas && !chatOpened.current) {
+        const { x, y, width, height, maximized } = vnas;
+        chatOpened.current = { x, y, width, height, maximized };
       }
       open("assistant", { latest: true });
       if (vnas?.maximized) dispatch({ type: "maximize", id: "assistant" });
@@ -193,18 +199,20 @@ export function Desktop({
         y: clamp(y, EDGE, page.height - height - EDGE),
       });
       dispatch({ type: "resize", id: "assistant", width, height });
-      chatOpened.current = true;
     },
     [open, windows],
   );
   const vnasOpen = isOpen("assistant");
+  const vnasMaximized = windows.some((window) => window.id === "assistant" && window.maximized);
   useEffect(() => {
-    if (vnasOpen || !chatOpened.current) return;
-    chatOpened.current = false;
-    const { x, y, width, height } = apps.assistant.bounds;
-    dispatch({ type: "move", id: "assistant", x, y });
-    dispatch({ type: "resize", id: "assistant", width, height });
-  }, [vnasOpen]);
+    const before = chatOpened.current;
+    if (vnasOpen || !before) return;
+    chatOpened.current = null;
+    dispatch({ type: "move", id: "assistant", x: before.x, y: before.y });
+    dispatch({ type: "resize", id: "assistant", width: before.width, height: before.height });
+    // Maximized in the small window, or maximized before it: back as it was.
+    if (vnasMaximized !== before.maximized) dispatch({ type: "maximize", id: "assistant" });
+  }, [vnasOpen, vnasMaximized]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   // anchor brings a row of the section into view, as the search does: one there already shows again.

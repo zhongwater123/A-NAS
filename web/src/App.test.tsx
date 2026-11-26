@@ -3,7 +3,7 @@
 // each other. What a window shows is tested with that window (docs/architecture/web-desktop.md).
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { delay, HttpResponse } from "msw";
+import { delay, HttpResponse, ws } from "msw";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ import type { AppShortcut, Transfer } from "./api.generated";
 import { resetSystemUpdate } from "./systemupdate/status";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
+import { assistantHandlers } from "./test/handlers/assistant";
 import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
 import { entry, filesHandlers, folder, ownSpace, sharedSpace, space } from "./test/handlers/files";
 import { photosHandlers } from "./test/handlers/photos";
@@ -241,6 +242,32 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(await screen.findByRole("button", { name: "打开 VNAS" }));
     const vnas = await screen.findByRole("dialog", { name: "VNAS" });
     expect(vnas.style).toMatchObject({ left: "260px", top: "54px", width: "1040px", height: "700px" });
+  });
+
+  it("gives VNAS back the maximizing it had before the companion opened it small", async () => {
+    serveDesktop({ assistant: { available: true } });
+    // VNAS stays open a while here: its list and its gateway, which say nothing.
+    const gateway = ws.link(`ws://${window.location.host}/api/v1/assistant/ws`);
+    server.use(
+      ...assistantHandlers(),
+      gateway.addEventListener("connection", () => {}),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 VNAS" }));
+    const big = await screen.findByRole("dialog", { name: "VNAS" });
+    await user.click(within(big).getByRole("button", { name: "最大化VNAS" }));
+    await user.click(within(big).getByRole("button", { name: "关闭VNAS" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "VNAS" })).toBeNull());
+    await user.click(screen.getByRole("button", { name: "和伙伴说话" }));
+    const small = await screen.findByRole("dialog", { name: "VNAS" });
+    expect(small.style.width).toBe("520px");
+    expect(within(small).getByRole("button", { name: "最大化VNAS" })).toBeTruthy();
+    await user.click(within(small).getByRole("button", { name: "关闭VNAS" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "VNAS" })).toBeNull());
+    await user.click(screen.getByRole("button", { name: "打开 VNAS" }));
+    const vnas = await screen.findByRole("dialog", { name: "VNAS" });
+    expect(within(vnas).getByRole("button", { name: "还原VNAS" })).toBeTruthy();
   });
 
   it("shows authenticated host health and keeps the clock advancing", async () => {

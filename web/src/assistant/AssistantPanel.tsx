@@ -502,14 +502,18 @@ export function AssistantPanel({
   // for the member, from another conversation or from the memory or the tasks, at its cards (toCards).
   const [intentBefore, setIntentBefore] = useState<typeof intent>();
   const [toCards, setToCards] = useState<{ conversation: string }>();
-  // The latest conversation, once the list is in (it lists the most recent first); none, a new one.
-  const [toLatest, setToLatest] = useState(false);
-  if (toLatest && sessionsLoaded) {
-    setToLatest(false);
+  // The latest conversation, once the list is in (it lists the most recent first); none, a new one. Another
+  // conversation opened before the list is in, by the member, a new prompt, a toast or the companion's card,
+  // wins: the list read before it does not take the window away from it.
+  const [toLatest, setToLatest] = useState<{ from: string | undefined }>();
+  if (toLatest && toLatest.from !== activeId) setToLatest(undefined);
+  else if (toLatest && sessionsLoaded) {
+    setToLatest(undefined);
     setActiveId(sessions[0]?.id);
   }
   if (intentBefore !== intent) {
     setIntentBefore(intent);
+    setToLatest(undefined);
     if (intent?.conversationId) {
       setActiveId(intent.conversationId);
       setView("chat");
@@ -517,7 +521,7 @@ export function AssistantPanel({
     } else if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
     else if (intent?.latest) {
       setView("chat");
-      setToLatest(true);
+      setToLatest({ from: activeId });
     } else if (intent) setView("tasks");
   } else if (toCards && (activeId !== toCards.conversation || view !== "chat")) setToCards(undefined);
   const intentHandled = useEffectEvent((handled: NonNullable<typeof intent>) => onIntentHandled?.(handled));

@@ -220,6 +220,33 @@ describe("the VNAS window", () => {
     expect(within(head).queryByText("新对话")).toBeNull();
   });
 
+  it("keeps a conversation asked for before the list is in over the latest one", async () => {
+    const OTHER = "20261021_100000_bbbbbb";
+    let listIn = () => {};
+    const listed = new Promise<void>((resolve) => {
+      listIn = resolve;
+    });
+    server.use(
+      // Before assistantHandlers' list: within one server.use call the earlier handler answers.
+      http.get("/api/v1/assistant/sessions", async ({ response }) => {
+        await listed;
+        return response(200).json({
+          sessions: [
+            assistantSession(OTHER, { title: "整理相册", messageCount: 2 }),
+            assistantSession(STORED, { title: "操作桌面", messageCount: 2 }),
+          ],
+        });
+      }),
+      ...assistantHandlers({ messages: history }),
+    );
+    const view = render(<AssistantPanel username="admin" intent={{ latest: true }} />);
+    // The companion's card, in a conversation that is not the latest, while the list is still on its way.
+    view.rerender(<AssistantPanel username="admin" intent={{ conversationId: STORED }} />);
+    listIn();
+    expect(await screen.findByRole("heading", { level: 2, name: "操作桌面" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "整理相册" })).toBeNull();
+  });
+
   it("opens the conversation whose card waits, at its cards, from another conversation, the memory or the tasks", async () => {
     const OTHER = "20261021_100000_bbbbbb";
     const card: Approval = {

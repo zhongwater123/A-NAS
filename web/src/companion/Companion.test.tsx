@@ -1260,6 +1260,23 @@ describe("what VNAS asks of the companion", () => {
       expect(screen.queryByRole("menu")).toBeNull();
       expect(companionMode()).toBe("normal");
     });
+
+    it("keeps focus where the member moved it as the card changes, and gives it back to her on Esc", async () => {
+      serve([IDLE, "工作状态-原地踱步张望"]);
+      const { pet } = await mount();
+      fireEvent.contextMenu(pet);
+      const hide = screen.getByRole("menuitem", { name: "隐藏伙伴" });
+      hide.focus();
+      // The card renders again with a turn of VNAS's.
+      act(() => startTurn("live0001"));
+      await settle();
+      expect(hide).toHaveFocus();
+      fireEvent.keyDown(hide, { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(pet).toHaveFocus();
+      // The menu's Esc, not hers as well: she does not go quiet.
+      expect(companionMode()).toBe("normal");
+    });
   });
 
   it("holds still under a lock, and goes on when the lock ends", async () => {
@@ -1770,6 +1787,34 @@ describe("walking, throwing and resting", () => {
       fireEvent.click(pet);
       expect((await screen.findAllByText("等你确认"))[0]).toBeInTheDocument();
       expect(chats).toEqual([]);
+    });
+
+    it("opens no chat for the click a long press may still send once it opened the menu", async () => {
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      // jsdom has no pointer capture, which the card's press takes.
+      const element = Element.prototype as unknown as Record<string, unknown>;
+      const capture = { hasPointerCapture: () => false, setPointerCapture: () => {}, releasePointerCapture: () => {} };
+      const added = Object.keys(capture).filter((name) => !(name in element));
+      for (const name of added) element[name] = capture[name as keyof typeof capture];
+      try {
+        const at = { button: 0, pointerId: 1, pointerType: "touch", clientX: 900, clientY: 640 };
+        // dsh-pet sends a touch long press as contextmenu; the finger lifts on the companion.
+        fireEvent.pointerDown(pet, at);
+        fireEvent.contextMenu(pet, at);
+        fireEvent.pointerUp(pet, at);
+        fireEvent.click(pet, at);
+        expect(chats).toEqual([]);
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+        // The next press is a click of its own.
+        fireEvent.pointerDown(document.body);
+        fireEvent.pointerDown(pet, at);
+        fireEvent.pointerUp(pet, at);
+        fireEvent.click(pet, at);
+        expect(chats).toHaveLength(1);
+      } finally {
+        for (const name of added) delete element[name];
+      }
     });
 
     it("opens no chat on the screen the family shares", async () => {
