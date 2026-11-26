@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -23,21 +22,6 @@ import (
 // (docs/specs/montage-center.md): each batch adds its own, fixed to their
 // content objects. The photo library keeps the videos and lets the montage
 // center reach them through the project's grant (ADR 0038 decision 3).
-
-// Grants is what the montage center asks of the photo library's grants;
-// photosapi.Grants provides it.
-type Grants interface {
-	Register(ctx context.Context, session, projectID string, assetIDs []string) (photos.Grant, error)
-	Lookup(ctx context.Context, grantID string, assetIDs []string) ([]photos.GrantedAsset, error)
-	Remove(ctx context.Context, grantID string, assetIDs []string) error
-	List(ctx context.Context) ([]photos.Grant, error)
-	Revoke(ctx context.Context, grantID string) error
-	// What jobs ask: a video's original, its analysis, and saving a film.
-	Open(ctx context.Context, grantID, assetID string) (*os.File, string, error)
-	Analyze(ctx context.Context, grantID string, assetIDs []string, retry bool) error
-	Analysis(ctx context.Context, grantID, assetID string) (photos.GrantAnalysis, []byte, error)
-	SaveFilm(ctx context.Context, grantID, versionKey, name string, film *os.File) (string, error)
-}
 
 // Limits of a request (docs/specs/montage-center.md, 本稿补充的默认规则).
 // IDs and request keys are printable ASCII, as the photo library's IDs are,

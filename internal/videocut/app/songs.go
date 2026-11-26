@@ -85,28 +85,6 @@ const (
 	WaitMedia    = "media_unavailable"
 )
 
-// Media is what the montage center asks of the FFmpeg worker for its songs;
-// ffmpegworker.Client provides it.
-type Media interface {
-	Probe(ctx context.Context, file *os.File) (ffmpegworker.Probe, error)
-	Audio(ctx context.Context, file *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error)
-}
-
-// MusicAnalyzer finds a song's structure in its samples: stereo, 32-bit
-// float at 44.1 kHz for allin1, and mono at 22050 Hz for the loudness. Both
-// arrive as streams; the analyzer reads them in that order while they are
-// written. whole yields once, when the writing ended: nil when both streams
-// carry the whole song. The analyzer analyses nothing before that, and
-// returns any other error whole yields as it is.
-type MusicAnalyzer interface {
-	Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (domain.Analysis, error)
-}
-
-// MusicComputer is the compute Worker's music operation.
-type MusicComputer interface {
-	Music(ctx context.Context, request videocutcompute.MusicRequest) (videocutcompute.Selection, error)
-}
-
 // songAnalysis is what a song row keeps of its analysis.
 type songAnalysis struct {
 	Structure *videocutcompute.Structure `json:"structure,omitempty"`

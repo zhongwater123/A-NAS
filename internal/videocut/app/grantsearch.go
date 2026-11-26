@@ -9,13 +9,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// WindowSearch finds, among a grant's videos, the windows most like each of
-// texts: the photo library's searchWindows (#599), which its grants answer
-// (photosapi.Grants).
-type WindowSearch interface {
-	SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error)
-}
-
 // GrantSearch is the search of Grants, which refuse as the photo library
 // does, with those refusals as the montage center's: windows made with
 // another model are ErrSearchModel, a library or local AI that cannot answer
