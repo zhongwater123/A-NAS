@@ -109,7 +109,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		// The job looks after the videos its shots lead with; a piece the
 		// fill takes from another is passed over when that video is gone.
 		for asset, object := range used {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) VALUES(?, ?, ?)", jobID, asset, object); err != nil {
+			if err := tx.AddJobAsset(ctx, jobID, asset, object); err != nil {
 				return err
 			}
 		}
@@ -182,7 +182,7 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 		}
 	}
 	for _, asset := range run.assets {
-		there[asset.assetID] = true // checkAssets passed them
+		there[asset.AssetID] = true // checkAssets passed them
 	}
 	run.catalog.Catalog = slices.DeleteFunc(slices.Clone(run.catalog.Catalog), func(id string) bool { return !there[run.catalog.Cards[id].Video] })
 	cut := map[string]bool{}

@@ -58,7 +58,7 @@ type jobRun struct {
 	claimed
 	grantID       string
 	replayingSave bool
-	assets        []jobAsset
+	assets        []db.JobAsset
 	keys          map[string]string
 	// The steps' results.
 	analysis analysisResult
@@ -72,8 +72,6 @@ type jobRun struct {
 	timeline timelineResult
 	render   renderResult
 }
-
-type jobAsset struct{ assetID, objectID string }
 
 // stepKey names a step's input for a run: a step whose key is the one its
 // stored result was made with is not run again.
@@ -359,22 +357,15 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 		return err
 	}
 	run.grantID = grantID
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", run.id)
+	kept, err := s.db.JobAssets(ctx, run.id)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var asset jobAsset
-		if err := rows.Scan(&asset.assetID, &asset.objectID); err != nil {
-			return err
-		}
-		run.assets = append(run.assets, asset)
-	}
+	run.assets = append(run.assets, kept...)
 	if len(run.assets) != len(assets) {
 		return fmt.Errorf("job %s lists its videos twice", run.id)
 	}
-	return rows.Err()
+	return nil
 }
 
 // jobGrant is the job's project grant and the job's videos. A project whose
@@ -389,20 +380,8 @@ func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, e
 	if err != nil {
 		return "", nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
+	assets, err := s.db.JobAssetIDs(ctx, jobID)
 	if err != nil {
-		return "", nil, err
-	}
-	defer rows.Close()
-	var assets []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return "", nil, err
-		}
-		assets = append(assets, id)
-	}
-	if err := rows.Err(); err != nil {
 		return "", nil, err
 	}
 	if !grantID.Valid {
@@ -550,20 +529,8 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	if err != nil {
 		return err
 	}
-	objects := map[string]string{}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ?", job.id)
+	objects, err := s.db.JobAssetObjects(ctx, job.id)
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var asset, object string
-		if err := rows.Scan(&asset, &object); err != nil {
-			return err
-		}
-		objects[asset] = object
-	}
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	looked, err := s.lookupAssets(ctx, grantID, ids)
@@ -702,7 +669,7 @@ func (s *Store) analysisReady(ctx context.Context, grantID string, videos []phot
 func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	ids := make([]string, len(run.assets))
 	for i, asset := range run.assets {
-		ids[i] = asset.assetID
+		ids[i] = asset.AssetID
 	}
 	looked, err := s.lookupAssets(ctx, run.grantID, ids)
 	if err != nil {
@@ -716,12 +683,12 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	// window's vector.
 	var available []photos.GrantedAsset
 	for _, asset := range run.assets {
-		looked, ok := about[asset.assetID]
+		looked, ok := about[asset.AssetID]
 		if ok && looked.Status == photos.GrantTrashed {
 			return "", &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
 		}
-		if !ok || looked.Status != photos.GrantAvailable || looked.ObjectID != asset.objectID {
-			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
+		if !ok || looked.Status != photos.GrantAvailable || looked.ObjectID != asset.ObjectID {
+			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.AssetID}}
 		}
 		available = append(available, looked)
 	}
@@ -730,12 +697,12 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	result := analysisResult{}
 	for n, asset := range run.assets {
-		analysis, _, err := s.grants.Analysis(ctx, run.grantID, asset.assetID)
+		analysis, _, err := s.grants.Analysis(ctx, run.grantID, asset.AssetID)
 		if err != nil {
-			return "", jobGrantError(err, []string{asset.assetID})
+			return "", jobGrantError(err, []string{asset.AssetID})
 		}
-		if analysis.ObjectID != asset.objectID {
-			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
+		if analysis.ObjectID != asset.ObjectID {
+			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.AssetID}}
 		}
 		// The analysis may have gone stale since the lookup, as when the
 		// windows are made again for a new model: the library then answers
@@ -743,14 +710,14 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		// from that would leave the video's cards out, or find no footage
 		// at all; the next round's lookup decides again.
 		if !allDone(analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described) {
-			s.logger.InfoContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
+			s.logger.InfoContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.AssetID,
 				"windows", analysis.Windows, "cards", analysis.Cards, "quality", analysis.Quality, "descriptions", analysis.Described)
 			return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 		}
-		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
+		video := analysedVideo{AssetID: asset.AssetID, ObjectID: asset.ObjectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
 			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsIdentity: analysis.DescriptionsIdentity,
-			Duration: about[asset.assetID].Duration, Width: about[asset.assetID].Width, Height: about[asset.assetID].Height,
-			TakenAt: about[asset.assetID].TakenAt, Windows: analysis.List, Measures: map[string]json.RawMessage{}}
+			Duration: about[asset.AssetID].Duration, Width: about[asset.AssetID].Width, Height: about[asset.AssetID].Height,
+			TakenAt: about[asset.AssetID].TakenAt, Windows: analysis.List, Measures: map[string]json.RawMessage{}}
 		described := map[int]json.RawMessage{}
 		for _, d := range analysis.Descriptions {
 			if d.Error == "" && len(d.Description) > 0 {
@@ -765,7 +732,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			seen, ok := beatTimes(answer, card.Times)
 			if !ok {
 				s.logger.WarnContext(ctx, "a card's description does not place its beats among the key frames",
-					"asset", asset.assetID, "card", card.Index)
+					"asset", asset.AssetID, "card", card.Index)
 				continue
 			}
 			id := fmt.Sprintf("v%d-%d", n+1, card.Index)
@@ -773,7 +740,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			for i := range seen {
 				frames[i] = beatID(id, i+1)
 			}
-			video.Cards = append(video.Cards, videocutcompute.CatalogCard{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
+			video.Cards = append(video.Cards, videocutcompute.CatalogCard{ID: id, Video: asset.AssetID, Start: float64(card.StartMs) / 1000,
 				End: float64(card.EndMs) / 1000, Times: seen, Frames: frames, Answer: answer})
 			if card.Quality != nil {
 				measured, err := json.Marshal(card.Quality)

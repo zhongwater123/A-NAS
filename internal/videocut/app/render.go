@@ -240,8 +240,8 @@ func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os
 	}
 	want, known := "", false
 	for _, asset := range run.assets {
-		if asset.assetID == assetID {
-			want, known = asset.objectID, true
+		if asset.AssetID == assetID {
+			want, known = asset.ObjectID, true
 		}
 	}
 	if video, ok := run.assetOf(assetID); !known && ok {

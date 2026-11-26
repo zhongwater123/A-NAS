@@ -71,9 +71,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 		}
 		created = true
 		// The videos the version was planned from, as they were then.
-		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM job_assets WHERE job_id = ?",
-			jobID, src.planJob)
-		return err
+		return tx.CopyJobAssets(ctx, jobID, src.planJob)
 	})
 	if err != nil {
 		return domain.Job{}, false, err

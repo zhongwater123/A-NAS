@@ -152,9 +152,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 			return err
 		}
 		created = true
-		_, err = tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
-			jobID, projectID)
-		return err
+		return tx.CopyProjectAssets(ctx, jobID, projectID)
 	})
 	if err != nil {
 		return domain.Job{}, false, err
@@ -468,7 +466,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	}
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		for _, id := range ids {
-			if _, err := tx.ExecContext(ctx, "DELETE FROM job_assets WHERE job_id = ? AND asset_id = ?", jobID, id); err != nil {
+			if err := tx.DeleteJobAsset(ctx, jobID, id); err != nil {
 				return err
 			}
 			if err := tx.DeleteProjectAsset(ctx, job.ProjectID, id); err != nil {
