@@ -759,7 +759,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("shows 剪辑中心 only while the device turns it on, and opens its empty project list", async () => {
-    serveDesktop({ montage: true });
+    serveDesktop({ videocut: true });
     serveWindows();
     const user = userEvent.setup();
     const { unmount } = render(<App />);
@@ -768,14 +768,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByText("还没有项目")).toBeInTheDocument();
     unmount();
 
-    serveDesktop({ montage: false });
+    serveDesktop({ videocut: false });
     render(<App />);
     await screen.findAllByRole("button", { name: "打开相册" });
     expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
   });
 
   it("asks again whether 剪辑中心 is on when the page comes back into view", async () => {
-    serveDesktop({ montage: true });
+    serveDesktop({ videocut: true });
     serveWindows();
     // The first read fails as on a network error, which the contract does not describe.
     let failed = false;

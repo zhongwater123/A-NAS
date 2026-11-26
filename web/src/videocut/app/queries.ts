@@ -3,10 +3,10 @@ import { getProject, getSong, listProjects, type VideoCutSong } from "../api/cli
 
 // The queries the window's pages share: the projects, one project, and its
 // song (null before one is chosen).
-export const projectsKey = ["montage", "projects"] as const;
-export const projectKey = (projectId: string) => ["montage", "project", projectId] as const;
-export const songKey = (projectId: string) => ["montage", "song", projectId] as const;
-export const jobKey = (jobId?: string) => ["montage", "job", jobId] as const;
+export const projectsKey = ["videocut", "projects"] as const;
+export const projectKey = (projectId: string) => ["videocut", "project", projectId] as const;
+export const songKey = (projectId: string) => ["videocut", "song", projectId] as const;
+export const jobKey = (jobId?: string) => ["videocut", "job", jobId] as const;
 
 export const projectsQuery = {
   queryKey: projectsKey,

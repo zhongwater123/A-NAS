@@ -106,7 +106,7 @@ const domains = {
     apps_unavailable: "无法连接容器代理",
   },
   music: { not_found: "内容已不存在" },
-  montage: {
+  videocut: {
     not_found: "项目或任务已不存在",
     no_song: "先选一首歌",
     job_in_progress: "这个项目已有任务在进行",

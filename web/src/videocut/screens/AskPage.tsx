@@ -132,7 +132,7 @@ function Ask({ detail, onBack }: { detail: VideoCutProjectDetail; onBack: () => 
             )}
           </div>
         </div>
-        {save.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(save.error, "montage")}</p>}
+        {save.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(save.error, "videocut")}</p>}
       </section>
       <div className={styles.mtFoot}>
         <button type="button" className={`${styles.mtBtn} ${styles.primary}`} onClick={leave}>

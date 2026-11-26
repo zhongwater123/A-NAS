@@ -15,7 +15,7 @@ import { forMember } from "../lib/words";
 import styles from "./notices.module.css";
 
 const POLL_MS = 60_000;
-const SEEN = "montage-notices-seen";
+const SEEN = "videocut-notices-seen";
 
 const key = (notice: VideoCutNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
 

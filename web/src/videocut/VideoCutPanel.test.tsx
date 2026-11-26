@@ -481,7 +481,7 @@ describe("剪辑中心", () => {
     );
     // As the desktop frames an app's window (AppWindow).
     const frame = document.createElement("section");
-    frame.setAttribute(WINDOW_ID, "montage");
+    frame.setAttribute(WINDOW_ID, "videocut");
     document.body.append(frame);
     try {
       render(<VideoCutPanel userId="user:alice" />, { container: frame });

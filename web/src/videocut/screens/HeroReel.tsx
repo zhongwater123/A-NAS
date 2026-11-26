@@ -20,7 +20,7 @@ export function HeroReel() {
   // The device's film is asked for before it is played: a player that was
   // given a film the device does not have does not reliably say so.
   const device = useQuery({
-    queryKey: ["montage", "hero"],
+    queryKey: ["videocut", "hero"],
     queryFn: ({ signal }) => hasHero(signal),
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,

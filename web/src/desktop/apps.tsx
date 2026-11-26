@@ -95,7 +95,7 @@ export interface WindowContext {
   // and the raters they chose (ADR 0037).
   scoring: ScoringAccess;
   // 剪辑中心 shows only while the device turns it on (ANAS_VIDEOCUT_ENABLED, ADR 0038).
-  montage: boolean;
+  videocut: boolean;
   // 共享工作区 shows to administrators and the members they added (ADR 0040); null to everyone else.
   workspace: WorkspaceAccess | null;
   open: OpenWindow;
@@ -356,15 +356,15 @@ const definitions = {
       />
     ),
   },
-  montage: {
+  videocut: {
     title: "剪辑中心",
     icon: Clapperboard,
-    tone: "montage",
+    tone: "videocut",
     bounds: { x: 220, y: 48, width: 1080, height: 720 },
     launcher: {
-      id: "montage",
-      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
-      visible: ({ montage }) => montage,
+      id: "videocut",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog videocut video",
+      visible: ({ videocut }) => videocut,
     },
     render: ({ session }) => <VideoCutPanel userId={session.user.id} />,
   },

@@ -96,7 +96,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
         <div className={styles.mtLabel}>音乐库</div>
         {tracks.error && <Failed inline error={tracks.error} onRetry={() => void tracks.refetch()} />}
-        {choose.error && <p className={styles.mtError}>{errorText(choose.error, "montage")}</p>}
+        {choose.error && <p className={styles.mtError}>{errorText(choose.error, "videocut")}</p>}
         {!tracks.data && !tracks.error && <Spinner small />}
         {tracks.data && shown.length === 0 && (
           <p className={styles.mtFaint}>
@@ -255,7 +255,7 @@ function Chosen({ projectId, song }: { projectId: string; song: VideoCutSong }) 
           />
           {/* biome-ignore lint/a11y/useMediaCaption: a song excerpt has no captions */}
           <audio controls preload="none" aria-label="试听选段" src={excerptAudio(projectId, song, excerpt)} />
-          {move.error && <p className={styles.mtError}>{errorText(move.error, "montage")}</p>}
+          {move.error && <p className={styles.mtError}>{errorText(move.error, "videocut")}</p>}
         </>
       )}
     </div>

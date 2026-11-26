@@ -55,7 +55,7 @@ export function NewProject({
     mutationFn: async (assetIds: string[]) =>
       into ? (await addAssets(into, assetIds)).id : (await createProject(assetIds)).id,
     onSuccess: (id) => {
-      void client.invalidateQueries({ queryKey: ["montage"] });
+      void client.invalidateQueries({ queryKey: ["videocut"] });
       onDone(id);
     },
   });
@@ -177,7 +177,7 @@ export function NewProject({
                 {completedLive.length} 个 MOV 补进了图库里的实况照片，没有加入项目
               </p>
             )}
-            {make.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(make.error, "montage")}</p>}
+            {make.error && <p className={`${styles.mtError} ${styles.mtHint}`}>{errorText(make.error, "videocut")}</p>}
           </>
         )}
       </section>

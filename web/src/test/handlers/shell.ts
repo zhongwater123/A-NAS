@@ -37,7 +37,7 @@ export interface ShellOptions {
   // Photo scoring is installed only when a test says what the account may do.
   scoring?: Pick<ScoringMe, "admin" | "rater">;
   // 剪辑中心 is off, as on a device without ANAS_VIDEOCUT_ENABLED, unless a test turns it on.
-  montage?: boolean;
+  videocut?: boolean;
   // 共享工作区 is hidden, as for a member no administrator added, unless a test says otherwise.
   workspace?: { admin: boolean };
 }
@@ -66,7 +66,7 @@ export function shellHandlers(options: ShellOptions = {}) {
       response(200).json(options.scoring ?? { admin: false, rater: false }),
     ),
     http.get("/api/v1/videocut", ({ response }) =>
-      options.montage
+      options.videocut
         ? response(204).empty()
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),

@@ -194,7 +194,7 @@ export function Desktop({
   // when the page comes back into view: a member an administrator just chose
   // finds them, one taken out loses them, and a failed read is tried again.
   const scoring = useReadOnShow(scoringAccess, noScoring, session.user.id, sameScoring);
-  const montage = useReadOnShow(videoCutEnabled, false, session.user.id);
+  const videocut = useReadOnShow(videoCutEnabled, false, session.user.id);
   const workspace = useReadOnShow(workspaceAccess, null, session.user.id, sameWorkspace);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
@@ -213,7 +213,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
-      montage,
+      videocut,
       workspace,
       open,
       intents,
@@ -229,7 +229,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
-      montage,
+      videocut,
       workspace,
       open,
       intents,
@@ -395,10 +395,10 @@ export function Desktop({
               <FamilyNotices onOpen={() => open("family")} />
             </Suspense>
           </ShellPart>
-          {montage && (
-            <ShellPart name="montage hints">
+          {videocut && (
+            <ShellPart name="videocut hints">
               <Suspense fallback={null}>
-                <VideoCutNotices onOpen={() => open("montage")} />
+                <VideoCutNotices onOpen={() => open("videocut")} />
               </Suspense>
             </ShellPart>
           )}

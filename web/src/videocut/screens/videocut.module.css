@@ -45,7 +45,7 @@
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  container: montagewindow / inline-size;
+  container: videocutwindow / inline-size;
 }
 :where(.mt-app) :where(button, input, textarea) {
   font: inherit;
@@ -544,7 +544,7 @@ button.mt-row:hover {
   object-fit: cover;
   background: #000;
 }
-@container montagewindow (max-width: 820px) {
+@container videocutwindow (max-width: 820px) {
   .mt-strip {
     display: none;
   }
@@ -958,7 +958,7 @@ textarea.mt-text {
   align-items: start;
   gap: 32px;
 }
-@container montagewindow (max-width: 640px) {
+@container videocutwindow (max-width: 640px) {
   .mt-cutopts {
     grid-template-columns: minmax(0, 1fr);
     gap: 20px;
@@ -1240,7 +1240,7 @@ textarea.mt-text {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
-@container montagewindow (max-width: 720px) {
+@container videocutwindow (max-width: 720px) {
   .mt-films {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1358,7 +1358,7 @@ textarea.mt-text {
   font-size: 12px;
 }
 
-@container montagewindow (max-width: 720px) {
+@container videocutwindow (max-width: 720px) {
   .mt-main,
   .mt-sub {
     padding: 16px;
