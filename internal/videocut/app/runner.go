@@ -176,12 +176,8 @@ func (s *Store) RunJobs(ctx context.Context) {
 
 // nextDue is how long until a queued or waiting job is due.
 func (s *Store) nextDue(ctx context.Context) time.Duration {
-	next, err := s.db.NextNotBefore(ctx)
-	if err != nil || !next.Valid {
-		return idlePoll
-	}
-	at := scanTime(next)
-	if at == nil {
+	at, err := s.db.NextNotBefore(ctx)
+	if err != nil || at == nil {
 		return idlePoll
 	}
 	return min(max(at.Sub(s.now()), 0), idlePoll)

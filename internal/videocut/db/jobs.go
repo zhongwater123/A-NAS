@@ -70,12 +70,12 @@ func (c *conn) UnwantRound(ctx context.Context, jobID string) error {
 }
 
 // WantRound records that jobID wants a round, since at unless it already
-// did, and says since when as kept ("" when that is unknown).
-func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string, error) {
+// did, and says since when (nil when that is unknown).
+func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (*time.Time, error) {
 	var since string
 	err := queryRow(ctx, d.db, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
 		WHERE id = ? RETURNING IFNULL(plan_wanted_at, '')`, sqlitedb.FormatTime(at), jobID).Scan(&since)
-	return since, err
+	return timeOrNil(sql.NullString{String: since, Valid: since != ""}), err
 }
 
 // MarkedUsernames are the usernames, registered since registeredSince, of
@@ -154,12 +154,12 @@ func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 	return active, err
 }
 
-// NextNotBefore is when the first queued or waiting job is due, as kept
-// (not valid when none is).
-func (d *DB) NextNotBefore(ctx context.Context) (sql.NullString, error) {
+// NextNotBefore is when the first queued or waiting job is due (nil when
+// none is, or that cannot be read).
+func (d *DB) NextNotBefore(ctx context.Context) (*time.Time, error) {
 	var next sql.NullString
 	err := queryRow(ctx, d.db, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next)
-	return next, err
+	return timeOrNil(next), err
 }
 
 // DueJob is a job due at now as the runner takes it, its settings still
@@ -348,21 +348,25 @@ func (c *conn) JobSettings(ctx context.Context, jobID string) (string, error) {
 	return encoded, err
 }
 
-// JobRow is a job as its page reads it; the times as kept.
+// JobRow is a job as its page reads it: Created is zero and Finished nil
+// when they cannot be read, and Finished nil while the job has not.
 type JobRow struct {
 	ID, ProjectID, Kind, State string
 	Step, WaitReason, Error    sql.NullString
-	Created                    string
-	Finished                   sql.NullString
+	Created                    time.Time
+	Finished                   *time.Time
 	Plans                      int
 }
 
 // Job is owner's job jobID; ErrNotFound when owner has none.
 func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
 	var job JobRow
+	var created string
+	var finished sql.NullString
 	err := queryRow(ctx, d.db, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
-		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &job.Step, &job.WaitReason, &job.Error, &job.Created, &job.Finished, &job.Plans)
+		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &job.Step, &job.WaitReason, &job.Error, &created, &finished, &job.Plans)
+	job.Created, job.Finished = timeOrZero(created), timeOrNil(finished)
 	return job, err
 }
 
@@ -413,12 +417,14 @@ func (c *conn) LatestJob(ctx context.Context, projectID string) (string, error) 
 }
 
 // NoticeRow is one of a member's jobs as the notices read it: its
-// project, state, wait reason and error, when it last changed (as kept),
+// project, state, wait reason and error, when it last changed (zero when
+// that cannot be read),
 // its first 方案's film ("" when none) and whether a round of its epoch is
 // in progress.
 type NoticeRow struct {
-	JobID, ProjectID, Project, State, Reason, Detail, At, FilmID string
-	Planning                                                     bool
+	JobID, ProjectID, Project, State, Reason, Detail, FilmID string
+	At                                                       time.Time
+	Planning                                                 bool
 }
 
 // Notices are owner's jobs that wait for VNAS (their wait reason
@@ -437,9 +443,11 @@ func (d *DB) Notices(ctx context.Context, owner, waitVNAS string, since time.Tim
 	var notices []NoticeRow
 	for rows.Next() {
 		var n NoticeRow
-		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &n.State, &n.Reason, &n.Detail, &n.At, &n.FilmID, &n.Planning); err != nil {
+		var at string
+		if err := rows.Scan(&n.JobID, &n.ProjectID, &n.Project, &n.State, &n.Reason, &n.Detail, &at, &n.FilmID, &n.Planning); err != nil {
 			return nil, err
 		}
+		n.At = timeOrZero(at)
 		notices = append(notices, n)
 	}
 	return notices, rows.Err()

@@ -64,10 +64,11 @@ func (d *DB) DoneResults(ctx context.Context, jobID string, names []string) (map
 }
 
 // StepRow is one of a job's steps as a job's page shows it: its state and
-// when it started and finished (not valid when it has not).
+// when it started and finished (nil when it has not, or when that cannot be
+// read).
 type StepRow struct {
 	Name, State       string
-	Started, Finished sql.NullString
+	Started, Finished *time.Time
 }
 
 // JobSteps are jobID's steps.
@@ -80,9 +81,11 @@ func (d *DB) JobSteps(ctx context.Context, jobID string) ([]StepRow, error) {
 	var steps []StepRow
 	for rows.Next() {
 		var st StepRow
-		if err := rows.Scan(&st.Name, &st.State, &st.Started, &st.Finished); err != nil {
+		var started, finished sql.NullString
+		if err := rows.Scan(&st.Name, &st.State, &started, &finished); err != nil {
 			return nil, err
 		}
+		st.Started, st.Finished = timeOrNil(started), timeOrNil(finished)
 		steps = append(steps, st)
 	}
 	return steps, rows.Err()

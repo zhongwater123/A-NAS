@@ -38,19 +38,21 @@ func (tx *Tx) CreateDraft(ctx context.Context, id, owner, projectID, versionID, 
 }
 
 // DraftRow is a draft as kept: the version it edits, its revision, its
-// shots and when it last changed.
+// shots and when it last changed (zero when that cannot be read).
 type DraftRow struct {
 	VersionID string
 	Revision  int
 	Shots     string
-	Updated   string
+	Updated   time.Time
 }
 
 // Draft reads owner's draft; ErrNotFound when owner has none by that id.
 func (d *DB) Draft(ctx context.Context, owner, draftID string) (DraftRow, error) {
 	var row DraftRow
+	var updated string
 	err := queryRow(ctx, d.db, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
-		draftID, owner).Scan(&row.VersionID, &row.Revision, &row.Shots, &row.Updated)
+		draftID, owner).Scan(&row.VersionID, &row.Revision, &row.Shots, &updated)
+	row.Updated = timeOrZero(updated)
 	return row, err
 }
 

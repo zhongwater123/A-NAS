@@ -120,7 +120,7 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (db.Pr
 type queryer interface {
 	JobSettings(ctx context.Context, jobID string) (string, error)
 	KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error)
-	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
+	PlanGrant(ctx context.Context, owner string) (username string, at time.Time, err error)
 	Project(ctx context.Context, owner, id string) (db.ProjectRow, error)
 	ProjectSong(ctx context.Context, owner, projectID string) (string, db.ProjectSong, error)
 	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
@@ -379,24 +379,17 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (domain.Proj
 	}
 	// The store has one connection: the page's rows are read whole before
 	// the previews are.
-	listed, err := s.db.ProjectList(ctx, owner, after, pageSize+1)
+	listed, next, err := s.db.ProjectList(ctx, owner, after, pageSize)
 	if err != nil {
 		return domain.ProjectPage{}, err
 	}
 	page := domain.ProjectPage{Items: []domain.Project{}}
-	var lastAt string
 	for _, row := range listed {
-		project := domain.Project{ID: row.ID, Name: row.Name, AssetCount: row.AssetCount, ChosenVersionID: row.ChosenVersionID,
-			ChosenFilmAssetID: row.ChosenFilmAssetID}
-		created := row.Created
-		if len(page.Items) == pageSize {
-			page.Next = lastAt + "|" + page.Items[pageSize-1].ID
-			break
-		}
-		if project.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
-			return domain.ProjectPage{}, err
-		}
-		page.Items, lastAt = append(page.Items, project), created
+		page.Items = append(page.Items, domain.Project{ID: row.ID, Name: row.Name, AssetCount: row.AssetCount, CreatedAt: row.Created,
+			ChosenVersionID: row.ChosenVersionID, ChosenFilmAssetID: row.ChosenFilmAssetID})
+	}
+	if next != nil {
+		page.Next = next.At + "|" + next.ID
 	}
 	for i := range page.Items {
 		if page.Items[i].PreviewAssetIDs, err = s.previews(ctx, page.Items[i].ID); err != nil {

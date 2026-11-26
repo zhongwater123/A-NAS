@@ -593,7 +593,7 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 	if !src.holds(draft.state) {
 		return nil, keptDraft{}, domain.ErrNotEditable
 	}
-	draft.updated, _ = time.Parse(time.RFC3339Nano, row.Updated)
+	draft.updated = row.Updated
 	return src, draft, nil
 }
 

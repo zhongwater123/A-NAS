@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -152,15 +151,14 @@ func (s *Store) RegisterPlanGrant(ctx context.Context, owner, username string) e
 
 // planGrant is owner's last registration, if any.
 func (s *Store) planGrant(ctx context.Context, q queryer, owner string) (string, time.Time, bool, error) {
-	username, at, err := q.PlanGrant(ctx, owner)
+	username, registered, err := q.PlanGrant(ctx, owner)
 	if errors.Is(err, db.ErrNotFound) {
 		return "", time.Time{}, false, nil
 	}
 	if err != nil {
 		return "", time.Time{}, false, err
 	}
-	registered, err := time.Parse(time.RFC3339Nano, at)
-	return username, registered, err == nil, err
+	return username, registered, true, nil
 }
 
 // VNASPlanner is the planner that waits for the member's VNAS.
@@ -243,11 +241,7 @@ func (s *Store) pastRounds(ctx context.Context, jobID string, epoch int, pickKey
 	}
 	var rounds []pastRound
 	for _, k := range kept {
-		round := pastRound{state: k.State, failure: k.Failure, outcome: k.Outcome}
-		if at := scanTime(k.Ended); at != nil {
-			round.ended = *at
-		}
-		rounds = append(rounds, round)
+		rounds = append(rounds, pastRound{state: k.State, failure: k.Failure, outcome: k.Outcome, ended: k.Ended})
 	}
 	return rounds, nil
 }
@@ -383,7 +377,7 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 	if err := s.leaveMarker(username); err != nil {
 		s.logger.WarnContext(ctx, "leaving the planning marker failed", "job", jobID, "error", err)
 	}
-	if at := scanTime(sql.NullString{String: since, Valid: since != ""}); at != nil && s.now().Sub(*at) >= notTakenAfter {
+	if since != nil && s.now().Sub(*since) >= notTakenAfter {
 		return pending(DetailNotTaken)
 	}
 	return pending("")

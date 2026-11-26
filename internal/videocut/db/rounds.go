@@ -59,10 +59,11 @@ func (tx *Tx) EndRoundByID(ctx context.Context, id string, at time.Time, outcome
 }
 
 // PastRound is one of a job's rounds as kept: its state, failure and
-// outcome, and when it ended (not valid while it has not).
+// outcome, and when it ended (zero while it has not, or when that cannot be
+// read).
 type PastRound struct {
 	State, Failure, Outcome string
-	Ended                   sql.NullString
+	Ended                   time.Time
 }
 
 // PastRounds are jobID's latest 20 rounds for epoch and pickKey, the latest
@@ -77,8 +78,12 @@ func (d *DB) PastRounds(ctx context.Context, jobID string, epoch int, pickKey st
 	var rounds []PastRound
 	for rows.Next() {
 		var round PastRound
-		if err := rows.Scan(&round.State, &round.Failure, &round.Outcome, &round.Ended); err != nil {
+		var ended sql.NullString
+		if err := rows.Scan(&round.State, &round.Failure, &round.Outcome, &ended); err != nil {
 			return nil, err
+		}
+		if at := timeOrNil(ended); at != nil {
+			round.Ended = *at
 		}
 		rounds = append(rounds, round)
 	}

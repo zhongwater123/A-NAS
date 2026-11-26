@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,27 +68,12 @@ const (
 // versionOf is a version as the domain reads it.
 func versionOf(row db.VersionRow) domain.Version {
 	version := domain.Version{ID: row.ID, Number: row.Number, JobID: row.JobID, Plan: row.Plan, FilmAssetID: row.FilmAssetID, Editable: row.Editable,
-		Kind: row.Kind, SourceVersionID: row.SourceVersionID, SourceNumber: row.SourceNumber, Change: row.Change}
-	created, revision := row.Created, row.DraftRevision
-	if revision.Valid {
+		Kind: row.Kind, SourceVersionID: row.SourceVersionID, SourceNumber: row.SourceNumber, Change: row.Change, CreatedAt: row.Created}
+	if revision := row.DraftRevision; revision.Valid {
 		n := int(revision.Int64)
 		version.DraftRevision = &n
 	}
-	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
-		version.CreatedAt = *at
-	}
 	return version
-}
-
-func scanTime(value sql.NullString) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	at, err := time.Parse(time.RFC3339Nano, value.String)
-	if err != nil {
-		return nil
-	}
-	return &at
 }
 
 // Generate starts a job for owner's project from its videos and settings
@@ -232,19 +216,14 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 		return domain.Job{}, err
 	}
 	job := domain.Job{ID: row.ID, ProjectID: row.ProjectID, Kind: row.Kind, State: row.State,
-		Step: row.Step.String, WaitReason: row.WaitReason.String, Error: row.Error.String}
-	if at := scanTime(sql.NullString{String: row.Created, Valid: true}); at != nil {
-		job.CreatedAt = *at
-	}
-	job.FinishedAt = scanTime(row.Finished)
+		Step: row.Step.String, WaitReason: row.WaitReason.String, Error: row.Error.String, CreatedAt: row.Created, FinishedAt: row.Finished}
 	done := map[string]domain.Step{}
 	kept, err := s.db.JobSteps(ctx, jobID)
 	if err != nil {
 		return domain.Job{}, err
 	}
 	for _, row := range kept {
-		st := domain.Step{Name: row.Name, State: row.State}
-		st.Started, st.Finished = scanTime(row.Started), scanTime(row.Finished)
+		st := domain.Step{Name: row.Name, State: row.State, Started: row.Started, Finished: row.Finished}
 		if st.State == JobRunning && job.State != JobRunning {
 			// The step stopped with the job: it shows why.
 			st.State = job.State
@@ -563,8 +542,8 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]domain.Notice, err
 	}
 	notices := []domain.Notice{}
 	for _, row := range kept {
-		n := domain.Notice{JobID: row.JobID, ProjectID: row.ProjectID, Project: row.Project, Reason: row.Reason, FilmID: row.FilmID}
-		state, detail, at, planning := row.State, row.Detail, row.At, row.Planning
+		n := domain.Notice{JobID: row.JobID, ProjectID: row.ProjectID, Project: row.Project, Reason: row.Reason, FilmID: row.FilmID, At: row.At}
+		state, detail, planning := row.State, row.Detail, row.Planning
 		switch {
 		case state == JobDone:
 			n.Kind = NoticeSaved
@@ -576,9 +555,6 @@ func (s *Store) Notices(ctx context.Context, owner string) ([]domain.Notice, err
 			n.Kind, n.Detail = NoticeWaiting, detail
 		default:
 			n.Kind = NoticeNeeds
-		}
-		if t := scanTime(sql.NullString{String: at, Valid: true}); t != nil {
-			n.At = *t
 		}
 		notices = append(notices, n)
 	}

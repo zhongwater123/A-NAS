@@ -19,10 +19,16 @@ func (d *DB) RegisterPlanGrant(ctx context.Context, owner, username string, at t
 	return err
 }
 
-// PlanGrant is owner's last registration: the username and when, as kept;
-// ErrNotFound when owner has none.
-func (c *conn) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	err = queryRow(ctx, c.q, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
+// PlanGrant is owner's last registration: the username and when;
+// ErrNotFound when owner has none, time.Parse's error when when cannot be
+// read.
+func (c *conn) PlanGrant(ctx context.Context, owner string) (username string, at time.Time, err error) {
+	var registered string
+	err = queryRow(ctx, c.q, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &registered)
+	if err != nil {
+		return username, time.Time{}, err
+	}
+	at, err = time.Parse(time.RFC3339Nano, registered)
 	return username, at, err
 }
 

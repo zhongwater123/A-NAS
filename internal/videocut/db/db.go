@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
@@ -80,6 +81,31 @@ func (r row) Scan(dest ...any) error {
 		return ErrNotFound
 	}
 	return err
+}
+
+// The times are kept as text (sqlitedb.FormatTime). A read that shows a
+// time leaves out one it cannot read, as these two do; a read that needs
+// it answers time.Parse's error.
+
+// timeOrZero is the time kept as text, the zero time when it is not one.
+func timeOrZero(text string) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
+// timeOrNil is the time kept as text, nil when it is NULL or not a time.
+func timeOrNil(text sql.NullString) *time.Time {
+	if !text.Valid {
+		return nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, text.String)
+	if err != nil {
+		return nil
+	}
+	return &at
 }
 
 // column is the values of the one column query selects, in the order it

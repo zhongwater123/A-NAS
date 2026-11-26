@@ -26,16 +26,17 @@ var versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.creat
 	CASE WHEN v.kind = 'recut' THEN IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change')
 		FROM jobs WHERE id = v.job_id), '') ELSE '' END`
 
-// VersionRow is a version as versions reads it (versionColumns): whether
-// it can be edited, the version it came from and its number, the draft's
-// revision it saved, and a recut's sentence.
+// VersionRow is a version as versions reads it (versionColumns): when it
+// was made (zero when that cannot be read), whether it can be edited, the
+// version it came from and its number, the draft's revision it saved, and a
+// recut's sentence.
 type VersionRow struct {
 	ID              string
 	Number          int
 	JobID           string
 	Plan            int
 	FilmAssetID     string
-	Created         string
+	Created         time.Time
 	Editable        bool
 	Kind            string
 	SourceVersionID string
@@ -69,10 +70,12 @@ func (d *DB) versions(ctx context.Context, column, value, order string) ([]Versi
 	var versions []VersionRow
 	for rows.Next() {
 		var v VersionRow
-		if err := rows.Scan(&v.ID, &v.Number, &v.JobID, &v.Plan, &v.FilmAssetID, &v.Created, &v.Editable,
+		var created string
+		if err := rows.Scan(&v.ID, &v.Number, &v.JobID, &v.Plan, &v.FilmAssetID, &created, &v.Editable,
 			&v.Kind, &v.SourceVersionID, &v.SourceNumber, &v.DraftRevision, &v.Change); err != nil {
 			return nil, err
 		}
+		v.Created = timeOrZero(created)
 		versions = append(versions, v)
 	}
 	return versions, rows.Err()

@@ -83,21 +83,24 @@ func (tx *Tx) DeleteOwnerProjects(ctx context.Context, owner string) error {
 }
 
 // ProjectCursor is where a page of projects goes on from: after the
-// project made at At with id ID.
+// project made at At, as kept, with id ID.
 type ProjectCursor struct{ At, ID string }
 
 // ProjectListRow is a ready project as the list shows it: its number of
 // videos, its chosen version and that version's film ("" when none), and
-// when it was made, as kept.
+// when it was made.
 type ProjectListRow struct {
-	ID, Name, Created                  string
+	ID, Name                           string
+	Created                            time.Time
 	AssetCount                         int
 	ChosenVersionID, ChosenFilmAssetID string
 }
 
 // ProjectList is up to limit of owner's ready projects, the latest made
-// first, after cursor when it is not nil.
-func (d *DB) ProjectList(ctx context.Context, owner string, cursor *ProjectCursor, limit int) ([]ProjectListRow, error) {
+// first, after cursor when it is not nil, and the cursor of the page after
+// (nil when there is none); time.Parse's error when one of them was made at
+// a time that cannot be read.
+func (d *DB) ProjectList(ctx context.Context, owner string, cursor *ProjectCursor, limit int) ([]ProjectListRow, *ProjectCursor, error) {
 	where, args := "p.owner_user_id = ? AND p.state = 'ready'", []any{owner}
 	if cursor != nil {
 		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
@@ -106,20 +109,37 @@ func (d *DB) ProjectList(ctx context.Context, owner string, cursor *ProjectCurso
 	rows, err := d.db.QueryContext(ctx, `SELECT p.id, p.name, p.created_at, (SELECT COUNT(*) FROM project_assets a WHERE a.project_id = p.id),
 		IFNULL(v.id, ''), IFNULL(v.film_asset_id, '')
 		FROM projects p LEFT JOIN versions v ON v.id = p.chosen_version_id AND v.project_id = p.id
-		WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, limit)...)
+		WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, limit+1)...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var projects []ProjectListRow
+	var created []string
 	for rows.Next() {
 		var p ProjectListRow
-		if err := rows.Scan(&p.ID, &p.Name, &p.Created, &p.AssetCount, &p.ChosenVersionID, &p.ChosenFilmAssetID); err != nil {
-			return nil, err
+		var at string
+		if err := rows.Scan(&p.ID, &p.Name, &at, &p.AssetCount, &p.ChosenVersionID, &p.ChosenFilmAssetID); err != nil {
+			return nil, nil, err
 		}
-		projects = append(projects, p)
+		projects, created = append(projects, p), append(created, at)
 	}
-	return projects, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	// One more than limit says there is a page after; its own time is not
+	// read.
+	var next *ProjectCursor
+	if len(projects) > limit {
+		projects = projects[:limit]
+		next = &ProjectCursor{At: created[limit-1], ID: projects[limit-1].ID}
+	}
+	for i := range projects {
+		if projects[i].Created, err = time.Parse(time.RFC3339Nano, created[i]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return projects, next, nil
 }
 
 // ProjectChange is what UpdateReadyProject changes: each that is not nil.
