@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
@@ -86,30 +85,11 @@ const (
 	WaitMedia    = "media_unavailable"
 )
 
-// SongSource is what the Product Service tells of the track it streams.
-type SongSource struct {
-	TrackID string `json:"trackId"`
-	Title   string `json:"title"`
-	// ContentType is how browsers receive the file; empty when they cannot
-	// play it and the media worker decodes it to FLAC (music.Track.Transcode).
-	ContentType string `json:"contentType"`
-}
-
 // Media is what the montage center asks of the FFmpeg worker for its songs;
 // ffmpegworker.Client provides it.
 type Media interface {
 	Probe(ctx context.Context, file *os.File) (ffmpegworker.Probe, error)
 	Audio(ctx context.Context, file *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error)
-}
-
-// Analysis is what the music analysis Worker answers for a song: its
-// structure and its loudness, the eighth version's RMS curve (frames of
-// 2048 samples every 512 at 22050 Hz).
-type Analysis struct {
-	Structure videocutcompute.Structure
-	Loudness  []float32
-	// Seconds is how long the Worker took.
-	Seconds float64
 }
 
 // MusicAnalyzer finds a song's structure in its samples: stereo, 32-bit
@@ -119,35 +99,12 @@ type Analysis struct {
 // carry the whole song. The analyzer analyses nothing before that, and
 // returns any other error whole yields as it is.
 type MusicAnalyzer interface {
-	Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (Analysis, error)
+	Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (domain.Analysis, error)
 }
 
 // MusicComputer is the compute Worker's music operation.
 type MusicComputer interface {
 	Music(ctx context.Context, request videocutcompute.MusicRequest) (videocutcompute.Selection, error)
-}
-
-// SongDetail is a project's song as the music page shows it.
-type SongDetail struct {
-	ID string `json:"id"`
-	// TrackID is the track of the music library the song was copied from.
-	TrackID  string  `json:"trackId,omitempty"`
-	Title    string  `json:"title"`
-	Duration float64 `json:"duration"`
-	// Transcode: browsers cannot play the copy; /song/audio decodes it to
-	// FLAC from ?start= and cannot seek by Range.
-	Transcode bool                      `json:"transcode"`
-	State     string                    `json:"state"`
-	Reason    string                    `json:"reason,omitempty"`
-	Waiting   string                    `json:"waiting,omitempty"`
-	Tempo     float64                   `json:"tempo,omitempty"`
-	Beats     []float64                 `json:"beats,omitempty"`
-	Downbeats []float64                 `json:"downbeats,omitempty"`
-	Sections  []videocutcompute.Section `json:"sections,omitempty"`
-	// DefaultStart is where the eighth version's rule starts the excerpt;
-	// Selection follows the project's own start when the member dragged it.
-	DefaultStart *float64                   `json:"defaultStart,omitempty"`
-	Selection    *videocutcompute.Selection `json:"selection,omitempty"`
 }
 
 // songAnalysis is what a song row keeps of its analysis.
@@ -285,35 +242,35 @@ func (s *Store) keep(file *os.File, sha string) error {
 // project and starts analysing it. The project then uses it from its
 // excerpt's default start; a song it used before goes unless another of
 // owner's projects uses it.
-func (s *Store) PutSong(ctx context.Context, owner, projectID string, source SongSource, body io.Reader) (SongDetail, error) {
+func (s *Store) PutSong(ctx context.Context, owner, projectID string, source domain.SongSource, body io.Reader) (domain.SongDetail, error) {
 	row, err := s.project(ctx, s.db, owner, projectID)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	if row.state != "ready" {
-		return SongDetail{}, domain.ErrNotFound
+		return domain.SongDetail{}, domain.ErrNotFound
 	}
 	if !utf8.ValidString(source.Title) || strings.ContainsRune(source.Title, 0) {
-		return SongDetail{}, domain.ErrInvalid
+		return domain.SongDetail{}, domain.ErrInvalid
 	}
 	title := SongTitle(source.Title)
 	contentType := source.ContentType
 	if contentType != "" && !strings.HasPrefix(contentType, "audio/") {
-		return SongDetail{}, domain.ErrInvalid
+		return domain.SongDetail{}, domain.ErrInvalid
 	}
 	file, sha, err := s.receive(body)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	defer func() { _ = file.Close() }()
 	duration, err := s.probeSong(ctx, file)
 	if err != nil {
-		return SongDetail{}, errors.Join(err, os.Remove(file.Name()))
+		return domain.SongDetail{}, errors.Join(err, os.Remove(file.Name()))
 	}
 	s.songs.Lock()
 	defer s.songs.Unlock()
 	if err := s.keep(file, sha); err != nil {
-		return SongDetail{}, errors.Join(err, os.Remove(file.Name()))
+		return domain.SongDetail{}, errors.Join(err, os.Remove(file.Name()))
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		songID, err := s.songRowFor(ctx, tx, owner, sha, title, contentType, duration)
@@ -327,7 +284,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source Son
 		return forgetUnusedSongs(ctx, tx, owner)
 	})
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	s.removeUnusedCopies(ctx)
 	s.wakeAnalysis()
@@ -481,16 +438,16 @@ func (s *Store) song(ctx context.Context, q queryer, id string) (songRow, error)
 
 // Song returns owner's project's song: how its analysis stands, its
 // structure, and the excerpt the project uses.
-func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, error) {
+func (s *Store) Song(ctx context.Context, owner, projectID string) (domain.SongDetail, error) {
 	chosen, err := s.projectSong(ctx, s.db, owner, projectID)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	row, err := s.song(ctx, s.db, chosen.songID.String)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
-	detail := SongDetail{ID: row.id, TrackID: chosen.trackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
+	detail := domain.SongDetail{ID: row.id, TrackID: chosen.trackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
 		State: row.state, Reason: row.reason, Waiting: row.waiting}
 	if st := row.analysis.Structure; st != nil {
 		detail.Tempo, detail.Beats, detail.Downbeats, detail.Sections = st.BPM, st.Beats, st.Downbeats, st.Segments
@@ -501,7 +458,7 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, 
 		if chosen.selection.Valid {
 			var own keptSelection
 			if err := json.Unmarshal([]byte(chosen.selection.String), &own); err != nil {
-				return SongDetail{}, err
+				return domain.SongDetail{}, err
 			}
 			detail.Selection = &own.Selection
 		}
@@ -514,21 +471,21 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (SongDetail, 
 // excerpt: it starts there and lasts as long. On the default start's
 // downbeat the project follows the default excerpt again, as if its member
 // had never dragged the start.
-func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float64) (SongDetail, error) {
+func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float64) (domain.SongDetail, error) {
 	chosen, err := s.projectSong(ctx, s.db, owner, projectID)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	row, err := s.song(ctx, s.db, chosen.songID.String)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	st := row.analysis.Structure
 	if row.state != SongReady || st == nil || len(st.Downbeats) == 0 {
-		return SongDetail{}, domain.ErrSongNotReady
+		return domain.SongDetail{}, domain.ErrSongNotReady
 	}
 	if math.IsNaN(at) || math.IsInf(at, 0) || at < 0 || at > row.duration {
-		return SongDetail{}, domain.ErrInvalid
+		return domain.SongDetail{}, domain.ErrInvalid
 	}
 	start := nearest(st.Downbeats, at)
 	// What the project keeps: nothing on the default start, where the
@@ -537,37 +494,37 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	var keptStart, kept any
 	if def := row.analysis.Selection; def == nil || start != defaultDownbeat(st, def) {
 		if s.compute == nil {
-			return SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
+			return domain.SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 		}
 		loudness, err := decodeLoudness(row.loudness)
 		if err != nil {
-			return SongDetail{}, err
+			return domain.SongDetail{}, err
 		}
 		selection, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
 		if errors.Is(err, videocutcompute.ErrWorkerRefused) {
 			// The Worker takes the song but no excerpt from there.
-			return SongDetail{}, fmt.Errorf("%w: %w", domain.ErrSongStart, err)
+			return domain.SongDetail{}, fmt.Errorf("%w: %w", domain.ErrSongStart, err)
 		}
 		if err != nil {
-			return SongDetail{}, err
+			return domain.SongDetail{}, err
 		}
 		if selection.Unusable != "" {
-			return SongDetail{}, fmt.Errorf("%w: %s", domain.ErrSongStart, selection.Unusable)
+			return domain.SongDetail{}, fmt.Errorf("%w: %s", domain.ErrSongStart, selection.Unusable)
 		}
 		encoded, err := json.Marshal(keptSelection{Selection: selection, Music: selection.Music})
 		if err != nil {
-			return SongDetail{}, err
+			return domain.SongDetail{}, err
 		}
 		keptStart, kept = start, string(encoded)
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE projects SET song_start = ?, song_selection = ?, updated_at = ?
 		WHERE id = ? AND owner_user_id = ? AND song_id = ?`, keptStart, kept, sqlitedb.FormatTime(s.now()), projectID, owner, row.id)
 	if err != nil {
-		return SongDetail{}, err
+		return domain.SongDetail{}, err
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
 		// The member chose another song meanwhile.
-		return SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
+		return domain.SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
 	}
 	return s.Song(ctx, owner, projectID)
 }
@@ -586,20 +543,11 @@ func nearest(times []float64, at float64) float64 {
 	return times[i]
 }
 
-// SongAudio is a project's song opened to be heard.
-type SongAudio struct {
-	File *os.File
-	Song SongDetail
-	// ContentType is how the file is sent; empty when it is decoded to FLAC.
-	ContentType string
-	ModifiedAt  time.Time
-}
-
 // OpenSongAudio opens owner's project's song for the member to hear.
-func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (SongAudio, error) {
+func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (domain.SongAudio, error) {
 	chosen, err := s.projectSong(ctx, s.db, owner, projectID)
 	if err != nil {
-		return SongAudio{}, err
+		return domain.SongAudio{}, err
 	}
 	return s.openSong(ctx, chosen.songID.String)
 }
@@ -607,7 +555,7 @@ func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (Son
 // DecodeSong streams audio, a song OpenSongAudio opened, as FLAC from start
 // seconds, for a copy browsers cannot play. The media worker receives a
 // descriptor of its own; audio.File stays the caller's to close.
-func (s *Store) DecodeSong(ctx context.Context, audio SongAudio, start float64) (io.ReadCloser, error) {
+func (s *Store) DecodeSong(ctx context.Context, audio domain.SongAudio, start float64) (io.ReadCloser, error) {
 	if math.IsNaN(start) || start < 0 || start > audio.Song.Duration {
 		return nil, domain.ErrInvalid
 	}

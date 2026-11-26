@@ -45,7 +45,7 @@ const PlanTemplate = "plan-v2"
 const RecutTemplate = "plan-v3"
 
 // templateOf is the template a job with these settings is planned with.
-func templateOf(settings JobSettings) string {
+func templateOf(settings domain.JobSettings) string {
 	if settings.Recut != nil {
 		return RecutTemplate
 	}
@@ -179,11 +179,11 @@ func (s *Store) VNASPlanner() Planner { return vnasPlanner{s} }
 
 type vnasPlanner struct{ s *Store }
 
-func (p vnasPlanner) Pick(ctx context.Context, input PlanInput) (json.RawMessage, error) {
+func (p vnasPlanner) Pick(ctx context.Context, input domain.PlanInput) (json.RawMessage, error) {
 	return p.s.planned(ctx, input, StepOutline)
 }
 
-func (p vnasPlanner) Shots(ctx context.Context, input PlanInput) (json.RawMessage, error) {
+func (p vnasPlanner) Shots(ctx context.Context, input domain.PlanInput) (json.RawMessage, error) {
 	return p.s.planned(ctx, input, StepShots)
 }
 
@@ -193,7 +193,7 @@ func (p vnasPlanner) Shots(ctx context.Context, input PlanInput) (json.RawMessag
 // can ask for it, and the second step's answer is turned back into the
 // outline's pictures here, so that no tool call waits behind the Worker's
 // other work for either.
-func (s *Store) planned(ctx context.Context, input PlanInput, step string) (json.RawMessage, error) {
+func (s *Store) planned(ctx context.Context, input domain.PlanInput, step string) (json.RawMessage, error) {
 	if input.StepKey == "" || input.PickKey == "" {
 		return nil, errors.New("the planning step has no input key")
 	}
@@ -203,7 +203,7 @@ func (s *Store) planned(ctx context.Context, input PlanInput, step string) (json
 		// first's key, it is built once.
 		briefKey = input.PickKey
 	}
-	brief, err := s.briefOf(ctx, input.JobID, step, briefKey, func() (PlanInput, error) { return input, nil })
+	brief, err := s.briefOf(ctx, input.JobID, step, briefKey, func() (domain.PlanInput, error) { return input, nil })
 	if err != nil {
 		return nil, err
 	}
@@ -502,18 +502,6 @@ func (s *Store) syncMarkers(ctx context.Context) {
 
 // --- rounds ---
 
-// Claim is what a claimed round tells the planner: what it fills the
-// template with, and the project's name, which titles the conversation in
-// the member's VNAS history.
-type Claim struct {
-	RoundID       string `json:"roundId"`
-	JobID         string `json:"jobId"`
-	AttemptToken  string `json:"attemptToken"`
-	Template      string `json:"template"`
-	TargetSeconds int    `json:"targetSeconds"`
-	Project       string `json:"project"`
-}
-
 func newToken() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -524,8 +512,8 @@ func newToken() string {
 // the member's marker is there. The round plans for the job's epoch and the
 // first step's input key as they are now. A claim that finds no such job
 // leaves no marker behind: the planner would claim for it again and again.
-func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
-	var claim Claim
+func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, error) {
+	var claim domain.Claim
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		username, _, granted, err := s.planGrant(ctx, tx, owner)
 		if err != nil {
@@ -552,7 +540,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 			return err
 		}
 		claim.TargetSeconds = excerptSeconds(excerpt.String)
-		var kept JobSettings
+		var kept domain.JobSettings
 		if json.Unmarshal([]byte(settings), &kept) == nil {
 			claim.Project = kept.ProjectName
 		}
@@ -571,7 +559,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 		s.syncMarkers(ctx)
 	}
 	if err != nil {
-		return Claim{}, err
+		return domain.Claim{}, err
 	}
 	s.logger.InfoContext(ctx, "planning round claimed", "round", claim.RoundID, "job", claim.JobID)
 	return claim, nil
@@ -580,7 +568,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 // excerptSeconds is the target length of the film in whole seconds, from
 // the song step's stored excerpt.
 func excerptSeconds(stored string) int {
-	var excerpt Excerpt
+	var excerpt domain.Excerpt
 	if stored == "" || json.Unmarshal([]byte(stored), &excerpt) != nil || excerpt.Frames <= 0 {
 		return 0
 	}

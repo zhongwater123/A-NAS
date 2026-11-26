@@ -54,71 +54,16 @@ const (
 // UpkeepInterval is how often the montage service runs a store's Upkeep.
 const UpkeepInterval = time.Minute
 
-// AssetStatus is where a project's video stands in the photo library now.
-type AssetStatus string
-
 const (
-	AssetAvailable AssetStatus = "available"
-	AssetTrashed   AssetStatus = "trashed"
-	AssetMissing   AssetStatus = "missing"
+	AssetAvailable domain.AssetStatus = "available"
+	AssetTrashed   domain.AssetStatus = "trashed"
+	AssetMissing   domain.AssetStatus = "missing"
 	// AssetUnknown: the photo library did not answer this time.
-	AssetUnknown AssetStatus = "unknown"
+	AssetUnknown domain.AssetStatus = "unknown"
 )
-
-// Project is a member's project in a list.
-type Project struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	AssetCount int       `json:"assetCount"`
-	CreatedAt  time.Time `json:"createdAt"`
-	// PreviewAssetIDs are up to six of its videos, spread over the order
-	// they were added: the list shows their thumbnails.
-	PreviewAssetIDs []string `json:"previewAssetIds,omitempty"`
-	// ChosenVersionID is the version the member confirmed as the
-	// project's film (#596), and ChosenFilmAssetID that film.
-	ChosenVersionID   string `json:"chosenVersionId,omitempty"`
-	ChosenFilmAssetID string `json:"chosenFilmAssetId,omitempty"`
-}
 
 // previewCount is how many videos a project in the list shows.
 const previewCount = 6
-
-// ProjectAsset is a video of a project.
-type ProjectAsset struct {
-	AssetID  string      `json:"assetId"`
-	Status   AssetStatus `json:"status"`
-	Duration float64     `json:"duration,omitempty"`
-	TakenAt  *time.Time  `json:"takenAt,omitempty"`
-	AddedAt  time.Time   `json:"addedAt"`
-}
-
-// ProjectDetail is one project with its videos.
-type ProjectDetail struct {
-	Project
-	Ask           string         `json:"ask"`
-	Chronological bool           `json:"chronological"`
-	Assets        []ProjectAsset `json:"assets"`
-	// Versions are the films saved, newest first.
-	Versions []Version `json:"versions"`
-	// Job is the project's latest job, for the page to pick up where it
-	// was after a reload.
-	Job *Job `json:"job,omitempty"`
-}
-
-// ProjectPage is a page of projects, newest first.
-type ProjectPage struct {
-	Items []Project `json:"items"`
-	Next  string    `json:"next,omitempty"`
-}
-
-// ProjectChange changes a project's name and settings; nil leaves one.
-// SongStart moves the song's excerpt to the downbeat nearest it.
-type ProjectChange struct {
-	Name          *string  `json:"name,omitempty"`
-	Ask           *string  `json:"ask,omitempty"`
-	Chronological *bool    `json:"chronological,omitempty"`
-	SongStart     *float64 `json:"songStart,omitempty"`
-}
 
 const (
 	projectRegistering = "registering"
@@ -450,30 +395,30 @@ func defaultName(earliest, latest *time.Time, now time.Time) string {
 // with the member's session; created is false when requestKey made it
 // before. The same requestKey again returns the same project, with one
 // grant, and waits for that request while it is still running.
-func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, name string, assetIDs []string) (ProjectDetail, bool, error) {
+func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, name string, assetIDs []string) (domain.ProjectDetail, bool, error) {
 	ids, err := uniqueIDs(assetIDs)
 	if err != nil {
-		return ProjectDetail{}, false, err
+		return domain.ProjectDetail{}, false, err
 	}
 	name = strings.TrimSpace(name)
 	if !printable(requestKey, MaxRequestKey) || !validText(name, MaxNameRunes) {
-		return ProjectDetail{}, false, domain.ErrInvalid
+		return domain.ProjectDetail{}, false, domain.ErrInvalid
 	}
 	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
-		return ProjectDetail{}, false, err
+		return domain.ProjectDetail{}, false, err
 	}
 	defer unlock()
 	b, err := s.batch(ctx, owner, requestKey, kindCreate, "", name, ids)
 	if err != nil {
-		return ProjectDetail{}, false, err
+		return domain.ProjectDetail{}, false, err
 	}
 	// A batch still registering is new, or one the photo library did not
 	// answer for before: the member has not had its project yet.
 	created := b.state == batchRegistering
 	if created {
 		if err := s.register(ctx, owner, session, b); err != nil {
-			return ProjectDetail{}, false, err
+			return domain.ProjectDetail{}, false, err
 		}
 	}
 	detail, err := s.Project(ctx, owner, b.projectID)
@@ -483,45 +428,45 @@ func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, n
 // AddAssets adds assetIDs to owner's project. The same requestKey again
 // adds nothing more. Versions already made stay as they are, and nothing is
 // made anew.
-func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, requestKey string, assetIDs []string) (ProjectDetail, error) {
+func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, requestKey string, assetIDs []string) (domain.ProjectDetail, error) {
 	ids, err := uniqueIDs(assetIDs)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	if !printable(requestKey, MaxRequestKey) {
-		return ProjectDetail{}, domain.ErrInvalid
+		return domain.ProjectDetail{}, domain.ErrInvalid
 	}
 	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	defer unlock()
 	row, err := s.project(ctx, s.db, owner, projectID)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	if row.state != projectReady {
-		return ProjectDetail{}, domain.ErrNotFound
+		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
 	b, err := s.batch(ctx, owner, requestKey, kindAdd, projectID, "", ids)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	if b.state == batchRegistering {
 		if err := s.register(ctx, owner, session, b); err != nil {
-			return ProjectDetail{}, err
+			return domain.ProjectDetail{}, err
 		}
 	}
 	return s.Project(ctx, owner, projectID)
 }
 
 // Projects lists owner's projects, newest first, from cursor.
-func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage, error) {
+func (s *Store) Projects(ctx context.Context, owner, cursor string) (domain.ProjectPage, error) {
 	where, args := "p.owner_user_id = ? AND p.state = 'ready'", []any{owner}
 	if cursor != "" {
 		at, id, ok := strings.Cut(cursor, "|")
 		if !ok {
-			return ProjectPage{}, domain.ErrInvalid
+			return domain.ProjectPage{}, domain.ErrInvalid
 		}
 		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
 		args = append(args, at, at, id)
@@ -531,36 +476,36 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 		FROM projects p LEFT JOIN versions v ON v.id = p.chosen_version_id AND v.project_id = p.id
 		WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, pageSize+1)...)
 	if err != nil {
-		return ProjectPage{}, err
+		return domain.ProjectPage{}, err
 	}
 	defer rows.Close()
-	page := ProjectPage{Items: []Project{}}
+	page := domain.ProjectPage{Items: []domain.Project{}}
 	var lastAt string
 	for rows.Next() {
-		var project Project
+		var project domain.Project
 		var created string
 		if err := rows.Scan(&project.ID, &project.Name, &created, &project.AssetCount, &project.ChosenVersionID, &project.ChosenFilmAssetID); err != nil {
-			return ProjectPage{}, err
+			return domain.ProjectPage{}, err
 		}
 		if len(page.Items) == pageSize {
 			page.Next = lastAt + "|" + page.Items[pageSize-1].ID
 			break
 		}
 		if project.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
-			return ProjectPage{}, err
+			return domain.ProjectPage{}, err
 		}
 		page.Items, lastAt = append(page.Items, project), created
 	}
 	if err := rows.Err(); err != nil {
-		return ProjectPage{}, err
+		return domain.ProjectPage{}, err
 	}
 	// The store has one connection: the page's rows go before the previews are read.
 	if err := rows.Close(); err != nil {
-		return ProjectPage{}, err
+		return domain.ProjectPage{}, err
 	}
 	for i := range page.Items {
 		if page.Items[i].PreviewAssetIDs, err = s.previews(ctx, page.Items[i].ID); err != nil {
-			return ProjectPage{}, err
+			return domain.ProjectPage{}, err
 		}
 	}
 	return page, nil
@@ -595,41 +540,41 @@ func (s *Store) previews(ctx context.Context, projectID string) ([]string, error
 // Project returns owner's project with where each video stands now. A video
 // whose content changed since it was added counts as missing, and so does
 // every video of a project whose grant is gone.
-func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDetail, error) {
+func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.ProjectDetail, error) {
 	row, err := s.project(ctx, s.db, owner, projectID)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	if row.state != projectReady {
-		return ProjectDetail{}, domain.ErrNotFound
+		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT asset_id, object_id, added_at FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	defer rows.Close()
-	detail := ProjectDetail{ID: row.id, Name: row.name, CreatedAt: row.created, Ask: row.ask,
-		Chronological: row.chronological, Assets: []ProjectAsset{}}
+	detail := domain.ProjectDetail{ID: row.id, Name: row.name, CreatedAt: row.created, Ask: row.ask,
+		Chronological: row.chronological, Assets: []domain.ProjectAsset{}}
 	objects := map[string]string{}
 	var ids []string
 	for rows.Next() {
-		var asset ProjectAsset
+		var asset domain.ProjectAsset
 		var object, added string
 		if err := rows.Scan(&asset.AssetID, &object, &added); err != nil {
-			return ProjectDetail{}, err
+			return domain.ProjectDetail{}, err
 		}
 		if asset.AddedAt, err = time.Parse(time.RFC3339Nano, added); err != nil {
-			return ProjectDetail{}, err
+			return domain.ProjectDetail{}, err
 		}
 		objects[asset.AssetID], ids = object, append(ids, asset.AssetID)
 		detail.Assets = append(detail.Assets, asset)
 	}
 	if err := rows.Err(); err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	detail.AssetCount = len(detail.Assets)
 	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	for _, version := range detail.Versions {
 		if version.ID == row.chosen {
@@ -641,11 +586,11 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 	case err == nil:
 		job, err := s.Job(ctx, owner, latest)
 		if err != nil {
-			return ProjectDetail{}, err
+			return domain.ProjectDetail{}, err
 		}
 		detail.Job = &job
 	case !errors.Is(err, sql.ErrNoRows):
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	// The films were added to the grant when saved: one lookup says where
 	// the videos and the films stand.
@@ -673,7 +618,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 		case looked.Status == photos.GrantAvailable && looked.ObjectID != objects[asset.AssetID]:
 			detail.Assets[i].Status = AssetMissing
 		default:
-			detail.Assets[i].Status = AssetStatus(looked.Status)
+			detail.Assets[i].Status = domain.AssetStatus(looked.Status)
 			detail.Assets[i].Duration, detail.Assets[i].TakenAt = looked.Duration, looked.TakenAt
 		}
 	}
@@ -703,18 +648,18 @@ func (s *Store) lookup(ctx context.Context, grantID string, ids []string) (map[s
 
 // UpdateProject renames owner's project or changes its settings. A job in
 // progress keeps the settings it started with.
-func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, change ProjectChange) (ProjectDetail, error) {
+func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, change domain.ProjectChange) (domain.ProjectDetail, error) {
 	sets, args := []string{}, []any{}
 	if change.Name != nil {
 		name := strings.TrimSpace(*change.Name)
 		if name == "" || !validText(name, MaxNameRunes) {
-			return ProjectDetail{}, domain.ErrInvalid
+			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
 		sets, args = append(sets, "name = ?"), append(args, name)
 	}
 	if change.Ask != nil {
 		if !validText(*change.Ask, MaxAskRunes) {
-			return ProjectDetail{}, domain.ErrInvalid
+			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
 		sets, args = append(sets, "ask = ?"), append(args, strings.TrimSpace(*change.Ask))
 	}
@@ -722,13 +667,13 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		sets, args = append(sets, "chronological = ?"), append(args, *change.Chronological)
 	}
 	if len(sets) == 0 && change.SongStart == nil {
-		return ProjectDetail{}, domain.ErrInvalid
+		return domain.ProjectDetail{}, domain.ErrInvalid
 	}
 	if change.SongStart != nil {
 		// The start is checked against the song first: a start that leaves
 		// no usable excerpt changes nothing.
 		if _, err := s.SongStart(ctx, owner, projectID, *change.SongStart); err != nil {
-			return ProjectDetail{}, err
+			return domain.ProjectDetail{}, err
 		}
 		if len(sets) == 0 {
 			return s.Project(ctx, owner, projectID)
@@ -738,10 +683,10 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 	result, err := s.db.ExecContext(ctx, "UPDATE projects SET "+strings.Join(sets, ", ")+
 		" WHERE id = ? AND owner_user_id = ? AND state = 'ready'", args...)
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
-		return ProjectDetail{}, errors.Join(domain.ErrNotFound, err)
+		return domain.ProjectDetail{}, errors.Join(domain.ErrNotFound, err)
 	}
 	return s.Project(ctx, owner, projectID)
 }
@@ -1097,6 +1042,6 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 }
 
 // versions lists a project's films, newest first.
-func (s *Store) versions(ctx context.Context, projectID string) ([]Version, error) {
+func (s *Store) versions(ctx context.Context, projectID string) ([]domain.Version, error) {
 	return s.versionsOf(ctx, "project_id", projectID, "number DESC")
 }

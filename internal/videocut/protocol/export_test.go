@@ -3,12 +3,12 @@ package protocol
 import (
 	"errors"
 
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 var errBadHeader = errors.New("bad song header")
 
-func DecodeHeader(header string, source *app.SongSource) error {
+func DecodeHeader(header string, source *domain.SongSource) error {
 	decoded, ok := decodeSource(header)
 	if !ok {
 		return errBadHeader

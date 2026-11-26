@@ -43,8 +43,8 @@ func (h *handler) versionDraft(w http.ResponseWriter, r *http.Request, user acco
 }
 
 type draftOpRequest struct {
-	BaseRevision *int        `json:"baseRevision"`
-	Op           app.DraftOp `json:"op"`
+	BaseRevision *int           `json:"baseRevision"`
+	Op           domain.DraftOp `json:"op"`
 }
 
 func (h *handler) editDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -66,7 +66,7 @@ func (h *handler) editDraft(w http.ResponseWriter, r *http.Request, user account
 
 func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	values := r.URL.Query()
-	query := app.CandidateQuery{Q: values.Get("q"), Size: values.Get("size"), Scene: values.Get("scene")}
+	query := domain.CandidateQuery{Q: values.Get("q"), Size: values.Get("size"), Scene: values.Get("scene")}
 	var err error
 	if query.Shot, err = strconv.Atoi(values.Get("shot")); err != nil {
 		h.fail(w, r, domain.ErrInvalid)
@@ -177,7 +177,7 @@ func (h *handler) frame(w http.ResponseWriter, r *http.Request, user accounts.Us
 
 // failEdit answers the editing errors; it reports whether err was one.
 func failEdit(w http.ResponseWriter, err error) bool {
-	var refusal *app.EditRefusal
+	var refusal *domain.EditRefusal
 	switch {
 	case errors.As(err, &refusal):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "edit_refused", refusal.Reason)

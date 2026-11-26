@@ -22,17 +22,17 @@ import (
 // same requestKey again returns the same job, and so does a revision that
 // was saved already, whatever the key; a project with a job in progress
 // answers ErrJobActive.
-func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string) (Job, bool, error) {
+func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string) (domain.Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) {
-		return Job{}, false, domain.ErrInvalid
+		return domain.Job{}, false, domain.ErrInvalid
 	}
 	if !s.runsEdits() {
-		return Job{}, false, domain.ErrJobsUnavailable
+		return domain.Job{}, false, domain.ErrJobsUnavailable
 	}
 	// A request key used before answers its job, whatever became of the draft.
 	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindEdit, "draft_id", draftID)
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	if jobID != "" {
 		job, err := s.Job(ctx, owner, jobID)
@@ -41,7 +41,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	created := false
 	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	state := draft.state
 	// A revision saved before is that version: its job answers, rather than
@@ -54,14 +54,14 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		job, err := s.Job(ctx, owner, saved)
 		return job, false, err
 	case !errors.Is(err, sql.ErrNoRows):
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	// A version whose videos were analysed again with another model since the
 	// draft was opened cannot be saved: say so now rather than fail in the fill.
 	if err := s.checkAnalysis(ctx, src); err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
-	edit := EditSettings{Job: src.planJob, Plan: src.planNo}
+	edit := domain.EditSettings{Job: src.planJob, Plan: src.planNo}
 	used := map[string]string{}
 	for _, shot := range state.Shots {
 		first := state.Slots[shot.First]
@@ -115,7 +115,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		return nil
 	})
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	s.wakeJobs()
 	job, err := s.Job(ctx, owner, jobID)
@@ -206,43 +206,43 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 
 // OpenDraftSongAudio opens the song of the version owner's draft edits, as
 // its job had it: the project may have another song since.
-func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (SongAudio, error) {
+func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (domain.SongAudio, error) {
 	var jobID string
 	err := s.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
 		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return SongAudio{}, domain.ErrNotFound
+		return domain.SongAudio{}, domain.ErrNotFound
 	}
 	if err != nil {
-		return SongAudio{}, err
+		return domain.SongAudio{}, err
 	}
 	settings, err := jobSettings(ctx, s.db, jobID)
 	if err != nil {
-		return SongAudio{}, err
+		return domain.SongAudio{}, err
 	}
 	if settings.SongID == "" {
-		return SongAudio{}, domain.ErrNoSong
+		return domain.SongAudio{}, domain.ErrNoSong
 	}
 	if _, err := s.ownSong(ctx, owner, settings.SongID); err != nil {
-		return SongAudio{}, domain.ErrNoSong
+		return domain.SongAudio{}, domain.ErrNoSong
 	}
 	return s.openSong(ctx, settings.SongID)
 }
 
 // openSong opens a song's copy to be heard.
-func (s *Store) openSong(ctx context.Context, songID string) (SongAudio, error) {
+func (s *Store) openSong(ctx context.Context, songID string) (domain.SongAudio, error) {
 	row, err := s.song(ctx, s.db, songID)
 	if err != nil {
-		return SongAudio{}, err
+		return domain.SongAudio{}, err
 	}
 	file, err := os.Open(s.songPath(row.sha))
 	if err != nil {
-		return SongAudio{}, err
+		return domain.SongAudio{}, err
 	}
 	info, err := file.Stat()
 	if err != nil {
-		return SongAudio{}, errors.Join(err, file.Close())
+		return domain.SongAudio{}, errors.Join(err, file.Close())
 	}
-	return SongAudio{File: file, ContentType: row.contentType, ModifiedAt: info.ModTime(),
-		Song: SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == ""}}, nil
+	return domain.SongAudio{File: file, ContentType: row.contentType, ModifiedAt: info.ModTime(),
+		Song: domain.SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == ""}}, nil
 }

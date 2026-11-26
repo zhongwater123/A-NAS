@@ -28,11 +28,11 @@ func (p FixedPlanner) read(name string) (json.RawMessage, error) {
 }
 
 // Pick answers pick.json.
-func (p FixedPlanner) Pick(context.Context, PlanInput) (json.RawMessage, error) {
+func (p FixedPlanner) Pick(context.Context, domain.PlanInput) (json.RawMessage, error) {
 	return p.read("pick.json")
 }
 
 // Shots answers shots.json: {answer, slots}.
-func (p FixedPlanner) Shots(context.Context, PlanInput) (json.RawMessage, error) {
+func (p FixedPlanner) Shots(context.Context, domain.PlanInput) (json.RawMessage, error) {
 	return p.read("shots.json")
 }

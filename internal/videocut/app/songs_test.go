@@ -106,31 +106,31 @@ type analyzer struct {
 	read  []int
 }
 
-func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (app.Analysis, error) {
+func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (domain.Analysis, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.down {
-		return app.Analysis{}, fmt.Errorf("%w: connection refused", videocutcompute.ErrWorkerUnavailable)
+		return domain.Analysis{}, fmt.Errorf("%w: connection refused", videocutcompute.ErrWorkerUnavailable)
 	}
 	for _, stream := range []*os.File{stereo, mono} {
 		data, err := io.ReadAll(stream)
 		if err != nil {
-			return app.Analysis{}, err
+			return domain.Analysis{}, err
 		}
 		a.read = append(a.read, len(data))
 	}
 	if err := <-whole; err != nil {
-		return app.Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	a.songs++
 	if a.fails {
-		return app.Analysis{}, fmt.Errorf("%w: internal: the operation failed", videocutcompute.ErrWorkerFailed)
+		return domain.Analysis{}, fmt.Errorf("%w: internal: the operation failed", videocutcompute.ErrWorkerFailed)
 	}
 	var downbeats []float64
 	for t := 0.0; t <= 200; t += 2 {
 		downbeats = append(downbeats, t)
 	}
-	return app.Analysis{Structure: videocutcompute.Structure{Model: "stand-in", BPM: 120, Beats: downbeats, Downbeats: downbeats,
+	return domain.Analysis{Structure: videocutcompute.Structure{Model: "stand-in", BPM: 120, Beats: downbeats, Downbeats: downbeats,
 		Segments: []videocutcompute.Section{{Start: 0, End: 40, Label: "verse"}, {Start: 40, End: 80, Label: "chorus"}, {Start: 80, End: 200, Label: "outro"}}},
 		Loudness: []float32{0.1, 0.2, 0.1}}, nil
 }
@@ -216,9 +216,9 @@ func (f *songFixture) open(t *testing.T) *app.Store {
 	return store
 }
 
-func (f *songFixture) put(t *testing.T, owner, project string, song []byte) (app.SongDetail, error) {
+func (f *songFixture) put(t *testing.T, owner, project string, song []byte) (domain.SongDetail, error) {
 	t.Helper()
-	return f.store.PutSong(context.Background(), owner, project, app.SongSource{TrackID: "track", Title: "Symphony", ContentType: "audio/mpeg"},
+	return f.store.PutSong(context.Background(), owner, project, domain.SongSource{TrackID: "track", Title: "Symphony", ContentType: "audio/mpeg"},
 		bytes.NewReader(song))
 }
 
@@ -333,13 +333,13 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := 21.3
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &start}); !errors.Is(err, domain.ErrSongNotReady) {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, domain.ProjectChange{SongStart: &start}); !errors.Is(err, domain.ErrSongNotReady) {
 		t.Fatalf("a start before the analysis = %v", err)
 	}
 	if err := f.store.AnalyzeWaiting(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &start}); err != nil {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, domain.ProjectChange{SongStart: &start}); err != nil {
 		t.Fatal(err)
 	}
 	song, err := f.store.Song(ctx, "user:alice", f.project)
@@ -356,7 +356,7 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 	}
 	// A start that leaves no usable excerpt changes nothing.
 	late := 170.0
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &late}); !errors.Is(err, domain.ErrSongStart) {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, domain.ProjectChange{SongStart: &late}); !errors.Is(err, domain.ErrSongStart) {
 		t.Fatalf("a late start = %v", err)
 	}
 	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.Selection.Excerpt[0] != 22 {
@@ -366,7 +366,7 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 	// excerpt again: the one the eighth version's rule picked, which the
 	// compute Worker is not asked for a second time.
 	asked, back := len(f.compute.asked), 40.6
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &back}); err != nil {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, domain.ProjectChange{SongStart: &back}); err != nil {
 		t.Fatal(err)
 	}
 	song, err = f.store.Song(ctx, "user:alice", f.project)
@@ -377,7 +377,7 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 		t.Fatalf("Chosen() back on the default start = %v, %v", start, err)
 	}
 	// Choosing the song again starts from its default too.
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &start}); err != nil {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, domain.ProjectChange{SongStart: &start}); err != nil {
 		t.Fatal(err)
 	}
 	if song, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); err != nil || song.Selection.Excerpt[0] != 40 {
@@ -593,13 +593,13 @@ func TestSongsAnEarlierVersionRefusedAreAnalysedAgain(t *testing.T) {
 	if err := f.store.AnalyzeWaiting(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	analyse := func(patience time.Duration) app.SongDetail {
+	analyse := func(patience time.Duration) domain.SongDetail {
 		t.Helper()
 		ctx, stop := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() { defer close(done); f.store.AnalyzeSongs(ctx) }()
 		defer func() { stop(); <-done }()
-		var song app.SongDetail
+		var song domain.SongDetail
 		for deadline := time.Now().Add(patience); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 			song, _ = f.store.Song(ctx, "user:alice", f.project)
 			if song.State == app.SongReady {
@@ -655,7 +655,7 @@ func TestTheSameSongIsAnalysedOnceForEveryone(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bob's copy of the same recording has another name.
-	song, err := f.store.PutSong(ctx, "user:bob", bobs.ID, app.SongSource{TrackID: "track", Title: "bob-rip-07", ContentType: "audio/mpeg"},
+	song, err := f.store.PutSong(ctx, "user:bob", bobs.ID, domain.SongSource{TrackID: "track", Title: "bob-rip-07", ContentType: "audio/mpeg"},
 		bytes.NewReader(songBytes(200, "shared")))
 	if err != nil || song.State != app.SongReady || f.music.songs != 1 {
 		t.Fatalf("bob's song = %+v, %v after %d analyses", song, err, f.music.songs)
@@ -749,7 +749,7 @@ func TestTheCopyOutlivesTheOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.store.PutSong(ctx, "user:alice", f.project, app.SongSource{Title: "Symphony", ContentType: "audio/mpeg"}, file)
+	_, err = f.store.PutSong(ctx, "user:alice", f.project, domain.SongSource{Title: "Symphony", ContentType: "audio/mpeg"}, file)
 	_ = file.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -777,7 +777,7 @@ func TestTheCopyOutlivesTheOriginal(t *testing.T) {
 func TestASongBrowsersCannotPlayIsDecodedToFLAC(t *testing.T) {
 	ctx := context.Background()
 	f := newSongFixture(t)
-	if _, err := f.store.PutSong(ctx, "user:alice", f.project, app.SongSource{Title: "APE"}, bytes.NewReader(songBytes(200, "ape"))); err != nil {
+	if _, err := f.store.PutSong(ctx, "user:alice", f.project, domain.SongSource{Title: "APE"}, bytes.NewReader(songBytes(200, "ape"))); err != nil {
 		t.Fatal(err)
 	}
 	song, err := f.store.Song(ctx, "user:alice", f.project)

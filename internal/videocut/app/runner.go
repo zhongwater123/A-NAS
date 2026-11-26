@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // The scheduler (docs/architecture/montage-center.md, 持久任务): one
@@ -88,7 +89,7 @@ type claimed struct {
 	id, owner, projectID string
 	// kind is generate, edit or recut (#596).
 	kind     string
-	settings JobSettings
+	settings domain.JobSettings
 	// plans is how many 方案 the job makes, as it started.
 	plans int
 }

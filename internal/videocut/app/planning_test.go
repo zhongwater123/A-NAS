@@ -51,7 +51,7 @@ func (e *jobEnv) grant(t *testing.T) {
 }
 
 // waitForPlan runs the job until it waits for VNAS.
-func (e *jobEnv) waitForPlan(t *testing.T, jobID string) app.Job {
+func (e *jobEnv) waitForPlan(t *testing.T, jobID string) domain.Job {
 	t.Helper()
 	job := e.settle(t, jobID)
 	if job.State != app.JobWaiting || job.WaitReason != app.WaitVNAS {
@@ -62,7 +62,7 @@ func (e *jobEnv) waitForPlan(t *testing.T, jobID string) app.Job {
 
 // planning starts a job with a grant, runs it until it waits for VNAS, and
 // claims and starts a round for it.
-func (e *jobEnv) planning(t *testing.T) (app.Job, app.Claim) {
+func (e *jobEnv) planning(t *testing.T) (domain.Job, domain.Claim) {
 	t.Helper()
 	e.grant(t)
 	job := e.waitForPlan(t, e.generate(t, "generate:1").ID)
@@ -70,7 +70,7 @@ func (e *jobEnv) planning(t *testing.T) (app.Job, app.Claim) {
 }
 
 // round claims and starts a round for Alice's job that wants one.
-func (e *jobEnv) round(t *testing.T) app.Claim {
+func (e *jobEnv) round(t *testing.T) domain.Claim {
 	t.Helper()
 	claim, err := e.store.ClaimRound(context.Background(), "user:alice")
 	if err != nil {
@@ -82,7 +82,7 @@ func (e *jobEnv) round(t *testing.T) app.Claim {
 	return claim
 }
 
-func (e *jobEnv) submit(t *testing.T, claim app.Claim, step string, answer json.RawMessage) app.ToolAnswer {
+func (e *jobEnv) submit(t *testing.T, claim domain.Claim, step string, answer json.RawMessage) domain.ToolAnswer {
 	t.Helper()
 	said, err := e.store.Submit(context.Background(), "user:alice", claim.JobID, claim.AttemptToken, step, answer)
 	if err != nil {
@@ -159,7 +159,7 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	}
 	// The shots wait for the outline.
 	if early, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, app.StepShots); err != nil ||
-		early.(*app.ToolAnswer).Status != app.ToolOutlineFirst {
+		early.(*domain.ToolAnswer).Status != app.ToolOutlineFirst {
 		t.Fatalf("shots brief before the outline = %+v, %v", early, err)
 	}
 	// A card outside the catalog is refused, with reasons.
@@ -718,7 +718,7 @@ func TestPlanningAgainEndsTheRoundInProgress(t *testing.T) {
 		}
 	}
 	if brief, err := env.store.Brief(ctx, "user:alice", job.ID, old.AttemptToken, app.StepOutline); err != nil ||
-		brief.(*app.ToolAnswer).Status != app.ToolRoundOver {
+		brief.(*domain.ToolAnswer).Status != app.ToolRoundOver {
 		t.Fatalf("the old round's brief = %+v, %v", brief, err)
 	}
 	if waiting := env.waitForPlan(t, job.ID); waiting.Step != "pick" || !env.marked(t) {
@@ -771,7 +771,7 @@ func TestAnswersForInputsTheJobNoLongerHasAreDropped(t *testing.T) {
 	// from its answers.
 	next := env.round(t)
 	if early, err := env.store.Brief(ctx, "user:alice", job.ID, next.AttemptToken, app.StepShots); err != nil ||
-		early.(*app.ToolAnswer).Status != app.ToolOutlineFirst {
+		early.(*domain.ToolAnswer).Status != app.ToolOutlineFirst {
 		t.Fatalf("the new round's shots brief before its outline = %+v, %v", early, err)
 	}
 	if taken := env.submit(t, next, app.StepOutline, outline("v2-0")); taken.Status != app.ToolAccepted {
@@ -802,7 +802,7 @@ func TestARoundForAnotherInputKeyIsOverAtOnce(t *testing.T) {
 		t.Fatalf("an outline for inputs the job no longer has = %+v", late)
 	}
 	if brief, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, app.StepOutline); err != nil ||
-		brief.(*app.ToolAnswer).Status != app.ToolRoundOver {
+		brief.(*domain.ToolAnswer).Status != app.ToolRoundOver {
 		t.Fatalf("its brief = %+v, %v", brief, err)
 	}
 	// A step that is gone altogether, as while the job waits upstream again.
@@ -822,7 +822,7 @@ func TestTwoAnswersAtOnceKeepOne(t *testing.T) {
 	job, claim := env.planning(t)
 	answers := []json.RawMessage{outline("v1-0"), outline("v1-1"), outline("v2-0"), outline("v2-1")}
 	var wg sync.WaitGroup
-	said := make([]app.ToolAnswer, len(answers))
+	said := make([]domain.ToolAnswer, len(answers))
 	failed := make([]error, len(answers))
 	for i, answer := range answers {
 		wg.Go(func() {
@@ -947,7 +947,7 @@ func newTwoPlanEnv(t *testing.T) *jobEnv {
 
 // outlineBrief reads the outline brief of a round: which 方案 it names (none
 // for the first) and how many earlier outlines it carries.
-func (e *jobEnv) outlineBrief(t *testing.T, claim app.Claim) (int, int) {
+func (e *jobEnv) outlineBrief(t *testing.T, claim domain.Claim) (int, int) {
 	t.Helper()
 	brief, err := e.store.Brief(context.Background(), "user:alice", claim.JobID, claim.AttemptToken, app.StepOutline)
 	if err != nil {
@@ -989,7 +989,7 @@ func TestARoundPlansBothPlansTheSecondAfterTheFirst(t *testing.T) {
 	// The model goes on before the job came to the second 方案: the job is
 	// still at the first's steps, or waits.
 	if early, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, app.StepShots); err != nil ||
-		early.(*app.ToolAnswer).Status != app.ToolOutlineFirst {
+		early.(*domain.ToolAnswer).Status != app.ToolOutlineFirst {
 		t.Fatalf("second shots brief before its outline = %+v, %v", early, err)
 	}
 	if plan, earlier := env.outlineBrief(t, claim); plan != 2 || earlier != 1 {
@@ -1180,7 +1180,7 @@ func TestARefusalThatCrossesPlanningAgainCountsForNothing(t *testing.T) {
 		}
 	}
 	env.compute.mu.Unlock()
-	answered := make(chan app.ToolAnswer, 1)
+	answered := make(chan domain.ToolAnswer, 1)
 	failed := make(chan error, 1)
 	go func() {
 		said, err := env.store.Submit(ctx, "user:alice", job.ID, claim.AttemptToken, app.StepShots, outline("v9-9"))

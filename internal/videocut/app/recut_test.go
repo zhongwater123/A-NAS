@@ -58,7 +58,7 @@ func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
 	if err := env.store.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", job.ID).Scan(&settingsJSON); err != nil {
 		t.Fatal(err)
 	}
-	var settings JobSettings
+	var settings domain.JobSettings
 	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil || settings.Recut == nil || settings.Recut.Change != "结尾留长一点" {
 		t.Fatalf("the recut's settings = %s, %v", settingsJSON, err)
 	}
@@ -72,7 +72,7 @@ func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
 		!slices.Equal(base.Shots[0].Pictures[0].Beats, []string{"c1/1", "c2/1", "c1/3"}) {
 		t.Fatalf("the base = %s, %v", settings.Recut.Base, err)
 	}
-	if templateOf(settings) != RecutTemplate || templateOf(JobSettings{}) != PlanTemplate {
+	if templateOf(settings) != RecutTemplate || templateOf(domain.JobSettings{}) != PlanTemplate {
 		t.Fatal("a recut is not planned with plan-v3")
 	}
 }
@@ -84,7 +84,7 @@ func TestARecutOfAnEditedVersionLeavesTheHandEditsOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
 		t.Fatal(err)
 	}
 	saving, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
@@ -125,7 +125,7 @@ func TestOnlyARecutTakesARound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); err != nil {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "lock", Shot: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1"); err != nil {
@@ -168,7 +168,7 @@ func TestARecutsBriefCarriesItsSentenceAndBase(t *testing.T) {
 	}
 	env.store.Exec(t, `INSERT INTO steps(job_id, name, input_key, state, result_json, started_at)
 		SELECT ?, name, input_key, state, result_json, started_at FROM steps WHERE job_id = 'job:1' AND name IN ('catalog', 'song')`, job.ID)
-	input := func() (PlanInput, error) { return env.store.storedInput(ctx, job.ID) }
+	input := func() (domain.PlanInput, error) { return env.store.storedInput(ctx, job.ID) }
 	if _, err := env.store.briefOf(ctx, job.ID, StepOutline, "key", input); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestARecutsBriefNamesTheCardsAsTheyAreNumberedNow(t *testing.T) {
 		job.ID, string(catalog))
 	env.store.Exec(t, `INSERT INTO steps(job_id, name, input_key, state, result_json, started_at)
 		SELECT ?, name, input_key, state, result_json, started_at FROM steps WHERE job_id = 'job:1' AND name = 'song'`, job.ID)
-	if _, err := env.store.briefOf(ctx, job.ID, StepOutline, "key", func() (PlanInput, error) { return env.store.storedInput(ctx, job.ID) }); err != nil {
+	if _, err := env.store.briefOf(ctx, job.ID, StepOutline, "key", func() (domain.PlanInput, error) { return env.store.storedInput(ctx, job.ID) }); err != nil {
 		t.Fatal(err)
 	}
 	base := string(compute.briefed[0].Base)

@@ -62,7 +62,7 @@ type jobRun struct {
 	// The steps' results.
 	analysis analysisResult
 	catalog  catalogResult
-	excerpt  Excerpt
+	excerpt  domain.Excerpt
 	// plan is the 方案 whose steps run, from 1 (0 before the first):
 	// picked to render are its own.
 	plan     int
@@ -914,12 +914,12 @@ func (s *Store) excerptOf(ctx context.Context, run *jobRun) (any, error) {
 
 // --- planning ---
 
-func (s *Store) planInput(run *jobRun, step string) PlanInput {
+func (s *Store) planInput(run *jobRun, step string) domain.PlanInput {
 	cards := make([]videocutcompute.CatalogCard, 0, len(run.catalog.Catalog))
 	for _, id := range run.catalog.Catalog {
 		cards = append(cards, run.catalog.Cards[id])
 	}
-	return PlanInput{JobID: run.id, Plan: run.plan, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked,
+	return domain.PlanInput{JobID: run.id, Plan: run.plan, Cards: cards, Music: run.excerpt.Music, Settings: run.settings, Picked: run.picked,
 		StepKey: run.keys[planStep(step, run.plan)], PickKey: run.keys["pick"]}
 }
 
@@ -940,7 +940,7 @@ func (s *Store) accept(ctx context.Context, jobID string, plan int, step, catalo
 	return err
 }
 
-func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, PlanInput) (json.RawMessage, error)) (any, error) {
+func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, domain.PlanInput) (json.RawMessage, error)) (any, error) {
 	if answer, ok, err := s.accepted(ctx, run.id, run.plan, step, run.keys["catalog"]); err != nil || ok {
 		return answer, err
 	}

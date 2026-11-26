@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -19,11 +20,11 @@ func TestTimelineUsesEveryPlannedSlotAndOnlyAvailableFootage(t *testing.T) {
 	run := &jobRun{
 		analysis: analysisResult{Videos: []analysedVideo{{AssetID: "video", Duration: 12}}},
 		catalog:  catalogResult{Cards: map[string]videocutcompute.CatalogCard{"card": {Video: "video", End: 12}, "filtered": {Video: "video", End: 12}}, Catalog: []string{"card"}},
-		excerpt:  Excerpt{Frames: 120},
+		excerpt:  domain.Excerpt{Frames: 120},
 		planned:  json.RawMessage(`{"slots":[[[[0,2],[2,4]]]]}`),
 	}
-	base := []Clip{{Video: "video", Card: "card", Slot: [2]float64{0, 2}, Share: 2, End: 2}, {Video: "video", Card: "card", Slot: [2]float64{2, 4}, Start: 2, End: 4, Share: 2}}
-	check := func(clips []Clip) error {
+	base := []domain.Clip{{Video: "video", Card: "card", Slot: [2]float64{0, 2}, Share: 2, End: 2}, {Video: "video", Card: "card", Slot: [2]float64{2, 4}, Start: 2, End: 4, Share: 2}}
+	check := func(clips []domain.Clip) error {
 		answer := videocutcompute.FillAnswer{}
 		for _, clip := range clips {
 			raw, err := json.Marshal(clip)
@@ -39,14 +40,14 @@ func TestTimelineUsesEveryPlannedSlotAndOnlyAvailableFootage(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name   string
-		mutate func([]Clip)
+		mutate func([]domain.Clip)
 	}{
-		{"repeated slot", func(c []Clip) { c[1].Slot = c[0].Slot }},
-		{"slot order", func(c []Clip) { c[1], c[0] = c[0], c[1] }},
-		{"unplanned lengths", func(c []Clip) { c[0].Slot[1], c[1].Slot[0] = 1, 1; c[0].Share, c[1].Share = 1, 3; c[1].End = 5 }},
-		{"wrong frames per slot", func(c []Clip) { c[0].Share, c[1].Share = 1, 3; c[1].End = 5 }},
-		{"filtered card", func(c []Clip) { c[0].Card = "filtered" }},
-		{"source too short", func(c []Clip) { c[0].End = 1.5 }},
+		{"repeated slot", func(c []domain.Clip) { c[1].Slot = c[0].Slot }},
+		{"slot order", func(c []domain.Clip) { c[1], c[0] = c[0], c[1] }},
+		{"unplanned lengths", func(c []domain.Clip) { c[0].Slot[1], c[1].Slot[0] = 1, 1; c[0].Share, c[1].Share = 1, 3; c[1].End = 5 }},
+		{"wrong frames per slot", func(c []domain.Clip) { c[0].Share, c[1].Share = 1, 3; c[1].End = 5 }},
+		{"filtered card", func(c []domain.Clip) { c[0].Card = "filtered" }},
+		{"source too short", func(c []domain.Clip) { c[0].End = 1.5 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clips := slices.Clone(base)

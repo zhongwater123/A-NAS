@@ -217,7 +217,7 @@ func (c *compute) Fill(_ context.Context, request videocutcompute.FillRequest, v
 		if c.external {
 			video = "asset:b1"
 		}
-		clip, _ := json.Marshal(app.Clip{Card: card.ID, Video: video, Start: card.Start, End: card.Start + 2,
+		clip, _ := json.Marshal(domain.Clip{Card: card.ID, Video: video, Start: card.Start, End: card.Start + 2,
 			Slot: [2]float64{float64(2 * i), float64(2*i + 2)}, Share: 2})
 		clips = append(clips, clip)
 	}
@@ -382,11 +382,11 @@ type planner struct {
 	mu     sync.Mutex
 	picks  int
 	shots  int
-	last   app.PlanInput
+	last   domain.PlanInput
 	unknow bool
 }
 
-func (p *planner) Pick(_ context.Context, input app.PlanInput) (json.RawMessage, error) {
+func (p *planner) Pick(_ context.Context, input domain.PlanInput) (json.RawMessage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.unknow {
@@ -397,7 +397,7 @@ func (p *planner) Pick(_ context.Context, input app.PlanInput) (json.RawMessage,
 	return json.RawMessage(`{"parts":[{"scenes":[]}]}`), nil
 }
 
-func (p *planner) Shots(_ context.Context, input app.PlanInput) (json.RawMessage, error) {
+func (p *planner) Shots(_ context.Context, input domain.PlanInput) (json.RawMessage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.shots++
@@ -415,8 +415,8 @@ func (music) ExcerptKey(_ context.Context, _, songID string, start float64) (str
 	return fmt.Sprintf("%s@%v", songID, start), nil
 }
 
-func (music) Excerpt(_ context.Context, _, songID string, start float64) (app.Excerpt, error) {
-	return app.Excerpt{Key: fmt.Sprintf("%s@%v", songID, start), Music: json.RawMessage(`{"parts":[{"level":"主歌"}]}`), Start: start, Frames: 120}, nil
+func (music) Excerpt(_ context.Context, _, songID string, start float64) (domain.Excerpt, error) {
+	return domain.Excerpt{Key: fmt.Sprintf("%s@%v", songID, start), Music: json.RawMessage(`{"parts":[{"level":"主歌"}]}`), Start: start, Frames: 120}, nil
 }
 
 func (music) Audio(context.Context, string, string) (*os.File, error) { return os.Open(os.DevNull) }
@@ -429,7 +429,7 @@ type jobEnv struct {
 	planner *planner
 	clock   *clock
 	root    string
-	project app.ProjectDetail
+	project domain.ProjectDetail
 	// markers, when set, has the member's VNAS plan, leaving markers here.
 	markers string
 	// plans is how many 方案 each job makes: one unless a test asks for more.
@@ -476,7 +476,7 @@ func newJobEnv(t *testing.T) *jobEnv {
 	return env
 }
 
-func (e *jobEnv) generate(t *testing.T, key string) app.Job {
+func (e *jobEnv) generate(t *testing.T, key string) domain.Job {
 	t.Helper()
 	job, created, err := e.store.Generate(context.Background(), "user:alice", e.project.ID, key)
 	if err != nil || !created || job.State != app.JobQueued {
@@ -487,7 +487,7 @@ func (e *jobEnv) generate(t *testing.T, key string) app.Job {
 
 // settle runs the job, letting time pass while it waits to be tried again,
 // until it ends or needs the member.
-func (e *jobEnv) settle(t *testing.T, jobID string) app.Job {
+func (e *jobEnv) settle(t *testing.T, jobID string) domain.Job {
 	t.Helper()
 	for range 20 {
 		if !e.store.RunOnce(context.Background()) {
@@ -500,10 +500,10 @@ func (e *jobEnv) settle(t *testing.T, jobID string) app.Job {
 		}
 	}
 	t.Fatalf("job %s never settled: %+v", jobID, e.job(t, jobID))
-	return app.Job{}
+	return domain.Job{}
 }
 
-func (e *jobEnv) job(t *testing.T, jobID string) app.Job {
+func (e *jobEnv) job(t *testing.T, jobID string) domain.Job {
 	t.Helper()
 	job, err := e.store.Job(context.Background(), "user:alice", jobID)
 	if err != nil {
@@ -819,7 +819,7 @@ func TestAJobKeepsTheVideosAndSettingsItStartedWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	ask := "多一点海"
-	if _, err := env.store.UpdateProject(ctx, "user:alice", env.project.ID, app.ProjectChange{Ask: &ask}); err != nil {
+	if _, err := env.store.UpdateProject(ctx, "user:alice", env.project.ID, domain.ProjectChange{Ask: &ask}); err != nil {
 		t.Fatal(err)
 	}
 	if done := env.settle(t, job.ID); done.State != app.JobDone {
@@ -979,7 +979,7 @@ func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
 
 // ownSongs reopens the store with its own songs, decoded by a stand-in FFmpeg
 // worker, and returns how to give the project one.
-func (e *jobEnv) ownSongs(t *testing.T) func(name string) app.SongDetail {
+func (e *jobEnv) ownSongs(t *testing.T) func(name string) domain.SongDetail {
 	t.Helper()
 	if err := e.store.Close(); err != nil {
 		t.Fatal(err)
@@ -990,9 +990,9 @@ func (e *jobEnv) ownSongs(t *testing.T) func(name string) app.SongDetail {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	e.store = store
-	return func(name string) app.SongDetail {
+	return func(name string) domain.SongDetail {
 		t.Helper()
-		song, err := store.PutSong(t.Context(), "user:alice", e.project.ID, app.SongSource{Title: name},
+		song, err := store.PutSong(t.Context(), "user:alice", e.project.ID, domain.SongSource{Title: name},
 			strings.NewReader("song 200 "+name))
 		if err != nil {
 			t.Fatal(err)

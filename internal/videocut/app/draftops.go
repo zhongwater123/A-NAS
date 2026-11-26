@@ -33,7 +33,7 @@ func shotAt(state draftState, n int) (int, error) {
 }
 
 // apply makes a step that needs nothing beyond the draft and its source.
-func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, error) {
+func (src *editSource) apply(state draftState, op domain.DraftOp) (draftState, string, error) {
 	next := state.clone()
 	switch op.Type {
 	case "replace":

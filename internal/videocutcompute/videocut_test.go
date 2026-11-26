@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -125,7 +125,7 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	}
 	frames := 0
 	for _, raw := range answer.Clips {
-		var clip app.Clip
+		var clip domain.Clip
 		if err := json.Unmarshal(raw, &clip); err != nil {
 			t.Fatal(err)
 		}

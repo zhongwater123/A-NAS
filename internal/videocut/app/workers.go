@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -140,7 +141,7 @@ type musicAnswer struct {
 
 // Analyze hands the two streams to the Worker; it reads them to their end,
 // and analyses them once whole says they were written whole.
-func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (Analysis, error) {
+func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (domain.Analysis, error) {
 	timeout := w.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
@@ -151,17 +152,17 @@ func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <
 	}}
 	var answer musicAnswer
 	if err := callWorker(ctx, w.Socket, timeout, request, []*os.File{stereo, mono}, whole, &answer); err != nil {
-		return Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	raw, err := base64.StdEncoding.DecodeString(answer.Loudness)
 	if err != nil {
-		return Analysis{}, fmt.Errorf("%w: loudness: %v", videocutcompute.ErrWorkerFailed, err)
+		return domain.Analysis{}, fmt.Errorf("%w: loudness: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	loudness, err := decodeLoudness(raw)
 	if err != nil || len(answer.Downbeats) == 0 && len(answer.Beats) == 0 && len(loudness) == 0 {
-		return Analysis{}, fmt.Errorf("%w: the answer has no song in it: %v", videocutcompute.ErrWorkerFailed, err)
+		return domain.Analysis{}, fmt.Errorf("%w: the answer has no song in it: %v", videocutcompute.ErrWorkerFailed, err)
 	}
-	return Analysis{Structure: answer.Structure, Loudness: loudness, Seconds: answer.Seconds}, nil
+	return domain.Analysis{Structure: answer.Structure, Loudness: loudness, Seconds: answer.Seconds}, nil
 }
 
 var _ MusicAnalyzer = MusicWorker{}

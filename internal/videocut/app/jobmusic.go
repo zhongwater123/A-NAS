@@ -19,18 +19,6 @@ import (
 // What a job asks of its project's song: the store is the jobs' Music
 // (pipeline.go).
 
-// Excerpt is the part of the song the film is cut to.
-type Excerpt struct {
-	// Key names the song's copy, its analysis and the excerpt's start.
-	Key string `json:"key"`
-	// Music is the excerpt as the compute Worker's domain reads it.
-	Music json.RawMessage `json:"music"`
-	// Start is where the excerpt starts in the song, in seconds; Frames
-	// is how long the film is, at FilmRate.
-	Start  float64 `json:"start"`
-	Frames int     `json:"frames"`
-}
-
 // DefaultStart stands for the excerpt the eighth version's rule picks: a
 // project whose member never dragged the start follows it, also when the
 // analysis finishes after the job began.
@@ -168,14 +156,14 @@ func named(music json.RawMessage, title string) (json.RawMessage, error) {
 
 // Excerpt is owner's song's excerpt from start, or the default one for
 // DefaultStart (or any negative start).
-func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error) {
+func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64) (domain.Excerpt, error) {
 	row, err := s.ownSong(ctx, owner, songID)
 	if err != nil {
-		return Excerpt{}, err
+		return domain.Excerpt{}, err
 	}
 	start, err = row.excerptStart(start)
 	if err != nil {
-		return Excerpt{}, err
+		return domain.Excerpt{}, err
 	}
 	st, selection, music := row.analysis.Structure, row.analysis.Selection, row.analysis.Music
 	if start != selection.Excerpt[0] {
@@ -184,24 +172,24 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		// project keeps it any more.
 		kept, err := s.draggedSelection(ctx, owner, songID, start)
 		if err != nil {
-			return Excerpt{}, err
+			return domain.Excerpt{}, err
 		}
 		if kept == nil {
 			if s.compute == nil {
-				return Excerpt{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
+				return domain.Excerpt{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 			}
 			loudness, err := decodeLoudness(row.loudness)
 			if err != nil {
-				return Excerpt{}, err
+				return domain.Excerpt{}, err
 			}
 			dragged, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
 			switch {
 			case errors.Is(err, videocutcompute.ErrWorkerRefused):
-				return Excerpt{}, fmt.Errorf("%w: %v", domain.ErrSongUnusable, err)
+				return domain.Excerpt{}, fmt.Errorf("%w: %v", domain.ErrSongUnusable, err)
 			case err != nil:
-				return Excerpt{}, err
+				return domain.Excerpt{}, err
 			case dragged.Unusable != "":
-				return Excerpt{}, fmt.Errorf("%w: %s", domain.ErrSongUnusable, dragged.Unusable)
+				return domain.Excerpt{}, fmt.Errorf("%w: %s", domain.ErrSongUnusable, dragged.Unusable)
 			}
 			kept = &keptSelection{Selection: dragged, Music: dragged.Music}
 		}
@@ -209,9 +197,9 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 	}
 	music, err = named(music, row.title)
 	if err != nil {
-		return Excerpt{}, err
+		return domain.Excerpt{}, err
 	}
-	return Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
+	return domain.Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
 		Frames: filmFrame(selection.Seconds)}, nil
 }
 

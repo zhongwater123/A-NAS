@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // SongHeader carries what the Product Service tells of the track it copies
@@ -89,7 +90,7 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 		}
 		// The library does not bound a title; the header's reader does
 		// (decodeSource).
-		source := app.SongSource{TrackID: track.ID, Title: app.SongTitle(track.Title)}
+		source := domain.SongSource{TrackID: track.ID, Title: app.SongTitle(track.Title)}
 		if !track.Transcode {
 			source.ContentType = track.ContentType()
 		}
@@ -108,19 +109,19 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 	}
 }
 
-func encodeSource(source app.SongSource) (string, error) {
+func encodeSource(source domain.SongSource) (string, error) {
 	data, err := json.Marshal(source)
 	return base64.StdEncoding.EncodeToString(data), err
 }
 
-func decodeSource(header string) (app.SongSource, bool) {
+func decodeSource(header string) (domain.SongSource, bool) {
 	data, err := base64.StdEncoding.DecodeString(header)
 	if err != nil || len(data) > 4<<10 {
-		return app.SongSource{}, false
+		return domain.SongSource{}, false
 	}
-	var source app.SongSource
+	var source domain.SongSource
 	if err := json.Unmarshal(data, &source); err != nil {
-		return app.SongSource{}, false
+		return domain.SongSource{}, false
 	}
 	return source, true
 }
@@ -163,7 +164,7 @@ func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user account
 
 // serveSong sends a song's copy with Range support when browsers play its
 // format, or decoded to FLAC from start.
-func (h *handler) serveSong(w http.ResponseWriter, r *http.Request, audio app.SongAudio) {
+func (h *handler) serveSong(w http.ResponseWriter, r *http.Request, audio domain.SongAudio) {
 	defer func() { _ = audio.File.Close() }()
 	if audio.ContentType != "" {
 		w.Header().Set("Content-Type", audio.ContentType)

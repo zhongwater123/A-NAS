@@ -25,6 +25,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -143,7 +144,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 		}
 	}
 
-	var project app.ProjectDetail
+	var project domain.ProjectDetail
 	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects",
 		`{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusCreated).Body, &project)
 	owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusOK)
@@ -156,7 +157,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if project.Name != "海边一日" || project.Chronological || project.AssetCount != 2 || project.Assets[1].Status != app.AssetAvailable {
 		t.Fatalf("project = %+v", project)
 	}
-	var page app.ProjectPage
+	var page domain.ProjectPage
 	decode(t, owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK).Body, &page)
 	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
 		t.Fatalf("projects = %+v", page)
@@ -165,12 +166,12 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
 		t.Fatalf("generate without a song: %s", response.Body.String())
 	}
-	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, app.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
+	if _, err := montageStore.PutSong(t.Context(), principal.UserID, project.ID, domain.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
 		t.Fatal(err)
 	}
 
 	// A film: 202 and the job to poll; one job at a time.
-	var job app.Job
+	var job domain.Job
 	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
 	if job.State != app.JobQueued || len(job.Steps) != 3+5*app.DefaultPlans {
 		t.Fatalf("job = %+v", job)
@@ -204,7 +205,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)
 	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
-	var withJob app.ProjectDetail
+	var withJob domain.ProjectDetail
 	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &withJob)
 	if withJob.Job == nil || withJob.Job.ID != job.ID {
 		t.Fatalf("the project's job = %+v", withJob.Job)
@@ -212,7 +213,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
 	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
 	var notices struct {
-		Items []app.Notice `json:"items"`
+		Items []domain.Notice `json:"items"`
 	}
 	decode(t, owner.do(http.MethodGet, "/api/v1/montage/notices", "", nil, http.StatusOK).Body, &notices)
 	if len(notices.Items) != 0 {

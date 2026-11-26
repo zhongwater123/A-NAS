@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -20,7 +19,7 @@ func TestEditingErrorsAnswerWhatThePageActsOn(t *testing.T) {
 		code    string
 		message string
 	}{
-		{&app.EditRefusal{Reason: "这个节拍已用在第 3 镜"}, http.StatusUnprocessableEntity, "edit_refused", "这个节拍已用在第 3 镜"},
+		{&domain.EditRefusal{Reason: "这个节拍已用在第 3 镜"}, http.StatusUnprocessableEntity, "edit_refused", "这个节拍已用在第 3 镜"},
 		{fmt.Errorf("wrapped: %w", domain.ErrDraftConflict), http.StatusConflict, "draft_conflict", ""},
 		{domain.ErrNotEditable, http.StatusConflict, "not_editable", ""},
 		{domain.ErrAnalysisChanged, http.StatusConflict, "analysis_changed", "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"},
@@ -59,7 +58,7 @@ func TestASongIsSentInRanges(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("Range", "bytes=2-5")
 	w := httptest.NewRecorder()
-	(&handler{}).serveSong(w, request, app.SongAudio{File: file, ContentType: "audio/mpeg"})
+	(&handler{}).serveSong(w, request, domain.SongAudio{File: file, ContentType: "audio/mpeg"})
 	if w.Code != http.StatusPartialContent || w.Body.String() != "2345" || w.Header().Get("Content-Range") != "bytes 2-5/10" ||
 		w.Header().Get("Content-Type") != "audio/mpeg" {
 		t.Fatalf("a range of the song = %d %q %v", w.Code, w.Body.String(), w.Header())

@@ -21,16 +21,16 @@ import (
 // planned again from the plan it came from, without the shots changed by
 // hand. The same requestKey again returns the same job; a project with a
 // job in progress answers ErrJobActive.
-func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, change string) (Job, bool, error) {
+func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, change string) (domain.Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) || strings.TrimSpace(change) == "" || !validText(change, MaxAskRunes) {
-		return Job{}, false, domain.ErrInvalid
+		return domain.Job{}, false, domain.ErrInvalid
 	}
 	if !s.runsJobs() {
-		return Job{}, false, domain.ErrJobsUnavailable
+		return domain.Job{}, false, domain.ErrJobsUnavailable
 	}
 	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindRecut, "source_version_id", versionID)
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	if jobID != "" {
 		job, err := s.Job(ctx, owner, jobID)
@@ -38,11 +38,11 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	}
 	src, err := s.versionSource(ctx, owner, versionID)
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	base, places, err := recutBase(src)
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	created := false
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
@@ -63,7 +63,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 			return err
 		}
 		settings.ProjectName, settings.Edit = row.name, nil
-		settings.Recut = &RecutSettings{Change: change, Base: base, Cards: places}
+		settings.Recut = &domain.RecutSettings{Change: change, Base: base, Cards: places}
 		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindRecut, settings: settings, plans: 1,
 			sourceVersion: sql.NullString{String: versionID, Valid: true}}); err != nil {
 			return err
@@ -75,7 +75,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 		return err
 	})
 	if err != nil {
-		return Job{}, false, err
+		return domain.Job{}, false, err
 	}
 	s.wakeJobs()
 	job, err := s.Job(ctx, owner, jobID)
@@ -89,7 +89,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 // not find (unmet) is left out, which the new round says for itself. The
 // plan names cards by their numbers then; places are where those cards were
 // in their videos, by which the recut finds them again (alignBase).
-func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
+func recutBase(src *editSource) (json.RawMessage, map[string]domain.CardPlace, error) {
 	var outline map[string]any
 	var shots struct {
 		Answer struct {
@@ -101,7 +101,7 @@ func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
 	}
 	delete(outline, "unmet")
 	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}
-	places := map[string]CardPlace{}
+	places := map[string]domain.CardPlace{}
 	for _, id := range base.cards() {
 		if card, ok := src.cards[id]; ok {
 			places[id] = placeOf(card)
@@ -111,25 +111,8 @@ func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
 	return encoded, places, err
 }
 
-// CardPlace is where a card is in its video: the footage it cuts and the
-// instants of its beats. The analysis numbers cards by the videos' order in
-// the job, and cuts and describes them again when the photo library
-// analyses a video again; a card in the same place is the same footage,
-// whatever its number.
-type CardPlace struct {
-	Video string    `json:"video"`
-	Start float64   `json:"start"`
-	End   float64   `json:"end"`
-	Times []float64 `json:"times"`
-}
-
-func placeOf(card videocutcompute.CatalogCard) CardPlace {
-	return CardPlace{Video: card.Video, Start: card.Start, End: card.End, Times: card.Times}
-}
-
-func (p CardPlace) key() string {
-	encoded, _ := json.Marshal(p)
-	return string(encoded)
+func placeOf(card videocutcompute.CatalogCard) domain.CardPlace {
+	return domain.CardPlace{Video: card.Video, Start: card.Start, End: card.End, Times: card.Times}
 }
 
 // recutPlan is a recut's base as it is passed on.
@@ -212,10 +195,10 @@ func renameIn(object map[string]any, field string, to func(string) (string, bool
 // footage now. A card no longer in its place (its video gone, or cut or
 // described anew) is left out, and its scenes and pictures are picked again;
 // the rest stay as they were planned.
-func alignBase(base json.RawMessage, places map[string]CardPlace, cards []videocutcompute.CatalogCard) (json.RawMessage, error) {
+func alignBase(base json.RawMessage, places map[string]domain.CardPlace, cards []videocutcompute.CatalogCard) (json.RawMessage, error) {
 	now := map[string]string{}
 	for _, card := range cards {
-		now[placeOf(card).key()] = card.ID
+		now[placeOf(card).Key()] = card.ID
 	}
 	var plan recutPlan
 	if err := json.Unmarshal(base, &plan); err != nil {
@@ -226,7 +209,7 @@ func alignBase(base json.RawMessage, places map[string]CardPlace, cards []videoc
 		if !ok {
 			return "", false
 		}
-		id, ok := now[place.key()]
+		id, ok := now[place.Key()]
 		return id, ok
 	})
 	return json.Marshal(plan)

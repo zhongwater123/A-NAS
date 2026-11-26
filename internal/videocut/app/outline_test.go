@@ -22,7 +22,7 @@ func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 			t.Fatal(err)
 		}
 		if outline.VersionNumber != 1 || outline.Plan.Design != "从海边走到山里" || len(outline.Parts) != 2 || outline.Seconds != 14 ||
-			outline.Counts != (DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) || !slices.Equal(outline.Unmet, []string{"直升机", "雪地", "日落"}) {
+			outline.Counts != (domain.DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) || !slices.Equal(outline.Unmet, []string{"直升机", "雪地", "日落"}) {
 			t.Fatalf("the outline = %+v", outline)
 		}
 		var beats []string
@@ -44,7 +44,7 @@ func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []DraftOp{{Type: "replace", Shot: 1, Beat: "c1/3"}, {Type: "lock", Shot: 2}, {Type: "delete", Shot: 4}} {
+	for _, op := range []domain.DraftOp{{Type: "replace", Shot: 1, Beat: "c1/3"}, {Type: "lock", Shot: 2}, {Type: "delete", Shot: 4}} {
 		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
 			t.Fatal(err)
 		}

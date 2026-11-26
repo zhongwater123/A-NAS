@@ -247,7 +247,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	}})
 	catalog, _ := json.Marshal(catalogResult{Cards: cards, Catalog: []string{"c1", "c2", "c3", "c4"}})
 	music := `{"seconds":14,"parts":[{"start":0,"end":8,"level":"主歌","slots":[[0,4],[4,8]]},{"start":8,"end":14,"level":"高潮","slots":[[8,11],[11,14]]}]}`
-	song, _ := json.Marshal(Excerpt{Key: "song", Music: json.RawMessage(music), Start: 31.5, Frames: 420})
+	song, _ := json.Marshal(domain.Excerpt{Key: "song", Music: json.RawMessage(music), Start: 31.5, Frames: 420})
 	pick := `{"design":"从海边走到山里","opening":"海","ending":"山","unmet":["直升机"," 雪地 "],"parts":[{"name":"海边","summary":"走","scenes":[{"query":"海边散步","cards":["c1","c2"]}]},
 		{"name":"山里","summary":"爬","scenes":[{"query":"海浪","cards":["c2"]},{"query":"山路","cards":["c3","c4"]}]}]}`
 	shots := `{"answer":{"unmet":["雪地","日落"],"parts":[{"name":"海边","pictures":[{"beats":["c1/1","c2/1","c1/3"],"shows":"","link":""}]},
@@ -294,7 +294,7 @@ func windowsOf(n int) []photos.Window {
 	return list
 }
 
-func beats(draft Draft) []string {
+func beats(draft domain.Draft) []string {
 	var out []string
 	for _, shot := range draft.Shots {
 		out = append(out, shot.Beat)
@@ -304,7 +304,7 @@ func beats(draft Draft) []string {
 
 func refusedWith(t *testing.T, err error, reason string) {
 	t.Helper()
-	var refusal *EditRefusal
+	var refusal *domain.EditRefusal
 	if !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, reason) {
 		t.Fatalf("got %v, want a refusal saying %q", err, reason)
 	}
@@ -324,7 +324,7 @@ func TestADraftStartsAsItsVersionAndIsTheMembersAlone(t *testing.T) {
 	if last.Start != 11 || last.End != 14 || last.Query != "山路" || !last.Portrait || last.Changed || last.From != 4 || last.To != 7 {
 		t.Fatalf("the last shot = %+v", last)
 	}
-	if draft.Counts != (DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) || draft.SongStart != 31.5 || draft.Plan.Design != "从海边走到山里" || len(draft.Parts) != 2 {
+	if draft.Counts != (domain.DraftCounts{Shots: 4, Videos: 2, Portrait: 1}) || draft.SongStart != 31.5 || draft.Plan.Design != "从海边走到山里" || len(draft.Parts) != 2 {
 		t.Fatalf("the draft = %+v", draft)
 	}
 	again, err := env.store.VersionDraft(ctx, editOwner, env.version)
@@ -335,10 +335,10 @@ func TestADraftStartsAsItsVersionAndIsTheMembersAlone(t *testing.T) {
 	if _, err := env.store.VersionDraft(ctx, editOther, env.version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's VersionDraft = %v", err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOther, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := env.store.EditDraft(ctx, editOther, draft.ID, 0, domain.DraftOp{Type: "lock", Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's EditDraft = %v", err)
 	}
-	if _, err := env.store.DraftCandidates(ctx, editOther, draft.ID, CandidateQuery{Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := env.store.DraftCandidates(ctx, editOther, draft.ID, domain.CandidateQuery{Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's DraftCandidates = %v", err)
 	}
 	if _, err := env.store.DraftShots(ctx, editOther, draft.ID); !errors.Is(err, domain.ErrNotFound) {
@@ -410,7 +410,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	edit := func(op DraftOp) (Draft, error) {
+	edit := func(op domain.DraftOp) (domain.Draft, error) {
 		t.Helper()
 		next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op)
 		if err == nil {
@@ -419,42 +419,42 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 		return next, err
 	}
 	refusals := []struct {
-		op     DraftOp
+		op     domain.DraftOp
 		reason string
 	}{
-		{DraftOp{Type: "replace", Shot: 1, Beat: "c2/2"}, "已用在第 3 镜"},
-		{DraftOp{Type: "replace", Shot: 1, Beat: "c4/1"}, "不够第 1 镜"},
-		{DraftOp{Type: "replace", Shot: 1, Beat: "c5/1"}, "不在这一版能用的素材里"},
-		{DraftOp{Type: "move", Shot: 2, To: 3}, "同一个段落"},
-		{DraftOp{Type: "revert", Shot: 1}, "没有改过"},
+		{domain.DraftOp{Type: "replace", Shot: 1, Beat: "c2/2"}, "已用在第 3 镜"},
+		{domain.DraftOp{Type: "replace", Shot: 1, Beat: "c4/1"}, "不够第 1 镜"},
+		{domain.DraftOp{Type: "replace", Shot: 1, Beat: "c5/1"}, "不在这一版能用的素材里"},
+		{domain.DraftOp{Type: "move", Shot: 2, To: 3}, "同一个段落"},
+		{domain.DraftOp{Type: "revert", Shot: 1}, "没有改过"},
 	}
 	for _, refusal := range refusals {
 		_, err := edit(refusal.op)
 		refusedWith(t, err, refusal.reason)
 	}
-	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c9/1"}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := edit(domain.DraftOp{Type: "replace", Shot: 1, Beat: "c9/1"}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a beat of no card = %v", err)
 	}
 	if draft.Revision != 0 {
 		t.Fatalf("refused steps moved the draft to revision %d", draft.Revision)
 	}
 	// Replace, and the shot is changed; a portrait beat may be chosen by hand.
-	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
 		t.Fatal(err)
 	}
 	if !draft.Shots[0].Changed || draft.Message != "第 1 镜已替换" || !draft.CanUndo {
 		t.Fatalf("after replacing = %+v, %q", draft.Shots[0], draft.Message)
 	}
 	// Move: a locked shot stays.
-	if _, err := edit(DraftOp{Type: "lock", Shot: 2}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "lock", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = edit(DraftOp{Type: "move", Shot: 1, To: 2})
+	_, err = edit(domain.DraftOp{Type: "move", Shot: 1, To: 2})
 	refusedWith(t, err, "锁定的镜头不动")
-	if _, err := edit(DraftOp{Type: "unlock", Shot: 2}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "unlock", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := edit(DraftOp{Type: "move", Shot: 1, To: 2}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "move", Shot: 1, To: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(beats(draft), []string{"c2/1", "c1/3", "c2/2", "c3/2"}) {
@@ -462,7 +462,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	}
 	// Delete: shot 2 (c1/3, 4–8 s) could go to c2/1 before it or c2/2
 	// after it, both long enough; c2/2 looks like it.
-	if _, err := edit(DraftOp{Type: "delete", Shot: 2}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "delete", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(beats(draft), []string{"c2/1", "c2/2", "c3/2"}) || !slices.Equal(draft.Shots[1].Slots, []int{2, 3}) ||
@@ -471,7 +471,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	}
 	// Shot 2 (c2/2, 4–11 s) now: both sides cover it and look like it
 	// alike, so the one before takes it.
-	if _, err := edit(DraftOp{Type: "delete", Shot: 2}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "delete", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(beats(draft), []string{"c2/1", "c3/2"}) || !slices.Equal(draft.Shots[0].Slots, []int{1, 2, 3}) {
@@ -479,32 +479,32 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 	}
 	// Neither c3/2 nor c2/1 covers the whole film: shot 1 cannot go; and
 	// the last shot never can.
-	_, err = edit(DraftOp{Type: "delete", Shot: 1})
+	_, err = edit(domain.DraftOp{Type: "delete", Shot: 1})
 	refusedWith(t, err, "都不够长")
-	if _, err := edit(DraftOp{Type: "reset"}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "reset"}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(beats(draft), []string{"c1/1", "c2/1", "c2/2", "c3/2"}) {
 		t.Fatalf("after resetting = %v", beats(draft))
 	}
 	// Revert puts back the version's beat.
-	if _, err := edit(DraftOp{Type: "replace", Shot: 4, Beat: "c3/1"}); err != nil {
+	if _, err := edit(domain.DraftOp{Type: "replace", Shot: 4, Beat: "c3/1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := edit(DraftOp{Type: "revert", Shot: 4}); err != nil || beats(draft)[3] != "c3/2" {
+	if _, err := edit(domain.DraftOp{Type: "revert", Shot: 4}); err != nil || beats(draft)[3] != "c3/2" {
 		t.Fatalf("after reverting = %v, %v", beats(draft), err)
 	}
 	// A shot that took the slots of the one before it is reverted to its
 	// own beat, not to the deleted shot's: c2/1 takes shot 1's slot, is
 	// replaced, and comes back.
-	if _, err := edit(DraftOp{Type: "delete", Shot: 1}); err != nil || !slices.Equal(beats(draft), []string{"c2/1", "c2/2", "c3/2"}) ||
+	if _, err := edit(domain.DraftOp{Type: "delete", Shot: 1}); err != nil || !slices.Equal(beats(draft), []string{"c2/1", "c2/2", "c3/2"}) ||
 		draft.Shots[0].Changed {
 		t.Fatalf("after deleting the first shot = %v %+v, %v", beats(draft), draft.Shots[0], err)
 	}
-	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil || !draft.Shots[0].Changed {
+	if _, err := edit(domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil || !draft.Shots[0].Changed {
 		t.Fatalf("after replacing the longer shot = %+v, %v", draft.Shots[0], err)
 	}
-	if _, err := edit(DraftOp{Type: "revert", Shot: 1}); err != nil || beats(draft)[0] != "c2/1" || draft.Shots[0].Changed {
+	if _, err := edit(domain.DraftOp{Type: "revert", Shot: 1}); err != nil || beats(draft)[0] != "c2/1" || draft.Shots[0].Changed {
 		t.Fatalf("after reverting the longer shot = %v %+v, %v", beats(draft), draft.Shots[0], err)
 	}
 }
@@ -523,10 +523,10 @@ func TestTwoWindowsEditingAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); err != nil {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "lock", Shot: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); !errors.Is(err, domain.ErrDraftConflict) {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); !errors.Is(err, domain.ErrDraftConflict) {
 		t.Fatalf("a step on an old revision = %v", err)
 	}
 	now, err := env.store.VersionDraft(ctx, editOwner, env.version)
@@ -545,30 +545,30 @@ func TestUndoGoesBackAHundredStepsAtMost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := func(op DraftOp) {
+	step := func(op domain.DraftOp) {
 		t.Helper()
 		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Undo after undo goes on back, not forward again.
-	step(DraftOp{Type: "replace", Shot: 1, Beat: "c1/2"})
-	step(DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"})
-	step(DraftOp{Type: "undo"})
+	step(domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/2"})
+	step(domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"})
+	step(domain.DraftOp{Type: "undo"})
 	if beats(draft)[0] != "c1/2" || draft.Message != "已撤销" {
 		t.Fatalf("one undo = %v", beats(draft))
 	}
-	step(DraftOp{Type: "undo"})
+	step(domain.DraftOp{Type: "undo"})
 	if beats(draft)[0] != "c1/1" || draft.CanUndo {
 		t.Fatalf("two undos = %v, can undo %v", beats(draft), draft.CanUndo)
 	}
-	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "undo"})
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "undo"})
 	refusedWith(t, err, "没有可以撤销")
 	for n := range 101 {
 		if n%2 == 0 {
-			step(DraftOp{Type: "lock", Shot: 2})
+			step(domain.DraftOp{Type: "lock", Shot: 2})
 		} else {
-			step(DraftOp{Type: "unlock", Shot: 2})
+			step(domain.DraftOp{Type: "unlock", Shot: 2})
 		}
 	}
 	// The step and the hundred before it.
@@ -577,13 +577,13 @@ func TestUndoGoesBackAHundredStepsAtMost(t *testing.T) {
 	}
 	undone := 0
 	for draft.CanUndo {
-		step(DraftOp{Type: "undo"})
+		step(domain.DraftOp{Type: "undo"})
 		undone++
 	}
 	if undone != keptRevisions {
 		t.Fatalf("undid %d steps", undone)
 	}
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "undo"}); err == nil {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "undo"}); err == nil {
 		t.Fatal("undid a step older than the last hundred")
 	}
 }
@@ -602,14 +602,14 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 4})
+	draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "lock", Shot: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed := int64(7)
 	shuffled := map[int][]string{}
 	for round := range 2 {
-		next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+		next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "shuffle", Seed: &seed})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -617,7 +617,7 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 		if !strings.HasSuffix(next.Message, "锁住的 1 个没动") {
 			t.Fatalf("message %q", next.Message)
 		}
-		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, DraftOp{Type: "undo"}); err != nil {
+		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, domain.DraftOp{Type: "undo"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -649,7 +649,7 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 		t.Fatalf("searched for %v", env.search.texts[0])
 	}
 	env.search.err = domain.ErrSearchModel
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle"}); !errors.Is(err, domain.ErrSearchModel) {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "shuffle"}); !errors.Is(err, domain.ErrSearchModel) {
 		t.Fatalf("a shuffle with another model = %v", err)
 	}
 }
@@ -661,11 +661,11 @@ func TestCandidatesForAShot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1})
+	list, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := func(candidates []Candidate) []string {
+	names := func(candidates []domain.Candidate) []string {
 		var out []string
 		for _, c := range candidates {
 			out = append(out, c.Beat)
@@ -679,15 +679,15 @@ func TestCandidatesForAShot(t *testing.T) {
 	if list.Planned[0].UsedBy != 2 || list.Results[3].Fits || !list.Results[1].Portrait || list.SameCard[0].TakenAt == nil {
 		t.Fatalf("candidates = %+v", list)
 	}
-	if !slices.Equal(list.Scenes, []SceneCount{{"山路", 2}, {"海边", 2}}) {
+	if !slices.Equal(list.Scenes, []domain.SceneCount{{Scene: "山路", Cards: 2}, {Scene: "海边", Cards: 2}}) {
 		t.Fatalf("scenes = %v", list.Scenes)
 	}
-	filtered, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Scene: "山路", Landscape: true})
+	filtered, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1, Scene: "山路", Landscape: true})
 	if err != nil || len(filtered.Results) != 0 {
 		t.Fatalf("landscape 山路 = %v, %v", names(filtered.Results), err)
 	}
 	env.search.hits = []photos.WindowMatch{{AssetID: videoB, Window: 0, Score: 0.9}, {AssetID: videoA, Window: 15, Score: 0.4}}
-	found, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"})
+	found, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1, Q: "山"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,17 +697,17 @@ func TestCandidatesForAShot(t *testing.T) {
 	// Words as long as a search may be, with blank around them, are searched
 	// for without it, as the photo library counts them.
 	words := strings.Repeat("山", photos.MaxQueryRunes)
-	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: " " + words + "\n"}); err != nil {
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1, Q: " " + words + "\n"}); err != nil {
 		t.Fatalf("searching for %d words with blank around them = %v", photos.MaxQueryRunes, err)
 	}
 	if last := env.search.texts[len(env.search.texts)-1]; !slices.Equal(last, []string{words}) {
 		t.Fatal("the blank around the words was searched for")
 	}
-	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: words + "山"}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1, Q: words + "山"}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("searching for more words than a search = %v", err)
 	}
 	env.store.search = nil
-	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"}); !errors.Is(err, domain.ErrSearchUnavailable) {
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, domain.CandidateQuery{Shot: 1, Q: "山"}); !errors.Is(err, domain.ErrSearchUnavailable) {
 		t.Fatalf("searching without the photo library's search = %v", err)
 	}
 }
@@ -761,7 +761,7 @@ func TestTheShotListOpensInASpreadsheet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "delete", Shot: 2}); err != nil {
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "delete", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if list, err = env.store.DraftShots(ctx, editOwner, draft.ID); err != nil {
@@ -912,7 +912,7 @@ func TestDeletingAShotReadsEachVideosAnalysisOnce(t *testing.T) {
 	}
 	// Shot 2 (c2/1) lies between c1/1 and c2/2, all three of video A.
 	env.grants.analysed = nil
-	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "delete", Shot: 2})
 	if err != nil || len(next.Shots) != 3 {
 		t.Fatalf("deleting shot 2 = %v, %v", beats(next), err)
 	}
@@ -933,7 +933,7 @@ func TestDeletingAShotBesideAVideoGoneIsRefusedWithWhy(t *testing.T) {
 	}
 	// Shot 2 (c2/1) lies between c1/1 and c2/2, all three of video A.
 	env.grants.gone = map[string]bool{videoA: true}
-	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "delete", Shot: 2})
 	refusedWith(t, err, "已从相册删除或放进回收站")
 	if errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("deleting beside a video gone = %v, a video that cannot be added", err)
@@ -956,7 +956,7 @@ func TestAShuffleLeavesAShotItCannotSearchFor(t *testing.T) {
 	}
 	before := beats(draft)
 	seed := int64(7)
-	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "shuffle", Seed: &seed})
 	if err != nil {
 		t.Fatalf("a shuffle with a picture of no description = %v", err)
 	}
@@ -975,7 +975,7 @@ func TestAShuffleLeavesAShotItCannotSearchFor(t *testing.T) {
 
 	// Every unlocked shot without a description to search for: refused.
 	env.store.Exec(t, `UPDATE steps SET result_json = replace(replace(result_json, '"query":"海边散步"', '"query":""'), '"query":"山路"', '"query":""') WHERE job_id = 'job:1' AND name = 'pick'`)
-	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, next.Revision, domain.DraftOp{Type: "shuffle", Seed: &seed})
 	refusedWith(t, err, "都没有可以搜索的画面描述")
 }
 
@@ -1021,17 +1021,17 @@ func TestDeletingAShotWhileItsVideosAreAnalysedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []DraftOp{{Type: "replace", Shot: 1, Beat: "c1/3"}, {Type: "move", Shot: 1, To: 2}} {
+	for _, op := range []domain.DraftOp{{Type: "replace", Shot: 1, Beat: "c1/3"}, {Type: "move", Shot: 1, To: 2}} {
 		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
 			t.Fatal(err)
 		}
 	}
 	env.grants.windowsState = map[string]photos.AnalysisState{videoA: photos.AnalysisWorking, videoB: photos.AnalysisWorking}
-	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
+	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "delete", Shot: 2})
 	refusedWith(t, err, "正在重新分析")
 	env.grants.windowsState = nil
 	env.grants.identity = "another-model|win=2s1f"
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2}); !errors.Is(err, domain.ErrAnalysisChanged) {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "delete", Shot: 2}); !errors.Is(err, domain.ErrAnalysisChanged) {
 		t.Fatalf("deleting once the videos were analysed with another model = %v", err)
 	}
 }
@@ -1072,13 +1072,13 @@ func TestAShuffleAvoidsTheCardOfAShotThatStays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
+	for _, op := range []domain.DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
 		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
 			t.Fatal(err)
 		}
 	}
 	seed := int64(7)
-	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "shuffle", Seed: &seed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1125,13 +1125,13 @@ func TestAShuffleAvoidsTheCardOfAShotThatFindsNothing(t *testing.T) {
 	}
 	// Shots: c1/1 (locked), c1/3, c2/2, c3/2 (locked). Shot 2 could take
 	// c2/1; shot 3 then finds nothing but c2 and would stay c2/2 beside it.
-	for _, op := range []DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
+	for _, op := range []domain.DraftOp{{Type: "replace", Shot: 2, Beat: "c1/3"}, {Type: "lock", Shot: 1}, {Type: "lock", Shot: 4}} {
 		if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, op); err != nil {
 			t.Fatal(err)
 		}
 	}
 	seed := int64(7)
-	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle", Seed: &seed})
+	next, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "shuffle", Seed: &seed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1160,7 +1160,7 @@ func TestADraftKeepsOnlyItsShots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
 		t.Fatal(err)
 	}
 	if n := env.store.Count(t, `SELECT (SELECT COUNT(*) FROM drafts WHERE shots_json LIKE '%"start"%' OR shots_json LIKE '%"slots"%')
@@ -1168,15 +1168,15 @@ func TestADraftKeepsOnlyItsShots(t *testing.T) {
 		t.Fatalf("%d rows keep the slots", n)
 	}
 	// Undone and reset, the draft stands over the same slots.
-	undone, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "undo"})
+	undone, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "undo"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reset, err := env.store.EditDraft(ctx, editOwner, draft.ID, undone.Revision, DraftOp{Type: "reset"})
+	reset, err := env.store.EditDraft(ctx, editOwner, draft.ID, undone.Revision, domain.DraftOp{Type: "reset"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, got := range []Draft{undone, reset} {
+	for _, got := range []domain.Draft{undone, reset} {
 		if !slices.Equal(beats(got), []string{"c1/1", "c2/1", "c2/2", "c3/2"}) || got.Seconds != 14 || len(got.Shots[3].Slots) != 1 {
 			t.Fatalf("the draft = %v over %v s", beats(got), got.Seconds)
 		}

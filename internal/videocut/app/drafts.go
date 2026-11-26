@@ -26,14 +26,8 @@ import (
 // no longer be edited, when its draft is opened and on a save that found it.
 const AnalysisChangedReason = "素材已按新模型重新分析，这一版不能再修改，可以用一句话重剪"
 
-// EditRefusal is a step the rules do not allow; Reason says why, for the
-// member.
-type EditRefusal struct{ Reason string }
-
-func (r *EditRefusal) Error() string { return "the edit is refused: " + r.Reason }
-
 func refuse(format string, args ...any) error {
-	return &EditRefusal{Reason: fmt.Sprintf(format, args...)}
+	return &domain.EditRefusal{Reason: fmt.Sprintf(format, args...)}
 }
 
 const (
@@ -58,7 +52,7 @@ func narrow(width, height int) bool {
 // timelineClip is one shot of a version's timeline as the fill wrote it:
 // the clip the render cuts, and the plan's part and picture it is of.
 type timelineClip struct {
-	Clip
+	domain.Clip
 	Part    int `json:"part"`
 	Picture int `json:"picture"`
 }
@@ -135,7 +129,7 @@ type editSource struct {
 	planned               plannedDoc
 	picked                pickedDoc
 	music                 musicDoc
-	excerpt               Excerpt
+	excerpt               domain.Excerpt
 }
 
 // versionSource reads what owner's version was cut from. A version saved
@@ -246,7 +240,7 @@ func plannedFrom(plan int) []string {
 type keptPlan struct {
 	analysis        analysisResult
 	catalog         catalogResult
-	excerpt         Excerpt
+	excerpt         domain.Excerpt
 	picked, planned json.RawMessage
 }
 
@@ -558,90 +552,14 @@ func (state draftState) changed(shot draftShot) bool {
 	return state.original(shot) != shot.Beat
 }
 
-// Draft is a member's edit of a version, as it is answered.
-type Draft struct {
-	ID            string `json:"id"`
-	VersionID     string `json:"versionId"`
-	ProjectID     string `json:"projectId"`
-	VersionNumber int    `json:"versionNumber"`
-	// Revision is the draft's revision, which a step is made on; CanUndo
-	// whether the step before it can be gone back to.
-	Revision int  `json:"revision"`
-	CanUndo  bool `json:"canUndo"`
-	// SongStart is where the version's excerpt starts in its song, and
-	// Seconds how long the film is. SongTranscode: the song is decoded on
-	// the way and cannot seek, so the rough preview asks for it from
-	// where it plays.
-	SongStart     float64     `json:"songStart"`
-	SongTranscode bool        `json:"songTranscode"`
-	Seconds       float64     `json:"seconds"`
-	Plan          DraftPlan   `json:"plan"`
-	Parts         []DraftPart `json:"parts"`
-	Shots         []DraftShot `json:"shots"`
-	Message       string      `json:"message,omitempty"`
-	Counts        DraftCounts `json:"counts"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
-}
-
-// DraftPlan is the plan the version was cut by: the first step's design,
-// opening and ending.
-type DraftPlan struct {
-	Design  string `json:"design"`
-	Opening string `json:"opening"`
-	Ending  string `json:"ending"`
-}
-
-// DraftPart is a part of the music and of the plan.
-type DraftPart struct {
-	Number  int    `json:"number"`
-	Name    string `json:"name"`
-	Summary string `json:"summary"`
-	Level   string `json:"level"`
-	// Label is the music's section (allin1's: intro, verse, chorus, build…);
-	// a build leads into a chorus (铺垫).
-	Label string  `json:"label"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-}
-
-// DraftCounts are the draft's shots, the videos they come from, and how
-// many of those are 竖.
-type DraftCounts struct {
-	Shots    int `json:"shots"`
-	Videos   int `json:"videos"`
-	Portrait int `json:"portrait"`
-}
-
-// DraftShot is a shot of the draft. Start and End are its place in the
-// film; From and To the part of its video a rough preview plays.
-type DraftShot struct {
-	Number   int     `json:"number"`
-	Beat     string  `json:"beat"`
-	AssetID  string  `json:"assetId"`
-	Part     int     `json:"part"`
-	Picture  int     `json:"picture"`
-	Slots    []int   `json:"slots"`
-	Start    float64 `json:"start"`
-	End      float64 `json:"end"`
-	From     float64 `json:"from"`
-	To       float64 `json:"to"`
-	Query    string  `json:"query"`
-	ShotSize string  `json:"shotSize"`
-	What     string  `json:"what"`
-	Locked   bool    `json:"locked"`
-	Changed  bool    `json:"changed"`
-	Extended bool    `json:"extended"`
-	Portrait bool    `json:"portrait"`
-}
-
 // view turns a draft's state into what is answered.
-func (src *editSource) view(id string, revision int, canUndo bool, state draftState, updated time.Time) Draft {
-	draft := Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
+func (src *editSource) view(id string, revision int, canUndo bool, state draftState, updated time.Time) domain.Draft {
+	draft := domain.Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
 		CanUndo: canUndo, SongStart: src.excerpt.Start, SongTranscode: src.songTranscode, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,
-		Plan:  DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
-		Parts: []DraftPart{}, Shots: []DraftShot{}}
+		Plan:  domain.DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
+		Parts: []domain.DraftPart{}, Shots: []domain.DraftShot{}}
 	for n, part := range src.music.Parts {
-		about := DraftPart{Number: n + 1, Level: part.Level, Label: part.Label, Start: part.Start, End: part.End}
+		about := domain.DraftPart{Number: n + 1, Level: part.Level, Label: part.Label, Start: part.Start, End: part.End}
 		if n < len(src.picked.Parts) {
 			about.Name, about.Summary = src.picked.Parts[n].Name, src.picked.Parts[n].Summary
 		}
@@ -652,7 +570,7 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 		first := state.Slots[shot.First]
 		card, n, _ := src.beat(shot.Beat)
 		about := src.about[card.ID].Beats[n-1]
-		view := DraftShot{Number: i + 1, Beat: shot.Beat, AssetID: card.Video, Part: first.Part, Picture: first.Picture,
+		view := domain.DraftShot{Number: i + 1, Beat: shot.Beat, AssetID: card.Video, Part: first.Part, Picture: first.Picture,
 			Start: first.Start, End: state.Slots[shot.Last].End, Query: src.query(first.Part, first.Picture),
 			ShotSize: about.ShotSize, What: about.What, Locked: shot.Locked, Changed: state.changed(shot),
 			Extended: shot.Last > shot.First, Portrait: src.portrait(shot.Beat)}
@@ -666,34 +584,19 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 		videos[card.Video] = true
 		draft.Shots = append(draft.Shots, view)
 	}
-	draft.Counts = DraftCounts{Shots: len(state.Shots), Videos: len(videos), Portrait: portrait}
+	draft.Counts = domain.DraftCounts{Shots: len(state.Shots), Videos: len(videos), Portrait: portrait}
 	return draft
-}
-
-// VersionOutline is a version as its film is: the plan it was cut by and
-// its shots, read without making a draft.
-type VersionOutline struct {
-	VersionID     string      `json:"versionId"`
-	ProjectID     string      `json:"projectId"`
-	VersionNumber int         `json:"versionNumber"`
-	Seconds       float64     `json:"seconds"`
-	Plan          DraftPlan   `json:"plan"`
-	Parts         []DraftPart `json:"parts"`
-	Shots         []DraftShot `json:"shots"`
-	Counts        DraftCounts `json:"counts"`
-	// Unmet is what the plan found the videos do not have.
-	Unmet []string `json:"unmet"`
 }
 
 // VersionOutline reads owner's version as its film is. It makes no draft,
 // and an edit of the version not saved yet does not show in it.
-func (s *Store) VersionOutline(ctx context.Context, owner, versionID string) (VersionOutline, error) {
+func (s *Store) VersionOutline(ctx context.Context, owner, versionID string) (domain.VersionOutline, error) {
 	src, err := s.versionSource(ctx, owner, versionID)
 	if err != nil {
-		return VersionOutline{}, err
+		return domain.VersionOutline{}, err
 	}
 	film := src.view("", 0, false, src.newDraftState(), time.Time{})
-	return VersionOutline{VersionID: film.VersionID, ProjectID: film.ProjectID, VersionNumber: film.VersionNumber, Seconds: film.Seconds,
+	return domain.VersionOutline{VersionID: film.VersionID, ProjectID: film.ProjectID, VersionNumber: film.VersionNumber, Seconds: film.Seconds,
 		Plan: film.Plan, Parts: film.Parts, Shots: film.Shots, Counts: film.Counts, Unmet: src.unmet()}, nil
 }
 
@@ -743,20 +646,20 @@ func (src *editSource) previewPiece(shot draftShot, state draftState) (float64, 
 // --- reading and writing drafts ---
 
 // VersionDraft is owner's draft of a version, made the first time.
-func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draft, error) {
+func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (domain.Draft, error) {
 	src, err := s.versionSource(ctx, owner, versionID)
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	if err := s.checkAnalysis(ctx, src); err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	var id string
 	err = s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		encoded, err := src.newDraftState().encode()
 		if err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 		id = newID("draft")
 		now := sqlitedb.FormatTime(s.now())
@@ -774,13 +677,13 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (Draf
 			return err
 		})
 		if err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 		if err := s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id); err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 	} else if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	return s.readDraft(ctx, owner, id, src)
 }
@@ -852,14 +755,14 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 }
 
 // readDraft answers owner's draft as it stands, with its source when known.
-func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editSource) (Draft, error) {
+func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editSource) (domain.Draft, error) {
 	src, draft, err := s.openDraft(ctx, owner, draftID, src)
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	canUndo, err := s.canUndo(ctx, draftID, draft.revision)
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	return src.view(draftID, draft.revision, canUndo, draft.state, draft.updated), nil
 }
@@ -890,26 +793,16 @@ func (s *Store) canUndo(ctx context.Context, draftID string, revision int) (bool
 	return ok, err
 }
 
-// DraftOp is one step of an edit. Shot and To are shot numbers from 1;
-// Seed, for a shuffle, makes it again as it was.
-type DraftOp struct {
-	Type string `json:"type"`
-	Shot int    `json:"shot,omitempty"`
-	To   int    `json:"to,omitempty"`
-	Beat string `json:"beat,omitempty"`
-	Seed *int64 `json:"seed,omitempty"`
-}
-
 // EditDraft applies a step to owner's draft made on revision base. A draft
 // that moved on answers ErrDraftConflict, a step the rules refuse an
 // *EditRefusal; either way the draft stays as it was.
-func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, op DraftOp) (Draft, error) {
+func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, op domain.DraftOp) (domain.Draft, error) {
 	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	if draft.revision != base {
-		return Draft{}, domain.ErrDraftConflict
+		return domain.Draft{}, domain.ErrDraftConflict
 	}
 	state := draft.state
 	var next draftState
@@ -920,13 +813,13 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	case "undo":
 		target, ok, err := s.undoTarget(ctx, draftID, base)
 		if err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 		if !ok {
-			return Draft{}, refuse("没有可以撤销的步骤")
+			return domain.Draft{}, refuse("没有可以撤销的步骤")
 		}
 		if next, ok = src.stateOf(target.shots); !ok {
-			return Draft{}, fmt.Errorf("draft %s revision %d holds an unusable state", draftID, target.revision)
+			return domain.Draft{}, fmt.Errorf("draft %s revision %d holds an unusable state", draftID, target.revision)
 		}
 		// Undoing goes on back from where the step undone came from.
 		back, message = target.back, "已撤销"
@@ -939,25 +832,25 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		}
 		seed = sql.NullInt64{Int64: value, Valid: true}
 		if next, message, err = s.shuffle(ctx, src, state, value); err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 	case "delete":
 		if next, message, err = s.deleteShot(ctx, src, state, op.Shot); err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 	default:
 		if next, message, err = src.apply(state, op); err != nil {
-			return Draft{}, err
+			return domain.Draft{}, err
 		}
 	}
 	// The shots must still cover every slot end to end: a step that broke
 	// that would leave a draft no read accepts.
 	if !next.valid() {
-		return Draft{}, fmt.Errorf("draft %s: a %s step left shots that do not cover the slots", draftID, op.Type)
+		return domain.Draft{}, fmt.Errorf("draft %s: a %s step left shots that do not cover the slots", draftID, op.Type)
 	}
 	encoded, err := next.encode()
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	now := s.now()
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
@@ -978,13 +871,13 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		return trimRevisions(ctx, tx, draftID, base+1)
 	})
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	// Not back.Valid: an undo's back may be a revision trimmed long since,
 	// past the last keptRevisions steps.
 	canUndo, err := s.canUndo(ctx, draftID, base+1)
 	if err != nil {
-		return Draft{}, err
+		return domain.Draft{}, err
 	}
 	view := src.view(draftID, base+1, canUndo, next, now)
 	view.Message = message

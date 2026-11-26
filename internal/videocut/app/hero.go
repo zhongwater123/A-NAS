@@ -19,34 +19,27 @@ const heroDir = "hero"
 // Hero files by what the page asks for.
 var heroFiles = map[string]string{"film": "hero.mp4", "poster": "hero.jpg"}
 
-// HeroFile is a hero file opened: its content type and what serving it needs.
-type HeroFile struct {
-	File        *os.File
-	Info        fs.FileInfo
-	ContentType string
-}
-
 // OpenHero opens the hero's film or poster; ErrNotFound when the device has none.
-func (s *Store) OpenHero(which string) (HeroFile, error) {
+func (s *Store) OpenHero(which string) (domain.HeroFile, error) {
 	name, ok := heroFiles[which]
 	if !ok {
-		return HeroFile{}, domain.ErrNotFound
+		return domain.HeroFile{}, domain.ErrNotFound
 	}
 	file, err := os.Open(filepath.Join(s.root, heroDir, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return HeroFile{}, domain.ErrNotFound
+		return domain.HeroFile{}, domain.ErrNotFound
 	}
 	if err != nil {
-		return HeroFile{}, err
+		return domain.HeroFile{}, err
 	}
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
-		return HeroFile{}, errors.Join(domain.ErrNotFound, err)
+		return domain.HeroFile{}, errors.Join(domain.ErrNotFound, err)
 	}
 	kind := "video/mp4"
 	if which == "poster" {
 		kind = "image/jpeg"
 	}
-	return HeroFile{File: file, Info: info, ContentType: kind}, nil
+	return domain.HeroFile{File: file, Info: info, ContentType: kind}, nil
 }

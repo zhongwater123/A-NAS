@@ -221,25 +221,25 @@ func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, [
 }
 
 // findStructure decodes the copy and has the music analysis Worker read it.
-func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error) {
+func (s *Store) findStructure(ctx context.Context, sha string) (domain.Analysis, error) {
 	if s.media == nil {
-		return Analysis{}, domain.ErrMediaUnavailable
+		return domain.Analysis{}, domain.ErrMediaUnavailable
 	}
 	if s.music == nil {
-		return Analysis{}, fmt.Errorf("%w: no music analysis worker", videocutcompute.ErrWorkerUnavailable)
+		return domain.Analysis{}, fmt.Errorf("%w: no music analysis worker", videocutcompute.ErrWorkerUnavailable)
 	}
 	file, err := os.Open(s.songPath(sha))
 	if err != nil {
-		return Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	defer func() { _ = file.Close() }()
 	stereoOut, stereoIn, err := os.Pipe()
 	if err != nil {
-		return Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	monoOut, monoIn, err := os.Pipe()
 	if err != nil {
-		return Analysis{}, errors.Join(err, stereoOut.Close(), stereoIn.Close())
+		return domain.Analysis{}, errors.Join(err, stereoOut.Close(), stereoIn.Close())
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -268,9 +268,9 @@ func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error)
 	case decodeErr != nil && !errors.Is(decodeErr, syscall.EPIPE):
 		// The decoding broke off by itself: what the Worker made of a
 		// stream cut short says nothing about the song.
-		return Analysis{}, decodeErr
+		return domain.Analysis{}, decodeErr
 	case err != nil:
-		return Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	return analysis, nil
 }

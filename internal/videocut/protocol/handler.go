@@ -208,7 +208,7 @@ func (h *handler) project(w http.ResponseWriter, r *http.Request, user accounts.
 }
 
 func (h *handler) updateProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	var change app.ProjectChange
+	var change domain.ProjectChange
 	if !httpjson.Read(w, r, maxJSONBytes, &change) {
 		return
 	}

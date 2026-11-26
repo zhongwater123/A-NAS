@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -38,20 +39,6 @@ type Compute interface {
 	Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error)
 }
 
-// Clip is one shot of the film: Start to End seconds of Video, shown for
-// Share seconds (longer than the source when Slow stretches it) in Slot.
-type Clip struct {
-	Card string `json:"card"`
-	// Beat is the beat of the card the shot was cut around, "card/n".
-	Beat  string     `json:"beat,omitempty"`
-	Video string     `json:"video"`
-	Start float64    `json:"start"`
-	End   float64    `json:"end"`
-	Slot  [2]float64 `json:"slot"`
-	Share float64    `json:"share"`
-	Slow  float64    `json:"slow,omitempty"`
-}
-
 // Editing is what rendering asks of the FFmpeg Worker; ffmpegworker.Client
 // provides it.
 type Editing interface {
@@ -59,31 +46,13 @@ type Editing interface {
 	Probe(ctx context.Context, file *os.File) (ffmpegworker.Probe, error)
 }
 
-// PlanInput is what planning reads: the catalog's cards, the excerpt and
-// the member's settings.
-type PlanInput struct {
-	JobID string `json:"jobId"`
-	// Plan is which of the job's 方案 is planned, from 1.
-	Plan     int                           `json:"plan"`
-	Cards    []videocutcompute.CatalogCard `json:"cards"`
-	Music    json.RawMessage               `json:"music"`
-	Settings JobSettings                   `json:"settings"`
-	// Picked is the first step's answer, for the second step.
-	Picked json.RawMessage `json:"picked,omitempty"`
-	// StepKey is the input key of the step being planned and PickKey the
-	// first step's: a planner that answers later, as the member's VNAS does,
-	// keeps its answers by them, so that one for other inputs is never used.
-	StepKey string `json:"-"`
-	PickKey string `json:"-"`
-}
-
 // Planner makes the two steps of the plan: which scenes go into each part
 // of the music (Pick), and which beats fill each picture with the slots
 // they take (Shots, answering {answer, slots}). The real planner is the AI
 // assistant's (M9); until then a stand-in answers.
 type Planner interface {
-	Pick(ctx context.Context, input PlanInput) (json.RawMessage, error)
-	Shots(ctx context.Context, input PlanInput) (json.RawMessage, error)
+	Pick(ctx context.Context, input domain.PlanInput) (json.RawMessage, error)
+	Shots(ctx context.Context, input domain.PlanInput) (json.RawMessage, error)
 }
 
 // Music is what jobs ask of the project's song (M8b).
@@ -93,7 +62,7 @@ type Music interface {
 	// ExcerptKey reads the identity without running the compute Worker.
 	ExcerptKey(ctx context.Context, owner, songID string, start float64) (string, error)
 	// Excerpt is the song's excerpt from start.
-	Excerpt(ctx context.Context, owner, songID string, start float64) (Excerpt, error)
+	Excerpt(ctx context.Context, owner, songID string, start float64) (domain.Excerpt, error)
 	// Audio opens the song's copy.
 	Audio(ctx context.Context, owner, songID string) (*os.File, error)
 }

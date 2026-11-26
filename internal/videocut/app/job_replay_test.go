@@ -97,7 +97,7 @@ func (song reanalysedSong) ExcerptKey(context.Context, string, string, float64) 
 	return song.version, nil
 }
 
-func (song reanalysedSong) Excerpt(ctx context.Context, owner, songID string, start float64) (app.Excerpt, error) {
+func (song reanalysedSong) Excerpt(ctx context.Context, owner, songID string, start float64) (domain.Excerpt, error) {
 	result, err := song.music.Excerpt(ctx, owner, songID, start)
 	result.Key = song.version
 	return result, err

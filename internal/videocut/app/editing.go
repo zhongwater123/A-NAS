@@ -25,53 +25,6 @@ import (
 
 // --- candidates ---
 
-// CandidateQuery asks for the beats that could lead shot Shot: Q searches
-// all the videos, and Size, Scene and Landscape filter what is searched or
-// listed.
-type CandidateQuery struct {
-	Shot      int
-	Q         string
-	Size      string
-	Scene     string
-	Landscape bool
-}
-
-// Candidate is a beat that could lead the shot. From and To are the part
-// of its video a try plays; Fits whether it is long enough; UsedBy the
-// shot that has it, 0 none.
-type Candidate struct {
-	Beat     string     `json:"beat"`
-	AssetID  string     `json:"assetId"`
-	From     float64    `json:"from"`
-	To       float64    `json:"to"`
-	ShotSize string     `json:"shotSize"`
-	What     string     `json:"what"`
-	Scene    string     `json:"scene"`
-	Portrait bool       `json:"portrait"`
-	Fits     bool       `json:"fits"`
-	UsedBy   int        `json:"usedBy,omitempty"`
-	Score    *float64   `json:"score,omitempty"`
-	TakenAt  *time.Time `json:"takenAt,omitempty"`
-}
-
-// SceneCount is a scene the cards were described in, and how many.
-type SceneCount struct {
-	Scene string `json:"scene"`
-	Cards int    `json:"cards"`
-}
-
-// Candidates are the beats for a shot: the rest of its card, the plan's
-// spare beats for its picture, and the search's results, or every beat
-// in shooting order when nothing was searched for.
-type Candidates struct {
-	Shot     int          `json:"shot"`
-	Query    string       `json:"query"`
-	SameCard []Candidate  `json:"sameCard"`
-	Planned  []Candidate  `json:"planned"`
-	Results  []Candidate  `json:"results"`
-	Scenes   []SceneCount `json:"scenes"`
-}
-
 const (
 	// maxResults is how many of a search's beats are listed, best first.
 	maxResults = 60
@@ -81,30 +34,30 @@ const (
 )
 
 // DraftCandidates lists the beats that could lead a shot of owner's draft.
-func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, query CandidateQuery) (Candidates, error) {
+func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, query domain.CandidateQuery) (domain.Candidates, error) {
 	// The photo library counts a search's words without the blank around
 	// them (photos.QueryText); so does this.
 	q := strings.TrimSpace(query.Q)
 	if !validText(q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
-		return Candidates{}, domain.ErrInvalid
+		return domain.Candidates{}, domain.ErrInvalid
 	}
 	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
-		return Candidates{}, err
+		return domain.Candidates{}, err
 	}
 	state := draft.state
 	i, err := shotAt(state, query.Shot)
 	if err != nil {
-		return Candidates{}, err
+		return domain.Candidates{}, err
 	}
 	shot := state.Shots[i]
 	slot := state.Slots[shot.First]
 	length := state.length(shot)
 	scenes := src.scenes()
-	answer := Candidates{Shot: query.Shot, Query: src.query(slot.Part, slot.Picture), SameCard: []Candidate{}, Planned: []Candidate{},
-		Results: []Candidate{}, Scenes: scenes}
+	answer := domain.Candidates{Shot: query.Shot, Query: src.query(slot.Part, slot.Picture), SameCard: []domain.Candidate{}, Planned: []domain.Candidate{},
+		Results: []domain.Candidate{}, Scenes: scenes}
 	listed := map[string]bool{shot.Beat: true}
-	add := func(list *[]Candidate, beat string, score *float64) {
+	add := func(list *[]domain.Candidate, beat string, score *float64) {
 		if listed[beat] {
 			return
 		}
@@ -121,7 +74,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	for _, beat := range src.planned.Answer.Parts[slot.Part-1].Pictures[slot.Picture-1].Beats {
 		add(&answer.Planned, beat, nil)
 	}
-	keep := func(candidate Candidate) bool {
+	keep := func(candidate domain.Candidate) bool {
 		if query.Size != "" && candidate.ShotSize != query.Size {
 			return false
 		}
@@ -132,11 +85,11 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 		case "":
 			return true
 		case otherScene:
-			return !slices.ContainsFunc(scenes, func(c SceneCount) bool { return c.Scene == candidate.Scene && c.Scene != otherScene })
+			return !slices.ContainsFunc(scenes, func(c domain.SceneCount) bool { return c.Scene == candidate.Scene && c.Scene != otherScene })
 		}
 		return candidate.Scene == query.Scene
 	}
-	var results []Candidate
+	var results []domain.Candidate
 	searching := q != ""
 	if !searching {
 		for _, id := range src.catalog {
@@ -147,7 +100,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	} else {
 		found, err := s.searchBeats(ctx, src, []string{q})
 		if err != nil {
-			return Candidates{}, err
+			return domain.Candidates{}, err
 		}
 		for _, hit := range found[0] {
 			score := hit.score
@@ -162,11 +115,11 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	return answer, nil
 }
 
-func (src *editSource) candidate(state draftState, beat string, length float64, score *float64) Candidate {
+func (src *editSource) candidate(state draftState, beat string, length float64, score *float64) domain.Candidate {
 	card, n, _ := src.beat(beat)
 	about := src.about[card.ID]
 	video, from, to := src.piece(beat, length)
-	candidate := Candidate{Beat: beat, AssetID: video, From: from, To: to, ShotSize: about.Beats[n-1].ShotSize,
+	candidate := domain.Candidate{Beat: beat, AssetID: video, From: from, To: to, ShotSize: about.Beats[n-1].ShotSize,
 		What: about.Beats[n-1].What, Scene: about.Scene, Portrait: src.portrait(beat), Fits: src.covers(beat, length, slowMost),
 		UsedBy: state.usedBy(beat), Score: score}
 	if taken := src.videos[video].TakenAt; taken != nil {
@@ -178,18 +131,20 @@ func (src *editSource) candidate(state draftState, beat string, length float64, 
 
 // scenes are the catalog's scenes by how many cards were described in
 // them, the first shownScenes and the rest together as 其他.
-func (src *editSource) scenes() []SceneCount {
+func (src *editSource) scenes() []domain.SceneCount {
 	counts := map[string]int{}
 	for _, id := range src.catalog {
 		counts[src.about[id].Scene]++
 	}
-	all := []SceneCount{}
+	all := []domain.SceneCount{}
 	for scene, cards := range counts {
 		if scene != "" {
-			all = append(all, SceneCount{Scene: scene, Cards: cards})
+			all = append(all, domain.SceneCount{Scene: scene, Cards: cards})
 		}
 	}
-	slices.SortFunc(all, func(a, b SceneCount) int { return cmp.Or(cmp.Compare(b.Cards, a.Cards), cmp.Compare(a.Scene, b.Scene)) })
+	slices.SortFunc(all, func(a, b domain.SceneCount) int {
+		return cmp.Or(cmp.Compare(b.Cards, a.Cards), cmp.Compare(a.Scene, b.Scene))
+	})
 	if len(all) <= shownScenes {
 		return all
 	}
@@ -197,7 +152,7 @@ func (src *editSource) scenes() []SceneCount {
 	for _, scene := range all[shownScenes:] {
 		rest += scene.Cards
 	}
-	return append(all[:shownScenes:shownScenes], SceneCount{Scene: otherScene, Cards: rest})
+	return append(all[:shownScenes:shownScenes], domain.SceneCount{Scene: otherScene, Cards: rest})
 }
 
 // --- confirming a version ---
@@ -205,7 +160,7 @@ func (src *editSource) scenes() []SceneCount {
 // ConfirmVersion makes owner's version the project's film. No film is
 // deleted; another version can be confirmed later
 // (docs/decisions/2026-11-19-montage-edit-defaults.md).
-func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (ProjectDetail, error) {
+func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (domain.ProjectDetail, error) {
 	var projectID string
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
@@ -221,7 +176,7 @@ func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (Pr
 		return err
 	})
 	if err != nil {
-		return ProjectDetail{}, err
+		return domain.ProjectDetail{}, err
 	}
 	return s.Project(ctx, owner, projectID)
 }

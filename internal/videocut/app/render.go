@@ -256,7 +256,7 @@ func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os
 }
 
 // clipFrames is how many frames of the film a shot takes.
-func clipFrames(clip Clip) int { return int(math.Round(clip.Share * FilmRate)) }
+func clipFrames(clip domain.Clip) int { return int(math.Round(clip.Share * FilmRate)) }
 
 func finite(values ...float64) bool {
 	for _, v := range values {
@@ -286,7 +286,7 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	var beats [][]string
 	var slot [2]int
 	for i, raw := range answer.Clips {
-		var clip Clip
+		var clip domain.Clip
 		if err := json.Unmarshal(raw, &clip); err != nil {
 			return failed("shot %d: %v", i+1, err)
 		}
@@ -463,7 +463,7 @@ func noSpace(err error) bool {
 // renderFilm renders each shot, one after another into tmp/<job-id>/,
 // assembles the film with the song and checks it.
 func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
-	clips := make([]Clip, len(run.timeline.Clips))
+	clips := make([]domain.Clip, len(run.timeline.Clips))
 	for i, raw := range run.timeline.Clips {
 		if err := json.Unmarshal(raw, &clips[i]); err != nil {
 			return nil, failed("shot %d: %v", i+1, err)
@@ -541,7 +541,7 @@ func storage(err error) error {
 }
 
 // renderClip appends one shot to segments.
-func (s *Store) renderClip(ctx context.Context, run *jobRun, segments *os.File, clip Clip, last bool, offset int) error {
+func (s *Store) renderClip(ctx context.Context, run *jobRun, segments *os.File, clip domain.Clip, last bool, offset int) error {
 	video, _ := run.assetOf(clip.Video)
 	file, err := s.openVideo(ctx, run, clip.Video)
 	if err != nil {

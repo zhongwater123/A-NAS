@@ -313,8 +313,8 @@ func eventually(t *testing.T, what string, done func() bool) {
 	}
 }
 
-func statuses(detail app.ProjectDetail) []app.AssetStatus {
-	out := []app.AssetStatus{}
+func statuses(detail domain.ProjectDetail) []domain.AssetStatus {
+	out := []domain.AssetStatus{}
 	for _, asset := range detail.Assets {
 		out = append(out, asset.Status)
 	}
@@ -406,14 +406,14 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 	lib.videos["asset:a2"] = video{owner: "user:alice", object: "object:changed"}
 	lib.mu.Unlock()
 	detail, err := store.Project(ctx, "user:alice", project.ID)
-	if got := statuses(detail); err != nil || !slices.Equal(got, []app.AssetStatus{app.AssetTrashed, app.AssetMissing, app.AssetAvailable}) {
+	if got := statuses(detail); err != nil || !slices.Equal(got, []domain.AssetStatus{app.AssetTrashed, app.AssetMissing, app.AssetAvailable}) {
 		t.Fatalf("statuses = %v, %v", got, err)
 	}
 	// An owner whose account is not in use answers nothing about them yet.
 	lib.mu.Lock()
 	lib.inactive = true
 	lib.mu.Unlock()
-	if detail, err := store.Project(ctx, "user:alice", project.ID); err != nil || !slices.Equal(statuses(detail), []app.AssetStatus{app.AssetUnknown, app.AssetUnknown, app.AssetUnknown}) {
+	if detail, err := store.Project(ctx, "user:alice", project.ID); err != nil || !slices.Equal(statuses(detail), []domain.AssetStatus{app.AssetUnknown, app.AssetUnknown, app.AssetUnknown}) {
 		t.Fatalf("statuses while the owner is inactive = %v, %v", statuses(detail), err)
 	}
 	lib.mu.Lock()
@@ -423,7 +423,7 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 	// Renamed, with a request; then deleted: the grant is revoked, the
 	// other project's is not.
 	name, ask := "海边", "节奏轻快"
-	if detail, err = store.UpdateProject(ctx, "user:alice", project.ID, app.ProjectChange{Name: &name, Ask: &ask}); err != nil || detail.Name != name || detail.Ask != ask {
+	if detail, err = store.UpdateProject(ctx, "user:alice", project.ID, domain.ProjectChange{Name: &name, Ask: &ask}); err != nil || detail.Name != name || detail.Ask != ask {
 		t.Fatalf("UpdateProject() = %+v, %v", detail, err)
 	}
 	if err := store.DeleteProject(ctx, "user:bob", project.ID); !errors.Is(err, domain.ErrNotFound) {
@@ -578,7 +578,7 @@ func TestReconcilingLeavesARegistrationInProgressAlone(t *testing.T) {
 	lib.registered = func() { close(entered); <-release }
 	lib.mu.Unlock()
 	type result struct {
-		detail app.ProjectDetail
+		detail domain.ProjectDetail
 		err    error
 	}
 	created := make(chan result, 1)
@@ -721,7 +721,7 @@ func TestAProjectWhoseGrantWentAway(t *testing.T) {
 	lib.forget(lost.ID)
 	store.Upkeep(ctx)
 	detail, err := store.AddAssets(ctx, "user:alice", "alice", lost.ID, "key:2", []string{"asset:a2"})
-	if err != nil || !slices.Equal(statuses(detail), []app.AssetStatus{app.AssetMissing, app.AssetAvailable}) {
+	if err != nil || !slices.Equal(statuses(detail), []domain.AssetStatus{app.AssetMissing, app.AssetAvailable}) {
 		t.Fatalf("after the grant was registered again: %v, %v", statuses(detail), err)
 	}
 

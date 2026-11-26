@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 )
 
@@ -99,7 +100,7 @@ func TestCopySongStreamsTheTrackWithWhatItIs(t *testing.T) {
 		t.Fatalf("answer = %d; the montage center got %q with %q", recorder.Code, body, header)
 	}
 	// A track browsers cannot play has no content type: it is decoded to listen.
-	var source app.SongSource
+	var source domain.SongSource
 	if err := protocol.DecodeHeader(header, &source); err != nil || source.Title != "Lossless" || source.ContentType != "" || source.TrackID != "t" {
 		t.Fatalf("source = %+v, %v", source, err)
 	}
@@ -120,7 +121,7 @@ func TestCopySongCutsALongTitleToFitItsHeader(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/montage/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
 	request.Header.Set("Content-Type", "application/json")
 	handler(recorder, request, accounts.Session{User: accounts.User{ID: "user:alice"}})
-	var source app.SongSource
+	var source domain.SongSource
 	if err := protocol.DecodeHeader(header, &source); recorder.Code != http.StatusOK || err != nil || source.Title != strings.Repeat("长", 200) {
 		t.Fatalf("answer = %d; the title arrived with %d runes, %v", recorder.Code, len([]rune(source.Title)), err)
 	}

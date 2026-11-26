@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -44,17 +45,17 @@ func (songMedia) Audio(_ context.Context, _ *os.File, request ffmpegworker.Audio
 // Worker's music operation.
 type songStructure struct{}
 
-func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (app.Analysis, error) {
+func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (domain.Analysis, error) {
 	_, _ = io.Copy(io.Discard, stereo)
 	_, _ = io.Copy(io.Discard, mono)
 	if err := <-whole; err != nil {
-		return app.Analysis{}, err
+		return domain.Analysis{}, err
 	}
 	var downbeats []float64
 	for t := 0.0; t < 120; t += 2 {
 		downbeats = append(downbeats, t)
 	}
-	return app.Analysis{Structure: videocutcompute.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
+	return domain.Analysis{Structure: videocutcompute.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
 		Segments: []videocutcompute.Section{{Start: 0, End: 30, Label: "intro"}, {Start: 30, End: 90, Label: "chorus"}, {Start: 90, End: 120, Label: "outro"}}},
 		Loudness: []float32{0.2, 0.3}}, nil
 }
@@ -179,7 +180,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 			video = asset.ID
 		}
 	}
-	var project app.ProjectDetail
+	var project domain.ProjectDetail
 	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","assetIds":["`+video+`"]}`, nil, http.StatusCreated).Body, &project)
 	path := "/api/v1/montage/projects/" + project.ID
 
@@ -194,7 +195,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	}
 	// The browser cannot say what the song is.
 	seen = nil
-	var song app.SongDetail
+	var song domain.SongDetail
 	decode(t, owner.do(http.MethodPut, path+"/song", `{"trackId":"`+mine+`"}`, map[string]string{protocol.SongHeader: "forged"}, http.StatusOK).Body, &song)
 	if song.Title != "Symphony" || song.State != app.SongAnalyzing || song.Transcode {
 		t.Fatalf("song = %+v", song)

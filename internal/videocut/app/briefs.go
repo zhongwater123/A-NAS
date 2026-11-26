@@ -51,14 +51,6 @@ const (
 	ToolNextPlan = "next_plan"
 )
 
-// ToolAnswer is what a submission, or a brief that cannot be given,
-// answers the model. Message is for the model, in the template's words.
-type ToolAnswer struct {
-	Status  string   `json:"status"`
-	Message string   `json:"message,omitempty"`
-	Reasons []string `json:"reasons,omitempty"`
-}
-
 var toolMessages = map[string]string{
 	ToolAccepted:     "已收下",
 	ToolCancelled:    "任务已取消",
@@ -67,8 +59,8 @@ var toolMessages = map[string]string{
 	ToolNextPlan:     "这一版已收下，接着做下一版",
 }
 
-func toolAnswer(status string, reasons ...string) ToolAnswer {
-	return ToolAnswer{Status: status, Message: toolMessages[status], Reasons: reasons}
+func toolAnswer(status string, reasons ...string) domain.ToolAnswer {
+	return domain.ToolAnswer{Status: status, Message: toolMessages[status], Reasons: reasons}
 }
 
 // roundCall is the round a tool call works on: the member's, for the job,
@@ -85,7 +77,7 @@ type roundCall struct {
 // planned again (another epoch), or the job's inputs are no longer the ones
 // the round was claimed for, so that what it hands back answers a step the
 // job no longer has.
-func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token string) (roundCall, *ToolAnswer, error) {
+func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token string) (roundCall, *domain.ToolAnswer, error) {
 	if token == "" || len(token) > 64 {
 		return roundCall{}, nil, domain.ErrNotFound
 	}
@@ -121,7 +113,7 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 // roundFor is the standing round of a tool call. Each call shows that its
 // model is still planning: the round's time is counted from the last one
 // (SweepRounds), as one round plans both 方案, eight calls or more.
-func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (roundCall, *ToolAnswer, error) {
+func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (roundCall, *domain.ToolAnswer, error) {
 	call, over, err := s.standing(ctx, s.db, owner, jobID, token)
 	if err != nil || over != nil {
 		return call, over, err
@@ -132,28 +124,28 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (round
 
 // storedInput is what the job's steps stored for planning: the catalog's
 // cards, the excerpt and the member's settings.
-func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error) {
-	input := PlanInput{JobID: jobID}
+func (s *Store) storedInput(ctx context.Context, jobID string) (domain.PlanInput, error) {
+	input := domain.PlanInput{JobID: jobID}
 	var catalogJSON, songJSON string
 	var err error
 	if input.Settings, err = jobSettings(ctx, s.db, jobID); err != nil {
-		return PlanInput{}, err
+		return domain.PlanInput{}, err
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",
 		jobID).Scan(&catalogJSON); err != nil {
-		return PlanInput{}, fmt.Errorf("the job has no catalog yet: %w", err)
+		return domain.PlanInput{}, fmt.Errorf("the job has no catalog yet: %w", err)
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
 		jobID).Scan(&songJSON); err != nil {
-		return PlanInput{}, fmt.Errorf("the job has no excerpt yet: %w", err)
+		return domain.PlanInput{}, fmt.Errorf("the job has no excerpt yet: %w", err)
 	}
 	var catalog catalogResult
 	if err := json.Unmarshal([]byte(catalogJSON), &catalog); err != nil {
-		return PlanInput{}, err
+		return domain.PlanInput{}, err
 	}
-	var excerpt Excerpt
+	var excerpt domain.Excerpt
 	if err := json.Unmarshal([]byte(songJSON), &excerpt); err != nil {
-		return PlanInput{}, err
+		return domain.PlanInput{}, err
 	}
 	input.Cards = make([]videocutcompute.CatalogCard, 0, len(catalog.Catalog))
 	for _, id := range catalog.Catalog {
@@ -169,7 +161,7 @@ func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error
 // job's step builds it before a round can ask (planned), and the tools read
 // what is kept, building the second step's only when the model asks for it
 // before the job came to that step.
-func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func() (PlanInput, error)) (videocutcompute.PlanBrief, error) {
+func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func() (domain.PlanInput, error)) (videocutcompute.PlanBrief, error) {
 	var brief videocutcompute.PlanBrief
 	var kept string
 	err := s.db.QueryRowContext(ctx, "SELECT brief_json FROM plan_briefs WHERE job_id = ? AND step = ? AND input_key = ?", jobID, step, key).Scan(&kept)
@@ -244,7 +236,7 @@ func (s *Store) currentPlan(ctx context.Context, call roundCall) (int, error) {
 // key. The second step's are those of the outline taken; before one is, the
 // model is told to hand the outline in first. The outline's brief is the
 // same for every 方案 and kept under the first's key (planned).
-func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step string) (videocutcompute.PlanBrief, string, *ToolAnswer, error) {
+func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step string) (videocutcompute.PlanBrief, string, *domain.ToolAnswer, error) {
 	key := planKey(call.pickKey, plan)
 	briefKey := call.pickKey
 	var picked json.RawMessage
@@ -260,7 +252,7 @@ func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step st
 		picked, key = outline, shotsKey(key, outline)
 		briefKey = key
 	}
-	brief, err := s.briefOf(ctx, call.jobID, step, briefKey, func() (PlanInput, error) {
+	brief, err := s.briefOf(ctx, call.jobID, step, briefKey, func() (domain.PlanInput, error) {
 		input, err := s.storedInput(ctx, call.jobID)
 		input.Picked = picked
 		return input, err
@@ -331,21 +323,21 @@ func (s *Store) Brief(ctx context.Context, owner, jobID, token, step string) (an
 // that ended meanwhile, or whose job changed its inputs or was planned
 // again, is told the round is over and its answer is dropped. Three refusals
 // in a row end the round (refuse).
-func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, answer json.RawMessage) (ToolAnswer, error) {
+func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, answer json.RawMessage) (domain.ToolAnswer, error) {
 	call, over, err := s.roundFor(ctx, owner, jobID, token)
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
 	if over != nil {
 		return *over, nil
 	}
 	plan, err := s.currentPlan(ctx, call)
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
 	brief, key, notYet, err := s.stepBrief(ctx, call, plan, step)
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
 	if notYet != nil {
 		if step == StepShots && plan > 1 {
@@ -369,9 +361,9 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	// is worked out from these bytes on both sides (shotsKey).
 	kept, err := json.Marshal(answer)
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
-	var late *ToolAnswer
+	var late *domain.ToolAnswer
 	first := false
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, late, err = s.standing(ctx, tx, owner, jobID, token); err != nil || late != nil {
@@ -394,7 +386,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 		return s.dueNow(ctx, tx, jobID)
 	})
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
 	if late != nil {
 		return *late, nil
@@ -414,8 +406,8 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 // Worker, and a round that ended meanwhile, or whose job was planned again,
 // must not count against the planning that follows it. Such a round is told
 // it is over.
-func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons []string) (ToolAnswer, error) {
-	var late *ToolAnswer
+func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons []string) (domain.ToolAnswer, error) {
+	var late *domain.ToolAnswer
 	var rejections int
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		call, over, err := s.standing(ctx, tx, owner, jobID, token)
@@ -439,7 +431,7 @@ func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons 
 		return s.dueNow(ctx, tx, jobID)
 	})
 	if err != nil {
-		return ToolAnswer{}, err
+		return domain.ToolAnswer{}, err
 	}
 	if late != nil {
 		return *late, nil

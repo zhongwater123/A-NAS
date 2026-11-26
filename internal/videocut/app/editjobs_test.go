@@ -112,7 +112,7 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); err != nil {
 		t.Fatal(err)
 	}
 	job, created, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
@@ -149,7 +149,7 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 	}
 	// The new version is edited on as any: a draft of its own, as it was saved.
 	again, err := env.store.VersionDraft(ctx, editOwner, edited.ID)
-	if err != nil || !slices.Equal(beats(again), []string{"c1/3", "c2/1", "c2/2", "c3/2"}) || slices.ContainsFunc(again.Shots, func(s DraftShot) bool { return s.Changed }) {
+	if err != nil || !slices.Equal(beats(again), []string{"c1/3", "c2/1", "c2/2", "c3/2"}) || slices.ContainsFunc(again.Shots, func(s domain.DraftShot) bool { return s.Changed }) {
 		t.Fatalf("the new version's draft = %v, %v", beats(again), err)
 	}
 	if list, err := env.store.VersionShots(ctx, editOwner, edited.ID); err != nil || len(readList(t, list)) != 4 {
@@ -170,7 +170,7 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 		t.Fatalf("%d films, %d versions", len(env.grants.films), env.store.Count(t, "SELECT COUNT(*) FROM versions"))
 	}
 	// Another step is another revision, and another version.
-	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "lock", Shot: 2}); err != nil {
+	if draft, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, domain.DraftOp{Type: "lock", Shot: 2}); err != nil {
 		t.Fatal(err)
 	}
 	third, created, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:5")
@@ -179,7 +179,7 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 	}
 }
 
-func stepNamesOf(job Job) []string {
+func stepNamesOf(job domain.Job) []string {
 	var names []string
 	for _, step := range job.Steps {
 		names = append(names, step.Name)
@@ -344,7 +344,7 @@ func TestAVersionKeepsTheSongItWasMadeWith(t *testing.T) {
 	}
 	env.store.Exec(t, "UPDATE songs SET content_type = 'audio/mpeg' WHERE id = 'song:old'")
 	// The edit job takes the version's song, not the project's.
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); err != nil {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, domain.DraftOp{Type: "lock", Shot: 1}); err != nil {
 		t.Fatal(err)
 	}
 	job, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1")
