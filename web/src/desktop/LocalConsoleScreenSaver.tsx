@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { onLocalConsoleActive } from "../lib/localConsole";
 import { readLocalDisplay } from "./api";
 import styles from "./localConsoleScreenSaver.module.css";
 
@@ -196,15 +195,23 @@ export function LocalConsoleScreenSaver({
 
     activityEvents.forEach((name) => window.addEventListener(name, activity, { capture: true, passive: false }));
     document.addEventListener("visibilitychange", visibilityChanged);
-    // Use the page reports where its window cannot see, inside a frame. A
-    // cover hides the frame, so only input takes a cover away.
-    const offActive = onLocalConsoleActive(() => {
-      if (phaseRef.current === "awake") schedule();
-    });
+    // Input inside a frame never reaches this window, and what a frame says
+    // comes from its own scripts, a shared page's for one, which can say it
+    // forever (Codex review of #674). The browser marks this window as used
+    // for about five seconds after a click, tap, key or touch scroll inside
+    // a frame too, and no script can do that: look every two seconds. Mouse
+    // movement and the wheel inside a frame do not count. A cover hides the
+    // frames, so only input takes a cover away.
+    const activation = navigator.userActivation;
+    const lookForUse = activation
+      ? window.setInterval(() => {
+          if (activation.isActive && phaseRef.current === "awake") schedule();
+        }, 2_000)
+      : undefined;
     schedule();
     return () => {
       clearTimers();
-      offActive();
+      window.clearInterval(lookForUse);
       activityEvents.forEach((name) => window.removeEventListener(name, activity, { capture: true }));
       document.removeEventListener("visibilitychange", visibilityChanged);
       setPhase("awake");

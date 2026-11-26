@@ -4,7 +4,6 @@ import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
-import { onLocalConsoleActive } from "../lib/localConsole";
 import { session } from "../test/fixtures";
 import {
   addVersion,
@@ -286,21 +285,18 @@ describe("共享页面的标签页", () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it("keeps the device screen's screen saver, which reading the page puts off", async () => {
+  it("keeps the device screen's screen saver, which the page's own messages do not put off", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     deviceScreen();
-    const used = vi.fn();
-    const stop = onLocalConsoleActive(used);
-    try {
-      render(<PageTab pageId="page_prd" />);
-      await frame();
-      // Scrolling inside the frame is input the tab's window never sees.
-      await fromFrame({ type: "anas:scrolled", y: 120 });
-      expect(used).toHaveBeenCalledTimes(1);
-      await act(() => vi.advanceTimersByTimeAsync(localConsoleScreenSaverIdleMs + 10 * 60_000));
-      expect(await screen.findByRole("dialog", { name: "息屏" })).toBeTruthy();
-    } finally {
-      stop();
+    render(<PageTab pageId="page_prd" />);
+    await frame();
+    // The page's scripts can say it scrolled as often as they like: the
+    // screen saver, then the black screen set at ten minutes, still come.
+    const minutes = Math.ceil(localConsoleScreenSaverIdleMs / 60_000) + 10;
+    for (let minute = 0; minute < minutes; minute++) {
+      await fromFrame({ type: "anas:scrolled", y: minute * 10 });
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
     }
+    expect(await screen.findByRole("dialog", { name: "息屏" })).toBeTruthy();
   });
 });
