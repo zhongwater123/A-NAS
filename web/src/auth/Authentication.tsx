@@ -3,7 +3,7 @@ import { FormEvent, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
 import type { Session } from "../api.generated";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 import { AuthError, AuthField, AuthHero, AuthStage, AuthSubmit } from "./AuthStage";
 import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { login, setupAdministrator } from "./api";

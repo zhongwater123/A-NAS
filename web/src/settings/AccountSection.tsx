@@ -4,7 +4,7 @@ import { type FormEvent, useEffect, useEffectEvent, useState } from "react";
 import type { Session, User } from "../api.generated";
 import { nicknameProblem, nicknameRuleText, passwordProblem, passwordRuleText } from "../auth/accountRules";
 import { changePassword, removeAvatar, updateNickname } from "../auth/api";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 import { displayName, fullName, usePeople } from "../people/people";
 import { AgentTokens } from "./AgentTokens";
 import { AvatarDialog } from "./AvatarDialog";
