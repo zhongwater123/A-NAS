@@ -1,0 +1,295 @@
+<!doctype html>
+<!--
+  手机模拟器（只在开发服务器上有：npm run dev 后打开 /phone.html）。
+  在电脑上按手机浏览器的可视区大小嵌入桌面，几台机型并排比较布局。
+  “触屏”打开时桌面以 ?touch 载入：鼠标点击按手指点按处理，按住半秒算长按。
+  CSS 的 (pointer: coarse)、(hover: none) 在这里模拟不了，那部分仍要用
+  浏览器的设备模拟或真机看。构建只打包 index.html，这个页面不进产品。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A-NAS · 手机模拟</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14161b;
+        --panel: #1d2027;
+        --line: #2d313b;
+        --text: #e7e9ee;
+        --muted: #8d94a3;
+        --accent: #4d8dff;
+        font: 13px/1.5 Inter, "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        color: var(--text);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 14px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      header h1 {
+        margin: 0 6px 0 0;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .group > span {
+        color: var(--muted);
+      }
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+      }
+      .chip {
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .chip[aria-pressed="true"] {
+        border-color: var(--accent);
+        background: rgba(77, 141, 255, 0.16);
+      }
+      .chip:hover {
+        border-color: #4a5060;
+      }
+      input[type="text"] {
+        width: 180px;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+      }
+      main {
+        display: flex;
+        align-items: flex-start;
+        gap: 28px;
+        overflow: auto;
+        padding: 24px;
+      }
+      figure {
+        flex: none;
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        margin: 0;
+      }
+      figcaption {
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      figcaption strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+      /* The frame takes the scaled size; the phone inside keeps its real CSS size. */
+      .frame {
+        position: relative;
+      }
+      .phone {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 14px;
+        border-radius: 38px;
+        background: #000;
+        box-shadow:
+          0 0 0 2px #3a3e47,
+          0 20px 50px rgba(0, 0, 0, 0.45);
+        transform-origin: 0 0;
+      }
+      .phone.landscape {
+        border-radius: 32px;
+      }
+      iframe {
+        display: block;
+        border: 0;
+        border-radius: 24px;
+        background: #fff;
+      }
+      .empty {
+        margin: auto;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>手机模拟</h1>
+      <div class="group" id="devices" role="group" aria-label="机型"></div>
+      <div class="group">
+        <button class="chip" id="rotate" type="button" aria-pressed="false">横屏</button>
+        <button class="chip" id="touch" type="button" aria-pressed="true" title="鼠标点击按手指点按处理，按住半秒算长按">
+          触屏
+        </button>
+        <button class="chip" id="fit" type="button" aria-pressed="true" title="按窗口高度缩小；关闭则按 1:1 显示">
+          适应高度
+        </button>
+      </div>
+      <div class="group">
+        <span>地址</span>
+        <input id="path" type="text" value="/" spellcheck="false" aria-label="打开的地址" />
+        <button class="chip" id="reload" type="button">刷新</button>
+      </div>
+    </header>
+    <main id="stage"></main>
+
+    <script type="module">
+      // Visible browser area, toolbars taken off: what a page actually gets.
+      const devices = [
+        { id: "se", name: "iPhone SE", browser: "Safari", portrait: [375, 553], landscape: [667, 325] },
+        { id: "ip15", name: "iPhone 15", browser: "Safari", portrait: [393, 659], landscape: [734, 341] },
+        { id: "max", name: "iPhone 15 Pro Max", browser: "Safari", portrait: [430, 739], landscape: [832, 380] },
+        { id: "android", name: "安卓 6.3 寸", browser: "Chrome", portrait: [412, 783], landscape: [915, 340] },
+        { id: "small", name: "安卓小屏", browser: "Chrome", portrait: [360, 560], landscape: [640, 280] },
+      ];
+      const key = "a-nas.phone-simulator";
+      const read = () => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? "{}");
+        } catch {
+          return {};
+        }
+      };
+      const state = { shown: ["ip15", "android"], landscape: false, touch: true, fit: true, path: "/", ...read() };
+      const save = () => {
+        try {
+          localStorage.setItem(key, JSON.stringify(state));
+        } catch {}
+      };
+
+      const stage = document.getElementById("stage");
+      const deviceBar = document.getElementById("devices");
+      const toggle = (id, on) => document.getElementById(id).setAttribute("aria-pressed", String(on));
+      const src = () => {
+        const url = new URL(state.path || "/", location.origin);
+        if (state.touch) url.searchParams.set("touch", "");
+        else url.searchParams.delete("touch");
+        return url.pathname + url.search.replace("touch=", "touch") + url.hash;
+      };
+
+      for (const device of devices) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.textContent = device.name;
+        chip.dataset.id = device.id;
+        chip.addEventListener("click", () => {
+          state.shown = state.shown.includes(device.id)
+            ? state.shown.filter((id) => id !== device.id)
+            : devices.filter((d) => d.id === device.id || state.shown.includes(d.id)).map((d) => d.id);
+          render();
+        });
+        deviceBar.append(chip);
+      }
+
+      // Frames are rebuilt only when the devices or the page change; a new
+      // window height only rescales them, so the desktops keep their state.
+      let built = "";
+      const render = () => {
+        save();
+        for (const chip of deviceBar.children) chip.setAttribute("aria-pressed", String(state.shown.includes(chip.dataset.id)));
+        toggle("rotate", state.landscape);
+        toggle("touch", state.touch);
+        toggle("fit", state.fit);
+        document.getElementById("path").value = state.path;
+
+        const signature = JSON.stringify([state.shown, state.landscape, src()]);
+        if (signature !== built) {
+          built = signature;
+          stage.replaceChildren();
+          for (const device of devices.filter((d) => state.shown.includes(d.id))) {
+            const [width, height] = state.landscape ? device.landscape : device.portrait;
+            const figure = document.createElement("figure");
+            const frame = document.createElement("div");
+            frame.className = "frame";
+            const phone = document.createElement("div");
+            phone.className = `phone${state.landscape ? " landscape" : ""}`;
+            const iframe = document.createElement("iframe");
+            iframe.title = `${device.name} 上的 A-NAS`;
+            iframe.width = String(width);
+            iframe.height = String(height);
+            iframe.src = src();
+            phone.append(iframe);
+            frame.append(phone);
+            const caption = document.createElement("figcaption");
+            caption.innerHTML = `<strong>${device.name}</strong> · ${device.browser} · ${width}×${height}`;
+            figure.append(frame, caption);
+            figure.dataset.size = `${width + 28}x${height + 28}`;
+            stage.append(figure);
+          }
+          if (!stage.children.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            empty.textContent = "选一个机型";
+            stage.append(empty);
+          }
+        }
+        scale();
+      };
+      const scale = () => {
+        // One factor for all, so phones side by side keep their real proportions.
+        const room = stage.clientHeight - 48 - 34;
+        const figures = [...stage.querySelectorAll("figure")];
+        const tallest = Math.max(...figures.map((figure) => Number(figure.dataset.size.split("x")[1])));
+        const factor = state.fit ? Math.min(1, room / tallest) : 1;
+        for (const figure of figures) {
+          const [width, height] = figure.dataset.size.split("x").map(Number);
+          const frame = figure.querySelector(".frame");
+          frame.style.width = `${width * factor}px`;
+          frame.style.height = `${height * factor}px`;
+          figure.querySelector(".phone").style.transform = `scale(${factor})`;
+        }
+      };
+
+      document.getElementById("rotate").addEventListener("click", () => {
+        state.landscape = !state.landscape;
+        render();
+      });
+      document.getElementById("touch").addEventListener("click", () => {
+        state.touch = !state.touch;
+        render();
+      });
+      document.getElementById("fit").addEventListener("click", () => {
+        state.fit = !state.fit;
+        render();
+      });
+      document.getElementById("path").addEventListener("change", (event) => {
+        state.path = event.target.value.trim() || "/";
+        render();
+      });
+      document.getElementById("reload").addEventListener("click", () => {
+        for (const iframe of stage.querySelectorAll("iframe")) iframe.contentWindow?.location.reload();
+      });
+      addEventListener("resize", scale);
+      render();
+    </script>
+  </body>
+</html>
