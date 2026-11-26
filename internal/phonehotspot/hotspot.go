@@ -16,11 +16,12 @@ const (
 )
 
 type State struct {
-	State      string      `json:"state"`
-	Reason     string      `json:"reason,omitempty"`
-	Connection *Connection `json:"connection,omitempty"`
-	Settings   *Settings   `json:"settings,omitempty"`
-	Devices    *[]Device   `json:"devices,omitempty"`
+	State           string      `json:"state"`
+	Reason          string      `json:"reason,omitempty"`
+	Connection      *Connection `json:"connection,omitempty"`
+	Settings        *Settings   `json:"settings,omitempty"`
+	SettingsInvalid bool        `json:"settingsInvalid,omitempty"`
+	Devices         []Device    `json:"devices,omitzero"`
 }
 
 type Device struct {
@@ -58,7 +59,7 @@ func (m *Memory) snapshot() State {
 	settings := m.profile.Settings()
 	if m.connection != nil {
 		devices := []Device{{MAC: "02:00:00:00:00:21", IP: "192.168.173.21", Name: "示例手机"}}
-		return State{State: On, Connection: m.connection, Settings: &settings, Devices: &devices}
+		return State{State: On, Connection: m.connection, Settings: &settings, Devices: devices}
 	}
 	return State{State: Off, Settings: &settings}
 }

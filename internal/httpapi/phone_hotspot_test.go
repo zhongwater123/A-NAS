@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,23 @@ func TestPhoneHotspotIsOnlyControlledAndReadByAdministrators(t *testing.T) {
 	member.do(http.MethodPut, path, `{"enabled":true}`, nil, http.StatusForbidden)
 	member.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"ssid":"guest"}`, nil, http.StatusForbidden)
 	owner.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"ssid":"guest\nignore"}`, nil, http.StatusBadRequest)
-	owner.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"password":"short"}`, nil, http.StatusBadRequest)
+	// These passwords intentionally violate the request schema. Exercise the
+	// application's rejection and response contract without validating the request.
+	for _, body := range []string{`{"password":"short"}`, `{"password":"八个字也不能用"}`, `{"password":"line break\n"}`} {
+		request := httptest.NewRequest(http.MethodPut, phonehotspotapi.SettingsPath, strings.NewReader(body))
+		request.AddCookie(owner.cookie)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-CSRF-Token", owner.csrf)
+		request.Header.Set("X-Forwarded-For", owner.forwardedFor)
+		rejected := httptest.NewRecorder()
+		handler.ServeHTTP(rejected, request)
+		if rejected.Code != http.StatusBadRequest || answerCode(rejected) != "invalid_password" {
+			t.Fatalf("invalid hotspot password was not rejected: %d %s", rejected.Code, rejected.Body.String())
+		}
+	}
+	if oversized := owner.do(http.MethodPut, phonehotspotapi.SettingsPath, "{}"+strings.Repeat(" ", 1024), nil, http.StatusRequestEntityTooLarge); answerCode(oversized) != "request_too_large" {
+		t.Fatal("hotspot configure did not use the standard size error")
+	}
 	owner.do(http.MethodPut, path, `{"enabled":true}`, nil, http.StatusOK)
 	response := owner.do(http.MethodGet, path, "", nil, http.StatusOK)
 	var state phonehotspot.State

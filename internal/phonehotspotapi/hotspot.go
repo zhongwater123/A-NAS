@@ -34,14 +34,13 @@ func (a *API) Routes() []apiroute.Route {
 func (a *API) saveSettings(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 	w.Header().Set("Cache-Control", "no-store")
 	var change phonehotspot.SettingsChange
-	if err := httpjson.Decode(w, r, 1024, &change); err != nil {
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+	if !httpjson.Read(w, r, 1024, &change) {
 		return
 	}
 	if err := change.Validate(); err != nil {
-		code := "hotspot_invalid_ssid"
+		code := "invalid_ssid"
 		if errors.Is(err, phonehotspot.ErrInvalidPassword) {
-			code = "hotspot_invalid_password"
+			code = "invalid_password"
 		}
 		httpjson.WriteError(w, http.StatusBadRequest, code, err.Error())
 		return

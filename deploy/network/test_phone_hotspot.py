@@ -33,6 +33,15 @@ flags=[ASSOC][AUTHORIZED]
             {"mac": "02:00:00:00:00:03"},
         ])
 
+    def test_unreadable_leases_preserve_authenticated_stations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / "dnsmasq.leases").mkdir()
+            stations = subprocess.CompletedProcess([], 0, stdout="02:00:00:00:00:01\nflags=[ASSOC][AUTHORIZED]\n")
+            with patch.multiple(hotspot, RUNTIME=runtime), patch.object(hotspot, "command", return_value=stations):
+                hotspot.publish_devices("wlan0", 42)
+            self.assertEqual(hotspot.json.loads((runtime / "devices.json").read_text()), [{"mac": "02:00:00:00:00:01"}])
+
     def test_custom_credentials_use_hostapd_byte_encoding(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)
@@ -247,6 +256,7 @@ assert (welcome.scheme, welcome.hostname, welcome.port) == ("https", host, int(p
 status, mime, cache, body = get(welcome.path)
 assert status == 200 and mime.startswith("text/html") and cache == "no-store"
 assert f'href="https://{host}:{port}/"'.encode() in body
+assert b":root { color-scheme:" in body and "打开 WebOS".encode() in body
 assert get("/privkey.pem")[0] == 404
 """
         hotspot.command("python", "-c", script, domain, address, str(hotspot.HTTPS_PORT), str(hotspot.TLS / "trust.pem"),

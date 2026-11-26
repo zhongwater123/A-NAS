@@ -33,4 +33,5 @@
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }

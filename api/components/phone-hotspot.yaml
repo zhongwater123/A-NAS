@@ -11,6 +11,9 @@ schemas:
         enum: [dependencies_missing, no_wired_uplink, no_idle_radio, ap_failed, dhcp_failed, web_unavailable, tls_unavailable, isolation_failed, cleanup_failed, service_failed, invalid_settings]
       settings:
         $ref: "#/schemas/PhoneHotspotSettings"
+      settingsInvalid:
+        type: boolean
+        description: The saved settings could not be read. An administrator can replace them by saving new settings.
       devices:
         description: Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected.
         type: array
@@ -47,6 +50,11 @@ schemas:
     type: object
     additionalProperties: false
     properties:
-      ssid: { type: string, maxLength: 32, description: At most 32 UTF-8 bytes. Empty restores the device's default name. }
-      password: { type: string, maxLength: 63, description: Eight to 63 printable ASCII characters. Empty restores a fresh random password on each start. }
+      ssid:
+        type: string
+        description: At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name.
+      password:
+        type: string
+        description: Omit to retain the saved password. Empty restores a fresh random password on each start.
+        pattern: '^(?:[ -~]{8,63})?$'
       portal: { type: boolean, description: Advertise the WebOS entry via the mobile system's network sign-in prompt }

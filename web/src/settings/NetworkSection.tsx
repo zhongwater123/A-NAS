@@ -2,15 +2,16 @@ import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient
 import { Switch } from "radix-ui";
 import { type FormEvent, useState } from "react";
 
-import { call, client } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import type { PhoneHotspotStatus } from "../api.generated";
 import { PasswordInput } from "./AccountSection";
+import { readPhoneHotspot, savePhoneHotspotSettings, setPhoneHotspot } from "./network/api";
+import { passwordRuleText, ssidRuleText } from "./network/rules";
 import { Banner, Field, Group, Modal, PageHeader, Pill, Row, type Tone } from "./parts";
 import styles from "./settings.module.css";
 
-const path = "/api/v1/network/phone-hotspot";
 const queryKey = ["settings", "phone-hotspot"];
+const defaultSettings = { ssid: "", passwordConfigured: false, portal: false };
 
 const labels: Record<PhoneHotspotStatus["state"], { text: string; tone: Tone }> = {
   off: { text: "已关闭", tone: "neutral" },
@@ -51,13 +52,13 @@ function PhoneHotspotSettings() {
   const [saved, setSaved] = useState(false);
   const status = useQuery({
     queryKey,
-    queryFn: ({ signal }) => call(client.GET(path, { signal })),
+    queryFn: ({ signal }) => readPhoneHotspot(signal),
     // The password is used only on this page.
     gcTime: 0,
     refetchInterval: ({ state: { data } }) => (data?.state === "starting" || data?.state === "stopping" ? 750 : 5000),
   });
   const change = useMutation({
-    mutationFn: (enabled: boolean) => call(client.PUT(path, { body: { enabled } })),
+    mutationFn: setPhoneHotspot,
     onMutate: () => {
       revealPassword(undefined);
       setSaved(false);
@@ -72,8 +73,9 @@ function PhoneHotspotSettings() {
   const phase = status.data?.state;
   const reason = status.data?.reason;
   const connection = phase === "on" && !change.isPending ? status.data?.connection : undefined;
-  const devices = connection && status.data?.devices;
-  const settings = status.data?.settings;
+  const devices = status.data?.devices;
+  const settingsInvalid = status.data?.settingsInvalid === true;
+  const settings = status.data?.settings ?? (settingsInvalid ? defaultSettings : undefined);
   const error = change.error ?? status.error;
   const busy = change.isPending || phase === "starting" || phase === "stopping";
   const reveal = connection != null && revealedPassword === connection.password;
@@ -108,7 +110,10 @@ function PhoneHotspotSettings() {
         </Row>
         {reason && <Row label="热点状态" detail={reasons[reason]} />}
         {settings && phase !== "unavailable" && (
-          <Row label="热点设置" detail="修改 Wi-Fi 名称、密码和连接提示">
+          <Row
+            label="热点设置"
+            detail={settingsInvalid ? "无法读取已保存的设置。可以重新填写并保存。" : "修改 Wi-Fi 名称、密码和连接提示"}
+          >
             <button type="button" className={styles.setBtn} onClick={() => setEditing(true)} disabled={busy}>
               编辑热点设置
             </button>
@@ -143,9 +148,11 @@ function PhoneHotspotSettings() {
       </Group>
       {connection && (
         <Group title="已连接设备">
-          {devices == null && <Row label="暂时无法读取设备" />}
-          {devices?.length === 0 && <Row label="暂无设备连接" />}
-          {!!devices?.length && <Row label={`${devices.length} 台设备在线`} />}
+          <Row
+            label={
+              devices == null ? "暂时无法读取设备" : devices.length ? `${devices.length} 台设备在线` : "暂无设备连接"
+            }
+          />
           {devices?.map((device) => (
             <Row
               key={device.mac}
@@ -160,12 +167,16 @@ function PhoneHotspotSettings() {
       {editing && settings && (
         <HotspotSettingsDialog
           settings={settings}
+          replacingInvalid={settingsInvalid}
           onClose={() => setEditing(false)}
-          onSaved={(next) => {
-            cache.setQueryData<PhoneHotspotStatus>(queryKey, (current) => current && { ...current, settings: next });
+          onSaved={async (next) => {
+            await cache.cancelQueries({ queryKey });
+            cache.setQueryData<PhoneHotspotStatus>(
+              queryKey,
+              (current) => current && { ...current, settings: next, settingsInvalid: false },
+            );
             setEditing(false);
             setSaved(true);
-            void cache.invalidateQueries({ queryKey });
           }}
         />
       )}
@@ -177,12 +188,14 @@ type HotspotSettings = NonNullable<PhoneHotspotStatus["settings"]>;
 
 function HotspotSettingsDialog({
   settings,
+  replacingInvalid,
   onClose,
   onSaved,
 }: {
   settings: HotspotSettings;
+  replacingInvalid: boolean;
   onClose: () => void;
-  onSaved: (settings: HotspotSettings) => void;
+  onSaved: (settings: HotspotSettings) => Promise<void>;
 }) {
   const [automatic, setAutomatic] = useState(!settings.passwordConfigured);
   const [busy, setBusy] = useState(false);
@@ -193,36 +206,45 @@ function HotspotSettingsDialog({
     const ssid = String(form.get("ssid") ?? "").trim();
     const password = String(form.get("password") ?? "");
     setError("");
-    if (!automatic && !password && !settings.passwordConfigured) {
-      setError("请填写自定义 Wi-Fi 密码。");
-      return;
-    }
     setBusy(true);
     try {
-      const next = await call(
-        client.PUT("/api/v1/network/phone-hotspot/settings", {
-          body: { ssid, password: automatic ? "" : password || undefined, portal: form.has("portal") },
-        }),
-      );
-      onSaved(next);
+      const next = await savePhoneHotspotSettings({
+        ssid,
+        password: automatic ? "" : password || undefined,
+        portal: form.has("portal"),
+      });
+      await onSaved(next);
     } catch (caught) {
-      setError(errorText(caught));
+      setError(errorText(caught, "phoneHotspot"));
       setBusy(false);
     }
   }
   return (
-    <Modal title="编辑热点设置" busy={busy} onClose={onClose} description="保存后下次开启热点时生效。">
+    <Modal
+      title="编辑热点设置"
+      busy={busy}
+      onClose={onClose}
+      description={replacingInvalid ? "保存会替换无法读取的设置，下次开启热点时生效。" : "保存后下次开启热点时生效。"}
+    >
       <form className={styles.setDialogForm} autoComplete="off" onSubmit={save}>
-        <Field label="Wi-Fi 名称" hint="留空使用设备默认名称，最多 32 字节">
-          <input className={styles.setInput} name="ssid" maxLength={32} defaultValue={settings.ssid} autoFocus />
+        <Field label="Wi-Fi 名称" hint={`${ssidRuleText} 留空使用设备默认名称。`}>
+          <input className={styles.setInput} name="ssid" defaultValue={settings.ssid} autoFocus />
         </Field>
         <label className={styles.setConsent}>
           <input type="checkbox" checked={automatic} onChange={(event) => setAutomatic(event.target.checked)} />
           <span>每次开启时生成随机密码</span>
         </label>
         {!automatic && (
-          <Field label="Wi-Fi 密码" hint={settings.passwordConfigured ? "留空保留原密码" : "8–63 个可打印的英文字符"}>
-            <PasswordInput name="password" autoComplete="new-password" minLength={8} />
+          <Field
+            label="Wi-Fi 密码"
+            hint={settings.passwordConfigured ? `留空保留原密码。${passwordRuleText}` : passwordRuleText}
+          >
+            <PasswordInput
+              name="password"
+              autoComplete="new-password"
+              minLength={8}
+              required={!settings.passwordConfigured}
+            />
           </Field>
         )}
         <label className={styles.setConsent}>

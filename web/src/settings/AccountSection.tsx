@@ -273,11 +273,13 @@ export function PasswordInput({
   autoComplete,
   minLength,
   autoFocus,
+  required = true,
 }: {
   name: string;
   autoComplete: "current-password" | "new-password" | "off";
   minLength?: number;
   autoFocus?: boolean;
+  required?: boolean;
 }) {
   const [shown, setShown] = useState(false);
   return (
@@ -287,7 +289,7 @@ export function PasswordInput({
         name={name}
         type={shown ? "text" : "password"}
         minLength={minLength}
-        required
+        required={required}
         autoComplete={autoComplete}
         autoFocus={autoFocus}
         spellCheck={false}

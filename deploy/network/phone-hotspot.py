@@ -202,7 +202,11 @@ def hotspot_profile(mac):
     return ssid or f"A-NAS-{mac.replace(':', '')[-6:].upper()}", password or secrets.token_hex(10), portal
 
 
-def configure_radio(name, host, ssid, password, portal=False):
+def configure_radio(name, host, ssid, password, portal):
+    portal_url = hotspot_url(host) + PORTAL_API
+    # DHCPv4 can carry no more than 255 octets in the portal option.
+    if portal and len(portal_url) > 255:
+        raise HotspotError("invalid_settings")
     ssid_bytes = ssid.encode("utf-8")
     key = hashlib.pbkdf2_hmac("sha1", password.encode("ascii"), ssid_bytes, 4096, dklen=32)
     write("hostapd.conf", f"""interface={name}
@@ -219,7 +223,6 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 wpa_psk={key.hex()}
 """)
-    portal_url = hotspot_url(host) + PORTAL_API
     announcement = f"dhcp-option-force=114,{portal_url}\n" if portal else ""
     write("dnsmasq.conf", f"""interface={name}
 except-interface=lo
@@ -236,10 +239,10 @@ pid-file={RUNTIME}/dnsmasq.pid
 """)
 
 
-def portal_config(host, web):
+def portal_config(host):
     base = hotspot_url(host)
-    (web / "portal.json").write_text(json.dumps({"captive": True, "user-portal-url": base + PORTAL_PAGE}), encoding="utf-8")
-    (web / "welcome.html").write_text(f"""<!doctype html>
+    status = json.dumps({"captive": True, "user-portal-url": base + PORTAL_PAGE})
+    welcome = f"""<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A-NAS 手机直连</title>
 <style>
@@ -250,32 +253,30 @@ a {{ display: inline-block; padding: 8px 0; font-weight: 600; overflow-wrap: any
 <main><h1>A-NAS 手机直连</h1><p>此热点用于访问 NAS 和上传文件。</p>
 <p>请用 Safari 或 Chrome 登录并上传。如果系统窗口没有打开网页，可以复制下方地址。</p>
 <a href="{base}/">打开 WebOS</a>
-<p>{base}/</p></main></html>
-""", encoding="utf-8")
-    # Files are only served by these exact paths and the HTTPS listener.
-    for filename in ("portal.json", "welcome.html"):
-        file = web / filename
-        os.chown(file, 0, pwd.getpwnam("caddy").pw_gid)
-        file.chmod(0o640)
+<p>{base}/</p></main></html>"""
+    # Caddy treats opening braces as placeholders. These bodies are literals.
+    status = status.replace("{", r"\{")
+    welcome = welcome.replace("{", r"\{")
     return f"""
     handle {PORTAL_API} {{
         header Content-Type application/captive+json
         header Cache-Control no-store
-        rewrite * /portal.json
-        root * {web}
-        file_server
+        respond <<PORTAL_STATUS
+{status}
+PORTAL_STATUS
     }}
     handle {PORTAL_PAGE} {{
+        header Content-Type "text/html; charset=utf-8"
         header Cache-Control no-store
         header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
-        rewrite * /welcome.html
-        root * {web}
-        file_server
+        respond <<PORTAL_HTML
+{welcome}
+PORTAL_HTML
     }}
 """
 
 
-def configure_proxy(host, portal=False):
+def configure_proxy(host, portal):
     # The existing Caddy system account reads just this instance's config and
     # credentials. The socket is the only way out of the Wi-Fi namespace.
     user = pwd.getpwnam("caddy")
@@ -293,7 +294,7 @@ def configure_proxy(host, portal=False):
     data = web / "data"
     data.mkdir(mode=0o700)
     os.chown(data, user.pw_uid, user.pw_gid)
-    portal_routes = portal_config(host, web) if portal else ""
+    portal_routes = portal_config(host) if portal else ""
     config = web / "Caddyfile"
     config.write_text(f"""{{
     admin off
@@ -306,7 +307,7 @@ https://{host}:{HTTPS_PORT} {{
         reverse_proxy unix/{web}/upstream.sock
     }}
 }}
-""", encoding="ascii")
+""", encoding="utf-8")
     os.chown(config, 0, user.pw_gid)
     config.chmod(0o640)
     return web
@@ -350,7 +351,10 @@ def publish_devices(name, namespace):
             snapshot.unlink(missing_ok=True)
             return
         leasefile = RUNTIME / "dnsmasq.leases"
-        leases = leasefile.read_text(encoding="utf-8", errors="replace") if leasefile.exists() else ""
+        try:
+            leases = leasefile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            leases = ""
         write("devices.json", json.dumps(connected_devices(stations.stdout, leases, time.time())))
     except (OSError, subprocess.SubprocessError):
         snapshot.unlink(missing_ok=True)
@@ -388,7 +392,7 @@ def ready():
         notify.sendto(b"READY=1", address)
 
 
-def publish_connection(host, ssid, password, portal=False):
+def publish_connection(host, ssid, password, portal):
     write("connection.json", json.dumps({"ssid": ssid, "password": password, "url": hotspot_url(host) + "/", "portal": portal}))
 
 
@@ -414,9 +418,6 @@ def serve():
     host = tls_host()
     name = radio.name
     ssid, password, portal = hotspot_profile(mac)
-    # DHCPv4 can carry no more than 255 octets in the portal option.
-    if portal and len(hotspot_url(host) + PORTAL_API) > 255:
-        raise HotspotError("invalid_settings")
     configure_radio(name, host, ssid, password, portal)
     web = configure_proxy(host, portal)
     if command("dnsmasq", "--test", f"--conf-file={RUNTIME}/dnsmasq.conf", check=False).returncode:

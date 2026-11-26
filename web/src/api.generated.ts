@@ -6637,6 +6637,8 @@ export interface components {
             /** @enum {string} */
             reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed" | "invalid_settings";
             settings?: components["schemas"]["PhoneHotspotSettings"];
+            /** @description The saved settings could not be read. An administrator can replace them by saving new settings. */
+            settingsInvalid?: boolean;
             /** @description Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected. */
             devices?: {
                 mac: string;
@@ -8826,9 +8828,9 @@ export interface components {
             portal: boolean;
         };
         PhoneHotspotSettingsChange: {
-            /** @description At most 32 UTF-8 bytes. Empty restores the device's default name. */
+            /** @description At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name. */
             ssid?: string;
-            /** @description Eight to 63 printable ASCII characters. Empty restores a fresh random password on each start. */
+            /** @description Omit to retain the saved password. Empty restores a fresh random password on each start. */
             password?: string;
             /** @description Advertise the WebOS entry via the mobile system's network sign-in prompt */
             portal?: boolean;
@@ -12167,6 +12169,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

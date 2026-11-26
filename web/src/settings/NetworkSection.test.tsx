@@ -77,3 +77,47 @@ it("saves next-start settings while keeping the connected phone and current cred
   expect(screen.getByText("Current Wi-Fi")).toBeInTheDocument();
   expect(screen.getByText("示例手机")).toBeInTheDocument();
 });
+
+it("keeps a saved fixed password when editing only the Wi-Fi name", async () => {
+  const path = "/api/v1/network/phone-hotspot";
+  server.use(
+    http.get(path, () =>
+      HttpResponse.json({ state: "off", settings: { ssid: "Old name", passwordConfigured: true, portal: false } }),
+    ),
+    http.put(`${path}/settings`, async ({ request }) => {
+      const body = await request.json();
+      expect(body).toEqual({ ssid: "New name", portal: false });
+      return HttpResponse.json({ ssid: "New name", passwordConfigured: true, portal: false });
+    }),
+  );
+  setSession(session());
+  const user = userEvent.setup();
+  render(<NetworkSection />);
+  await user.click(await screen.findByRole("button", { name: "编辑热点设置" }));
+  expect(screen.getByLabelText("Wi-Fi 密码")).not.toBeRequired();
+  await user.clear(screen.getByLabelText("Wi-Fi 名称"));
+  await user.type(screen.getByLabelText("Wi-Fi 名称"), "New name");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  expect(await screen.findByText("设置已保存，下次开启热点时生效。")).toBeInTheDocument();
+});
+
+it("lets an administrator replace unreadable settings while showing the hotspot failure", async () => {
+  const path = "/api/v1/network/phone-hotspot";
+  server.use(
+    http.get(path, () => HttpResponse.json({ state: "failed", reason: "invalid_settings", settingsInvalid: true })),
+    http.put(`${path}/settings`, async ({ request }) => {
+      expect(await request.json()).toEqual({ ssid: "Recovered", password: "", portal: false });
+      return HttpResponse.json({ ssid: "Recovered", passwordConfigured: false, portal: false });
+    }),
+  );
+  setSession(session());
+  const user = userEvent.setup();
+  render(<NetworkSection />);
+  expect(await screen.findByText("启动或运行失败")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "编辑热点设置" }));
+  expect(screen.getByText("保存会替换无法读取的设置，下次开启热点时生效。")).toBeInTheDocument();
+  await user.type(screen.getByLabelText("Wi-Fi 名称"), "Recovered");
+  await user.click(screen.getByRole("button", { name: "保存" }));
+  expect(await screen.findByText("设置已保存，下次开启热点时生效。")).toBeInTheDocument();
+  expect(screen.queryByText("无法读取已保存的设置。可以重新填写并保存。")).not.toBeInTheDocument();
+});
