@@ -1,0 +1,151 @@
+/* 问题反馈's button, which the desktop shows from the start. The panel's
+   styles load with the panel, the first time it opens (feedback.module.css). */
+
+/* The button is a tab on the right edge in the dark glass of the rail and dock. */
+.fb-fab {
+  --fb-warm: linear-gradient(155deg, #ffb661, #ff6b5c);
+  --fb-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  z-index: 76;
+  right: 0;
+  width: 40px;
+  padding: 8px 0 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(34, 24, 72, 0.62), rgba(20, 14, 46, 0.46));
+  box-shadow:
+    -10px 16px 40px rgba(22, 14, 52, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(24px) saturate(150%);
+  transform: translateY(-50%);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  animation: fb-fab-in 0.4s var(--fb-ease);
+  transition:
+    width 0.24s var(--fb-ease),
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.fb-fab:hover,
+.fb-fab.dragging {
+  width: 46px;
+  background: linear-gradient(180deg, rgba(48, 34, 98, 0.72), rgba(26, 18, 60, 0.56));
+  box-shadow:
+    -12px 18px 44px rgba(22, 14, 52, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
+}
+.fb-fab.dragging {
+  cursor: grabbing;
+  transition: none;
+}
+.fb-fab:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.92);
+  outline-offset: 2px;
+}
+.fb-fab-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--fb-warm);
+  box-shadow:
+    0 4px 12px rgba(255, 107, 92, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  transition: transform 0.24s var(--fb-ease);
+}
+.fb-fab-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.fb-fab:hover .fb-fab-icon {
+  transform: scale(1.06);
+}
+.fb-fab:active .fb-fab-icon {
+  transform: scale(0.94);
+}
+.fb-fab-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  opacity: 0.9;
+}
+.fb-fab-count {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  color: #e04b3d;
+  background: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 3px 8px rgba(10, 8, 30, 0.3);
+}
+@keyframes fb-fab-in {
+  from {
+    opacity: 0;
+    transform: translate(14px, -50%);
+  }
+}
+.fb-fab[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* In the panel's place when its code did not download. */
+.fb-failed {
+  position: absolute;
+  z-index: 96;
+  top: 18px;
+  right: 18px;
+  width: min(340px, calc(100% - 36px));
+  padding: 20px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 22px;
+  color: var(--color-text);
+  background: rgba(243, 245, 249, 0.95);
+  box-shadow: 0 30px 90px rgba(12, 10, 40, 0.42);
+  backdrop-filter: blur(30px) saturate(140%);
+  font-size: 13px;
+}
+.fb-failed h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.fb-failed p {
+  margin: 0 0 16px;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+.fb-failed div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fb-failed button:not(:global(.primary)) {
+  padding: 8px 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fb-fab {
+    animation: none;
+  }
+}
