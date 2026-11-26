@@ -175,7 +175,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 ## 服务形态与部署
 
 - **进程**：`/usr/lib/a-nas/anas-api videocut-service`，单元 `anas-videocut.service`。
-  - 系统账号 `a-nas-montage`，固定 UID 31003，是 sysusers 里下一个空闲号。附加组 `a-nas-photos`，用来连 FFmpeg Worker 与剪辑计算 Worker 的套接字。这个组也让它能连上相册的产品接口与 AI Worker 的套接字，和家庭中心一样（见“项目授权”的“被攻破时”）。
+  - 系统账号 `a-nas-videocut`，固定 UID 31005，是 sysusers 里下一个空闲号。附加组 `a-nas-photos`，用来连 FFmpeg Worker 与剪辑计算 Worker 的套接字。这个组也让它能连上相册的产品接口与 AI Worker 的套接字，和家庭中心一样（见“项目授权”的“被攻破时”）。
   - 沙箱照搬 `anas-family.service` 的全部加固项，不只是下面几项：
     - `PrivateNetwork`、`ProtectSystem=strict`、`RestrictAddressFamilies=AF_UNIX`；
     - `NoNewPrivileges`、`PrivateTmp`、`PrivateDevices`、`ProtectHome`、`ProtectKernel*`；
@@ -184,7 +184,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
   - 资源：`MemoryMax=512M`、`CPUWeight=20`、`IOWeight=20`。重计算都在 Worker 和相册里，服务本身只管状态。
 - **入口**：anas-api 用 `mount("/api/v1/videocut", apiroute.Session, ...)` 把请求转到 `/run/a-nas-montage/montage.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-montage-sessions/montage.sock`，确认来人是谁。
 - **开关**：环境变量 `ANAS_VIDEOCUT_ENABLED`，M10 之前默认关闭。关闭时产品服务不挂载 `/api/v1/videocut`，桌面不显示入口。网页入口只是外观，隐藏它挡不住接口，所以开关放在服务端；先例是 `ANAS_PHOTO_ASSISTANT_LOOKUP`。
-- **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-montage`，每 15 分钟修复一次漂移。
+- **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-videocut`，每 15 分钟修复一次漂移。
   - 数据卷离线或只读时，整个服务回答 503 `videocut_unavailable`，不在系统盘建替代目录。
   - 容量不足只拒绝写入，不让整个服务不可用（[不变量 12](OVERVIEW.md#不变量)）：渲染写 `tmp/` 前用 `capacity.Admits` 按预计大小检查，存回时相册照常检查；不够时任务进入 `needs_input(storage_full)`，腾出空间后重试。已有项目与成片照常可看。
 - **剪辑计算 Worker**：`anas-videocut-compute.socket` 加 `anas-videocut-compute.service`。
@@ -200,8 +200,8 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 | 区域 | 要改的地方 |
 |---|---|
-| 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-montage`（否则连不上 0750 的 `/run/a-nas-montage`） |
-| 包脚本 | preinst 检查 UID 31003 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
+| 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-videocut`（否则连不上 0750 的 `/run/a-nas-montage`） |
+| 包脚本 | preinst 检查 UID 31005 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `montage service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
 | anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
@@ -256,7 +256,7 @@ montage/
 剪辑中心后台读原片、请求分析、存回成片时，成员可能早已离线；#514 又不允许长期保存明文会话令牌。所以改由相册持有一条项目授权。思路类似 Google Drive 的 `drive.file`（应用只能访问用户交给它的文件）：成员在场时登记，之后服务凭授权访问，权限仍由相册每次重新判断。
 
 **套接字与协议**
-- 由 systemd 持有：`anas-photos-grants.socket` 监听 `/run/a-nas-photos-grants/grants.sock`，`SocketUser=a-nas-montage`、权限 0600，所在目录只有 root 能写，交给 `anas-photos` 接受连接。不用属组 0660，是因为产品服务也在 `a-nas-montage` 组里。相册另用 `SO_PEERCRED` 核对对端 UID 是 31003。
+- 由 systemd 持有：`anas-photos-grants.socket` 监听 `/run/a-nas-photos-grants/grants.sock`，`SocketUser=a-nas-videocut`、权限 0600，所在目录只有 root 能写，交给 `anas-photos` 接受连接。不用属组 0660，是因为产品服务也在 `a-nas-videocut` 组里。相册另用 `SO_PEERCRED` 核对对端 UID 是 31005。
 - 协议用 `internal/unixmsg`：4 字节长度加 JSON，带描述符，已有 fuzz 测试。HTTP 传不了 `SCM_RIGHTS`，所以不用 HTTP。
 - 请求与回答的 Go 类型放在 `internal/photosapi`，双方共用。按先例，内部接口不进 `api/` 契约（[API 契约](../development/api-contract.md)）。
 - 这个套接字上的请求哪些算有人在用相册、推迟相册的 AI 工作，见[门控与三类工作](photo-ai.md#门控与三类工作)。

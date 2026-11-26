@@ -20,7 +20,7 @@ Environment=ANAS_SHARE_SESSION_GROUP=a-nas-shares
 Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock
 Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family
 Environment=ANAS_VIDEOCUT_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
-Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-montage
+Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-videocut
 # The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 Environment=ANAS_WORKSPACE_SESSION_SOCKET=/run/a-nas-workspace-sessions/workspace.sock
 Environment=ANAS_WORKSPACE_SESSION_GROUP=a-nas-workspace

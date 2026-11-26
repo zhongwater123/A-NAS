@@ -55,7 +55,7 @@
 
 单元 [`anas-videocut-music.socket`](../../deploy/montage-music/anas-videocut-music.socket) 与 [`.service`](../../deploy/montage-music/anas-videocut-music.service)：
 
-- 套接字 `/run/a-nas-montage-music/music.sock`，`SocketUser=a-nas-montage`、0600，只有剪辑服务能连；
+- 套接字 `/run/a-nas-montage-music/music.sock`，`SocketUser=a-nas-videocut`、0600，只有剪辑服务能连；
 - DynamicUser，`PrivateNetwork`，`InaccessiblePaths=-/srv/a-nas`，`HF_HUB_OFFLINE=1`；歌曲只经两条管道进来；
 - 放在 `anas.slice` 之下；空闲 5 分钟退出，下一首再由套接字启动；
 - 权重按清单的 SHA-256 逐个核对后才加载（`checked_files`）。

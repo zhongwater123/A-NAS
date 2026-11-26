@@ -14,7 +14,7 @@ esac
 # The photo, share, family, montage and workspace services own their stores
 # under fixed IDs (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
 # systemd-sysusers would leave such an account as it is.
-for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003 a-nas-workspace:31004; do
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-videocut:31005 a-nas-workspace:31004; do
   name=${account%%:*} id=${account#*:}
   if getent passwd "$name" >/dev/null; then
     [[ "$(id -u "$name"):$(id -g "$name")" == "$id:$id" ]] ||

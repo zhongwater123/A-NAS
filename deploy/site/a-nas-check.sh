@@ -92,7 +92,7 @@ else
 fi
 
 # Accounts that own data keep fixed IDs (ADR 0011); the others cannot log in.
-for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003 a-nas-workspace:31004; do
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-videocut:31005 a-nas-workspace:31004; do
   name=${account%%:*} id=${account#*:}
   if [[ "$(id -u "$name" 2>/dev/null):$(id -g "$name" 2>/dev/null)" == "$id:$id" ]]; then
     pass "$name is $id:$id"

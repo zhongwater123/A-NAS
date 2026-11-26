@@ -9,7 +9,7 @@ Type=simple
 # Cuts cards, measures their quality and fills the music's slots with the
 # prototype's pure computation (ai/anas_videocut). Everything it reads comes
 # in the request, so it has no network and no data volume.
-User=a-nas-montage-compute
+User=a-nas-videocut-compute
 DynamicUser=true
 Environment=PYTHONPATH=/usr/lib/a-nas/ai
 Environment=PYTHONDONTWRITEBYTECODE=1

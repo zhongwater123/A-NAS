@@ -106,7 +106,7 @@ if [[ "${1:-}" != --inside ]]; then
     "$legacy_product/usr/lib/systemd/system/anas-videocut-compute.service"
   sed -i -e '/systemctl stop anas-videocut-assistant\.socket/d' -e 's/ anas-videocut-assistant\.socket//g' \
     -e 's/ anas-videocut-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
-    -e 's/anas-videocut\.service//g' -e "s/ 'anas-videocut montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    -e 's/anas-videocut\.service//g' -e "s/ 'anas-videocut montage\/montage\.db montage'//" -e 's/ a-nas-videocut:31005//' \
     -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-videocut-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
   sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
@@ -1069,10 +1069,10 @@ check "nor in the Host Agent's log in Settings" \
 # ANAS_VIDEOCUT_ENABLED turns it on: then the Product Service forwards
 # /api/v1/videocut and the montage service confirms the session itself.
 check "montage store belongs to the montage service alone" \
-  test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-montage"
+  test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-videocut"
 check "Product Service account cannot list the montage store" denied a-nas ls "$data/montage"
 check "the montage socket is the service's, for the Product Service's group" \
-  test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
+  test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-videocut:a-nas-videocut:750 a-nas-videocut"
 check "the montage center is not served while its switch is off" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut"):$(status_of -b /tmp/alice.jar "$api/api/v1/videocut/projects")" = 404:404
 printf 'Environment=ANAS_VIDEOCUT_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
@@ -1414,11 +1414,11 @@ print(reply)
 sys.exit(0 if reply.get("ok") else 1)
 PY
 check "the grant socket is the montage account's alone" \
-  test "$(stat -c '%a %U' /run/a-nas-photos-grants/grants.sock):$(stat -c '%a %U' /run/a-nas-photos-grants)" = "600 a-nas-montage:755 root"
+  test "$(stat -c '%a %U' /run/a-nas-photos-grants/grants.sock):$(stat -c '%a %U' /run/a-nas-photos-grants)" = "600 a-nas-videocut:755 root"
 check "the photo service answers the montage account on it" \
-  setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py
+  setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups python3 /usr/local/lib/photo-grants.py
 check "the Product Service account cannot connect to it" denied a-nas python3 /usr/local/lib/photo-grants.py
-check "the montage account cannot list the photo store" denied a-nas-montage ls "$data/photos"
+check "the montage account cannot list the photo store" denied a-nas-videocut ls "$data/photos"
 
 # --- The compute worker is socket-activated with the production sandbox.
 # The small test runtime has only system Python, so its fixture answers a
@@ -1584,7 +1584,7 @@ check "a member makes a montage project of her video" test -n "$clip" -a -n "$pr
 # The grant socket lists the grants not revoked; a revoked one is gone.
 project_grant_listed() {
   local grants
-  grants=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups python3 /usr/local/lib/photo-grants.py) || return 2
+  grants=$(setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups python3 /usr/local/lib/photo-grants.py) || return 2
   grep -qF "'projectId': '$project'" <<<"$grants"
 }
 check "the photo library holds the project's grant" project_grant_listed
@@ -2063,7 +2063,7 @@ journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -
 search_socket=/run/a-nas-search/search.sock
 # The Product Service holds a-nas-search through its unit's SupplementaryGroups,
 # not as a login group of a-nas.
-as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-workspace,a-nas-search "$@"; }
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-videocut,a-nas-workspace,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -2469,12 +2469,12 @@ check "the owner plays his own song by its track ID" \
 check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
 check "a member copies her own song into the montage center" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
 check "the copy is the montage service's alone, named by its content" \
-  bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-montage' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
+  bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-videocut' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
 check "the song waits for allin1, which is not installed" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$song_project/song" | jq -r .state)" = analyzing
 check "she listens to the copy with Range" \
   test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/videocut/projects/$song_project/song/audio")" = 206
-check "the montage account cannot read her space" denied a-nas-montage ls "$data/spaces/private/alice"
+check "the montage account cannot read her space" denied a-nas-videocut ls "$data/spaces/private/alice"
 check "deleting the project removes the copy no project uses" \
   bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/videocut/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
 
@@ -3067,7 +3067,7 @@ check "apt rolls back to the previous release" reinstall rollback-previous "$pre
 check "the previous release, which came before the montage center, has no montage unit" \
   test "$(systemctl show -p LoadState --value anas-videocut.service):$(systemctl show -p ActiveState --value anas-videocut.service)" = \
   not-found:inactive
-check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "and the montage service stopped before its unit went" fails pgrep -u a-nas-videocut
 check "nor a workspace unit, whose service stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-workspace.service):$(systemctl show -p ActiveState --value anas-workspace.service)" = \
   not-found:inactive
@@ -3107,8 +3107,8 @@ check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}'
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
-  test "$(systemctl is-active anas-videocut):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
-  "active:31003:700 a-nas-montage:660 a-nas-montage"
+  test "$(systemctl is-active anas-videocut):$(id -u a-nas-videocut):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
+  "active:31005:700 a-nas-videocut:660 a-nas-videocut"
 check "after upgrading again the workspace service has its account, store and socket" \
   test "$(systemctl is-active anas-workspace):$(id -u a-nas-workspace):$(stat -c '%a %U' "$data/workspace"):$(stat -c '%a %G' /run/a-nas-workspace/workspace.sock)" = \
   "active:31004:700 a-nas-workspace:660 a-nas-workspace"

@@ -111,7 +111,7 @@ check "a grant says when it was issued and how many rounds it allows" \
   jq -e '.rounds == 5 and (.issuedAt | fromdateiso8601) > (now - 300)' "$plans/alice"
 check "no grant is kept where the Product Service could write one" test ! -e /var/lib/a-nas/assistant-plans
 check "the Product Service's account cannot read the grants" denied a-nas ls "$plans"
-check "nor can the montage service's" denied a-nas-montage ls "$plans"
+check "nor can the montage service's" denied a-nas-videocut ls "$plans"
 check "the members write the probe's files into their spaces" quiet bash /spike/seed.sh "$data"
 # A real snapshot of alice's space, which the sandbox must not show.
 curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
@@ -649,7 +649,7 @@ if "$real_runtime"; then
     check "she starts it, which registers her planning grant on the way" \
       bash -c "[[ -n '$plan_job' && '$plan_job' != null ]] && jq -e '(.issuedAt | fromdateiso8601) > (now - 120)' '$plans/alice' >/dev/null"
     systemctl stop anas-videocut-assistant.socket anas-videocut.service || true
-    seeded=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups \
+    seeded=$(setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups \
       python3 /spike/montage-plan-seed.py "$data/montage/montage.db" "$plan_job" "$clip" 2>&1 || true)
     systemctl start anas-videocut.service anas-videocut-assistant.socket || true
     check "the test gives her job a catalog and her song an analysis" grep -q '^seeded ' <<<"$seeded"

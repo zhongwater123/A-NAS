@@ -7,8 +7,8 @@ Documentation=https://github.com/zhongwater123/A-NAS
 # song at a time and exits when idle. Only the montage service reaches it
 # (docs/architecture/montage-music.md); the directory is root's.
 ListenStream=/run/a-nas-montage-music/music.sock
-SocketUser=a-nas-montage
-SocketGroup=a-nas-montage
+SocketUser=a-nas-videocut
+SocketGroup=a-nas-videocut
 SocketMode=0600
 DirectoryMode=0755
 

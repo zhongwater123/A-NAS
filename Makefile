@@ -245,14 +245,14 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
-	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'User=a-nas-videocut' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api videocut-service' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-videocut.service
-	grep -Fqx 'Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-videocut' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
-	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
+	grep -Fqx 'u a-nas-videocut 31005 "A-NAS VideoCut service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-workspace' deploy/systemd/system/anas-workspace.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api workspace-service' deploy/systemd/system/anas-workspace.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-workspace.service
@@ -269,7 +269,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-montage a-nas-workspace a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-videocut a-nas-workspace a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
 	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
@@ -285,7 +285,7 @@ ops-check:
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'Environment=ANAS_PHOTO_SESSION_GROUP=a-nas-photos' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
-	grep -Fqx 'SocketUser=a-nas-montage' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'SocketUser=a-nas-videocut' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service

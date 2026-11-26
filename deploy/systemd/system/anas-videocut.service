@@ -6,8 +6,8 @@ Wants=anas-host-agent.service anas-api.service anas-videocut-assistant.socket
 
 [Service]
 Type=simple
-User=a-nas-montage
-Group=a-nas-montage
+User=a-nas-videocut
+Group=a-nas-videocut
 # Reaches the media worker and the montage compute worker; the photo store
 # stays private to a-nas-photos. The group also reaches the photo service's
 # API and the AI worker, as for the family service (ADR 0038, consequences).
