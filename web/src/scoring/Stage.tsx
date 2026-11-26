@@ -794,8 +794,9 @@ export function Stage({
     if (!action) return;
     // With no photo to confirm (a sheet covers it, it is not shown yet, or
     // the batch is finished), Enter belongs to the button that has the
-    // focus: 继续打分, the guide's close, 返回批次.
-    if (action.kind === "confirm" && !ready && target.closest("button")) return;
+    // focus: 继续打分, the guide's close, 返回批次. So does it on the buttons
+    // of a bubble of the guide and of a sheet over the stage.
+    if (action.kind === "confirm" && target.closest("button") && (!ready || target.closest('[role="dialog"]'))) return;
     event.preventDefault();
     event.stopPropagation();
     if (action.kind !== "zoom") setArmed(false);
@@ -983,6 +984,7 @@ export function Stage({
       onKeyDown={act}
       onKeyUp={release}
       onPointerMove={track}
+      data-coach-ring={coaching && coachTarget[coaching] !== "photo" ? coachTarget[coaching] : undefined}
       data-vnas-private="照片打分只由成员本人打分"
     >
       <header className={styles.scTop}>
@@ -1094,7 +1096,9 @@ export function Stage({
               setValue(next);
             }}
             onRelease={() => {
-              if (ready) setArmed(true);
+              // The practice photo waits for Enter, as the guide asks, and
+              // leaves the handbook's answer up to be read.
+              if (ready && !practice) setArmed(true);
             }}
             onCompare={compare}
             rulerRef={ruler}

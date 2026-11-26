@@ -39,7 +39,7 @@ async function openBatch(user: ReturnType<typeof userEvent.setup>) {
   const skip = screen.queryByRole("button", { name: "跳过引导" });
   if (skip) await user.click(skip);
 }
-const bubble = () => screen.queryByRole("region", { name: "新手引导" });
+const bubble = () => screen.queryByRole("dialog", { name: "新手引导" });
 // The stage's count sets its number apart from the words around it.
 const counted = (text: string) => (_: string, element: Element | null) =>
   element?.matches("[aria-live]") === true && element.textContent === text;
@@ -315,6 +315,37 @@ describe("ScoringPanel for a rater", () => {
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
     await shownPhoto();
     expect(bubble()).toBeNull();
+  });
+
+  it("waits on the practice photo for the rater, after a pick of the pointer and on the guide's buttons by keys", async () => {
+    const batch = raterBatch({ id: `b-${Math.random()}`, scale: "five", dimensions: dimensionsOf("overall") });
+    const { handlers, answered } = raterHandlers(batch, ["t1"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await screen.findByRole("img", { name: "练习用的照片" });
+    const said = () => bubble()?.querySelector("p")?.textContent;
+    // Enter on the guide's focused 下一步 moves the guide on.
+    screen.getByRole("button", { name: "下一步" }).focus();
+    await user.keyboard("{Enter}");
+    expect(said()).toMatch(/^试着打一下/);
+    // A pick of the pointer does not move on by itself here: the handbook's
+    // answer stays up, on the only item.
+    await user.keyboard("4");
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByRole("slider", { name: "分数" }) },
+      { keys: "[/MouseLeft]" },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(said()).toContain("手册给这张 3 分");
+    expect(screen.getByRole("img", { name: "练习用的照片" })).toBeTruthy();
+    // Enter on the focused 跳过引导 skips the guide; nothing is sent.
+    screen.getByRole("button", { name: "跳过引导" }).focus();
+    await user.keyboard("{Enter}");
+    expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
+    expect(bubble()).toBeNull();
+    expect(answered).toHaveLength(0);
   });
 
   it("skips the guide, and shows it again from the scoring guide with the handbook, keeping the photo", async () => {

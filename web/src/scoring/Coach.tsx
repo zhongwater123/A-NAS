@@ -1,5 +1,6 @@
-import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 
+import { CoachMark } from "../ui/CoachMark";
 import { dimensionGuides } from "./handbook";
 import { isLevels, overall, type Scale } from "./model";
 import styles from "./scoring.module.css";
@@ -156,10 +157,10 @@ export function coachText(
   }
 }
 
-// Bubble sets a step's words beside its target inside the stage, with a
-// ring around the target, and keeps them there as the stage changes size.
-// It sits above a target in the lower half of the stage and below one in the
-// upper half; on the photo it sits inside its top corner.
+// Bubble sets a step's words beside its target inside the stage, the
+// element marked data-coach with it: above it, as everything but 打分标准
+// is in the lower part of the stage, and inside the photo's top corner. The
+// stage rings the target itself.
 export function Bubble({
   root,
   target,
@@ -173,66 +174,18 @@ export function Bubble({
   children: ReactNode;
   actions: ReactNode;
 }) {
-  const bubble = useRef<HTMLElement>(null);
-  const [place, setPlace] = useState<{
-    left: number;
-    top: number;
-    ring?: { left: number; top: number; width: number; height: number };
-  }>();
-  useLayoutEffect(() => {
-    const stage = root.current;
-    if (!stage) return;
-    const measure = () => {
-      const element = stage.querySelector(`[data-coach="${target}"]`);
-      const box = stage.getBoundingClientRect();
-      const size = bubble.current?.getBoundingClientRect();
-      if (!element || !size || box.width === 0) {
-        setPlace(undefined);
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      const at = { left: rect.left - box.left, top: rect.top - box.top, width: rect.width, height: rect.height };
-      const margin = 12;
-      const clamp = (value: number, most: number) => Math.max(margin, Math.min(value, most - margin));
-      if (target === "photo") {
-        setPlace({
-          left: clamp(at.left + 20, box.width - size.width),
-          top: clamp(at.top + 20, box.height - size.height),
-        });
-        return;
-      }
-      const above = at.top + at.height / 2 > box.height / 2 && at.top - size.height - margin >= margin;
-      setPlace({
-        left: clamp(at.left + at.width / 2 - size.width / 2, box.width - size.width),
-        top: clamp(above ? at.top - size.height - margin : at.top + at.height + margin, box.height - size.height),
-        ring: { left: at.left - 4, top: at.top - 4, width: at.width + 8, height: at.height + 8 },
-      });
-    };
-    measure();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : undefined;
-    observer?.observe(stage);
-    if (bubble.current) observer?.observe(bubble.current);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [root, target]);
   return (
-    <>
-      {place?.ring && <div className={styles.scCoachRing} style={place.ring} aria-hidden="true" />}
-      <section
-        ref={bubble}
-        className={`${styles.scCoach}${place ? ` ${styles.placed}` : ""}`}
-        aria-label="新手引导"
-        style={place && { left: place.left, top: place.top }}
-      >
-        <p aria-live="polite">{children}</p>
-        <footer>
-          {count && <span>{count}</span>}
-          {actions}
-        </footer>
-      </section>
-    </>
+    <CoachMark
+      container={root}
+      anchor={`[data-coach="${target}"]`}
+      inside={target === "photo"}
+      side={target === "guide" ? "bottom" : "top"}
+      label="新手引导"
+      className={styles.scCoach}
+      count={count}
+      actions={actions}
+    >
+      {children}
+    </CoachMark>
   );
 }

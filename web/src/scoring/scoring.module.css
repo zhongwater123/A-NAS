@@ -735,13 +735,10 @@
 }
 
 /* The guide on the practice photo: a bubble beside what it is about, and a
-   ring around that. Both sit under the sheets over the stage. */
+   ring around that. The bubble sits under the sheets over the stage. */
 .sc-coach {
-  position: absolute;
   z-index: 12;
-  inset-block-end: 24px;
-  inset-inline-start: 50%;
-  width: min(300px, calc(100% - 24px));
+  width: min(300px, var(--radix-popover-content-available-width, 300px));
   padding: 14px 16px 12px;
   border-radius: 14px;
   background: #222;
@@ -751,13 +748,8 @@
   color: var(--sc-ink);
   font-size: 14px;
   line-height: 1.6;
-  transform: translateX(-50%);
   user-select: text;
   animation: sc-fade 0.2s var(--sc-ease);
-}
-.sc-coach.placed {
-  inset-block-end: auto;
-  transform: none;
 }
 .sc-coach p {
   margin: 0;
@@ -778,19 +770,13 @@
   padding: 0 12px;
   font-size: 13px;
 }
-.sc-coach-ring {
-  position: absolute;
-  z-index: 11;
-  border-radius: 12px;
-  box-shadow:
-    0 0 0 2px var(--sc-accent),
-    0 0 0 8px var(--sc-accent-soft);
-  pointer-events: none;
-  transition:
-    left 0.2s var(--sc-ease),
-    top 0.2s var(--sc-ease),
-    width 0.2s var(--sc-ease),
-    height 0.2s var(--sc-ease);
+.sc-stage[data-coach-ring="item"] [data-coach="item"],
+.sc-stage[data-coach-ring="scale"] [data-coach="scale"],
+.sc-stage[data-coach-ring="acts"] [data-coach="acts"],
+.sc-stage[data-coach-ring="guide"] [data-coach="guide"],
+.sc-stage[data-coach-ring="confirm"] [data-coach="confirm"] {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 4px;
 }
 .sc-rest {
   display: flex;
